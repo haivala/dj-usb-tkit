@@ -68,6 +68,25 @@ cargo run
 
 ## Release Bundles
 
+### macOS
+
+Install prerequisites and build with:
+
+```bash
+chmod +x scripts/macos-build-setup.sh
+./scripts/macos-build-setup.sh
+```
+
+### Windows
+
+Open PowerShell as Administrator and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows-build-setup.ps1
+```
+
+### Linux
+
 Build installers/packages with:
 
 ```bash
@@ -98,7 +117,7 @@ BUNDLES=deb,rpm ./scripts/release.sh
 Artifacts are written under:
 
 ```bash
-desktop/src-tauri/target/release/bundle
+desktop/target/release/bundle
 ```
 
 For release build workflow and publication checks, see `docs/RELEASE_BUILD_INSTALL.md`.

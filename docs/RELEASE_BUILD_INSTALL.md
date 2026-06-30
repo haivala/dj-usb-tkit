@@ -18,13 +18,19 @@ Primary commands:
 - Backend tests: `cargo test -q --manifest-path backend/Cargo.toml`
 - Frontend tests: `npm test --prefix vanilla-ui`
 - Frontend build: `npm run build --prefix vanilla-ui`
-- Release script: `./scripts/release.sh`
+- Release script (Linux): `./scripts/release.sh`
+- Build setup (macOS): `./scripts/macos-build-setup.sh`
+- Build setup (Windows): `powershell -ExecutionPolicy Bypass -File scripts\windows-build-setup.ps1`
 
 Release pipeline behavior (`scripts/release.sh`):
 
 - runs backend and frontend tests when `RUN_TESTS=1`
 - builds desktop bundles from `desktop/src-tauri/`
 - uses `scripts/tauri.release.conf.json` for release configuration
+
+macOS note: `scripts/macos-build-setup.sh` installs all prerequisites (Xcode Command Line Tools, Rust, Node.js) and builds the app. Safe to re-run.
+
+Windows note: `scripts/windows-build-setup.ps1` installs all prerequisites (Visual Studio Build Tools, Rust, Node.js portable, OpenSSL, WebView2 runtime) and builds the app. Safe to re-run. Must be run from PowerShell as Administrator.
 
 Linux note: AppImage builds require `linuxdeploy` available on `PATH`.
 
@@ -36,7 +42,7 @@ Runtime notes:
 - app runtime does not require Node when using default Stratum analysis
 - Node is required for source build/test workflows and for optional Essentia analysis runtime
 
-The release script stages a clean frontend bundle and then runs Tauri packaging from the desktop host project. Build output is produced under `desktop/src-tauri/target/release/bundle`.
+The release script stages a clean frontend bundle and then runs Tauri packaging from the desktop host project. Build output is produced under `desktop/target/release/bundle`.
 
 Release quality gates are controlled by environment flags:
 
