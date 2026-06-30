@@ -198,6 +198,21 @@ function mergeTrackPreservingBestFields(existing, normalized) {
   return merged;
 }
 
+function applySourceRootAnalysisFromBrowseData(state, data) {
+  const rows = Array.isArray(data?.sourceRootAnalysis)
+    ? data.sourceRootAnalysis
+    : (Array.isArray(data?.source_root_analysis) ? data.source_root_analysis : []);
+  if (!rows.length) return;
+  if (!state.sourceRootAnalysisStatus || typeof state.sourceRootAnalysisStatus !== "object") {
+    state.sourceRootAnalysisStatus = {};
+  }
+  for (const row of rows) {
+    const root = String(row?.sourceRoot ?? row?.source_root ?? "").trim();
+    if (!root) continue;
+    state.sourceRootAnalysisStatus[root] = !!(row?.fullyAnalyzed ?? row?.fully_analyzed);
+  }
+}
+
 export function scheduleRealtimeTrackRender(state, deps) {
   const {
     clearTimeoutFn,
@@ -465,6 +480,19 @@ export function renderSourceChips(state, el, deps = {}) {
 
   if (!documentObj) return;
   el.sourceChipsContainer.innerHTML = "";
+  if (!state.sourceRootAnalysisStatus || typeof state.sourceRootAnalysisStatus !== "object") {
+    state.sourceRootAnalysisStatus = {};
+  }
+  const activeRoots = new Set(state.sourceRoots || []);
+  for (const cachedRoot of Object.keys(state.sourceRootAnalysisStatus)) {
+    if (!activeRoots.has(cachedRoot)) delete state.sourceRootAnalysisStatus[cachedRoot];
+  }
+  const allFolderSourcesEnabled = (state.sourceRoots || [])
+    .every((root) => state.sourceRootEnabled[root] !== false);
+  const queryActive = String(el.librarySearch?.value || state.libraryQuery || "").trim().length > 0;
+  const loadedTrackCount = Array.isArray(state.tracks) ? state.tracks.length : 0;
+  const loadedTotal = Number(state.libraryLoadedTotal || loadedTrackCount || 0);
+  const loadedLibraryComplete = !state.libraryHasMore && loadedTotal <= loadedTrackCount;
 
   // master.db chip - shown when detected, positioned before filesystem chips
   if (state.externalMasterDbPath) {
@@ -479,10 +507,17 @@ export function renderSourceChips(state, el, deps = {}) {
       state.sourceRootEnabled[path] = true;
     }
     const scopedTracks = state.tracks.filter((track) => trackPathMatchesAnyRoot(track.filePath, [path]));
-    const fullyAnalyzed = scopedTracks.length > 0 && scopedTracks.every((track) => {
-      const durationMs = Number(track?.durationMs || 0);
-      return trackHasCoreAnalysis(track) && Number.isFinite(durationMs) && durationMs > 0;
-    });
+    const canRefreshAnalysisStatus = allFolderSourcesEnabled
+      && !queryActive
+      && loadedLibraryComplete
+      && scopedTracks.length > 0;
+    if (canRefreshAnalysisStatus) {
+      state.sourceRootAnalysisStatus[path] = scopedTracks.every((track) => {
+        const durationMs = Number(track?.durationMs || 0);
+        return trackHasCoreAnalysis(track) && Number.isFinite(durationMs) && durationMs > 0;
+      });
+    }
+    const fullyAnalyzed = state.sourceRootAnalysisStatus[path] === true;
 
     const chip = documentObj.createElement("span");
     chip.className = `source-chip${fullyAnalyzed ? " source-chip-analyzed" : ""}`;
@@ -650,6 +685,7 @@ export async function loadTracks(state, query, limit, cursor, options = {}, deps
         cursor
       })
       : { total: 0, items: [], nextCursor: null, hasMore: false };
+    applySourceRootAnalysisFromBrowseData(state, data);
     const rawItems = data.items || [];
 
     if (requestSeq && requestSeq !== state.libraryRequestSeq) {

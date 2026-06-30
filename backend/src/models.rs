@@ -218,6 +218,17 @@ pub struct BrowseSourceFilesData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
     pub has_more: bool,
+    #[serde(default)]
+    pub source_root_analysis: Vec<SourceRootAnalysisStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceRootAnalysisStatus {
+    pub source_root: String,
+    pub total: usize,
+    pub analyzed: usize,
+    pub fully_analyzed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

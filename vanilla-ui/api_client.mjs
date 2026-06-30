@@ -139,6 +139,20 @@ export function createApiClient({ tauriInvoke, tauriIsTauri, tauriListen, state,
       const byRoot = roots.length
         ? folderItems.filter((t) => roots.some((root) => normalizePath(t.filePath).startsWith(`${normalizePath(root).replace(/\/+$/, "")}/`) || normalizePath(t.filePath) === normalizePath(root)))
         : [];
+      const sourceRootAnalysis = roots.map((root) => {
+        const rootKey = normalizePath(root).replace(/\/+$/, "");
+        const rootItems = folderItems.filter((t) => {
+          const fileKey = normalizePath(t.filePath);
+          return fileKey === rootKey || fileKey.startsWith(`${rootKey}/`);
+        });
+        const analyzed = rootItems.filter((t) => t.waveformPeaksPath && Number(t.bpm || 0) > 0 && Number(t.durationMs || 0) > 0).length;
+        return {
+          sourceRoot: root,
+          total: rootItems.length,
+          analyzed,
+          fullyAnalyzed: rootItems.length > 0 && analyzed === rootItems.length
+        };
+      });
       const scopedItems = includeMasterDb ? byRoot.concat(masterDbItems) : byRoot;
       const filtered = !query
         ? scopedItems
@@ -151,7 +165,8 @@ export function createApiClient({ tauriInvoke, tauriIsTauri, tauriListen, state,
           total: filtered.length,
           items,
           nextCursor: nextOffset < filtered.length ? String(nextOffset) : null,
-          hasMore: nextOffset < filtered.length
+          hasMore: nextOffset < filtered.length,
+          sourceRootAnalysis
         }
       };
     }

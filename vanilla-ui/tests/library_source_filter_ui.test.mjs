@@ -83,7 +83,10 @@ test("loadTracks uses one browse request for enabled folders and master.db", asy
           { id: "db-1", title: "Desktop Alpha", artist: "Desktop", filePath: "/library/alpha.mp3", masterDbSource: true }
         ],
         nextCursor: "cursor-2",
-        hasMore: true
+        hasMore: true,
+        sourceRootAnalysis: [
+          { sourceRoot: "/music/a", total: 1, analyzed: 1, fullyAnalyzed: true }
+        ]
       };
     },
     normalizeTrack,
@@ -104,6 +107,7 @@ test("loadTracks uses one browse request for enabled folders and master.db", asy
   assert.equal(state.libraryLoadedTotal, 2);
   assert.equal(state.libraryNextCursor, "cursor-2");
   assert.equal(state.libraryHasMore, true);
+  assert.equal(state.sourceRootAnalysisStatus["/music/a"], true);
 });
 
 test("renderSourceChips renders chips and toggles analyzed class", () => {
@@ -138,6 +142,117 @@ test("renderSourceChips renders chips and toggles analyzed class", () => {
   assert.deepEqual(Object.keys(persisted).sort(), ["/music/a", "/music/b"]);
   assert.equal(scanLabelUpdates, 1);
   assert.equal(indicatorUpdates, 1);
+});
+
+test("renderSourceChips keeps analyzed borders stable while folder filters are active", () => {
+  const dom = new JSDOM(`<!doctype html><body><div id="chips"></div></body>`);
+  const document = dom.window.document;
+  const state = {
+    sourceRoots: ["/music/a", "/music/b"],
+    sourceRootEnabled: { "/music/a": true, "/music/b": true },
+    sourceRootAnalysisStatus: {},
+    tracks: [
+      { filePath: "/music/a/1.mp3", durationMs: 120000, analyzed: true },
+      { filePath: "/music/b/2.mp3", durationMs: 120000, analyzed: true }
+    ]
+  };
+  const el = { sourceChipsContainer: document.querySelector("#chips") };
+  const deps = {
+    documentObj: document,
+    escapeHtml: (v) => String(v),
+    trackPathMatchesAnyRoot: (filePath, roots) => String(filePath).startsWith(String(roots[0])),
+    trackHasCoreAnalysis: (track) => !!track.analyzed,
+    persistSourceRootEnabled: () => {},
+    updateScanLibraryButtonLabel: () => {},
+    updateSourceFilterIndicator: () => {}
+  };
+
+  renderSourceChips(state, el, deps);
+  let chips = el.sourceChipsContainer.querySelectorAll(".source-chip");
+  assert.equal(chips[0].classList.contains("source-chip-analyzed"), true);
+  assert.equal(chips[1].classList.contains("source-chip-analyzed"), true);
+
+  state.sourceRootEnabled["/music/b"] = false;
+  state.tracks = [
+    { filePath: "/music/a/1.mp3", durationMs: 120000, analyzed: true }
+  ];
+  renderSourceChips(state, el, deps);
+
+  chips = el.sourceChipsContainer.querySelectorAll(".source-chip");
+  assert.equal(chips[0].classList.contains("source-chip-analyzed"), true);
+  assert.equal(chips[1].classList.contains("source-chip-analyzed"), true);
+  assert.equal(chips[1].querySelector(".source-chip-toggle").checked, false);
+});
+
+test("renderSourceChips does not promote unanalyzed folders from a filtered subset", () => {
+  const dom = new JSDOM(`<!doctype html><body><div id="chips"></div></body>`);
+  const document = dom.window.document;
+  const state = {
+    sourceRoots: ["/music/a", "/music/b"],
+    sourceRootEnabled: { "/music/a": true, "/music/b": true },
+    sourceRootAnalysisStatus: {},
+    tracks: [
+      { filePath: "/music/a/1.mp3", durationMs: 120000, analyzed: true },
+      { filePath: "/music/b/2.mp3", durationMs: 120000, analyzed: false }
+    ]
+  };
+  const el = { sourceChipsContainer: document.querySelector("#chips") };
+  const deps = {
+    documentObj: document,
+    escapeHtml: (v) => String(v),
+    trackPathMatchesAnyRoot: (filePath, roots) => String(filePath).startsWith(String(roots[0])),
+    trackHasCoreAnalysis: (track) => !!track.analyzed,
+    persistSourceRootEnabled: () => {},
+    updateScanLibraryButtonLabel: () => {},
+    updateSourceFilterIndicator: () => {}
+  };
+
+  renderSourceChips(state, el, deps);
+  let chips = el.sourceChipsContainer.querySelectorAll(".source-chip");
+  assert.equal(chips[1].classList.contains("source-chip-analyzed"), false);
+
+  state.sourceRootEnabled["/music/a"] = false;
+  state.tracks = [
+    { filePath: "/music/b/3.mp3", durationMs: 120000, analyzed: true }
+  ];
+  renderSourceChips(state, el, deps);
+
+  chips = el.sourceChipsContainer.querySelectorAll(".source-chip");
+  assert.equal(chips[1].classList.contains("source-chip-analyzed"), false);
+});
+
+test("renderSourceChips does not overwrite cached analysis status from an incomplete page", () => {
+  const dom = new JSDOM(`<!doctype html><body><div id="chips"></div><input id="search" /></body>`);
+  const document = dom.window.document;
+  const state = {
+    sourceRoots: ["/music/a"],
+    sourceRootEnabled: { "/music/a": true },
+    sourceRootAnalysisStatus: { "/music/a": true },
+    tracks: [
+      { filePath: "/music/a/1.mp3", durationMs: null, analyzed: false }
+    ],
+    libraryHasMore: true,
+    libraryLoadedTotal: 10,
+    libraryQuery: ""
+  };
+  const el = {
+    sourceChipsContainer: document.querySelector("#chips"),
+    librarySearch: document.querySelector("#search")
+  };
+
+  renderSourceChips(state, el, {
+    documentObj: document,
+    escapeHtml: (v) => String(v),
+    trackPathMatchesAnyRoot: (filePath, roots) => String(filePath).startsWith(String(roots[0])),
+    trackHasCoreAnalysis: (track) => !!track.analyzed,
+    persistSourceRootEnabled: () => {},
+    updateScanLibraryButtonLabel: () => {},
+    updateSourceFilterIndicator: () => {}
+  });
+
+  const chip = el.sourceChipsContainer.querySelector(".source-chip");
+  assert.equal(chip.classList.contains("source-chip-analyzed"), true);
+  assert.equal(state.sourceRootAnalysisStatus["/music/a"], true);
 });
 
 test("renderSourceChips shows importMasterDbBtn when externalMasterDbPath is set", () => {

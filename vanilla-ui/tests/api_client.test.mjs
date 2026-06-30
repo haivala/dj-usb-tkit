@@ -96,6 +96,9 @@ test("invoke mock browse_source_files scopes folder and master.db rows independe
   });
   assert.equal(folderOnly.data.items.length, 3);
   assert.equal(folderOnly.data.items.some((track) => track.masterDbSource), false);
+  assert.deepEqual(folderOnly.data.sourceRootAnalysis, [
+    { sourceRoot: "/music", total: 3, analyzed: 0, fullyAnalyzed: false }
+  ]);
 
   const masterOnly = await client.invoke("browse_source_files", {
     sourceRoots: [],

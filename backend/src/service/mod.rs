@@ -44,8 +44,8 @@ use crate::models::{
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RenamePlaylistData,
     RenamePlaylistRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
     ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
-    SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
-    Track,
+    SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SourceRootAnalysisStatus, StopPlaybackData, Track,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -100,6 +100,26 @@ type ExistingTracksByPath = std::collections::HashMap<String, ExistingTrackSnaps
 
 fn browse_path_key(path: &str) -> String {
     path.trim().replace('\\', "/").to_ascii_lowercase()
+}
+
+fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
+    let file_key = browse_path_key(file_path);
+    let root_key = browse_path_key(root).trim_end_matches('/').to_string();
+    !root_key.is_empty() && (file_key == root_key || file_key.starts_with(&format!("{root_key}/")))
+}
+
+fn track_has_core_analysis_for_source_status(track: &Track) -> bool {
+    let has_waveform_path = track
+        .waveform_peaks_path
+        .as_deref()
+        .map(|path| !path.trim().is_empty())
+        .unwrap_or(false);
+    let has_bpm = track.bpm.map(|bpm| bpm > 0.0).unwrap_or(false);
+    let has_duration = track
+        .duration_ms
+        .map(|duration| duration > 0)
+        .unwrap_or(false);
+    has_waveform_path && has_bpm && has_duration
 }
 
 fn non_empty_db_value(value: &str) -> Option<&str> {
@@ -539,9 +559,7 @@ impl BackendService {
             external_master_db_candidates()
                 .into_iter()
                 .find(|c| c.is_file())
-                .ok_or_else(|| {
-                    BackendError::Validation("master.db not found".to_string())
-                })?
+                .ok_or_else(|| BackendError::Validation("master.db not found".to_string()))?
         };
 
         if !master_path.is_file() {
@@ -982,6 +1000,7 @@ impl BackendService {
                 items: Vec::new(),
                 next_cursor: None,
                 has_more: false,
+                source_root_analysis: Vec::new(),
             });
         }
 
@@ -1055,6 +1074,28 @@ impl BackendService {
             })
             .collect::<Vec<_>>();
 
+        let source_root_analysis = source_roots
+            .iter()
+            .map(|root| {
+                let mut total = 0usize;
+                let mut analyzed = 0usize;
+                for track in &items {
+                    if browse_path_matches_root(&track.file_path, root) {
+                        total += 1;
+                        if track_has_core_analysis_for_source_status(track) {
+                            analyzed += 1;
+                        }
+                    }
+                }
+                SourceRootAnalysisStatus {
+                    source_root: root.clone(),
+                    total,
+                    analyzed,
+                    fully_analyzed: total > 0 && analyzed == total,
+                }
+            })
+            .collect::<Vec<_>>();
+
         if include_master_db {
             for track in indexed_tracks
                 .into_iter()
@@ -1110,6 +1151,7 @@ impl BackendService {
             items: page_items,
             next_cursor,
             has_more,
+            source_root_analysis,
         })
     }
 
