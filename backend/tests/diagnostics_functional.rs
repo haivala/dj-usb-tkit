@@ -1320,15 +1320,11 @@ fn strict_repair_leaves_unrelated_playlists_unchanged() {
     assert!(control_after.sort_order_match);
     assert_eq!(control_after.pdb_sort_order, control_after.edb_sort_order);
     assert_eq!(
-        control_after.pdb_sort_order,
-        control_before.pdb_sort_order.map(|v| v.saturating_add(1)),
-        "repair moves the target playlist first, so sibling playlist sort orders shift"
+        control_after.pdb_sort_order, control_before.pdb_sort_order,
+        "strict repair should preserve PDB playlist sorting for unrelated playlists"
     );
 
-    let mut order_normalized_after = control_after.clone();
-    order_normalized_after.pdb_sort_order = control_before.pdb_sort_order;
-    order_normalized_after.edb_sort_order = control_before.edb_sort_order;
-    assert_same_parity_detail(&order_normalized_after, &control_before);
+    assert_same_parity_detail(&control_after, &control_before);
     assert_eq!(control_members_after, control_members_before);
 }
 

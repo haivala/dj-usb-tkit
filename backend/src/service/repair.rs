@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::params;
 
-use crate::edb::{open_edb_from_usb_root, open_edb_rw, try_read_playlists_with_metadata_from_edb};
+use crate::edb::{
+    ExportDbPlaylist, open_edb_from_usb_root, open_edb_rw,
+    try_read_playlists_with_metadata_from_edb,
+};
 use crate::error::{BackendError, BackendResult};
 use crate::models::{
     DiagCheck, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
@@ -1982,6 +1985,166 @@ struct MergedPlaylist {
     edb_needs_write: bool,
 }
 
+fn sorted_edb_playlist_names(
+    edb_playlists: Option<&HashMap<String, ExportDbPlaylist>>,
+) -> Vec<String> {
+    let Some(edb_playlists) = edb_playlists else {
+        return Vec::new();
+    };
+    let mut names = edb_playlists
+        .iter()
+        .map(|(name, playlist)| {
+            (
+                name.clone(),
+                playlist.sort_order,
+                playlist.playlist_id,
+                canonicalize_playlist_name(name),
+            )
+        })
+        .collect::<Vec<_>>();
+    names.sort_by(|a, b| {
+        a.1.cmp(&b.1)
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| a.3.cmp(&b.3))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    names.into_iter().map(|(name, _, _, _)| name).collect()
+}
+
+fn strict_repair_ordered_playlist_names(
+    parsed: &crate::pdb_reader::ParsedPdb,
+    edb_playlists: Option<&HashMap<String, ExportDbPlaylist>>,
+) -> Vec<String> {
+    let sorted_edb_names = sorted_edb_playlist_names(edb_playlists);
+    let edb_name_set = sorted_edb_names.iter().cloned().collect::<HashSet<_>>();
+    let mut edb_names_by_canon = HashMap::<String, Vec<String>>::new();
+    for name in &sorted_edb_names {
+        edb_names_by_canon
+            .entry(canonicalize_playlist_name(name))
+            .or_default()
+            .push(name.clone());
+    }
+
+    let mut pdb_leaves = parsed
+        .playlist_tree
+        .iter()
+        .filter(|row| !row.row_is_folder)
+        .collect::<Vec<_>>();
+    pdb_leaves.sort_by(|a, b| {
+        a.sort_order
+            .cmp(&b.sort_order)
+            .then_with(|| a.id.cmp(&b.id))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let mut out = Vec::<String>::new();
+    let mut seen_canon = HashSet::<String>::new();
+    let mut consumed_edb_names = HashSet::<String>::new();
+    for leaf in pdb_leaves {
+        let canon = canonicalize_playlist_name(&leaf.name);
+        if !seen_canon.insert(canon.clone()) {
+            continue;
+        }
+        let chosen = if edb_name_set.contains(&leaf.name) {
+            leaf.name.clone()
+        } else {
+            edb_names_by_canon
+                .get(&canon)
+                .and_then(|names| {
+                    names
+                        .iter()
+                        .find(|name| !consumed_edb_names.contains(*name))
+                        .cloned()
+                })
+                .unwrap_or_else(|| leaf.name.clone())
+        };
+        if edb_name_set.contains(&chosen) {
+            consumed_edb_names.insert(chosen.clone());
+        }
+        out.push(chosen);
+    }
+
+    for name in sorted_edb_names {
+        let canon = canonicalize_playlist_name(&name);
+        if seen_canon.insert(canon) {
+            out.push(name);
+        }
+    }
+
+    out
+}
+
+fn pdb_page_size_from_bytes(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .get(4..8)
+        .and_then(|raw| raw.try_into().ok())
+        .map(u32::from_le_bytes)
+        .and_then(|value| usize::try_from(value).ok())
+}
+
+fn restore_pdb_playlist_sort_orders(
+    usb_root: &std::path::Path,
+    desired_sort_by_id: &HashMap<u32, u32>,
+) -> BackendResult<usize> {
+    if desired_sort_by_id.is_empty() {
+        return Ok(0);
+    }
+    let pdb_path = vendor_pdb_path(usb_root);
+    if !pdb_path.is_file() {
+        return Ok(0);
+    }
+    let mut bytes = std::fs::read(&pdb_path)?;
+    let page_size = pdb_page_size_from_bytes(&bytes).ok_or_else(|| {
+        BackendError::Validation(format!(
+            "PDB playlist order restore failed: cannot read page size from {}",
+            pdb_path.display()
+        ))
+    })?;
+    let patches = desired_sort_by_id
+        .iter()
+        .map(
+            |(id, sort_order)| crate::pdb_writer::PdbPlaylistTreeSortOrderPatch {
+                id: *id,
+                sort_order: *sort_order,
+            },
+        )
+        .collect::<Vec<_>>();
+    let patched = crate::pdb_writer::patch_playlist_tree_sort_orders_in_place(
+        &mut bytes, &patches, page_size,
+    )?;
+    if patched > 0 {
+        std::fs::write(&pdb_path, &bytes)?;
+    }
+    Ok(patched)
+}
+
+fn sync_edb_playlist_sort_orders_from_pdb(
+    usb_root: &std::path::Path,
+    warnings: &mut Vec<String>,
+) -> BackendResult<usize> {
+    let parsed = parse_pdb(&vendor_pdb_path(usb_root))?;
+    let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
+        warnings
+            .push("strict parity upgrade: unable to open eDB for playlist order sync".to_string());
+        return Ok(0);
+    };
+    if !table_exists(&conn, "playlist") {
+        return Ok(0);
+    }
+    let tx = conn.transaction()?;
+    let mut updated = 0usize;
+    for leaf in parsed.playlist_tree.iter().filter(|row| !row.row_is_folder) {
+        updated += tx.execute(
+            "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 AND attribute = 0",
+            params![i64::from(leaf.sort_order), i64::from(leaf.id)],
+        )?;
+    }
+    tx.commit()?;
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
+    Ok(updated)
+}
+
 fn build_manifest_for_merged_playlist(
     usb_root: &std::path::Path,
     playlist: &MergedPlaylist,
@@ -3500,29 +3663,8 @@ impl BackendService {
         }
 
         // ── Phase 2: Merge playlists ──────────────────────────────────
-        let mut all_playlist_names: Vec<String> = Vec::new();
-        {
-            let mut seen_exact = HashSet::new();
-            let mut seen_canon = HashSet::new();
-            // eDB playlists first (preferred order source)
-            if let Some(ref edb_pls) = edb_playlists {
-                for name in edb_pls.keys() {
-                    if seen_exact.insert(name.clone()) {
-                        seen_canon.insert(canonicalize_playlist_name(name));
-                        all_playlist_names.push(name.clone());
-                    }
-                }
-            }
-            // PDB-only playlists appended (skip if exact or canonical match already seen)
-            for leaf in parsed.playlist_tree.iter().filter(|r| !r.row_is_folder) {
-                if !seen_exact.contains(&leaf.name) {
-                    let canon = canonicalize_playlist_name(&leaf.name);
-                    if seen_canon.insert(canon) {
-                        all_playlist_names.push(leaf.name.clone());
-                    }
-                }
-            }
-        }
+        let all_playlist_names =
+            strict_repair_ordered_playlist_names(&parsed, edb_playlists.as_ref());
 
         let mut next_track_id = parsed.tracks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
         let mut next_playlist_id = parsed.playlist_tree.iter().map(|r| r.id).max().unwrap_or(0) + 1;
@@ -3535,6 +3677,7 @@ impl BackendService {
             + 1;
 
         let mut merged_playlists: Vec<MergedPlaylist> = Vec::new();
+        let has_existing_pdb_order = parsed.playlist_tree.iter().any(|r| !r.row_is_folder);
         // Track all assigned PDB track IDs to avoid collisions
         let mut assigned_track_ids: HashSet<u32> = parsed.tracks.iter().map(|t| t.id).collect();
         // Track consumed PDB playlists to prevent double-matching on canonical collisions
@@ -3619,11 +3762,17 @@ impl BackendService {
                         next_playlist_id += 1;
                         id
                     });
-                    let sort = u32::try_from(edb.sort_order).unwrap_or_else(|_| {
+                    let sort = if has_existing_pdb_order {
                         let s = next_sort_order;
                         next_sort_order += 1;
                         s
-                    });
+                    } else {
+                        u32::try_from(edb.sort_order).unwrap_or_else(|_| {
+                            let s = next_sort_order;
+                            next_sort_order += 1;
+                            s
+                        })
+                    };
                     (
                         allocate_unique_playlist_id(
                             candidate,
@@ -3977,6 +4126,14 @@ impl BackendService {
         result.merged_playlists = merged_playlists.len();
 
         // ── Phase 3: Rewrite PDB using the current export writer ──────
+        let mut desired_pdb_sort_by_id: HashMap<u32, u32> = parsed
+            .playlist_tree
+            .iter()
+            .map(|row| (row.id, row.sort_order))
+            .collect();
+        for mpl in &merged_playlists {
+            desired_pdb_sort_by_id.insert(mpl.playlist_id, mpl.sort_order);
+        }
         for mpl in &merged_playlists {
             let (playlist_data, manifest) = build_manifest_for_merged_playlist(usb_root, mpl);
             if let Err(err) = write_pdb(
@@ -3991,6 +4148,14 @@ impl BackendService {
                 warnings.push(format!(
                     "strict parity upgrade: PDB rewrite failed for '{}': {err}",
                     mpl.name
+                ));
+                result.failed_playlists += 1;
+            }
+        }
+        if result.merged_playlists > 0 {
+            if let Err(err) = restore_pdb_playlist_sort_orders(usb_root, &desired_pdb_sort_by_id) {
+                warnings.push(format!(
+                    "strict parity upgrade: PDB playlist order restore failed: {err}"
                 ));
                 result.failed_playlists += 1;
             }
@@ -4063,10 +4228,9 @@ impl BackendService {
                 result.failed_playlists += 1;
                 continue;
             };
-            // Use the re-read PDB id (handles collision remapping) but take
-            // sort_order directly from the merge result — post-write PDB sort_orders
-            // are renumbered by move_playlist_tree_row_to_front and do not reflect
-            // the original PDB values we want to propagate into eDB.
+            // Use the re-read PDB id (handles collision remapping). The eDB
+            // writer may move this playlist to the front, so all eDB sequenceNos
+            // are synced from the final PDB sort order after the write loop.
             let target_playlist_id = pdb_identity_by_name
                 .get(&mpl.name)
                 .map(|(id, _)| *id)
@@ -4088,6 +4252,14 @@ impl BackendService {
                     ));
                     result.failed_playlists += 1;
                 }
+            }
+        }
+        if result.merged_playlists > 0 {
+            if let Err(err) = sync_edb_playlist_sort_orders_from_pdb(usb_root, warnings) {
+                warnings.push(format!(
+                    "strict parity upgrade: eDB playlist order sync failed: {err}"
+                ));
+                result.failed_playlists += 1;
             }
         }
 
@@ -4381,8 +4553,11 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edb::ExportDbPlaylist;
     use crate::models::{DiagCheck, DiagStatus, UsbParityPlaylistDetail};
-    use crate::pdb_reader::{ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow};
+    use crate::pdb_reader::{
+        ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistTreeRow,
+    };
     use crate::service::export_helpers::inspect_pdb_columns_playlist_order;
     use tempfile::tempdir;
 
@@ -4429,6 +4604,55 @@ mod tests {
 
         let clean = make_strict_repair_detail("Clean");
         assert!(!playlist_requires_strict_upgrade(&clean));
+    }
+
+    #[test]
+    fn strict_repair_playlist_names_follow_pdb_order_with_edb_only_tail() {
+        let mut parsed = ParsedPdb::default();
+        parsed.playlist_tree.push(PdbPlaylistTreeRow {
+            id: 10,
+            parent_id: 0,
+            sort_order: 1,
+            row_is_folder: false,
+            name: "Zeta".to_string(),
+        });
+        parsed.playlist_tree.push(PdbPlaylistTreeRow {
+            id: 20,
+            parent_id: 0,
+            sort_order: 2,
+            row_is_folder: false,
+            name: "Alpha".to_string(),
+        });
+
+        let mut edb_playlists = HashMap::<String, ExportDbPlaylist>::new();
+        edb_playlists.insert(
+            "Alpha".to_string(),
+            ExportDbPlaylist {
+                playlist_id: 20,
+                sort_order: 0,
+                tracks: Vec::new(),
+            },
+        );
+        edb_playlists.insert(
+            "Zeta".to_string(),
+            ExportDbPlaylist {
+                playlist_id: 10,
+                sort_order: 1,
+                tracks: Vec::new(),
+            },
+        );
+        edb_playlists.insert(
+            "Beta".to_string(),
+            ExportDbPlaylist {
+                playlist_id: 30,
+                sort_order: 0,
+                tracks: Vec::new(),
+            },
+        );
+
+        let names = strict_repair_ordered_playlist_names(&parsed, Some(&edb_playlists));
+
+        assert_eq!(names, vec!["Zeta", "Alpha", "Beta"]);
     }
 
     #[test]
