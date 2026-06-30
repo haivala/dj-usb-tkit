@@ -1,6 +1,7 @@
 <p align="center">
   <img src="vanilla-ui/text-icon.svg" alt="DJ USB Tkit" width="320" />
 </p>
+
 # DJ USB Tkit
 
 Local-first DJ library manager and USB exporter built with Rust + Tauri.
