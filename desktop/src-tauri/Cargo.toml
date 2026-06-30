@@ -1,0 +1,20 @@
+[package]
+name = "dj_usb_tkit_desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+backend = { path = "../../backend", features = ["tauri"] }
+chrono = { version = "0.4", features = ["clock"] }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = ["protocol-asset", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+url = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+glib = "0.18"

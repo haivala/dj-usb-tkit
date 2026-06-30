@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "name": "embedded_artwork",
+      "audio": "audio/embedded/track_embedded.mp3",
+      "expectedTitle": "Fixture Embedded",
+      "expectedArtist": "Fixture Artist",
+      "expectedAlbum": "Fixture Album",
+      "expectedArtworkSource": "embedded",
+      "expectedArtworkPathEndsWith": "track_embedded",
+      "expectedWaveform": "non_empty"
+    },
+    {
+      "name": "folder_artwork_fallback",
+      "audio": "audio/folder/track_folder.jpg.mp3",
+      "expectedTitle": "Fixture Folder Cover",
+      "expectedArtist": "Fixture Artist",
+      "expectedAlbum": "Fixture Album",
+      "expectedArtworkSource": "same_folder_file",
+      "expectedArtworkFileName": "cover.jpg",
+      "expectedWaveform": "non_empty"
+    },
+    {
+      "name": "parent_folder_artwork_fallback",
+      "audio": "audio/parent/child/track_parent_folder.jpg.mp3",
+      "expectedTitle": "Fixture Parent Cover",
+      "expectedArtist": "Fixture Artist",
+      "expectedAlbum": "Fixture Album",
+      "expectedArtworkSource": "parent_folder_file",
+      "expectedArtworkFileName": "cover.png",
+      "expectedWaveform": "non_empty"
+    },
+    {
+      "name": "no_artwork",
+      "audio": "audio/noart/track_no_art.mp3",
+      "expectedTitle": "Fixture No Art",
+      "expectedArtist": "Fixture Artist",
+      "expectedAlbum": "Fixture Album",
+      "expectedArtworkSource": "none",
+      "expectedWaveform": "empty_or_low"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+target/
+vanilla-ui/node_modules/
+desktop/node_modules/
+vanilla-ui/dist/
+vanilla-ui/test-results/
+test-results/
+desktop/runtime/
+desktop/src-tauri/gen/schemas/windows-schema.json
+**/.app-data/
+.docker-logs/
+.tmp-diag-data/

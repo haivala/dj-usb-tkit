@@ -1,0 +1,197 @@
+[package]
+name = "backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autobins = false
+
+[features]
+default = []
+tauri = ["dep:tauri", "dep:reqwest", "dep:flate2", "dep:tar", "dep:futures-util"]
+dev-tools = []
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+lofty = "0.22"
+rodio = "0.20"
+symphonia = { version = "0.5", default-features = false, features = ["all-formats", "all-codecs"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v7", "serde"] }
+walkdir = "2"
+stratum-dsp = "1"
+tauri = { version = "2", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
+flate2 = { version = "1", optional = true }
+tar = { version = "0.4", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd"))'.dependencies]
+alsa-sys = "0.3"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "init_usb"
+path = "src/bin/init_usb.rs"
+
+[[bin]]
+name = "export_playlist_to_usb"
+path = "src/bin/export_playlist_to_usb.rs"
+
+[[bin]]
+name = "analyze_one_track"
+path = "src/bin/analyze_one_track.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "analyze_playlist_tracks"
+path = "src/bin/analyze_playlist_tracks.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "compare_usb_dbs"
+path = "src/bin/compare_usb_dbs.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "compare_usb_shape"
+path = "src/bin/compare_usb_shape.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "derive_pdb_growth_rules"
+path = "src/bin/derive_pdb_growth_rules.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_page_rows"
+path = "src/bin/dump_page_rows.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "compare_pdb"
+path = "src/bin/compare_pdb.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_pdb_anomalies"
+path = "src/bin/dump_pdb_anomalies.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_pdb_page_headers"
+path = "src/bin/dump_pdb_page_headers.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "check_pdb_crossrefs"
+path = "src/bin/check_pdb_crossrefs.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "regenerate_pdb"
+path = "src/bin/regenerate_pdb.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_pdb_layout"
+path = "src/bin/dump_pdb_layout.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_pdb_t16"
+path = "src/bin/dump_pdb_t16.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_pdb_playlist"
+path = "src/bin/dump_pdb_playlist.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_t00_page_rows"
+path = "src/bin/dump_t00_page_rows.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_t08_rows"
+path = "src/bin/dump_t08_rows.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_pdb_track_debug"
+path = "src/bin/dump_pdb_track_debug.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "dump_usb_db_compare"
+path = "src/bin/dump_usb_db_compare.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "export_usb_to_usb2"
+path = "src/bin/export_usb_to_usb2.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "list_playlist_from_db"
+path = "src/bin/list_playlist_from_db.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "run_usb_repair"
+path = "src/bin/run_usb_repair.rs"
+
+[[bin]]
+name = "run_strict_parity_repair"
+path = "src/bin/run_strict_parity_repair.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "sqlcipher_query"
+path = "src/bin/sqlcipher_query.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "probe_usb_analysis_paths"
+path = "src/bin/probe_usb_analysis_paths.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "waveform_render_gate"
+path = "src/bin/waveform_render_gate.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "render_waveform_pair"
+path = "src/bin/render_waveform_pair.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "render_3way_waveform"
+path = "src/bin/render_3way_waveform.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "run_usb_diagnostics"
+path = "src/bin/run_usb_diagnostics.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "benchmark_analyze_tracks"
+path = "src/bin/benchmark_analyze_tracks.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "remove_usb_playlist"
+path = "src/bin/remove_usb_playlist.rs"
+required-features = ["dev-tools"]

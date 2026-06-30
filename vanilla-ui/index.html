@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DJ USB Tkit</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <style>html{background:#f0edf5}@media(prefers-color-scheme:dark){html:not([data-theme]){background:#0c0a12}}html[data-theme="dark"]{background:#0c0a12}html[data-theme="light"]{background:#f0edf5}</style>
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="brand-mark">
+      <!-- Themed brand logo: USB stick colors follow --accent / --accent-hot CSS variables -->
+      <svg class="brand-logo" width="200" height="44" viewBox="0 0 200 44" role="img" aria-label="DJ USB Tkit">
+        <defs>
+          <linearGradient id="usb-body-t" x1="0" y1="0" x2="0" y2="1">
+            <stop class="usb-grad-top"/>
+            <stop class="usb-grad-bot" offset="1"/>
+          </linearGradient>
+        </defs>
+        <text x="2" y="30" font-family="'Outfit', system-ui, sans-serif" font-size="26" font-weight="700" fill="currentColor">DJ</text>
+        <!-- USB icon -->
+        <g transform="translate(40,2)">
+          <!-- connector cap -->
+          <rect x="3" y="0" width="13" height="15" rx="1" fill="#b0abb8"/>
+          <!-- connector pins -->
+          <rect x="5" y="5" width="3.5" height="2.5" rx="0.5" class="usb-pin"/>
+          <rect x="11" y="5" width="3.5" height="2.5" rx="0.5" class="usb-pin"/>
+          <!-- body -->
+          <rect x="0" y="12" width="19" height="30" rx="2.5" fill="url(#usb-body-t)"/>
+          <!-- waveform bars -->
+          <rect x="3.5"  y="22" width="1.2" height="5"  rx="0.6" class="usb-wave" opacity="0.55"/>
+          <rect x="5.5"  y="20" width="1.2" height="9"  rx="0.6" class="usb-wave" opacity="0.65"/>
+          <rect x="7.5"  y="18" width="1.2" height="13" rx="0.6" class="usb-wave" opacity="0.75"/>
+          <rect x="9.5"  y="17" width="1.2" height="15" rx="0.6" class="usb-wave" opacity="0.85"/>
+          <rect x="11.5" y="19" width="1.2" height="11" rx="0.6" class="usb-wave" opacity="0.7"/>
+          <rect x="13.5" y="21" width="1.2" height="7"  rx="0.6" class="usb-wave" opacity="0.6"/>
+          <rect x="15.5" y="23" width="1.2" height="3"  rx="0.6" class="usb-wave" opacity="0.5"/>
+        </g>
+        <text x="64" y="30" font-family="'Outfit', system-ui, sans-serif" font-size="26" font-weight="700" fill="currentColor">Tkit</text>
+      </svg>
+    </h1>
+    <div class="status-wrap">
+      <div class="status" id="statusText">Idle</div>
+      <button class="help-btn" id="helpBtn" title="Help" aria-label="Help">?</button>
+      <button class="settings-btn" id="settingsBtn" title="Settings" aria-label="Settings">&#9881;</button>
+      <div class="playlist-badge inactive" id="playlistBadge">
+        <span class="badge-dot"></span>
+        <span id="badgeLabel">No active playlist</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-layout">
+    <aside class="nav-sidebar" id="navSidebar">
+      <div class="nav-sidebar-header">
+        <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="Collapse sidebar" aria-label="Collapse sidebar">&#9666;</button>
+      </div>
+      <nav class="nav-items" role="navigation" aria-label="App sections">
+        <button class="nav-item active" data-view="library" aria-current="true">
+          <span class="nav-icon">&#9835;</span>
+          <span class="nav-label">Library</span>
+        </button>
+        <button class="nav-item" data-view="usb">
+          <span class="nav-icon">&#9921;</span>
+          <span class="nav-label">USB</span>
+        </button>
+        <button class="nav-item nav-sub-item" data-view="usb-playlists">
+          <span class="nav-label">Playlists</span>
+        </button>
+        <button class="nav-item nav-sub-item" data-view="usb-history">
+          <span class="nav-label">History</span>
+        </button>
+        <button class="nav-item nav-sub-item" data-view="usb-player-menu">
+          <span class="nav-label">Player Menu</span>
+        </button>
+        <div class="nav-divider"></div>
+        <div class="nav-section-label">Playlists</div>
+        <ul class="nav-playlist-list" id="navPlaylistList">
+          <li class="nav-playlist-add-item">
+            <button class="nav-item nav-add-playlist" id="addPlaylistBtn" title="New playlist" aria-label="New playlist">
+              <span class="nav-icon">+</span>
+              <span class="nav-label">New</span>
+            </button>
+          </li>
+          <!-- dynamic playlist items inserted here by JS -->
+        </ul>
+      </nav>
+      <div class="nav-sidebar-footer">
+        <button class="nav-sidebar-footer-link" id="websiteBtn" title="Website">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span class="nav-label">Website</span>
+        </button>
+        <button class="nav-sidebar-footer-link" id="donateBtn" title="Donate">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          <span class="nav-label">Donate</span>
+        </button>
+      </div>
+    </aside>
+
+    <main>
+      <section class="panel active" id="panel-library" role="tabpanel">
+        <div id="libraryEmptyState"></div>
+        <div id="libraryContent">
+          <h2>Media Library</h2>
+          <div class="source-bar" id="sourceBar">
+            <div class="source-filter-header" id="sourceFilterHeader">
+              <span class="source-filter-label">Source Folders</span>
+              <span class="source-filter-indicator" id="sourceFilterIndicator">Filtered</span>
+            </div>
+            <div class="source-body" id="sourceBody">
+              <div class="source-chips" id="sourceChipsContainer"></div>
+              <label class="external-master-db-toggle hidden" id="externalMasterDbToggle">
+                <input type="checkbox" id="externalMasterDbCheckbox" />
+                <span class="external-master-db-toggle-label">External Library</span>
+                <span class="external-master-db-toggle-path muted" id="externalMasterDbPath"></span>
+              </label>
+              <div class="source-actions">
+                <button id="addSourceBtn">+ Add Folder</button>
+                <button id="importMasterDbBtn" class="hidden">Import RB</button>
+                <button id="scanLibraryBtn" data-primary>Scan Library</button>
+              </div>
+            </div>
+          </div>
+          <div class="library-toolbar">
+            <div class="search-row">
+              <input id="librarySearch" placeholder="Search title / artist / album" />
+            </div>
+            <div class="selection-actions hidden" id="selectionActions">
+              <span id="selectionCount" class="selection-count"></span>
+              <button id="addSelectedBtn" data-primary disabled>+ Add to Playlist</button>
+            </div>
+          </div>
+          <div class="table-wrap" id="libraryTableWrap">
+            <div class="track-grid track-grid--library" data-track-grid data-body-id="libraryTableBody" role="table" aria-label="Library tracks">
+              <div class="track-grid-head" role="rowgroup">
+                <div class="track-grid-row" role="row">
+                  <div class="track-grid-cell" role="columnheader"><input type="checkbox" id="selectAllTracks" /></div>
+                  <div class="track-grid-cell" role="columnheader"></div>
+                  <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden">sorted by &rarr;</span></div>
+                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title" data-sort-default="Track"><span class="sort-label">Track</span></div>
+                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="album">Album</div>
+                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="format">Fmt</div>
+                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="durationMs">Length</div>
+                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="bpm">BPM</div>
+                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="key">Key</div>
+                  <div class="track-grid-cell" role="columnheader"></div>
+                </div>
+              </div>
+              <div class="track-grid-body" id="libraryTableBody" role="rowgroup"></div>
+            </div>
+          </div>
+          <p class="muted track-total-time" id="libraryTotalDuration">Total time: 0:00</p>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-usb" role="tabpanel" aria-hidden="true">
+        <!-- USB Connection Bar — hidden until USB is selected -->
+        <div class="usb-connection-bar hidden" id="usbConnectionBar">
+          <h2>USB Browser</h2>
+          <div class="usb-cfg-connect-row">
+            <button id="selectUsbFolderBtn" data-primary>Select USB Folder</button>
+            <span class="usb-path-badge" id="usbRootPathText">No USB selected</span>
+            <span class="usb-health-dot" id="usbHealthDot" title="USB health unknown"></span>
+          </div>
+          <div class="usb-cfg-recent-row" id="usbRecentRow">
+            <span class="muted">Recent:</span>
+            <div class="usb-cfg-recent-list" id="usbRecentList"></div>
+          </div>
+          <div class="usb-cfg-init-row hidden" id="usbInitRow">
+            <span class="muted" id="usbInitHint">No External library structure found.</span>
+            <button id="initializeUsbBtn">Initialize USB Structure</button>
+          </div>
+        </div>
+
+        <div id="usbEmptyState"></div>
+
+        <!-- Health & Diagnostics -->
+        <div id="usbSelectedControls" class="hidden">
+          <details class="usb-health-card" id="usbHealthCard">
+            <summary class="usb-health-summary">
+              <span class="usb-cfg-section-label">Health &amp; Diagnostics</span>
+            </summary>
+            <div class="usb-health-content">
+              <div class="usb-cfg-toolbar">
+                <button id="reDiagnoseBtn">Rediagnose USB</button>
+                <button id="runUsbParityBtn">Parity Report</button>
+                <span class="usb-cfg-toolbar-sep"></span>
+                <button id="previewRepairsBtn">Preview Fixes</button>
+              </div>
+              <div class="diag-card hidden" id="usbDiagnosticsCard">
+                <div class="diag-status-row">
+                  <span id="diagOverallStatus" class="diag-badge"></span>
+                  <span class="muted" id="diagDuration"></span>
+                </div>
+
+                <!-- Diagnostics report view (default) -->
+                <div id="diagReportView">
+                  <div id="diagSections"></div>
+                  <details class="diag-details hidden" id="diagPlaylistDetails">
+                    <summary class="muted">Playlist Resolution Details</summary>
+                    <div class="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Status</th>
+                            <th>Playlist</th>
+                            <th>Resolved</th>
+                            <th>Total</th>
+                            <th>Rate</th>
+                          </tr>
+                        </thead>
+                        <tbody id="diagPlaylistTableBody"></tbody>
+                      </table>
+                    </div>
+                  </details>
+                </div>
+
+                <!-- Repair preview view (replaces report when active) -->
+                <div id="diagRepairPanel" class="hidden">
+                  <p id="diagRepairSummary" class="diag-repair-summary"></p>
+                  <ul id="diagRepairFixes" class="diag-repair-list"></ul>
+                  <div class="diag-repair-actions">
+                    <button id="diagBackToReportBtn">Back to Report</button>
+                    <button id="applyRepairsBtn" disabled data-primary>Apply Fixes</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+        </div>
+      </section>
+
+      <!-- USB Playlists panel -->
+      <section class="panel" id="panel-usb-playlists" role="tabpanel" aria-hidden="true">
+        <h2>USB Playlists</h2>
+        <div class="row mb-sm">
+          <button id="refreshUsbBtn" data-primary disabled>Import Playlists</button>
+        </div>
+        <p class="muted" id="usbCountsText">0 playlists, 0 tracks</p>
+        <div class="split">
+          <ul id="usbPlaylists" class="list left"><li class="muted">No playlists imported yet. Click "Import Playlists" to load from USB.</li></ul>
+          <div class="right hidden">
+            <div class="search-row">
+              <input id="usbTrackSearch" placeholder="Search USB playlist tracks" />
+            </div>
+            <div class="table-wrap">
+              <div class="track-grid track-grid--no-select" data-track-grid data-body-id="usbPlaylistTracks" role="table" aria-label="USB playlist tracks">
+                <div class="track-grid-head" role="rowgroup">
+                  <div class="track-grid-row" role="row">
+                    <div class="track-grid-cell" role="columnheader"></div>
+                    <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden">sorted by &rarr;</span></div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title" data-sort-default="Track"><span class="sort-label">Track</span></div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="album">Album</div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="format">Fmt</div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="durationMs">Length</div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="bpm">BPM</div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="key">Key</div>
+                    <div class="track-grid-cell" role="columnheader"></div>
+                  </div>
+                </div>
+                <div class="track-grid-body" id="usbPlaylistTracks" role="rowgroup"></div>
+              </div>
+            </div>
+            <p class="muted track-total-time" id="usbPlaylistTotalDuration">Total time: 0:00</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- USB History panel -->
+      <section class="panel" id="panel-usb-history" role="tabpanel" aria-hidden="true">
+        <h2>USB History</h2>
+        <div class="row mb-sm">
+          <button id="refreshHistoryBtn" data-primary disabled>Import History</button>
+        </div>
+        <p class="muted" id="historyCountsText">0 sessions, 0 tracks</p>
+        <div class="split">
+          <ul id="historyList" class="list left"><li class="muted">No history imported yet. Click "Import History" to load from USB.</li></ul>
+          <div class="right hidden">
+            <div class="search-row">
+              <input id="historyTrackSearch" placeholder="Search history tracks" />
+            </div>
+            <div class="table-wrap">
+              <div class="track-grid track-grid--no-select" data-track-grid data-body-id="historyTracks" role="table" aria-label="USB history tracks">
+                <div class="track-grid-head" role="rowgroup">
+                  <div class="track-grid-row" role="row">
+                    <div class="track-grid-cell" role="columnheader"></div>
+                    <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden">sorted by &rarr;</span></div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title" data-sort-default="Track"><span class="sort-label">Track</span></div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="album">Album</div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="format">Fmt</div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="durationMs">Length</div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="bpm">BPM</div>
+                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="key">Key</div>
+                    <div class="track-grid-cell" role="columnheader"></div>
+                  </div>
+                </div>
+                <div class="track-grid-body" id="historyTracks" role="rowgroup"></div>
+              </div>
+            </div>
+            <p class="muted track-total-time" id="historyTotalDuration">Total time: 0:00</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- USB player menu panel -->
+      <section class="panel" id="panel-usb-player-menu" role="tabpanel" aria-hidden="true">
+        <h2>Player Menu Editor</h2>
+        <div id="usbPlayerMenuDivergence" class="player-menu-divergence hidden">
+          <span id="usbPlayerMenuDivergenceMessage"></span>
+          <button id="usbPlayerMenuSyncBtn" type="button">Fix PDB sync</button>
+          <button id="usbPlayerMenuRestoreBtn" type="button">Restore browse categories</button>
+        </div>
+
+        <div class="split player-menu-split">
+          <div class="left player-menu-col">
+            <p class="muted player-menu-label">Available (hidden)</p>
+            <div id="usbPlayerMenuAvailable" class="player-menu-listbox" role="listbox" aria-label="Available hidden player menu items"></div>
+          </div>
+          <div class="right player-menu-col">
+            <p class="muted player-menu-label">Current player menu</p>
+            <div id="usbPlayerMenuCurrent" class="player-menu-listbox" role="listbox" aria-label="Current visible player menu items"></div>
+            <div class="row player-menu-actions">
+              <button id="usbPlayerMenuAddBtn">Add &rarr;</button>
+              <button id="usbPlayerMenuRemoveBtn">&larr; Remove</button>
+              <button id="usbPlayerMenuUpBtn">Move Up</button>
+              <button id="usbPlayerMenuDownBtn">Move Down</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Shared playlist panel (reused for whichever playlist is selected) -->
+      <section class="panel" id="panel-playlist" role="tabpanel" aria-hidden="true">
+        <h2 id="playlistPanelTitle">Playlist</h2>
+        <div class="row search-row">
+          <input id="playlistSearchInput" value="" placeholder="Search playlist tracks" />
+        </div>
+        <div id="playlistEmptyState"></div>
+        <div class="table-wrap" id="playlistTableWrap">
+          <div class="track-grid track-grid--no-select" data-track-grid data-body-id="playlistTracksBody" role="table" aria-label="Playlist tracks">
+            <div class="track-grid-head" role="rowgroup">
+              <div class="track-grid-row" role="row">
+                <div class="track-grid-cell" role="columnheader"></div>
+                <div class="track-grid-cell" role="columnheader"></div>
+                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title" data-sort-default="Track"><span class="sort-label">Track</span></div>
+                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="album">Album</div>
+                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="format">Fmt</div>
+                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="durationMs">Length</div>
+                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="bpm">BPM</div>
+                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="key">Key</div>
+                <div class="track-grid-cell" role="columnheader"></div>
+              </div>
+            </div>
+            <div class="track-grid-body" id="playlistTracksBody" role="rowgroup"></div>
+          </div>
+        </div>
+        <p class="muted track-total-time" id="playlistTotalDuration">Total time: 0:00</p>
+        <div class="row playlist-actions">
+          <p class="muted playlist-export-status" id="playlistExportStatus">Not exported yet.</p>
+          <button id="analyzePlaylistMissingBtn" type="button" disabled>Analyze Missing Tracks</button>
+          <button id="exportPlaylistBtn" data-export-playlist disabled>Export to USB</button>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-event-log" role="tabpanel" aria-hidden="true">
+        <h2>Event Log</h2>
+        <div class="event-log-toolbar">
+          <label>
+            <span class="muted">Level</span>
+            <select id="eventLogLevelFilter">
+              <option value="all">All</option>
+              <option value="error">Error</option>
+              <option value="warn">Warn</option>
+              <option value="info">Info</option>
+              <option value="log">Log</option>
+            </select>
+          </label>
+          <label>
+            <span class="muted">Source</span>
+            <select id="eventLogSourceFilter">
+              <option value="all">All</option>
+            </select>
+          </label>
+          <button id="eventLogClearBtn">Clear</button>
+        </div>
+        <p class="muted" id="eventLogSummary">No entries</p>
+        <div class="event-log-list" id="eventLogList" role="log" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Settings Drawer -->
+  <div class="settings-backdrop hidden" id="settingsBackdrop"></div>
+  <aside class="settings-drawer hidden" id="settingsDrawer" role="dialog" aria-label="Settings">
+    <div class="settings-header">
+      <h2>Settings</h2>
+      <button class="settings-close" id="settingsCloseBtn" aria-label="Close settings">&times;</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-section">
+        <div class="settings-section-label">Theme</div>
+        <div class="theme-selector" id="themeSelector">
+          <button class="theme-option" data-theme-choice="light">Light</button>
+          <button class="theme-option" data-theme-choice="dark">Dark</button>
+          <button class="theme-option" data-theme-choice="auto">Auto</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="accent-preview-row">
+          <div class="accent-swatch" id="accentSwatch"></div>
+          <input type="range" id="accentHueSlider" class="accent-hue-slider" min="0" max="360" value="270" />
+          <button class="accent-reset-btn" id="accentResetBtn">Reset</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-label">Analysis</div>
+        <label class="usb-cfg-toggle-row" for="analysisBpmRangeSelect">
+          <span>BPM range</span>
+          <select id="analysisBpmRangeSelect">
+            <option value="70-180">70-180</option>
+            <option value="48-95">48-95</option>
+            <option value="58-115">58-115</option>
+            <option value="68-135">68-135</option>
+            <option value="78-155">78-155</option>
+            <option value="88-175">88-175</option>
+            <option value="98-195">98-195</option>
+            <option value="108-215">108-215</option>
+            <option value="118-235">118-235</option>
+            <option value="128-255">128-255</option>
+          </select>
+        </label>
+        <label class="usb-cfg-toggle-row" for="analysisEngineSelect">
+          <span>BPM/Key engine</span>
+          <select id="analysisEngineSelect">
+            <option value="stratum">Stratum (built-in)</option>
+            <option value="essentia">Essentia</option>
+          </select>
+        </label>
+        <span class="analysis-engine-status" id="analysisEngineStatus"></span>
+        <div id="essentiaInstallRow" class="essentia-install-row hidden">
+          <span id="essentiaNodeStatus"></span>
+          <div class="essentia-install-actions">
+            <button id="essentiaDownloadBtn" class="essentia-btn">Download ~5 MB</button>
+            <button id="essentiaCancelBtn" class="essentia-btn hidden">Cancel</button>
+            <button id="essentiaRemoveBtn" class="essentia-btn hidden">Remove</button>
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-label">Export</div>
+        <fieldset class="usb-cfg-radio-group" id="exportSyncModeGroup">
+          <legend class="muted">Sync Mode</legend>
+          <label class="usb-cfg-toggle-row">
+            <input type="radio" name="exportSyncMode" id="exportSyncModeMirror" value="mirror" checked />
+            <span>Mirror playlist (exact match)</span>
+            <span class="muted usb-cfg-toggle-hint">Same-name playlists on USB are rewritten to exactly match this app playlist (old tracks removed).</span>
+          </label>
+          <label class="usb-cfg-toggle-row">
+            <input type="radio" name="exportSyncMode" id="exportSyncModeAdditive" value="additive" />
+            <span>Additive playlist update</span>
+            <span class="muted usb-cfg-toggle-hint">Adds missing tracks to same-name USB playlists, but keeps existing USB tracks.</span>
+          </label>
+        </fieldset>
+        <label class="usb-cfg-toggle-row" for="exportBackupCheckbox">
+          <input type="checkbox" id="exportBackupCheckbox" checked />
+          <span>Back up PDB and eDB before export</span>
+          <span class="muted usb-cfg-toggle-hint">Copies PDB and eDB to backups folder next to them with a timestamp before each export.</span>
+        </label>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-label">Tools</div>
+        <button id="openEventLogBtn">Open Event Log</button>
+      </div>
+      <div class="settings-footer">
+        <span class="settings-version" id="settingsVersionText">Version 0.1.0-RC3</span>
+      </div>
+    </div>
+  </aside>
+
+  <footer class="progress-footer" id="progressFooter" aria-live="polite">
+    <div class="progress-meta">
+      <span id="progressLabel">Progress</span>
+      <span id="progressText">Idle</span>
+      <button class="progress-dismiss" id="progressDismiss" aria-label="Dismiss">&times;</button>
+    </div>
+    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Operation progress">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+  </footer>
+
+  <div class="confirm-overlay" id="confirmOverlay" hidden>
+    <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <h3 id="confirmTitle">Confirm</h3>
+      <p id="confirmMessage" class="muted"></p>
+      <div class="row confirm-actions">
+        <button id="confirmCancelBtn">Cancel</button>
+        <button id="confirmOkBtn" data-primary>Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Empty state template (hidden, cloned by JS) -->
+  <template id="emptyStateTemplate">
+    <div class="empty-state">
+      <div class="empty-state-icon"></div>
+      <h3 class="empty-state-heading"></h3>
+      <p class="empty-state-body muted"></p>
+      <button class="empty-state-action hidden" data-primary></button>
+    </div>
+  </template>
+
+  <!-- Help overlay -->
+  <div class="help-overlay hidden" id="helpOverlay">
+    <div class="help-dialog" role="dialog" aria-modal="true" aria-label="Quick Start Help">
+      <div class="help-header">
+        <h2>Quick Start</h2>
+        <button class="help-close" id="helpCloseBtn" aria-label="Close help">&times;</button>
+      </div>
+      <ol class="help-steps">
+        <li><strong>Add folders:</strong> Click "+ Add Folder" in Library to add your music directories.</li>
+        <li><strong>Scan:</strong> Click "Scan Library" to index all tracks from your folders.</li>
+        <li><strong>Connect USB:</strong> Go to USB and select your External library USB drive.</li>
+        <li><strong>Create playlist:</strong> Click "+ New" in the sidebar to create a playlist, then add tracks from Library or USB.</li>
+        <li><strong>Export:</strong> Open your playlist and click "Export to USB" to write it to your drive.</li>
+      </ol>
+      <div class="help-donate-section" id="helpDonateSection">
+        <h3 class="help-donate-heading">Support DJ USB Tkit</h3>
+        <p class="help-donate-desc">Support options are maintained on chiph.art so payment links can stay current.</p>
+        <a href="#" class="help-donate-link" data-external-url="https://chiph.art/en/dj-usb-tkit/support?utm_source=djtkit&amp;utm_medium=app&amp;utm_campaign=support">
+          Open support page
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script src="./playback_match.js"></script>
+  <script src="./playback_ui_state.js"></script>
+  <script src="./playback_source_label.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

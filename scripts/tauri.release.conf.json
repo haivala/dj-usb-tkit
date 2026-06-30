@@ -1,0 +1,11 @@
+{
+  "build": {
+    "frontendDist": "../../vanilla-ui/dist"
+  },
+  "bundle": {
+    "active": true,
+    "resources": [
+      "../scripts/essentia_runner.cjs"
+    ]
+  }
+}

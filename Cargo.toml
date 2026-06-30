@@ -1,0 +1,15 @@
+[workspace]
+members = ["backend", "desktop/src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0-2"
+edition = "2024"
+license = "MIT"
+
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

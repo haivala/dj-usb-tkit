@@ -1,0 +1,29 @@
+{
+  "name": "dj-usb-tkit-vanilla-ui",
+  "private": true,
+  "version": "0.1.0-2",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "test:message-guard": "node scripts/check-message-handling.mjs",
+    "build": "node scripts/build.mjs",
+    "test:unit": "npm run test:message-guard && node --test tests/*.test.mjs",
+    "test:e2e:nobuild": "playwright test",
+    "test:e2e": "npm run build && npm run test:e2e:nobuild",
+    "test:ci": "npm run build && npm run test:unit && npm run test:e2e:nobuild",
+    "test": "npm run test:unit && npm run test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "esbuild": "^0.28.1",
+    "jsdom": "^29.1.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
+  }
+}

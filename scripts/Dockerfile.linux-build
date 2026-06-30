@@ -1,0 +1,67 @@
+# Build environment for DJ USB Tkit Linux releases
+# Debian Bookworm (glibc 2.36) for broad distro compatibility
+#
+# Build:  docker build -f scripts/Dockerfile.linux-build -t djtkit-linux-build .
+# Rebuild after Rust/Node updates to refresh cached layers.
+
+FROM rust:1-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates pkg-config \
+      libssl-dev libasound2-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+      libayatana-appindicator3-dev librsvg2-dev \
+      patchelf file xz-utils xdg-utils rpm zsync desktop-file-utils appstream \
+      squashfs-tools fuse libfuse2 binutils cpio perl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js (official tarball — apt nodejs is too old)
+ARG NODE_VER=v24.14.1
+RUN curl -fsSL "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-linux-x64.tar.xz" \
+    | tar -xJ -C /usr/local --strip-components=1
+
+# Rust stable toolchain + Tauri CLI
+RUN rustup toolchain install stable --profile minimal \
+    && rustup default stable \
+    && cargo install tauri-cli --version "^2" --locked
+
+# Pre-download linuxdeploy tools into Tauri's cache directory.
+# Keep real AppImage binaries in cache — Tauri uses --appimage-extract-and-run
+# which self-extracts without FUSE. Tauri also runs `dd` to zero bytes 8-10
+# (AppImage magic) on every build; this is harmless to ELF binaries (those bytes
+# are unused padding in the ELF ident header) but would corrupt shell script
+# shebangs, so wrapper scripts must NOT be used here.
+# Extracted copies go to /usr/local/bin/ for manual probes and plugin lookups.
+RUN mkdir -p /root/.cache/tauri && cd /root/.cache/tauri \
+    && curl -fsSL -o linuxdeploy-x86_64.AppImage \
+       "https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage" \
+    && curl -fsSL -o linuxdeploy-plugin-appimage-x86_64.AppImage \
+       "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage" \
+    && curl -fsSL -o linuxdeploy-plugin-gtk.sh \
+       "https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh" \
+    && curl -fsSL -o linuxdeploy-plugin-gstreamer.sh \
+       "https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh" \
+    && curl -fsSL -o AppRun-x86_64 \
+       "https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64" \
+    && chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-appimage-x86_64.AppImage \
+       linuxdeploy-plugin-gtk.sh linuxdeploy-plugin-gstreamer.sh AppRun-x86_64 \
+    && for ai in linuxdeploy-x86_64.AppImage linuxdeploy-plugin-appimage-x86_64.AppImage; do \
+         name="${ai%.AppImage}"; \
+         ./"$ai" --appimage-extract; \
+         mv squashfs-root "$name"; \
+       done \
+    && cp linuxdeploy-plugin-gtk.sh linuxdeploy-plugin-gtk \
+    && chmod +x linuxdeploy-plugin-gtk \
+    && cp linuxdeploy-plugin-gstreamer.sh linuxdeploy-plugin-gstreamer \
+    && chmod +x linuxdeploy-plugin-gstreamer \
+    && cp AppRun-x86_64 AppRun \
+    && chmod +x AppRun \
+    && find /root/.cache/tauri -maxdepth 2 \( -type f -o -type l \) | sort > /root/.cache/tauri/.cache-manifest \
+    && install -Dm755 /root/.cache/tauri/linuxdeploy-x86_64/AppRun /usr/local/bin/linuxdeploy \
+    && install -Dm755 /root/.cache/tauri/linuxdeploy-plugin-appimage-x86_64/AppRun /usr/local/bin/linuxdeploy-plugin-appimage \
+    && install -Dm755 /root/.cache/tauri/linuxdeploy-plugin-gtk /usr/local/bin/linuxdeploy-plugin-gtk \
+    && install -Dm755 /root/.cache/tauri/linuxdeploy-plugin-gstreamer /usr/local/bin/linuxdeploy-plugin-gstreamer \
+    && install -Dm755 /root/.cache/tauri/AppRun /usr/local/bin/AppRun
+
+ENV NO_STRIP=1
+
+WORKDIR /project

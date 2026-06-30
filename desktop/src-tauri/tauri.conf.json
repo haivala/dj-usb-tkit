@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DJ_USB_Tkit",
+  "identifier": "art.chiph.djusbtkit",
+  "build": {
+    "frontendDist": "../../vanilla-ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "DJ USB Tkit",
+        "windowClassname": "com.local.djusbtkit",
+        "width": 1280,
+        "height": 840,
+        "resizable": true,
+        "visible": false,
+        "backgroundColor": [12, 10, 18, 255]
+      }
+    ],
+    "security": {
+        "assetProtocol": {
+          "enable": true,
+          "scope": [
+            "$HOME/**",
+            "$APPDATA/**",
+            "$LOCALDATA/**",
+            "$TEMP/**",
+            "/mnt/**"
+          ]
+        },
+      "csp": {
+        "default-src": "'self' ipc: http://ipc.localhost asset:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "img-src": "'self' asset: http://asset.localhost file: blob: data:",
+        "media-src": "'self' asset: http://asset.localhost https://asset.localhost file: blob: data:",
+        "style-src": "'self' 'unsafe-inline'",
+        "font-src": "'self' asset: http://asset.localhost data:"
+      }
+    }
+  },
+  "bundle": {
+    "active": false,
+    "resources": [
+      "../scripts/essentia_runner.cjs"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/256x256.png",
+      "icons/512x512.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ]
+  }
+}
