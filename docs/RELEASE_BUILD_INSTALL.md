@@ -42,7 +42,7 @@ Runtime notes:
 - app runtime does not require Node when using default Stratum analysis
 - Node is required for source build/test workflows and for optional Essentia analysis runtime
 
-The release script stages a clean frontend bundle and then runs Tauri packaging from the desktop host project. Build output is produced under `desktop/target/release/bundle`.
+The release script stages a clean frontend bundle and then runs Tauri packaging from the desktop host project. Build output is produced under `target/release/bundle`.
 
 Release quality gates are controlled by environment flags:
 

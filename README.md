@@ -1,7 +1,7 @@
 <p align="center">
   <img src="vanilla-ui/text-icon.svg" alt="DJ USB Tkit" width="320" />
 </p>
-<h1 align="center">DJ USB Tkit</h1>
+# DJ USB Tkit
 
 Local-first DJ library manager and USB exporter built with Rust + Tauri.
 
@@ -117,7 +117,7 @@ BUNDLES=deb,rpm ./scripts/release.sh
 Artifacts are written under:
 
 ```bash
-desktop/target/release/bundle
+target/release/bundle
 ```
 
 For release build workflow and publication checks, see `docs/RELEASE_BUILD_INSTALL.md`.
