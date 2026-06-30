@@ -215,6 +215,12 @@ clean_tauri_bundle_output() {
   fi
 }
 
+echo "==> Installing frontend dependencies"
+(
+  cd "$UI_DIR"
+  npm ci
+)
+
 if [[ "$RUN_TESTS" == "1" ]]; then
   echo "==> Running backend tests"
   (
