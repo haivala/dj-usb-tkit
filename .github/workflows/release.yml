@@ -1,0 +1,268 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, for example v0.1.0"
+        required: false
+        type: string
+      draft:
+        description: "Create the GitHub Release as a draft"
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: "Mark the GitHub Release as a prerelease"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: "24"
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      checkout_ref: ${{ steps.release.outputs.checkout_ref }}
+      draft: ${{ steps.release.outputs.draft }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - name: Resolve tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_input="${{ inputs.tag || '' }}"
+          if [[ -n "$tag_input" ]]; then
+            tag="$tag_input"
+            checkout_ref="$tag_input"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            checkout_ref="${GITHUB_REF}"
+          else
+            echo "Release workflow requires a tag. Push a v* tag or provide the tag input when dispatching manually." >&2
+            exit 1
+          fi
+
+          if [[ "$tag" != v* ]]; then
+            echo "Release tags must start with v, for example v0.1.0." >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
+          echo "draft=${{ inputs.draft || false }}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${{ inputs.prerelease || false }}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+            artifact_suffix: linux
+            bundles: deb,rpm,appimage
+          - name: macOS
+            os: macos-latest
+            artifact_suffix: macos
+            bundles: dmg
+          - name: Windows
+            os: windows-2022
+            artifact_suffix: windows
+            bundles: nsis,msi
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - name: Set up Node.js
+        if: runner.os != 'Linux'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            vanilla-ui/package-lock.json
+            desktop/package-lock.json
+
+      - name: Set up Rust
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Configure Windows OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $roots = @(
+            "${env:ProgramFiles}\OpenSSL-Win64",
+            "${env:ProgramFiles}\OpenSSL",
+            "${env:ProgramFiles(x86)}\OpenSSL-Win32"
+          )
+
+          $opensslRoot = $roots | Where-Object { Test-Path "$_\include\openssl\ssl.h" } | Select-Object -First 1
+          if (-not $opensslRoot) {
+            choco install openssl --yes --no-progress
+            $opensslRoot = $roots | Where-Object { Test-Path "$_\include\openssl\ssl.h" } | Select-Object -First 1
+          }
+
+          if (-not $opensslRoot) {
+            throw "OpenSSL headers were not found after installation."
+          }
+
+          $libCandidates = @(
+            "$opensslRoot\lib\VC\x64\MD",
+            "$opensslRoot\lib\VC\x64",
+            "$opensslRoot\lib\VC",
+            "$opensslRoot\lib"
+          )
+          $opensslLib = $libCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $opensslLib) {
+            throw "OpenSSL library directory was not found under $opensslRoot."
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_DIR=$opensslRoot"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_INCLUDE_DIR=$opensslRoot\include"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_LIB_DIR=$opensslLib"
+
+      - name: Build Linux release bundles
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+          RUN_TESTS: "0"
+        run: |
+          set -euo pipefail
+          ./scripts/linux-release-docker.sh
+
+      - name: Build native release bundles
+        if: runner.os != 'Linux'
+        shell: bash
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+          RUN_TESTS: "0"
+        run: |
+          set -euo pipefail
+          ./scripts/release.sh
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: djtkit-${{ matrix.artifact_suffix }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.rpm
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Download bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          DRAFT: ${{ needs.prepare.outputs.draft }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "Tag does not exist on origin: $TAG" >&2
+            exit 1
+          fi
+
+          mapfile -d '' files < <(
+            find release-assets -type f \( \
+              -name '*.AppImage' -o \
+              -name '*.deb' -o \
+              -name '*.rpm' -o \
+              -name '*.dmg' -o \
+              -name '*.msi' -o \
+              -name '*.exe' \
+            \) -print0 | sort -z
+          )
+
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "No release assets were downloaded." >&2
+            exit 1
+          fi
+
+          version="${TAG#v}"
+          notes_file="$(mktemp)"
+          awk -v version="$version" '
+            $0 ~ "^##[[:space:]]+" version "([[:space:]]|$)" { found=1; next }
+            found && $0 ~ "^##[[:space:]]+" { exit }
+            found { print }
+          ' CHANGELOG.md > "$notes_file"
+
+          if [[ ! -s "$notes_file" ]]; then
+            printf 'Automated release for %s.\n' "$TAG" > "$notes_file"
+          fi
+
+          title="DJ USB Tkit $version"
+          release_flags=()
+          if [[ "$DRAFT" == "true" ]]; then
+            release_flags+=(--draft)
+          fi
+          if [[ "$PRERELEASE" == "true" ]]; then
+            release_flags+=(--prerelease)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            gh release create "$TAG" "${files[@]}" \
+              --title "$title" \
+              --notes-file "$notes_file" \
+              "${release_flags[@]}"
+          fi

@@ -201,6 +201,14 @@ prepare_frontend_dist() {
   fi
 }
 
+ensure_playwright_browser() {
+  echo "==> Ensuring Playwright Chromium browser is installed"
+  (
+    cd "$UI_DIR"
+    npx playwright install chromium
+  )
+}
+
 clean_tauri_bundle_output() {
   local target_triple="${1:-}"
   local bundle_dir
@@ -227,6 +235,8 @@ if [[ "$RUN_TESTS" == "1" ]]; then
     cd "$BACKEND_DIR"
     cargo test
   )
+
+  ensure_playwright_browser
 
   echo "==> Running frontend tests"
   (

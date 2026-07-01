@@ -11,6 +11,24 @@ The standard release flow is:
 3. Build desktop bundles through Tauri.
 4. Publish artifacts from the release bundle output directory.
 
+## GitHub Actions release
+
+The `Release` workflow publishes GitHub Releases from existing `v*` tags.
+
+To publish from CI:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds Linux (`deb`, `rpm`, `AppImage`), macOS (`dmg`), and
+Windows (`nsis`, `msi`) bundles, uploads them as workflow artifacts, then
+creates or updates the GitHub Release assets for the tag.
+
+The workflow can also be run manually from GitHub Actions with an existing tag
+name. Manual runs can be marked as draft releases or prereleases.
+
 ## Deep technical details
 
 Primary commands:
@@ -25,6 +43,7 @@ Primary commands:
 Release pipeline behavior (`scripts/release.sh`):
 
 - runs backend and frontend tests when `RUN_TESTS=1`
+- installs the Playwright Chromium browser before frontend tests
 - builds desktop bundles from `desktop/src-tauri/`
 - uses `scripts/tauri.release.conf.json` for release configuration
 

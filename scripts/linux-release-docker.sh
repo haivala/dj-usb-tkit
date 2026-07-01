@@ -82,6 +82,7 @@ docker run --rm \
     UI_DIR="/project/vanilla-ui"
     DESKTOP_DIR="/project/desktop"
     TAURI_DIR="/project/desktop/src-tauri"
+    WORKSPACE_TARGET_DIR="/project/target"
     DIST_DIR="/project/vanilla-ui/dist"
     TAURI_RELEASE_CONFIG="/project/scripts/tauri.release.conf.json"
     HOST_LOG_DIR="/host-logs"
@@ -169,7 +170,7 @@ docker run --rm \
     fi
 
     echo "==> Clearing stale bundle output"
-    rm -rf "$TAURI_DIR/target/release/bundle"
+    rm -rf "$WORKSPACE_TARGET_DIR/release/bundle" "$TAURI_DIR/target/release/bundle"
 
     echo "==> Verifying staging inputs"
     echo "    frontendDist: $DIST_DIR"
@@ -233,7 +234,7 @@ docker run --rm \
       set -e
       if [[ "$build_status" -ne 0 ]]; then
         if [[ ",$BUNDLES," == *",appimage,"* ]]; then
-          REAL_APPDIR="$TAURI_DIR/target/release/bundle/appimage/DJ_USB_Tkit.AppDir"
+          REAL_APPDIR="$WORKSPACE_TARGET_DIR/release/bundle/appimage/DJ_USB_Tkit.AppDir"
           echo "==> Tauri AppDir inspection"
           if [[ -d "$REAL_APPDIR" ]]; then
             find "$REAL_APPDIR" | sort | tee "$HOST_LOG_DIR/tauri-appdir-inspection.log"
@@ -248,14 +249,15 @@ docker run --rm \
 
     echo ""
     echo "=== Container build complete ==="
-    echo "Bundles in: /project/desktop/src-tauri/target/release/bundle/"
+    echo "Bundles in: $WORKSPACE_TARGET_DIR/release/bundle/"
 
     chown -R "$HOST_UID:$HOST_GID" \
+      /project/target \
       /project/desktop/src-tauri/target \
       /project/vanilla-ui/dist \
       2>/dev/null || true
   '
 
 echo ""
-echo "=== Done — output is in desktop/src-tauri/target/release/bundle/ ==="
+echo "=== Done — output is in target/release/bundle/ ==="
 echo "=== Logs are in $HOST_LOG_DIR ==="
