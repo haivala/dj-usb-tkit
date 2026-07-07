@@ -6,6 +6,10 @@
 
 Local-first DJ library manager and USB exporter built with Rust + Tauri.
 
+<p align="center">
+  <img src="docs/assets/DJ-USB-Tkit.png" alt="DJ USB Tkit screenshot" width="800" />
+</p>
+
 ## App Requirements
 
 - Local-first desktop workflows for library indexing, playlist management, USB import/export, diagnostics/repairs, and native playback.
