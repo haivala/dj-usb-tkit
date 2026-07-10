@@ -1212,6 +1212,9 @@ pub(crate) fn external_master_db_candidates() -> Vec<std::path::PathBuf> {
             home.join("Library/Application Support")
                 .join(desktop_master_db_rel_path()),
         );
+        // macOS: current rekordbox installs store the db directly under Library,
+        // without "Application Support"
+        candidates.push(home.join("Library").join(desktop_master_db_rel_path()));
         // Linux
         candidates.push(home.join(".local/share").join(desktop_master_db_rel_path()));
     }
@@ -1643,6 +1646,15 @@ mod diag_tests {
                 .iter()
                 .any(|p| p.to_str() == Some("/custom/path/master.db"))
         );
+    }
+
+    #[test]
+    fn external_master_db_candidates_includes_macos_library_pioneer_path() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        let home = std::env::var("HOME").expect("HOME must be set for this test");
+        let candidates = external_master_db_candidates();
+        let expected = PathBuf::from(home).join("Library/Pioneer/rekordbox/master.db");
+        assert!(candidates.contains(&expected));
     }
 
     #[test]
