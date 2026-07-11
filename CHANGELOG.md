@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Fix macOS master.db detection for current rekordbox installs, which store
+  the database directly under `~/Library/Pioneer/rekordbox/master.db` rather
+  than under `Application Support`.
+
 ## 0.1.0
 
 - Initial public release.
