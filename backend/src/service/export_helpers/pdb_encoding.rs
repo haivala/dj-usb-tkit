@@ -168,8 +168,21 @@ pub(crate) fn apply_page_local_index_shift(table_type: u32, row: &mut [u8], row_
 pub fn encode_album_row(id: u32, name: &str, artist_id: u32) -> Vec<u8> {
     let name_bytes = encode_pdb_string(&sanitize_metadata(name));
     // Near variant (subtype 0x0080):
-    // subtype(2) + index_shift(2) + unknown(4) + artist_id(4) + id(4) + unknown(5) + ofs_name_near(1) + name
-    let name_start = 22usize; // 0x16
+    // subtype(2) + index_shift(2) + unknown(4) + artist_id(4) + id(4) + unknown(5) + ofs_name_near(1) + [padding] + name
+    //
+    // Reference exports place the name at offset 22 for ASCII content; this
+    // writer preserves that for byte-for-byte parity. Offset 22 is not
+    // 4-byte aligned (22 % 4 == 2), which is fine for the single-byte ASCII
+    // string header but not for the 4-byte DeviceSQL UTF-16 header
+    // (`0x90 [total_len: u16 LE] 0x00`). MIPS-based player hardware faults
+    // on an unaligned 4-byte load of that header — confirmed on real
+    // hardware for a non-ASCII album name at offset 22, freezing the
+    // player's Album browse menu — the same class of bug already fixed for
+    // the near-variant artist row (see `encode_artist_row`). Non-ASCII
+    // (UTF-16) names are padded 2 bytes to start at the next aligned
+    // offset, 24, instead.
+    let is_utf16 = name_bytes.first() == Some(&0x90);
+    let name_start = if is_utf16 { 24usize } else { 22usize };
     let mut row = vec![0u8; name_start + name_bytes.len()];
     row[0..2].copy_from_slice(&0x0080u16.to_le_bytes()); // subtype = near
     // bytes 2-3: page-local index_shift; assigned by the page writer.
@@ -512,15 +525,37 @@ mod tests {
     }
 
     #[test]
-    fn album_row_name_offset_matches_reference_export() {
-        // Reference exports have ofs_name_near = 22 for the near-variant album row.
-        // NOTE: 22 % 4 == 2 — not 4-byte aligned. Keep the reference shape while
-        // still using the normal DeviceSQL UTF-16LE encoding for non-ASCII names.
-        let row = encode_album_row(1, "Álbum", 1);
+    fn album_row_ascii_name_offset_matches_reference_export() {
+        // Reference exports have ofs_name_near = 22 for ASCII album names.
+        // 22 % 4 == 2 (not 4-byte aligned), but that's fine for the
+        // single-byte ASCII string header.
+        let row = encode_album_row(1, "Album", 1);
         let ofs_name_near = row[21] as usize;
         assert_eq!(
             ofs_name_near, 22,
-            "album row ofs_name_near must be 22 (matches reference export)"
+            "ASCII album row ofs_name_near must be 22 (matches reference export)"
+        );
+    }
+
+    #[test]
+    fn album_row_non_ascii_name_offset_is_4byte_aligned() {
+        // Non-ASCII names use the 4-byte DeviceSQL UTF-16 header
+        // (`0x90 [total_len: u16 LE] 0x00`). MIPS-based player hardware
+        // faults on an unaligned 4-byte load of that header — confirmed on
+        // real hardware for a non-ASCII album name at the unaligned
+        // reference offset (22), freezing the player's Album browse menu.
+        // The writer must pad to the next 4-byte-aligned offset (24)
+        // instead, matching the fix already applied to artist rows.
+        let row = encode_album_row(1, "Álbum", 1);
+        let ofs_name_near = row[21] as usize;
+        assert_eq!(
+            ofs_name_near, 24,
+            "non-ASCII album row ofs_name_near must be 4-byte aligned (24)"
+        );
+        assert_eq!(
+            ofs_name_near % 4,
+            0,
+            "non-ASCII album name offset must be 4-byte aligned"
         );
         assert_eq!(
             row[ofs_name_near], 0x90,

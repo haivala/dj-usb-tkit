@@ -2690,6 +2690,39 @@ mod tests {
         assert!(result.contains("sik"));
     }
 
+    #[test]
+    fn sanitize_contents_caps_zalgo_combining_marks() {
+        // "Zalgo" text stacks dozens of combining marks onto one base
+        // character; CDJ text rendering hangs compositing an unbounded
+        // stack. The on-disk folder/file name must not carry that through.
+        let mark = '\u{0301}';
+        let zalgo: String = std::iter::once('e')
+            .chain(std::iter::repeat(mark).take(60))
+            .collect();
+        let result = sanitize_contents_component(&zalgo);
+        assert!(
+            result.chars().count() <= crate::metadata::MAX_GRAPHEME_CLUSTER_CHARS,
+            "expected capped cluster, got {} chars",
+            result.chars().count()
+        );
+        assert!(result.starts_with('e'));
+    }
+
+    #[test]
+    fn sanitize_contents_caps_script_diversity() {
+        // Fabricated (not pulled from any real file), shaped like a name
+        // observed in the wild: no single grapheme cluster is deep enough
+        // to trip the combining-mark cap, but it mixes many unrelated
+        // scripts in a short string — separately observed to hang the
+        // CDJ's Artist browse menu and track-load screen. Codepoints are
+        // Cherokee, Runic, Glagolitic, Coptic, N'Ko, Vai, Osmanya, and
+        // Deseret, chosen only because they're distinct scripts.
+        let artist =
+            "\u{13A0}\u{13A1} \u{16A0}\u{16A1} \u{2C00}\u{2C01} \u{2C80}\u{2C81} \u{07CA}\u{07CB} \u{A500}\u{A501} \u{10480}\u{10481} \u{10400}\u{10401}";
+        let result = sanitize_contents_component(artist);
+        assert!(!result.is_empty());
+    }
+
     // --- truncate_component ---
 
     #[test]

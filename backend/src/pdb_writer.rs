@@ -2151,6 +2151,34 @@ mod writer_tests {
     }
 
     #[test]
+    fn test_pdb_round_trip_non_ascii_album_name() {
+        // Non-ASCII album names are written at a different (4-byte-aligned)
+        // row offset than ASCII names, to avoid a MIPS unaligned-read
+        // freeze on real CDJ hardware. The reader must follow the
+        // self-describing offset rather than assuming a fixed one — this
+        // exercises writer and reader together, not just the writer's byte
+        // layout in isolation.
+        let mut data = PdbData::empty();
+        data.artists.push(PdbArtistRow {
+            id: 1,
+            name: "Artist A".into(),
+        });
+        data.albums.push(PdbAlbumRow {
+            id: 1,
+            name: "Álbum Ñoño".into(),
+            artist_id: 1,
+        });
+
+        let bytes = write_pdb(&data).unwrap();
+        let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).unwrap();
+
+        assert_eq!(
+            parsed.albums.get(&1).map(String::as_str),
+            Some("Álbum Ñoño")
+        );
+    }
+
+    #[test]
     fn test_page_chain_linking() {
         // Create enough key rows to overflow one page
         let mut data = PdbData::empty();

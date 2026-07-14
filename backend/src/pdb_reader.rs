@@ -861,7 +861,12 @@ fn parse_artist_row(row: &[u8]) -> Option<(u32, String)> {
 
 fn parse_album_row(row: &[u8]) -> Option<(u32, String)> {
     let id = read_u32_le(row, 12)?;
-    let name = get_string_from_pdb(row, 22).unwrap_or_default();
+    // ofs_name_near (byte 21) is self-describing: the writer pads non-ASCII
+    // (UTF-16) names to a 4-byte-aligned offset (24) instead of the ASCII
+    // default (22) to avoid a MIPS unaligned-read freeze, so this must be
+    // read from the row rather than assumed fixed. See `encode_album_row`.
+    let name_offset = read_u8(row, 21).unwrap_or(22) as usize;
+    let name = get_string_from_pdb(row, name_offset).unwrap_or_default();
     Some((id, name))
 }
 

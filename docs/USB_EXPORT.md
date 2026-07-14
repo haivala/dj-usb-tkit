@@ -67,10 +67,36 @@ Known eDB track-row data currently mapped in export includes:
 - `content.analysisDataFilePath`, media path, artwork linkage, and identity fields
 
 Before writing exporter-owned metadata text, the exporter strips embedded NUL
-bytes and truncates to 255 Unicode characters. This applies to playlist names,
-track title/subtitle/search/comment/KUVO-comment text, and artist/album/genre
-metadata. It does not apply this metadata sanitizer to key/tonality strings,
-media paths, or analysis paths.
+bytes, caps any grapheme cluster (a base character plus its combining marks)
+to 8 codepoints, caps the number of distinct Unicode scripts a single string
+may mix to 3, and truncates to 255 Unicode characters. This applies to
+playlist names, track title/subtitle/search/comment/KUVO-comment text, and
+artist/album/genre metadata. It does not apply this metadata sanitizer to
+key/tonality strings, media paths, or analysis paths.
+
+The grapheme-cluster cap exists because "zalgo" text — dozens to hundreds of
+Unicode combining marks stacked on one base character — has been observed to
+hang CDJ hardware when it tries to render the track title, even though the
+total character count is well under the 255-character limit. The
+script-diversity cap exists because a separate, shallower pathological case
+was also observed to hang CDJ hardware: a name mixing many unrelated scripts
+(e.g. Braille, Yi, Georgian, Tibetan, Tamil, Bengali, Arabic all in ~25
+characters) hung both the CDJ's Artist browse menu and its track-load screen,
+even though no individual grapheme cluster was deep enough to trip the
+combining-mark cap. Rather than curating a list of which scripts are "safe"
+CDJ hardware can render, the cap is purely self-referential: once a string
+has touched `MAX_DISTINCT_SCRIPTS` distinct scripts, characters belonging to
+any further script are dropped — the allowed set is just whichever scripts
+the string happens to touch first. Script-neutral characters (punctuation,
+digits, combining marks that inherit their base's script) never count against
+the budget.
+
+Both caps are applied to the on-disk `/Contents/...` file and folder names the
+exporter generates (see `sanitize_contents_component` in `export_paths.rs`),
+since that text is also embedded verbatim in the ANLZ `PPTH` chunk written
+into the waveform/beatgrid bundle (see `docs/WAVEFORMS.md`). Neither cap is
+applied to the literal media path used to read the audio file itself — that
+must always match the real file on disk.
 
 The main technical stages are:
 

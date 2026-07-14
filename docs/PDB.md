@@ -362,10 +362,20 @@ String encoding used by the writer:
 - non-ASCII strings use marker `0x90` plus UTF-16LE payload;
 - path strings (slot 20) do **not** include a trailing NUL — `total_len` encodes exact char count.
 
-Before metadata strings are encoded, export strips embedded NUL bytes and
-truncates to 255 Unicode characters. This covers PDB playlist/dictionary names
-and track slots `16`, `17`, and `19`. The metadata sanitizer is not applied to
-track media paths, analysis paths, or key/tonality strings.
+Before metadata strings are encoded, export strips embedded NUL bytes, caps
+any grapheme cluster (base character plus combining marks) to 8 codepoints,
+caps the number of distinct Unicode scripts a single string may mix to 3, and
+truncates to 255 Unicode characters. Long combining-mark stacks ("zalgo" text)
+and names mixing many unrelated scripts (e.g. Braille, Yi, Georgian, Tibetan,
+Tamil, Bengali, Arabic in one short artist name) have both independently been
+observed to hang CDJ hardware — the first in text rendering, the second in
+the Artist browse menu and track-load screen — even well under the
+character-count limit and without any single grapheme cluster being deep.
+See `docs/USB_EXPORT.md` for the full rationale. This covers PDB
+playlist/dictionary names and track slots `16`, `17`, and `19`. The metadata
+sanitizer is not applied to track media paths, analysis paths, or
+key/tonality strings. Slot 20 (media path) is also exempt from this
+sanitizer, but the path it holds is already built from sanitized components.
 
 ### Slot 20 must start at a 4-byte aligned row offset
 
@@ -384,9 +394,13 @@ header is read by the hardware decoder with a 4-byte load:
 - `tt=2` artist row near-variant (0x0060): name at offset 12 (% 4 = 0 ✓).
   Offset 10 (% 4 = 2) caused a hardware freeze on UTF-16 artist names.
 - `tt=3` album row near-variant (0x0080): reference exports place the name at
-  offset 22 (% 4 = 2). The writer keeps this shape for parity and still uses
-  the normal DeviceSQL string encoder, including UTF-16LE for non-ASCII album
-  names.
+  offset 22 (% 4 = 2) for ASCII album names, which the writer keeps for
+  parity — fine for the 1-byte ASCII string header. For non-ASCII (UTF-16)
+  album names the writer instead pads to offset 24 (% 4 = 0 ✓); offset 22
+  confirmed a hardware freeze in the CDJ's Album browse menu with a non-ASCII
+  album name, the same failure mode as the artist row above. `ofs_name_near`
+  (row byte 21) is self-describing — the reader must read it rather than
+  assume a fixed offset, since it now varies by content.
 - `tt=0` slot 17 (title): starts at offset 232 (% 4 = 0 ✓) when all tracks have
   the same structure for slots 0–16.
 

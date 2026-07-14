@@ -14,6 +14,7 @@ use super::super::usb_vendor_compat::{
 use super::{ExportManifest, ExportTrackData};
 use crate::edb::{open_edb_rw, table_exists};
 use crate::error::{BackendError, BackendResult};
+use crate::metadata::{MAX_GRAPHEME_CLUSTER_CHARS, cap_grapheme_clusters, cap_script_diversity};
 use crate::pdb_reader::parse_pdb;
 
 pub fn sanitize_filename_component(value: &str) -> String {
@@ -53,10 +54,16 @@ pub fn sanitize_contents_component(value: &str) -> String {
         })
         .collect::<String>();
     let collapsed = replaced.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
+    // Bound stacked combining marks ("zalgo" text) and how many unrelated
+    // scripts a single name can mix, so on-disk file/folder names — and the
+    // ANLZ PPTH chunk built from them — stay within what CDJ text rendering
+    // can handle without hanging.
+    let depth_capped = cap_grapheme_clusters(&collapsed, MAX_GRAPHEME_CLUSTER_CHARS);
+    let capped = cap_script_diversity(&depth_capped).into_owned();
+    if capped.is_empty() {
         "Unknown".to_string()
     } else {
-        collapsed
+        capped
     }
 }
 
