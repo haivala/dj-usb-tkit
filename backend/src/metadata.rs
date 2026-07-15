@@ -54,18 +54,28 @@ pub(crate) fn cap_grapheme_clusters(s: &str, max_cluster_chars: usize) -> Cow<'_
 }
 
 /// Cap the number of distinct scripts touched by `s`. Once
-/// [`MAX_DISTINCT_SCRIPTS`] distinct scripts have appeared, characters
-/// belonging to any further script are dropped; characters already in an
-/// allowed script (plus script-neutral characters: punctuation, digits,
-/// combining marks that inherit their base's script) always pass through.
+/// [`MAX_DISTINCT_SCRIPTS`] distinct scripts have appeared, whole grapheme
+/// clusters (base character plus its combining marks) whose base belongs to
+/// any further script are dropped together; clusters whose base is already
+/// in an allowed script (plus script-neutral bases: punctuation, digits,
+/// stray combining marks) always pass through.
+///
+/// Clusters are dropped as a unit rather than character-by-character:
+/// dropping only an over-budget base while letting its combining marks
+/// through (they're `Script::Inherited`, which is script-neutral) would
+/// leave the marks to reattach onto whatever base character precedes them
+/// in the output, reconstituting an oversized cluster — the exact "zalgo"
+/// shape [`cap_grapheme_clusters`] exists to prevent.
 ///
 /// Used both for exported metadata text ([`sanitize_metadata`]) and for
 /// on-disk file/folder names built from that metadata.
 pub(crate) fn cap_script_diversity(s: &str) -> Cow<'_, str> {
     let mut seen = Vec::with_capacity(MAX_DISTINCT_SCRIPTS);
     let mut overflow = false;
-    for ch in s.chars() {
-        let script = ch.script();
+    for grapheme in s.graphemes(true) {
+        let Some(script) = grapheme.chars().next().map(|c| c.script()) else {
+            continue;
+        };
         if !counts_toward_script_diversity(script) || seen.contains(&script) {
             continue;
         }
@@ -81,17 +91,26 @@ pub(crate) fn cap_script_diversity(s: &str) -> Cow<'_, str> {
 
     let mut allowed: Vec<Script> = Vec::with_capacity(MAX_DISTINCT_SCRIPTS);
     let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        let script = ch.script();
-        if !counts_toward_script_diversity(script) || allowed.contains(&script) {
-            out.push(ch);
-            continue;
+    for grapheme in s.graphemes(true) {
+        let base_script = grapheme.chars().next().map(|c| c.script());
+        let keep = match base_script {
+            Some(script) if counts_toward_script_diversity(script) => {
+                if allowed.contains(&script) {
+                    true
+                } else if allowed.len() < MAX_DISTINCT_SCRIPTS {
+                    allowed.push(script);
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => true,
+        };
+        if keep {
+            out.push_str(grapheme);
         }
-        if allowed.len() < MAX_DISTINCT_SCRIPTS {
-            allowed.push(script);
-            out.push(ch);
-        }
-        // else: character belongs to a script beyond the budget — drop it.
+        // else: cluster's base belongs to a script beyond the budget — drop
+        // the whole cluster, combining marks included.
     }
     Cow::Owned(out)
 }
@@ -118,20 +137,32 @@ pub(crate) fn sanitize_metadata(s: &str) -> Cow<'_, str> {
     let mut total_chars = 0usize;
     let mut allowed_scripts: Vec<Script> = Vec::with_capacity(MAX_DISTINCT_SCRIPTS);
     'clusters: for grapheme in s.graphemes(true) {
-        for ch in grapheme
+        if total_chars >= MAX_METADATA_CHARS {
+            break;
+        }
+        // Nul-strip and depth-cap first, then decide script diversity for
+        // the cluster as a whole (base character decides, marks follow) —
+        // never split a cluster's base from its own combining marks, or a
+        // dropped base's marks would reattach onto the previous cluster and
+        // reconstitute an oversized one.
+        let capped: String = grapheme
             .chars()
             .filter(|&c| c != '\0')
             .take(MAX_GRAPHEME_CLUSTER_CHARS)
+            .collect();
+        let base_script = capped.chars().next().map(|c| c.script());
+        if let Some(script) = base_script
+            && counts_toward_script_diversity(script)
+            && !allowed_scripts.contains(&script)
         {
+            if allowed_scripts.len() >= MAX_DISTINCT_SCRIPTS {
+                continue 'clusters;
+            }
+            allowed_scripts.push(script);
+        }
+        for ch in capped.chars() {
             if total_chars >= MAX_METADATA_CHARS {
                 break 'clusters;
-            }
-            let script = ch.script();
-            if counts_toward_script_diversity(script) && !allowed_scripts.contains(&script) {
-                if allowed_scripts.len() >= MAX_DISTINCT_SCRIPTS {
-                    continue;
-                }
-                allowed_scripts.push(script);
             }
             out.push(ch);
             total_chars += 1;
@@ -350,5 +381,58 @@ mod tests {
             "expected at most {MAX_DISTINCT_SCRIPTS} distinct scripts, kept {scripts_kept:?}"
         );
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn cap_script_diversity_drops_whole_cluster_not_just_base() {
+        // A cluster whose base script is over budget must be dropped
+        // entirely, including its combining marks — not just the base,
+        // which would leave the (script-neutral, Inherited) marks to
+        // reattach onto the previous surviving base character and
+        // reconstitute an oversized cluster.
+        let mark = '\u{0301}'; // COMBINING ACUTE ACCENT (Script::Inherited)
+        let mut s = String::new();
+        s.push('a'); // Latin (1/3)
+        s.push('\u{3042}'); // Hiragana あ (2/3)
+        s.push('\u{4e2d}'); // Han 中 (3/3, budget now full)
+        // Two more clusters whose base script (Cyrillic, Greek) is over
+        // budget, each dragging several combining marks along.
+        s.push('\u{0411}'); // Cyrillic Б — over budget
+        s.extend(std::iter::repeat(mark).take(7));
+        s.push('\u{03a9}'); // Greek Ω — over budget
+        s.extend(std::iter::repeat(mark).take(7));
+
+        let result = cap_script_diversity(&s);
+        assert_eq!(result.as_ref(), "a\u{3042}\u{4e2d}", "over-budget clusters must be dropped whole, including their marks");
+        assert!(
+            result
+                .graphemes(true)
+                .all(|g| g.chars().count() <= MAX_GRAPHEME_CLUSTER_CHARS),
+            "no orphaned marks may reattach onto a surviving cluster"
+        );
+    }
+
+    #[test]
+    fn sanitize_metadata_drops_whole_cluster_not_just_base() {
+        // Same scenario as cap_script_diversity_drops_whole_cluster_not_just_base,
+        // exercised through the fused sanitize_metadata path.
+        let mark = '\u{0301}';
+        let mut s = String::new();
+        s.push('a');
+        s.push('\u{3042}');
+        s.push('\u{4e2d}');
+        s.push('\u{0411}');
+        s.extend(std::iter::repeat(mark).take(7));
+        s.push('\u{03a9}');
+        s.extend(std::iter::repeat(mark).take(7));
+
+        let result = sanitize_metadata(&s);
+        assert_eq!(result.as_ref(), "a\u{3042}\u{4e2d}");
+        assert!(
+            result
+                .graphemes(true)
+                .all(|g| g.chars().count() <= MAX_GRAPHEME_CLUSTER_CHARS),
+            "dropped clusters' marks must not reattach onto the last kept base"
+        );
     }
 }
