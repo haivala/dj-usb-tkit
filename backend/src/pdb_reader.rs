@@ -657,9 +657,10 @@ fn parse_page_rows(
                 break;
             }
             if let Some(prev) = prev_off
-                && off < prev {
-                    break;
-                }
+                && off < prev
+            {
+                break;
+            }
             prev_off = Some(off);
             row_offsets.push(off);
         }

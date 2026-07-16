@@ -721,20 +721,20 @@ impl BackendService {
                 .join("rekordbox")
                 .join("export.pdb");
             if pdb_path.is_file()
-                && let Ok(parsed) = parse_pdb(&pdb_path) {
-                    for art_id in &exclusive_artwork_ids {
-                        if let Some(art_path) = parsed.artworks.get(art_id) {
-                            // Small artwork
-                            stale_paths.push(art_path.clone());
-                            // Medium variant: replace .jpg with _m.jpg
-                            let medium =
-                                art_path.replace(".jpg", "_m.jpg").replace(".png", "_m.png");
-                            if medium != *art_path {
-                                stale_paths.push(medium);
-                            }
+                && let Ok(parsed) = parse_pdb(&pdb_path)
+            {
+                for art_id in &exclusive_artwork_ids {
+                    if let Some(art_path) = parsed.artworks.get(art_id) {
+                        // Small artwork
+                        stale_paths.push(art_path.clone());
+                        // Medium variant: replace .jpg with _m.jpg
+                        let medium = art_path.replace(".jpg", "_m.jpg").replace(".png", "_m.png");
+                        if medium != *art_path {
+                            stale_paths.push(medium);
                         }
                     }
                 }
+            }
         }
 
         let mut files_deleted = 0usize;
@@ -1328,27 +1328,27 @@ impl BackendService {
         }
 
         if let Some(index) = try_read_track_index_from_edb(&usb_root, &mut warnings)
-            && let Some(mut track) = index.get(&track_id).cloned() {
-                let mut file_hint_match = true;
-                if !file_hint.is_empty() {
-                    let candidate = normalize_text(&track.file_path);
-                    file_hint_match =
-                        candidate.contains(&file_hint) || file_hint.contains(&candidate);
-                }
-                if file_hint_match {
-                    if track.waveform_preview.is_none() {
-                        track.waveform_preview = track
-                            .usb_analysis_path
-                            .as_deref()
-                            .and_then(load_waveform_preview_from_analysis_path);
-                    }
-                    return Ok(InspectUsbTrackData {
-                        source: "eDB".to_string(),
-                        track,
-                        warnings,
-                    });
-                }
+            && let Some(mut track) = index.get(&track_id).cloned()
+        {
+            let mut file_hint_match = true;
+            if !file_hint.is_empty() {
+                let candidate = normalize_text(&track.file_path);
+                file_hint_match = candidate.contains(&file_hint) || file_hint.contains(&candidate);
             }
+            if file_hint_match {
+                if track.waveform_preview.is_none() {
+                    track.waveform_preview = track
+                        .usb_analysis_path
+                        .as_deref()
+                        .and_then(load_waveform_preview_from_analysis_path);
+                }
+                return Ok(InspectUsbTrackData {
+                    source: "eDB".to_string(),
+                    track,
+                    warnings,
+                });
+            }
+        }
 
         Err(BackendError::Validation(format!(
             "trackId {track_id} not found on USB metadata sources"

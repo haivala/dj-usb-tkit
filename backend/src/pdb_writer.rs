@@ -1129,14 +1129,15 @@ pub(crate) fn remove_rows_inplace(
                 }
                 let row_data = &bytes[row_abs..payload_end.min(page_end)];
                 if let Some(id) = extract_row_id(row_data)
-                    && ids_to_remove.contains(&id) {
-                        new_rowpf &= !bit;
-                        page_removed += 1;
-                        // Track the absolute slot index of the highest removed row.
-                        let abs_slot = group_start_row + j;
-                        highest_removed_slot =
-                            Some(highest_removed_slot.map_or(abs_slot, |prev| prev.max(abs_slot)));
-                    }
+                    && ids_to_remove.contains(&id)
+                {
+                    new_rowpf &= !bit;
+                    page_removed += 1;
+                    // Track the absolute slot index of the highest removed row.
+                    let abs_slot = group_start_row + j;
+                    highest_removed_slot =
+                        Some(highest_removed_slot.map_or(abs_slot, |prev| prev.max(abs_slot)));
+                }
             }
 
             if new_rowpf != rowpf {
@@ -3111,23 +3112,26 @@ pub(crate) fn append_rows_to_chain_in_place(
         // Case 1: reused blank baseline page in this same call.
         if let Some(base_idx) = reused_baseline_idx
             && let Some(base_off) = page_offset(base_idx, page_size)
-                && bytes.get(base_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
-                    bytes[base_off + 0x1b] = PAGE_FLAGS_DATA;
-                }
+            && bytes.get(base_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK)
+        {
+            bytes[base_off + 0x1b] = PAGE_FLAGS_DATA;
+        }
         // Case 2: existing first data page that was single-page (ACTV) before this
         // call extended the chain with physical overflow pages.
         if chain.len() == 2
             && let Some(&first_data_idx) = chain.get(1)
-                && let Some(fd_off) = page_offset(first_data_idx, page_size)
-                    && bytes.get(fd_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
-                        bytes[fd_off + 0x1b] = PAGE_FLAGS_DATA;
-                    }
+            && let Some(fd_off) = page_offset(first_data_idx, page_size)
+            && bytes.get(fd_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK)
+        {
+            bytes[fd_off + 0x1b] = PAGE_FLAGS_DATA;
+        }
         // Case 3: the previous tail of a multi-page chain is now an overflow page.
         if chain.len() > 2
             && let Some(old_tail_off) = page_offset(last, page_size)
-                && bytes.get(old_tail_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
-                    bytes[old_tail_off + 0x1b] = PAGE_FLAGS_DATA;
-                }
+            && bytes.get(old_tail_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK)
+        {
+            bytes[old_tail_off + 0x1b] = PAGE_FLAGS_DATA;
+        }
     }
 
     // Finalize the table pointer at the file header. `first` is unchanged
@@ -3145,10 +3149,9 @@ pub(crate) fn append_rows_to_chain_in_place(
     };
     outcome.new_empty_candidate = new_ec;
 
-    if chain_grew
-        && let Some(last_off) = page_offset(new_last, page_size) {
-            let _ = write_u32_le_at(bytes, last_off + 0x0c, new_ec);
-        }
+    if chain_grew && let Some(last_off) = page_offset(new_last, page_size) {
+        let _ = write_u32_le_at(bytes, last_off + 0x0c, new_ec);
+    }
 
     if !set_table_ptr_fields(bytes, table_type, new_ec, first, new_last) {
         return Err(BackendError::Validation(format!(
@@ -6662,9 +6665,10 @@ fn parse_t08_entries_from_page(page: &[u8], page_index: u32, len_page: usize) ->
                 break;
             }
             if let Some(prev) = prev_off
-                && off < prev {
-                    break; // offsets must be non-decreasing
-                }
+                && off < prev
+            {
+                break; // offsets must be non-decreasing
+            }
             prev_off = Some(off);
             row_offsets.push(off);
         }

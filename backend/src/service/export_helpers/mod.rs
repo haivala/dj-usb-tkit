@@ -108,23 +108,25 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
         Some((_ec_before, _first_before, before_last)),
         Some((_ec_after, _first_after, after_last)),
     ) = (table_ptr_fields(before, 7), table_ptr_fields(after, 7))
-        && before_last != _first_before && before_last == after_last
-            && let Some(last_off) = page_offset(before_last, PAGE_SIZE) {
-                let before_next = before
-                    .get(last_off + 0x0c..last_off + 0x10)
-                    .and_then(|b| b.try_into().ok())
-                    .map(u32::from_le_bytes);
-                let after_next = after
-                    .get(last_off + 0x0c..last_off + 0x10)
-                    .and_then(|b| b.try_into().ok())
-                    .map(u32::from_le_bytes);
-                if before_next != after_next {
-                    issues.push(format!(
-                        "t07 tail next_page changed {:?}->{:?}",
-                        before_next, after_next
-                    ));
-                }
-            }
+        && before_last != _first_before
+        && before_last == after_last
+        && let Some(last_off) = page_offset(before_last, PAGE_SIZE)
+    {
+        let before_next = before
+            .get(last_off + 0x0c..last_off + 0x10)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes);
+        let after_next = after
+            .get(last_off + 0x0c..last_off + 0x10)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes);
+        if before_next != after_next {
+            issues.push(format!(
+                "t07 tail next_page changed {:?}->{:?}",
+                before_next, after_next
+            ));
+        }
+    }
 
     for &table_type in MENU_TABLES {
         let Some(before_ptr) = table_ptr_fields(before, table_type) else {
@@ -565,29 +567,30 @@ pub fn update_existing_content_row(
             params![track.exported_path, content_id],
         )?;
     }
-    if content_columns.contains("analysisDataFilePath")
-        && track.waveform_path.is_some() {
-            tx.execute(
-                "UPDATE content SET analysisDataFilePath = ?1 WHERE content_id = ?2",
-                params![track.waveform_path, content_id],
-            )?;
-        }
+    if content_columns.contains("analysisDataFilePath") && track.waveform_path.is_some() {
+        tx.execute(
+            "UPDATE content SET analysisDataFilePath = ?1 WHERE content_id = ?2",
+            params![track.waveform_path, content_id],
+        )?;
+    }
     if content_columns.contains("bpmx100")
-        && let Some(bpm) = track.bpm {
-            let bpmx100 = (bpm * 100.0).round() as i64;
-            tx.execute(
-                "UPDATE content SET bpmx100 = ?1 WHERE content_id = ?2",
-                params![bpmx100, content_id],
-            )?;
-        }
+        && let Some(bpm) = track.bpm
+    {
+        let bpmx100 = (bpm * 100.0).round() as i64;
+        tx.execute(
+            "UPDATE content SET bpmx100 = ?1 WHERE content_id = ?2",
+            params![bpmx100, content_id],
+        )?;
+    }
     if content_columns.contains("length")
-        && let Some(duration_ms) = track.duration_ms {
-            let length = duration_ms_to_seconds(duration_ms);
-            tx.execute(
-                "UPDATE content SET length = ?1 WHERE content_id = ?2",
-                params![length, content_id],
-            )?;
-        }
+        && let Some(duration_ms) = track.duration_ms
+    {
+        let length = duration_ms_to_seconds(duration_ms);
+        tx.execute(
+            "UPDATE content SET length = ?1 WHERE content_id = ?2",
+            params![length, content_id],
+        )?;
+    }
     if content_columns.contains("artist_id_artist") {
         let artist_id = find_or_insert_artist(tx, &track.artist)?;
         tx.execute(
@@ -624,21 +627,21 @@ pub fn update_existing_content_row(
             .artwork_path
             .as_deref()
             .filter(|path| !path.trim().is_empty())
-        {
-            let image_id = find_or_insert_image(tx, path)?;
-            if content_columns.contains("image_id") {
-                tx.execute(
-                    "UPDATE content SET image_id = ?1 WHERE content_id = ?2",
-                    params![image_id, content_id],
-                )?;
-            }
-            if content_columns.contains("imageFilePath_id") {
-                tx.execute(
-                    "UPDATE content SET imageFilePath_id = ?1 WHERE content_id = ?2",
-                    params![image_id, content_id],
-                )?;
-            }
+    {
+        let image_id = find_or_insert_image(tx, path)?;
+        if content_columns.contains("image_id") {
+            tx.execute(
+                "UPDATE content SET image_id = ?1 WHERE content_id = ?2",
+                params![image_id, content_id],
+            )?;
         }
+        if content_columns.contains("imageFilePath_id") {
+            tx.execute(
+                "UPDATE content SET imageFilePath_id = ?1 WHERE content_id = ?2",
+                params![image_id, content_id],
+            )?;
+        }
+    }
     if content_columns.contains("fileName") {
         tx.execute(
             "UPDATE content SET fileName = ?1 WHERE content_id = ?2",
@@ -764,26 +767,29 @@ pub fn update_existing_content_row(
         )?;
     }
     if content_columns.contains("contentLink")
-        && let Some(cl) = track.content_link {
-            tx.execute(
-                "UPDATE content SET contentLink = ?1 WHERE content_id = ?2",
-                params![cl, content_id],
-            )?;
-        }
+        && let Some(cl) = track.content_link
+    {
+        tx.execute(
+            "UPDATE content SET contentLink = ?1 WHERE content_id = ?2",
+            params![cl, content_id],
+        )?;
+    }
     if content_columns.contains("masterContentId")
-        && let Some(mci) = track.master_content_id {
-            tx.execute(
-                "UPDATE content SET masterContentId = ?1 WHERE content_id = ?2",
-                params![mci, content_id],
-            )?;
-        }
+        && let Some(mci) = track.master_content_id
+    {
+        tx.execute(
+            "UPDATE content SET masterContentId = ?1 WHERE content_id = ?2",
+            params![mci, content_id],
+        )?;
+    }
     if content_columns.contains("masterDbId")
-        && let Some(mdb) = track.master_db_id {
-            tx.execute(
-                "UPDATE content SET masterDbId = ?1 WHERE content_id = ?2",
-                params![mdb, content_id],
-            )?;
-        }
+        && let Some(mdb) = track.master_db_id
+    {
+        tx.execute(
+            "UPDATE content SET masterDbId = ?1 WHERE content_id = ?2",
+            params![mdb, content_id],
+        )?;
+    }
     if content_columns.contains("isHotCueAutoLoadOn") {
         tx.execute(
             "UPDATE content SET isHotCueAutoLoadOn = 1 WHERE content_id = ?1",
@@ -1309,13 +1315,14 @@ fn write_pdb_fresh_with_overrides(
     {
         let mut unlock_warnings = Vec::<String>::new();
         if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings)
-            && table_exists(&conn, "content") {
-                let has_key_table = table_exists(&conn, "key");
-                let has_artist_table = table_exists(&conn, "artist");
-                let has_album_table = table_exists(&conn, "album");
-                let has_image_table = table_exists(&conn, "image");
+            && table_exists(&conn, "content")
+        {
+            let has_key_table = table_exists(&conn, "key");
+            let has_artist_table = table_exists(&conn, "artist");
+            let has_album_table = table_exists(&conn, "album");
+            let has_image_table = table_exists(&conn, "image");
 
-                let image_fk_col = if has_image_table
+            let image_fk_col = if has_image_table
                     && conn
                         .query_row(
                             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'imageFilePath_id'",
@@ -1343,37 +1350,37 @@ fn write_pdb_fresh_with_overrides(
                     None
                 };
 
-                let key_select = if has_key_table { "k.name" } else { "NULL" };
-                let key_join = if has_key_table {
-                    "LEFT JOIN \"key\" k ON k.key_id = c.key_id"
-                } else {
-                    ""
-                };
-                let artist_select = if has_artist_table { "ar.name" } else { "NULL" };
-                let artist_join = if has_artist_table {
-                    "LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist"
-                } else {
-                    ""
-                };
-                let album_select = if has_album_table { "al.name" } else { "NULL" };
-                let album_join = if has_album_table {
-                    "LEFT JOIN album al ON al.album_id = c.album_id"
-                } else {
-                    ""
-                };
-                let image_select = if image_fk_col.is_some() {
-                    "img.path"
-                } else {
-                    "NULL"
-                };
-                let image_join = if let Some(fk_col) = image_fk_col {
-                    format!("LEFT JOIN image img ON img.image_id = {fk_col}")
-                } else {
-                    String::new()
-                };
+            let key_select = if has_key_table { "k.name" } else { "NULL" };
+            let key_join = if has_key_table {
+                "LEFT JOIN \"key\" k ON k.key_id = c.key_id"
+            } else {
+                ""
+            };
+            let artist_select = if has_artist_table { "ar.name" } else { "NULL" };
+            let artist_join = if has_artist_table {
+                "LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist"
+            } else {
+                ""
+            };
+            let album_select = if has_album_table { "al.name" } else { "NULL" };
+            let album_join = if has_album_table {
+                "LEFT JOIN album al ON al.album_id = c.album_id"
+            } else {
+                ""
+            };
+            let image_select = if image_fk_col.is_some() {
+                "img.path"
+            } else {
+                "NULL"
+            };
+            let image_join = if let Some(fk_col) = image_fk_col {
+                format!("LEFT JOIN image img ON img.image_id = {fk_col}")
+            } else {
+                String::new()
+            };
 
-                let sql = format!(
-                    r#"
+            let sql = format!(
+                r#"
                     SELECT
                       c.path,
                       {key_select},
@@ -1391,58 +1398,61 @@ fn write_pdb_fresh_with_overrides(
                     {image_join}
                     WHERE c.path IS NOT NULL AND TRIM(c.path) != ''
                     "#,
-                );
+            );
 
-                if let Ok(mut stmt) = conn.prepare(&sql)
-                    && let Ok(rows) = stmt.query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                            row.get::<_, Option<String>>(3)?,
-                            row.get::<_, Option<String>>(4)?,
-                            row.get::<_, Option<i64>>(5)?,
-                            row.get::<_, Option<i64>>(6)?,
-                            row.get::<_, Option<i64>>(7)?,
-                            row.get::<_, Option<i64>>(8)?,
-                        ))
-                    }) {
-                        for row in rows.flatten() {
-                            let key = canonicalize_track_path_identity(&row.0);
-                            if key.is_empty() {
-                                continue;
-                            }
-                            if let Some(name) = row.1
-                                && !name.trim().is_empty() {
-                                    edb_key_by_path.insert(key.clone(), name);
-                                }
-                            if let Some(name) = row.2
-                                && !name.trim().is_empty() {
-                                    edb_artist_by_path.insert(key.clone(), name);
-                                }
-                            if let Some(name) = row.3
-                                && !name.trim().is_empty() {
-                                    edb_album_by_path.insert(key.clone(), name);
-                                }
-                            if let Some(path) = row.4 {
-                                let normalized =
-                                    repair_utf8_mojibake(path.trim()).replace('\\', "/");
-                                if !normalized.is_empty() {
-                                    edb_artwork_by_path.insert(key.clone(), normalized);
-                                }
-                            }
-                            edb_identity_by_path.insert(
-                                key,
-                                (
-                                    row.5.and_then(|v| u32::try_from(v).ok()),
-                                    row.6.and_then(|v| u32::try_from(v).ok()),
-                                    row.7.and_then(|v| u32::try_from(v).ok()),
-                                    row.8.and_then(|v| u16::try_from(v).ok()),
-                                ),
-                            );
+            if let Ok(mut stmt) = conn.prepare(&sql)
+                && let Ok(rows) = stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        row.get::<_, Option<i64>>(6)?,
+                        row.get::<_, Option<i64>>(7)?,
+                        row.get::<_, Option<i64>>(8)?,
+                    ))
+                })
+            {
+                for row in rows.flatten() {
+                    let key = canonicalize_track_path_identity(&row.0);
+                    if key.is_empty() {
+                        continue;
+                    }
+                    if let Some(name) = row.1
+                        && !name.trim().is_empty()
+                    {
+                        edb_key_by_path.insert(key.clone(), name);
+                    }
+                    if let Some(name) = row.2
+                        && !name.trim().is_empty()
+                    {
+                        edb_artist_by_path.insert(key.clone(), name);
+                    }
+                    if let Some(name) = row.3
+                        && !name.trim().is_empty()
+                    {
+                        edb_album_by_path.insert(key.clone(), name);
+                    }
+                    if let Some(path) = row.4 {
+                        let normalized = repair_utf8_mojibake(path.trim()).replace('\\', "/");
+                        if !normalized.is_empty() {
+                            edb_artwork_by_path.insert(key.clone(), normalized);
                         }
                     }
+                    edb_identity_by_path.insert(
+                        key,
+                        (
+                            row.5.and_then(|v| u32::try_from(v).ok()),
+                            row.6.and_then(|v| u32::try_from(v).ok()),
+                            row.7.and_then(|v| u32::try_from(v).ok()),
+                            row.8.and_then(|v| u16::try_from(v).ok()),
+                        ),
+                    );
+                }
             }
+        }
     }
 
     // ── Process manifest tracks ─────────────────────────────────────────
@@ -2703,8 +2713,7 @@ mod tests {
         // CDJ's Artist browse menu and track-load screen. Codepoints are
         // Cherokee, Runic, Glagolitic, Coptic, N'Ko, Vai, Osmanya, and
         // Deseret, chosen only because they're distinct scripts.
-        let artist =
-            "\u{13A0}\u{13A1} \u{16A0}\u{16A1} \u{2C00}\u{2C01} \u{2C80}\u{2C81} \u{07CA}\u{07CB} \u{A500}\u{A501} \u{10480}\u{10481} \u{10400}\u{10401}";
+        let artist = "\u{13A0}\u{13A1} \u{16A0}\u{16A1} \u{2C00}\u{2C01} \u{2C80}\u{2C81} \u{07CA}\u{07CB} \u{A500}\u{A501} \u{10480}\u{10481} \u{10400}\u{10401}";
         let result = sanitize_contents_component(artist);
         assert!(!result.is_empty());
     }
@@ -3440,7 +3449,10 @@ mod tests {
         let out = fs::read(&dst).unwrap();
         let format_tag = u16::from_le_bytes(out[20..22].try_into().unwrap());
         assert_eq!(format_tag, 1, "should be normalized to plain PCM");
-        assert!(out.ends_with(&data), "sample data must be preserved verbatim");
+        assert!(
+            out.ends_with(&data),
+            "sample data must be preserved verbatim"
+        );
     }
 
     #[test]
@@ -3457,7 +3469,10 @@ mod tests {
         copy_wav_normalized_if_needed(&src, &dst).unwrap();
         let second_write = fs::metadata(&dst).unwrap().modified().unwrap();
 
-        assert_eq!(first_write, second_write, "up-to-date target should not be rewritten");
+        assert_eq!(
+            first_write, second_write,
+            "up-to-date target should not be rewritten"
+        );
     }
 
     #[test]
@@ -3488,7 +3503,11 @@ mod tests {
         let dst = dir.path().join("target.wav");
 
         copy_wav_normalized_if_needed(&src, &dst).unwrap();
-        assert_eq!(fs::read(&dst).unwrap(), plain, "non-extensible WAV copied as-is");
+        assert_eq!(
+            fs::read(&dst).unwrap(),
+            plain,
+            "non-extensible WAV copied as-is"
+        );
     }
 
     #[test]

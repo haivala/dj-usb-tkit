@@ -69,16 +69,18 @@ pub(crate) fn normalize_usb_root_path(path: std::path::PathBuf) -> std::path::Pa
 
     let name = lower_name(&path);
     if (name == USB_CONTENTS_DIR.to_ascii_lowercase() || name == USB_VENDOR_ROOT_DIR_LOWER)
-        && let Some(parent) = path.parent() {
-            return parent.to_path_buf();
-        }
+        && let Some(parent) = path.parent()
+    {
+        return parent.to_path_buf();
+    }
 
     if name == USB_VENDOR_DB_DIR_LOWER
         && let Some(parent) = path.parent()
-            && lower_name(parent) == USB_VENDOR_ROOT_DIR_LOWER
-                && let Some(root) = parent.parent() {
-                    return root.to_path_buf();
-                }
+        && lower_name(parent) == USB_VENDOR_ROOT_DIR_LOWER
+        && let Some(root) = parent.parent()
+    {
+        return root.to_path_buf();
+    }
 
     path
 }
@@ -245,9 +247,10 @@ pub(crate) fn load_waveform_preview_from_analysis_path(path: &str) -> Option<Vec
             continue;
         };
         if let Some(peaks) = extract_waveform_preview_from_anlz_bytes(&bytes, WAVEFORM_PREVIEW_BINS)
-            && !peaks.is_empty() {
-                return Some(peaks);
-            }
+            && !peaks.is_empty()
+        {
+            return Some(peaks);
+        }
     }
     None
 }
@@ -416,12 +419,13 @@ pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<String> {
                 // non-bundle filenames under USBANLZ (often control-char garbage).
                 if ext != "DAT" && ext != "EXT" && ext != "2EX" {
                     if let Ok(md) = e.metadata()
-                        && md.len() == 0 {
-                            warnings.push(format!(
-                                "analysis malformed entry is empty: {}",
-                                sanitize_warning_path(e.path())
-                            ));
-                        }
+                        && md.len() == 0
+                    {
+                        warnings.push(format!(
+                            "analysis malformed entry is empty: {}",
+                            sanitize_warning_path(e.path())
+                        ));
+                    }
                     warnings.push(format!(
                         "analysis entry malformed: {}",
                         sanitize_warning_path(e.path())

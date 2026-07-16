@@ -209,7 +209,9 @@ pub(crate) fn decode_history_playlist_id(
     let from_second = (raw_second_field >> 8) & 0xFFFF;
 
     let candidates = [low, high, from_second];
-    candidates.into_iter().find(|&candidate| candidate != 0 && known_history_ids.contains(&candidate))
+    candidates
+        .into_iter()
+        .find(|&candidate| candidate != 0 && known_history_ids.contains(&candidate))
 }
 
 #[cfg(test)]

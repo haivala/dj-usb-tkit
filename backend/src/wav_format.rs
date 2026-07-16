@@ -123,9 +123,7 @@ pub fn classify(info: &WavFmtInfo) -> Option<WavFormatIssue> {
         return None;
     }
     match info.sub_format_tag {
-        Some(WAVE_FORMAT_PCM) | Some(WAVE_FORMAT_IEEE_FLOAT) => {
-            Some(WavFormatIssue::ExtensiblePcm)
-        }
+        Some(WAVE_FORMAT_PCM) | Some(WAVE_FORMAT_IEEE_FLOAT) => Some(WavFormatIssue::ExtensiblePcm),
         _ => Some(WavFormatIssue::ExtensibleOther),
     }
 }
@@ -183,8 +181,10 @@ pub fn rewrite_extensible_to_pcm(source: &Path, target: &Path) -> BackendResult<
     out.write_all(&new_fmt_body)?;
 
     // Stream every remaining chunk after the old fmt chunk, verbatim.
-    let after_fmt_offset =
-        info.fmt_chunk_offset + 8 + u64::from(info.fmt_chunk_size) + (info.fmt_chunk_size % 2) as u64;
+    let after_fmt_offset = info.fmt_chunk_offset
+        + 8
+        + u64::from(info.fmt_chunk_size)
+        + (info.fmt_chunk_size % 2) as u64;
     src.seek(SeekFrom::Start(after_fmt_offset))?;
     io::copy(&mut src, &mut out)?;
 
@@ -376,7 +376,11 @@ mod tests {
     fn rewrite_rejects_extensible_other() {
         let dir = tempdir().unwrap();
         let source = dir.path().join("source.wav");
-        std::fs::write(&source, make_wav(&make_extensible_fmt(0x0006), &[], &[0u8; 20])).unwrap();
+        std::fs::write(
+            &source,
+            make_wav(&make_extensible_fmt(0x0006), &[], &[0u8; 20]),
+        )
+        .unwrap();
         let target = dir.path().join("target.wav");
         let err = rewrite_extensible_to_pcm(&source, &target).expect_err("should reject");
         assert!(err.to_string().contains("not a safely-convertible"));

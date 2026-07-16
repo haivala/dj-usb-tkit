@@ -182,13 +182,14 @@ fn previous_pdb_header_compatibility_value(usb_root: &Path) -> Option<(u32, Path
 fn detect_pdb_header_compatibility_repair(usb_root: &Path) -> Option<PdbHeaderCompatibilityRepair> {
     let current_value = read_pdb_header_compatibility_value(&vendor_pdb_path(usb_root))?;
     if let Some((target_value, path)) = previous_pdb_header_compatibility_value(usb_root)
-        && current_value != target_value {
-            return Some(PdbHeaderCompatibilityRepair {
-                current_value,
-                target_value,
-                source: PdbHeaderCompatibilitySource::PreviousSnapshot(path),
-            });
-        }
+        && current_value != target_value
+    {
+        return Some(PdbHeaderCompatibilityRepair {
+            current_value,
+            target_value,
+            source: PdbHeaderCompatibilitySource::PreviousSnapshot(path),
+        });
+    }
 
     if is_known_pdb_header_compatibility_value(current_value) {
         return None;
@@ -763,12 +764,13 @@ pub(super) fn detect_pdb_ec_data_page_conflicts(pdb_path: &Path) -> Vec<EcDataPa
             continue; // empty table — ec is just the pre-allocated blank slot
         }
         if let Some(&owner_tt) = data_page_owner.get(&ec)
-            && owner_tt != tt {
-                conflicts.push(EcDataPageConflict {
-                    table_type: tt,
-                    last_page: lp,
-                });
-            }
+            && owner_tt != tt
+        {
+            conflicts.push(EcDataPageConflict {
+                table_type: tt,
+                last_page: lp,
+            });
+        }
     }
     conflicts
 }
@@ -1623,9 +1625,7 @@ fn derive_history_sync_payload(
 }
 
 fn normalize_player_menu_name(raw: &str) -> String {
-    raw.replace(['\u{fffa}', '\u{fffb}'], "")
-        .trim()
-        .to_string()
+    raw.replace(['\u{fffa}', '\u{fffb}'], "").trim().to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -2453,9 +2453,10 @@ impl BackendService {
         } else {
             for menu_id in &req.current_menu_item_ids {
                 if let Some(kind) = kind_by_menu.get(menu_id).copied()
-                    && seen.insert(kind) {
-                        desired_kinds.push(kind);
-                    }
+                    && seen.insert(kind)
+                {
+                    desired_kinds.push(kind);
+                }
             }
         }
 
@@ -2965,30 +2966,31 @@ impl BackendService {
 
         // Detect audio files present on USB that are not indexed in either PDB or eDB content rows.
         if let Some(parsed) = parsed_pdb.as_ref()
-            && any_audio_on_usb {
-                let mut indexed_paths = parsed
-                    .tracks
-                    .iter()
-                    .map(|t| normalize_path_for_contents_match(&t.track_file_path))
-                    .filter(|p| !p.is_empty())
-                    .collect::<HashSet<_>>();
-                let edb_indexed_paths = collect_edb_indexed_paths(&usb_root, &mut warnings);
-                indexed_paths.extend(edb_indexed_paths);
-                unindexed_audio_paths = all_contents_audio
-                    .iter()
-                    .map(|p| normalize_path_for_contents_match(p))
-                    .filter(|p| !p.is_empty())
-                    .filter(|p| !indexed_paths.contains(p))
-                    .collect::<Vec<_>>();
-                unindexed_audio_paths.sort();
-                unindexed_audio_paths.dedup();
+            && any_audio_on_usb
+        {
+            let mut indexed_paths = parsed
+                .tracks
+                .iter()
+                .map(|t| normalize_path_for_contents_match(&t.track_file_path))
+                .filter(|p| !p.is_empty())
+                .collect::<HashSet<_>>();
+            let edb_indexed_paths = collect_edb_indexed_paths(&usb_root, &mut warnings);
+            indexed_paths.extend(edb_indexed_paths);
+            unindexed_audio_paths = all_contents_audio
+                .iter()
+                .map(|p| normalize_path_for_contents_match(p))
+                .filter(|p| !p.is_empty())
+                .filter(|p| !indexed_paths.contains(p))
+                .collect::<Vec<_>>();
+            unindexed_audio_paths.sort();
+            unindexed_audio_paths.dedup();
 
-                if !unindexed_audio_paths.is_empty() {
-                    detected_issues.push(format!(
+            if !unindexed_audio_paths.is_empty() {
+                detected_issues.push(format!(
                         "{} audio file(s) exist under Contents but are missing from the canonical-path indexed set (PDB/eDB)",
                         unindexed_audio_paths.len()
                     ));
-                    proposed_fixes.push(RepairFixProposal {
+                proposed_fixes.push(RepairFixProposal {
                         id: "manual_reimport_unindexed_audio".to_string(),
                         title: "Manual Re-import Unindexed Audio".to_string(),
                         description: "Non-destructive guidance: copy unindexed files to safety/media library and import/export again."
@@ -2998,22 +3000,22 @@ impl BackendService {
                         estimated_writes: 0,
                         estimated_deletes: 0,
                     });
-                    unsupported_items.push(RepairUnsupportedItem {
+                unsupported_items.push(RepairUnsupportedItem {
                         issue: format!(
                             "{} canonical-path unindexed audio file(s) under Contents",
                             unindexed_audio_paths.len()
                         ),
                         reason: "Automatic deletion is intentionally disabled for canonical-path index drift. Recommended flow: copy files to safety/media library, import into playlists, export again. (Strict raw-count drift is reported separately in parity checks.)".to_string(),
                     });
-                    warnings.push(format!(
+                warnings.push(format!(
                         "canonical-path unindexed audio files detected: {} (see Event Log source=usb-diagnostics)",
                         unindexed_audio_paths.len()
                     ));
-                    for path in &unindexed_audio_paths {
-                        warnings.push(format!("unindexed audio file: {path}"));
-                    }
+                for path in &unindexed_audio_paths {
+                    warnings.push(format!("unindexed audio file: {path}"));
                 }
             }
+        }
 
         if !missing_audio_track_ids.is_empty() {
             if unindexed_audio_paths.is_empty() {
@@ -3064,32 +3066,34 @@ impl BackendService {
             let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
             if !history_rows.is_empty()
                 && let Some(conn) = open_edb_from_usb_root(&usb_root, &mut warnings)
-                    && table_exists(&conn, "history") && table_exists(&conn, "history_content") {
-                        let current_history_count = conn
-                            .query_row("SELECT COUNT(*) FROM history", [], |row| {
-                                row.get::<_, i64>(0)
-                            })
-                            .ok()
-                            .unwrap_or(0)
-                            .max(0) as usize;
-                        let current_history_content_count =
-                            conn.query_row("SELECT COUNT(*) FROM history_content", [], |row| {
-                                row.get::<_, i64>(0)
-                            })
-                            .ok()
-                            .unwrap_or(0)
-                            .max(0) as usize;
-                        let target_history_count = history_rows.len();
-                        let target_history_content_count = history_content_rows.len();
-                        if current_history_count != target_history_count
-                            || current_history_content_count != target_history_content_count
-                        {
-                            sync_edb_history_needed = true;
-                            sync_edb_history_supported = true;
-                            detected_issues.push(format!(
+                && table_exists(&conn, "history")
+                && table_exists(&conn, "history_content")
+            {
+                let current_history_count = conn
+                    .query_row("SELECT COUNT(*) FROM history", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .ok()
+                    .unwrap_or(0)
+                    .max(0) as usize;
+                let current_history_content_count = conn
+                    .query_row("SELECT COUNT(*) FROM history_content", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .ok()
+                    .unwrap_or(0)
+                    .max(0) as usize;
+                let target_history_count = history_rows.len();
+                let target_history_content_count = history_content_rows.len();
+                if current_history_count != target_history_count
+                    || current_history_content_count != target_history_content_count
+                {
+                    sync_edb_history_needed = true;
+                    sync_edb_history_supported = true;
+                    detected_issues.push(format!(
                                 "eDB history differs from PDB-derived payload (history {current_history_count}->{target_history_count}, history_content {current_history_content_count}->{target_history_content_count})"
                             ));
-                            proposed_fixes.push(RepairFixProposal {
+                    proposed_fixes.push(RepairFixProposal {
                                 id: SYNC_EDB_HISTORY_FROM_PDB_FIX_ID.to_string(),
                                 title: "Sync eDB History Tables From PDB".to_string(),
                                 description: "Optional fix: replace eDB history/history_content rows using current PDB history payload mapping.".to_string(),
@@ -3099,8 +3103,8 @@ impl BackendService {
                                 estimated_writes: target_history_count + target_history_content_count,
                                 estimated_deletes: current_history_count + current_history_content_count,
                             });
-                        }
-                    }
+                }
+            }
         }
 
         let mut strict_upgrade_targets = HashSet::<String>::new();
@@ -3826,20 +3830,21 @@ impl BackendService {
                     // If matched via meta fallback, mark the PDB track's identity key
                     // as seen so it won't be re-added in the PDB-only pass.
                     if let Some(pt) = pdb_track
-                        && !pdb_track_by_key.contains_key(&ident) {
-                            let pt_artist = parsed
-                                .artists
-                                .get(&pt.artist_id)
-                                .map(|s| s.as_str())
-                                .unwrap_or("");
-                            let pt_ident = track_identity_key(
-                                &pt.track_file_path,
-                                &pt.title,
-                                pt_artist,
-                                Some(&pt.id.to_string()),
-                            );
-                            seen_identity_keys.insert(pt_ident);
-                        }
+                        && !pdb_track_by_key.contains_key(&ident)
+                    {
+                        let pt_artist = parsed
+                            .artists
+                            .get(&pt.artist_id)
+                            .map(|s| s.as_str())
+                            .unwrap_or("");
+                        let pt_ident = track_identity_key(
+                            &pt.track_file_path,
+                            &pt.title,
+                            pt_artist,
+                            Some(&pt.id.to_string()),
+                        );
+                        seen_identity_keys.insert(pt_ident);
+                    }
                     let track_id = if let Some(pt) = pdb_track {
                         pt.id
                     } else {
@@ -4145,12 +4150,13 @@ impl BackendService {
             }
         }
         if result.merged_playlists > 0
-            && let Err(err) = restore_pdb_playlist_sort_orders(usb_root, &desired_pdb_sort_by_id) {
-                warnings.push(format!(
-                    "strict parity upgrade: PDB playlist order restore failed: {err}"
-                ));
-                result.failed_playlists += 1;
-            }
+            && let Err(err) = restore_pdb_playlist_sort_orders(usb_root, &desired_pdb_sort_by_id)
+        {
+            warnings.push(format!(
+                "strict parity upgrade: PDB playlist order restore failed: {err}"
+            ));
+            result.failed_playlists += 1;
+        }
 
         // Re-read written PDB identities so eDB uses the exact playlist id/sort
         // that ended up in the device-facing PDB after rewrite.
@@ -4246,12 +4252,13 @@ impl BackendService {
             }
         }
         if result.merged_playlists > 0
-            && let Err(err) = sync_edb_playlist_sort_orders_from_pdb(usb_root, warnings) {
-                warnings.push(format!(
-                    "strict parity upgrade: eDB playlist order sync failed: {err}"
-                ));
-                result.failed_playlists += 1;
-            }
+            && let Err(err) = sync_edb_playlist_sort_orders_from_pdb(usb_root, warnings)
+        {
+            warnings.push(format!(
+                "strict parity upgrade: eDB playlist order sync failed: {err}"
+            ));
+            result.failed_playlists += 1;
+        }
 
         Ok(result)
     }
@@ -4316,24 +4323,25 @@ impl BackendService {
                     && let (Some(ra), Some(rp)) = (
                         resolve_usb_side_path(usb_root, a),
                         resolve_usb_side_path(usb_root, p),
-                    ) {
-                        let analysis_path = std::path::PathBuf::from(&ra);
-                        let analysis_dir = analysis_path
-                            .parent()
-                            .map(std::path::Path::to_path_buf)
-                            .unwrap_or_else(|| usb_root.to_path_buf());
-                        let target = AnalysisRepairTarget {
-                            source_audio: rp,
-                            analysis_dir: analysis_dir.clone(),
-                            track_path: p.to_string(),
-                        };
-                        map_by_file
-                            .entry(canonicalize_playlist_name(&ra))
-                            .or_insert_with(|| target.clone());
-                        map_by_dir
-                            .entry(canonicalize_playlist_name(&analysis_dir.to_string_lossy()))
-                            .or_insert(target);
-                    }
+                    )
+                {
+                    let analysis_path = std::path::PathBuf::from(&ra);
+                    let analysis_dir = analysis_path
+                        .parent()
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or_else(|| usb_root.to_path_buf());
+                    let target = AnalysisRepairTarget {
+                        source_audio: rp,
+                        analysis_dir: analysis_dir.clone(),
+                        track_path: p.to_string(),
+                    };
+                    map_by_file
+                        .entry(canonicalize_playlist_name(&ra))
+                        .or_insert_with(|| target.clone());
+                    map_by_dir
+                        .entry(canonicalize_playlist_name(&analysis_dir.to_string_lossy()))
+                        .or_insert(target);
+                }
             }
         }
 

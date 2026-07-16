@@ -220,14 +220,20 @@ mod tests {
         // as produced by "zalgo text" generators.
         let base = 'e';
         let mark = '\u{0301}'; // COMBINING ACUTE ACCENT
-        let zalgo: String = std::iter::once(base).chain(std::iter::repeat(mark).take(60)).collect();
+        let zalgo: String = std::iter::once(base)
+            .chain(std::iter::repeat(mark).take(60))
+            .collect();
         let result = sanitize_metadata(&zalgo);
         assert_eq!(
             result.chars().count(),
             MAX_GRAPHEME_CLUSTER_CHARS,
             "cluster must be capped, not passed through whole"
         );
-        assert_eq!(result.chars().next(), Some('e'), "base character is preserved");
+        assert_eq!(
+            result.chars().next(),
+            Some('e'),
+            "base character is preserved"
+        );
     }
 
     #[test]
@@ -265,7 +271,9 @@ mod tests {
     #[test]
     fn cap_grapheme_clusters_bounds_pathological_input() {
         let mark = '\u{0301}';
-        let s: String = std::iter::once('e').chain(std::iter::repeat(mark).take(100)).collect();
+        let s: String = std::iter::once('e')
+            .chain(std::iter::repeat(mark).take(100))
+            .collect();
         let result = cap_grapheme_clusters(&s, MAX_GRAPHEME_CLUSTER_CHARS);
         assert_eq!(result.chars().count(), MAX_GRAPHEME_CLUSTER_CHARS);
     }
@@ -281,7 +289,9 @@ mod tests {
         let mark_a = '\u{0301}'; // COMBINING ACUTE ACCENT
         let mark_b = '\u{0362}'; // COMBINING DOUBLE RIGHTWARDS ARROW BELOW
         let heavy_cluster = |base: char, mark: char, count: usize| -> String {
-            std::iter::once(base).chain(std::iter::repeat(mark).take(count)).collect::<String>()
+            std::iter::once(base)
+                .chain(std::iter::repeat(mark).take(count))
+                .collect::<String>()
         };
         let mut album = String::new();
         album.push_str(&heavy_cluster('x', mark_a, 40));
@@ -345,7 +355,10 @@ mod tests {
             scripts_kept.len() <= MAX_DISTINCT_SCRIPTS,
             "expected at most {MAX_DISTINCT_SCRIPTS} distinct scripts, kept {scripts_kept:?}"
         );
-        assert!(result.starts_with('a'), "characters before the budget is hit are preserved");
+        assert!(
+            result.starts_with('a'),
+            "characters before the budget is hit are preserved"
+        );
     }
 
     #[test]
@@ -358,8 +371,7 @@ mod tests {
         // below are Cherokee, Runic, Glagolitic, Coptic, N'Ko, Vai,
         // Osmanya, and Deseret — chosen only because they're distinct
         // scripts, not for any resemblance to real text.
-        let artist =
-            "\u{13A0}\u{13A1} \u{16A0}\u{16A1} \u{2C00}\u{2C01} \u{2C80}\u{2C81} \u{07CA}\u{07CB} \u{A500}\u{A501} \u{10480}\u{10481} \u{10400}\u{10401}";
+        let artist = "\u{13A0}\u{13A1} \u{16A0}\u{16A1} \u{2C00}\u{2C01} \u{2C80}\u{2C81} \u{07CA}\u{07CB} \u{A500}\u{A501} \u{10480}\u{10481} \u{10400}\u{10401}";
         let max_cluster_before = artist
             .graphemes(true)
             .map(|g| g.chars().count())
@@ -403,7 +415,11 @@ mod tests {
         s.extend(std::iter::repeat(mark).take(7));
 
         let result = cap_script_diversity(&s);
-        assert_eq!(result.as_ref(), "a\u{3042}\u{4e2d}", "over-budget clusters must be dropped whole, including their marks");
+        assert_eq!(
+            result.as_ref(),
+            "a\u{3042}\u{4e2d}",
+            "over-budget clusters must be dropped whole, including their marks"
+        );
         assert!(
             result
                 .graphemes(true)

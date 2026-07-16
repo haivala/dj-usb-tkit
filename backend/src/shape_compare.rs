@@ -261,14 +261,14 @@ pub fn compare_usb_shape(expected_root: &Path, actual_root: &Path) -> ShapeDiff 
         if let (Some(e), Some(a)) = (
             expected_shapes.get(table_type),
             actual_shapes.get(table_type),
-        )
-            && *e != *a {
-                pdb_table_shape_diffs.push(PdbTableShapeDiff {
-                    table_type: *table_type,
-                    expected: (*e).clone(),
-                    actual: (*a).clone(),
-                });
-            }
+        ) && *e != *a
+        {
+            pdb_table_shape_diffs.push(PdbTableShapeDiff {
+                table_type: *table_type,
+                expected: (*e).clone(),
+                actual: (*a).clone(),
+            });
+        }
     }
 
     let expected_tables = expected.edb_schema.keys().cloned().collect::<BTreeSet<_>>();

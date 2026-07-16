@@ -153,16 +153,16 @@ fn play_in_worker(
     let same_track_loaded = state.path.as_deref() == Some(normalized.as_str());
     if same_track_loaded
         && let Some(sink) = state.sink.as_ref()
-            && !sink.empty() {
-                let offset_ms =
-                    compute_target_offset_ms(start_offset_ms, start_ratio, state.duration_ms);
-                if sink.try_seek(Duration::from_millis(offset_ms)).is_ok() {
-                    sink.play();
-                    state.started_at = Some(Instant::now());
-                    state.start_offset_ms = offset_ms;
-                    return Ok(snapshot(state));
-                }
-            }
+        && !sink.empty()
+    {
+        let offset_ms = compute_target_offset_ms(start_offset_ms, start_ratio, state.duration_ms);
+        if sink.try_seek(Duration::from_millis(offset_ms)).is_ok() {
+            sink.play();
+            state.started_at = Some(Instant::now());
+            state.start_offset_ms = offset_ms;
+            return Ok(snapshot(state));
+        }
+    }
 
     if state.stream.is_none() || state.stream_handle.is_none() {
         let (stream, stream_handle) = open_output_stream()?;
@@ -342,9 +342,10 @@ fn compute_target_offset_ms(
     let ratio = start_ratio.unwrap_or(0.0).clamp(0.0, 1.0);
     let mut offset_ms = start_offset_ms.unwrap_or(0);
     if offset_ms == 0
-        && let Some(total_ms) = duration_ms {
-            offset_ms = ((total_ms as f64) * ratio).round() as u64;
-        }
+        && let Some(total_ms) = duration_ms
+    {
+        offset_ms = ((total_ms as f64) * ratio).round() as u64;
+    }
     if let Some(total_ms) = duration_ms {
         offset_ms = offset_ms.min(total_ms);
     }

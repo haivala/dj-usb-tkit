@@ -471,14 +471,14 @@ impl BackendService {
                     artwork_relative = Some(existing_artwork);
                 } else if !export_dry_run
                     && let Some(path) = track.artwork_path.as_deref()
-                        && let Some(asset_path) =
-                            export_artwork_for_player(path, &usb_root, &track.id, &mut warnings)?
-                        {
-                            artwork_relative = to_usb_relative_path(&usb_root, &asset_path)
-                                .or(Some(asset_path));
-                            exported_artworks += 1;
-                            owns_artwork = true;
-                        }
+                    && let Some(asset_path) =
+                        export_artwork_for_player(path, &usb_root, &track.id, &mut warnings)?
+                {
+                    artwork_relative =
+                        to_usb_relative_path(&usb_root, &asset_path).or(Some(asset_path));
+                    exported_artworks += 1;
+                    owns_artwork = true;
+                }
             }
             // Fallback: pick up artwork from existing USB PDB if we didn't resolve it
             if artwork_relative.is_none() {
@@ -519,17 +519,19 @@ impl BackendService {
                             )?;
                         }
                         analysis_relative = Some(existing_analysis);
-                    } else if !export_dry_run && track.waveform_peaks_path.is_some()
+                    } else if !export_dry_run
+                        && track.waveform_peaks_path.is_some()
                         && let Some(relative) = export_analysis_bundle_for_track(
                             track,
                             &usb_root,
                             &exported_path,
                             &mut warnings,
-                        )? {
-                            analysis_relative = Some(relative);
-                            exported_analysis_files += 3;
-                            owns_waveform = true;
-                        }
+                        )?
+                    {
+                        analysis_relative = Some(relative);
+                        exported_analysis_files += 3;
+                        owns_waveform = true;
+                    }
                 }
             }
 
@@ -954,13 +956,14 @@ impl BackendService {
         app_content_link_id: i64,
     ) -> BackendResult<(Option<i64>, Option<i64>, Option<i64>)> {
         if let Some((existing_mdb, existing_mci, existing_cl, _)) = existing_identity
-            && (existing_mdb.is_some() || existing_mci.is_some() || existing_cl.is_some()) {
-                return Ok((
-                    existing_mdb.map(i64::from),
-                    existing_mci.map(i64::from),
-                    existing_cl.map(i64::from),
-                ));
-            }
+            && (existing_mdb.is_some() || existing_mci.is_some() || existing_cl.is_some())
+        {
+            return Ok((
+                existing_mdb.map(i64::from),
+                existing_mci.map(i64::from),
+                existing_cl.map(i64::from),
+            ));
+        }
 
         if owns_waveform {
             return Ok((
@@ -1001,9 +1004,10 @@ impl BackendService {
             .optional()?;
         if let Some(existing) = existing
             && let Ok(parsed) = existing.parse::<i64>()
-                && parsed > 0 {
-                    return Ok(parsed);
-                }
+            && parsed > 0
+        {
+            return Ok(parsed);
+        }
 
         let seed = format!(
             "{}:{}:{}",
@@ -1040,9 +1044,10 @@ impl BackendService {
                 |row| row.get::<_, i64>(0),
             )
             .optional()?
-            && existing > 0 {
-                return Ok(existing);
-            }
+            && existing > 0
+        {
+            return Ok(existing);
+        }
 
         let mut candidate = i64::from(stable_u32_hash(&format!("master-content:{track_id}")));
         if candidate <= 0 {
@@ -1089,9 +1094,10 @@ impl BackendService {
         let Some(raw) = raw else {
             return Ok(HashSet::new());
         };
-        let parsed = serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default()
-        .into_iter()
-        .collect::<HashSet<_>>();
+        let parsed = serde_json::from_str::<Vec<String>>(&raw)
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<HashSet<_>>();
         Ok(parsed)
     }
 

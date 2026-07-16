@@ -167,10 +167,11 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<String>) -> Option<rusqlite::Con
     let open_ro =
         || rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY);
     if let Ok(plain) = open_ro()
-        && has_schema(&plain) {
-            warnings.push("eDB opened without SQLCipher key".to_string());
-            return Some(plain);
-        }
+        && has_schema(&plain)
+    {
+        warnings.push("eDB opened without SQLCipher key".to_string());
+        return Some(plain);
+    }
 
     let merged_keys = effective_sqlcipher_keys();
     let mut attempts = 0usize;
@@ -236,10 +237,11 @@ pub fn open_edb_rw(usb_root: &Path, warnings: &mut Vec<String>) -> Option<rusqli
     };
 
     if let Ok(plain) = open_rw()
-        && has_schema(&plain) {
-            warnings.push("eDB opened read-write without SQLCipher key".to_string());
-            return Some(plain);
-        }
+        && has_schema(&plain)
+    {
+        warnings.push("eDB opened read-write without SQLCipher key".to_string());
+        return Some(plain);
+    }
 
     let merged_keys = effective_sqlcipher_keys();
     for raw_key in &merged_keys {
@@ -913,21 +915,22 @@ pub fn replace_export_playlist_row_with_identity(
         )
         .ok();
     if let Some(ref cname) = collider_name
-        && *cname != playlist_name {
-            let new_id: i64 = conn.query_row(
-                "SELECT COALESCE(MAX(playlist_id), 0) + 1 FROM playlist",
-                [],
-                |row| row.get(0),
-            )?;
-            conn.execute(
-                "UPDATE playlist_content SET playlist_id = ?1 WHERE playlist_id = ?2",
-                params![new_id, playlist_id],
-            )?;
-            conn.execute(
-                "UPDATE playlist SET playlist_id = ?1 WHERE playlist_id = ?2 AND attribute = 0",
-                params![new_id, playlist_id],
-            )?;
-        }
+        && *cname != playlist_name
+    {
+        let new_id: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(playlist_id), 0) + 1 FROM playlist",
+            [],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "UPDATE playlist_content SET playlist_id = ?1 WHERE playlist_id = ?2",
+            params![new_id, playlist_id],
+        )?;
+        conn.execute(
+            "UPDATE playlist SET playlist_id = ?1 WHERE playlist_id = ?2 AND attribute = 0",
+            params![new_id, playlist_id],
+        )?;
+    }
 
     match load_table_row_template(conn, "playlist", &columns) {
         Ok(mut values) => {
@@ -1241,17 +1244,20 @@ pub fn populate_content_values_map(
         );
     }
     if values.contains_key("contentLink")
-        && let Some(cl) = track.content_link {
-            values.insert("contentLink".to_string(), Value::Integer(cl));
-        }
+        && let Some(cl) = track.content_link
+    {
+        values.insert("contentLink".to_string(), Value::Integer(cl));
+    }
     if values.contains_key("masterContentId")
-        && let Some(mci) = track.master_content_id {
-            values.insert("masterContentId".to_string(), Value::Integer(mci));
-        }
+        && let Some(mci) = track.master_content_id
+    {
+        values.insert("masterContentId".to_string(), Value::Integer(mci));
+    }
     if values.contains_key("masterDbId")
-        && let Some(mdb) = track.master_db_id {
-            values.insert("masterDbId".to_string(), Value::Integer(mdb));
-        }
+        && let Some(mdb) = track.master_db_id
+    {
+        values.insert("masterDbId".to_string(), Value::Integer(mdb));
+    }
     if values.contains_key("isHotCueAutoLoadOn") {
         values.insert("isHotCueAutoLoadOn".to_string(), Value::Integer(1));
     }
@@ -1486,12 +1492,13 @@ pub fn find_or_insert_album(
         let columns = load_table_columns(conn, "album")?;
         if columns.iter().any(|c| c == "artist_id")
             && let Some(artist_name) = artist_name
-                && let Some(artist_id) = find_or_insert_artist(conn, artist_name)? {
-                    let _ = conn.execute(
-                        "UPDATE album SET artist_id = COALESCE(artist_id, ?1) WHERE album_id = ?2",
-                        params![artist_id, existing],
-                    );
-                }
+            && let Some(artist_id) = find_or_insert_artist(conn, artist_name)?
+        {
+            let _ = conn.execute(
+                "UPDATE album SET artist_id = COALESCE(artist_id, ?1) WHERE album_id = ?2",
+                params![artist_id, existing],
+            );
+        }
         if columns.iter().any(|c| c == "isComplation") {
             let _ = conn.execute(
                 "UPDATE album SET isComplation = COALESCE(isComplation, 0) WHERE album_id = ?1",

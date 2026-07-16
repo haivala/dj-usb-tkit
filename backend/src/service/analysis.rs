@@ -348,9 +348,10 @@ impl EssentiaWorkerPool {
 
         loop {
             if let Some(idx) = state.available.pop()
-                && let Some(worker) = state.workers.get_mut(idx).and_then(Option::take) {
-                    return Ok((idx, worker));
-                }
+                && let Some(worker) = state.workers.get_mut(idx).and_then(Option::take)
+            {
+                return Ok((idx, worker));
+            }
             state = self.ready.wait(state).map_err(|_| {
                 BackendError::Internal("analysis worker pool condvar poisoned".to_string())
             })?;
@@ -365,21 +366,22 @@ impl EssentiaWorkerPool {
         config: &EssentiaWorkerConfig,
     ) {
         if let Ok(mut state) = self.state.lock()
-            && state.config.as_ref() == Some(config) {
-                if idx >= state.workers.len() {
-                    state.workers.resize_with(idx + 1, || None);
-                }
-                state.workers[idx] = worker;
-                if state.workers[idx].is_some() {
-                    state.available.push(idx);
-                    self.ready.notify_one();
-                } else {
-                    state.config = None;
-                    state.available.clear();
-                    state.workers.clear();
-                    self.ready.notify_all();
-                }
+            && state.config.as_ref() == Some(config)
+        {
+            if idx >= state.workers.len() {
+                state.workers.resize_with(idx + 1, || None);
             }
+            state.workers[idx] = worker;
+            if state.workers[idx].is_some() {
+                state.available.push(idx);
+                self.ready.notify_one();
+            } else {
+                state.config = None;
+                state.available.clear();
+                state.workers.clear();
+                self.ready.notify_all();
+            }
+        }
     }
 
     fn reset(&self) {
@@ -472,14 +474,15 @@ impl BackendService {
         let mut failed = 0usize;
         let mut warnings = Vec::<String>::new();
         if let Some(total) = auto_eligible_total
-            && total > tracks.len() {
-                warnings.push(format!(
+            && total > tracks.len()
+        {
+            warnings.push(format!(
                     "Auto analysis limit reached: selected {} of {} eligible tracks (limit {}). Run analysis again or select tracks explicitly to continue.",
                     tracks.len(),
                     total,
                     ANALYSIS_AUTO_SELECT_LIMIT
                 ));
-            }
+        }
         let total = tracks.len();
         let (bpm_min, bpm_max) = resolve_analysis_bpm_range(None, None);
         let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());

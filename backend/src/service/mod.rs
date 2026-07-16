@@ -533,16 +533,16 @@ impl BackendService {
                 let twoex = waveform_dir.join(format!("{id}.2EX"));
                 if twoex.is_file()
                     && let Ok(bytes) = std::fs::read(&twoex)
-                        && !bytes.windows(4).any(|w| w == b"PWV6") {
-                            tx.execute(
-                                "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",
-                                params![id],
-                            )?;
-                            for ext in ["DAT", "EXT", "2EX"] {
-                                let _ =
-                                    std::fs::remove_file(waveform_dir.join(format!("{id}.{ext}")));
-                            }
-                        }
+                    && !bytes.windows(4).any(|w| w == b"PWV6")
+                {
+                    tx.execute(
+                        "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",
+                        params![id],
+                    )?;
+                    for ext in ["DAT", "EXT", "2EX"] {
+                        let _ = std::fs::remove_file(waveform_dir.join(format!("{id}.{ext}")));
+                    }
+                }
             }
         }
 
@@ -1947,9 +1947,10 @@ fn score_playback_candidate(track: &Track, req: &ResolvePlaybackSourceRequest) -
         }
     }
     if let (Some(a), Some(b)) = (req.bpm, track.bpm)
-        && (a - b).abs() <= 0.15 {
-            score += 4;
-        }
+        && (a - b).abs() <= 0.15
+    {
+        score += 4;
+    }
     score
 }
 
