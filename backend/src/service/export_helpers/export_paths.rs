@@ -480,23 +480,20 @@ pub fn collect_manifest_owned_paths(usb_root: &Path, manifest: &ExportManifest) 
         if track.owns_exported_media {
             insert_if_owned_path(&mut owned, usb_root, &track.exported_path);
         }
-        if track.owns_artwork {
-            if let Some(path) = track.artwork_path.as_deref() {
-                if let Some(normalized) = normalize_owned_export_path(usb_root, path) {
+        if track.owns_artwork
+            && let Some(path) = track.artwork_path.as_deref()
+                && let Some(normalized) = normalize_owned_export_path(usb_root, path) {
                     // Also claim the _m (medium) variant
                     insert_with_medium_variant(&mut owned, normalized);
                 }
-            }
-        }
-        if track.owns_waveform {
-            if let Some(path) = track.waveform_path.as_deref() {
+        if track.owns_waveform
+            && let Some(path) = track.waveform_path.as_deref() {
                 for bundle_path in analysis_bundle_path_variants(path) {
                     if let Some(normalized) = normalize_owned_export_path(usb_root, &bundle_path) {
                         owned.insert(normalized);
                     }
                 }
             }
-        }
     }
     owned
 }
@@ -630,15 +627,14 @@ pub fn filter_prunable_stale_paths_for_playlist(
                 usb_root,
                 &track.anlz_path,
             );
-            if let Some(art_path) = parsed.artworks.get(&track.artwork_id) {
-                if let Some(normalized) = normalize_owned_export_path(usb_root, art_path) {
+            if let Some(art_path) = parsed.artworks.get(&track.artwork_id)
+                && let Some(normalized) = normalize_owned_export_path(usb_root, art_path) {
                     protect_artwork_variants_if_stale(
                         &mut protected,
                         &stale_normalized,
                         normalized,
                     );
                 }
-            }
         }
     }
 

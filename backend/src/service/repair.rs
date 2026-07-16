@@ -181,15 +181,14 @@ fn previous_pdb_header_compatibility_value(usb_root: &Path) -> Option<(u32, Path
 
 fn detect_pdb_header_compatibility_repair(usb_root: &Path) -> Option<PdbHeaderCompatibilityRepair> {
     let current_value = read_pdb_header_compatibility_value(&vendor_pdb_path(usb_root))?;
-    if let Some((target_value, path)) = previous_pdb_header_compatibility_value(usb_root) {
-        if current_value != target_value {
+    if let Some((target_value, path)) = previous_pdb_header_compatibility_value(usb_root)
+        && current_value != target_value {
             return Some(PdbHeaderCompatibilityRepair {
                 current_value,
                 target_value,
                 source: PdbHeaderCompatibilitySource::PreviousSnapshot(path),
             });
         }
-    }
 
     if is_known_pdb_header_compatibility_value(current_value) {
         return None;
@@ -471,7 +470,7 @@ pub(super) fn detect_pdb_wrong_history_page_shape(pdb_path: &Path) -> Vec<WrongS
             continue;
         }
         let table_type = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
-        if !matches!(table_type, 16 | 17 | 18) {
+        if !matches!(table_type, 16..=18) {
             continue;
         }
         let nrs = read_u8_at(&bytes, off + 0x18).unwrap_or(0) as u16;
@@ -763,14 +762,13 @@ pub(super) fn detect_pdb_ec_data_page_conflicts(pdb_path: &Path) -> Vec<EcDataPa
         if fp == lp {
             continue; // empty table — ec is just the pre-allocated blank slot
         }
-        if let Some(&owner_tt) = data_page_owner.get(&ec) {
-            if owner_tt != tt {
+        if let Some(&owner_tt) = data_page_owner.get(&ec)
+            && owner_tt != tt {
                 conflicts.push(EcDataPageConflict {
                     table_type: tt,
                     last_page: lp,
                 });
             }
-        }
     }
     conflicts
 }
@@ -1625,8 +1623,7 @@ fn derive_history_sync_payload(
 }
 
 fn normalize_player_menu_name(raw: &str) -> String {
-    raw.replace('\u{fffa}', "")
-        .replace('\u{fffb}', "")
+    raw.replace(['\u{fffa}', '\u{fffb}'], "")
         .trim()
         .to_string()
 }
@@ -2455,11 +2452,10 @@ impl BackendService {
             }
         } else {
             for menu_id in &req.current_menu_item_ids {
-                if let Some(kind) = kind_by_menu.get(menu_id).copied() {
-                    if seen.insert(kind) {
+                if let Some(kind) = kind_by_menu.get(menu_id).copied()
+                    && seen.insert(kind) {
                         desired_kinds.push(kind);
                     }
-                }
             }
         }
 
@@ -2968,8 +2964,8 @@ impl BackendService {
         }
 
         // Detect audio files present on USB that are not indexed in either PDB or eDB content rows.
-        if let Some(parsed) = parsed_pdb.as_ref() {
-            if any_audio_on_usb {
+        if let Some(parsed) = parsed_pdb.as_ref()
+            && any_audio_on_usb {
                 let mut indexed_paths = parsed
                     .tracks
                     .iter()
@@ -3018,7 +3014,6 @@ impl BackendService {
                     }
                 }
             }
-        }
 
         if !missing_audio_track_ids.is_empty() {
             if unindexed_audio_paths.is_empty() {
@@ -3067,9 +3062,9 @@ impl BackendService {
 
         if let Some(parsed) = parsed_pdb.as_ref() {
             let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
-            if !history_rows.is_empty() {
-                if let Some(conn) = open_edb_from_usb_root(&usb_root, &mut warnings) {
-                    if table_exists(&conn, "history") && table_exists(&conn, "history_content") {
+            if !history_rows.is_empty()
+                && let Some(conn) = open_edb_from_usb_root(&usb_root, &mut warnings)
+                    && table_exists(&conn, "history") && table_exists(&conn, "history_content") {
                         let current_history_count = conn
                             .query_row("SELECT COUNT(*) FROM history", [], |row| {
                                 row.get::<_, i64>(0)
@@ -3106,8 +3101,6 @@ impl BackendService {
                             });
                         }
                     }
-                }
-            }
         }
 
         let mut strict_upgrade_targets = HashSet::<String>::new();
@@ -3832,8 +3825,8 @@ impl BackendService {
                         });
                     // If matched via meta fallback, mark the PDB track's identity key
                     // as seen so it won't be re-added in the PDB-only pass.
-                    if let Some(pt) = pdb_track {
-                        if !pdb_track_by_key.contains_key(&ident) {
+                    if let Some(pt) = pdb_track
+                        && !pdb_track_by_key.contains_key(&ident) {
                             let pt_artist = parsed
                                 .artists
                                 .get(&pt.artist_id)
@@ -3847,7 +3840,6 @@ impl BackendService {
                             );
                             seen_identity_keys.insert(pt_ident);
                         }
-                    }
                     let track_id = if let Some(pt) = pdb_track {
                         pt.id
                     } else {
@@ -4152,14 +4144,13 @@ impl BackendService {
                 result.failed_playlists += 1;
             }
         }
-        if result.merged_playlists > 0 {
-            if let Err(err) = restore_pdb_playlist_sort_orders(usb_root, &desired_pdb_sort_by_id) {
+        if result.merged_playlists > 0
+            && let Err(err) = restore_pdb_playlist_sort_orders(usb_root, &desired_pdb_sort_by_id) {
                 warnings.push(format!(
                     "strict parity upgrade: PDB playlist order restore failed: {err}"
                 ));
                 result.failed_playlists += 1;
             }
-        }
 
         // Re-read written PDB identities so eDB uses the exact playlist id/sort
         // that ended up in the device-facing PDB after rewrite.
@@ -4254,14 +4245,13 @@ impl BackendService {
                 }
             }
         }
-        if result.merged_playlists > 0 {
-            if let Err(err) = sync_edb_playlist_sort_orders_from_pdb(usb_root, warnings) {
+        if result.merged_playlists > 0
+            && let Err(err) = sync_edb_playlist_sort_orders_from_pdb(usb_root, warnings) {
                 warnings.push(format!(
                     "strict parity upgrade: eDB playlist order sync failed: {err}"
                 ));
                 result.failed_playlists += 1;
             }
-        }
 
         Ok(result)
     }
@@ -4322,8 +4312,8 @@ impl BackendService {
             })?;
             for row in rows {
                 let (path, analysis_path) = row?;
-                if let (Some(p), Some(a)) = (path.as_deref(), analysis_path.as_deref()) {
-                    if let (Some(ra), Some(rp)) = (
+                if let (Some(p), Some(a)) = (path.as_deref(), analysis_path.as_deref())
+                    && let (Some(ra), Some(rp)) = (
                         resolve_usb_side_path(usb_root, a),
                         resolve_usb_side_path(usb_root, p),
                     ) {
@@ -4344,7 +4334,6 @@ impl BackendService {
                             .entry(canonicalize_playlist_name(&analysis_dir.to_string_lossy()))
                             .or_insert(target);
                     }
-                }
             }
         }
 

@@ -76,8 +76,8 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
 
     if before.len() < PAGE_SIZE
         || after.len() < PAGE_SIZE
-        || before.len() % PAGE_SIZE != 0
-        || after.len() % PAGE_SIZE != 0
+        || !before.len().is_multiple_of(PAGE_SIZE)
+        || !after.len().is_multiple_of(PAGE_SIZE)
     {
         return Err(BackendError::Validation(
             "PDB export blocked: non page-aligned PDB candidate".into(),
@@ -108,9 +108,8 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
         Some((_ec_before, _first_before, before_last)),
         Some((_ec_after, _first_after, after_last)),
     ) = (table_ptr_fields(before, 7), table_ptr_fields(after, 7))
-    {
-        if before_last != _first_before && before_last == after_last {
-            if let Some(last_off) = page_offset(before_last, PAGE_SIZE) {
+        && before_last != _first_before && before_last == after_last
+            && let Some(last_off) = page_offset(before_last, PAGE_SIZE) {
                 let before_next = before
                     .get(last_off + 0x0c..last_off + 0x10)
                     .and_then(|b| b.try_into().ok())
@@ -126,8 +125,6 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
                     ));
                 }
             }
-        }
-    }
 
     for &table_type in MENU_TABLES {
         let Some(before_ptr) = table_ptr_fields(before, table_type) else {
@@ -568,32 +565,29 @@ pub fn update_existing_content_row(
             params![track.exported_path, content_id],
         )?;
     }
-    if content_columns.contains("analysisDataFilePath") {
-        if track.waveform_path.is_some() {
+    if content_columns.contains("analysisDataFilePath")
+        && track.waveform_path.is_some() {
             tx.execute(
                 "UPDATE content SET analysisDataFilePath = ?1 WHERE content_id = ?2",
                 params![track.waveform_path, content_id],
             )?;
         }
-    }
-    if content_columns.contains("bpmx100") {
-        if let Some(bpm) = track.bpm {
+    if content_columns.contains("bpmx100")
+        && let Some(bpm) = track.bpm {
             let bpmx100 = (bpm * 100.0).round() as i64;
             tx.execute(
                 "UPDATE content SET bpmx100 = ?1 WHERE content_id = ?2",
                 params![bpmx100, content_id],
             )?;
         }
-    }
-    if content_columns.contains("length") {
-        if let Some(duration_ms) = track.duration_ms {
+    if content_columns.contains("length")
+        && let Some(duration_ms) = track.duration_ms {
             let length = duration_ms_to_seconds(duration_ms);
             tx.execute(
                 "UPDATE content SET length = ?1 WHERE content_id = ?2",
                 params![length, content_id],
             )?;
         }
-    }
     if content_columns.contains("artist_id_artist") {
         let artist_id = find_or_insert_artist(tx, &track.artist)?;
         tx.execute(
@@ -625,8 +619,8 @@ pub fn update_existing_content_row(
             params![key_id, content_id],
         )?;
     }
-    if content_columns.contains("image_id") || content_columns.contains("imageFilePath_id") {
-        if let Some(path) = track
+    if (content_columns.contains("image_id") || content_columns.contains("imageFilePath_id"))
+        && let Some(path) = track
             .artwork_path
             .as_deref()
             .filter(|path| !path.trim().is_empty())
@@ -645,7 +639,6 @@ pub fn update_existing_content_row(
                 )?;
             }
         }
-    }
     if content_columns.contains("fileName") {
         tx.execute(
             "UPDATE content SET fileName = ?1 WHERE content_id = ?2",
@@ -770,30 +763,27 @@ pub fn update_existing_content_row(
             params![analysed_bits, content_id],
         )?;
     }
-    if content_columns.contains("contentLink") {
-        if let Some(cl) = track.content_link {
+    if content_columns.contains("contentLink")
+        && let Some(cl) = track.content_link {
             tx.execute(
                 "UPDATE content SET contentLink = ?1 WHERE content_id = ?2",
                 params![cl, content_id],
             )?;
         }
-    }
-    if content_columns.contains("masterContentId") {
-        if let Some(mci) = track.master_content_id {
+    if content_columns.contains("masterContentId")
+        && let Some(mci) = track.master_content_id {
             tx.execute(
                 "UPDATE content SET masterContentId = ?1 WHERE content_id = ?2",
                 params![mci, content_id],
             )?;
         }
-    }
-    if content_columns.contains("masterDbId") {
-        if let Some(mdb) = track.master_db_id {
+    if content_columns.contains("masterDbId")
+        && let Some(mdb) = track.master_db_id {
             tx.execute(
                 "UPDATE content SET masterDbId = ?1 WHERE content_id = ?2",
                 params![mdb, content_id],
             )?;
         }
-    }
     if content_columns.contains("isHotCueAutoLoadOn") {
         tx.execute(
             "UPDATE content SET isHotCueAutoLoadOn = 1 WHERE content_id = ?1",
@@ -1318,8 +1308,8 @@ fn write_pdb_fresh_with_overrides(
         HashMap::<String, (Option<u32>, Option<u32>, Option<u32>, Option<u16>)>::new();
     {
         let mut unlock_warnings = Vec::<String>::new();
-        if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings) {
-            if table_exists(&conn, "content") {
+        if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings)
+            && table_exists(&conn, "content") {
                 let has_key_table = table_exists(&conn, "key");
                 let has_artist_table = table_exists(&conn, "artist");
                 let has_album_table = table_exists(&conn, "album");
@@ -1403,8 +1393,8 @@ fn write_pdb_fresh_with_overrides(
                     "#,
                 );
 
-                if let Ok(mut stmt) = conn.prepare(&sql) {
-                    if let Ok(rows) = stmt.query_map([], |row| {
+                if let Ok(mut stmt) = conn.prepare(&sql)
+                    && let Ok(rows) = stmt.query_map([], |row| {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, Option<String>>(1)?,
@@ -1422,21 +1412,18 @@ fn write_pdb_fresh_with_overrides(
                             if key.is_empty() {
                                 continue;
                             }
-                            if let Some(name) = row.1 {
-                                if !name.trim().is_empty() {
+                            if let Some(name) = row.1
+                                && !name.trim().is_empty() {
                                     edb_key_by_path.insert(key.clone(), name);
                                 }
-                            }
-                            if let Some(name) = row.2 {
-                                if !name.trim().is_empty() {
+                            if let Some(name) = row.2
+                                && !name.trim().is_empty() {
                                     edb_artist_by_path.insert(key.clone(), name);
                                 }
-                            }
-                            if let Some(name) = row.3 {
-                                if !name.trim().is_empty() {
+                            if let Some(name) = row.3
+                                && !name.trim().is_empty() {
                                     edb_album_by_path.insert(key.clone(), name);
                                 }
-                            }
                             if let Some(path) = row.4 {
                                 let normalized =
                                     repair_utf8_mojibake(path.trim()).replace('\\', "/");
@@ -1455,9 +1442,7 @@ fn write_pdb_fresh_with_overrides(
                             );
                         }
                     }
-                }
             }
-        }
     }
 
     // ── Process manifest tracks ─────────────────────────────────────────

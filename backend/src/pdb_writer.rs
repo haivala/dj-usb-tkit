@@ -855,7 +855,7 @@ pub(crate) fn write_pdb_with_warnings(data: &PdbData) -> BackendResult<(Vec<u8>,
 
             // Observed behavior: selected empty tables keep the redundant next pointer
             // at 0x2c synchronized to the blank-page index instead of 0x03FFFFFF.
-            if matches!(tp.table_type, 17 | 18 | 19) {
+            if matches!(tp.table_type, 17..=19) {
                 file[sentinel_off + 0x2c..sentinel_off + 0x30]
                     .copy_from_slice(&blank_page.to_le_bytes());
             }
@@ -1128,8 +1128,8 @@ pub(crate) fn remove_rows_inplace(
                     continue;
                 }
                 let row_data = &bytes[row_abs..payload_end.min(page_end)];
-                if let Some(id) = extract_row_id(row_data) {
-                    if ids_to_remove.contains(&id) {
+                if let Some(id) = extract_row_id(row_data)
+                    && ids_to_remove.contains(&id) {
                         new_rowpf &= !bit;
                         page_removed += 1;
                         // Track the absolute slot index of the highest removed row.
@@ -1137,7 +1137,6 @@ pub(crate) fn remove_rows_inplace(
                         highest_removed_slot =
                             Some(highest_removed_slot.map_or(abs_slot, |prev| prev.max(abs_slot)));
                     }
-                }
             }
 
             if new_rowpf != rowpf {
@@ -3110,32 +3109,25 @@ pub(crate) fn append_rows_to_chain_in_place(
     //            no longer the tail.
     if outcome.pages_appended > 0 {
         // Case 1: reused blank baseline page in this same call.
-        if let Some(base_idx) = reused_baseline_idx {
-            if let Some(base_off) = page_offset(base_idx, page_size) {
-                if bytes.get(base_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
+        if let Some(base_idx) = reused_baseline_idx
+            && let Some(base_off) = page_offset(base_idx, page_size)
+                && bytes.get(base_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
                     bytes[base_off + 0x1b] = PAGE_FLAGS_DATA;
                 }
-            }
-        }
         // Case 2: existing first data page that was single-page (ACTV) before this
         // call extended the chain with physical overflow pages.
-        if chain.len() == 2 {
-            if let Some(&first_data_idx) = chain.get(1) {
-                if let Some(fd_off) = page_offset(first_data_idx, page_size) {
-                    if bytes.get(fd_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
+        if chain.len() == 2
+            && let Some(&first_data_idx) = chain.get(1)
+                && let Some(fd_off) = page_offset(first_data_idx, page_size)
+                    && bytes.get(fd_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
                         bytes[fd_off + 0x1b] = PAGE_FLAGS_DATA;
                     }
-                }
-            }
-        }
         // Case 3: the previous tail of a multi-page chain is now an overflow page.
-        if chain.len() > 2 {
-            if let Some(old_tail_off) = page_offset(last, page_size) {
-                if bytes.get(old_tail_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
+        if chain.len() > 2
+            && let Some(old_tail_off) = page_offset(last, page_size)
+                && bytes.get(old_tail_off + 0x1b).copied() == Some(PAGE_FLAGS_DATA_TRACK) {
                     bytes[old_tail_off + 0x1b] = PAGE_FLAGS_DATA;
                 }
-            }
-        }
     }
 
     // Finalize the table pointer at the file header. `first` is unchanged
@@ -3153,11 +3145,10 @@ pub(crate) fn append_rows_to_chain_in_place(
     };
     outcome.new_empty_candidate = new_ec;
 
-    if chain_grew {
-        if let Some(last_off) = page_offset(new_last, page_size) {
+    if chain_grew
+        && let Some(last_off) = page_offset(new_last, page_size) {
             let _ = write_u32_le_at(bytes, last_off + 0x0c, new_ec);
         }
-    }
 
     if !set_table_ptr_fields(bytes, table_type, new_ec, first, new_last) {
         return Err(BackendError::Validation(format!(
@@ -4110,7 +4101,7 @@ pub(crate) fn patch_playlist_tree_sort_orders_in_place(
     if patches.is_empty() {
         return Ok(0);
     }
-    if page_size != PAGE_SIZE || bytes.len() < page_size || bytes.len() % page_size != 0 {
+    if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
         return Err(BackendError::Validation(
             "PDB additive playlist-tree sort patch blocked: invalid page alignment".to_string(),
         ));
@@ -4208,7 +4199,7 @@ pub(crate) fn mutate_tracks_in_place(
     if mutations.is_empty() {
         return Ok(0);
     }
-    if page_size != PAGE_SIZE || bytes.len() < page_size || bytes.len() % page_size != 0 {
+    if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
         return Err(BackendError::Validation(
             "PDB additive track mutation blocked: invalid page alignment".to_string(),
         ));
@@ -6670,11 +6661,10 @@ fn parse_t08_entries_from_page(page: &[u8], page_index: u32, len_page: usize) ->
             if off >= payload.len() {
                 break;
             }
-            if let Some(prev) = prev_off {
-                if off < prev {
+            if let Some(prev) = prev_off
+                && off < prev {
                     break; // offsets must be non-decreasing
                 }
-            }
             prev_off = Some(off);
             row_offsets.push(off);
         }
@@ -6865,7 +6855,7 @@ fn try_activate_t08_latent_slots_in_place(
     // row groups when present (stale-slot reuse behavior).
     for (k, row) in rows.iter().enumerate() {
         let slot = current + k;
-        if slot % 16 == 0 {
+        if slot.is_multiple_of(16) {
             if m < 4 {
                 return false;
             }
@@ -7300,7 +7290,7 @@ pub fn try_patch_t08_with_multi_page_growth(
         let pages_remaining = data_pages.len() - i;
         let rows_remaining = total_desired.saturating_sub(row_cursor);
         let rows_for_this_page = if rows_remaining <= pages_remaining * max_rows_per_page {
-            (rows_remaining + pages_remaining - 1) / pages_remaining
+            rows_remaining.div_ceil(pages_remaining)
         } else {
             max_rows_per_page
         };
@@ -7367,7 +7357,7 @@ pub fn try_patch_t08_with_multi_page_growth(
 }
 
 pub(crate) fn max_seqpage_in_file(bytes: &[u8], page_size: usize) -> u32 {
-    if bytes.len() < page_size || bytes.len() % page_size != 0 {
+    if bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
         return 0;
     }
     let max_page = (bytes.len() / page_size).saturating_sub(1) as u32;

@@ -168,11 +168,10 @@ pub fn remove_playlist_and_tracks_from_pdb(
         .collect();
     // Also protect tracks referenced by history entries
     for he in &parsed.history_entries {
-        if let Some(tid) = he.track_id {
-            if target_track_ids.contains(&tid) {
+        if let Some(tid) = he.track_id
+            && target_track_ids.contains(&tid) {
                 shared_track_ids.insert(tid);
             }
-        }
     }
     let exclusive_track_ids: HashSet<u32> = target_track_ids
         .difference(&shared_track_ids)
@@ -413,11 +412,10 @@ pub fn verify_pdb_content(
             .iter()
             .filter(|e| e.playlist_id == playlist_id)
         {
-            if let Some(path) = track_path_by_id.get(&entry.track_id) {
-                if expected_paths.contains(path) {
+            if let Some(path) = track_path_by_id.get(&entry.track_id)
+                && expected_paths.contains(path) {
                     matched.insert(path.clone());
                 }
-            }
         }
     }
 

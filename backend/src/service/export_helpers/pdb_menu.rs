@@ -207,7 +207,7 @@ pub fn encode_pdb_t16_row(id: u16, kind: u16, name: &str) -> Vec<u8> {
 /// accepted the result.
 pub fn load_pdb_t16_rows_from_bytes(bytes: &[u8]) -> Option<Vec<Vec<u8>>> {
     let page_size = 4096usize;
-    if bytes.len() < page_size || bytes.len() % page_size != 0 {
+    if bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
         return None;
     }
     let (_pages, rows) = load_pdb_t16_rows(bytes, page_size).ok()?;

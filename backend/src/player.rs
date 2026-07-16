@@ -27,6 +27,12 @@ pub struct PlaybackController {
     tx: mpsc::Sender<PlaybackCommand>,
 }
 
+impl Default for PlaybackController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlaybackController {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel::<PlaybackCommand>();
@@ -145,9 +151,9 @@ fn play_in_worker(
 ) -> BackendResult<PlaybackStatusData> {
     let normalized = normalize_and_validate_path(path)?;
     let same_track_loaded = state.path.as_deref() == Some(normalized.as_str());
-    if same_track_loaded {
-        if let Some(sink) = state.sink.as_ref() {
-            if !sink.empty() {
+    if same_track_loaded
+        && let Some(sink) = state.sink.as_ref()
+            && !sink.empty() {
                 let offset_ms =
                     compute_target_offset_ms(start_offset_ms, start_ratio, state.duration_ms);
                 if sink.try_seek(Duration::from_millis(offset_ms)).is_ok() {
@@ -157,8 +163,6 @@ fn play_in_worker(
                     return Ok(snapshot(state));
                 }
             }
-        }
-    }
 
     if state.stream.is_none() || state.stream_handle.is_none() {
         let (stream, stream_handle) = open_output_stream()?;
@@ -187,13 +191,13 @@ fn play_in_worker(
                 sink.append(decoder);
             }
             sink.play();
-            return Ok(load_playback_state(
+            Ok(load_playback_state(
                 state,
                 sink,
                 normalized,
                 offset_ms,
                 duration_ms,
-            ));
+            ))
         }
         Err(rodio_err) => {
             let decoded = match decode_audio_pcm_symphonia(&normalized) {
@@ -221,13 +225,13 @@ fn play_in_worker(
                 sink.append(src);
             }
             sink.play();
-            return Ok(load_playback_state(
+            Ok(load_playback_state(
                 state,
                 sink,
                 normalized,
                 offset_ms,
                 duration_ms,
-            ));
+            ))
         }
     }
 }
@@ -337,11 +341,10 @@ fn compute_target_offset_ms(
 ) -> u64 {
     let ratio = start_ratio.unwrap_or(0.0).clamp(0.0, 1.0);
     let mut offset_ms = start_offset_ms.unwrap_or(0);
-    if offset_ms == 0 {
-        if let Some(total_ms) = duration_ms {
+    if offset_ms == 0
+        && let Some(total_ms) = duration_ms {
             offset_ms = ((total_ms as f64) * ratio).round() as u64;
         }
-    }
     if let Some(total_ms) = duration_ms {
         offset_ms = offset_ms.min(total_ms);
     }

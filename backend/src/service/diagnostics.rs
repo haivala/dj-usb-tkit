@@ -685,14 +685,12 @@ impl BackendService {
                     &usb_root,
                     &mut menu_warnings,
                 )
-            {
-                if !divergence.is_empty() {
+                && !divergence.is_empty() {
                     raw_warnings.push(format!(
                         "PDB and eDB menus disagree ({} active menu items missing from PDB)",
                         divergence.in_edb_visible_only.len()
                     ));
                 }
-            }
             for warning in menu_warnings {
                 raw_warnings.push(warning);
             }

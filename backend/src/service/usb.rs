@@ -720,8 +720,8 @@ impl BackendService {
                 .join(USB_VENDOR_ROOT_DIR)
                 .join("rekordbox")
                 .join("export.pdb");
-            if pdb_path.is_file() {
-                if let Ok(parsed) = parse_pdb(&pdb_path) {
+            if pdb_path.is_file()
+                && let Ok(parsed) = parse_pdb(&pdb_path) {
                     for art_id in &exclusive_artwork_ids {
                         if let Some(art_path) = parsed.artworks.get(art_id) {
                             // Small artwork
@@ -735,7 +735,6 @@ impl BackendService {
                         }
                     }
                 }
-            }
         }
 
         let mut files_deleted = 0usize;
@@ -1152,7 +1151,7 @@ impl BackendService {
         let fingerprint =
             build_track_match_fingerprint(&track.title, &track.artist, track.album.as_deref());
         let track_number = track.track_number.map(|v| v.max(1));
-        let bpm = track.bpm.and_then(|v| if v > 0.0 { Some(v) } else { None });
+        let bpm = track.bpm.filter(|&v| v > 0.0);
         let key = track
             .key
             .as_deref()
@@ -1328,8 +1327,8 @@ impl BackendService {
             ));
         }
 
-        if let Some(index) = try_read_track_index_from_edb(&usb_root, &mut warnings) {
-            if let Some(mut track) = index.get(&track_id).cloned() {
+        if let Some(index) = try_read_track_index_from_edb(&usb_root, &mut warnings)
+            && let Some(mut track) = index.get(&track_id).cloned() {
                 let mut file_hint_match = true;
                 if !file_hint.is_empty() {
                     let candidate = normalize_text(&track.file_path);
@@ -1350,7 +1349,6 @@ impl BackendService {
                     });
                 }
             }
-        }
 
         Err(BackendError::Validation(format!(
             "trackId {track_id} not found on USB metadata sources"

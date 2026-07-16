@@ -251,7 +251,7 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
         }
 
         let table_type = read_u32_le_at(page, 0x08).unwrap_or(0);
-        if matches!(table_type, 16 | 17 | 18) {
+        if matches!(table_type, 16..=18) {
             continue;
         }
 
@@ -656,11 +656,10 @@ fn parse_page_rows(
             if off > payload.len() {
                 break;
             }
-            if let Some(prev) = prev_off {
-                if off < prev {
+            if let Some(prev) = prev_off
+                && off < prev {
                     break;
                 }
-            }
             prev_off = Some(off);
             row_offsets.push(off);
         }
@@ -1022,7 +1021,7 @@ fn decode_isrc_slot(row: &[u8], offset: usize) -> Option<String> {
     // ISRC is always ASCII. Reference exports and the writer use short-ASCII:
     // header = len*2+3 (always odd).
     // Even first byte (e.g. 0x90 empty-envelope from old buggy encoder) → treat as absent.
-    if first % 2 == 0 {
+    if first.is_multiple_of(2) {
         return None;
     }
     let len_chars = first.saturating_sub(3) / 2;
