@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Detect WAV files using the `WAVE_FORMAT_EXTENSIBLE` header, which some
+  Pioneer CDJs reject even when the underlying audio is otherwise within
+  spec. Flagged during library scan with a format-badge tooltip; when the
+  extensible header wraps plain PCM/IEEE-float data, export automatically
+  rewrites it to a standard header (lossless, no re-encoding) so the file
+  plays on CDJ hardware.
+
 ## 0.1.2
 
 - Fix CDJ hardware hangs on pathological Unicode metadata (long
