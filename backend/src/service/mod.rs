@@ -49,6 +49,7 @@ use crate::models::{
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
+use crate::wav_format::WavFormatIssue;
 
 const TRACK_QUERY_LIMIT_MAX: usize = 5000;
 const SETTING_EXPORT_OWNED_FILES_PREFIX: &str = "export_owned_files_v1";
@@ -73,7 +74,7 @@ const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
 const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm, tonality, file_path, \
     file_size_bytes, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, duration_ms, \
     artwork_path, waveform_peaks_path, bpm_analyzer, created_at, updated_at, \
-    COALESCE(master_db_source, 0) AS master_db_source";
+    COALESCE(master_db_source, 0) AS master_db_source, wav_extensible_kind";
 
 type ExistingTrackSnapshot = (
     String,
@@ -95,6 +96,7 @@ type ExistingTrackSnapshot = (
     Option<String>,
     Option<String>,
     Option<String>, // genre
+    Option<String>, // wav_extensible_kind
 );
 type ExistingTracksByPath = std::collections::HashMap<String, ExistingTrackSnapshot>;
 
@@ -293,7 +295,7 @@ impl BackendService {
         let mut existing_tracks = ExistingTracksByPath::new();
         {
             let mut stmt = tx.prepare(
-                "SELECT id, file_modified_at, title, artist, album, track_number, tonality, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date, genre, file_path FROM tracks",
+                "SELECT id, file_modified_at, title, artist, album, track_number, tonality, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date, genre, file_path, wav_extensible_kind FROM tracks",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
@@ -318,6 +320,7 @@ impl BackendService {
                         row.get::<_, Option<String>>(16)?,
                         row.get::<_, Option<String>>(17)?,
                         row.get::<_, Option<String>>(18)?, // genre
+                        row.get::<_, Option<String>>(20)?, // wav_extensible_kind
                     ),
                 ))
             })?;
@@ -341,6 +344,8 @@ impl BackendService {
                         &item.artist,
                         item.album.as_deref(),
                     );
+                    let wav_extensible_kind =
+                        item.wav_extensible_kind.map(WavFormatIssue::as_db_str);
                     tx.execute(
                         r#"
                         INSERT INTO tracks (
@@ -348,8 +353,8 @@ impl BackendService {
                           file_size_bytes, file_modified_at, format_ext, sample_rate_hz, bit_depth, bitrate_kbps,
                           disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date,
                           genre, duration_ms, artwork_path, waveform_peaks_path, match_fingerprint,
-                          created_at, updated_at
-                        ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, NULL, NULL, NULL, ?22, ?23, ?23)
+                          created_at, updated_at, wav_extensible_kind
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, NULL, NULL, NULL, ?22, ?23, ?23, ?24)
                         "#,
                         params![
                             id,
@@ -374,7 +379,8 @@ impl BackendService {
                             item.recorded_date,
                             item.genre,
                             fingerprint,
-                            now
+                            now,
+                            wav_extensible_kind
                         ],
                     )?;
                     indexed += 1;
@@ -399,7 +405,10 @@ impl BackendService {
                     old_release_date,
                     old_recorded_date,
                     old_genre,
+                    old_wav_extensible_kind,
                 )) => {
+                    let wav_extensible_kind =
+                        item.wav_extensible_kind.map(WavFormatIssue::as_db_str);
                     let tonality_changed = item.tonality.is_some() && old_tonality != item.tonality;
                     let metadata_changed = old_title != item.title
                         || old_artist != item.artist
@@ -417,7 +426,8 @@ impl BackendService {
                         || old_release_year != item.release_year
                         || old_release_date != item.release_date
                         || old_recorded_date != item.recorded_date
-                        || old_genre != item.genre;
+                        || old_genre != item.genre
+                        || old_wav_extensible_kind.as_deref() != wav_extensible_kind;
                     if old_modified != item.file_modified_at || metadata_changed {
                         let fingerprint = build_track_match_fingerprint(
                             &item.title,
@@ -447,7 +457,8 @@ impl BackendService {
                                 recorded_date = ?18,
                                 genre = ?19,
                                 match_fingerprint = ?20,
-                                updated_at = ?21
+                                updated_at = ?21,
+                                wav_extensible_kind = ?23
                             WHERE id = ?22
                             "#,
                             params![
@@ -472,7 +483,8 @@ impl BackendService {
                                 item.genre,
                                 fingerprint,
                                 now,
-                                id
+                                id,
+                                wav_extensible_kind
                             ],
                         )?;
                         updated += 1;
@@ -1060,6 +1072,9 @@ impl BackendService {
                         sample_rate_hz: scanned.sample_rate_hz,
                         bit_depth: scanned.bit_depth,
                         bitrate_kbps: scanned.bitrate_kbps,
+                        wav_extensible_kind: scanned
+                            .wav_extensible_kind
+                            .map(|kind| kind.as_db_str().to_string()),
                         duration_ms: None,
                         artwork_path: None,
                         artwork_data_url: None,
@@ -1493,7 +1508,8 @@ impl BackendService {
             r#"
             SELECT t.id, t.title, t.artist, t.album, t.track_number, t.bpm, t.tonality, t.file_path,
                    t.file_size_bytes, t.format_ext, t.sample_rate_hz, t.bit_depth, t.bitrate_kbps, t.duration_ms,
-                   t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at
+                   t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at,
+                   t.wav_extensible_kind
             FROM playlist_tracks pt
             JOIN tracks t ON t.id = pt.track_id
             WHERE pt.playlist_id = ?1
@@ -1819,6 +1835,9 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
         sample_rate_hz: row.get(10)?,
         bit_depth: row.get(11)?,
         bitrate_kbps: row.get(12)?,
+        // Looked up by name (not position) since callers select the tracks
+        // columns with varying shapes; some queries omit this column.
+        wav_extensible_kind: row.get("wav_extensible_kind").unwrap_or(None),
         duration_ms: row.get(13)?,
         artwork_path,
         artwork_data_url,

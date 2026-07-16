@@ -383,6 +383,181 @@ fn scan_library_detects_real_flac_wav_and_aif_fixtures() {
 }
 
 #[test]
+fn scan_library_detects_wav_extensible_kind_for_real_fixtures() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    copy_audio_fixture(&media, "formats/track_format_wav.wav", "Plain.wav");
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_wav_extensible.wav",
+        "Extensible Pcm.wav",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_wav_extensible_other.wav",
+        "Extensible Other.wav",
+    );
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let items = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+    assert_eq!(items.len(), 3);
+
+    let kind_for = |needle: &str| {
+        items
+            .iter()
+            .find(|t| t.file_path.contains(needle))
+            .unwrap_or_else(|| panic!("missing scanned track for {needle}"))
+            .wav_extensible_kind
+            .clone()
+    };
+    assert_eq!(kind_for("Plain.wav"), None);
+    assert_eq!(kind_for("Extensible Pcm.wav"), Some("extensible_pcm".to_string()));
+    assert_eq!(
+        kind_for("Extensible Other.wav"),
+        Some("extensible_other".to_string())
+    );
+}
+
+#[test]
+fn export_to_usb_normalizes_extensible_pcm_wav_and_leaves_extensible_other_untouched() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_wav_extensible.wav",
+        "Wav Extensible Artist - Extensible Pcm.wav",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_wav_extensible_other.wav",
+        "Wav Extensible Artist - Extensible Other.wav",
+    );
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let tracks = backend
+        .search_tracks(SearchTracksRequest {
+            query: "wav extensible".to_string(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+    assert_eq!(tracks.len(), 2, "expected both extensible wav fixtures");
+    let track_ids = tracks.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
+    seed_tracks_as_analyzed(&data_dir, &track_ids);
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Wav Extensible Export".to_string(),
+    });
+    assert!(created.ok, "create playlist failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+
+    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids,
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added.ok, "add tracks failed: {added:?}");
+
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+    assert_eq!(exported.data.expect("export data").exported_tracks, 2);
+
+    let conn = open_edb(
+        &usb.join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("exportLibrary.db"),
+    );
+    let mut stmt = conn
+        .prepare("SELECT path FROM content ORDER BY path")
+        .expect("prepare content path query");
+    let edb_paths = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query content paths")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect content paths");
+
+    let exported_pcm = edb_paths
+        .iter()
+        .find(|p| p.contains("Extensible Pcm"))
+        .map(|p| usb.join(p.trim_start_matches('/')))
+        .expect("exported extensible-pcm path");
+    let exported_other = edb_paths
+        .iter()
+        .find(|p| p.contains("Extensible Other"))
+        .map(|p| usb.join(p.trim_start_matches('/')))
+        .expect("exported extensible-other path");
+
+    // Extensible-PCM should be normalized: fmt chunk shrunk to standard 16
+    // bytes with format tag 1 (PCM), sample data preserved verbatim.
+    let pcm_bytes = fs::read(&exported_pcm).expect("read exported pcm wav");
+    let format_tag = u16::from_le_bytes(pcm_bytes[20..22].try_into().unwrap());
+    assert_eq!(format_tag, 1, "expected normalized PCM format tag");
+    let fmt_chunk_size = u32::from_le_bytes(pcm_bytes[16..20].try_into().unwrap());
+    assert_eq!(fmt_chunk_size, 16, "expected standard 16-byte fmt chunk");
+    let source_pcm_bytes =
+        fs::read(fixture_audio_path("formats/track_format_wav_extensible.wav")).unwrap();
+    assert!(
+        pcm_bytes.ends_with(&source_pcm_bytes[source_pcm_bytes.len() - 100..]),
+        "sample data tail must be preserved verbatim through normalization"
+    );
+
+    // Extensible-other has no safe subformat to convert to, so it must be
+    // exported byte-for-byte unchanged (still carrying the hard warning).
+    let other_bytes = fs::read(&exported_other).expect("read exported other wav");
+    let source_other_bytes =
+        fs::read(fixture_audio_path("formats/track_format_wav_extensible_other.wav")).unwrap();
+    assert_eq!(
+        other_bytes, source_other_bytes,
+        "extensible-other wav must be copied verbatim, not rewritten"
+    );
+}
+
+#[test]
 fn export_to_usb_preserves_flac_wav_and_aif_media_paths_in_edb_and_pdb() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");

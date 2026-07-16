@@ -10,6 +10,8 @@ After indexing, analysis runs in batches and progressively fills waveform, BPM, 
 
 If analysis encounters unsupported files or decode failures, the app reports command/job errors and continues processing the rest of the queue.
 
+Scanning also flags a WAV-specific hardware compatibility issue: some Pioneer CDJs reject WAV files whose `fmt ` chunk uses the `WAVE_FORMAT_EXTENSIBLE` tag, even when the wrapped audio (sample rate/bit depth) is otherwise within spec. `scan_library` detects this per-file (cheap header parse, no decode) and the UI shows it as a format-badge tooltip on the track row. When the extensible header wraps plain PCM/IEEE-float data, export automatically rewrites it to a standard header — see `docs/USB_EXPORT.md`. When it wraps some other subformat, it's shown as a hard warning instead, since there's nothing safe to rewrite.
+
 Analysis engine selection is user-controlled from Settings. The default engine is `stratum`. The optional `essentia` engine can be enabled after runtime assets are installed, and analysis requests then use the selected engine for BPM/key detection.
 
 ### Analysis engine matrix
@@ -105,6 +107,8 @@ Implementation anchors:
 - analysis progress type: `backend/src/service/analysis.rs:122`
 - batched analysis path: `backend/src/service/analysis.rs:439`
 - analysis command entry: `backend/src/service/analysis.rs:432`
+- WAV `fmt ` chunk parsing/classification: `backend/src/wav_format.rs`
+- scan-time WAV_EXTENSIBLE detection call site: `backend/src/scanner.rs` (`read_wav_extensible_kind`)
 
 ## Verification links
 

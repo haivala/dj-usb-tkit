@@ -110,6 +110,8 @@ If playlist tracks are missing required analysis, export is blocked and UI instr
 
 Analysis bundle handling is copy-only during export. Export requires the track to already have a `DAT/EXT/2EX` bundle and copies/reuses it even if the bundle is older or low-detail. Export does not decode source audio or regenerate ANLZ files; missing bundle files block export before media copy starts. See `docs/WAVEFORMS.md`.
 
+WAV media copy has one exception to plain byte-for-byte copying: if a source WAV's `fmt ` chunk uses `WAVE_FORMAT_EXTENSIBLE` and wraps plain PCM or IEEE-float data (flagged during scan — see `docs/LIBRARY_ANALYSIS.md`), export rewrites the header to a standard 16-byte PCM/float `fmt ` chunk before writing it to the USB drive, since some Pioneer CDJs reject the extensible form outright. This is a lossless, header-only rewrite: only the `fmt ` chunk bytes and the overall RIFF size are changed, sample data is streamed through unmodified. If the extensible header wraps some other subformat, there's nothing safe to rewrite and the file is copied unchanged (`copy_if_different`), keeping the hard warning from scan surfaced in the UI. See `backend/src/wav_format.rs` (`rewrite_extensible_to_pcm`) and `copy_wav_normalized_if_needed` in `export_paths.rs`.
+
 Current media-copy behavior is intentionally conservative: file copy/write steps
 are sequential per export operation. This keeps ordering deterministic and
 failure handling straightforward across USB devices.

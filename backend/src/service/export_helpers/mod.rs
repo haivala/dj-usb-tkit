@@ -26,11 +26,12 @@ pub use export_paths::canonical_artwork_target_path;
 pub use export_paths::{
     CONTENT_FILENAME_MAX_LEN, PruneResult, analysis_bundle_path_variants,
     canonical_analysis_bundle_paths, canonical_artwork_target_paths, collect_manifest_owned_paths,
-    copy_if_different, ensure_analysis_bundle_ppth, export_analysis_bundle_for_track,
-    export_artwork_for_player, export_owned_files_setting_key, exported_media_target_path,
-    filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path, limit_contents_file_name,
-    normalize_owned_export_path, prune_stale_export_owned_files, sanitize_contents_component,
-    sanitize_filename_component, stable_u32_hash, to_usb_relative_path, truncate_component,
+    copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
+    export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
+    exported_media_target_path, filter_prunable_stale_paths_for_playlist,
+    is_safe_export_owned_path, limit_contents_file_name, normalize_owned_export_path,
+    prune_stale_export_owned_files, sanitize_contents_component, sanitize_filename_component,
+    stable_u32_hash, to_usb_relative_path, truncate_component,
 };
 pub use pdb_encoding::{
     PdbLayoutProfile, encode_album_row, encode_artist_row, encode_artwork_row, encode_key_row,
@@ -3406,6 +3407,119 @@ mod tests {
 
         let result = copy_if_different(&src, &dst);
         assert!(result.is_err());
+    }
+
+    // --- copy_wav_normalized_if_needed ---
+
+    fn wav_with_extensible_fmt(sub_format_tag: u16, data: &[u8]) -> Vec<u8> {
+        let mut fmt = Vec::new();
+        fmt.extend_from_slice(&0xFFFEu16.to_le_bytes()); // WAVE_FORMAT_EXTENSIBLE
+        fmt.extend_from_slice(&1u16.to_le_bytes()); // mono
+        fmt.extend_from_slice(&44_100u32.to_le_bytes());
+        fmt.extend_from_slice(&(44_100u32 * 2).to_le_bytes()); // byte rate
+        fmt.extend_from_slice(&2u16.to_le_bytes()); // block align
+        fmt.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        fmt.extend_from_slice(&22u16.to_le_bytes()); // cbSize
+        fmt.extend_from_slice(&16u16.to_le_bytes()); // validBitsPerSample
+        fmt.extend_from_slice(&0x4u32.to_le_bytes()); // channel mask
+        fmt.extend_from_slice(&sub_format_tag.to_le_bytes());
+        fmt.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x10, 0x00]);
+        fmt.extend_from_slice(&[0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71]);
+
+        let mut body = Vec::new();
+        body.extend_from_slice(b"WAVE");
+        body.extend_from_slice(b"fmt ");
+        body.extend_from_slice(&(fmt.len() as u32).to_le_bytes());
+        body.extend_from_slice(&fmt);
+        body.extend_from_slice(b"data");
+        body.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        body.extend_from_slice(data);
+
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        out.extend_from_slice(&body);
+        out
+    }
+
+    #[test]
+    fn copy_wav_normalized_if_needed_rewrites_extensible_pcm() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("source.wav");
+        let data = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
+        fs::write(&src, wav_with_extensible_fmt(1, &data)).unwrap();
+        let dst = dir.path().join("sub/target.wav");
+
+        copy_wav_normalized_if_needed(&src, &dst).unwrap();
+
+        let out = fs::read(&dst).unwrap();
+        let format_tag = u16::from_le_bytes(out[20..22].try_into().unwrap());
+        assert_eq!(format_tag, 1, "should be normalized to plain PCM");
+        assert!(out.ends_with(&data), "sample data must be preserved verbatim");
+    }
+
+    #[test]
+    fn copy_wav_normalized_if_needed_skips_rewrite_when_target_up_to_date() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("source.wav");
+        fs::write(&src, wav_with_extensible_fmt(1, &[0u8; 20])).unwrap();
+        let dst = dir.path().join("target.wav");
+
+        copy_wav_normalized_if_needed(&src, &dst).unwrap();
+        let first_write = fs::metadata(&dst).unwrap().modified().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        copy_wav_normalized_if_needed(&src, &dst).unwrap();
+        let second_write = fs::metadata(&dst).unwrap().modified().unwrap();
+
+        assert_eq!(first_write, second_write, "up-to-date target should not be rewritten");
+    }
+
+    #[test]
+    fn copy_wav_normalized_if_needed_falls_back_for_non_extensible_wav() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("source.wav");
+        // Plain PCM (format tag 1), not extensible - should behave like copy_if_different.
+        let mut fmt = Vec::new();
+        fmt.extend_from_slice(&1u16.to_le_bytes());
+        fmt.extend_from_slice(&1u16.to_le_bytes());
+        fmt.extend_from_slice(&44_100u32.to_le_bytes());
+        fmt.extend_from_slice(&(44_100u32 * 2).to_le_bytes());
+        fmt.extend_from_slice(&2u16.to_le_bytes());
+        fmt.extend_from_slice(&16u16.to_le_bytes());
+        let mut body = Vec::new();
+        body.extend_from_slice(b"WAVE");
+        body.extend_from_slice(b"fmt ");
+        body.extend_from_slice(&(fmt.len() as u32).to_le_bytes());
+        body.extend_from_slice(&fmt);
+        body.extend_from_slice(b"data");
+        body.extend_from_slice(&8u32.to_le_bytes());
+        body.extend_from_slice(&[0u8; 8]);
+        let mut plain = Vec::new();
+        plain.extend_from_slice(b"RIFF");
+        plain.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        plain.extend_from_slice(&body);
+        fs::write(&src, &plain).unwrap();
+        let dst = dir.path().join("target.wav");
+
+        copy_wav_normalized_if_needed(&src, &dst).unwrap();
+        assert_eq!(fs::read(&dst).unwrap(), plain, "non-extensible WAV copied as-is");
+    }
+
+    #[test]
+    fn copy_wav_normalized_if_needed_falls_back_for_extensible_other_subformat() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("source.wav");
+        let source_bytes = wav_with_extensible_fmt(0x0006, &[0u8; 20]);
+        fs::write(&src, &source_bytes).unwrap();
+        let dst = dir.path().join("target.wav");
+
+        copy_wav_normalized_if_needed(&src, &dst).unwrap();
+        assert_eq!(
+            fs::read(&dst).unwrap(),
+            source_bytes,
+            "extensible-other WAV is not safe to rewrite, so it's copied verbatim"
+        );
     }
 
     #[test]

@@ -24,6 +24,7 @@ fn db_migration_is_idempotent_and_adds_expected_columns() {
     assert!(has_column(&conn, "tracks", "sample_rate_hz"));
     assert!(has_column(&conn, "tracks", "bit_depth"));
     assert!(has_column(&conn, "tracks", "bitrate_kbps"));
+    assert!(has_column(&conn, "tracks", "wav_extensible_kind"));
     assert!(has_column(&conn, "playlists", "last_exported_at"));
     assert!(has_column(&conn, "playlists", "last_exported_usb_root"));
     assert!(has_column(&conn, "playlists", "last_exported_track_count"));

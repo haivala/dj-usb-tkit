@@ -163,6 +163,7 @@ impl Db {
         ensure_tracks_column(&conn, "first_beat_ms", "INTEGER")?;
         ensure_tracks_column(&conn, "genre", "TEXT")?;
         ensure_tracks_column(&conn, "master_db_source", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_tracks_column(&conn, "wav_extensible_kind", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_at", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_usb_root", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_track_count", "INTEGER")?;
@@ -204,6 +205,7 @@ const ALLOWED_TRACK_COLUMNS: &[&str] = &[
     "first_beat_ms",
     "genre",
     "master_db_source",
+    "wav_extensible_kind",
 ];
 const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[
     "last_exported_at",

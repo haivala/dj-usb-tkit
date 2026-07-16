@@ -88,6 +88,7 @@ pub struct Track {
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u8>,
     pub bitrate_kbps: Option<u32>,
+    pub wav_extensible_kind: Option<String>,
     pub duration_ms: Option<u64>,
     pub artwork_path: Option<String>,
     pub artwork_data_url: Option<String>,

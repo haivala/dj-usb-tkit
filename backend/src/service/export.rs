@@ -12,11 +12,11 @@ use crate::models::{ExportToUsbData, ExportToUsbRequest, WarningEntry};
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
     WriteExportLibraryDbResult, WriteExportPdbResult, collect_manifest_owned_paths,
-    copy_if_different, ensure_analysis_bundle_ppth, export_analysis_bundle_for_track,
-    export_artwork_for_player, export_owned_files_setting_key, exported_media_target_path,
-    filter_prunable_stale_paths_for_playlist, preview_pdb, prune_stale_export_owned_files,
-    stable_u32_hash, to_usb_relative_path, verify_edb_content, verify_pdb_content,
-    write_edb_playlist, write_pdb,
+    copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
+    export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
+    exported_media_target_path, filter_prunable_stale_paths_for_playlist, preview_pdb,
+    prune_stale_export_owned_files, stable_u32_hash, to_usb_relative_path, verify_edb_content,
+    verify_pdb_content, write_edb_playlist, write_pdb,
 };
 use super::export_log::append_export_log_record;
 use super::usb_utils::{
@@ -450,7 +450,11 @@ impl BackendService {
                     .filter(|rel| rel.starts_with("/Contents/"));
             let owns_exported_media = existing_exported_path.is_none();
             if !export_dry_run && owns_exported_media {
-                copy_if_different(&source, &target)?;
+                if extension == "wav" || extension == "wave" {
+                    copy_wav_normalized_if_needed(&source, &target)?;
+                } else {
+                    copy_if_different(&source, &target)?;
+                }
             }
             exported_tracks += 1;
 

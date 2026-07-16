@@ -249,3 +249,75 @@ test("renderTrackTable empty row keeps a single full-width cell regardless of ch
   const cellsB = (withoutCheckbox.innerHTML.match(/role="cell"/g) || []).length;
   assert.equal(cellsB, 1);
 });
+
+function renderFormatBadgeRow(track) {
+  return createTrackRow(
+    {
+      id: "t-format",
+      title: "Title",
+      artist: "Artist",
+      album: "Album",
+      bpm: "",
+      key: "",
+      waveformPreview: [],
+      waveformPeaksPath: "",
+      usbAnalysisPath: "",
+      ...track
+    },
+    {
+      origin: "usb",
+      index: 0,
+      withCheckbox: false,
+      actionLabel: "+",
+      actionType: "add-usb",
+      compactAddButton: true,
+      enableAnalyzeActions: false
+    },
+    {
+      state: {},
+      buildCoverSrcCandidates: () => [],
+      isTrackCurrentlyPlaying: () => false,
+      escapeHtml,
+      trackHasCoreAnalysis: () => false,
+      getKeyHue: () => 0
+    }
+  );
+}
+
+test("createTrackRow shows an autofix badge for WAVE_FORMAT_EXTENSIBLE PCM wav tracks", () => {
+  const html = renderFormatBadgeRow({
+    filePath: "/media/track.wav",
+    formatExt: "wav",
+    wavExtensibleKind: "extensible_pcm"
+  });
+
+  assert.ok(html.includes('class="format-badge autofix"'));
+  assert.ok(!html.includes('class="format-badge warn"'));
+  assert.ok(html.includes("Will be automatically converted to standard PCM on export"));
+});
+
+test("createTrackRow keeps a hard warning badge for extensible wav with an unsafe subformat", () => {
+  const html = renderFormatBadgeRow({
+    filePath: "/media/track.wav",
+    formatExt: "wav",
+    wavExtensibleKind: "extensible_other"
+  });
+
+  assert.ok(html.includes('class="format-badge warn"'));
+  assert.ok(!html.includes('class="format-badge autofix"'));
+  assert.ok(html.includes("cannot be safely converted"));
+});
+
+test("createTrackRow shows a plain badge for a wav with no extensible header issue", () => {
+  const html = renderFormatBadgeRow({
+    filePath: "/media/track.wav",
+    formatExt: "wav",
+    wavExtensibleKind: null,
+    sampleRateHz: 44100,
+    bitDepth: 16
+  });
+
+  assert.ok(html.includes('class="format-badge">WAV</span>'));
+  assert.ok(!html.includes('class="format-badge warn"'));
+  assert.ok(!html.includes('class="format-badge autofix"'));
+});

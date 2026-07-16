@@ -149,6 +149,7 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     sampleRateHz: toFiniteOrNull(track?.sampleRateHz ?? track?.sample_rate_hz),
     bitDepth: toFiniteOrNull(track?.bitDepth ?? track?.bit_depth),
     bitrateKbps: toFiniteOrNull(track?.bitrateKbps ?? track?.bitrate_kbps),
+    wavExtensibleKind: track?.wavExtensibleKind ?? track?.wav_extensible_kind ?? null,
     waveformPreview,
     waveformColorData: Array.isArray(track?.waveformColorData) ? track.waveformColorData : null,
     createdAt: track?.createdAt || track?.created_at || "",

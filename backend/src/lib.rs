@@ -13,6 +13,7 @@ pub mod service;
 pub mod shape_compare;
 pub mod usb_formats;
 pub mod utils;
+pub mod wav_format;
 
 #[cfg(feature = "tauri")]
 pub mod tauri_commands;

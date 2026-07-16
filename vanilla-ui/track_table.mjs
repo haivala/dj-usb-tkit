@@ -76,7 +76,9 @@ export function createTrackRow(track, options, deps) {
     : "-";
   const formatInfo = describeTrackFormat(track);
   const formatCell = formatInfo.warning
-    ? `<div role="cell" class="track-grid-cell td-format"><span class="format-badge warn" title="${escapeHtml(formatInfo.warning)}">${escapeHtml(formatInfo.label)} ⚠</span></div>`
+    ? (formatInfo.kind === "autofix"
+      ? `<div role="cell" class="track-grid-cell td-format"><span class="format-badge autofix" title="${escapeHtml(formatInfo.warning)}">${escapeHtml(formatInfo.label)} ⟳</span></div>`
+      : `<div role="cell" class="track-grid-cell td-format"><span class="format-badge warn" title="${escapeHtml(formatInfo.warning)}">${escapeHtml(formatInfo.label)} ⚠</span></div>`)
     : `<div role="cell" class="track-grid-cell td-format"><span class="format-badge">${escapeHtml(formatInfo.label)}</span></div>`;
   const durationCell = `<div role="cell" class="track-grid-cell td-length">${escapeHtml(formatTrackDuration(track))}</div>`;
 
@@ -176,12 +178,31 @@ function describeTrackFormat(track) {
     return match ? String(match[1] || "").toLowerCase() : "";
   })();
   const ext = direct || inferred;
+  const label = ext ? ext.toUpperCase() : "Unknown";
+
+  if (ext === "wav") {
+    const wavExtensibleKind = track?.wavExtensibleKind || null;
+    if (wavExtensibleKind === "extensible_pcm") {
+      return {
+        label,
+        kind: "autofix",
+        warning: "Uses an extended WAV header (WAVE_FORMAT_EXTENSIBLE) that some CDJs reject. Will be automatically converted to standard PCM on export.",
+      };
+    }
+    if (wavExtensibleKind === "extensible_other") {
+      return {
+        label,
+        kind: "warn",
+        warning: "Uses an extended WAV header with a non-standard subformat - cannot be safely converted and may not play on CDJ hardware.",
+      };
+    }
+  }
+
   const sampleRate = Number(track?.sampleRateHz || 0) || null;
   const bitDepth = Number(track?.bitDepth || 0) || null;
   const bitrate = Number(track?.bitrateKbps || 0) || null;
-  const label = ext ? ext.toUpperCase() : "Unknown";
   const warning = validateFormatCompatibility(ext, sampleRate, bitDepth, bitrate);
-  return { label, warning };
+  return { label, kind: warning ? "warn" : null, warning };
 }
 
 function validateFormatCompatibility(ext, sampleRate, bitDepth, bitrate) {

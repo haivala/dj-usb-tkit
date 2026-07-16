@@ -1586,6 +1586,12 @@ input[type="checkbox"] {
   border-color: #f1b55a;
 }
 
+.format-badge.autofix {
+  background: #cfe8ff;
+  color: #0b4f8a;
+  border-color: #7bb8ec;
+}
+
 /* ── lists (USB/History sidebar) ────────────────────── */
 
 .list {

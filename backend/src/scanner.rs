@@ -9,6 +9,7 @@ use lofty::tag::{ItemKey, Tag};
 use walkdir::WalkDir;
 
 use crate::error::{BackendError, BackendResult};
+use crate::wav_format::{WavFormatIssue, detect_wav_format_issue};
 
 const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "aif", "aiff", "wav", "aac", "m4a", "ogg", "opus", "mp4", "m4p",
@@ -49,6 +50,7 @@ pub struct ScannedTrack {
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u8>,
     pub bitrate_kbps: Option<u32>,
+    pub wav_extensible_kind: Option<WavFormatIssue>,
     pub disc_number: Option<u32>,
     pub subtitle: Option<String>,
     pub comment: Option<String>,
@@ -86,6 +88,7 @@ pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTra
             let metadata = read_file_metadata(path)?;
             let meta = read_embedded_metadata(path);
             let (sample_rate_hz, bit_depth, bitrate_kbps) = read_audio_technical_metadata(path);
+            let wav_extensible_kind = read_wav_extensible_kind(path);
             let (fallback_artist, fallback_title) = infer_artist_title(path);
             let fallback_album = infer_album_from_path(path);
             let fallback_track_number = infer_track_number_from_name(
@@ -115,6 +118,7 @@ pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTra
                 sample_rate_hz,
                 bit_depth,
                 bitrate_kbps,
+                wav_extensible_kind,
                 disc_number: meta.disc_number,
                 subtitle: meta.subtitle,
                 comment: meta.comment,
@@ -140,6 +144,20 @@ fn read_audio_technical_metadata(path: &Path) -> (Option<u32>, Option<u8>, Optio
     let bit_depth = props.bit_depth();
     let bitrate_kbps = props.audio_bitrate();
     (sample_rate_hz, bit_depth, bitrate_kbps)
+}
+
+/// Detects a WAVE_FORMAT_EXTENSIBLE issue for `.wav`/`.wave` files only -
+/// `lofty`'s properties don't expose the raw format tag, so this parses the
+/// RIFF `fmt ` chunk directly. Other formats don't have this issue.
+fn read_wav_extensible_kind(path: &Path) -> Option<WavFormatIssue> {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())?;
+    if ext != "wav" && ext != "wave" {
+        return None;
+    }
+    detect_wav_format_issue(path)
 }
 
 pub fn unique_paths(tracks: &[ScannedTrack]) -> HashSet<&str> {
@@ -564,6 +582,74 @@ mod tests {
         out
     }
 
+    fn make_minimal_wav_extensible(sub_format_tag: u16) -> Vec<u8> {
+        let sample_rate: u32 = 44_100;
+        let num_samples: u32 = 4_410; // ~100ms
+        let data_len = num_samples * 2; // 16-bit mono
+        let fmt_len: u32 = 40;
+        let riff_len = 12 + 8 + fmt_len + 8 + data_len - 8;
+        let mut out = Vec::with_capacity(12 + 8 + fmt_len as usize + 8 + data_len as usize);
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&riff_len.to_le_bytes());
+        out.extend_from_slice(b"WAVE");
+        out.extend_from_slice(b"fmt ");
+        out.extend_from_slice(&fmt_len.to_le_bytes());
+        out.extend_from_slice(&0xFFFEu16.to_le_bytes()); // WAVE_FORMAT_EXTENSIBLE
+        out.extend_from_slice(&1u16.to_le_bytes()); // mono
+        out.extend_from_slice(&sample_rate.to_le_bytes());
+        out.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
+        out.extend_from_slice(&2u16.to_le_bytes()); // block align
+        out.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        out.extend_from_slice(&22u16.to_le_bytes()); // cbSize
+        out.extend_from_slice(&16u16.to_le_bytes()); // validBitsPerSample
+        out.extend_from_slice(&0x4u32.to_le_bytes()); // channel mask (front center)
+        // SubFormat GUID: sub_format_tag as Data1's low word, then the
+        // standard KSDATAFORMAT tail (...-0000-0010-8000-00AA00389B71).
+        out.extend_from_slice(&sub_format_tag.to_le_bytes());
+        out.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x10, 0x00]);
+        out.extend_from_slice(&[0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71]);
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&data_len.to_le_bytes());
+        out.resize(out.len() + data_len as usize, 0); // silence
+        out
+    }
+
+    #[test]
+    fn scan_detects_wav_extensible_kind() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("plain.wav"), make_minimal_wav()).unwrap();
+        fs::write(
+            dir.path().join("extensible_pcm.wav"),
+            make_minimal_wav_extensible(1),
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("extensible_other.wav"),
+            make_minimal_wav_extensible(0x0006),
+        )
+        .unwrap();
+
+        let result = scan_audio_files(&[dir.path().to_string_lossy().to_string()]).unwrap();
+        assert_eq!(result.len(), 3);
+
+        let by_name = |name: &str| {
+            result
+                .iter()
+                .find(|t| t.path.ends_with(name))
+                .unwrap_or_else(|| panic!("missing scanned track {name}"))
+        };
+
+        assert_eq!(by_name("plain.wav").wav_extensible_kind, None);
+        assert_eq!(
+            by_name("extensible_pcm.wav").wav_extensible_kind,
+            Some(WavFormatIssue::ExtensiblePcm)
+        );
+        assert_eq!(
+            by_name("extensible_other.wav").wav_extensible_kind,
+            Some(WavFormatIssue::ExtensibleOther)
+        );
+    }
+
     #[test]
     fn scan_finds_audio_and_infers_metadata() {
         let dir = tempdir().unwrap();
@@ -603,6 +689,7 @@ mod tests {
                 sample_rate_hz: None,
                 bit_depth: None,
                 bitrate_kbps: None,
+                wav_extensible_kind: None,
                 disc_number: None,
                 subtitle: None,
                 comment: None,
@@ -625,6 +712,7 @@ mod tests {
                 sample_rate_hz: None,
                 bit_depth: None,
                 bitrate_kbps: None,
+                wav_extensible_kind: None,
                 disc_number: None,
                 subtitle: None,
                 comment: None,
@@ -647,6 +735,7 @@ mod tests {
                 sample_rate_hz: None,
                 bit_depth: None,
                 bitrate_kbps: None,
+                wav_extensible_kind: None,
                 disc_number: None,
                 subtitle: None,
                 comment: None,

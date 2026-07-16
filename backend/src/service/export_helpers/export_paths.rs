@@ -125,6 +125,43 @@ pub fn copy_if_different(source: &Path, target: &Path) -> BackendResult<()> {
     Ok(())
 }
 
+/// Copies a WAV file to `target`, normalizing a WAVE_FORMAT_EXTENSIBLE header
+/// to standard PCM/IEEE-float first if needed - some Pioneer CDJs reject
+/// WAVE_FORMAT_EXTENSIBLE WAVs outright. The rewrite only touches the `fmt `
+/// chunk (see `wav_format::rewrite_extensible_to_pcm`), so sample data is
+/// never re-encoded. Falls back to a plain `copy_if_different` for anything
+/// that isn't a safely-convertible extensible WAV (unreadable header, or an
+/// extensible subformat other than PCM/float, which stays a hard warning).
+pub fn copy_wav_normalized_if_needed(source: &Path, target: &Path) -> BackendResult<()> {
+    let info = match crate::wav_format::parse_wav_fmt(source)? {
+        Some(info) => info,
+        None => return copy_if_different(source, target),
+    };
+    if crate::wav_format::classify(&info) != Some(crate::wav_format::WavFormatIssue::ExtensiblePcm) {
+        return copy_if_different(source, target);
+    }
+
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // The rewrite shrinks the fmt chunk to a standard 16-byte body; use that
+    // to compute the expected output size and skip re-writing an up-to-date
+    // target, mirroring copy_if_different's skip-if-same-size check.
+    let old_fmt_chunk_len = 8 + u64::from(info.fmt_chunk_size) + u64::from(info.fmt_chunk_size % 2);
+    let new_fmt_chunk_len = 8 + 16u64;
+    let delta = old_fmt_chunk_len.saturating_sub(new_fmt_chunk_len);
+    let expected_len = std::fs::metadata(source)?.len().saturating_sub(delta);
+    let should_write = match std::fs::metadata(target) {
+        Ok(dst) => dst.len() != expected_len,
+        Err(_) => true,
+    };
+    if should_write {
+        crate::wav_format::rewrite_extensible_to_pcm(source, target)?;
+    }
+    Ok(())
+}
+
 pub fn stable_u32_hash(input: &str) -> u32 {
     let mut hash: u32 = 0x811C9DC5;
     for byte in input.as_bytes() {
