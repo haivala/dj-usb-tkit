@@ -55,13 +55,11 @@ fn normalize_selected_path(value: &str) -> Option<PathBuf> {
     if trimmed.is_empty() {
         return None;
     }
-    if let Ok(url) = url::Url::parse(trimmed) {
-        if url.scheme() == "file" {
-            if let Ok(path) = url.to_file_path() {
+    if let Ok(url) = url::Url::parse(trimmed)
+        && url.scheme() == "file"
+            && let Ok(path) = url.to_file_path() {
                 return Some(path);
             }
-        }
-    }
     Some(PathBuf::from(trimmed))
 }
 
@@ -131,11 +129,10 @@ async fn pick_usb_folder(app: tauri::AppHandle) -> Result<Option<String>, String
         FilePath::Url(url) => url.to_string(),
     });
 
-    if let Some(ref selected_path) = path {
-        if let Some(pb) = normalize_selected_path(selected_path) {
+    if let Some(ref selected_path) = path
+        && let Some(pb) = normalize_selected_path(selected_path) {
             let _ = allow_asset_scope_path(&app, &pb);
         }
-    }
 
     Ok(path)
 }
@@ -327,9 +324,9 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
         }
 
         // Fall back to system PATH if no bundled node was found.
-        if resolved_node.is_none() {
-            if let Ok(output) = std::process::Command::new("which").arg("node").output() {
-                if output.status.success() {
+        if resolved_node.is_none()
+            && let Ok(output) = std::process::Command::new("which").arg("node").output()
+                && output.status.success() {
                     let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if !path_str.is_empty() {
                         let path = PathBuf::from(&path_str);
@@ -338,8 +335,6 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
                         }
                     }
                 }
-            }
-        }
     }
 
     let mut resolved_runner = std::env::var_os("DJTKIT_ESSENTIA_RUNNER")
@@ -374,8 +369,8 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
 
     let mut resolved_modules = std::env::var_os("DJTKIT_ESSENTIA_NODE_MODULES")
         .map(|v| PathBuf::from(v.to_string_lossy().to_string()));
-    if resolved_modules.is_none() {
-        if let Ok(app_data) = _app.path().app_data_dir() {
+    if resolved_modules.is_none()
+        && let Ok(app_data) = _app.path().app_data_dir() {
             let modules_dir = app_data.join("essentia").join("node_modules");
             if modules_dir.join("essentia.js").is_dir() {
                 // SAFETY: set once at startup before backend worker threads are spawned.
@@ -388,7 +383,6 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
                 resolved_modules = Some(modules_dir);
             }
         }
-    }
 
     emit_backend_log(
         _app,

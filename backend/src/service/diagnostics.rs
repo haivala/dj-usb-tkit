@@ -3076,6 +3076,12 @@ pub(crate) fn normalize_path_for_contents_match(value: &str) -> String {
     }
 }
 
+fn normalize_usb_path_for_parity(value: &str) -> String {
+    repair_utf8_mojibake(value.trim())
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -4264,10 +4270,4 @@ mod tests {
         let key = super::track_identity_key("", "", "", None);
         assert_eq!(key, "unknown");
     }
-}
-
-fn normalize_usb_path_for_parity(value: &str) -> String {
-    repair_utf8_mojibake(value.trim())
-        .replace('\\', "/")
-        .to_ascii_lowercase()
 }

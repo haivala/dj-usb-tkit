@@ -2044,6 +2044,35 @@ fn decode_track_page_cursor(
     Ok(Some(cursor))
 }
 
+impl BackendService {
+    fn backfill_track_fingerprints(&self) -> BackendResult<()> {
+        let conn = self.db.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, artist, album FROM tracks WHERE match_fingerprint IS NULL OR match_fingerprint = ''",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        let pending = rows.collect::<Result<Vec<_>, _>>()?;
+        if pending.is_empty() {
+            return Ok(());
+        }
+        for (id, title, artist, album) in pending {
+            let fp = build_track_match_fingerprint(&title, &artist, album.as_deref());
+            conn.execute(
+                "UPDATE tracks SET match_fingerprint = ?1 WHERE id = ?2",
+                params![fp, id],
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2231,34 +2260,5 @@ mod tests {
         assert_eq!(decoded.file_path, "/music/a.mp3");
         assert_eq!(decoded.id, "track-a");
         assert_eq!(decoded.signature, sig);
-    }
-}
-
-impl BackendService {
-    fn backfill_track_fingerprints(&self) -> BackendResult<()> {
-        let conn = self.db.connect()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, title, artist, album FROM tracks WHERE match_fingerprint IS NULL OR match_fingerprint = ''",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })?;
-        let pending = rows.collect::<Result<Vec<_>, _>>()?;
-        if pending.is_empty() {
-            return Ok(());
-        }
-        for (id, title, artist, album) in pending {
-            let fp = build_track_match_fingerprint(&title, &artist, album.as_deref());
-            conn.execute(
-                "UPDATE tracks SET match_fingerprint = ?1 WHERE id = ?2",
-                params![fp, id],
-            )?;
-        }
-        Ok(())
     }
 }

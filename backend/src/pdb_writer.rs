@@ -1523,7 +1523,7 @@ mod writer_tests {
     fn test_data_page_header_fields() {
         let row = encode_artist_row(1, "Test");
         let mut seq = 100u32;
-        let (pages, _) = pack_rows_into_pages(2, &[row.clone()], &mut seq);
+        let (pages, _) = pack_rows_into_pages(2, std::slice::from_ref(&row), &mut seq);
         let page = &pages[0];
 
         // table_type at 0x08

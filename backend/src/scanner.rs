@@ -542,7 +542,7 @@ mod tests {
     fn scan_skips_non_audio_files() {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("readme.txt"), "hello").unwrap();
-        fs::write(dir.path().join("cover.jpg"), &[0xFF, 0xD8]).unwrap();
+        fs::write(dir.path().join("cover.jpg"), [0xFF, 0xD8]).unwrap();
 
         let result = scan_audio_files(&[dir.path().to_string_lossy().to_string()]).unwrap();
         assert!(result.is_empty());

@@ -1757,7 +1757,7 @@ fn export_to_usb_option_matrix_controls_artwork_analysis_and_prune_behavior() {
         .next()
         .expect("scanned track");
 
-    seed_tracks_as_analyzed(&data_dir, &[track.id.clone()]);
+    seed_tracks_as_analyzed(&data_dir, std::slice::from_ref(&track.id));
     seed_track_artwork_path(&data_dir, &track.id, &cover_path);
 
     let created = backend.create_playlist(CreatePlaylistRequest {
@@ -1930,7 +1930,7 @@ fn export_to_usb_reexport_is_idempotent_for_media_and_assets() {
         .next()
         .expect("scanned track");
 
-    seed_tracks_as_analyzed(&data_dir, &[track.id.clone()]);
+    seed_tracks_as_analyzed(&data_dir, std::slice::from_ref(&track.id));
     seed_track_artwork_path(&data_dir, &track.id, &cover_path);
 
     let created = backend.create_playlist(CreatePlaylistRequest {

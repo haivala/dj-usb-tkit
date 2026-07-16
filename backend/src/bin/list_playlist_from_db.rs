@@ -190,8 +190,7 @@ fn list_edb_playlists(input: &Path) {
         None
     };
 
-    let select_parts = vec![
-        format!("{id_col} AS id"),
+    let select_parts = [format!("{id_col} AS id"),
         format!("{name_col} AS name"),
         parent_col
             .map(|c| format!("{c} AS parent_id"))
@@ -201,8 +200,7 @@ fn list_edb_playlists(input: &Path) {
             .unwrap_or_else(|| "NULL AS sort_order".to_string()),
         attr_col
             .map(|c| format!("{c} AS attribute"))
-            .unwrap_or_else(|| "NULL AS attribute".to_string()),
-    ];
+            .unwrap_or_else(|| "NULL AS attribute".to_string())];
     let sql = format!(
         "SELECT {} FROM playlist ORDER BY name COLLATE NOCASE, id",
         select_parts.join(", ")

@@ -602,7 +602,7 @@ fn setup_two_playlist_strict_parity_fixture() -> (TempDir, BackendCommands, Path
     seed_tracks_as_analyzed(&data_dir, &track_ids);
 
     let playlist_names = ["Repair Target".to_string(), "Repair Control".to_string()];
-    for (playlist_name, track_id) in playlist_names.iter().zip(track_ids.into_iter()) {
+    for (playlist_name, track_id) in playlist_names.iter().zip(track_ids) {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: playlist_name.clone(),
         });

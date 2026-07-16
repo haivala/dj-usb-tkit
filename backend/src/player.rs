@@ -392,25 +392,6 @@ pub fn run_playback_preflight(path: &str) -> BackendResult<PlaybackPreflightData
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn symphonia_fallback_decodes_flac_fixture() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/audio/formats/track_format_flac.flac");
-        let decoded = decode_audio_pcm_symphonia(path.to_string_lossy().as_ref())
-            .expect("symphonia should decode flac fixture");
-        assert!(
-            !decoded.samples.is_empty(),
-            "decoded sample buffer should not be empty"
-        );
-        assert!(decoded.sample_rate > 0, "sample rate should be positive");
-        assert!(decoded.channels > 0, "channel count should be positive");
-    }
-}
-
 fn open_output_stream() -> BackendResult<(OutputStream, rodio::OutputStreamHandle)> {
     let _alsa_error_silencer = AlsaErrorSilencer::new();
     let _stderr_probe_silencer = StderrProbeSilencer::new();
@@ -656,4 +637,23 @@ fn normalize_and_validate_path(path: &str) -> BackendResult<String> {
     }
 
     Ok(as_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symphonia_fallback_decodes_flac_fixture() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/formats/track_format_flac.flac");
+        let decoded = decode_audio_pcm_symphonia(path.to_string_lossy().as_ref())
+            .expect("symphonia should decode flac fixture");
+        assert!(
+            !decoded.samples.is_empty(),
+            "decoded sample buffer should not be empty"
+        );
+        assert!(decoded.sample_rate > 0, "sample rate should be positive");
+        assert!(decoded.channels > 0, "channel count should be positive");
+    }
 }

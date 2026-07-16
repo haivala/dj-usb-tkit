@@ -359,7 +359,7 @@ fn anlz_bundle_write_roundtrip() {
 
     // All files exist and are valid ANLZ
     for (path, label) in [(&dat_path, "DAT"), (&ext_path, "EXT"), (&twoex_path, "2EX")] {
-        let data = std::fs::read(path).expect(&format!("{label} file should exist"));
+        let data = std::fs::read(path).unwrap_or_else(|_| panic!("{label} file should exist"));
         verify_pmai_header(&data, label);
         // All should have PPTH
         assert!(

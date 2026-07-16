@@ -842,7 +842,6 @@ fn analyzer_fixtures_validate_artwork_and_waveform_behavior() {
         }
     }
     if validated_waveforms == 0 {
-        return;
     }
 }
 
@@ -1973,7 +1972,7 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
 
     let export_new = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
-        playlist_id: playlist_id,
+        playlist_id,
         options: Some(ExportToUsbOptions {
             include_artwork: true,
             include_analysis: false,

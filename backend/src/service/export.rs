@@ -89,192 +89,6 @@ fn export_warning_entry(message: String) -> WarningEntry {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        ensure_playlist_tracks_analysis_ready, export_warning_entry, has_required_analysis,
-        has_required_analysis_fields,
-    };
-    use crate::error::BackendError;
-    use crate::service::export_helpers::{ExportPlaylistData, ExportTrackData};
-    use std::path::Path;
-    use tempfile::tempdir;
-
-    fn make_track() -> ExportTrackData {
-        ExportTrackData {
-            id: "t1".to_string(),
-            title: "Track".to_string(),
-            artist: "Artist".to_string(),
-            album: Some("Album".to_string()),
-            track_number: Some(1),
-            bpm: Some(128.0),
-            key: Some("Am".to_string()),
-            file_path: "/tmp/track.mp3".to_string(),
-            file_name: "track.mp3".to_string(),
-            file_modified_at: None,
-            file_size_bytes: None,
-            sample_rate_hz: None,
-            bit_depth: None,
-            bitrate_kbps: None,
-            disc_number: None,
-            subtitle: None,
-            comment: None,
-            title_for_search: None,
-            kuvo_delivery_comment: None,
-            dj_play_count: None,
-            rating: None,
-            color_id: None,
-            artist_id_lyricist: None,
-            artist_id_original_artist: None,
-            artist_id_remixer: None,
-            artist_id_composer: None,
-            genre_id: None,
-            genre: None,
-            label_id: None,
-            isrc: None,
-            release_year: None,
-            release_date: None,
-            recorded_date: None,
-            file_type: None,
-            artwork_path: None,
-            waveform_peaks_path: Some("/tmp/waveform.dat".to_string()),
-            duration_ms: Some(120_000),
-            first_beat_ms: None,
-            position: 0,
-        }
-    }
-
-    fn write_test_analysis_bundle(dir: &Path, stem: &str) -> String {
-        let dat = dir.join(format!("{stem}.DAT"));
-        let ext = dir.join(format!("{stem}.EXT"));
-        let twoex = dir.join(format!("{stem}.2EX"));
-        std::fs::write(&dat, b"bad-dat").expect("write DAT");
-        std::fs::write(&ext, b"bad-ext").expect("write EXT");
-        std::fs::write(&twoex, b"bad-2ex").expect("write 2EX");
-        dat.to_string_lossy().to_string()
-    }
-
-    #[test]
-    fn required_analysis_allows_missing_key() {
-        let mut track = make_track();
-        track.key = None;
-        let dir = tempdir().expect("tempdir");
-        track.waveform_peaks_path = Some(write_test_analysis_bundle(dir.path(), "waveform"));
-        assert!(has_required_analysis(dir.path(), &track));
-    }
-
-    #[test]
-    fn required_analysis_still_requires_waveform_bpm_and_duration() {
-        let mut track = make_track();
-        track.waveform_peaks_path = None;
-        assert!(!has_required_analysis_fields(&track));
-
-        let mut track = make_track();
-        track.bpm = None;
-        assert!(!has_required_analysis_fields(&track));
-
-        let mut track = make_track();
-        track.duration_ms = None;
-        assert!(!has_required_analysis_fields(&track));
-    }
-
-    #[test]
-    fn required_analysis_requires_existing_anlz_bundle_but_not_valid_content() {
-        let dir = tempdir().expect("tempdir");
-        let mut track = make_track();
-        track.waveform_peaks_path = Some(write_test_analysis_bundle(dir.path(), "invalid"));
-
-        assert!(
-            has_required_analysis(dir.path(), &track),
-            "export readiness should require files, not validate ANLZ quality"
-        );
-
-        let mut missing_bundle = make_track();
-        missing_bundle.waveform_peaks_path =
-            Some(dir.path().join("missing.DAT").to_string_lossy().to_string());
-        assert!(!has_required_analysis(dir.path(), &missing_bundle));
-    }
-
-    #[test]
-    fn playlist_guard_message_mentions_current_required_fields() {
-        let mut track = make_track();
-        track.key = None;
-        let playlist = ExportPlaylistData {
-            id: "pl1".to_string(),
-            name: "Playlist".to_string(),
-            tracks: vec![track],
-        };
-        let dir = tempdir().expect("tempdir");
-        let mut playlist = playlist;
-        playlist.tracks[0].waveform_peaks_path =
-            Some(write_test_analysis_bundle(dir.path(), "ready"));
-        assert!(ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).is_ok());
-
-        let mut missing_waveform = make_track();
-        missing_waveform.waveform_peaks_path = None;
-        let playlist = ExportPlaylistData {
-            id: "pl1".to_string(),
-            name: "Playlist".to_string(),
-            tracks: vec![missing_waveform],
-        };
-        let err = ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).unwrap_err();
-        match err {
-            BackendError::ValidationWithDetails(msg, details) => {
-                assert!(msg.contains("missing required analysis"));
-                assert_eq!(details["validationType"], "missing_analysis");
-                assert_eq!(
-                    details["requiredFields"],
-                    serde_json::json!(["waveform", "bpm", "duration"])
-                );
-                assert_eq!(details["missingTrackCount"], 1);
-                assert_eq!(details["missingAnalysisBundleCount"], 0);
-                assert_eq!(details["totalTrackCount"], 1);
-            }
-            other => panic!("unexpected error variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn playlist_guard_reports_missing_analysis_bundle() {
-        let dir = tempdir().expect("tempdir");
-        let mut track = make_track();
-        track.waveform_peaks_path =
-            Some(dir.path().join("missing.DAT").to_string_lossy().to_string());
-        let playlist = ExportPlaylistData {
-            id: "pl1".to_string(),
-            name: "Playlist".to_string(),
-            tracks: vec![track],
-        };
-
-        let err = ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).unwrap_err();
-        match err {
-            BackendError::ValidationWithDetails(msg, details) => {
-                assert!(msg.contains("missing required analysis"));
-                assert_eq!(details["validationType"], "missing_analysis");
-                assert_eq!(details["missingTrackCount"], 1);
-                assert_eq!(details["missingAnalysisBundleCount"], 1);
-                assert_eq!(details["totalTrackCount"], 1);
-            }
-            other => panic!("unexpected error variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn export_verification_and_prune_summary_are_info_not_warn() {
-        let verification = export_warning_entry(
-            "export verification passed (db: skipped, pdb: checked, tracks: 2)".to_string(),
-        );
-        assert_eq!(verification.level, "info");
-        assert_eq!(verification.code, "export.info");
-
-        let prune = export_warning_entry(
-            "prune stale enabled: removed 0, missing 0, skipped 0".to_string(),
-        );
-        assert_eq!(prune.level, "info");
-        assert_eq!(prune.code, "export.info");
-    }
-}
-
 fn ensure_playlist_tracks_analysis_ready(
     usb_root: &Path,
     playlist: &ExportPlaylistData,
@@ -1120,5 +934,191 @@ impl BackendService {
             params![key, encoded, now],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ensure_playlist_tracks_analysis_ready, export_warning_entry, has_required_analysis,
+        has_required_analysis_fields,
+    };
+    use crate::error::BackendError;
+    use crate::service::export_helpers::{ExportPlaylistData, ExportTrackData};
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    fn make_track() -> ExportTrackData {
+        ExportTrackData {
+            id: "t1".to_string(),
+            title: "Track".to_string(),
+            artist: "Artist".to_string(),
+            album: Some("Album".to_string()),
+            track_number: Some(1),
+            bpm: Some(128.0),
+            key: Some("Am".to_string()),
+            file_path: "/tmp/track.mp3".to_string(),
+            file_name: "track.mp3".to_string(),
+            file_modified_at: None,
+            file_size_bytes: None,
+            sample_rate_hz: None,
+            bit_depth: None,
+            bitrate_kbps: None,
+            disc_number: None,
+            subtitle: None,
+            comment: None,
+            title_for_search: None,
+            kuvo_delivery_comment: None,
+            dj_play_count: None,
+            rating: None,
+            color_id: None,
+            artist_id_lyricist: None,
+            artist_id_original_artist: None,
+            artist_id_remixer: None,
+            artist_id_composer: None,
+            genre_id: None,
+            genre: None,
+            label_id: None,
+            isrc: None,
+            release_year: None,
+            release_date: None,
+            recorded_date: None,
+            file_type: None,
+            artwork_path: None,
+            waveform_peaks_path: Some("/tmp/waveform.dat".to_string()),
+            duration_ms: Some(120_000),
+            first_beat_ms: None,
+            position: 0,
+        }
+    }
+
+    fn write_test_analysis_bundle(dir: &Path, stem: &str) -> String {
+        let dat = dir.join(format!("{stem}.DAT"));
+        let ext = dir.join(format!("{stem}.EXT"));
+        let twoex = dir.join(format!("{stem}.2EX"));
+        std::fs::write(&dat, b"bad-dat").expect("write DAT");
+        std::fs::write(&ext, b"bad-ext").expect("write EXT");
+        std::fs::write(&twoex, b"bad-2ex").expect("write 2EX");
+        dat.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn required_analysis_allows_missing_key() {
+        let mut track = make_track();
+        track.key = None;
+        let dir = tempdir().expect("tempdir");
+        track.waveform_peaks_path = Some(write_test_analysis_bundle(dir.path(), "waveform"));
+        assert!(has_required_analysis(dir.path(), &track));
+    }
+
+    #[test]
+    fn required_analysis_still_requires_waveform_bpm_and_duration() {
+        let mut track = make_track();
+        track.waveform_peaks_path = None;
+        assert!(!has_required_analysis_fields(&track));
+
+        let mut track = make_track();
+        track.bpm = None;
+        assert!(!has_required_analysis_fields(&track));
+
+        let mut track = make_track();
+        track.duration_ms = None;
+        assert!(!has_required_analysis_fields(&track));
+    }
+
+    #[test]
+    fn required_analysis_requires_existing_anlz_bundle_but_not_valid_content() {
+        let dir = tempdir().expect("tempdir");
+        let mut track = make_track();
+        track.waveform_peaks_path = Some(write_test_analysis_bundle(dir.path(), "invalid"));
+
+        assert!(
+            has_required_analysis(dir.path(), &track),
+            "export readiness should require files, not validate ANLZ quality"
+        );
+
+        let mut missing_bundle = make_track();
+        missing_bundle.waveform_peaks_path =
+            Some(dir.path().join("missing.DAT").to_string_lossy().to_string());
+        assert!(!has_required_analysis(dir.path(), &missing_bundle));
+    }
+
+    #[test]
+    fn playlist_guard_message_mentions_current_required_fields() {
+        let mut track = make_track();
+        track.key = None;
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: vec![track],
+        };
+        let dir = tempdir().expect("tempdir");
+        let mut playlist = playlist;
+        playlist.tracks[0].waveform_peaks_path =
+            Some(write_test_analysis_bundle(dir.path(), "ready"));
+        assert!(ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).is_ok());
+
+        let mut missing_waveform = make_track();
+        missing_waveform.waveform_peaks_path = None;
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: vec![missing_waveform],
+        };
+        let err = ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(msg, details) => {
+                assert!(msg.contains("missing required analysis"));
+                assert_eq!(details["validationType"], "missing_analysis");
+                assert_eq!(
+                    details["requiredFields"],
+                    serde_json::json!(["waveform", "bpm", "duration"])
+                );
+                assert_eq!(details["missingTrackCount"], 1);
+                assert_eq!(details["missingAnalysisBundleCount"], 0);
+                assert_eq!(details["totalTrackCount"], 1);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn playlist_guard_reports_missing_analysis_bundle() {
+        let dir = tempdir().expect("tempdir");
+        let mut track = make_track();
+        track.waveform_peaks_path =
+            Some(dir.path().join("missing.DAT").to_string_lossy().to_string());
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: vec![track],
+        };
+
+        let err = ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(msg, details) => {
+                assert!(msg.contains("missing required analysis"));
+                assert_eq!(details["validationType"], "missing_analysis");
+                assert_eq!(details["missingTrackCount"], 1);
+                assert_eq!(details["missingAnalysisBundleCount"], 1);
+                assert_eq!(details["totalTrackCount"], 1);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn export_verification_and_prune_summary_are_info_not_warn() {
+        let verification = export_warning_entry(
+            "export verification passed (db: skipped, pdb: checked, tracks: 2)".to_string(),
+        );
+        assert_eq!(verification.level, "info");
+        assert_eq!(verification.code, "export.info");
+
+        let prune = export_warning_entry(
+            "prune stale enabled: removed 0, missing 0, skipped 0".to_string(),
+        );
+        assert_eq!(prune.level, "info");
+        assert_eq!(prune.code, "export.info");
     }
 }

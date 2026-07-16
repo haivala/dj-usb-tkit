@@ -153,7 +153,7 @@ fn main() {
             // nrs wraps but num_rl keeps the real row index.
             && tt != 8;
         // tt=16/17/18: correct shape is (nrs, 0); detect old-bug pattern (1, nrs-1).
-        let history_shape_bad = matches!(tt, 16 | 17 | 18)
+        let history_shape_bad = matches!(tt, 16..=18)
             && nrs > 1
             && u5 == 1
             && num_rl == (nrs as u16).saturating_sub(1);
@@ -499,15 +499,14 @@ fn main() {
         if fp == lp {
             continue; // empty table — ec points to blank baseline slot
         }
-        if let Some(&owner_tt) = data_page_owner.get(&ec) {
-            if owner_tt != tt {
+        if let Some(&owner_tt) = data_page_owner.get(&ec)
+            && owner_tt != tt {
                 println!(
                     "  CONFLICT: tt={tt} ec={ec} points to data page owned by tt={owner_tt}  \
                      ANOMALY: DJ software rejects as corrupted"
                 );
                 conflicts_found = true;
             }
-        }
     }
     if !conflicts_found {
         println!("  none");

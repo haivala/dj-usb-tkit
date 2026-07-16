@@ -221,7 +221,7 @@ mod tests {
         let base = 'e';
         let mark = '\u{0301}'; // COMBINING ACUTE ACCENT
         let zalgo: String = std::iter::once(base)
-            .chain(std::iter::repeat(mark).take(60))
+            .chain(std::iter::repeat_n(mark, 60))
             .collect();
         let result = sanitize_metadata(&zalgo);
         assert_eq!(
@@ -244,7 +244,7 @@ mod tests {
         let mark = '\u{0301}';
         let cluster = |base: char| -> String {
             std::iter::once(base)
-                .chain(std::iter::repeat(mark).take(20))
+                .chain(std::iter::repeat_n(mark, 20))
                 .collect()
         };
         let zalgo: String = "the quick brown fox jumps over the lazy dog and more text after"
@@ -272,7 +272,7 @@ mod tests {
     fn cap_grapheme_clusters_bounds_pathological_input() {
         let mark = '\u{0301}';
         let s: String = std::iter::once('e')
-            .chain(std::iter::repeat(mark).take(100))
+            .chain(std::iter::repeat_n(mark, 100))
             .collect();
         let result = cap_grapheme_clusters(&s, MAX_GRAPHEME_CLUSTER_CHARS);
         assert_eq!(result.chars().count(), MAX_GRAPHEME_CLUSTER_CHARS);
@@ -290,7 +290,7 @@ mod tests {
         let mark_b = '\u{0362}'; // COMBINING DOUBLE RIGHTWARDS ARROW BELOW
         let heavy_cluster = |base: char, mark: char, count: usize| -> String {
             std::iter::once(base)
-                .chain(std::iter::repeat(mark).take(count))
+                .chain(std::iter::repeat_n(mark, count))
                 .collect::<String>()
         };
         let mut album = String::new();
@@ -410,9 +410,9 @@ mod tests {
         // Two more clusters whose base script (Cyrillic, Greek) is over
         // budget, each dragging several combining marks along.
         s.push('\u{0411}'); // Cyrillic Б — over budget
-        s.extend(std::iter::repeat(mark).take(7));
+        s.extend(std::iter::repeat_n(mark, 7));
         s.push('\u{03a9}'); // Greek Ω — over budget
-        s.extend(std::iter::repeat(mark).take(7));
+        s.extend(std::iter::repeat_n(mark, 7));
 
         let result = cap_script_diversity(&s);
         assert_eq!(
@@ -438,9 +438,9 @@ mod tests {
         s.push('\u{3042}');
         s.push('\u{4e2d}');
         s.push('\u{0411}');
-        s.extend(std::iter::repeat(mark).take(7));
+        s.extend(std::iter::repeat_n(mark, 7));
         s.push('\u{03a9}');
-        s.extend(std::iter::repeat(mark).take(7));
+        s.extend(std::iter::repeat_n(mark, 7));
 
         let result = sanitize_metadata(&s);
         assert_eq!(result.as_ref(), "a\u{3042}\u{4e2d}");

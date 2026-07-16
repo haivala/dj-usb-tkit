@@ -2693,7 +2693,7 @@ mod tests {
         // stack. The on-disk folder/file name must not carry that through.
         let mark = '\u{0301}';
         let zalgo: String = std::iter::once('e')
-            .chain(std::iter::repeat(mark).take(60))
+            .chain(std::iter::repeat_n(mark, 60))
             .collect();
         let result = sanitize_contents_component(&zalgo);
         assert!(

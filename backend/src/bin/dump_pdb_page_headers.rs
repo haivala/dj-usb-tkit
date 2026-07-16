@@ -202,8 +202,8 @@ fn main() {
                     }
                     cursor -= 4;
                     let rp =
-                        ru16(&bytes.get(off..off + page_size).unwrap_or(&[]), cursor).unwrap_or(0);
-                    let tr = ru16(&bytes.get(off..off + page_size).unwrap_or(&[]), cursor + 2)
+                        ru16(bytes.get(off..off + page_size).unwrap_or(&[]), cursor).unwrap_or(0);
+                    let tr = ru16(bytes.get(off..off + page_size).unwrap_or(&[]), cursor + 2)
                         .unwrap_or(0);
                     let glen = (row_slots - g * 16).min(16);
                     let mask = if glen == 16 {
