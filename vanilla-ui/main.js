@@ -62,6 +62,12 @@ import * as jobMgr from "./job_manager.mjs";
 import * as bootstrap from "./startup_bootstrap.mjs";
 import * as uiCtrl from "./ui_controller.mjs";
 import { createMessageBus } from "./message_bus.mjs";
+import { openExternalUrl } from "./components/settings/events.mjs";
+import {
+  fetchUpdateInfo as fetchUpdateInfoRemote,
+  renderUpdateNotice,
+  renderCriticalUpdateBanner,
+} from "./update_check.mjs";
 
 const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
 const LIBRARY_LOAD_LIMIT_INIT = 200;
@@ -121,6 +127,10 @@ const el = {
   settingsBackdrop: document.getElementById("settingsBackdrop"),
   settingsCloseBtn: document.getElementById("settingsCloseBtn"),
   settingsVersionText: document.getElementById("settingsVersionText"),
+  settingsUpdateNote: document.getElementById("settingsUpdateNote"),
+  criticalUpdateBanner: document.getElementById("criticalUpdateBanner"),
+  criticalUpdateText: document.getElementById("criticalUpdateText"),
+  criticalUpdateDismissBtn: document.getElementById("criticalUpdateDismissBtn"),
   openEventLogBtn: document.getElementById("openEventLogBtn"),
   accentHueSlider: document.getElementById("accentHueSlider"),
   accentSwatch: document.getElementById("accentSwatch"),
@@ -1482,6 +1492,30 @@ function hydrateAppVersionLabel() {
     tauriGetVersion,
   });
 }
+function checkForUpdate() {
+  return bootstrap.checkForUpdate(state, el, {
+    resolveVersion: async () => {
+      if (!tauriIsTauri()) return null;
+      try {
+        const version = await tauriGetVersion();
+        return version && String(version).trim() ? String(version).trim() : null;
+      } catch {
+        return null;
+      }
+    },
+    fetchUpdateInfo: (version) =>
+      fetchUpdateInfoRemote(version, {
+        fetchFn: typeof fetch !== "undefined" ? fetch.bind(window) : null,
+      }),
+    renderUpdateNotice: (s, e) =>
+      renderUpdateNotice(s, e, { openUrl: (url) => openExternalUrl(window, url) }),
+    renderCriticalUpdateBanner: (s, e) =>
+      renderCriticalUpdateBanner(s, e, {
+        localStorageObj: localStorage,
+        openUrl: (url) => openExternalUrl(window, url),
+      }),
+  });
+}
 function restoreStoredUiPrefs() {
   bootstrap.restoreStoredUiPrefs(state, el, {
     localStorageObj: localStorage,
@@ -1653,6 +1687,7 @@ async function init() {
     themeInit: () => ThemeManager.init(),
     accentInit: () => AccentManager.init(),
     hydrateAppVersionLabel,
+    checkForUpdate,
     setupConsoleFileLogging: () =>
       eventLog.setupConsoleFileLogging({
         isTauriRuntime,

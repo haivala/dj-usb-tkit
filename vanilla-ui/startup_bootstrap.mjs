@@ -25,6 +25,26 @@ export async function hydrateAppVersionLabel(el, deps = {}) {
   el.settingsVersionText.textContent = `Version ${version}`;
 }
 
+export async function checkForUpdate(state, el, deps = {}) {
+  const {
+    resolveVersion = async () => null,
+    fetchUpdateInfo = async () => null,
+    renderUpdateNotice = () => {},
+    renderCriticalUpdateBanner = () => {}
+  } = deps;
+  try {
+    const version = await resolveVersion();
+    if (!version) return;
+    const info = await fetchUpdateInfo(version);
+    if (!info) return;
+    state.updateCheck = info;
+    renderUpdateNotice(state, el);
+    renderCriticalUpdateBanner(state, el);
+  } catch {
+    // An update check must never disrupt startup.
+  }
+}
+
 export function restoreStoredUiPrefs(state, el, deps = {}) {
   const {
     localStorageObj = typeof localStorage !== "undefined" ? localStorage : null,
@@ -156,6 +176,7 @@ export async function initApp(state, deps = {}) {
     themeInit,
     accentInit,
     hydrateAppVersionLabel,
+    checkForUpdate = () => {},
     setupConsoleFileLogging,
     setupRuntimeErrorLogging,
     pushEventLog,
@@ -191,6 +212,7 @@ export async function initApp(state, deps = {}) {
   themeInit();
   accentInit();
   await hydrateAppVersionLabel();
+  checkForUpdate();
   await setupConsoleFileLogging();
   logInfo("Frontend console bridge initialized");
   setupRuntimeErrorLogging();

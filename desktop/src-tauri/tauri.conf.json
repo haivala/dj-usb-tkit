@@ -31,7 +31,7 @@
         },
       "csp": {
         "default-src": "'self' ipc: http://ipc.localhost asset:",
-        "connect-src": "ipc: http://ipc.localhost",
+        "connect-src": "ipc: http://ipc.localhost https://api.github.com",
         "img-src": "'self' asset: http://asset.localhost file: blob: data:",
         "media-src": "'self' asset: http://asset.localhost https://asset.localhost file: blob: data:",
         "style-src": "'self' 'unsafe-inline'",

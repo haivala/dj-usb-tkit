@@ -2,7 +2,7 @@ const NODE_JS_URL = "https://nodejs.org/";
 const WEBSITE_URL = "https://chiph.art?utm_source=djtkit&utm_medium=app&utm_campaign=sidebar";
 const SUPPORT_URL = "https://chiph.art/en/dj-usb-tkit/support?utm_source=djtkit&utm_medium=app&utm_campaign=support";
 
-function openExternalUrl(window, url) {
+export function openExternalUrl(window, url) {
   if (window.__TAURI__?.opener?.openUrl) {
     window.__TAURI__.opener.openUrl(url);
   } else if (window.__TAURI_INTERNALS__?.invoke) {

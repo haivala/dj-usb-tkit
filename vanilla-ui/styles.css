@@ -2604,6 +2604,62 @@ td button[data-action]:disabled,
   color: var(--muted);
 }
 
+.settings-update-note {
+  display: block;
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.settings-update-note .update-note-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ── critical update banner ─────────────────────────── */
+
+.critical-update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--danger-glow);
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.critical-update-banner .critical-update-link {
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.critical-update-dismiss {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.critical-update-dismiss:hover {
+  opacity: 1;
+}
+
 .event-log-toolbar {
   display: flex;
   gap: 10px;

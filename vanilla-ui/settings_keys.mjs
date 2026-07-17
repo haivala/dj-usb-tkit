@@ -15,6 +15,7 @@ export const STORAGE_KEY_SIDEBAR_COLLAPSED = "djusbtkit.sidebarCollapsed";
 export const STORAGE_KEY_HELP_SEEN = "djusbtkit.helpSeen";
 export const STORAGE_KEY_MASTER_DB_ENABLED = "djusbtkit.masterDbEnabled";
 export const STORAGE_KEY_SOURCES_EVER_CONFIGURED = "djusbtkit.sourcesEverConfigured";
+export const STORAGE_KEY_UPDATE_DISMISSED = "djusbtkit.updateDismissedVersion";
 
 export const FRONTEND_DB_KEY_THEME = "ui_theme_v1";
 export const FRONTEND_DB_KEY_ACCENT_HUE = "ui_accent_hue_v1";

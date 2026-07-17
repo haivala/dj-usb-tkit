@@ -1,3 +1,5 @@
+import { dismissCriticalUpdateBanner } from "../../update_check.mjs";
+
 export function bindShellEvents(ctx) {
   const {
     state,
@@ -70,4 +72,8 @@ export function bindShellEvents(ctx) {
   }, true);
 
   document.addEventListener("click", handleSortHeaderClick);
+
+  el.criticalUpdateDismissBtn?.addEventListener("click", () => {
+    dismissCriticalUpdateBanner(state, el);
+  });
 }

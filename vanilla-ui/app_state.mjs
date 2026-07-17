@@ -24,6 +24,7 @@ export function createInitialState() {
     nodeAvailable: false,
     essentiaInstalled: false,
     essentiaDownloading: false,
+    updateCheck: null,
     tracks: [],
     filteredTracks: [],
     libraryQuery: "",

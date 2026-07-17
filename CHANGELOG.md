@@ -1,5 +1,15 @@
 # Changelog
 
+<!--
+  The in-app update checker reads this file's content via the GitHub Release
+  body (release.yml copies each `## <version>` section verbatim into the
+  release notes). To flag a release as critical — shown as a prominent
+  in-app banner instead of the quiet default notice — add a line right
+  under the version heading:
+
+  **Severity:** critical
+-->
+
 ## 0.1.3
 
 - Fix USB export becoming permanently blocked with a "PDB export blocked"
