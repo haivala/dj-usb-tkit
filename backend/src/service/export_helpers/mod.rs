@@ -69,10 +69,81 @@ fn preserve_existing_t16_rows(bytes: &[u8]) -> Option<Vec<Vec<u8>>> {
     load_pdb_t16_rows_from_bytes(bytes)
 }
 
+/// Verify that `table_type`'s chain underwent, at most, a pure tail append
+/// between `before` and `after`: new pages chained after the existing last
+/// page, with every pre-existing page remaining at its same position in the
+/// chain. Content on existing pages may legitimately change (e.g. sibling
+/// sort_order patches, or a table nothing in this codebase writes to but
+/// that reference exporters/hardware populate independently, such as legacy
+/// history fallback tables) — only reordering, relocation, or a broken chain
+/// is rejected. Pushes a description onto `issues` when the check fails;
+/// does nothing when either side is missing a table pointer.
+fn validate_table_pure_append_or_unchanged(
+    before: &[u8],
+    after: &[u8],
+    table_type: u32,
+    page_size: usize,
+    issues: &mut Vec<String>,
+) {
+    let (Some((_ec_before, before_first, before_last)), Some((_ec_after, _first_after, after_last))) = (
+        table_ptr_fields(before, table_type),
+        table_ptr_fields(after, table_type),
+    ) else {
+        return;
+    };
+
+    if before_last == after_last {
+        // Tail didn't move: its next_page must not have changed either, so
+        // nothing was silently appended past a stale tail pointer.
+        if let Some(last_off) = page_offset(before_last, page_size) {
+            let before_next = before
+                .get(last_off + 0x0c..last_off + 0x10)
+                .and_then(|b| b.try_into().ok())
+                .map(u32::from_le_bytes);
+            let after_next = after
+                .get(last_off + 0x0c..last_off + 0x10)
+                .and_then(|b| b.try_into().ok())
+                .map(u32::from_le_bytes);
+            if before_next != after_next {
+                issues.push(format!(
+                    "t{table_type:02} tail next_page changed {:?}->{:?}",
+                    before_next, after_next
+                ));
+            }
+        }
+    } else {
+        // Tail moved: only acceptable as a pure append. The old chain's
+        // page-index sequence must be an exact, unmoved prefix of the new
+        // chain — content on those pages may legitimately change, but their
+        // identity and order in the chain may not.
+        let is_pure_append = match (
+            collect_chain_pages(before, page_size, before_first, before_last),
+            collect_chain_pages(after, page_size, before_first, after_last),
+        ) {
+            (Some(old_chain), Some(new_chain)) => {
+                new_chain.len() > old_chain.len() && new_chain[..old_chain.len()] == old_chain[..]
+            }
+            _ => false,
+        };
+        if !is_pure_append {
+            issues.push(format!(
+                "t{table_type:02} last_page changed {before_last}->{after_last} (not a pure tail append)"
+            ));
+        }
+    }
+}
+
 fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> BackendResult<()> {
     const PAGE_SIZE: usize = 4096;
     const CRITICAL_FIRST_PAGE_TABLES: &[u32] = &[0, 7, 8, 11, 12, 16, 17, 18, 19];
     const MENU_TABLES: &[u32] = &[16, 17, 18];
+    // Tables nothing in this codebase writes rows into. Reference exporters
+    // and/or hardware are known to populate some of these independently
+    // (e.g. legacy history fallback tables) as they're used over time, so a
+    // tail-append is tolerated the same way t07 growth is — but their chain
+    // must never be reordered or relocated, which previously went completely
+    // unchecked (only first_page was verified).
+    const UNWRITTEN_APPEND_ONLY_TABLES: &[u32] = &[9, 10, 11, 12, 14, 15];
 
     if before.len() < PAGE_SIZE
         || after.len() < PAGE_SIZE
@@ -86,10 +157,7 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
 
     let mut issues = Vec::<String>::new();
     for &table_type in CRITICAL_FIRST_PAGE_TABLES {
-        if let (
-            Some((_before_ec, before_first, before_last)),
-            Some((_after_ec, after_first, after_last)),
-        ) = (
+        if let (Some((_before_ec, before_first, _before_last)), Some((_after_ec, after_first, _after_last))) = (
             table_ptr_fields(before, table_type),
             table_ptr_fields(after, table_type),
         ) {
@@ -98,34 +166,18 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
                     "t{table_type:02} first_page changed {before_first}->{after_first}"
                 ));
             }
-            if table_type == 7 && before_last != before_first && before_last != after_last {
-                issues.push(format!("t07 last_page changed {before_last}->{after_last}"));
-            }
         }
     }
 
-    if let (
-        Some((_ec_before, _first_before, before_last)),
-        Some((_ec_after, _first_after, after_last)),
-    ) = (table_ptr_fields(before, 7), table_ptr_fields(after, 7))
-        && before_last != _first_before
-        && before_last == after_last
-        && let Some(last_off) = page_offset(before_last, PAGE_SIZE)
-    {
-        let before_next = before
-            .get(last_off + 0x0c..last_off + 0x10)
-            .and_then(|b| b.try_into().ok())
-            .map(u32::from_le_bytes);
-        let after_next = after
-            .get(last_off + 0x0c..last_off + 0x10)
-            .and_then(|b| b.try_into().ok())
-            .map(u32::from_le_bytes);
-        if before_next != after_next {
-            issues.push(format!(
-                "t07 tail next_page changed {:?}->{:?}",
-                before_next, after_next
-            ));
-        }
+    // t07 (playlist_tree) growth: this is how reference exporters themselves
+    // grow playlist_tree once the existing tail page runs out of room, and
+    // multi-page t07 chains are known to work on hardware. Blanket-rejecting
+    // any last_page move made it impossible to add a new playlist to a USB
+    // once t07 outgrew its initial page.
+    validate_table_pure_append_or_unchanged(before, after, 7, PAGE_SIZE, &mut issues);
+
+    for &table_type in UNWRITTEN_APPEND_ONLY_TABLES {
+        validate_table_pure_append_or_unchanged(before, after, table_type, PAGE_SIZE, &mut issues);
     }
 
     for &table_type in MENU_TABLES {
@@ -4276,6 +4328,73 @@ mod tests {
         assert_eq!(bytes[18 * ps + 24], 4);
         assert_eq!(u16le(18 * ps + 34), 3);
         assert_eq!(u16le(40 * ps + 34), 3);
+    }
+
+    /// t09/t10/t11/t12/t14/t15 are tables this codebase never writes rows
+    /// into, but reference exporters/hardware are known to populate some of
+    /// them (e.g. legacy history fallback tables) independently as a USB is
+    /// used over time. A pure tail append to one of these tables between the
+    /// on-disk "before" PDB and the candidate "after" PDB must not block an
+    /// unrelated export.
+    #[test]
+    fn topology_guard_tolerates_pure_tail_append_on_unwritten_table() {
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path();
+        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
+            .expect("initialize usb skeleton");
+        let pdb_path = usb_root
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb");
+        let before = std::fs::read(&pdb_path).expect("read initialized export.pdb");
+
+        // Simulate hardware/reference-exporter growth: append one well-formed
+        // row to t11's chain the same way any table's tail grows, without
+        // this codebase ever having a t11 row encoder of its own.
+        let mut after = before.clone();
+        crate::pdb_writer::append_rows_to_chain_in_place(&mut after, 11, &[vec![0u8; 16]], 4096)
+            .expect("simulated hardware append to t11");
+
+        assert!(
+            validate_topology_locked_export_bytes(&before, &after).is_ok(),
+            "a pure tail append on a table this codebase never writes to must be tolerated"
+        );
+    }
+
+    /// The same guard must still reject a relocation/reorder of an
+    /// already-committed page on one of those unwritten tables — tolerating
+    /// tail growth must not mean tolerating anything.
+    #[test]
+    fn topology_guard_rejects_relocated_page_on_unwritten_table() {
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path();
+        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
+            .expect("initialize usb skeleton");
+        let pdb_path = usb_root
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb");
+        let before = std::fs::read(&pdb_path).expect("read initialized export.pdb");
+
+        // Grow t11 by one page first (legitimate baseline), then point
+        // last_page at a page never actually chained there — the new
+        // last_page is unreachable by walking next-pointers from first, so
+        // this is not a real tail append and must be rejected.
+        let mut after = before.clone();
+        crate::pdb_writer::append_rows_to_chain_in_place(&mut after, 11, &[vec![0u8; 16]], 4096)
+            .expect("simulated hardware append to t11");
+        let (ec, first, _last) = table_ptr_fields(&after, 11).expect("t11 pointer present");
+        let bogus_last = (after.len() / 4096) as u32 - 1;
+        crate::utils::set_table_ptr_fields(&mut after, 11, ec, first, bogus_last);
+
+        let err = validate_topology_locked_export_bytes(&before, &after)
+            .expect_err("an unreachable last_page must be rejected as a non-append change");
+        assert!(
+            err.to_string().contains("t11"),
+            "error should name the offending table: {err}"
+        );
     }
 
     #[test]

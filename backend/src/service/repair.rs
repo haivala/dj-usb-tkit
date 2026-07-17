@@ -480,8 +480,11 @@ pub(super) fn detect_pdb_wrong_history_page_shape(pdb_path: &Path) -> Vec<WrongS
         }
         let u5 = read_u16_le_at(&bytes, off + 0x20).unwrap_or(0);
         let num_rl = read_u16_le_at(&bytes, off + 0x22).unwrap_or(0);
-        // Flag the old-bug pattern: u5=1 and num_rl=nrs-1.
-        if u5 == 1 && num_rl == nrs.saturating_sub(1) {
+        // Flag the old-bug pattern: u5=1 and num_rl=nrs-1. When nrs=1 this
+        // pattern is bit-identical to the correct (u5=nrs, num_rl=0) shape —
+        // a single-row page can never be distinguished as wrong, so skip it
+        // rather than flag a false positive that no repair can actually fix.
+        if nrs > 1 && u5 == 1 && num_rl == nrs.saturating_sub(1) {
             out.push(WrongShapeHistoryPage {
                 page_index: i,
                 table_type,

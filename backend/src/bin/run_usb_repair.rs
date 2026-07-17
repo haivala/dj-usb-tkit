@@ -41,11 +41,51 @@ fn main() {
     println!("mode={mode}  usb={usb_root}");
     println!();
 
+    // Match real UI behavior: the repair dialog defaults to checking every
+    // *supported* proposed fix (including "optional" ones like
+    // sync_edb_history_from_pdb) and sends that explicit id list on Apply.
+    // The backend's own "selected_fix_ids empty = select all" shortcut is
+    // NOT what any UI path actually sends — it deliberately excludes
+    // sync_edb_history_from_pdb. Run a preview first to collect the same
+    // "supported" id set the UI would check, then apply with that explicit
+    // list, so this CLI's "apply" matches what a real user gets from
+    // "select all, hit apply" rather than the narrower empty-list shortcut.
+    let selected_fix_ids = if apply {
+        let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb_root.clone()),
+            apply: false,
+            selected_fix_ids: vec![],
+        });
+        if !preview.ok {
+            eprintln!(
+                "repair preview failed: {}",
+                preview
+                    .error
+                    .as_ref()
+                    .map(|e| e.message.as_str())
+                    .unwrap_or("unknown")
+            );
+            std::process::exit(1);
+        }
+        preview
+            .data
+            .map(|d| {
+                d.proposed_fixes
+                    .into_iter()
+                    .filter(|f| f.supported)
+                    .map(|f| f.id)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
     let resp = backend.repair_usb_diagnostics_with_progress(
         RepairUsbDiagnosticsRequest {
             usb_root: Some(usb_root.clone()),
             apply,
-            selected_fix_ids: vec![], // empty = select all
+            selected_fix_ids,
         },
         |cur, tot, msg| eprintln!("  [{cur}/{tot}] {msg}"),
     );

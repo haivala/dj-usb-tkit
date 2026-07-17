@@ -135,9 +135,14 @@ Existing PDBs are topology-locked. Normal export does not fall back to a full
 PDB rebuild, does not call `apply_growth_shape`, and does not rewrite menu
 tables. If an export cannot be represented as an in-place additive/mirror patch,
 the PDB write fails before commit rather than producing a player-corrupt shape.
-For PDB `t07` playlist_tree, normal export must keep the existing tail page in
-place: new playlist rows are added into existing capacity, including
-tombstone-preserving tail pages, and a t07 `last_page` move is rejected.
+For PDB `t07` playlist_tree, new playlist rows are added into existing tail
+capacity first, including tombstone-preserving tail pages. When existing
+capacity is exhausted, a pure tail append (new pages chained after the
+existing last page, with every pre-existing page remaining at its same
+position in the chain) is allowed — this is how reference exporters
+themselves grow playlist_tree, and multi-page chains are known to work on
+hardware. Only a `last_page` change that is not a pure append — page
+relocation, reordering, or a broken chain — is rejected.
 The exported playlist is placed first in the playlist menu by patching only the
 fixed-width `t07.sort_order` fields of active sibling playlist-tree rows. This
 matches the intended playlist sibling order while preserving row lengths,
