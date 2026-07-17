@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
 - Fix USB export becoming permanently blocked with a "PDB export blocked"
   error once a USB's playlist list had grown large enough to need extra
@@ -10,6 +10,8 @@
 - Fix USB diagnostics permanently reporting one unfixable "history page
   shape" issue on USBs with a single-entry history-menu page; repair now
   correctly recognizes it as already valid.
+- Internal: clean up clippy lint warnings and apply `cargo fmt` across the
+  backend and desktop crates (no functional changes).
 - Detect WAV files using the `WAVE_FORMAT_EXTENSIBLE` header, which some
   Pioneer CDJs reject even when the underlying audio is otherwise within
   spec. Flagged during library scan with a format-badge tooltip; when the
