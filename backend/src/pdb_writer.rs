@@ -1189,6 +1189,254 @@ pub(crate) fn remove_rows_inplace(
     removed
 }
 
+/// Location of one active `tt=8` (playlist_entries) row within a page's
+/// backward-growing footer index.
+struct PlaylistEntryLocation {
+    page_idx: usize,
+    group_start_row: usize,
+    bit: usize,
+    entry_index: u32,
+}
+
+/// Remove stale duplicate `tt=8` (playlist_entries) rows in-place.
+///
+/// Years of desktop-software edits on a real USB can leave a playlist's old
+/// membership rows behind on a shared page: when a playlist grows and its
+/// tail relocates to a fresh page, the old copy of the relocated rows is not
+/// always cleared from the original page. The result is the same
+/// `(playlist_id, track_id)` pair appearing on more than one active row —
+/// invisible to hardware (which reads the current page's live count) but
+/// visible to this app's own strict-parity diagnostics, which walks every
+/// active row via the page's real row-presence bitmap
+/// (`num_row_offsets`/`num_rows`, not the separate and occasionally stale
+/// `num_rl` footer field — see docs/PDB.md).
+///
+/// For each `(playlist_id, track_id)` pair with more than one active row,
+/// keeps the row with the lowest `entry_index` and tombstones the rest using
+/// the same footer-bitmap convention as `remove_rows_inplace` (clear the
+/// `rowpf` bit, decrement `num_rows`, and rewrite `tranrf` by OR-ing in the
+/// highest tombstoned slot for the affected group only — never touching
+/// groups it didn't remove from).
+///
+/// Returns the number of rows tombstoned.
+pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usize {
+    if bytes.len() < PAGE_SIZE * 2 {
+        return 0;
+    }
+    let Some(len_page) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
+        return 0;
+    };
+    if len_page != PAGE_SIZE || bytes.len() < len_page * 2 {
+        return 0;
+    }
+    let total_pages = bytes.len() / len_page;
+
+    // ── Pass 1: locate every active row, grouped by (playlist_id, track_id) ──
+    let mut locations: std::collections::HashMap<(u32, u32), Vec<PlaylistEntryLocation>> =
+        std::collections::HashMap::new();
+
+    for page_idx in 1..total_pages {
+        let page_start = page_idx * len_page;
+        let page_end = page_start + len_page;
+        if page_end > bytes.len() {
+            break;
+        }
+        let Some(pt) = read_u32_le_at(bytes, page_start + 0x08) else {
+            continue;
+        };
+        if pt != 8 {
+            continue;
+        }
+        let page_flags = bytes[page_start + 0x1b];
+        if page_flags & 0x40 != 0 {
+            continue;
+        }
+        let packed = u32::from(bytes[page_start + 0x18])
+            | (u32::from(bytes[page_start + 0x19]) << 8)
+            | (u32::from(bytes[page_start + 0x1a]) << 16);
+        let num_row_offsets = (packed & 0x1FFF) as usize;
+        if num_row_offsets == 0 {
+            continue;
+        }
+        let Some(used_size) = read_u16_le_at(bytes, page_start + 0x1e).map(|v| v as usize) else {
+            continue;
+        };
+        let payload_start = page_start + HEAP_START;
+        let payload_end = payload_start + used_size;
+        if payload_end > page_end {
+            continue;
+        }
+
+        let mut cursor = page_end;
+        for group_start_row in (0..num_row_offsets).step_by(16) {
+            let group_len = (num_row_offsets - group_start_row).min(16);
+            if cursor < page_start + 4 + group_len * 2 {
+                break;
+            }
+            cursor -= 2; // tranrf (unused here)
+            cursor -= 2;
+            let rowpf_off = cursor;
+            let Some(rowpf) = read_u16_le_at(bytes, rowpf_off) else {
+                continue;
+            };
+            let mut offsets = Vec::with_capacity(group_len);
+            for _ in 0..group_len {
+                cursor -= 2;
+                let Some(off) = read_u16_le_at(bytes, cursor).map(|v| v as usize) else {
+                    offsets.clear();
+                    break;
+                };
+                offsets.push(off);
+            }
+            if offsets.len() != group_len {
+                continue;
+            }
+            for (j, &heap_off) in offsets.iter().enumerate() {
+                let bit = 1u16 << (j as u16);
+                if rowpf & bit == 0 {
+                    continue;
+                }
+                let row_abs = payload_start + heap_off;
+                if row_abs >= payload_end {
+                    continue;
+                }
+                let row_data = &bytes[row_abs..payload_end.min(page_end)];
+                let (Some(entry_index), Some(track_id), Some(playlist_id)) = (
+                    extract_u32_at(row_data, 0x00),
+                    extract_playlist_entry_track_id(row_data),
+                    extract_playlist_entry_playlist_id(row_data),
+                ) else {
+                    continue;
+                };
+                locations
+                    .entry((playlist_id, track_id))
+                    .or_default()
+                    .push(PlaylistEntryLocation {
+                        page_idx,
+                        group_start_row,
+                        bit: j,
+                        entry_index,
+                    });
+            }
+        }
+    }
+
+    // ── Decide removals: keep the lowest entry_index per (playlist_id, track_id) ──
+    let mut to_remove: std::collections::HashSet<(usize, usize, usize)> =
+        std::collections::HashSet::new();
+    for locs in locations.values() {
+        if locs.len() < 2 {
+            continue;
+        }
+        let mut sorted: Vec<&PlaylistEntryLocation> = locs.iter().collect();
+        sorted.sort_by_key(|l| (l.entry_index, l.page_idx, l.group_start_row, l.bit));
+        for loc in sorted.into_iter().skip(1) {
+            to_remove.insert((loc.page_idx, loc.group_start_row, loc.bit));
+        }
+    }
+    if to_remove.is_empty() {
+        return 0;
+    }
+
+    // ── Pass 2: tombstone the selected rows, page by page ───────────────────
+    let mut removed = 0usize;
+    for page_idx in 1..total_pages {
+        let page_start = page_idx * len_page;
+        let page_end = page_start + len_page;
+        if page_end > bytes.len() {
+            break;
+        }
+        let Some(pt) = read_u32_le_at(bytes, page_start + 0x08) else {
+            continue;
+        };
+        if pt != 8 {
+            continue;
+        }
+        let page_flags = bytes[page_start + 0x1b];
+        if page_flags & 0x40 != 0 {
+            continue;
+        }
+        let packed = u32::from(bytes[page_start + 0x18])
+            | (u32::from(bytes[page_start + 0x19]) << 8)
+            | (u32::from(bytes[page_start + 0x1a]) << 16);
+        let num_row_offsets = (packed & 0x1FFF) as usize;
+        let num_rows = ((packed >> 13) & 0x7FF) as usize;
+        if num_row_offsets == 0 {
+            continue;
+        }
+
+        let mut cursor = page_end;
+        let mut page_removed = 0usize;
+        let mut highest_removed_slot: Option<usize> = None;
+        let mut group_offsets: Vec<(usize, usize)> = Vec::new();
+
+        for group_start_row in (0..num_row_offsets).step_by(16) {
+            let group_len = (num_row_offsets - group_start_row).min(16);
+            if cursor < page_start + 4 + group_len * 2 {
+                break;
+            }
+            cursor -= 2;
+            let tranrf_off = cursor;
+            cursor -= 2;
+            let rowpf_off = cursor;
+            let Some(rowpf) = read_u16_le_at(bytes, rowpf_off) else {
+                continue;
+            };
+            group_offsets.push((tranrf_off, group_start_row));
+            cursor = cursor.saturating_sub(group_len * 2);
+
+            let mut new_rowpf = rowpf;
+            for j in 0..group_len {
+                if !to_remove.contains(&(page_idx, group_start_row, j)) {
+                    continue;
+                }
+                let bit = 1u16 << (j as u16);
+                if rowpf & bit == 0 {
+                    continue;
+                }
+                new_rowpf &= !bit;
+                page_removed += 1;
+                let abs_slot = group_start_row + j;
+                highest_removed_slot =
+                    Some(highest_removed_slot.map_or(abs_slot, |prev| prev.max(abs_slot)));
+            }
+            if new_rowpf != rowpf {
+                bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&new_rowpf.to_le_bytes());
+            }
+        }
+
+        if page_removed > 0 {
+            removed += page_removed;
+
+            let new_num_rows = num_rows.saturating_sub(page_removed);
+            let new_packed =
+                (num_row_offsets as u32 & 0x1FFF) | ((new_num_rows as u32 & 0x7FF) << 13);
+            bytes[page_start + 0x18] = (new_packed & 0xFF) as u8;
+            bytes[page_start + 0x19] = ((new_packed >> 8) & 0xFF) as u8;
+            bytes[page_start + 0x1a] = ((new_packed >> 16) & 0xFF) as u8;
+
+            if let Some(slot) = highest_removed_slot {
+                bytes[page_start + 0x20..page_start + 0x22].copy_from_slice(&1u16.to_le_bytes());
+                bytes[page_start + 0x22..page_start + 0x24]
+                    .copy_from_slice(&(slot as u16).to_le_bytes());
+
+                let last_group = slot / 16;
+                let last_bit = (slot % 16) as u32;
+                for &(tranrf_off, group_start) in &group_offsets {
+                    let tranrf_val: u16 = if group_start / 16 == last_group {
+                        1u16 << last_bit
+                    } else {
+                        0
+                    };
+                    bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&tranrf_val.to_le_bytes());
+                }
+            }
+        }
+    }
+
+    removed
+}
+
 /// Normalise tt=8 (playlist_entry) page footer fields to `(u5=1, num_rl=trc-1)`.
 ///
 /// Exports produced by other software occasionally carry interior pages whose
@@ -2304,6 +2552,129 @@ mod writer_tests {
 
         assert_eq!(label_count, 9_995);
         assert_eq!(dnb_count, 317);
+    }
+
+    // ── remove_duplicate_playlist_entries_inplace tests ─────────────────
+
+    /// Build a minimal 2-page PDB byte buffer (page 0 = file header, page 1 =
+    /// a single `tt=8` data page) containing exactly `rows`
+    /// `(entry_index, track_id, playlist_id)` tuples, all active, laid out
+    /// using the wide `num_row_offsets`/`num_rows` packed footer field (the
+    /// same convention `remove_rows_inplace` and
+    /// `remove_duplicate_playlist_entries_inplace` read).
+    fn build_tt8_test_page(rows: &[(u32, u32, u32)]) -> Vec<u8> {
+        assert!(rows.len() <= 16, "test helper only supports one footer group");
+        let mut bytes = vec![0u8; PAGE_SIZE * 2];
+        bytes[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_le_bytes());
+
+        let page_start = PAGE_SIZE;
+        let page_end = PAGE_SIZE * 2;
+        bytes[page_start + 4..page_start + 8].copy_from_slice(&1u32.to_le_bytes());
+        bytes[page_start + 8..page_start + 12].copy_from_slice(&8u32.to_le_bytes());
+        bytes[page_start + 0x1b] = PAGE_FLAGS_DATA;
+
+        let payload_start = page_start + HEAP_START;
+        for (i, &(entry_index, track_id, playlist_id)) in rows.iter().enumerate() {
+            let row_off = payload_start + i * 12;
+            bytes[row_off..row_off + 4].copy_from_slice(&entry_index.to_le_bytes());
+            bytes[row_off + 4..row_off + 8].copy_from_slice(&track_id.to_le_bytes());
+            bytes[row_off + 8..row_off + 12].copy_from_slice(&playlist_id.to_le_bytes());
+        }
+        let used_s = (rows.len() * 12) as u16;
+        bytes[page_start + 0x1e..page_start + 0x20].copy_from_slice(&used_s.to_le_bytes());
+
+        let n = rows.len() as u32;
+        let packed: u32 = (n & 0x1FFF) | ((n & 0x7FF) << 13);
+        bytes[page_start + 0x18] = (packed & 0xFF) as u8;
+        bytes[page_start + 0x19] = ((packed >> 8) & 0xFF) as u8;
+        bytes[page_start + 0x1a] = ((packed >> 16) & 0xFF) as u8;
+
+        let rowpf: u16 = if rows.is_empty() {
+            0
+        } else {
+            ((1u32 << rows.len()) - 1) as u16
+        };
+        let rowpf_off = page_end - 4;
+        let tranrf_off = page_end - 2;
+        bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&rowpf.to_le_bytes());
+        bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&0u16.to_le_bytes());
+
+        for (i, _) in rows.iter().enumerate() {
+            let off_pos = rowpf_off - 2 * (i + 1);
+            let heap_off = (i * 12) as u16;
+            bytes[off_pos..off_pos + 2].copy_from_slice(&heap_off.to_le_bytes());
+        }
+
+        bytes
+    }
+
+    fn active_tt8_rows(bytes: &[u8]) -> Vec<(u32, u32, u32)> {
+        let parsed = crate::pdb_reader::parse_pdb_bytes(bytes).unwrap();
+        parsed
+            .playlist_entries
+            .iter()
+            .map(|e| (e.entry_index, e.track_id, e.playlist_id))
+            .collect()
+    }
+
+    #[test]
+    fn remove_duplicate_playlist_entries_collapses_stale_copy() {
+        // Same shape as the real-world defect this repairs: a track is
+        // duplicated under the same playlist_id with a different
+        // entry_index, and an unrelated row must survive untouched.
+        let mut bytes = build_tt8_test_page(&[
+            (1, 100, 1), // kept: lowest entry_index for (playlist=1, track=100)
+            (2, 200, 1), // untouched: distinct track
+            (5, 100, 1), // stale duplicate of the first row, must be removed
+        ]);
+
+        let removed = remove_duplicate_playlist_entries_inplace(&mut bytes);
+        assert_eq!(removed, 1);
+
+        let mut rows = active_tt8_rows(&bytes);
+        rows.sort();
+        assert_eq!(rows, vec![(1, 100, 1), (2, 200, 1)]);
+    }
+
+    #[test]
+    fn remove_duplicate_playlist_entries_keeps_same_track_in_different_playlists() {
+        // The same track_id under two different playlist_ids is not a
+        // duplicate and must survive.
+        let mut bytes = build_tt8_test_page(&[(1, 100, 1), (1, 100, 2)]);
+
+        let removed = remove_duplicate_playlist_entries_inplace(&mut bytes);
+        assert_eq!(removed, 0);
+
+        let mut rows = active_tt8_rows(&bytes);
+        rows.sort();
+        assert_eq!(rows, vec![(1, 100, 1), (1, 100, 2)]);
+    }
+
+    #[test]
+    fn remove_duplicate_playlist_entries_is_noop_when_clean() {
+        let mut bytes = build_tt8_test_page(&[(1, 100, 1), (2, 200, 1), (3, 300, 1)]);
+        let before = active_tt8_rows(&bytes);
+
+        let removed = remove_duplicate_playlist_entries_inplace(&mut bytes);
+        assert_eq!(removed, 0);
+        assert_eq!(active_tt8_rows(&bytes), before);
+    }
+
+    #[test]
+    fn remove_duplicate_playlist_entries_removes_all_but_one_of_triple() {
+        let mut bytes = build_tt8_test_page(&[
+            (4, 900, 33),
+            (11, 900, 33),
+            (26, 900, 33),
+            (12, 950, 33),
+        ]);
+
+        let removed = remove_duplicate_playlist_entries_inplace(&mut bytes);
+        assert_eq!(removed, 2);
+
+        let mut rows = active_tt8_rows(&bytes);
+        rows.sort();
+        assert_eq!(rows, vec![(4, 900, 33), (12, 950, 33)]);
     }
 
     #[test]

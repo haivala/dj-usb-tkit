@@ -106,6 +106,7 @@ struct StrictParityUpgradeApplyResult {
     edb_playlists_written: usize,
     failed_playlists: usize,
     artwork_patch_incomplete: bool,
+    duplicate_entries_removed: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -3202,9 +3203,10 @@ impl BackendService {
                         Ok(result) => {
                             if result.failed_playlists > 0 {
                                 failed_fixes.push(format!(
-                                "Upgrade Export Data To Strict Parity: merged {} playlist(s), wrote {} eDB playlist(s), {} failed{}",
+                                "Upgrade Export Data To Strict Parity: merged {} playlist(s), wrote {} eDB playlist(s), removed {} duplicate PDB entry/entries, {} failed{}",
                                 result.merged_playlists,
                                 result.edb_playlists_written,
+                                result.duplicate_entries_removed,
                                 result.failed_playlists,
                                 if result.artwork_patch_incomplete {
                                     " (artwork parity incomplete)"
@@ -3214,9 +3216,10 @@ impl BackendService {
                             ));
                             } else if result.merged_playlists > 0 {
                                 applied_fixes.push(format!(
-                                "Upgrade Export Data To Strict Parity: merged {} playlist(s), wrote {} eDB playlist(s){}",
+                                "Upgrade Export Data To Strict Parity: merged {} playlist(s), wrote {} eDB playlist(s), removed {} duplicate PDB entry/entries{}",
                                 result.merged_playlists,
                                 result.edb_playlists_written,
+                                result.duplicate_entries_removed,
                                 if result.artwork_patch_incomplete {
                                     " (artwork parity incomplete)"
                                 } else {
@@ -4159,6 +4162,41 @@ impl BackendService {
                 "strict parity upgrade: PDB playlist order restore failed: {err}"
             ));
             result.failed_playlists += 1;
+        }
+
+        // ── Phase 3b: Remove stale duplicate playlist_entries rows ──────
+        // A playlist's tail can be left behind on a shared tt=8 page from an
+        // earlier point in the USB's history when the playlist later grew and
+        // its continuation relocated to a fresh page (see docs/PDB.md). The
+        // rewrite above only manages rows within each merged playlist's
+        // current live boundary, so pre-existing stale copies elsewhere on
+        // shared pages survive it. Sweep the whole PDB for any
+        // (playlist_id, track_id) pair with more than one active row and
+        // tombstone all but the earliest.
+        if result.merged_playlists > 0 {
+            let pdb_path = vendor_pdb_path(usb_root);
+            match std::fs::read(&pdb_path) {
+                Ok(mut pdb_bytes) => {
+                    let removed =
+                        crate::pdb_writer::remove_duplicate_playlist_entries_inplace(
+                            &mut pdb_bytes,
+                        );
+                    if removed > 0 {
+                        if let Err(err) = std::fs::write(&pdb_path, &pdb_bytes) {
+                            warnings.push(format!(
+                                "strict parity upgrade: failed to write deduplicated PDB: {err}"
+                            ));
+                        } else {
+                            result.duplicate_entries_removed = removed;
+                        }
+                    }
+                }
+                Err(err) => {
+                    warnings.push(format!(
+                        "strict parity upgrade: unable to read PDB for duplicate cleanup: {err}"
+                    ));
+                }
+            }
         }
 
         // Re-read written PDB identities so eDB uses the exact playlist id/sort

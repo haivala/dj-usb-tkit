@@ -10,6 +10,15 @@
   **Severity:** critical
 -->
 
+## Unreleased
+
+- Fix "Duplicate PDB entries" diagnostics failures that the offered strict
+  parity repair could not actually resolve. Some playlists on
+  long-lived, heavily-edited USBs had accumulated stale duplicate copies of
+  a track's playlist membership in the device-side database; running the
+  repair reported success without removing them. The repair now finds and
+  removes the stale duplicates so affected playlists pass diagnostics.
+
 ## 0.1.3
 
 - Fix USB export becoming permanently blocked with a "PDB export blocked"
