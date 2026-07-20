@@ -207,8 +207,11 @@ export function bindUsbEvents(ctx) {
     if (!track) return;
 
     if (!action) {
+      const before = trackMetaFingerprint(track);
       await hydrateUsbTrackMetadata(track);
-      renderUsbPlaylistTracks();
+      if (trackMetaFingerprint(track) !== before && !patchUsbTrackRow(track)) {
+        renderUsbPlaylistTracks();
+      }
       return;
     }
 
@@ -253,8 +256,11 @@ export function bindUsbEvents(ctx) {
     if (!track) return;
 
     if (!action) {
+      const before = trackMetaFingerprint(track);
       await hydrateUsbTrackMetadata(track);
-      renderHistoryTracks();
+      if (trackMetaFingerprint(track) !== before && !patchHistoryTrackRow(track)) {
+        renderHistoryTracks();
+      }
       return;
     }
 
