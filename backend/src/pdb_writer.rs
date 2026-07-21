@@ -2563,7 +2563,10 @@ mod writer_tests {
     /// same convention `remove_rows_inplace` and
     /// `remove_duplicate_playlist_entries_inplace` read).
     fn build_tt8_test_page(rows: &[(u32, u32, u32)]) -> Vec<u8> {
-        assert!(rows.len() <= 16, "test helper only supports one footer group");
+        assert!(
+            rows.len() <= 16,
+            "test helper only supports one footer group"
+        );
         let mut bytes = vec![0u8; PAGE_SIZE * 2];
         bytes[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_le_bytes());
 
@@ -2662,12 +2665,8 @@ mod writer_tests {
 
     #[test]
     fn remove_duplicate_playlist_entries_removes_all_but_one_of_triple() {
-        let mut bytes = build_tt8_test_page(&[
-            (4, 900, 33),
-            (11, 900, 33),
-            (26, 900, 33),
-            (12, 950, 33),
-        ]);
+        let mut bytes =
+            build_tt8_test_page(&[(4, 900, 33), (11, 900, 33), (26, 900, 33), (12, 950, 33)]);
 
         let removed = remove_duplicate_playlist_entries_inplace(&mut bytes);
         assert_eq!(removed, 2);

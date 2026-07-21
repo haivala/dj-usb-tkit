@@ -35,6 +35,31 @@ Analysis engine selection is user-controlled from Settings. The default engine i
 3. Use "Analyze Missing Tracks" for only that playlist's unanalyzed local tracks.
 4. Export after missing-analysis count reaches zero.
 
+### Missing or moved source folders
+
+Source folders are recoverable state. If a configured source folder is renamed,
+moved, unmounted, or otherwise missing, the app must not interpret that as "all
+tracks under this folder were deleted".
+
+On startup the UI checks configured source folders through `check_source_roots`.
+Missing folders are rendered as warning-colored source chips. The normal filter
+checkbox is shown unchecked/disabled for a missing source, and clicking the chip
+opens relocation instead of toggling the filter. The chip remove action remains
+the explicit destructive path and uses the existing confirmation before
+`remove_tracks_by_source_roots` prunes tracks.
+
+Scanning also treats missing folders as non-destructive. `scan_library` reports
+missing roots in `notFound`, scans only usable roots, and only prunes stale
+tracks for roots that currently exist. If every enabled source folder is
+missing, scan returns zero indexed/updated/removed rows with a warning.
+
+Relocation uses `relocate_source_root`: the backend rewrites `tracks.file_path`
+from `oldRoot/relative/path` to `newRoot/relative/path` only when the target
+file exists and no indexed-path conflict exists. Track IDs are preserved, so
+local playlist membership remains intact. If some files cannot be resolved under
+the new root, those tracks remain under the old missing root and the UI keeps the
+old root visible for follow-up.
+
 ## Deep technical details
 
 The backend separates indexing and analysis at the command level. `scan_library` is responsible for file discovery, metadata indexing, and local database updates, while `analyze_new_tracks` and `analyze_track_piece` perform CPU-heavy enrichment on tracks already indexed in local storage. This separation is what allows the UI to show track rows quickly and then fill in analysis fields progressively.

@@ -23,6 +23,7 @@ export function bindLibraryEvents(ctx) {
     persistSourcesEverConfigured = () => {},
     enabledSourceRoots,
     pickSourceFolders,
+    relocateSourceRoot,
     scanLibrary,
     scanMasterDb,
     scheduleApplySearchLocalFilter,
@@ -75,6 +76,16 @@ export function bindLibraryEvents(ctx) {
     })();
   });
 
+  el.sourceChipsContainer.addEventListener("click", (event) => {
+    if (event.target.closest(".source-chip-remove")) return;
+    const chip = event.target.closest(".source-chip-missing[data-source-relocate-index]");
+    if (!chip) return;
+    const index = Number(chip.dataset.sourceRelocateIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= state.sourceRoots.length) return;
+    const path = state.sourceRoots[index];
+    relocateSourceRoot(path).catch(catchErr(emitStatus));
+  });
+
   el.sourceChipsContainer.addEventListener("change", (event) => {
     const checkbox = event.target.closest(".source-chip-toggle");
     if (!checkbox) return;
@@ -88,7 +99,7 @@ export function bindLibraryEvents(ctx) {
         .catch(catchErr(emitStatus));
       updateSourceFilterIndicator();
       const total = state.sourceRoots.length + 1;
-      const enabled = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled).length + (enabling ? 1 : 0);
+      const enabled = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots).length + (enabling ? 1 : 0);
       emitStatus(`Source filters: ${enabled}/${total} enabled`);
       return;
     }
@@ -103,7 +114,7 @@ export function bindLibraryEvents(ctx) {
     updateSourceFilterIndicator();
     const masterDbTotal = state.externalMasterDbPath ? 1 : 0;
     const masterDbEnabled = state.externalMasterDbPath && state.masterDbEnabled ? 1 : 0;
-    const enabledCount = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled).length + masterDbEnabled;
+    const enabledCount = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots).length + masterDbEnabled;
     emitStatus(`Source filters: ${enabledCount}/${state.sourceRoots.length + masterDbTotal} enabled`);
   });
 

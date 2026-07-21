@@ -18,6 +18,12 @@ The playlist command layer is intentionally CRUD-oriented:
 - `list_playlists`, `get_playlist_tracks` read container and ordered membership state
 - `add_tracks_to_playlist`, `remove_tracks_from_playlist` mutate membership rows
 
+Playlist export is blocked when the selected playlist contains local tracks
+under a known missing source root. The user must relocate the source folder or
+explicitly remove that source before export proceeds. This prevents a moved or
+unmounted music folder from producing an empty or partially empty USB playlist
+without an explicit user decision.
+
 Playback architecture is backend-owned so transport behavior stays consistent across views and source types. The frontend requests playback actions, but audio lifecycle state is emitted by backend events. The UI subscribes to those events and updates controls/playhead state from the push stream.
 
 Playback resolution is source-aware:

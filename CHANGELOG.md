@@ -12,6 +12,13 @@
 
 ## Unreleased
 
+- Missing library source folders are now surfaced as recoverable UI state
+  instead of being treated as deleted media during scan. Missing source chips
+  render as warning chips, scan pruning ignores missing roots, and affected
+  exports are blocked until the source is relocated or explicitly removed.
+- Add source-root relocation for moved music folders. Relocation rewrites
+  indexed track paths to the new folder while preserving track IDs and local
+  playlist membership.
 - Fix "Duplicate PDB entries" diagnostics failures that the offered strict
   parity repair could not actually resolve. Some playlists on
   long-lived, heavily-edited USBs had accumulated stale duplicate copies of

@@ -4177,10 +4177,9 @@ impl BackendService {
             let pdb_path = vendor_pdb_path(usb_root);
             match std::fs::read(&pdb_path) {
                 Ok(mut pdb_bytes) => {
-                    let removed =
-                        crate::pdb_writer::remove_duplicate_playlist_entries_inplace(
-                            &mut pdb_bytes,
-                        );
+                    let removed = crate::pdb_writer::remove_duplicate_playlist_entries_inplace(
+                        &mut pdb_bytes,
+                    );
                     if removed > 0 {
                         if let Err(err) = std::fs::write(&pdb_path, &pdb_bytes) {
                             warnings.push(format!(

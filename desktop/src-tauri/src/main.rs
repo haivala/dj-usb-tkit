@@ -57,9 +57,10 @@ fn normalize_selected_path(value: &str) -> Option<PathBuf> {
     }
     if let Ok(url) = url::Url::parse(trimmed)
         && url.scheme() == "file"
-            && let Ok(path) = url.to_file_path() {
-                return Some(path);
-            }
+        && let Ok(path) = url.to_file_path()
+    {
+        return Some(path);
+    }
     Some(PathBuf::from(trimmed))
 }
 
@@ -130,9 +131,10 @@ async fn pick_usb_folder(app: tauri::AppHandle) -> Result<Option<String>, String
     });
 
     if let Some(ref selected_path) = path
-        && let Some(pb) = normalize_selected_path(selected_path) {
-            let _ = allow_asset_scope_path(&app, &pb);
-        }
+        && let Some(pb) = normalize_selected_path(selected_path)
+    {
+        let _ = allow_asset_scope_path(&app, &pb);
+    }
 
     Ok(path)
 }
@@ -326,15 +328,16 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
         // Fall back to system PATH if no bundled node was found.
         if resolved_node.is_none()
             && let Ok(output) = std::process::Command::new("which").arg("node").output()
-                && output.status.success() {
-                    let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !path_str.is_empty() {
-                        let path = PathBuf::from(&path_str);
-                        if path.is_file() {
-                            resolved_node = Some(path);
-                        }
-                    }
+            && output.status.success()
+        {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                let path = PathBuf::from(&path_str);
+                if path.is_file() {
+                    resolved_node = Some(path);
                 }
+            }
+        }
     }
 
     let mut resolved_runner = std::env::var_os("DJTKIT_ESSENTIA_RUNNER")
@@ -370,19 +373,20 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
     let mut resolved_modules = std::env::var_os("DJTKIT_ESSENTIA_NODE_MODULES")
         .map(|v| PathBuf::from(v.to_string_lossy().to_string()));
     if resolved_modules.is_none()
-        && let Ok(app_data) = _app.path().app_data_dir() {
-            let modules_dir = app_data.join("essentia").join("node_modules");
-            if modules_dir.join("essentia.js").is_dir() {
-                // SAFETY: set once at startup before backend worker threads are spawned.
-                unsafe {
-                    std::env::set_var(
-                        "DJTKIT_ESSENTIA_NODE_MODULES",
-                        modules_dir.to_string_lossy().to_string(),
-                    )
-                };
-                resolved_modules = Some(modules_dir);
-            }
+        && let Ok(app_data) = _app.path().app_data_dir()
+    {
+        let modules_dir = app_data.join("essentia").join("node_modules");
+        if modules_dir.join("essentia.js").is_dir() {
+            // SAFETY: set once at startup before backend worker threads are spawned.
+            unsafe {
+                std::env::set_var(
+                    "DJTKIT_ESSENTIA_NODE_MODULES",
+                    modules_dir.to_string_lossy().to_string(),
+                )
+            };
+            resolved_modules = Some(modules_dir);
         }
+    }
 
     emit_backend_log(
         _app,
@@ -738,8 +742,10 @@ fn main() {
             backend::tauri_commands::search_tracks,
             backend::tauri_commands::list_tracks,
             backend::tauri_commands::browse_source_files,
+            backend::tauri_commands::check_source_roots,
             backend::tauri_commands::materialize_source_track,
             backend::tauri_commands::remove_tracks_by_source_roots,
+            backend::tauri_commands::relocate_source_root,
             backend::tauri_commands::get_system_parallelism,
             backend::tauri_commands::get_tracks_by_ids_with_previews,
             backend::tauri_commands::resolve_playback_source,

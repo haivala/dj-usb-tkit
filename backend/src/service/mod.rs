@@ -34,18 +34,19 @@ use crate::db::Db;
 use crate::error::{BackendError, BackendResult};
 use crate::models::{
     AddTracksToPlaylistData, AddTracksToPlaylistRequest, BrowseSourceFilesData,
-    BrowseSourceFilesRequest, CreatePlaylistData, CreatePlaylistRequest, DedupeMode,
-    DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData, GetFrontendSettingsData,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSystemParallelismData, GetTracksByIdsData,
-    GetTracksByIdsRequest, InitializeUsbData, InitializeUsbRequest, ListPlaylistsData,
-    ListTracksData, ListTracksRequest, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    PlayTrackData, PlayTrackRequest, PlaybackPreflightData, PlaybackPreflightRequest,
-    PlaybackStatusData, Playlist, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
-    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RenamePlaylistData,
-    RenamePlaylistRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
-    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
-    SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SourceRootAnalysisStatus, StopPlaybackData, Track,
+    BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
+    CreatePlaylistRequest, DedupeMode, DeletePlaylistData, DeletePlaylistRequest,
+    DetectExternalMasterDbData, GetFrontendSettingsData, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetSystemParallelismData, GetTracksByIdsData, GetTracksByIdsRequest,
+    InitializeUsbData, InitializeUsbRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, Playlist,
+    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
+    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
+    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ScanLibraryData, ScanLibraryRequest,
+    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
+    SetFrontendSettingRequest, SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -108,6 +109,74 @@ fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
     let file_key = browse_path_key(file_path);
     let root_key = browse_path_key(root).trim_end_matches('/').to_string();
     !root_key.is_empty() && (file_key == root_key || file_key.starts_with(&format!("{root_key}/")))
+}
+
+fn sanitize_source_roots(source_roots: Vec<String>) -> Vec<String> {
+    let mut roots = Vec::<String>::new();
+    for root in source_roots {
+        let trimmed = root.trim().to_string();
+        if trimmed.is_empty() || roots.iter().any(|existing| existing == &trimmed) {
+            continue;
+        }
+        roots.push(trimmed);
+    }
+    roots
+}
+
+fn source_root_is_usable(root: &str) -> bool {
+    let path = Path::new(root);
+    path.exists() && path.is_dir()
+}
+
+fn source_root_status(root: &str) -> SourceRootStatus {
+    let path = Path::new(root);
+    SourceRootStatus {
+        source_root: root.to_string(),
+        exists: path.exists(),
+        is_dir: path.is_dir(),
+    }
+}
+
+fn normalize_source_root_for_matching(value: &str) -> String {
+    value
+        .trim()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn relative_path_under_source_root(file_path: &str, source_root: &str) -> Option<String> {
+    let normalized_path = file_path.trim().replace('\\', "/");
+    let normalized_root = source_root.trim().replace('\\', "/");
+    let root = normalized_root.trim_end_matches('/');
+    if root.is_empty() {
+        return None;
+    }
+
+    let path_key = normalized_path.to_ascii_lowercase();
+    let root_key = root.to_ascii_lowercase();
+    if path_key == root_key {
+        return Some(String::new());
+    }
+    let prefix = format!("{root_key}/");
+    if path_key.starts_with(&prefix) {
+        return Some(normalized_path[root.len() + 1..].to_string());
+    }
+    None
+}
+
+fn relocated_source_path(new_root: &Path, relative_path: &str) -> PathBuf {
+    let trimmed = relative_path.trim_matches('/');
+    if trimmed.is_empty() {
+        return new_root.to_path_buf();
+    }
+    let mut out = new_root.to_path_buf();
+    for segment in trimmed.split('/') {
+        if !segment.is_empty() {
+            out.push(segment);
+        }
+    }
+    out
 }
 
 fn track_has_core_analysis_for_source_status(track: &Track) -> bool {
@@ -280,13 +349,43 @@ impl BackendService {
     }
 
     pub fn scan_library(&self, req: ScanLibraryRequest) -> BackendResult<ScanLibraryData> {
-        if req.source_roots.is_empty() {
+        let source_roots = sanitize_source_roots(req.source_roots);
+        if source_roots.is_empty() {
             return Err(BackendError::Validation(
                 "sourceRoots must contain at least one path".to_string(),
             ));
         }
 
-        let scanned = scan_audio_files(&req.source_roots)?;
+        let mut existing_roots = Vec::<String>::new();
+        let mut not_found = Vec::<String>::new();
+        for root in source_roots {
+            if source_root_is_usable(&root) {
+                existing_roots.push(root);
+            } else {
+                not_found.push(root);
+            }
+        }
+        let mut warnings = Vec::<String>::new();
+        if !not_found.is_empty() {
+            warnings.push(format!(
+                "{} source folder(s) missing or not directories: {}",
+                not_found.len(),
+                not_found.join(", ")
+            ));
+        }
+
+        if existing_roots.is_empty() {
+            return Ok(ScanLibraryData {
+                job_id: Uuid::now_v7().to_string(),
+                indexed: 0,
+                updated: 0,
+                removed: 0,
+                not_found,
+                warnings,
+            });
+        }
+
+        let scanned = scan_audio_files(&existing_roots)?;
         let now = now();
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
@@ -498,12 +597,17 @@ impl BackendService {
         let analysis_dir = self.db.data_dir().join("analysis");
         let waveform_dir = analysis_dir.join("waveforms");
         let artwork_dir = analysis_dir.join("artwork");
-        for root in &req.source_roots {
-            let escaped_root = root.replace('%', "\\%").replace('_', "\\_");
-            let like = format!("{escaped_root}%");
-            let mut stmt =
-                tx.prepare("SELECT id, file_path FROM tracks WHERE file_path LIKE ?1 ESCAPE '\\'")?;
-            let rows = stmt.query_map(params![like], |row| {
+        for root in &existing_roots {
+            let escaped_root = root
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            let slash_like = format!("{escaped_root}/%");
+            let backslash_like = format!("{escaped_root}\\\\%");
+            let mut stmt = tx.prepare(
+                "SELECT id, file_path FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\' OR file_path LIKE ?3 ESCAPE '\\'",
+            )?;
+            let rows = stmt.query_map(params![root, slash_like, backslash_like], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?;
 
@@ -553,8 +657,8 @@ impl BackendService {
             indexed,
             updated,
             removed,
-            not_found: vec![],
-            warnings: vec![],
+            not_found,
+            warnings,
         })
     }
 
@@ -1168,6 +1272,119 @@ impl BackendService {
         })
     }
 
+    pub fn check_source_roots(
+        &self,
+        req: CheckSourceRootsRequest,
+    ) -> BackendResult<CheckSourceRootsData> {
+        let items = sanitize_source_roots(req.source_roots)
+            .into_iter()
+            .map(|root| source_root_status(&root))
+            .collect::<Vec<_>>();
+        let missing = items
+            .iter()
+            .filter(|item| !item.exists || !item.is_dir)
+            .map(|item| item.source_root.clone())
+            .collect::<Vec<_>>();
+
+        Ok(CheckSourceRootsData { items, missing })
+    }
+
+    pub fn relocate_source_root(
+        &self,
+        req: RelocateSourceRootRequest,
+    ) -> BackendResult<RelocateSourceRootData> {
+        let old_root = req.old_root.trim().to_string();
+        let new_root = req.new_root.trim().to_string();
+        if old_root.is_empty() || new_root.is_empty() {
+            return Err(BackendError::Validation(
+                "oldRoot and newRoot must not be empty".to_string(),
+            ));
+        }
+        if normalize_source_root_for_matching(&old_root)
+            == normalize_source_root_for_matching(&new_root)
+        {
+            return Err(BackendError::Validation(
+                "newRoot must be different from oldRoot".to_string(),
+            ));
+        }
+        let new_root_path = PathBuf::from(&new_root);
+        if !new_root_path.exists() || !new_root_path.is_dir() {
+            return Err(BackendError::Validation(format!(
+                "newRoot does not exist or is not a directory: {new_root}"
+            )));
+        }
+
+        let mut conn = self.db.connect()?;
+        let tx = conn.transaction()?;
+        let tracks = {
+            let mut stmt = tx.prepare("SELECT id, file_path FROM tracks")?;
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+        };
+
+        let mut matched = 0usize;
+        let mut updated = 0usize;
+        let mut unchanged = 0usize;
+        let mut missing_at_new_root = 0usize;
+        let mut conflicts = 0usize;
+        let timestamp = now();
+
+        for (track_id, old_file_path) in tracks {
+            let Some(relative_path) = relative_path_under_source_root(&old_file_path, &old_root)
+            else {
+                continue;
+            };
+            matched += 1;
+
+            let new_file_path = relocated_source_path(&new_root_path, &relative_path);
+            let new_file_path_string = new_file_path.to_string_lossy().to_string();
+            if new_file_path_string == old_file_path {
+                unchanged += 1;
+                continue;
+            }
+            if !new_file_path.is_file() {
+                missing_at_new_root += 1;
+                continue;
+            }
+
+            let existing_id = tx
+                .query_row(
+                    "SELECT id FROM tracks WHERE file_path = ?1 LIMIT 1",
+                    params![&new_file_path_string],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if existing_id
+                .as_deref()
+                .is_some_and(|existing| existing != track_id)
+            {
+                conflicts += 1;
+                continue;
+            }
+
+            tx.execute(
+                "UPDATE tracks SET file_path = ?1, updated_at = ?2 WHERE id = ?3",
+                params![&new_file_path_string, &timestamp, &track_id],
+            )?;
+            updated += 1;
+        }
+
+        replace_relocated_source_root_settings(&tx, &old_root, &new_root)?;
+        tx.commit()?;
+
+        Ok(RelocateSourceRootData {
+            old_root,
+            new_root,
+            matched,
+            updated,
+            unchanged,
+            missing_at_new_root,
+            conflicts,
+        })
+    }
+
     pub fn materialize_source_track(
         &self,
         req: MaterializeSourceTrackRequest,
@@ -1314,14 +1531,16 @@ impl BackendService {
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
                 .replace('_', "\\_");
-            let like = format!("{escaped}/%");
+            let slash_like = format!("{escaped}/%");
+            let backslash_like = format!("{escaped}\\\\%");
             let deleted = tx.execute(
                 r#"
                 DELETE FROM tracks
                 WHERE file_path = ?1
                    OR file_path LIKE ?2 ESCAPE '\'
+                   OR file_path LIKE ?3 ESCAPE '\'
                 "#,
-                params![root, like],
+                params![root, slash_like, backslash_like],
             )?;
             removed += deleted;
         }
@@ -1762,6 +1981,110 @@ fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_HELP_SEEN,
         SETTING_UI_USB_RECENT_ROOTS,
     ]
+}
+
+fn source_root_keys_equal(left: &str, right: &str) -> bool {
+    normalize_source_root_for_matching(left) == normalize_source_root_for_matching(right)
+}
+
+fn write_app_setting_tx(
+    tx: &rusqlite::Transaction<'_>,
+    key: &str,
+    value: String,
+) -> BackendResult<()> {
+    tx.execute(
+        r#"
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        "#,
+        params![key, value, now()],
+    )?;
+    Ok(())
+}
+
+fn replace_relocated_source_root_settings(
+    tx: &rusqlite::Transaction<'_>,
+    old_root: &str,
+    new_root: &str,
+) -> BackendResult<()> {
+    if let Some(raw_roots) = tx
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![SETTING_UI_SOURCE_ROOTS],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        && let Ok(roots) = serde_json::from_str::<Vec<String>>(&raw_roots)
+    {
+        let mut changed = false;
+        let mut next_roots = Vec::<String>::new();
+        for root in roots {
+            let replacement = if source_root_keys_equal(&root, old_root) {
+                changed = true;
+                new_root.to_string()
+            } else {
+                root
+            };
+            if next_roots
+                .iter()
+                .any(|existing| source_root_keys_equal(existing, &replacement))
+            {
+                changed = true;
+            } else {
+                next_roots.push(replacement);
+            }
+        }
+        if changed {
+            let encoded = serde_json::to_string(&next_roots).map_err(|err| {
+                BackendError::Internal(format!("failed to encode source roots setting: {err}"))
+            })?;
+            write_app_setting_tx(tx, SETTING_UI_SOURCE_ROOTS, encoded)?;
+        }
+    }
+
+    if let Some(raw_enabled) = tx
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![SETTING_UI_SOURCE_ROOT_ENABLED],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        && let Ok(mut enabled) =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw_enabled)
+    {
+        let old_keys = enabled
+            .keys()
+            .filter(|key| source_root_keys_equal(key, old_root))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !old_keys.is_empty() {
+            let mut moved_value = None;
+            for key in old_keys {
+                if moved_value.is_none() {
+                    moved_value = enabled.remove(&key);
+                } else {
+                    enabled.remove(&key);
+                }
+            }
+            if let Some(value) = moved_value {
+                let has_new_key = enabled
+                    .keys()
+                    .any(|key| source_root_keys_equal(key, new_root));
+                if !has_new_key {
+                    enabled.insert(new_root.to_string(), value);
+                }
+            }
+            let encoded = serde_json::to_string(&enabled).map_err(|err| {
+                BackendError::Internal(format!(
+                    "failed to encode source root enabled setting: {err}"
+                ))
+            })?;
+            write_app_setting_tx(tx, SETTING_UI_SOURCE_ROOT_ENABLED, encoded)?;
+        }
+    }
+
+    Ok(())
 }
 
 pub fn check_essentia_installed(data_dir: &std::path::Path) -> bool {

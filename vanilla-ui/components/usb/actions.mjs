@@ -1,3 +1,8 @@
+import {
+  missingSourceRootsArray,
+  playlistTracksAffectedByMissingRoots
+} from "../library/actions.mjs";
+
 export function normalizePlaylistNameForCompare(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -1255,7 +1260,8 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
     updateModeText,
     switchView,
     renderUsbPlaylists,
-    renderUsbPlaylistTracks
+    renderUsbPlaylistTracks,
+    refreshMissingSourceRoots = async () => []
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
   const emitErrorEvent = (text, details = null, coalesceKey = "export.failure") => {
@@ -1283,6 +1289,14 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
   if (!playlist) return;
   if (!playlist.tracks?.length) {
     emitStatus("Playlist must contain tracks before export");
+    return;
+  }
+  await refreshMissingSourceRoots({ silent: true });
+  const affectedMissingTracks = playlistTracksAffectedByMissingRoots(playlist.tracks, state);
+  if (affectedMissingTracks.length) {
+    const missingRoots = missingSourceRootsArray(state);
+    const suffix = missingRoots.length ? `: ${missingRoots[0]}` : "";
+    emitStatus(`Export blocked: source folder is missing${suffix}. Relocate or remove it first.`);
     return;
   }
   if (!state.usbRoot || !state.usbRootValid) {

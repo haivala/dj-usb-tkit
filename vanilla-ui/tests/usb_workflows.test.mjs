@@ -95,6 +95,53 @@ test("exportPlaylistToUsb blocks when playlist tracks are missing and logs gener
   assert.equal(logged[0].code, "export.failure");
 });
 
+test("exportPlaylistToUsb blocks playlists affected by missing source roots", async () => {
+  const state = {
+    sourceRoots: ["/music/missing"],
+    missingSourceRoots: new Set(["/music/missing"]),
+    playlists: [
+      {
+        id: "p1",
+        name: "Set",
+        tracks: [{ id: "t1", filePath: "/music/missing/Artist - Track.mp3" }]
+      }
+    ],
+    usbRoot: "/USB",
+    usbRootValid: true,
+    usbWritable: true,
+    exportPruneStale: true,
+    activeJobId: null
+  };
+  const el = {};
+  let status = "";
+  let exportCalled = false;
+
+  await exportPlaylistToUsb(state, el, "p1", {
+    setStatus: (text) => { status = text; },
+    refreshMissingSourceRoots: async () => ["/music/missing"],
+    command: async () => {
+      exportCalled = true;
+      return {};
+    },
+    setProgress: () => {},
+    startProgressHeartbeat: () => {},
+    nextPaint: async () => {},
+    stopProgressHeartbeat: () => {},
+    countWarningsForStatus: () => 0,
+    warningEntryLevel: () => "info",
+    logWarnings: () => {},
+    pushEventLog: () => {},
+    loadPlaylists: async () => {},
+    updateModeText: () => {},
+    switchView: async () => {},
+    renderUsbPlaylists: () => {},
+    renderUsbPlaylistTracks: () => {}
+  });
+
+  assert.equal(exportCalled, false);
+  assert.match(status, /Export blocked: source folder is missing/);
+});
+
 test("player menu single-select clears opposite list and enables proper actions", () => {
   const dom = new JSDOM(`<!doctype html><body>
     <button id="refresh"></button>

@@ -192,6 +192,7 @@ export async function initApp(state, deps = {}) {
     loadUsbRootFromStorage,
     restoreStoredUiPrefs,
     applySidebarCollapsedUi,
+    checkSourceRoots = async () => {},
     renderSourceChips,
     detectExternalMasterDb,
     bindEvents,
@@ -233,6 +234,7 @@ export async function initApp(state, deps = {}) {
   }
   persistSourceRootEnabled(state.sourceRootEnabled);
   await syncAssetScopePaths();
+  await checkSourceRoots({ silent: true });
   loadUsbRootFromStorage();
 
   restoreStoredUiPrefs();

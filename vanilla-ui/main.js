@@ -792,6 +792,14 @@ function renderSourceChips() {
     updateSourceFilterIndicator,
   });
 }
+async function checkSourceRoots(options = {}) {
+  return library.refreshMissingSourceRoots(state, {
+    command,
+    renderSourceChips,
+    emitStatus,
+    silent: options?.silent !== false,
+  });
+}
 function applySearchLocalFilter() {
   library.applySearchLocalFilter(state, el, {
     renderLibraryRows,
@@ -943,12 +951,28 @@ async function scanLibrary() {
     trackPathIsInsideSelectedRoots: (fp) =>
       library.trackPathIsInsideSelectedRoots(
         fp,
-        library.enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled)
+        library.enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots)
       ),
     trackHasCoreAnalysis,
     analyzeTrackIds,
     refreshCurrentPlaylistTracks,
     countWarningsForStatus: eventLog.countWarningsForStatus,
+    renderSourceChips,
+  });
+}
+async function relocateSourceRoot(oldRoot) {
+  return library.relocateSourceRoot(state, oldRoot, {
+    pickSourceFolders,
+    command,
+    persistSourceRoots,
+    persistSourceRootEnabled,
+    syncAssetScopePaths,
+    renderSourceChips,
+    resetAndLoadLibraryTracks,
+    refreshCurrentPlaylistTracks,
+    refreshMissingSourceRoots: checkSourceRoots,
+    LIBRARY_LOAD_LIMIT_DEFAULT,
+    emitStatus,
   });
 }
 async function scanMasterDb() {
@@ -1418,6 +1442,7 @@ async function exportPlaylistToUsb(playlistId) {
     switchView,
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
+    refreshMissingSourceRoots: checkSourceRoots,
   });
 }
 
@@ -1618,6 +1643,7 @@ function bindEvents() {
     persistSourcesEverConfigured,
     enabledSourceRoots: library.enabledSourceRoots,
     pickSourceFolders,
+    relocateSourceRoot,
     scanLibrary,
     scanMasterDb,
     LIBRARY_LOAD_LIMIT_DEFAULT,
@@ -1709,6 +1735,7 @@ async function init() {
     loadUsbRootFromStorage,
     restoreStoredUiPrefs,
     applySidebarCollapsedUi,
+    checkSourceRoots,
     renderSourceChips,
     detectExternalMasterDb,
     bindEvents,

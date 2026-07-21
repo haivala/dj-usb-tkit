@@ -916,6 +916,18 @@ main {
   color: color-mix(in srgb, var(--success) 70%, var(--ink));
 }
 
+.source-chip-missing {
+  border-color: color-mix(in srgb, var(--danger) 64%, var(--line));
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-raised));
+  color: color-mix(in srgb, var(--danger) 76%, var(--ink));
+  cursor: pointer;
+}
+
+.source-chip-missing .source-chip-toggle {
+  accent-color: var(--danger);
+  cursor: pointer;
+}
+
 .source-chip-toggle {
   width: 14px;
   height: 14px;

@@ -10,6 +10,7 @@ export function createInitialState() {
   return {
     sourceRoots: [],
     sourceRootEnabled: {},
+    missingSourceRoots: new Set(),
     sourceRootAnalysisStatus: {},
     usbRoot: null,
     usbRecentRoots: [],

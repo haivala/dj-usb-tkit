@@ -14,19 +14,20 @@ use crate::error::{ErrorCode, ErrorPayload};
 use crate::models::{
     AddTracksToPlaylistData, AddTracksToPlaylistRequest, AnalyzeNewTracksData,
     AnalyzeNewTracksRequest, AnalyzeTrackPieceData, AnalyzeTrackPieceRequest, ApiResponse,
-    BrowseSourceFilesData, BrowseSourceFilesRequest, CreatePlaylistData, CreatePlaylistRequest,
-    DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData, ExportToUsbData,
-    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetSystemParallelismData, GetTracksByIdsData, GetTracksByIdsRequest,
+    BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
+    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
+    DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
+    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest,
+    GetSystemParallelismData, GetTracksByIdsData, GetTracksByIdsRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
     ListPlaylistsData, ListTracksData, ListTracksRequest, MaterializeSourceTrackData,
     MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
-    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    RenamePlaylistData, RenamePlaylistRequest, RepairUsbDiagnosticsData,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, RelocateSourceRootData,
+    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
+    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
+    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
     RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
     RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
@@ -672,6 +673,14 @@ pub fn browse_source_files(
 }
 
 #[tauri::command]
+pub fn check_source_roots(
+    state: State<'_, BackendCommands>,
+    request: CheckSourceRootsRequest,
+) -> ApiResponse<CheckSourceRootsData> {
+    state.check_source_roots(request)
+}
+
+#[tauri::command]
 pub fn materialize_source_track(
     state: State<'_, BackendCommands>,
     request: MaterializeSourceTrackRequest,
@@ -685,6 +694,14 @@ pub fn remove_tracks_by_source_roots(
     request: RemoveTracksBySourceRootsRequest,
 ) -> ApiResponse<RemoveTracksBySourceRootsData> {
     state.remove_tracks_by_source_roots(request)
+}
+
+#[tauri::command]
+pub fn relocate_source_root(
+    state: State<'_, BackendCommands>,
+    request: RelocateSourceRootRequest,
+) -> ApiResponse<RelocateSourceRootData> {
+    state.relocate_source_root(request)
 }
 
 #[tauri::command]

@@ -87,7 +87,10 @@ export function updateSourceFilterIndicator(state, el) {
   if (!el.sourceFilterIndicator) return;
   const anyUnchecked = state.sourceRoots.some((root) => state.sourceRootEnabled[root] === false);
   const masterDbFiltered = !!(state.externalMasterDbPath && !state.masterDbEnabled);
-  el.sourceFilterIndicator.classList.toggle("active", anyUnchecked || masterDbFiltered);
+  const missingRoots = state.missingSourceRoots instanceof Set
+    ? state.missingSourceRoots.size
+    : (Array.isArray(state.missingSourceRoots) ? state.missingSourceRoots.length : 0);
+  el.sourceFilterIndicator.classList.toggle("active", anyUnchecked || masterDbFiltered || missingRoots > 0);
 }
 
 export function updateScanLibraryButtonLabel(state, el, deps) {

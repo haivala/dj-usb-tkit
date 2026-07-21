@@ -225,6 +225,28 @@ pub struct BrowseSourceFilesData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CheckSourceRootsRequest {
+    pub source_roots: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceRootStatus {
+    pub source_root: String,
+    pub exists: bool,
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckSourceRootsData {
+    pub items: Vec<SourceRootStatus>,
+    #[serde(default)]
+    pub missing: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SourceRootAnalysisStatus {
     pub source_root: String,
     pub total: usize,
@@ -272,6 +294,25 @@ pub struct RemoveTracksBySourceRootsRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RemoveTracksBySourceRootsData {
     pub removed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocateSourceRootRequest {
+    pub old_root: String,
+    pub new_root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocateSourceRootData {
+    pub old_root: String,
+    pub new_root: String,
+    pub matched: usize,
+    pub updated: usize,
+    pub unchanged: usize,
+    pub missing_at_new_root: usize,
+    pub conflicts: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

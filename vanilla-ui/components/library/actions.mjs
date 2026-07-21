@@ -214,6 +214,61 @@ function applySourceRootAnalysisFromBrowseData(state, data) {
   }
 }
 
+export function missingSourceRootsArray(state) {
+  const roots = state?.missingSourceRoots;
+  if (roots instanceof Set) return Array.from(roots);
+  if (Array.isArray(roots)) return roots;
+  return [];
+}
+
+export function setMissingSourceRoots(state, roots) {
+  const normalized = Array.isArray(roots)
+    ? roots.map((root) => String(root || "").trim()).filter(Boolean)
+    : [];
+  state.missingSourceRoots = new Set(normalized);
+  return normalized;
+}
+
+export function sourceRootIsMissing(state, root) {
+  const key = normalizePath(root).replace(/\/+$/, "");
+  if (!key) return false;
+  return missingSourceRootsArray(state)
+    .some((candidate) => normalizePath(candidate).replace(/\/+$/, "") === key);
+}
+
+export function playlistTracksAffectedByMissingRoots(tracks, state) {
+  const missing = missingSourceRootsArray(state);
+  if (!missing.length || !Array.isArray(tracks)) return [];
+  return tracks.filter((track) => trackPathMatchesAnyRoot(track?.filePath, missing));
+}
+
+export async function refreshMissingSourceRoots(state, deps = {}) {
+  const {
+    command = async () => ({ missing: [] }),
+    renderSourceChips = () => {},
+    emitStatus = () => {},
+    silent = true
+  } = deps;
+  const roots = Array.isArray(state.sourceRoots) ? state.sourceRoots : [];
+  if (!roots.length) {
+    setMissingSourceRoots(state, []);
+    renderSourceChips();
+    return [];
+  }
+  try {
+    const data = await command("check_source_roots", { sourceRoots: roots });
+    const missing = setMissingSourceRoots(state, Array.isArray(data?.missing) ? data.missing : []);
+    renderSourceChips();
+    if (!silent && missing.length) {
+      emitStatus(`Source folder missing: ${missing[0]}${missing.length > 1 ? ` (+${missing.length - 1} more)` : ""}. Relocate or remove it.`);
+    }
+    return missing;
+  } catch (err) {
+    console.warn("Failed to check source folders:", err);
+    return missingSourceRootsArray(state);
+  }
+}
+
 export function scheduleRealtimeTrackRender(state, deps) {
   const {
     clearTimeoutFn,
@@ -468,6 +523,74 @@ export function applySearchLocalFilter(state, el, deps = {}) {
   updateSelectionCount();
 }
 
+export async function relocateSourceRoot(state, oldRoot, deps = {}) {
+  const {
+    pickSourceFolders = async () => [],
+    command = async () => ({}),
+    persistSourceRoots = () => {},
+    persistSourceRootEnabled = () => {},
+    syncAssetScopePaths = async () => {},
+    renderSourceChips = () => {},
+    resetAndLoadLibraryTracks = async () => {},
+    refreshCurrentPlaylistTracks = async () => {},
+    refreshMissingSourceRoots = async () => [],
+    LIBRARY_LOAD_LIMIT_DEFAULT = 200
+  } = deps;
+  const emitStatus = resolveEmitStatus(deps);
+  const sourceRoot = String(oldRoot || "").trim();
+  if (!sourceRoot) return;
+
+  emitStatus(`Relocate source folder: ${sourceRoot}`);
+  const picked = await pickSourceFolders();
+  const newRoot = Array.isArray(picked)
+    ? String(picked[0] || "").trim()
+    : String(picked || "").trim();
+  if (!newRoot) return;
+
+  const result = await command("relocate_source_root", {
+    oldRoot: sourceRoot,
+    newRoot
+  });
+
+  const oldIndex = state.sourceRoots.findIndex((root) => normalizePath(root) === normalizePath(sourceRoot));
+  const alreadyHasNewRoot = state.sourceRoots.some((root) => normalizePath(root) === normalizePath(newRoot));
+  const unresolved = Number(result?.missingAtNewRoot || 0) + Number(result?.conflicts || 0);
+  if (!state.sourceRootEnabled || typeof state.sourceRootEnabled !== "object") {
+    state.sourceRootEnabled = {};
+  }
+  const oldEnabled = state.sourceRootEnabled?.[sourceRoot];
+  if (oldIndex >= 0 && unresolved === 0) {
+    if (alreadyHasNewRoot) {
+      state.sourceRoots.splice(oldIndex, 1);
+    } else {
+      state.sourceRoots[oldIndex] = newRoot;
+    }
+  } else if (!alreadyHasNewRoot) {
+    state.sourceRoots.push(newRoot);
+  }
+  if (oldEnabled !== undefined && state.sourceRootEnabled?.[newRoot] === undefined) {
+    state.sourceRootEnabled[newRoot] = oldEnabled;
+  } else if (state.sourceRootEnabled?.[newRoot] === undefined) {
+    state.sourceRootEnabled[newRoot] = true;
+  }
+  if (unresolved === 0) {
+    delete state.sourceRootEnabled[sourceRoot];
+  }
+  persistSourceRoots(state.sourceRoots);
+  persistSourceRootEnabled(state.sourceRootEnabled);
+  renderSourceChips();
+  await syncAssetScopePaths();
+  await refreshMissingSourceRoots({ silent: true });
+  await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
+  await refreshCurrentPlaylistTracks();
+
+  const updated = Number(result?.updated || 0);
+  const partial = unresolved > 0
+    ? ` | ${unresolved} track(s) still unresolved`
+    : "";
+  emitStatus(`Source relocated: ${updated} track path(s) updated${partial}`);
+}
+
 export function renderSourceChips(state, el, deps = {}) {
   const {
     documentObj = typeof document !== "undefined" ? document : null,
@@ -488,6 +611,12 @@ export function renderSourceChips(state, el, deps = {}) {
   for (const cachedRoot of Object.keys(state.sourceRootAnalysisStatus)) {
     if (!activeRoots.has(cachedRoot)) delete state.sourceRootAnalysisStatus[cachedRoot];
   }
+  const activeRootKeys = new Set((state.sourceRoots || []).map((root) => normalizePath(root).replace(/\/+$/, "")));
+  const retainedMissingRoots = missingSourceRootsArray(state)
+    .filter((root) => activeRootKeys.has(normalizePath(root).replace(/\/+$/, "")));
+  if (retainedMissingRoots.length !== missingSourceRootsArray(state).length) {
+    setMissingSourceRoots(state, retainedMissingRoots);
+  }
   const allFolderSourcesEnabled = (state.sourceRoots || [])
     .every((root) => state.sourceRootEnabled[root] !== false);
   const queryActive = String(el.librarySearch?.value || state.libraryQuery || "").trim().length > 0;
@@ -507,12 +636,13 @@ export function renderSourceChips(state, el, deps = {}) {
     if (state.sourceRootEnabled[path] === undefined) {
       state.sourceRootEnabled[path] = true;
     }
+    const missing = sourceRootIsMissing(state, path);
     const scopedTracks = state.tracks.filter((track) => trackPathMatchesAnyRoot(track.filePath, [path]));
     const canRefreshAnalysisStatus = allFolderSourcesEnabled
       && !queryActive
       && loadedLibraryComplete
       && scopedTracks.length > 0;
-    if (canRefreshAnalysisStatus) {
+    if (!missing && canRefreshAnalysisStatus) {
       state.sourceRootAnalysisStatus[path] = scopedTracks.every((track) => {
         const durationMs = Number(track?.durationMs || 0);
         return trackHasCoreAnalysis(track) && Number.isFinite(durationMs) && durationMs > 0;
@@ -521,8 +651,18 @@ export function renderSourceChips(state, el, deps = {}) {
     const fullyAnalyzed = state.sourceRootAnalysisStatus[path] === true;
 
     const chip = documentObj.createElement("span");
-    chip.className = `source-chip${fullyAnalyzed ? " source-chip-analyzed" : ""}`;
-    chip.innerHTML = `<input class="source-chip-toggle" type="checkbox" data-source-toggle-index="${index}" ${state.sourceRootEnabled[path] !== false ? "checked" : ""} aria-label="Filter source" /><span class="source-chip-path" title="${escapeHtml(path)}">${escapeHtml(path)}</span><button class="source-chip-remove" data-source-index="${index}" aria-label="Remove">&times;</button>`;
+    chip.className = `source-chip${fullyAnalyzed && !missing ? " source-chip-analyzed" : ""}${missing ? " source-chip-missing" : ""}`;
+    if (missing) {
+      chip.dataset.sourceRelocateIndex = String(index);
+      chip.title = "Source folder missing. Click to relocate.";
+    }
+    const checkedAttr = !missing && state.sourceRootEnabled[path] !== false ? "checked" : "";
+    const disabledAttr = missing ? "disabled" : "";
+    const ariaLabel = missing ? "Source folder missing" : "Filter source";
+    const pathTitle = missing
+      ? `Folder missing. Click to relocate: ${path}`
+      : path;
+    chip.innerHTML = `<input class="source-chip-toggle" type="checkbox" data-source-toggle-index="${index}" ${checkedAttr} ${disabledAttr} aria-label="${escapeHtml(ariaLabel)}" /><span class="source-chip-path" title="${escapeHtml(pathTitle)}">${escapeHtml(path)}</span><button class="source-chip-remove" data-source-index="${index}" aria-label="Remove">&times;</button>`;
     el.sourceChipsContainer.appendChild(chip);
   });
 
@@ -673,7 +813,7 @@ export async function loadTracks(state, query, limit, cursor, options = {}, deps
   state.libraryLoading = true;
   try {
     const enabledRoots = (state.sourceRoots || []).filter(
-      (root) => state.sourceRootEnabled?.[root] !== false
+      (root) => state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(state, root)
     );
     const includeMasterDb = state.masterDbEnabled === true;
     const hasEnabledSources = enabledRoots.length > 0 || includeMasterDb;
@@ -835,7 +975,8 @@ export async function scanLibrary(state, deps) {
     trackHasCoreAnalysis,
     analyzeTrackIds,
     refreshCurrentPlaylistTracks,
-    countWarningsForStatus
+    countWarningsForStatus,
+    renderSourceChips = () => {}
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
   if (!state.sourceRoots.length) {
@@ -844,12 +985,31 @@ export async function scanLibrary(state, deps) {
   }
 
   persistSourceRoots(state.sourceRoots);
+  const knownMissing = missingSourceRootsArray(state);
+  if (knownMissing.length) {
+    emitStatus(`Source folder missing: ${knownMissing[0]}${knownMissing.length > 1 ? ` (+${knownMissing.length - 1} more)` : ""}. Relocate or remove it.`);
+  }
+  const activeScanRoots = enabledSourceRoots(
+    state.sourceRoots,
+    state.sourceRootEnabled,
+    state.missingSourceRoots
+  );
+  if (!activeScanRoots.length) {
+    emitStatus(knownMissing.length
+      ? "No available source folders to scan. Relocate or remove missing source folders."
+      : "Enable at least one source folder before scanning");
+    return;
+  }
   emitStatus("Scanning library files...");
-  const activeScanRoots = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled);
   const result = await command("scan_library", {
     sourceRoots: activeScanRoots,
     incremental: true
   });
+  if (Array.isArray(result?.notFound) && result.notFound.length) {
+    setMissingSourceRoots(state, [...missingSourceRootsArray(state), ...result.notFound]);
+    renderSourceChips();
+    emitStatus(`Source folder missing: ${result.notFound[0]}${result.notFound.length > 1 ? ` (+${result.notFound.length - 1} more)` : ""}. Relocate or remove it.`);
+  }
 
   await resetAndLoadLibraryTracks("", LIBRARY_LOAD_LIMIT_POST_SCAN);
   const scopedTracks = state.tracks
@@ -880,8 +1040,10 @@ export async function scanLibrary(state, deps) {
   const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
   const autoLimitWarning = findAnalysisAutoLimitWarning(warnings);
   const autoLimitSuffix = autoLimitWarning ? ` | ${autoLimitWarning}` : "";
+  const missingCount = missingSourceRootsArray(state).length;
+  const missingSuffix = missingCount ? ` | ${missingCount} source folder(s) missing` : "";
   emitStatus(
-    `Scan done: ${scopedTracks.length} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}`
+    `Scan done: ${scopedTracks.length} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}${missingSuffix}`
   );
 }
 
@@ -1612,9 +1774,17 @@ export function trackPathMatchesAnyRoot(filePath, roots) {
   });
 }
 
-export function enabledSourceRoots(sourceRoots, sourceRootEnabled = {}) {
+export function enabledSourceRoots(sourceRoots, sourceRootEnabled = {}, missingSourceRoots = null) {
   const roots = Array.isArray(sourceRoots) ? sourceRoots : [];
-  return roots.filter((root) => sourceRootEnabled[root] !== false);
+  const missingKeys = missingSourceRoots instanceof Set
+    ? Array.from(missingSourceRoots).map((root) => normalizePath(root).replace(/\/+$/, ""))
+    : (Array.isArray(missingSourceRoots)
+      ? missingSourceRoots.map((root) => normalizePath(root).replace(/\/+$/, ""))
+      : []);
+  return roots.filter((root) => {
+    const rootKey = normalizePath(root).replace(/\/+$/, "");
+    return sourceRootEnabled[root] !== false && !missingKeys.includes(rootKey);
+  });
 }
 
 export function filterTracksBySourceRoots(tracks, sourceRoots, sourceRootEnabled = {}) {

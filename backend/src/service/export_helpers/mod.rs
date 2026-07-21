@@ -85,10 +85,14 @@ fn validate_table_pure_append_or_unchanged(
     page_size: usize,
     issues: &mut Vec<String>,
 ) {
-    let (Some((_ec_before, before_first, before_last)), Some((_ec_after, _first_after, after_last))) = (
+    let (
+        Some((_ec_before, before_first, before_last)),
+        Some((_ec_after, _first_after, after_last)),
+    ) = (
         table_ptr_fields(before, table_type),
         table_ptr_fields(after, table_type),
-    ) else {
+    )
+    else {
         return;
     };
 
@@ -157,7 +161,10 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
 
     let mut issues = Vec::<String>::new();
     for &table_type in CRITICAL_FIRST_PAGE_TABLES {
-        if let (Some((_before_ec, before_first, _before_last)), Some((_after_ec, after_first, _after_last))) = (
+        if let (
+            Some((_before_ec, before_first, _before_last)),
+            Some((_after_ec, after_first, _after_last)),
+        ) = (
             table_ptr_fields(before, table_type),
             table_ptr_fields(after, table_type),
         ) {
@@ -4340,7 +4347,8 @@ mod tests {
     fn topology_guard_tolerates_pure_tail_append_on_unwritten_table() {
         let dir = tempdir().unwrap();
         let usb_root = dir.path();
-        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
+            .unwrap();
         crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
             .expect("initialize usb skeleton");
         let pdb_path = usb_root
@@ -4369,7 +4377,8 @@ mod tests {
     fn topology_guard_rejects_relocated_page_on_unwritten_table() {
         let dir = tempdir().unwrap();
         let usb_root = dir.path();
-        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
+            .unwrap();
         crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
             .expect("initialize usb skeleton");
         let pdb_path = usb_root

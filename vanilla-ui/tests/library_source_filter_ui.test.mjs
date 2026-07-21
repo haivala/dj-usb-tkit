@@ -6,6 +6,7 @@ import {
   applySearchLocalFilter,
   loadTracks,
   normalizeTrack,
+  relocateSourceRoot,
   renderSourceChips,
   scanMasterDb
 } from "../components/library/actions.mjs";
@@ -142,6 +143,89 @@ test("renderSourceChips renders chips and toggles analyzed class", () => {
   assert.deepEqual(Object.keys(persisted).sort(), ["/music/a", "/music/b"]);
   assert.equal(scanLabelUpdates, 1);
   assert.equal(indicatorUpdates, 1);
+});
+
+test("renderSourceChips renders missing source as unchecked relocation chip", () => {
+  const dom = new JSDOM(`<!doctype html><body><div id="chips"></div></body>`);
+  const document = dom.window.document;
+  const state = {
+    sourceRoots: ["/music/missing"],
+    sourceRootEnabled: { "/music/missing": true },
+    missingSourceRoots: new Set(["/music/missing"]),
+    sourceRootAnalysisStatus: {},
+    tracks: []
+  };
+  const el = { sourceChipsContainer: document.querySelector("#chips") };
+
+  renderSourceChips(state, el, {
+    documentObj: document,
+    escapeHtml: (v) => String(v),
+    persistSourceRootEnabled: () => {},
+    updateScanLibraryButtonLabel: () => {},
+    updateSourceFilterIndicator: () => {}
+  });
+
+  const chip = el.sourceChipsContainer.querySelector(".source-chip");
+  assert.ok(chip.classList.contains("source-chip-missing"));
+  assert.equal(chip.dataset.sourceRelocateIndex, "0");
+  const checkbox = chip.querySelector(".source-chip-toggle");
+  assert.equal(checkbox.checked, false);
+  assert.equal(checkbox.disabled, true);
+  assert.equal(checkbox.getAttribute("aria-label"), "Source folder missing");
+  assert.match(chip.querySelector(".source-chip-path").getAttribute("title"), /Click to relocate/);
+});
+
+test("relocateSourceRoot replaces source and preserves playlist track identity state", async () => {
+  const state = {
+    sourceRoots: ["/music/old"],
+    sourceRootEnabled: { "/music/old": true },
+    missingSourceRoots: new Set(["/music/old"]),
+    libraryQuery: ""
+  };
+  const calls = [];
+  let persistedRoots = null;
+  let persistedEnabled = null;
+  let rendered = 0;
+  let reloaded = 0;
+  let refreshedPlaylists = 0;
+  const statuses = [];
+
+  await relocateSourceRoot(state, "/music/old", {
+    pickSourceFolders: async () => ["/music/new"],
+    command: async (name, payload) => {
+      calls.push({ name, payload });
+      return {
+        oldRoot: payload.oldRoot,
+        newRoot: payload.newRoot,
+        matched: 2,
+        updated: 2,
+        unchanged: 0,
+        missingAtNewRoot: 0,
+        conflicts: 0
+      };
+    },
+    persistSourceRoots: (roots) => { persistedRoots = [...roots]; },
+    persistSourceRootEnabled: (enabled) => { persistedEnabled = { ...enabled }; },
+    syncAssetScopePaths: async () => {},
+    renderSourceChips: () => { rendered += 1; },
+    resetAndLoadLibraryTracks: async () => { reloaded += 1; },
+    refreshCurrentPlaylistTracks: async () => { refreshedPlaylists += 1; },
+    refreshMissingSourceRoots: async () => { state.missingSourceRoots = new Set(); },
+    LIBRARY_LOAD_LIMIT_DEFAULT: 25,
+    emitStatus: (msg) => statuses.push(msg)
+  });
+
+  assert.deepEqual(calls, [
+    { name: "relocate_source_root", payload: { oldRoot: "/music/old", newRoot: "/music/new" } }
+  ]);
+  assert.deepEqual(state.sourceRoots, ["/music/new"]);
+  assert.deepEqual(persistedRoots, ["/music/new"]);
+  assert.equal(persistedEnabled["/music/new"], true);
+  assert.equal(Object.hasOwn(persistedEnabled, "/music/old"), false);
+  assert.ok(rendered >= 1);
+  assert.equal(reloaded, 1);
+  assert.equal(refreshedPlaylists, 1);
+  assert.ok(statuses.at(-1).includes("2 track path(s) updated"));
 });
 
 test("renderSourceChips keeps analyzed borders stable while folder filters are active", () => {

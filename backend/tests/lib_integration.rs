@@ -841,8 +841,7 @@ fn analyzer_fixtures_validate_artwork_and_waveform_behavior() {
             ),
         }
     }
-    if validated_waveforms == 0 {
-    }
+    if validated_waveforms == 0 {}
 }
 
 #[test]

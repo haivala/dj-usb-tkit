@@ -30,7 +30,35 @@ export function createApiClient({ tauriInvoke, tauriIsTauri, tauriListen, state,
     if (command === "scan_library") {
       return {
         ok: true,
-        data: { jobId: "mock-scan", indexed: 3, updated: 0, removed: 0 }
+        data: { jobId: "mock-scan", indexed: 3, updated: 0, removed: 0, notFound: [], warnings: [] }
+      };
+    }
+
+    if (command === "check_source_roots") {
+      const roots = Array.isArray(payload?.request?.sourceRoots)
+        ? payload.request.sourceRoots
+        : (Array.isArray(payload?.sourceRoots) ? payload.sourceRoots : []);
+      return {
+        ok: true,
+        data: {
+          items: roots.map((root) => ({ sourceRoot: root, exists: true, isDir: true })),
+          missing: []
+        }
+      };
+    }
+
+    if (command === "relocate_source_root") {
+      return {
+        ok: true,
+        data: {
+          oldRoot: payload?.request?.oldRoot || "",
+          newRoot: payload?.request?.newRoot || "",
+          matched: 0,
+          updated: 0,
+          unchanged: 0,
+          missingAtNewRoot: 0,
+          conflicts: 0
+        }
       };
     }
 

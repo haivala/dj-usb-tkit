@@ -118,6 +118,11 @@ test("enabledSourceRoots excludes roots explicitly set to false", () => {
   assert.deepEqual(enabledSourceRoots(roots, { "/b": false }), ["/a", "/c"]);
 });
 
+test("enabledSourceRoots excludes missing roots without changing enabled map", () => {
+  const roots = ["/a", "/b", "/c"];
+  assert.deepEqual(enabledSourceRoots(roots, { "/b": true }, new Set(["/b"])), ["/a", "/c"]);
+});
+
 // ---------------------------------------------------------------------------
 // filterTracksBySourceRoots
 // ---------------------------------------------------------------------------
