@@ -10,7 +10,7 @@
   **Severity:** critical
 -->
 
-## Unreleased
+## 0.1.4
 
 - Missing library source folders are now surfaced as recoverable UI state
   instead of being treated as deleted media during scan. Missing source chips

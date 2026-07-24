@@ -13,12 +13,16 @@ reports are useful gates, but they are not substitutes for these rows.
 
 ## Matrix
 
-| Device model | Firmware version | Test scenario | Operations tested | Result | Validation source | Last validated date | Tester | Notes |
-|---|---|---|---|---|---|---|---|---|
-| CDJ-2000NXS2 | 1.87 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-06-28 | maintainer | Exported USB is accepted and playable. |
-| CDJ-3000 | 3.20 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-06-28 | maintainer | Exported USB is accepted and playable. |
-| CDJ-2000NXS2 | 1.87 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-06-28 | maintainer | Strict parity repair output is accepted and playable. |
-| CDJ-3000 | 3.20 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-06-28 | maintainer | Strict parity repair output is accepted and playable. |
+| Device model | Firmware version | App version | Test scenario | Operations tested | Result | Validation source | Last validated date | Tester | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| CDJ-2000NXS2 | 1.87 | 0.1.0 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-06-28 | maintainer | Exported USB is accepted and playable. |
+| CDJ-3000 | 3.20 | 0.1.0 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-06-28 | maintainer | Exported USB is accepted and playable. |
+| CDJ-2000NXS2 | 1.87 | 0.1.0 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-06-28 | maintainer | Strict parity repair output is accepted and playable. |
+| CDJ-3000 | 3.20 | 0.1.0 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-06-28 | maintainer | Strict parity repair output is accepted and playable. |
+| CDJ-2000NXS2 | 1.82 | 0.1.4 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-07-24 | maintainer | Exported USB is accepted and playable. |
+| CDJ-2000NXS2 | 1.82 | 0.1.4 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-07-24 | maintainer | Strict parity repair output is accepted and playable. |
+| CDJ-2000NXS | 1.44 | 0.1.4 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-07-24 | maintainer | Exported USB is accepted and playable. |
+| CDJ-2000NXS | 1.44 | 0.1.4 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-07-24 | maintainer | Strict parity repair output is accepted and playable. |
 
 ## Required Operations
 
