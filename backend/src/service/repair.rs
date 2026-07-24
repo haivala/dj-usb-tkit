@@ -1566,11 +1566,7 @@ pub(crate) fn playlist_requires_strict_upgrade(detail: &UsbParityPlaylistDetail)
         || detail.pdb_duplicate_entries > 0
         || detail.pdb_missing_core_metadata > 0
         || !detail.playlist_id_match
-        || detail
-            .pdb_sort_order
-            .zip(detail.edb_sort_order)
-            .map(|(p, e)| p != e)
-            .unwrap_or(false)
+        || !detail.sort_order_match
 }
 
 fn strict_raw_coverage_issue_from_parity_checks(checks: &[DiagCheck]) -> Option<String> {

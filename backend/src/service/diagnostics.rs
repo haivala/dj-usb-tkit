@@ -2557,6 +2557,13 @@ pub(crate) fn build_usb_parity_comparison(
                 .unwrap_or(false),
             _ => false,
         };
+        let sort_order_match = match (pdb_info.as_ref(), edb_info.as_ref()) {
+            (Some(pdb), Some(edb)) => edb
+                .sort_order
+                .map(|sort_order| sort_order == pdb.sort_order)
+                .unwrap_or(false),
+            _ => false,
+        };
 
         let structural_pass = only_in_pdb == 0
             && only_in_edb == 0
@@ -2564,7 +2571,8 @@ pub(crate) fn build_usb_parity_comparison(
             && pdb_duplicate_entries == 0
             && path_mismatch_tracks == 0
             && dictionary_id_issue_tracks == 0
-            && playlist_id_match;
+            && playlist_id_match
+            && sort_order_match;
 
         let status = if !structural_pass {
             DiagStatus::Fail
@@ -2594,7 +2602,7 @@ pub(crate) fn build_usb_parity_comparison(
             path_mismatch_tracks,
             dictionary_id_issue_tracks,
             playlist_id_match,
-            sort_order_match: true,
+            sort_order_match,
             sample_only_in_pdb,
             sample_only_in_edb,
             sample_metadata_mismatches,
@@ -2651,7 +2659,13 @@ pub(crate) fn build_usb_parity_comparison(
         .count();
     let total_only_in_pdb: usize = details.iter().map(|d| d.only_in_pdb).sum();
     let total_only_in_edb: usize = details.iter().map(|d| d.only_in_edb).sum();
-    let order_mismatches = details.iter().filter(|d| d.order_mismatch).count();
+    let entry_order_mismatches = details.iter().filter(|d| d.order_mismatch).count();
+    let sort_order_mismatches = details
+        .iter()
+        .filter(|d| d.pdb_sort_order.is_some() && d.edb_sort_order.is_some())
+        .filter(|d| !d.sort_order_match)
+        .count();
+    let order_mismatches = entry_order_mismatches + sort_order_mismatches;
     let total_duplicate_entries: usize = details.iter().map(|d| d.pdb_duplicate_entries).sum();
     let total_pdb_missing_core_metadata: usize =
         details.iter().map(|d| d.pdb_missing_core_metadata).sum();
@@ -2843,7 +2857,10 @@ pub(crate) fn build_usb_parity_comparison(
         } else {
             DiagStatus::Fail
         },
-        detail: format!("entry-order mismatches={}", order_mismatches),
+        detail: format!(
+            "entry-order mismatches={}, playlist-sort-order mismatches={}",
+            entry_order_mismatches, sort_order_mismatches
+        ),
         link: None,
     });
     if let Some(raw_coverage) = strict_raw_coverage.as_ref() {
@@ -3595,6 +3612,79 @@ mod tests {
             .expect("ordering check");
         assert!(matches!(ordering.status, DiagStatus::Fail));
         assert!(ordering.detail.contains("entry-order mismatches=1"));
+    }
+
+    #[test]
+    fn parity_report_fails_when_playlist_sort_order_differs() {
+        let mut parsed = ParsedPdb::default();
+        parsed.artists.insert(1, "Artist".to_string());
+        parsed.playlist_tree.push(PdbPlaylistTreeRow {
+            id: 10,
+            parent_id: 0,
+            sort_order: 1,
+            row_is_folder: false,
+            name: "First".to_string(),
+        });
+        parsed.playlist_tree.push(PdbPlaylistTreeRow {
+            id: 20,
+            parent_id: 0,
+            sort_order: 2,
+            row_is_folder: false,
+            name: "Second".to_string(),
+        });
+        parsed.tracks = vec![
+            make_pdb_track(1, "A", 1, "/Contents/Artist/A.mp3"),
+            make_pdb_track(2, "B", 1, "/Contents/Artist/B.mp3"),
+        ];
+        parsed.playlist_entries.push(PdbPlaylistEntryRow {
+            entry_index: 0,
+            track_id: 1,
+            playlist_id: 10,
+        });
+        parsed.playlist_entries.push(PdbPlaylistEntryRow {
+            entry_index: 0,
+            track_id: 2,
+            playlist_id: 20,
+        });
+
+        let edb_playlists = HashMap::from([
+            (
+                "First".to_string(),
+                ExportDbPlaylist {
+                    playlist_id: 10,
+                    sort_order: 2,
+                    tracks: vec![make_usb_track("1", "A", "Artist", "/Contents/Artist/A.mp3")],
+                },
+            ),
+            (
+                "Second".to_string(),
+                ExportDbPlaylist {
+                    playlist_id: 20,
+                    sort_order: 1,
+                    tracks: vec![make_usb_track("2", "B", "Artist", "/Contents/Artist/B.mp3")],
+                },
+            ),
+        ]);
+
+        let (checks, _, details, overall) = build_usb_parity_comparison(
+            &parsed,
+            &edb_playlists,
+            &ReferenceOnlyEdbFieldUsage::default(),
+            None,
+        );
+
+        assert!(matches!(overall, DiagStatus::Fail));
+        assert_eq!(details.len(), 2);
+        assert_eq!(details[0].name, "First");
+        assert!(!details[0].sort_order_match);
+        assert!(!details[1].sort_order_match);
+        let ordering = checks
+            .iter()
+            .find(|c| c.label == "Playlist ordering parity")
+            .expect("ordering check");
+        assert!(matches!(ordering.status, DiagStatus::Fail));
+        assert!(ordering.detail.contains("entry-order mismatches=0"));
+        assert!(ordering.detail.contains("playlist-sort-order mismatches=2"));
     }
 
     #[test]
