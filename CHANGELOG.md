@@ -25,6 +25,10 @@
   a track's playlist membership in the device-side database; running the
   repair reported success without removing them. The repair now finds and
   removes the stale duplicates so affected playlists pass diagnostics.
+- Fix strict parity reporting for playlist sort-order drift. eDB playlist
+  sequence numbers that no longer match the device-facing PDB playlist order
+  are now reported as ordering parity failures and routed through strict
+  repair, which syncs eDB order back from PDB.
 - Clicking a track row in a USB playlist or history list to load its
   waveform/BPM/key no longer rebuilds and repaints the entire visible track
   list — only the clicked row updates now, matching how the library view
