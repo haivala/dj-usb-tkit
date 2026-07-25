@@ -1196,7 +1196,7 @@ pub(crate) fn external_master_db_candidates() -> Vec<std::path::PathBuf> {
         }
     }
 
-    // HOME-based paths (macOS + Linux)
+    // HOME-based paths (macOS)
     if let Ok(home) = std::env::var("HOME") {
         let home = PathBuf::from(home);
         // macOS: desktop library uses "Pioneer DJ" (with space) as the application directory
@@ -1212,8 +1212,6 @@ pub(crate) fn external_master_db_candidates() -> Vec<std::path::PathBuf> {
         // macOS: current rekordbox installs store the db directly under Library,
         // without "Application Support"
         candidates.push(home.join("Library").join(desktop_master_db_rel_path()));
-        // Linux
-        candidates.push(home.join(".local/share").join(desktop_master_db_rel_path()));
     }
 
     // Windows APPDATA

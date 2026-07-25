@@ -47,7 +47,7 @@ run an explicit ANLZ scan when looking for empty or malformed analysis bundles.
 | --- | --- |
 | Playlist identity | matching playlist ids across PDB and eDB |
 | Playlist membership | tracks only in PDB, tracks only in eDB, and duplicate PDB entries |
-| Playlist order | common entries appear in the same order |
+| Playlist order | common entries appear in the same order within a playlist, and playlist sibling order (PDB `t07.sort_order`) matches eDB `playlist.sequenceNo`; both dimensions are reported together as "Playlist ordering parity" |
 | Track metadata | title, artist, album, key, track number, BPM, duration |
 | Paths | media path and analysis path parity |
 | Artwork | artwork presence on both sides |
@@ -83,14 +83,14 @@ The current code can propose these repair IDs:
 
 | Repair ID | Applies to | What it does |
 | --- | --- | --- |
-| `upgrade_export_data_to_strict_parity` | PDB and eDB playlist parity failures | Merges playlists from both databases, preserves membership from both sides, rewrites PDB and eDB through the export writers |
+| `upgrade_export_data_to_strict_parity` | PDB and eDB playlist parity failures | Merges playlists from both databases, preserves membership from both sides, rewrites PDB and eDB through the export writers, removes stale duplicate PDB playlist-entry rows, and syncs eDB `sequenceNo` from PDB `t07.sort_order` |
 | `fix_empty_analysis_files` | empty USB analysis files with resolvable source audio | Regenerates `DAT/EXT/2EX` bundles for the affected analysis directory |
 | `repair_pdb_header_compatibility_field` | PDB header bytes `0x10..0x14` | Writes only that 4-byte field, using the newest compatible local backup value when available or fallback value `5` |
 | `repair_pdb_sentinel_u5_on_data_pages` | data pages whose `u5` is sentinel `0x1FFF` | Rewrites `u5` and, only when needed, `num_rl` to the per-table data-page convention |
 | `repair_pdb_wrong_page_flags` | data pages with invalid `page_flags` | Patches byte `0x1b` to the accepted value for that table family |
 | `repair_pdb_zero_tranrf_on_track_pages` | row-footer groups with active rows and zero `tranrf` | Patches only zero `tranrf` groups; it does not normalize non-zero transaction masks |
 | `repair_pdb_wrong_track_u5_num_rl` | invalid active `t00` track-page footer shape | Patches the affected track page footer fields |
-| `repair_pdb_wrong_history_page_shape` | `t16`, `t17`, or `t18` pages with `(1, nrs-1)` shape | Changes those pages to `(nrs, 0)` |
+| `repair_pdb_wrong_history_page_shape` | `t16`, `t17`, or `t18` pages with `(1, nrs-1)` shape and `nrs > 1` | Changes those pages to `(nrs, 0)`; single-entry pages (`nrs == 1`, where `(1, nrs-1)` and `(nrs, 0)` coincide) are already valid and are not flagged |
 | `repair_pdb_stale_sentinel_btree` | sentinel pages with stale B-tree entries | Resets the sentinel B-tree index area to the empty state |
 | `repair_pdb_wrong_playlist_tree_shape` | `t07` playlist-tree pages with wrong footer shape | Sets `u5=nrs` and `num_rl=0` |
 | `repair_pdb_tombstoned_playlist_tree_ids` | tombstoned `t00` or `t07` slots duplicating active ids | Zeros only the id field in affected tombstoned slots |
@@ -137,8 +137,10 @@ Menu commands are separate from diagnostics repair:
 - keep PDB-only playlist members instead of pruning them;
 - prefer eDB track metadata when present, falling back to PDB fields;
 - write PDB through the current writer;
+- remove stale duplicate PDB playlist-entry rows left by prior repairs;
 - re-read PDB playlist identities;
-- write eDB using the final playlist identity.
+- write eDB using the final playlist identity, including syncing
+  `sequenceNo` from the current PDB `t07.sort_order` for every playlist.
 
 The strict repair path is intended to converge on rerun. It does not compact
 PDB tables, rebuild the entire PDB from scratch, or silently remove playlist

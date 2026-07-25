@@ -16,6 +16,9 @@
   playlist row in the USB Playlists panel to reorder it; the new order is
   written back to the USB's PDB and eDB, so it's reflected on CDJs and in
   rekordbox, not just in the app.
+- Remove a dead `master.db` autodetection candidate path under
+  `~/.local/share/Pioneer/rekordbox/master.db`. rekordbox has no official
+  Linux install, so this path could never match a real installation.
 
 ## 0.1.4
 

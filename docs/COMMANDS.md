@@ -71,6 +71,7 @@ The desktop host also emits a unified `job:event` channel carrying the same payl
 - `get_usb_cdj_menu_config`
 - `update_usb_cdj_menu_config`
 - `remove_usb_playlist`
+- `reorder_usb_playlists`
 - `inspect_usb_track`
 - `initialize_usb`
 - `export_to_usb`

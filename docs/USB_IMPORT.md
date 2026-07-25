@@ -29,6 +29,22 @@ Known DB data surfaces used by import:
 
 Track metadata resolution for imported playlist entries is multi-source. The importer attempts to resolve each referenced track ID through PDB row data, then eDB content data, then optional master-DB fallback, and skips unresolvable orphan entries instead of failing the whole playlist import.
 
+`detect_external_master_db` locates the local rekordbox `master.db` by checking
+a fixed candidate list in order and returning the first path that exists:
+
+1. `$DJUSBTKIT_MASTER_DB_PATH` env override, when set (used for tests/debugging)
+2. macOS: `~/Library/Application Support/Pioneer DJ/rekordbox/master.db`
+3. macOS: `~/Library/Application Support/Pioneer/rekordbox/master.db` (older installs)
+4. macOS: `~/Library/Pioneer/rekordbox/master.db` (current rekordbox installs, which
+   store the db directly under `Library` rather than `Application Support`)
+5. Windows: `%APPDATA%/Pioneer/rekordbox/master.db`
+6. Windows: `%USERPROFILE%/AppData/Roaming/Pioneer/rekordbox/master.db`
+
+There is no Linux candidate: rekordbox has no official Linux install, so no
+real install path exists to check there.
+
+See `external_master_db_candidates` in `backend/src/service/usb_utils.rs`.
+
 The import service deliberately favors responsiveness over eager payload loading. `fetch_usb_playlists` and `fetch_usb_histories` focus on metadata and membership, while expensive payload hydration (waveform preview bytes, artwork data URLs) is deferred. This keeps initial USB imports fast on large drives.
 
 Hydration is explicitly split into two surfaces:
