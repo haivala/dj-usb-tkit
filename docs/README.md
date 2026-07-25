@@ -9,6 +9,10 @@ This is the documentation set for DJ USB Tkit.
 - `master DB` = `master.db`
 - `local DB` = app local SQLite database
 
+## Overview
+
+- `docs/COMPARISON.md` - how this project differs from rekordbox
+
 ## Functional Docs
 
 - `docs/LIBRARY_ANALYSIS.md` - library scanning, analysis, and waveform behavior

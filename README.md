@@ -18,7 +18,7 @@ Local-first DJ library manager and USB exporter built with Rust + Tauri.
 - Export sync modes: `mirror` (exact playlist sync) and `additive` (append missing tracks without removing existing members).
 - Strict parity reporting is separate from operational passability so users can distinguish "works" vs "fully parity-clean" outcomes.
 
-Detailed behavior and requirements are documented under `docs/`, starting with `docs/README.md`.
+Detailed behavior and requirements are documented under `docs/`, starting with `docs/README.md`. See [`docs/COMPARISON.md`](docs/COMPARISON.md) for how this differs from rekordbox.
 
 > **Warning:** This software writes to DJ USB drives and library databases. Use it at your own risk: the author and maintainers are not responsible for broken USB exports, corrupted databases, data loss, or other damage to your USB drive. Always keep your own backups.
 >
