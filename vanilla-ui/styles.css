@@ -1684,6 +1684,28 @@ input[type="checkbox"] {
   background: var(--danger-glow);
 }
 
+/* drag handle for reordering USB playlists */
+.list li button .drag-handle {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+}
+
+.list li button .drag-handle:active {
+  cursor: grabbing;
+}
+
+.list li.dragging {
+  opacity: 0.5;
+}
+
+.list li.dragging button {
+  border-style: dashed;
+}
+
 /* ── split layout ───────────────────────────────────── */
 
 .split {

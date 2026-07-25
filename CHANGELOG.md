@@ -10,6 +10,13 @@
   **Severity:** critical
 -->
 
+## Unreleased
+
+- Add drag-and-drop reordering for USB playlists. Grab the handle on a
+  playlist row in the USB Playlists panel to reorder it; the new order is
+  written back to the USB's PDB and eDB, so it's reflected on CDJs and in
+  rekordbox, not just in the app.
+
 ## 0.1.4
 
 - Missing library source folders are now surfaced as recoverable UI state

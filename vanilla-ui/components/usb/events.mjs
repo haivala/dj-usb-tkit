@@ -25,6 +25,8 @@ export function bindUsbEvents(ctx) {
     renderUsbPlaylistTracks,
     renderHistoryTracks,
     removeUsbPlaylist,
+    reorderUsbPlaylists,
+    moveArrayItem,
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
     setActiveListItem,
@@ -192,6 +194,59 @@ export function bindUsbEvents(ctx) {
       return;
     }
     emitStatus(`USB playlist selected: ${playlist.name} (${state.usbPlaylistTracks.length} tracks)`);
+  });
+
+  let dragSourceLi = null;
+  let dragSourceIndex = null;
+
+  el.usbPlaylists.addEventListener("dragstart", (event) => {
+    const handle = event.target.closest("[data-usb-drag-handle]");
+    const li = handle?.closest("li[data-usb-playlist-li]");
+    if (!handle || !li) {
+      event.preventDefault();
+      return;
+    }
+    dragSourceLi = li;
+    dragSourceIndex = Number(li.dataset.usbPlaylistLi);
+    li.classList.add("dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(dragSourceIndex));
+    }
+  });
+
+  el.usbPlaylists.addEventListener("dragover", (event) => {
+    if (!dragSourceLi) return;
+    event.preventDefault();
+    const targetLi = event.target.closest("li[data-usb-playlist-li]");
+    if (!targetLi || targetLi === dragSourceLi) return;
+    const rect = targetLi.getBoundingClientRect();
+    const before = event.clientY < rect.top + rect.height / 2;
+    if (before) {
+      targetLi.before(dragSourceLi);
+    } else {
+      targetLi.after(dragSourceLi);
+    }
+  });
+
+  el.usbPlaylists.addEventListener("drop", (event) => {
+    if (dragSourceLi) event.preventDefault();
+  });
+
+  el.usbPlaylists.addEventListener("dragend", () => {
+    if (!dragSourceLi) return;
+    dragSourceLi.classList.remove("dragging");
+    const lis = Array.from(el.usbPlaylists.querySelectorAll("li[data-usb-playlist-li]"));
+    const toIndex = lis.indexOf(dragSourceLi);
+    const fromIndex = dragSourceIndex;
+    dragSourceLi = null;
+    dragSourceIndex = null;
+    if (toIndex < 0 || toIndex === fromIndex) return;
+    state.usbPlaylists = moveArrayItem(state.usbPlaylists, fromIndex, toIndex);
+    reorderUsbPlaylists().catch((err) => {
+      console.error(err);
+      emitStatus(`Save playlist order failed: ${err.message}`);
+    });
   });
 
   el.usbPlaylistTracks.addEventListener("click", async (event) => {

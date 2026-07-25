@@ -725,6 +725,35 @@ export async function removeUsbPlaylist(state, playlist, deps) {
     `Removed USB playlist: ${playlist.name} [db ${data.removedFromEdb || 0}, pdb ${data.removedFromPdb || 0}]${warningSuffix}`
   );
 }
+
+export function moveArrayItem(list, fromIndex, toIndex) {
+  const copy = list.slice();
+  const [item] = copy.splice(fromIndex, 1);
+  copy.splice(toIndex, 0, item);
+  return copy;
+}
+
+export async function reorderUsbPlaylists(state, el, deps) {
+  const { command, refreshUsb } = deps;
+  const emitStatus = resolveEmitStatus(deps);
+
+  if (!state.usbRoot || !state.usbRootValid) {
+    emitStatus("Select USB folder first");
+    return;
+  }
+
+  try {
+    await command("reorder_usb_playlists", {
+      usbRoot: state.usbRoot,
+      orderedPlaylistIds: state.usbPlaylists.map((p) => p.id)
+    });
+    emitStatus("Playlist order saved");
+  } catch (err) {
+    emitStatus(`Failed to save playlist order: ${err.message || err}`);
+  } finally {
+    await refreshUsb();
+  }
+}
 // USB workflow orchestration extracted from main.js.
 
 export async function refreshUsb(state, el, deps) {
@@ -1388,7 +1417,7 @@ export function renderUsbPlaylists(state, el, deps = {}) {
     const source = String(playlist.source || "unknown");
     el.usbPlaylists.insertAdjacentHTML(
       "beforeend",
-      `<li><button data-usb-playlist-index="${index}" data-usb-playlist="${escapeHtml(playlist.id)}" title="Source: ${escapeHtml(source)}"><span class="playlist-label">${escapeHtml(playlist.name)} (${count})</span><span class="playlist-remove" data-usb-remove-playlist="${escapeHtml(playlist.id)}" title="Remove">&times;</span></button></li>`
+      `<li data-usb-playlist-li="${index}"><button data-usb-playlist-index="${index}" data-usb-playlist="${escapeHtml(playlist.id)}" title="Source: ${escapeHtml(source)}"><span class="drag-handle" data-usb-drag-handle draggable="true" title="Drag to reorder">&#10495;</span><span class="playlist-label">${escapeHtml(playlist.name)} (${count})</span><span class="playlist-remove" data-usb-remove-playlist="${escapeHtml(playlist.id)}" title="Remove">&times;</span></button></li>`
     );
   });
 }

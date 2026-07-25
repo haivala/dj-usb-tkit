@@ -7,8 +7,8 @@ use backend::error::ErrorCode;
 use backend::models::{
     AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, InitializeUsbRequest,
-    MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ScanLibraryRequest,
-    SearchTracksRequest,
+    MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ReorderUsbPlaylistsRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -3115,4 +3115,135 @@ fn export_backup_skipped_when_disabled() {
         !backup_dir.exists(),
         "backups/ directory must not be created when backup is disabled"
     );
+}
+
+#[test]
+fn reorder_usb_playlists_persists_order_and_keeps_parity() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    for i in 0..3usize {
+        copy_audio_fixture(
+            &media,
+            "formats/track_format_wav.wav",
+            &format!("Reorder Artist {i} - Reorder Track {i}.wav"),
+        );
+    }
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let all_tracks = backend
+        .search_tracks(SearchTracksRequest {
+            query: "reorder".to_string(),
+            limit: 50,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+    assert_eq!(all_tracks.len(), 3, "expected 3 reorder tracks");
+    let all_ids: Vec<_> = all_tracks.iter().map(|t| t.id.clone()).collect();
+    seed_tracks_as_analyzed(&data_dir, &all_ids);
+
+    let mut playlist_ids = Vec::with_capacity(3);
+    for i in 0..3usize {
+        let created = backend.create_playlist(CreatePlaylistRequest {
+            name: format!("Reorder Playlist {i}"),
+        });
+        assert!(created.ok, "create playlist {i} failed: {created:?}");
+        let pid = created.data.expect("playlist data").playlist_id;
+        let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: pid.clone(),
+            track_ids: vec![all_ids[i].clone()],
+            dedupe: DedupeMode::Skip,
+        });
+        assert!(added.ok, "add tracks to playlist {i} failed: {added:?}");
+        playlist_ids.push(pid);
+    }
+
+    for (i, pid) in playlist_ids.iter().enumerate() {
+        let exported = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: pid.clone(),
+            options: Some(ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: false,
+                ..Default::default()
+            }),
+        });
+        assert!(exported.ok, "export playlist {i} failed: {exported:?}");
+    }
+
+    let fetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(fetched.ok, "fetch usb playlists failed: {fetched:?}");
+    let mut ids = fetched
+        .data
+        .expect("usb playlist data")
+        .items
+        .into_iter()
+        .filter(|p| p.name.starts_with("Reorder Playlist"))
+        .map(|p| p.id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids.len(), 3, "expected 3 reorder playlists on device: {ids:?}");
+
+    // Reverse the device-native order and persist it via the new command.
+    ids.reverse();
+    let reordered = backend.reorder_usb_playlists(ReorderUsbPlaylistsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        ordered_playlist_ids: ids.clone(),
+    });
+    assert!(reordered.ok, "reorder usb playlists failed: {reordered:?}");
+    assert_eq!(reordered.data.expect("reorder data").reordered, 3);
+
+    let refetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(refetched.ok, "re-fetch usb playlists failed: {refetched:?}");
+    let refetched_ids = refetched
+        .data
+        .expect("re-fetch usb playlist data")
+        .items
+        .into_iter()
+        .filter(|p| p.name.starts_with("Reorder Playlist"))
+        .map(|p| p.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        refetched_ids, ids,
+        "USB playlist order should reflect the persisted reorder"
+    );
+
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity.ok, "parity report failed: {parity:?}");
+    let parity_data = parity.data.expect("parity data");
+    for detail in parity_data
+        .playlist_details
+        .iter()
+        .filter(|d| d.name.starts_with("Reorder Playlist"))
+    {
+        assert!(
+            detail.sort_order_match,
+            "expected PDB/eDB sort_order parity after reorder for {}: {detail:?}",
+            detail.name
+        );
+    }
 }

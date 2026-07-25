@@ -4,7 +4,7 @@ function installTauriMock(page, mode) {
   return page.addInitScript(({ mode }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     const state = {
-      initialized: mode === "valid" || mode === "warning-mix" || mode === "toggle-usb",
+      initialized: mode === "valid" || mode === "warning-mix" || mode === "toggle-usb" || mode === "reorder",
       pickCount: 0,
       usbPlaylists: mode === "valid" || mode === "warning-mix"
         ? [
@@ -17,8 +17,15 @@ function installTauriMock(page, mode) {
               ]
             }
           ]
+        : mode === "reorder"
+        ? [
+            { id: "usb-pl-1", name: "Alpha", source: "mock-tauri", tracks: [{ title: "Track A" }] },
+            { id: "usb-pl-2", name: "Bravo", source: "mock-tauri", tracks: [{ title: "Track B" }] },
+            { id: "usb-pl-3", name: "Charlie", source: "mock-tauri", tracks: [{ title: "Track C" }] }
+          ]
         : []
     };
+    window.__reorderCalls = [];
 
     const diagnosticsPayload = {
       overallStatus: "WARN",
@@ -265,6 +272,17 @@ function installTauriMock(page, mode) {
               }
             };
           }
+          if (command === "reorder_usb_playlists") {
+            const orderedIds = Array.isArray(payload?.request?.orderedPlaylistIds)
+              ? payload.request.orderedPlaylistIds
+              : [];
+            window.__reorderCalls.push(orderedIds);
+            const byId = new Map(state.usbPlaylists.map((p) => [String(p.id), p]));
+            state.usbPlaylists = orderedIds
+              .map((id) => byId.get(String(id)))
+              .filter((p) => p !== undefined);
+            return { ok: true, data: { reordered: state.usbPlaylists.length, warnings: [] } };
+          }
           if (command === "remove_usb_playlist") {
             const playlistId = String(payload?.request?.playlistId || "");
             state.usbPlaylists = state.usbPlaylists.filter((p) => String(p.id) !== playlistId);
@@ -484,6 +502,82 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagPlaylistTableBody")).toContainText("dict issues 1");
   await expect(page.locator("#diagPlaylistTableBody")).toContainText("PDB gaps 1");
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
+});
+
+async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTop) {
+  const source = page.locator(fromHandleSelector);
+  const target = page.locator(toRowSelector);
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2 + 10, { steps: 5 });
+  const targetY = dropNearTop ? targetBox.y + targetBox.height * 0.25 : targetBox.y + targetBox.height * 0.75;
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetY, { steps: 10 });
+  await page.mouse.up();
+}
+
+test("USB playlist drag-and-drop reorder persists the new order", async ({ page }) => {
+  await installTauriMock(page, "reorder");
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator("#refreshUsbBtn").click();
+
+  const rows = page.locator("#usbPlaylists li[data-usb-playlist-li]");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toContainText("Alpha");
+  await expect(rows.nth(1)).toContainText("Bravo");
+  await expect(rows.nth(2)).toContainText("Charlie");
+
+  // Drag "Alpha" (row 0) to below "Charlie" (row 2), moving it to the end.
+  await dragViaHandle(
+    page,
+    '#usbPlaylists li[data-usb-playlist-li="0"] [data-usb-drag-handle]',
+    '#usbPlaylists li[data-usb-playlist-li="2"]',
+    false
+  );
+
+  // reorderUsbPlaylists emits "Playlist order saved" and then immediately
+  // refreshes from the backend, which overwrites status with the fetch
+  // result — so assert on the settled state (row order + recorded call)
+  // rather than the transient status text.
+  await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 3");
+  await expect(rows.nth(0)).toContainText("Bravo");
+  await expect(rows.nth(1)).toContainText("Charlie");
+  await expect(rows.nth(2)).toContainText("Alpha");
+
+  const reorderCalls = await page.evaluate(() => window.__reorderCalls);
+  expect(reorderCalls.length).toBeGreaterThan(0);
+  const lastCall = reorderCalls[reorderCalls.length - 1];
+  expect(lastCall).toEqual(["usb-pl-2", "usb-pl-3", "usb-pl-1"]);
+});
+
+test("USB playlist drag that does not change position skips persisting order", async ({ page }) => {
+  await installTauriMock(page, "reorder");
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator("#refreshUsbBtn").click();
+
+  const rows = page.locator("#usbPlaylists li[data-usb-playlist-li]");
+  await expect(rows).toHaveCount(3);
+
+  // Drag row 0's handle a few pixels and drop back within the same row.
+  const handle = page.locator('#usbPlaylists li[data-usb-playlist-li="0"] [data-usb-drag-handle]');
+  const box = await handle.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 2, { steps: 3 });
+  await page.mouse.up();
+
+  await expect(rows.nth(0)).toContainText("Alpha");
+  const reorderCalls = await page.evaluate(() => window.__reorderCalls);
+  expect(reorderCalls).toEqual([]);
 });
 
 test("USB toggle race ends in deterministic final state", async ({ page }) => {

@@ -27,7 +27,8 @@ use crate::models::{
     PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, RelocateSourceRootData,
     RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, RepairUsbDiagnosticsData,
+    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
+    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
     RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
     RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
@@ -937,6 +938,29 @@ pub async fn remove_usb_playlist(
         "remove_usb_playlist",
         move |mut progress| {
             commands.remove_usb_playlist_with_progress(request, move |c, t, m| {
+                progress(c, t, m);
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn reorder_usb_playlists(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+    request: ReorderUsbPlaylistsRequest,
+) -> Result<ApiResponse<ReorderUsbPlaylistsData>, String> {
+    let commands = state.inner().clone();
+    run_usb_job_with_progress(
+        &app,
+        "usb_write",
+        "reorder_usb_playlists",
+        "USB: Saving playlist order",
+        "USB: Playlist order saved",
+        "reorder_usb_playlists",
+        move |mut progress| {
+            commands.reorder_usb_playlists_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
             })
         },

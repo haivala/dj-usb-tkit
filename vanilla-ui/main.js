@@ -1321,6 +1321,14 @@ async function removeUsbPlaylist(p) {
     countWarningsForStatus: eventLog.countWarningsForStatus,
   });
 }
+async function reorderUsbPlaylists() {
+  return usb.reorderUsbPlaylists(state, el, {
+    setStatus,
+    emitStatus,
+    command,
+    refreshUsb,
+  });
+}
 async function runUsbDiagnostics() {
   return usb.runUsbDiagnostics(state, {
     setStatus,
@@ -1683,6 +1691,8 @@ function bindEvents() {
     playTrackFromOrigin,
     scrubRatioFromPointer: playback.scrubRatioFromPointer,
     removeUsbPlaylist,
+    reorderUsbPlaylists,
+    moveArrayItem: usb.moveArrayItem,
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
     setActiveListItem: shell.setActiveListItem,

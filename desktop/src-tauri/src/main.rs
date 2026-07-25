@@ -765,6 +765,7 @@ fn main() {
             backend::tauri_commands::update_usb_player_menu_config,
             backend::tauri_commands::sync_usb_player_menu_edb_to_pdb,
             backend::tauri_commands::remove_usb_playlist,
+            backend::tauri_commands::reorder_usb_playlists,
             backend::tauri_commands::inspect_usb_track,
             backend::tauri_commands::analyze_new_tracks,
             backend::tauri_commands::analyze_track_piece,

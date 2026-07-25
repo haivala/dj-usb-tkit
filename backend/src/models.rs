@@ -579,6 +579,21 @@ pub struct RemoveUsbPlaylistData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReorderUsbPlaylistsRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    pub ordered_playlist_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderUsbPlaylistsData {
+    pub reordered: usize,
+    pub warnings: Vec<WarningEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FetchUsbHistoriesRequest {
     #[serde(default)]
     pub usb_root: Option<String>,

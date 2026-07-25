@@ -2079,7 +2079,7 @@ fn pdb_page_size_from_bytes(bytes: &[u8]) -> Option<usize> {
         .and_then(|value| usize::try_from(value).ok())
 }
 
-fn restore_pdb_playlist_sort_orders(
+pub(crate) fn restore_pdb_playlist_sort_orders(
     usb_root: &std::path::Path,
     desired_sort_by_id: &HashMap<u32, u32>,
 ) -> BackendResult<usize> {
@@ -2115,7 +2115,7 @@ fn restore_pdb_playlist_sort_orders(
     Ok(patched)
 }
 
-fn sync_edb_playlist_sort_orders_from_pdb(
+pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
     usb_root: &std::path::Path,
     warnings: &mut Vec<String>,
 ) -> BackendResult<usize> {

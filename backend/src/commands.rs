@@ -18,7 +18,8 @@ use crate::models::{
     PlaybackStatusData, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    RenamePlaylistData, RenamePlaylistRequest, RepairUsbDiagnosticsData,
+    RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
+    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
     RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
     RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
@@ -263,6 +264,27 @@ impl BackendCommands {
         wrap(
             self.service
                 .remove_usb_playlist_with_progress(req, on_progress),
+        )
+    }
+
+    pub fn reorder_usb_playlists(
+        &self,
+        req: ReorderUsbPlaylistsRequest,
+    ) -> ApiResponse<ReorderUsbPlaylistsData> {
+        wrap(self.service.reorder_usb_playlists(req))
+    }
+
+    pub fn reorder_usb_playlists_with_progress<F>(
+        &self,
+        req: ReorderUsbPlaylistsRequest,
+        on_progress: F,
+    ) -> ApiResponse<ReorderUsbPlaylistsData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        wrap(
+            self.service
+                .reorder_usb_playlists_with_progress(req, on_progress),
         )
     }
 

@@ -14,8 +14,9 @@ use crate::error::{BackendError, BackendResult};
 use crate::models::{
     FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, InspectUsbTrackData, InspectUsbTrackRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, UsbHistory, UsbHistoryCounts, UsbImportStats, UsbPlaylist, UsbTrack,
-    ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry,
+    RemoveUsbPlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, UsbHistory,
+    UsbHistoryCounts, UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData,
+    ValidateUsbRootRequest, WarningEntry,
 };
 use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, parse_pdb};
 
@@ -190,6 +191,10 @@ fn history_warning_entry(message: String) -> WarningEntry {
         ("info", "usb.histories.info")
     };
     usb_warning(level, code, message)
+}
+
+fn reorder_playlist_warning_entry(message: String) -> WarningEntry {
+    usb_warning("warn", "usb.reorder.warn", message)
 }
 
 fn normalize_date_created(value: &str) -> Option<NaiveDate> {
@@ -616,6 +621,72 @@ impl BackendService {
         req: FetchUsbHistoriesRequest,
     ) -> BackendResult<FetchUsbHistoriesData> {
         self.fetch_usb_histories_with_progress(req, |_, _, _| {})
+    }
+
+    pub fn reorder_usb_playlists(
+        &self,
+        req: ReorderUsbPlaylistsRequest,
+    ) -> BackendResult<ReorderUsbPlaylistsData> {
+        self.reorder_usb_playlists_with_progress(req, |_, _, _| {})
+    }
+
+    pub fn reorder_usb_playlists_with_progress<F>(
+        &self,
+        req: ReorderUsbPlaylistsRequest,
+        mut on_progress: F,
+    ) -> BackendResult<ReorderUsbPlaylistsData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        let mut warnings = Vec::<String>::new();
+        on_progress(0, 100, "USB: Resolving USB root");
+        let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
+
+        on_progress(10, 100, "USB: Computing new playlist order");
+        let mut desired_sort_by_id = HashMap::<u32, u32>::new();
+        let mut next_sort_order = 0u32;
+        for id in &req.ordered_playlist_ids {
+            let Some(pdb_id_str) = id.strip_prefix("usb-pl-") else {
+                continue;
+            };
+            // eDB-only playlists use "usb-pl-name-{canonical}" ids and have no
+            // PDB row to patch, so they fail to parse as a bare u32 and are skipped.
+            let Ok(pdb_id) = pdb_id_str.parse::<u32>() else {
+                continue;
+            };
+            desired_sort_by_id.insert(pdb_id, next_sort_order);
+            next_sort_order += 1;
+        }
+
+        if desired_sort_by_id.is_empty() {
+            return Err(BackendError::Validation(
+                "reorder_usb_playlists: no PDB-backed playlist ids in orderedPlaylistIds"
+                    .to_string(),
+            ));
+        }
+
+        on_progress(30, 100, "USB: Patching PDB playlist order");
+        let patched = crate::service::repair::restore_pdb_playlist_sort_orders(
+            &usb_root,
+            &desired_sort_by_id,
+        )?;
+
+        on_progress(70, 100, "USB: Syncing eDB playlist order");
+        let edb_updated =
+            crate::service::repair::sync_edb_playlist_sort_orders_from_pdb(&usb_root, &mut warnings)?;
+        if edb_updated == 0 {
+            warnings.push("reorder: eDB playlist order sync updated 0 rows".to_string());
+        }
+
+        on_progress(100, 100, "USB: Playlist order saved");
+
+        Ok(ReorderUsbPlaylistsData {
+            reordered: patched,
+            warnings: warnings
+                .into_iter()
+                .map(reorder_playlist_warning_entry)
+                .collect(),
+        })
     }
 
     pub fn remove_usb_playlist(
