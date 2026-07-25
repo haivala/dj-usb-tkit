@@ -1,40 +1,42 @@
-# DJ USB Tkit vs. rekordbox
+# DJ USB Tkit vs. Rekordbox
 
-This page summarizes where DJ USB Tkit differs from Pioneer/AlphaTheta's
-rekordbox for the specific job both tools do: getting a library onto a USB
+This page summarizes where DJ USB Tkit differs from
+Rekordbox for the specific job both tools do: getting a library onto a USB
 drive a CDJ/XDJ can play, and keeping that USB drive healthy.
 
-This is not a full feature comparison — rekordbox is a much larger application
+This is not a full feature comparison — Rekordbox is a much larger application
 (streaming integrations, DVS, video, Lighting, cloud library sync, and more).
 The comparison below is scoped to library management, USB export, and USB
 database health, which is what this project actually implements.
 
 ## Summary
 
-| | DJ USB Tkit | rekordbox |
+| | DJ USB Tkit | Rekordbox |
 | --- | --- | --- |
 | Platform | Windows, macOS, Linux | Windows, macOS only ([no official Linux build](../docs/USB_IMPORT.md)) |
 | License | Open source (MIT) | Closed source, proprietary |
 | Runs fully offline | Yes — local-first, no account or cloud dependency required | Has optional cloud/account-linked features |
 | USB export sync control | Explicit `mirror` or `additive` mode per export (see below) | Playlist re-export behavior is not user-selectable the same way |
+| USB playlist sorting | Drag-and-drop reorder of playlists already on the USB, written back to PDB and eDB in place | Requires the library to be managed and re-exported from Rekordbox |
 | USB diagnostics | Dedicated operational + strict-parity reports, read-only | Not exposed as a standalone diagnostic tool |
 | USB repair | Preview-first repair catalog for a defined set of PDB/eDB structural issues, hardware-validated | No equivalent user-facing repair tooling |
 | Pre-export backups | Automatic timestamped PDB/eDB backups before every export and repair write | Not automatic in the same way |
 | Analysis scope | Analyze only the tracks a target playlist needs, on demand | Typically analyzes more broadly as tracks are added |
+| History session dates | Multi-source fallback chain fills in a session date even when PDB/eDB have none stored | N/A — imports what's on the USB as-is |
 
 ## Why this exists
 
-rekordbox owns the reference database format (PDB/eDB), and DJs are stuck
-with it if they want to play off USB on Pioneer hardware. But rekordbox
+Rekordbox owns the reference database format (PDB/eDB), and DJs are stuck
+with it if they want to play off USB on Pioneer hardware. But Rekordbox
 itself is a large, closed-source, Windows/macOS-only application, and the
 parts of it that matter for USB prep — indexing, analysis, export, and
 recovering a broken USB — are not independently inspectable, scriptable, or
 fixable when something goes wrong. DJ USB Tkit re-implements just that slice,
-openly, and adds tooling rekordbox doesn't expose to users at all.
+openly, and adds tooling Rekordbox doesn't expose to users at all.
 
 ## Cross-platform, including Linux
 
-rekordbox has no official Linux release; DJ USB Tkit builds and runs on
+Rekordbox has no official Linux release; DJ USB Tkit builds and runs on
 Linux (Arch, Ubuntu/Debian, Fedora — see the main [README](../README.md)),
 in addition to Windows and macOS.
 
@@ -58,6 +60,17 @@ This makes it possible to build up a playlist directly on a USB stick from
 multiple sessions/machines without accidentally wiping prior additions, or to
 force a clean resync when that's what's wanted instead.
 
+## Reordering playlists directly on the USB
+
+The USB Playlists panel supports drag-and-drop reordering of the playlist
+list on an already-exported USB (`reorder_usb_playlists`). This patches
+`t07.sort_order` in PDB in place and re-syncs eDB `playlist.sequenceNo` from
+it afterward, so the new order shows up on CDJs and in Rekordbox itself, not
+just in DJ USB Tkit — and strict-parity ordering checks stay green. See
+"Playlist Reordering" in [`docs/PDB.md`](PDB.md). This works on the USB
+directly; it doesn't require reordering the source playlist locally and
+re-exporting.
+
 ## Diagnostics and repair for broken USB databases
 
 DJ USB Tkit ships dedicated, read-only diagnostics
@@ -69,7 +82,7 @@ playlist parity mismatches between PDB and eDB, and more. See
 catalog. Repairs default to preview mode (nothing is written until you
 apply), and repaired output has been validated on real CDJ-2000NXS,
 CDJ-2000NXS2, and CDJ-3000 hardware (see
-[`docs/CDJ_TEST_MATRIX.md`](CDJ_TEST_MATRIX.md)). rekordbox does not expose
+[`docs/CDJ_TEST_MATRIX.md`](CDJ_TEST_MATRIX.md)). Rekordbox does not expose
 an equivalent repair surface for a broken export database — the common
 workaround is deleting the `PIONEER` folder and re-exporting from scratch,
 which loses history and any USB-only playlist state.
@@ -84,7 +97,7 @@ still disagreeing between PDB and eDB on playlist membership/order, track
 metadata, dictionary IDs, or artwork, and surface that disagreement as a
 problem on a different player. Strict parity checks both surfaces
 field-by-field so the export is consistent across the CDJ lineup, not just
-whichever hardware happened to be used for validation. rekordbox's own
+whichever hardware happened to be used for validation. Rekordbox's own
 reference exporter produces this consistency by construction; DJ USB Tkit
 verifies and repairs it explicitly since it's rebuilding both database
 writers independently.
@@ -116,7 +129,28 @@ actually needs, instead of requiring broader up-front analysis. See
 
 ## Tolerant USB import
 
-Import reads PDB, eDB, and (optionally) rekordbox's own local `master.db` as
+Import reads PDB, eDB, and (optionally) Rekordbox's own local `master.db` as
 fallback sources, resolves conflicts across them, and returns partial-but-usable
 data with warnings when metadata is incomplete or corrupted rather than
 failing the whole import. See [`docs/USB_IMPORT.md`](USB_IMPORT.md).
+
+## Guessing dates for undated history sessions
+
+CDJ history playlists don't reliably carry a usable session date in PDB/eDB.
+When importing USB history, DJ USB Tkit resolves a date for each session
+through a fallback chain instead of leaving it blank:
+
+1. a date recorded directly on the parsed PDB history row, when present;
+2. failing that, DJ USB Tkit's own export log (a local, app-written record
+   that fingerprints which tracks were exported together and when) matched
+   against that history session's track set;
+3. failing that, the latest track `date_added`/`date_created` among the
+   session's own tracks, carried forward across older, still-undated
+   sessions in numeric history-slot order so gaps interpolate instead of
+   showing nothing.
+
+This is import-time inference for display, not a database write — the
+underlying USB history rows aren't modified by it. See
+`apply_history_dates_from_export_log` and
+`apply_history_dates_from_track_date_created` in
+`backend/src/service/usb.rs` and `backend/src/service/export_log.rs`.
