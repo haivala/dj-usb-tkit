@@ -22,7 +22,7 @@ use crate::models::{
     ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, RunUsbDiagnosticsData,
     RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData,
     ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData, SearchTracksRequest,
-    SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
+    SetAnalysisPausedData, SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
     ValidateUsbRootRequest,
 };
@@ -316,6 +316,14 @@ impl BackendCommands {
         req: AnalyzeTrackPieceRequest,
     ) -> ApiResponse<AnalyzeTrackPieceData> {
         wrap(self.service.analyze_track_piece(req))
+    }
+
+    pub fn set_analysis_paused(&self, paused: bool) -> ApiResponse<SetAnalysisPausedData> {
+        wrap(self.service.set_analysis_paused(paused))
+    }
+
+    pub fn cancel_analysis(&self) -> ApiResponse<()> {
+        wrap(self.service.cancel_analysis())
     }
 
     pub fn export_to_usb(&self, req: ExportToUsbRequest) -> ApiResponse<ExportToUsbData> {

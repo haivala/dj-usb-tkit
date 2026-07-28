@@ -11,7 +11,13 @@ export function setProgress(state, el, active, percent = 0, text = "", opts = {}
   el.progressFooter
     .querySelector(".progress-track")
     ?.setAttribute("aria-valuenow", String(clamped));
-  el.progressText.textContent = state.progressBaseText;
+  // Keep showing "(paused)" even if a job:event for the track still
+  // finishing up while paused updates the base text in the meantime --
+  // otherwise the display would flicker back to the elapsed-seconds text
+  // until the next heartbeat tick re-asserts it.
+  el.progressText.textContent = state.progressPausedAtMs
+    ? `${state.progressBaseText} (paused)`
+    : state.progressBaseText;
 }
 
 export function dismissProgress(state, el) {
@@ -22,8 +28,16 @@ export function startProgressHeartbeat(state, el) {
   if (state.progressHeartbeatTimer) return;
   state.progressStartedAtMs = Date.now();
   state.lastJobEventAtMs = Date.now();
+  state.progressPausedAtMs = null;
   state.progressHeartbeatTimer = window.setInterval(() => {
     if (!el.progressFooter.classList.contains("active")) return;
+    // Re-asserted every tick (not just on the pause click) so it wins over
+    // any job:event that re-renders progressText for the track still
+    // finishing up while paused.
+    if (state.progressPausedAtMs) {
+      el.progressText.textContent = `${state.progressBaseText} (paused)`;
+      return;
+    }
     const now = Date.now();
     const totalSecs = Math.max(0, Math.floor((now - state.progressStartedAtMs) / 1000));
     const idleSecs = Math.max(0, Math.floor((now - state.lastJobEventAtMs) / 1000));
@@ -36,6 +50,24 @@ export function stopProgressHeartbeat(state) {
   if (!state.progressHeartbeatTimer) return;
   window.clearInterval(state.progressHeartbeatTimer);
   state.progressHeartbeatTimer = null;
+  state.progressPausedAtMs = null;
+}
+
+export function pauseProgressHeartbeat(state, el) {
+  if (state.progressPausedAtMs) return;
+  state.progressPausedAtMs = Date.now();
+  el.progressText.textContent = `${state.progressBaseText} (paused)`;
+}
+
+export function resumeProgressHeartbeat(state, el) {
+  if (!state.progressPausedAtMs) return;
+  // Shift the start time forward by however long we were paused, so the
+  // displayed elapsed time picks back up from where it left off instead of
+  // counting the paused interval.
+  state.progressStartedAtMs += Date.now() - state.progressPausedAtMs;
+  state.progressPausedAtMs = null;
+  const totalSecs = Math.max(0, Math.floor((Date.now() - state.progressStartedAtMs) / 1000));
+  el.progressText.textContent = `${state.progressBaseText} (${totalSecs}s)`;
 }
 
 export function nextPaint() {
@@ -61,6 +93,19 @@ export async function withProgress(state, el, label, fn) {
     setProgress(state, el, true, 100, `${label} failed`, { error: true, dismissable: true });
     throw error;
   }
+}
+
+export function updateAnalysisPauseButtonAppearance(el, paused) {
+  el.progressPauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
+  el.progressPauseBtn.setAttribute("aria-label", paused ? "Resume analysis" : "Pause analysis");
+  el.progressPauseBtn.innerHTML = paused ? "&#9654;" : "&#10074;&#10074;";
+}
+
+function setAnalysisControlsVisible(state, el, visible) {
+  el.progressPauseBtn.hidden = !visible;
+  el.progressCancelAnalysisBtn.hidden = !visible;
+  state.analysisPaused = false;
+  updateAnalysisPauseButtonAppearance(el, false);
 }
 
 const JOB_STAGE_STATUS_RULES = {
@@ -186,6 +231,8 @@ export function handleJobEvent(state, el, payload, deps = {}) {
 
   if (eventName === "job.started" && jobId) {
     state.activeJobId = jobId;
+    state.activeJobType = jobType;
+    setAnalysisControlsVisible(state, el, jobType === "analysis");
     state.lastJobEventAtMs = Date.now();
     setProgress(state, el, true, percent, message || "Working...");
     startProgressHeartbeat(state, el);
@@ -237,6 +284,8 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     }
     Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
     state.activeJobId = null;
+    state.activeJobType = null;
+    setAnalysisControlsVisible(state, el, false);
     setTimeout(() => {
       setProgress(state, el, false, 0, "Idle");
       stopProgressHeartbeat(state);
@@ -258,6 +307,8 @@ export function handleJobEvent(state, el, payload, deps = {}) {
       }
     });
     state.activeJobId = null;
+    state.activeJobType = null;
+    setAnalysisControlsVisible(state, el, false);
     setTimeout(() => {
       setProgress(state, el, false, 0, "Idle");
       stopProgressHeartbeat(state);

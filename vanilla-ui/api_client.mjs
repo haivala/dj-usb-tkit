@@ -789,6 +789,17 @@ export function createApiClient({ tauriInvoke, tauriIsTauri, tauriListen, state,
       };
     }
 
+    if (command === "set_analysis_paused") {
+      return {
+        ok: true,
+        data: { paused: !!payload?.request?.paused }
+      };
+    }
+
+    if (command === "cancel_analysis") {
+      return { ok: true, data: null };
+    }
+
     return { ok: false, error: { code: "INTERNAL_ERROR", message: "Unknown mock command" } };
   }
 

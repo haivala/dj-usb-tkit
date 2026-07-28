@@ -59,6 +59,13 @@
   individual tracks are slow to analyze, so track count isn't a reliable
   basis for the interval; only "after every track" is actually independent
   of hardware, worker count, and per-track duration.
+- Add Pause/Resume and Cancel controls to the analysis progress bar. Pausing
+  lets any tracks currently being analyzed finish, but holds off starting new
+  ones until resumed; cancelling does the same but permanently, ending the
+  batch early with a status noting how many tracks were analyzed before it
+  stopped. While paused, the progress bar's elapsed-time counter shows
+  "paused" instead of continuing to tick, and picks back up from where it
+  left off (excluding the paused duration) once resumed.
 
 ## 0.1.6
 

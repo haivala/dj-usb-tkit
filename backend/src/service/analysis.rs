@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
 use std::time::Instant;
 
@@ -26,6 +27,7 @@ use uuid::Uuid;
 use crate::error::{BackendError, BackendResult};
 use crate::models::{
     AnalyzeNewTracksData, AnalyzeNewTracksRequest, AnalyzeTrackPieceData, AnalyzeTrackPieceRequest,
+    SetAnalysisPausedData,
 };
 
 use super::anlz::{WaveformData, write_generated_anlz_bundle_with_first_beat};
@@ -543,6 +545,11 @@ impl BackendService {
 
         let mut completed_count = 0usize;
 
+        // Every new batch starts fresh: a pause/cancel from a previous batch
+        // must not leak into this one.
+        self.analysis_paused.store(false, Ordering::SeqCst);
+        self.analysis_cancelled.store(false, Ordering::SeqCst);
+
         if total > 1 {
             let mut tx_db = conn.unchecked_transaction()?;
             let mut persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
@@ -612,8 +619,23 @@ impl BackendService {
                 let waveform_dir = waveform_dir.clone();
                 let artwork_dir = artwork_dir.clone();
                 let queue = queue.clone();
+                let pause_flag = self.analysis_paused.clone();
+                let cancel_flag = self.analysis_cancelled.clone();
                 let handle = std::thread::spawn(move || {
                     loop {
+                        // Pausing lets a track already in flight finish, but
+                        // no worker picks up a *new* one until resumed.
+                        // Cancelling breaks out of the wait immediately
+                        // instead of waiting for a resume that never comes.
+                        while pause_flag.load(Ordering::SeqCst)
+                            && !cancel_flag.load(Ordering::SeqCst)
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(150));
+                        }
+                        if cancel_flag.load(Ordering::SeqCst) {
+                            break;
+                        }
+
                         let track = {
                             let mut guard = match queue.lock() {
                                 Ok(g) => g,
@@ -665,11 +687,22 @@ impl BackendService {
             drop(tx);
 
             while completed_count < total {
-                let evt = rx.recv().map_err(|_| {
-                    BackendError::Internal(
-                        "analysis worker channel closed unexpectedly".to_string(),
-                    )
-                })?;
+                let evt = match rx.recv() {
+                    Ok(evt) => evt,
+                    Err(_) => {
+                        // All workers exited early because the batch was
+                        // cancelled -- not a genuine error.
+                        if self.analysis_cancelled.load(Ordering::SeqCst) {
+                            warnings.push(format!(
+                                "Analysis cancelled: {completed_count} of {total} tracks analyzed"
+                            ));
+                            break;
+                        }
+                        return Err(BackendError::Internal(
+                            "analysis worker channel closed unexpectedly".to_string(),
+                        ));
+                    }
+                };
                 match evt {
                     WorkerEvent::Partial {
                         worker_idx,
@@ -815,6 +848,16 @@ impl BackendService {
             failed,
             warnings,
         })
+    }
+
+    pub fn set_analysis_paused(&self, paused: bool) -> BackendResult<SetAnalysisPausedData> {
+        self.analysis_paused.store(paused, Ordering::SeqCst);
+        Ok(SetAnalysisPausedData { paused })
+    }
+
+    pub fn cancel_analysis(&self) -> BackendResult<()> {
+        self.analysis_cancelled.store(true, Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn analyze_track_piece(

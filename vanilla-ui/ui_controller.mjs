@@ -184,6 +184,12 @@ export function bindEvents(ctx) {
   if (el.progressDismiss) {
     el.progressDismiss.addEventListener("click", ctx.dismissProgress);
   }
+  if (el.progressPauseBtn) {
+    el.progressPauseBtn.addEventListener("click", ctx.toggleAnalysisPause);
+  }
+  if (el.progressCancelAnalysisBtn) {
+    el.progressCancelAnalysisBtn.addEventListener("click", ctx.cancelAnalysis);
+  }
 
   bindShellEvents(ctx);
   bindSettingsEvents(ctx);

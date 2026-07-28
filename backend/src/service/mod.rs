@@ -26,6 +26,8 @@ use rusqlite::{OptionalExtension, params, params_from_iter};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use uuid::Uuid;
 
 use base64::Engine;
@@ -282,12 +284,16 @@ fn master_db_analysis_file_candidates(master_path: &Path, db_path: &str) -> Vec<
 #[derive(Debug, Clone)]
 pub struct BackendService {
     pub db: Db,
+    pub analysis_paused: Arc<AtomicBool>,
+    pub analysis_cancelled: Arc<AtomicBool>,
 }
 
 impl BackendService {
     pub fn new(data_dir: impl AsRef<std::path::Path>) -> BackendResult<Self> {
         let svc = Self {
             db: Db::new(data_dir)?,
+            analysis_paused: Arc::new(AtomicBool::new(false)),
+            analysis_cancelled: Arc::new(AtomicBool::new(false)),
         };
         svc.backfill_track_fingerprints()?;
         Ok(svc)

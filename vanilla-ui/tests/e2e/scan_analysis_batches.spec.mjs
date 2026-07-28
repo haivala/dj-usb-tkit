@@ -57,6 +57,8 @@ function installScanAnalysisMock(page, opts = {}) {
     let analyzeNewTracksCalls = 0;
     const pieceEventsByPiece = { duration: 0, artwork: 0, waveform: 0, bpm_key: 0 };
     let bpmRangeSeen = null;
+    let analysisPaused = false;
+    let analysisCancelled = false;
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const nowIso = () => new Date().toISOString();
 
@@ -130,6 +132,10 @@ function installScanAnalysisMock(page, opts = {}) {
     const runAnalyzeNewTracks = async (ids, bpmMin, bpmMax) => {
       const jobId = `job-analysis-mock-${analyzeNewTracksCalls}`;
       const total = Math.max(1, ids.length);
+      // Every new batch starts fresh, matching the real backend's
+      // reset-at-start-of-batch behavior for its pause/cancel flags.
+      analysisPaused = false;
+      analysisCancelled = false;
       emitJobEvent({
         event: "job.started",
         jobId,
@@ -146,6 +152,32 @@ function installScanAnalysisMock(page, opts = {}) {
       let failed = 0;
 
       for (let i = 0; i < ids.length; i += 1) {
+        // Simulates the real worker pool: a pause blocks picking up the
+        // next track (the current one, if any, already finished), and a
+        // cancel breaks out permanently instead of waiting for a resume.
+        while (analysisPaused && !analysisCancelled) {
+          await sleep(15);
+        }
+        if (analysisCancelled) {
+          emitJobEvent({
+            event: "job.completed",
+            jobId,
+            jobType: "analysis",
+            stage: "analyze_new_tracks",
+            current: i,
+            total,
+            percent: Math.round((i / total) * 100),
+            message: `Analysis finished: ${analyzed} analyzed, ${failed} failed`,
+            timestamp: nowIso()
+          });
+          return {
+            jobId,
+            analyzed,
+            failed,
+            warnings: [`Analysis cancelled: ${analyzed} of ${total} tracks analyzed`]
+          };
+        }
+
         const id = ids[i];
         const track = tracks.find((t) => t.id === id);
         if (!track) {
@@ -288,6 +320,14 @@ function installScanAnalysisMock(page, opts = {}) {
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
           }
+          if (command === "set_analysis_paused") {
+            analysisPaused = !!(payload?.request?.paused);
+            return { ok: true, data: { paused: analysisPaused } };
+          }
+          if (command === "cancel_analysis") {
+            analysisCancelled = true;
+            return { ok: true, data: null };
+          }
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
         }
       },
@@ -314,6 +354,12 @@ function installScanAnalysisMock(page, opts = {}) {
       },
       get bpmRangeSeen() {
         return bpmRangeSeen;
+      },
+      get analysisPaused() {
+        return analysisPaused;
+      },
+      get analysisCancelled() {
+        return analysisCancelled;
       }
     };
   }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange });
@@ -743,6 +789,87 @@ test("library total duration advances only when each track is fully ready", asyn
   });
 
   await expect(page.locator("#libraryTotalDuration")).toHaveText("Total time: 6:00");
+});
+
+test("pause button stops picking up new tracks and resume continues the batch", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 5, pieceDelayMs: 40 });
+  await page.goto("/");
+
+  await page.locator("#scanLibraryBtn").click();
+  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+  await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
+
+  await page.waitForFunction(() => {
+    return document.querySelectorAll("#libraryTableBody .bpm-pill").length >= 1;
+  });
+  await page.locator("#progressPauseBtn").click();
+  await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.analysisPaused)).toBe(true);
+  await expect(page.locator("#progressText")).toContainText("(paused)");
+
+  // A track already in flight when pause was clicked is allowed to finish
+  // (same as the backend's own worker loop), so give that a moment to
+  // settle before establishing the "paused" baseline count.
+  await page.waitForTimeout(250);
+  const pausedCount = await page.locator("#libraryTableBody .bpm-pill").count();
+  expect(pausedCount).toBeLessThan(5);
+  // Give the batch plenty of time to have picked up further tracks if pause
+  // wasn't actually blocking new work.
+  await page.waitForTimeout(300);
+  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(pausedCount);
+  // The timer text stays on "(paused)" the whole time, not just right after
+  // the click.
+  await expect(page.locator("#progressText")).toContainText("(paused)");
+
+  await page.locator("#progressPauseBtn").click();
+  await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.analysisPaused)).toBe(false);
+  await expect(page.locator("#progressText")).not.toContainText("(paused)");
+
+  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(5);
+  await expect(page.locator("#statusText")).toContainText("analyzed 5, failed 0");
+  await expect(page.locator("#progressPauseBtn")).toBeHidden();
+  await expect(page.locator("#progressCancelAnalysisBtn")).toBeHidden();
+});
+
+test("cancel button stops the batch early and reports how many tracks completed", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 5, pieceDelayMs: 40 });
+  await page.goto("/");
+
+  await page.locator("#scanLibraryBtn").click();
+  await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
+
+  await page.waitForFunction(() => {
+    return document.querySelectorAll("#libraryTableBody .bpm-pill").length >= 1;
+  });
+  await page.locator("#progressCancelAnalysisBtn").click();
+
+  await expect(page.locator("#progressPauseBtn")).toBeHidden();
+  await expect(page.locator("#progressCancelAnalysisBtn")).toBeHidden();
+  await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.analysisCancelled)).toBe(true);
+
+  // The batch must not hang waiting on tracks that will never come; the
+  // status line should settle on "Scan done: ... | analyzed N, failed 0"
+  // instead of staying on "Analyzing...". Read N from the status text
+  // itself (the frontend's own source of truth for how many completed)
+  // rather than a DOM snapshot taken mid-flight, since one extra track can
+  // legitimately finish in the small window between clicking cancel and the
+  // coordinator observing it -- same race as the backend's own test for
+  // this (see analyze_new_tracks_cancel_stops_early_without_hanging).
+  let finalCount = null;
+  await expect.poll(async () => {
+    const text = (await page.locator("#statusText").textContent()) || "";
+    const match = text.match(/analyzed (\d+), failed 0/);
+    if (!match) return null;
+    finalCount = Number(match[1]);
+    return finalCount;
+  }).not.toBeNull();
+
+  expect(finalCount).toBeGreaterThan(0);
+  expect(finalCount).toBeLessThan(5);
+  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(finalCount);
+
+  // No further tracks should show up after settling.
+  await page.waitForTimeout(200);
+  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(finalCount);
 });
 
 test("scan recomputes waveform piece even when one already exists", async ({ page }) => {

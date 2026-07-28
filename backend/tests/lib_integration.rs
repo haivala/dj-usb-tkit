@@ -2708,6 +2708,253 @@ fn analyze_new_tracks_commits_periodically_with_real_worker_count_on_moderate_ba
 }
 
 #[test]
+fn analyze_new_tracks_pauses_and_resumes_between_tracks() {
+    // Pausing must let the track currently being analyzed finish normally,
+    // but no worker may start a *new* track until resumed. Forcing a single
+    // worker makes the ordering deterministic: track 1 finishes, we pause
+    // and kick off a background resume after a short real delay, and assert
+    // track 2 didn't start being reported ready until at least roughly that
+    // delay had elapsed.
+    let _guard = test_env_lock().lock().expect("env lock");
+    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
+    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
+    let prev_max_workers = std::env::var("DJTKIT_ANALYSIS_MAX_WORKERS").ok();
+    // SAFETY: tests serialize env access through a global mutex.
+    unsafe {
+        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
+        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
+        std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", "1");
+    }
+
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    for i in 0..6 {
+        let source = media.join(format!("Artist - pause_test_{i:02}.wav"));
+        write_test_pulsed_key_wav(&source, 120.0, 2_000);
+    }
+
+    let data_dir = root.path().join("data");
+    let service = BackendService::new(&data_dir).expect("create service");
+    let scan = service
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .expect("scan succeeds");
+    assert_eq!(scan.indexed, 6);
+
+    let track_ids: Vec<String> = service
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 50,
+            cursor: None,
+        })
+        .expect("search succeeds")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(track_ids.len(), 6);
+
+    const RESUME_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+    let mut ready_count = 0usize;
+    let mut paused_at: Option<std::time::Instant> = None;
+    let mut resumed_gap: Option<std::time::Duration> = None;
+    let mut resume_handle: Option<std::thread::JoinHandle<()>> = None;
+    let result = service.analyze_new_tracks_with_progress(
+        AnalyzeNewTracksRequest {
+            track_ids,
+            bpm_min: None,
+            bpm_max: None,
+            analysis_engine: None,
+        },
+        |progress| {
+            if !progress.track_ready {
+                return;
+            }
+            ready_count += 1;
+            if ready_count == 1 {
+                service.set_analysis_paused(true).expect("pause succeeds");
+                paused_at = Some(std::time::Instant::now());
+                let resume_service = service.clone();
+                resume_handle = Some(std::thread::spawn(move || {
+                    std::thread::sleep(RESUME_DELAY);
+                    resume_service
+                        .set_analysis_paused(false)
+                        .expect("resume succeeds");
+                }));
+            } else if ready_count == 2 {
+                resumed_gap = paused_at.map(|t| t.elapsed());
+            }
+        },
+    );
+    assert!(result.is_ok(), "analyze failed: {result:?}");
+    let data = result.expect("already checked");
+    assert_eq!(data.analyzed, 6, "expected the whole batch to complete");
+    let gap = resumed_gap.expect("expected a second track to become ready after resuming");
+    assert!(
+        gap >= RESUME_DELAY.mul_f32(0.6),
+        "expected track 2 to only become ready roughly after the resume delay \
+         ({RESUME_DELAY:?}), but it was ready after only {gap:?}"
+    );
+    if let Some(handle) = resume_handle {
+        handle.join().expect("resume thread should not panic");
+    }
+
+    match prev_enabled {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ENABLE_ESSENTIA_JS") }
+        }
+    }
+    match prev_runner {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ESSENTIA_RUNNER", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ESSENTIA_RUNNER") }
+        }
+    }
+    match prev_max_workers {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") }
+        }
+    }
+}
+
+#[test]
+fn analyze_new_tracks_cancel_stops_early_without_hanging() {
+    // Cancelling must stop workers from picking up new tracks (the
+    // in-flight one still finishes), and the coordinator must return
+    // gracefully once every worker has exited instead of hanging forever on
+    // a channel that will never receive another event.
+    let _guard = test_env_lock().lock().expect("env lock");
+    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
+    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
+    let prev_max_workers = std::env::var("DJTKIT_ANALYSIS_MAX_WORKERS").ok();
+    // SAFETY: tests serialize env access through a global mutex.
+    unsafe {
+        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
+        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
+        std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", "1");
+    }
+
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    for i in 0..6 {
+        let source = media.join(format!("Artist - cancel_test_{i:02}.wav"));
+        write_test_pulsed_key_wav(&source, 120.0, 2_000);
+    }
+
+    let data_dir = root.path().join("data");
+    let service = BackendService::new(&data_dir).expect("create service");
+    let scan = service
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .expect("scan succeeds");
+    assert_eq!(scan.indexed, 6);
+
+    let track_ids: Vec<String> = service
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 50,
+            cursor: None,
+        })
+        .expect("search succeeds")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(track_ids.len(), 6);
+
+    let mut ready_count = 0usize;
+    let result = service.analyze_new_tracks_with_progress(
+        AnalyzeNewTracksRequest {
+            track_ids,
+            bpm_min: None,
+            bpm_max: None,
+            analysis_engine: None,
+        },
+        |progress| {
+            if !progress.track_ready {
+                return;
+            }
+            ready_count += 1;
+            if ready_count == 1 {
+                service.cancel_analysis().expect("cancel succeeds");
+            }
+        },
+    );
+    assert!(
+        result.is_ok(),
+        "cancelling should return gracefully, not error/hang: {result:?}"
+    );
+    let data = result.expect("already checked");
+    // With a single worker, cancelling as soon as track 1 is ready still
+    // lets track 2 slip in: the worker sends track 1's "done" event and
+    // immediately loops back to pop the next track, which can win the race
+    // against the coordinator thread processing that event and running our
+    // cancel callback. Either way the batch must stop well short of all 6.
+    assert!(
+        (1..6).contains(&data.analyzed),
+        "expected cancellation to stop the batch early (1 to 5 of 6 tracks), got {}",
+        data.analyzed
+    );
+    let expected_warning = format!("Analysis cancelled: {} of 6 tracks analyzed", data.analyzed);
+    assert!(
+        data.warnings.iter().any(|w| w == &expected_warning),
+        "expected warning {expected_warning:?}, got: {:?}",
+        data.warnings
+    );
+
+    match prev_enabled {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ENABLE_ESSENTIA_JS") }
+        }
+    }
+    match prev_runner {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ESSENTIA_RUNNER", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ESSENTIA_RUNNER") }
+        }
+    }
+    match prev_max_workers {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") }
+        }
+    }
+}
+
+#[test]
 fn scan_library_rescan_preserves_existing_key_when_scanner_has_no_tonality() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");

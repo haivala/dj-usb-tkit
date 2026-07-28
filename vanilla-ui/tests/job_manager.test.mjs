@@ -15,6 +15,8 @@ import {
   dismissProgress,
   startProgressHeartbeat,
   stopProgressHeartbeat,
+  pauseProgressHeartbeat,
+  resumeProgressHeartbeat,
   handleJobEvent,
   formatJobStatusText
 } from "../job_manager.mjs";
@@ -33,6 +35,14 @@ function makeClassList() {
   };
 }
 
+function makeButton() {
+  return {
+    hidden: true,
+    innerHTML: "",
+    setAttribute: () => {}
+  };
+}
+
 function makeEl() {
   return {
     progressFooter: {
@@ -40,7 +50,9 @@ function makeEl() {
       querySelector: () => ({ setAttribute: () => {} })
     },
     progressFill: { style: { width: "" } },
-    progressText: { textContent: "" }
+    progressText: { textContent: "" },
+    progressPauseBtn: makeButton(),
+    progressCancelAnalysisBtn: makeButton()
   };
 }
 
@@ -50,6 +62,7 @@ function makeState() {
     progressBaseText: "Idle",
     progressHeartbeatTimer: null,
     progressStartedAtMs: 0,
+    progressPausedAtMs: null,
     lastJobEventAtMs: 0,
     activeJobId: null
   };
@@ -167,6 +180,82 @@ test("stopProgressHeartbeat is no-op without timer", () => {
   }
 });
 
+test("pauseProgressHeartbeat freezes the display text at 'paused' and records a timestamp", () => {
+  const state = makeState();
+  state.progressBaseText = "Analyzing 3/10: Track.wav";
+  const el = makeEl();
+  pauseProgressHeartbeat(state, el);
+  assert.equal(el.progressText.textContent, "Analyzing 3/10: Track.wav (paused)");
+  assert.ok(state.progressPausedAtMs > 0);
+});
+
+test("pauseProgressHeartbeat is idempotent when already paused", () => {
+  const state = makeState();
+  const el = makeEl();
+  pauseProgressHeartbeat(state, el);
+  const firstPausedAt = state.progressPausedAtMs;
+  pauseProgressHeartbeat(state, el);
+  assert.equal(state.progressPausedAtMs, firstPausedAt);
+});
+
+test("resumeProgressHeartbeat clears the pause and shifts the start time forward by the paused duration", () => {
+  const state = makeState();
+  const el = makeEl();
+  const now = Date.now();
+  state.progressStartedAtMs = now - 10000;
+  state.progressPausedAtMs = now - 4000;
+  resumeProgressHeartbeat(state, el);
+  assert.equal(state.progressPausedAtMs, null);
+  // Elapsed should reflect only the 6s before the pause, not the 4s spent
+  // paused, so it "continues from where it was" instead of counting the
+  // paused interval.
+  const elapsedSecs = Math.round((Date.now() - state.progressStartedAtMs) / 1000);
+  assert.ok(elapsedSecs <= 7, `expected paused duration to be excluded from elapsed time, got ${elapsedSecs}s`);
+  assert.match(el.progressText.textContent, /\(\d+s\)$/);
+});
+
+test("resumeProgressHeartbeat is a no-op when not paused", () => {
+  const state = makeState();
+  state.progressBaseText = "Idle";
+  const el = makeEl();
+  const startedAt = state.progressStartedAtMs;
+  resumeProgressHeartbeat(state, el);
+  assert.equal(state.progressStartedAtMs, startedAt);
+  assert.equal(el.progressText.textContent, "");
+});
+
+test("heartbeat tick keeps showing 'paused' while paused instead of the elapsed seconds", () => {
+  const state = makeState();
+  const el = makeEl();
+  el.progressFooter.classList.add("active");
+  let tick;
+  const origSetInterval = window.setInterval;
+  window.setInterval = (fn) => { tick = fn; return 1; };
+  try {
+    startProgressHeartbeat(state, el);
+    state.progressBaseText = "Analyzing 1/5: Track.wav";
+    pauseProgressHeartbeat(state, el);
+    tick();
+    assert.equal(el.progressText.textContent, "Analyzing 1/5: Track.wav (paused)");
+  } finally {
+    window.setInterval = origSetInterval;
+  }
+});
+
+test("stopProgressHeartbeat clears the paused timestamp too", () => {
+  const state = makeState();
+  state.progressHeartbeatTimer = 5;
+  state.progressPausedAtMs = Date.now();
+  const origClearInterval = window.clearInterval;
+  window.clearInterval = () => {};
+  try {
+    stopProgressHeartbeat(state);
+    assert.equal(state.progressPausedAtMs, null);
+  } finally {
+    window.clearInterval = origClearInterval;
+  }
+});
+
 test("handleJobEvent job.started sets active job and progress", () => {
   const state = makeState();
   const el = makeEl();
@@ -190,6 +279,52 @@ test("handleJobEvent job.started sets active job and progress", () => {
     assert.equal(state.activeJobId, "j1");
     assert.equal(state.progressPercent, 5);
     assert.equal(statusText, "Copying files");
+  } finally {
+    window.setInterval = origSetInterval;
+  }
+});
+
+test("handleJobEvent shows pause/cancel controls only for analysis jobs, hides them on completion", () => {
+  const state = makeState();
+  const el = makeEl();
+  const origSetInterval = window.setInterval;
+  window.setInterval = () => 42;
+  try {
+    handleJobEvent(state, el, {
+      event: "job.started",
+      jobId: "j-scan",
+      jobType: "scan",
+      stage: "index",
+      message: "Scanning",
+      percent: 0
+    }, { debugFrontendLog: () => {}, applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve() });
+    assert.equal(el.progressPauseBtn.hidden, true);
+    assert.equal(el.progressCancelAnalysisBtn.hidden, true);
+
+    handleJobEvent(state, el, {
+      event: "job.started",
+      jobId: "j-analysis",
+      jobType: "analysis",
+      stage: "analyze_new_tracks",
+      message: "Analyzing",
+      percent: 0
+    }, { debugFrontendLog: () => {}, applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve() });
+    assert.equal(el.progressPauseBtn.hidden, false);
+    assert.equal(el.progressCancelAnalysisBtn.hidden, false);
+    assert.equal(state.activeJobType, "analysis");
+    assert.equal(state.analysisPaused, false);
+
+    handleJobEvent(state, el, {
+      event: "job.completed",
+      jobId: "j-analysis",
+      jobType: "analysis",
+      stage: "analyze_new_tracks",
+      message: "Done",
+      percent: 100
+    }, { debugFrontendLog: () => {}, applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve() });
+    assert.equal(el.progressPauseBtn.hidden, true);
+    assert.equal(el.progressCancelAnalysisBtn.hidden, true);
+    assert.equal(state.activeJobType, null);
   } finally {
     window.setInterval = origSetInterval;
   }

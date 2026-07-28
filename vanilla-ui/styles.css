@@ -2088,6 +2088,44 @@ body.sidebar-collapsed .progress-footer {
   justify-content: center;
 }
 
+.progress-pause,
+.progress-cancel {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progress-pause:hover,
+.progress-cancel:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+  background: var(--card-hover);
+  box-shadow: none;
+}
+
+.progress-pause[hidden],
+.progress-cancel[hidden] {
+  display: none;
+}
+
+.progress-pause[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
 /* error state */
 .progress-footer.error {
   border-top-color: var(--danger);

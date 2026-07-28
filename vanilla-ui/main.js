@@ -207,6 +207,8 @@ const el = {
   progressText: document.getElementById("progressText"),
   progressFill: document.getElementById("progressFill"),
   progressDismiss: document.getElementById("progressDismiss"),
+  progressPauseBtn: document.getElementById("progressPauseBtn"),
+  progressCancelAnalysisBtn: document.getElementById("progressCancelAnalysisBtn"),
   usbDiagnosticsCard: document.getElementById("usbDiagnosticsCard"),
   diagOverallStatus: document.getElementById("diagOverallStatus"),
   diagDuration: document.getElementById("diagDuration"),
@@ -282,6 +284,30 @@ function setProgress(active, percent = 0, text = "", opts = {}) {
 }
 function dismissProgress() {
   jobMgr.dismissProgress(state, el);
+}
+function toggleAnalysisPause() {
+  const paused = !state.analysisPaused;
+  state.analysisPaused = paused;
+  jobMgr.updateAnalysisPauseButtonAppearance(el, paused);
+  if (paused) {
+    jobMgr.pauseProgressHeartbeat(state, el);
+  } else {
+    jobMgr.resumeProgressHeartbeat(state, el);
+  }
+  command("set_analysis_paused", { paused }).catch((err) => {
+    console.error("[analysis-ui] set_analysis_paused failed:", err);
+  });
+}
+function cancelAnalysis() {
+  el.progressPauseBtn.hidden = true;
+  el.progressCancelAnalysisBtn.hidden = true;
+  if (state.analysisPaused) {
+    state.analysisPaused = false;
+    jobMgr.resumeProgressHeartbeat(state, el);
+  }
+  command("cancel_analysis").catch((err) => {
+    console.error("[analysis-ui] cancel_analysis failed:", err);
+  });
 }
 function startProgressHeartbeat() {
   jobMgr.startProgressHeartbeat(state, el);
@@ -1656,6 +1682,8 @@ function bindEvents() {
     scanMasterDb,
     LIBRARY_LOAD_LIMIT_DEFAULT,
     dismissProgress,
+    toggleAnalysisPause,
+    cancelAnalysis,
     refreshUsb,
     pickUsbFolder,
     validateAndSetUsbRoot,

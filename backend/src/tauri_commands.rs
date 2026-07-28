@@ -31,9 +31,10 @@ use crate::models::{
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
     ResolvePlaybackSourceRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
     RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
-    SetFrontendSettingRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
+    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
+    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
+    ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -1198,6 +1199,19 @@ pub async fn analyze_track_piece(
         Ok(response) => Ok(response),
         Err(err) => Err(format!("analyze_track_piece task failed: {err}")),
     }
+}
+
+#[tauri::command]
+pub fn set_analysis_paused(
+    state: State<'_, BackendCommands>,
+    request: SetAnalysisPausedRequest,
+) -> ApiResponse<SetAnalysisPausedData> {
+    state.set_analysis_paused(request.paused)
+}
+
+#[tauri::command]
+pub fn cancel_analysis(state: State<'_, BackendCommands>) -> ApiResponse<()> {
+    state.cancel_analysis()
 }
 
 #[tauri::command]
