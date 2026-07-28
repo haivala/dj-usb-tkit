@@ -113,7 +113,7 @@ Batch concurrency model:
 Implemented throughput optimizations:
 
 - dynamic shared-queue scheduling for better tail utilization
-- transaction and prepared-statement reuse for batched DB writes
+- per-track transaction commits for batched DB writes (a transaction is opened, the cached statement executed, and committed once per track — not held open for the whole batch — so other writers aren't blocked with "database is locked")
 - decode-path allocation reuse
 
 Verification tools:
