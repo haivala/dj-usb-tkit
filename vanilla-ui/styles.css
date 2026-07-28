@@ -274,6 +274,12 @@ body.library-onboarding {
   color: var(--muted);
 }
 
+.status-warning-link {
+  color: var(--danger);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* ── header buttons ───────────────────────────────── */
 
 .settings-btn,

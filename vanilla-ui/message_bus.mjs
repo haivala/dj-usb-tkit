@@ -39,7 +39,9 @@ function normalizeStatus(status) {
   if (!status || typeof status !== "object") return null;
   const text = normalizeText(status.text);
   if (!text) return null;
-  return { text };
+  const warningCountRaw = Number(status.warningCount);
+  const warningCount = Number.isFinite(warningCountRaw) ? Math.max(0, warningCountRaw) : 0;
+  return { text, warningCount };
 }
 
 function normalizeEventLog(eventLog) {
@@ -92,7 +94,7 @@ export function createMessageBus(deps = {}) {
     }
 
     if (message.status) {
-      setStatusText(message.status.text);
+      setStatusText(message.status.text, message.status.warningCount);
     }
 
     if (message.eventLog) {

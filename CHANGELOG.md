@@ -36,6 +36,9 @@
   checkbox, and could stay stale on app start. Folder analysis status is
   now refreshed from the backend on startup and whenever an analysis job
   completes.
+- When a status message reports warnings or errors (USB scans/exports,
+  library scans/analysis), that part of the status line is now a link
+  that jumps straight to the Event Log instead of being inert text.
 
 ## 0.1.5
 

@@ -50,7 +50,7 @@ test("refreshHistory populates state and summary counts", async () => {
   assert.match(el.historyCountsText.textContent, /1 sessions, 1 tracks/);
   assert.equal(renderedLists, 1);
   assert.equal(renderedTracks, 1);
-  assert.match(status, /USB histories loaded: 1 \(1 warning\(s\)\)/);
+  assert.match(status, /USB histories loaded: 1 \| \(1 warning\(s\)\)/);
 });
 
 test("exportPlaylistToUsb blocks when playlist tracks are missing and logs generic failures", async () => {

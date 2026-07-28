@@ -6,8 +6,23 @@ import { bindSettingsEvents } from "./components/settings/events.mjs";
 import { bindEventLogEvents } from "./components/event-log/events.mjs";
 import { bindShellEvents } from "./components/shell/events.mjs";
 
-export function setStatusText(el, text) {
-  el.statusText.textContent = text;
+export function setStatusText(el, text, warningCount = 0) {
+  const target = el.statusText;
+  const doc = target.ownerDocument;
+  target.textContent = "";
+  const str = String(text ?? "");
+  const n = Math.max(0, Number(warningCount) || 0);
+  const pipeIdx = n > 0 ? str.indexOf("|") : -1;
+  if (pipeIdx === -1) {
+    target.append(doc.createTextNode(str));
+    return;
+  }
+  target.append(doc.createTextNode(str.slice(0, pipeIdx + 1)));
+  const link = doc.createElement("a");
+  link.href = "#";
+  link.className = "status-warning-link";
+  link.textContent = str.slice(pipeIdx + 1);
+  target.append(link);
 }
 
 export function setStatus(el, state, pushEventLog, text) {

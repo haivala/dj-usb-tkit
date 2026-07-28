@@ -294,7 +294,7 @@ function withProgress(label, fn) {
 }
 
 const messageBus = createMessageBus({
-  setStatusText: (text) => uiCtrl.setStatusText(el, text),
+  setStatusText: (text, warningCount) => uiCtrl.setStatusText(el, text, warningCount),
   setProgressText: (progress) => {
     if (!progress?.text) return;
     const percent = Number(progress.percent);
@@ -323,7 +323,7 @@ function setStatus(text, meta = {}) {
     level: meta.level || "info",
     source: meta.source || "ui",
     code: meta.code || null,
-    status: { text: statusText },
+    status: { text: statusText, warningCount: meta.warningCount || 0 },
     eventLog,
   });
 }

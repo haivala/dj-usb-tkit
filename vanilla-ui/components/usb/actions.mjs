@@ -720,9 +720,10 @@ export async function removeUsbPlaylist(state, playlist, deps) {
   const warningCount = typeof countWarningsForStatus === "function"
     ? countWarningsForStatus(data.warnings)
     : ((data.warnings || []).length || 0);
-  const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   emitStatus(
-    `Removed USB playlist: ${playlist.name} [db ${data.removedFromEdb || 0}, pdb ${data.removedFromPdb || 0}]${warningSuffix}`
+    `Removed USB playlist: ${playlist.name} [db ${data.removedFromEdb || 0}, pdb ${data.removedFromPdb || 0}]${warningSuffix}`,
+    { warningCount }
   );
 }
 
@@ -820,10 +821,10 @@ export async function refreshUsb(state, el, deps) {
   updatePlaylistExportButtons();
 
   const warningCount = countWarningsForStatus(data.warnings);
-  const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   logWarnings("usb-import", data.warnings, "fetch_usb_playlists");
   setProgress(true, 100, `Done — ${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`);
-  emitStatus(`USB playlists loaded: ${state.usbPlaylists.length}${warningSuffix}`);
+  emitStatus(`USB playlists loaded: ${state.usbPlaylists.length}${warningSuffix}`, { warningCount });
   setTimeout(() => setProgress(false, 0, "Idle"), 1200);
 }
 
@@ -963,9 +964,9 @@ export async function refreshHistory(state, el, deps) {
   renderHistoryList();
   renderHistoryTracks();
   const warningCount = countWarningsForStatus(data.warnings);
-  const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   logWarnings("usb-import", data.warnings, "fetch_usb_histories");
-  emitStatus(`USB histories loaded: ${state.histories.length}${warningSuffix}`);
+  emitStatus(`USB histories loaded: ${state.histories.length}${warningSuffix}`, { warningCount });
 }
 
 function toMenuOptionLabel(item) {
@@ -1373,7 +1374,7 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
     }
   }
   const warningCount = countWarningsForStatus(data.warnings);
-  const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   const warningList = Array.isArray(data.warnings) ? data.warnings : [];
   if (warningList.length) {
     const infoCount = warningList.filter((entry) => warningEntryLevel(entry) === "info").length;
@@ -1389,7 +1390,8 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
   }
   logWarnings("export", data.warnings, "export_to_usb");
   emitStatus(
-    `Export complete: ${playlist.name} - ${data.exportedTracks || 0} track(s), ${data.skippedTracks || 0} skipped${warningSuffix}${state.exportPruneStale ? " [sync: mirror]" : " [sync: additive]"}`
+    `Export complete: ${playlist.name} - ${data.exportedTracks || 0} track(s), ${data.skippedTracks || 0} skipped${warningSuffix}${state.exportPruneStale ? " [sync: mirror]" : " [sync: additive]"}`,
+    { warningCount }
   );
   await loadPlaylists();
   state.currentPlaylistId = playlistId;

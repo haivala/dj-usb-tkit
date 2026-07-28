@@ -1071,7 +1071,8 @@ export async function scanLibrary(state, deps) {
   const missingCount = missingSourceRootsArray(state).length;
   const missingSuffix = missingCount ? ` | ${missingCount} source folder(s) missing` : "";
   emitStatus(
-    `Scan done: ${scopedTracks.length} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}${missingSuffix}`
+    `Scan done: ${scopedTracks.length} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}${missingSuffix}`,
+    { warningCount }
   );
 }
 
@@ -1351,10 +1352,10 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     logWarnings("analysis", warnings, modeLabel);
   }
   const warningCount = countWarningsForStatus(warnings);
-  const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   const autoLimitWarning = findAnalysisAutoLimitWarning(warnings);
   const autoLimitSuffix = autoLimitWarning ? ` | ${autoLimitWarning}` : "";
-  emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}`);
+  emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}`, { warningCount });
   return { analyzed, failed, warnings };
 }
 

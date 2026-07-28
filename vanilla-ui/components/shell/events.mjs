@@ -62,6 +62,16 @@ export function bindShellEvents(ctx) {
     });
   });
 
+  el.statusText?.addEventListener("click", (event) => {
+    const link = event.target.closest(".status-warning-link");
+    if (!link) return;
+    event.preventDefault();
+    switchView("event-log").catch((err) => {
+      console.error(err);
+      setStatus(err.message);
+    });
+  });
+
   document.addEventListener("click", (event) => {
     if (!state.playbackActive) return;
     const inActiveRow = event.target?.closest?.(`.track-grid-row[data-playback-row="${state.playbackRowKey}"]`);
