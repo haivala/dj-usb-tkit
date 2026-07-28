@@ -3202,7 +3202,11 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
         .filter(|p| p.name.starts_with("Reorder Playlist"))
         .map(|p| p.id)
         .collect::<Vec<_>>();
-    assert_eq!(ids.len(), 3, "expected 3 reorder playlists on device: {ids:?}");
+    assert_eq!(
+        ids.len(),
+        3,
+        "expected 3 reorder playlists on device: {ids:?}"
+    );
 
     // Reverse the device-native order and persist it via the new command.
     ids.reverse();

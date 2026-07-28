@@ -28,13 +28,13 @@ use crate::models::{
     RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
     RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
-    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
-    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
-    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
-    RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
-    SearchTracksData, SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    StopPlaybackData, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
-    ValidateUsbRootData, ValidateUsbRootRequest,
+    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
+    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, RunUsbDiagnosticsData,
+    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData,
+    ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData, SearchTracksRequest,
+    SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
+    ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
