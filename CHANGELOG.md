@@ -12,6 +12,8 @@
 
 ## Unreleased
 
+## 0.1.7
+
 **Severity:** critical
 
 - Fix the memory-aware analysis worker cap (0.1.5/0.1.6) not applying to the
