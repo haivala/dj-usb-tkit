@@ -792,6 +792,12 @@ function renderSourceChips() {
     updateSourceFilterIndicator,
   });
 }
+async function refreshSourceRootAnalysisStatus() {
+  return library.refreshSourceRootAnalysisStatus(state, {
+    command,
+    renderSourceChips,
+  });
+}
 async function checkSourceRoots(options = {}) {
   return library.refreshMissingSourceRoots(state, {
     command,
@@ -1007,6 +1013,7 @@ async function analyzeTrackIds(trackIds, modeLabel = "Analyze", options = {}) {
     updateLibraryDurationSummary: () =>
       updateLibraryDurationSummary(getLibraryVisibleTracks()),
     renderSourceChips,
+    refreshSourceRootAnalysisStatus,
     refreshCurrentPlaylistTracks,
     countWarningsForStatus: eventLog.countWarningsForStatus,
     logWarnings,
@@ -1463,6 +1470,7 @@ function handleJobEvent(payload) {
     applyRealtimeAnalyzedTrackUpdate,
     setStatus,
     emitMessage,
+    refreshSourceRootAnalysisStatus,
   });
 }
 function handleBackendLogEvent(payload) {
@@ -1747,6 +1755,7 @@ async function init() {
     applySidebarCollapsedUi,
     checkSourceRoots,
     renderSourceChips,
+    refreshSourceRootAnalysisStatus,
     detectExternalMasterDb,
     bindEvents,
     switchView,

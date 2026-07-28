@@ -194,6 +194,7 @@ export async function initApp(state, deps = {}) {
     applySidebarCollapsedUi,
     checkSourceRoots = async () => {},
     renderSourceChips,
+    refreshSourceRootAnalysisStatus = async () => {},
     detectExternalMasterDb,
     bindEvents,
     switchView,
@@ -241,6 +242,7 @@ export async function initApp(state, deps = {}) {
   applySidebarCollapsedUi();
 
   renderSourceChips();
+  refreshSourceRootAnalysisStatus().catch(() => {});
   await detectExternalMasterDb();
   bindEvents();
   await switchView("library");

@@ -115,6 +115,7 @@ export function handleJobEvent(state, el, payload, deps = {}) {
   const {
     debugFrontendLog,
     applyRealtimeAnalyzedTrackUpdate,
+    refreshSourceRootAnalysisStatus = () => {},
   } = deps;
   const emitMessage = createEmitMessage(deps);
   const trackInfo = payload?.trackTitle || payload?.trackId;
@@ -223,6 +224,7 @@ export function handleJobEvent(state, el, payload, deps = {}) {
         status
       });
     }
+    Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
     state.activeJobId = null;
     setTimeout(() => {
       setProgress(state, el, false, 0, "Idle");

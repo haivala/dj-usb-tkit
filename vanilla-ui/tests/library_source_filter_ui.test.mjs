@@ -8,6 +8,7 @@ import {
   normalizeTrack,
   relocateSourceRoot,
   renderSourceChips,
+  refreshSourceRootAnalysisStatus,
   scanMasterDb
 } from "../components/library/actions.mjs";
 
@@ -446,4 +447,57 @@ test("scanMasterDb emits generic error status on command failure", async () => {
   });
   assert.equal(statuses[0], "Importing from desktop library...");
   assert.ok(statuses[1].startsWith("Desktop library import failed:"), statuses[1]);
+});
+
+test("refreshSourceRootAnalysisStatus queries every non-missing root, including disabled ones", async () => {
+  const state = {
+    sourceRoots: ["/music/a", "/music/b"],
+    sourceRootEnabled: { "/music/a": true, "/music/b": false },
+    masterDbEnabled: true,
+    sourceRootAnalysisStatus: {}
+  };
+  const calls = [];
+  let rendered = 0;
+
+  await refreshSourceRootAnalysisStatus(state, {
+    command: async (name, payload) => {
+      calls.push({ name, payload });
+      return {
+        sourceRootAnalysis: [
+          { sourceRoot: "/music/a", total: 3, analyzed: 3, fullyAnalyzed: true },
+          { sourceRoot: "/music/b", total: 2, analyzed: 2, fullyAnalyzed: true }
+        ]
+      };
+    },
+    renderSourceChips: () => { rendered += 1; }
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, "browse_source_files");
+  assert.deepEqual(calls[0].payload.sourceRoots, ["/music/a", "/music/b"]);
+  assert.equal(calls[0].payload.includeMasterDb, false);
+  assert.equal(calls[0].payload.limit, 1);
+  assert.equal(state.sourceRootAnalysisStatus["/music/a"], true);
+  assert.equal(state.sourceRootAnalysisStatus["/music/b"], true);
+  assert.equal(rendered, 1);
+});
+
+test("refreshSourceRootAnalysisStatus skips missing roots and no-ops when everything is missing", async () => {
+  const state = {
+    sourceRoots: ["/music/a"],
+    sourceRootEnabled: { "/music/a": true },
+    missingSourceRoots: new Set(["/music/a"]),
+    masterDbEnabled: false,
+    sourceRootAnalysisStatus: {}
+  };
+  let calls = 0;
+  let rendered = 0;
+
+  await refreshSourceRootAnalysisStatus(state, {
+    command: async () => { calls += 1; return {}; },
+    renderSourceChips: () => { rendered += 1; }
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(rendered, 0);
 });

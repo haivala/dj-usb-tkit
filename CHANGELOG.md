@@ -12,6 +12,12 @@
 
 ## Unreleased
 
+- Fix source folder chips not turning green after analysis finishes on
+  large libraries — they only updated when toggling a folder's filter
+  checkbox, and could stay stale on app start. Folder analysis status is
+  now refreshed from the backend on startup and whenever an analysis job
+  completes.
+
 ## 0.1.5
 
 **Severity:** critical

@@ -282,6 +282,35 @@ test("handleJobEvent job.completed resets active job", () => {
   }
 });
 
+test("handleJobEvent job.completed refreshes source root analysis status", () => {
+  const state = makeState();
+  state.activeJobId = "j1";
+  const el = makeEl();
+  const origSetTimeout = window.setTimeout;
+  const origClearInterval = window.clearInterval;
+  window.setTimeout = (fn) => fn();
+  window.clearInterval = () => {};
+  let refreshCalls = 0;
+  try {
+    handleJobEvent(state, el, {
+      event: "job.completed",
+      jobId: "j1",
+      jobType: "analyze_new_tracks",
+      message: "Done"
+    }, {
+      debugFrontendLog: () => {},
+      pushEventLog: () => {},
+      applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
+      setStatus: () => {},
+      refreshSourceRootAnalysisStatus: () => { refreshCalls += 1; return Promise.resolve(); }
+    });
+    assert.equal(refreshCalls, 1);
+  } finally {
+    window.setTimeout = origSetTimeout;
+    window.clearInterval = origClearInterval;
+  }
+});
+
 test("handleJobEvent ignores events for different job id", () => {
   const state = makeState();
   state.activeJobId = "j1";

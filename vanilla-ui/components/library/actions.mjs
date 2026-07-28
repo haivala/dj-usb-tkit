@@ -214,6 +214,34 @@ function applySourceRootAnalysisFromBrowseData(state, data) {
   }
 }
 
+export async function refreshSourceRootAnalysisStatus(state, deps = {}) {
+  const {
+    command,
+    renderSourceChips = () => {}
+  } = deps;
+  // Analysis status is a property of the folder itself, not of whether it's
+  // currently toggled on in the library filter, so this intentionally
+  // queries every configured root (enabled or not) rather than reusing the
+  // enabled-only filter that loadTracks/browse_source_files use for the
+  // visible library. Missing roots are skipped since there's nothing on
+  // disk to scan.
+  const roots = (state.sourceRoots || []).filter((root) => !sourceRootIsMissing(state, root));
+  if (!roots.length) return;
+  try {
+    const data = await command("browse_source_files", {
+      sourceRoots: roots,
+      includeMasterDb: false,
+      query: "",
+      limit: 1,
+      cursor: null
+    });
+    applySourceRootAnalysisFromBrowseData(state, data);
+    renderSourceChips();
+  } catch (err) {
+    console.warn("Failed to refresh source folder analysis status:", err);
+  }
+}
+
 export function missingSourceRootsArray(state) {
   const roots = state?.missingSourceRoots;
   if (roots instanceof Set) return Array.from(roots);
@@ -1120,6 +1148,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     patchPlaylistRowByTrackId,
     updateLibraryDurationSummary,
     renderSourceChips,
+    refreshSourceRootAnalysisStatus = () => {},
     refreshCurrentPlaylistTracks,
     countWarningsForStatus,
     logWarnings
@@ -1316,6 +1345,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     // final sync pass only
   }
 
+  Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
   await refreshCurrentPlaylistTracks();
   if (typeof logWarnings === "function" && warnings.length) {
     logWarnings("analysis", warnings, modeLabel);
