@@ -26,7 +26,7 @@ export function renderEssentiaInstallRow(state, el, deps = {}) {
   if (el.essentiaNodeStatus) {
     if (!nodeAvailable) {
       el.essentiaNodeStatus.innerHTML =
-        `Node.js not found — <a href="#" class="essentia-node-link">Get Node.js</a>`;
+        `Node.js not found — <a href="${NODE_JS_URL}" class="essentia-node-link" target="_blank" rel="noopener noreferrer">Get Node.js</a>`;
       el.essentiaNodeStatus.querySelector(".essentia-node-link")
         ?.addEventListener("click", (e) => { e.preventDefault(); openUrl(NODE_JS_URL); });
     } else if (essentiaInstalled) {
