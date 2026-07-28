@@ -38,8 +38,13 @@ const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
 const ANALYSIS_MEMORY_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 // Extra margin on top of the flat headroom, since per-worker budgets below are estimates.
 const ANALYSIS_MEMORY_USABLE_FRACTION: f64 = 0.75;
-// ~96MB fixed decode buffer (ANALYSIS_DECODE_MAX_SAMPLES f32) + artwork decode/resize + waveform/misc buffers.
-const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 256 * 1024 * 1024;
+// stratum-dsp's internal working set (STFT spectrogram, onset/tempogram/chroma
+// buffers) dwarfs the ~96MB decode buffer. Measured empirically: ~1.15GB/worker
+// peak RSS under realistic concurrent load (N threads x ~4min tracks), rounded
+// up with margin. A worker parked on an unusually long single track (near the
+// ANALYSIS_DECODE_MAX_SAMPLES cap) can still peak closer to ~2.7GB; accepted
+// residual risk for libraries dominated by very long recorded sets/mixes.
+const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 1536 * 1024 * 1024;
 // Stratum budget plus a Node.js/WASM child process per worker.
 const ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES: u64 = 400 * 1024 * 1024;
 const ANLZ_DETAIL_DEFAULT_DURATION_MS: u64 = 180_000;
@@ -261,6 +266,32 @@ struct EssentiaWorkerConfig {
     pool_size: usize,
 }
 
+/// AppImage's `AppRun` prepends the mounted AppDir's own `usr/lib` to
+/// `LD_LIBRARY_PATH` so our bundled libs load correctly — but that env var is
+/// inherited by every child process we spawn, including the system `node`
+/// binary we shell out to for the essentia engine. The AppDir bundles its own
+/// (older) `libcrypto.so.3` for backend Rust deps, which shadows the system's
+/// newer OpenSSL and breaks system `node` (built against a newer OpenSSL ABI)
+/// when it's launched with our environment. Strip AppDir-rooted entries so
+/// external system binaries link against the system's own libraries.
+fn strip_appimage_lib_path(cmd: &mut Command) {
+    let Some(appdir) = std::env::var("APPDIR").ok().filter(|d| !d.is_empty()) else {
+        return;
+    };
+    let Ok(ld_library_path) = std::env::var("LD_LIBRARY_PATH") else {
+        return;
+    };
+    let filtered: Vec<&str> = ld_library_path
+        .split(':')
+        .filter(|entry| !entry.is_empty() && !entry.starts_with(&appdir))
+        .collect();
+    if filtered.is_empty() {
+        cmd.env_remove("LD_LIBRARY_PATH");
+    } else {
+        cmd.env("LD_LIBRARY_PATH", filtered.join(":"));
+    }
+}
+
 struct EssentiaNodeWorker {
     child: Child,
     stdin: ChildStdin,
@@ -269,16 +300,17 @@ struct EssentiaNodeWorker {
 
 impl EssentiaNodeWorker {
     fn spawn(config: &EssentiaWorkerConfig) -> BackendResult<Self> {
-        let mut child = Command::new(&config.node_bin)
+        let mut command = Command::new(&config.node_bin);
+        command
             .arg(config.runner_path.to_string_lossy().to_string())
             .arg("--worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|err| {
-                BackendError::Internal(format!("Failed to launch BPM/key analysis worker: {err}"))
-            })?;
+            .stderr(Stdio::inherit());
+        strip_appimage_lib_path(&mut command);
+        let mut child = command.spawn().map_err(|err| {
+            BackendError::Internal(format!("Failed to launch BPM/key analysis worker: {err}"))
+        })?;
         let stdin = child.stdin.take().ok_or_else(|| {
             BackendError::Internal("BPM/key analysis worker missing stdin pipe".to_string())
         })?;
@@ -503,34 +535,26 @@ impl BackendService {
             let cpu_workers = std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1);
-            let per_worker_budget = match engine {
-                AnalysisEngine::Essentia => ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES,
-                AnalysisEngine::Stratum => ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES,
-            };
-            let memory_cap = memory_worker_cap(per_worker_budget);
-            let env_cap = analysis_worker_cap_from_env();
-            let combined_cap = combine_worker_caps(env_cap, memory_cap);
+            let cap = resolve_worker_cap_for_engine(engine);
             let worker_count =
-                resolve_analysis_worker_count_with_cap(total, cpu_workers, combined_cap);
+                resolve_analysis_worker_count_with_cap(total, cpu_workers, cap.combined);
             let debug_workers = analysis_debug_workers_enabled();
 
             if debug_workers {
-                crate::logging::emit(
-                    crate::logging::Level::Info,
-                    "analysis",
-                    &format!(
-                        "debug workers total_tracks={} cpu_workers={} memory_cap={} env_cap={} worker_count={}",
-                        total,
-                        cpu_workers,
-                        memory_cap
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "unavailable".to_string()),
-                        env_cap
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "none".to_string()),
-                        worker_count
-                    ),
+                let line = format!(
+                    "debug workers total_tracks={} cpu_workers={} memory_cap={} env_cap={} worker_count={}",
+                    total,
+                    cpu_workers,
+                    cap.memory_cap
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unavailable".to_string()),
+                    cap.env_cap
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    worker_count
                 );
+                eprintln!("[analysis] {line}");
+                crate::logging::emit(crate::logging::Level::Info, "analysis", &line);
             }
 
             let queue = Arc::new(Mutex::new(
@@ -1285,6 +1309,31 @@ fn analysis_debug_workers_enabled() -> bool {
         .unwrap_or(false)
 }
 
+/// The memory/env worker caps for a given engine, broken down for debug
+/// logging as well as combined. The single implementation here is shared by
+/// both worker-pool call sites (batch analysis and the essentia pool) so a
+/// copy-paste bug in "pick budget -> combine caps" can't silently diverge
+/// between them.
+struct WorkerCapBreakdown {
+    memory_cap: Option<usize>,
+    env_cap: Option<usize>,
+    combined: Option<usize>,
+}
+
+fn resolve_worker_cap_for_engine(engine: AnalysisEngine) -> WorkerCapBreakdown {
+    let bytes_per_worker = match engine {
+        AnalysisEngine::Essentia => ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES,
+        AnalysisEngine::Stratum => ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES,
+    };
+    let memory_cap = memory_worker_cap(bytes_per_worker);
+    let env_cap = analysis_worker_cap_from_env();
+    WorkerCapBreakdown {
+        memory_cap,
+        env_cap,
+        combined: combine_worker_caps(env_cap, memory_cap),
+    }
+}
+
 fn analyze_local_track_with_updates(
     file_path: &str,
     track_id: &str,
@@ -1641,26 +1690,25 @@ fn resolve_essentia_worker_config() -> BackendResult<EssentiaWorkerConfig> {
     let cpu_workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    let memory_cap = memory_worker_cap(ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES);
-    let env_cap = analysis_worker_cap_from_env();
-    let combined_cap = combine_worker_caps(env_cap, memory_cap);
-    let pool_size = resolve_analysis_parallelism_budget_with_cap(cpu_workers, combined_cap);
+    // This pool is a lazily-initialized global shared across batch and
+    // single-track paths, so it always uses the (heavier) essentia budget
+    // regardless of which engine the current request selected.
+    let cap = resolve_worker_cap_for_engine(AnalysisEngine::Essentia);
+    let pool_size = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
     if analysis_debug_workers_enabled() {
-        crate::logging::emit(
-            crate::logging::Level::Info,
-            "analysis",
-            &format!(
-                "debug workers(essentia) cpu_workers={} memory_cap={} env_cap={} pool_size={}",
-                cpu_workers,
-                memory_cap
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unavailable".to_string()),
-                env_cap
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "none".to_string()),
-                pool_size
-            ),
+        let line = format!(
+            "debug workers(essentia) cpu_workers={} memory_cap={} env_cap={} pool_size={}",
+            cpu_workers,
+            cap.memory_cap
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            cap.env_cap
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            pool_size
         );
+        eprintln!("[analysis] {line}");
+        crate::logging::emit(crate::logging::Level::Info, "analysis", &line);
     }
     Ok(EssentiaWorkerConfig {
         node_bin,
@@ -1673,20 +1721,21 @@ fn run_essentia_request_once(
     config: &EssentiaWorkerConfig,
     args: &serde_json::Value,
 ) -> BackendResult<Vec<u8>> {
-    let output = Command::new(&config.node_bin)
+    let mut command = Command::new(&config.node_bin);
+    command
         .arg(config.runner_path.to_string_lossy().to_string())
-        .arg(args.to_string())
-        .output()
-        .map_err(|err| {
-            let details = format!(
-                "node={} runner={}",
-                config.node_bin,
-                config.runner_path.display()
-            );
-            BackendError::Internal(format!(
-                "Failed to launch BPM/key analysis runtime: {err} | {details}"
-            ))
-        })?;
+        .arg(args.to_string());
+    strip_appimage_lib_path(&mut command);
+    let output = command.output().map_err(|err| {
+        let details = format!(
+            "node={} runner={}",
+            config.node_bin,
+            config.runner_path.display()
+        );
+        BackendError::Internal(format!(
+            "Failed to launch BPM/key analysis runtime: {err} | {details}"
+        ))
+    })?;
 
     if !output.status.success() {
         let stderr_text = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -2307,16 +2356,18 @@ pub(crate) fn build_waveform_preview_from_file_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        EssentiaResult, build_waveform_data_from_samples, build_waveform_preview_from_samples,
-        collect_tracks_for_analysis, combine_worker_caps, essentia_result_has_detected_values,
-        resolve_analysis_bpm_range, resolve_analysis_parallelism_budget_with_cap,
-        resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
+        AnalysisEngine, EssentiaResult, build_waveform_data_from_samples,
+        build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
+        essentia_result_has_detected_values, resolve_analysis_bpm_range,
+        resolve_analysis_parallelism_budget_with_cap, resolve_analysis_worker_count_with_cap,
+        resolve_memory_worker_cap, resolve_worker_cap_for_engine, strip_appimage_lib_path,
         waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
         waveform_preview_if_persisted,
     };
     use crate::service::WAVEFORM_PREVIEW_BINS;
     use crate::service::anlz::WaveformData;
     use rusqlite::Connection;
+    use std::process::Command;
     use std::sync::{Mutex, OnceLock};
 
     fn env_var_lock() -> &'static Mutex<()> {
@@ -2440,6 +2491,121 @@ mod tests {
         let result = super::available_system_memory_bytes();
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         assert!(result.unwrap_or(0) > 0);
+    }
+
+    fn command_env_value(cmd: &Command, key: &str) -> Option<Option<String>> {
+        cmd.get_envs().find_map(|(k, v)| {
+            (k.to_string_lossy() == key).then(|| v.map(|v| v.to_string_lossy().to_string()))
+        })
+    }
+
+    #[test]
+    fn strip_appimage_lib_path_noop_without_appdir() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::remove_var("APPDIR") };
+        unsafe { std::env::set_var("LD_LIBRARY_PATH", "/opt/custom/lib") };
+        let mut cmd = Command::new("true");
+        strip_appimage_lib_path(&mut cmd);
+        unsafe { std::env::remove_var("LD_LIBRARY_PATH") };
+        assert_eq!(command_env_value(&cmd, "LD_LIBRARY_PATH"), None);
+    }
+
+    #[test]
+    fn strip_appimage_lib_path_noop_without_ld_library_path() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::set_var("APPDIR", "/tmp/.mount_abc/usr") };
+        unsafe { std::env::remove_var("LD_LIBRARY_PATH") };
+        let mut cmd = Command::new("true");
+        strip_appimage_lib_path(&mut cmd);
+        unsafe { std::env::remove_var("APPDIR") };
+        assert_eq!(command_env_value(&cmd, "LD_LIBRARY_PATH"), None);
+    }
+
+    #[test]
+    fn strip_appimage_lib_path_strips_appdir_entries_keeps_others() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::set_var("APPDIR", "/tmp/.mount_abc/usr") };
+        unsafe {
+            std::env::set_var(
+                "LD_LIBRARY_PATH",
+                "/tmp/.mount_abc/usr/lib:/opt/custom/lib:/tmp/.mount_abc/usr/lib64",
+            )
+        };
+        let mut cmd = Command::new("true");
+        strip_appimage_lib_path(&mut cmd);
+        unsafe { std::env::remove_var("APPDIR") };
+        unsafe { std::env::remove_var("LD_LIBRARY_PATH") };
+        assert_eq!(
+            command_env_value(&cmd, "LD_LIBRARY_PATH"),
+            Some(Some("/opt/custom/lib".to_string()))
+        );
+    }
+
+    #[test]
+    fn strip_appimage_lib_path_removes_var_when_all_entries_stripped() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::set_var("APPDIR", "/tmp/.mount_abc/usr") };
+        unsafe {
+            std::env::set_var(
+                "LD_LIBRARY_PATH",
+                "/tmp/.mount_abc/usr/lib:/tmp/.mount_abc/usr/lib64",
+            )
+        };
+        let mut cmd = Command::new("true");
+        strip_appimage_lib_path(&mut cmd);
+        unsafe { std::env::remove_var("APPDIR") };
+        unsafe { std::env::remove_var("LD_LIBRARY_PATH") };
+        assert_eq!(command_env_value(&cmd, "LD_LIBRARY_PATH"), Some(None));
+    }
+
+    #[test]
+    fn resolve_worker_cap_for_engine_stratum_binds_under_memory_pressure() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") };
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "4294967296") };
+        let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
+        // 4 GiB available, 1.5 GiB/worker budget: after 1 GiB headroom = 3
+        // GiB; * 0.75 = 2.25 GiB; / 1.5GiB = 1.
+        assert_eq!(cap.memory_cap, Some(1));
+        assert_eq!(cap.env_cap, None);
+        assert_eq!(cap.combined, Some(1));
+    }
+
+    #[test]
+    fn resolve_worker_cap_for_engine_essentia_uses_essentia_budget() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") };
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "17179869184") };
+        let stratum_cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
+        let essentia_cap = resolve_worker_cap_for_engine(AnalysisEngine::Essentia);
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
+        // Same available memory, different per-worker budgets (1.5 GiB vs
+        // 400MiB) must produce different caps -- proves the right per-engine
+        // constant is actually selected, not just that some cap exists.
+        assert_ne!(stratum_cap.memory_cap, essentia_cap.memory_cap);
+        assert!(essentia_cap.memory_cap.unwrap() > stratum_cap.memory_cap.unwrap());
+    }
+
+    #[test]
+    fn memory_cap_actually_reduces_worker_count_below_cpu_count() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") };
+        // Simulate the reported 16GB/12-thread crash machine: ~13 GiB
+        // available, far more CPU threads than the memory budget should allow.
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "13958643712") };
+        let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
+        let cpu_workers = 12;
+        let total_tracks = 500;
+        let worker_count =
+            resolve_analysis_worker_count_with_cap(total_tracks, cpu_workers, cap.combined);
+        // The concrete proof: a memory-scarce environment must reduce the
+        // real worker count below what CPU count alone would allow.
+        assert!(
+            worker_count < cpu_workers,
+            "expected memory cap to bind below cpu_workers={cpu_workers}, got worker_count={worker_count}"
+        );
     }
 
     #[test]

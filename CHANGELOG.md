@@ -12,6 +12,25 @@
 
 ## Unreleased
 
+**Severity:** critical
+
+- Fix analysis still crashing/hanging on lower-RAM, high-core-count machines
+  after 0.1.5's memory-aware worker cap. That fix's per-worker memory budget
+  for the `stratum` engine was based on a fixed decode-buffer estimate and
+  didn't account for `stratum-dsp`'s own internal analysis buffers; measured
+  under realistic concurrent load, actual usage was several times higher, so
+  the cap rarely bound tighter than CPU count on affected machines. The
+  budget is now based on real measurement and worker count is capped
+  accordingly, while high-RAM machines see no change in behavior.
+- Fix the opt-in `essentia` engine failing to start from the AppImage build
+  with an `OPENSSL_3.x not found` error. The AppImage's own bundled
+  `libcrypto.so.3` (needed by our Rust dependencies) was shadowing the
+  system's newer OpenSSL via `LD_LIBRARY_PATH` when we shelled out to the
+  system's Node runtime, which is linked against the newer version. The
+  AppImage's own library path is no longer passed through to spawned Node
+  processes.
+- Fix `DJTKIT_ANALYSIS_DEBUG_WORKERS=1` diagnostic output only reaching the
+  in-app Event Log; it now also prints to the terminal.
 - Fix source folder chips not turning green after analysis finishes on
   large libraries — they only updated when toggling a folder's filter
   checkbox, and could stay stale on app start. Folder analysis status is
