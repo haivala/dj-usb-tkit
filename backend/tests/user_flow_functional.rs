@@ -149,6 +149,8 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
             .collect::<Vec<_>>();
 
         let analyzed = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+            bpm_min: None,
+            bpm_max: None,
             track_ids: remaining_ids.clone(),
             analysis_engine: None,
         });
@@ -563,6 +565,8 @@ fn analyze_local_track_waveform_preview_comes_from_anlz_roundtrip() {
         let track_id = tracks[0].id.clone();
 
         let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+            bpm_min: None,
+            bpm_max: None,
             track_ids: vec![track_id.clone()],
             analysis_engine: None,
         });
@@ -637,6 +641,8 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
         let track_id = scanned[0].id.clone();
 
         let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+            bpm_min: None,
+            bpm_max: None,
             track_ids: vec![track_id.clone()],
             analysis_engine: None,
         });

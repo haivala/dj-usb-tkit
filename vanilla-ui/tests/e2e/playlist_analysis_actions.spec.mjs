@@ -2,6 +2,20 @@ import { test, expect } from "@playwright/test";
 
 test("playlist analyze-missing only targets local non-USB tracks", async ({ page }) => {
   await page.addInitScript(() => {
+    // registerBackendJobEvents() only calls listen("job:event", ...) when
+    // window.isTauri is truthy (see components/playback/actions.mjs). Without
+    // this, the app never subscribes to job:event and the per-row
+    // "analyzing" state (now driven entirely by job:event, see
+    // job_manager.mjs handleJobEvent) would never update.
+    window.isTauri = true;
+    // @tauri-apps/api's real invoke()/isTauri() (bundled into main.js) route
+    // through window.__TAURI_INTERNALS__.invoke once window.isTauri is set,
+    // bypassing window.__TAURI__.core.invoke entirely. Forward it to our mock
+    // so every invoke call -- not just event listener registration -- reaches
+    // the mock regardless of which path the bundled API code takes.
+    window.__TAURI_INTERNALS__ = {
+      invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
+    };
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
 
@@ -68,6 +82,30 @@ test("playlist analyze-missing only targets local non-USB tracks", async ({ page
     });
 
     const analyzedRequests = [];
+    const listeners = new Map();
+    const nowIso = () => new Date().toISOString();
+
+    const listen = async (eventName, callback) => {
+      const key = String(eventName || "");
+      const arr = listeners.get(key) || [];
+      arr.push(callback);
+      listeners.set(key, arr);
+      return () => {
+        const current = listeners.get(key) || [];
+        listeners.set(key, current.filter((fn) => fn !== callback));
+      };
+    };
+
+    const emitJobEvent = (jobPayload) => {
+      const cbs = listeners.get("job:event") || [];
+      for (const cb of cbs.slice()) {
+        try {
+          cb({ event: "job:event", payload: jobPayload });
+        } catch (_) {
+          // ignore listener errors in mock
+        }
+      }
+    };
 
     window.__TAURI__ = {
       core: {
@@ -91,37 +129,89 @@ test("playlist analyze-missing only targets local non-USB tracks", async ({ page
           if (command === "browse_source_files") {
             return { ok: true, data: { total: libraryTracks.length, items: libraryTracks } };
           }
-          if (command === "get_system_parallelism") {
-            return { ok: true, data: { workers: 4 } };
-          }
-          if (command === "analyze_track_piece") {
-            analyzedRequests.push({ trackId: request.trackId, piece: request.piece });
-            if (request.piece === "duration") {
-              playlistTracks["pl-1"][0].durationMs = 180000;
-              libraryTracks[0].durationMs = 180000;
+          if (command === "analyze_new_tracks") {
+            analyzedRequests.push({ trackIds: request.trackIds });
+            const ids = request.trackIds || [];
+            const jobId = "job-analysis-mock";
+            emitJobEvent({
+              event: "job.started",
+              jobId,
+              jobType: "analysis",
+              stage: "analyze_new_tracks",
+              current: 0,
+              total: Math.max(1, ids.length),
+              percent: 0,
+              message: "Analyzing selected tracks",
+              timestamp: nowIso()
+            });
+            for (const trackId of ids) {
+              if (trackId !== "local-missing-1") continue;
+              emitJobEvent({
+                event: "job.progress",
+                jobId,
+                jobType: "analysis",
+                stage: "analyze_new_tracks",
+                trackId,
+                current: 0,
+                total: 1,
+                percent: 0,
+                message: "Analyzing 1/1: Local Missing",
+                trackReady: false,
+                timestamp: nowIso()
+              });
             }
-            if (request.piece === "waveform") {
+            await new Promise((resolve) => { setTimeout(resolve, 200); });
+            for (const trackId of ids) {
+              if (trackId !== "local-missing-1") continue;
+              playlistTracks["pl-1"][0].durationMs = 180000;
               playlistTracks["pl-1"][0].waveformPeaksPath = "/tmp/local-missing.DAT";
               playlistTracks["pl-1"][0].waveformPreview = [5, 10, 20];
+              playlistTracks["pl-1"][0].bpm = 128;
+              libraryTracks[0].durationMs = 180000;
               libraryTracks[0].waveformPeaksPath = "/tmp/local-missing.DAT";
               libraryTracks[0].waveformPreview = [5, 10, 20];
-            }
-            if (request.piece === "bpm_key") {
-              playlistTracks["pl-1"][0].bpm = 128;
               libraryTracks[0].bpm = 128;
+              emitJobEvent({
+                event: "job.progress",
+                jobId,
+                jobType: "analysis",
+                stage: "analyze_new_tracks",
+                trackId,
+                trackTitle: "Local Missing",
+                filePath: "/music/local-missing.mp3",
+                current: 1,
+                total: 1,
+                percent: 100,
+                message: "Analyzing 1/1: Local Missing",
+                trackReady: true,
+                failed: false,
+                bpm: 128,
+                bpmAnalyzer: "mock-analyzer",
+                durationMs: 180000,
+                waveformPeaksPath: "/tmp/local-missing.DAT",
+                waveformPreview: [5, 10, 20],
+                timestamp: nowIso()
+              });
             }
+            emitJobEvent({
+              event: "job.completed",
+              jobId,
+              jobType: "analysis",
+              stage: "analyze_new_tracks",
+              current: ids.length,
+              total: Math.max(1, ids.length),
+              percent: 100,
+              message: `Analysis finished: ${ids.length} analyzed, 0 failed`,
+              timestamp: nowIso()
+            });
             return {
               ok: true,
-              data: await new Promise((resolve) => {
-                setTimeout(() => resolve({
-                  bpm: request.piece === "bpm_key" ? 128 : null,
-                  key: null,
-                  durationMs: request.piece === "duration" ? 180000 : null,
-                  artworkPath: null,
-                  waveformPeaksPath: request.piece === "waveform" ? "/tmp/local-missing.DAT" : null,
-                  waveformPreview: request.piece === "waveform" ? [5, 10, 20] : null
-                }), 40);
-              })
+              data: {
+                jobId,
+                analyzed: ids.length,
+                failed: 0,
+                warnings: []
+              }
             };
           }
           if (command === "get_tracks_by_ids_with_previews") {
@@ -170,7 +260,8 @@ test("playlist analyze-missing only targets local non-USB tracks", async ({ page
           }
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
         }
-      }
+      },
+      event: { listen }
     };
 
     window.__playlistAnalysisTest = { analyzedRequests };
@@ -190,17 +281,11 @@ test("playlist analyze-missing only targets local non-USB tracks", async ({ page
 
   await page.waitForFunction(() => {
     const reqs = window.__playlistAnalysisTest?.analyzedRequests || [];
-    return reqs.length === 4;
+    return reqs.length === 1;
   });
 
   const analyzedRequests = await page.evaluate(() => window.__playlistAnalysisTest.analyzedRequests);
-  expect(analyzedRequests.map((item) => item.trackId)).toEqual([
-    "local-missing-1",
-    "local-missing-1",
-    "local-missing-1",
-    "local-missing-1"
-  ]);
-  expect(analyzedRequests.map((item) => item.piece).sort()).toEqual(["artwork", "bpm_key", "duration", "waveform"]);
+  expect(analyzedRequests.map((item) => item.trackIds)).toEqual([["local-missing-1"]]);
   await expect(page.locator("#statusText")).toContainText("Analyze Missing Tracks done: analyzed 1, failed 0");
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="local-missing-1"]')).not.toHaveClass(/is-analyzing/);
 
@@ -263,9 +348,6 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
-          }
-          if (command === "get_system_parallelism") {
-            return { ok: true, data: { workers: 4 } };
           }
           if (command === "set_frontend_setting" || command === "get_frontend_settings") {
             return command === "get_frontend_settings"

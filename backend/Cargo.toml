@@ -190,11 +190,6 @@ path = "src/bin/run_usb_diagnostics.rs"
 required-features = ["dev-tools"]
 
 [[bin]]
-name = "benchmark_analyze_tracks"
-path = "src/bin/benchmark_analyze_tracks.rs"
-required-features = ["dev-tools"]
-
-[[bin]]
 name = "remove_usb_playlist"
 path = "src/bin/remove_usb_playlist.rs"
 required-features = ["dev-tools"]

@@ -37,8 +37,8 @@ use crate::models::{
     BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
     CreatePlaylistRequest, DedupeMode, DeletePlaylistData, DeletePlaylistRequest,
     DetectExternalMasterDbData, GetFrontendSettingsData, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetSystemParallelismData, GetTracksByIdsData, GetTracksByIdsRequest,
-    InitializeUsbData, InitializeUsbRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, InitializeUsbData,
+    InitializeUsbRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
     MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest,
     PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, Playlist,
     RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
@@ -293,12 +293,22 @@ impl BackendService {
         Ok(svc)
     }
 
-    pub fn get_system_parallelism(&self) -> BackendResult<GetSystemParallelismData> {
-        let workers = std::thread::available_parallelism()
+    /// One-line CPU/RAM summary for the startup Event Log, so support
+    /// requests about crashes/throttling on a given machine don't require
+    /// asking the user for their specs separately.
+    pub fn system_resource_summary() -> String {
+        let cpu_threads = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
             .max(1);
-        Ok(GetSystemParallelismData { workers })
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        let to_gib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+        format!(
+            "system resources: {cpu_threads} CPU thread(s), {:.1} GiB total RAM, {:.1} GiB available RAM",
+            to_gib(sys.total_memory()),
+            to_gib(sys.available_memory())
+        )
     }
 
     pub fn play_track_native(

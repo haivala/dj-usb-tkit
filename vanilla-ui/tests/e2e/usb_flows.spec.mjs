@@ -380,7 +380,8 @@ test("USB playlists status counts only warn/error warnings", async ({ page }) =>
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await page.locator("#refreshUsbBtn").click();
 
-  await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 1 (2 warning(s))");
+  await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 1 | (2 warning(s))");
+  await expect(page.locator("#statusText .status-warning-link")).toHaveText("(2 warning(s))");
 });
 
 test("console.log messages appear in Event Log", async ({ page }) => {

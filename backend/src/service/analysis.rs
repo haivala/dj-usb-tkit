@@ -67,6 +67,20 @@ const TRACK_ANALYSIS_UPDATE_SQL: &str = r#"
 
 const ANALYSIS_AUTO_SELECT_LIMIT: usize = 3000;
 
+// Earlier attempts scaled the commit interval to worker_count (more workers
+// -> commit less often, since N tracks complete in roughly the time of one).
+// That reasoning only accounts for *throughput*, not how long an individual
+// track takes -- a fixed track-count interval (even a small, capped one)
+// still translates to unbounded wall-clock lock-hold time if each track is
+// slow (a debug/dev build, a long/complex track, a slow disk, essentia
+// overhead, etc). Confirmed in practice: 10 tracks at ~20s each in a dev
+// build held the write lock for ~3+ minutes, well past another writer's
+// busy_timeout. The only interval that's actually robust to "how long is a
+// track" without introducing any wall-clock/timer logic is committing after
+// every single track -- the lock is then never held longer than one track's
+// own processing time, regardless of hardware, worker count, or track
+// length. WAL commits are cheap; this is not a meaningful throughput cost.
+
 /// Read the configured analysis engine from app_settings. Defaults to Stratum.
 fn resolve_analysis_engine(db: &crate::db::Db, requested: Option<&str>) -> AnalysisEngine {
     if let Some(raw) = requested {
@@ -524,20 +538,25 @@ impl BackendService {
                 ));
         }
         let total = tracks.len();
-        let (bpm_min, bpm_max) = resolve_analysis_bpm_range(None, None);
+        let (bpm_min, bpm_max) = resolve_analysis_bpm_range(req.bpm_min, req.bpm_max);
         let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
 
         let mut completed_count = 0usize;
 
         if total > 1 {
-            let tx_db = conn.unchecked_transaction()?;
+            let mut tx_db = conn.unchecked_transaction()?;
             let mut persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
             let cpu_workers = std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1);
             let cap = resolve_worker_cap_for_engine(engine);
-            let worker_count =
-                resolve_analysis_worker_count_with_cap(total, cpu_workers, cap.combined);
+            // Reserve ~2 cores for the OS/UI (same budget the essentia pool
+            // already uses) before bounding by track count -- without this,
+            // a high-core machine with ample RAM would spin up one worker per
+            // CPU and leave nothing for the UI thread to stay responsive.
+            let cpu_budget =
+                resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
+            let worker_count = resolve_analysis_worker_count_with_cap(total, cpu_budget, None);
             let debug_workers = analysis_debug_workers_enabled();
 
             if debug_workers {
@@ -705,6 +724,18 @@ impl BackendService {
                             &mut warnings,
                             &mut on_progress,
                         )?;
+                        // Commit after every track (not just periodically) so
+                        // the write lock is never held longer than one
+                        // track's own processing time -- see the comment
+                        // above ANALYSIS_AUTO_SELECT_LIMIT for why a
+                        // track-count-based interval, even a small one,
+                        // isn't enough on its own.
+                        if completed_count < total {
+                            drop(persist_stmt);
+                            tx_db.commit()?;
+                            tx_db = conn.unchecked_transaction()?;
+                            persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
+                        }
                     }
                 }
             }
@@ -2606,6 +2637,32 @@ mod tests {
             worker_count < cpu_workers,
             "expected memory cap to bind below cpu_workers={cpu_workers}, got worker_count={worker_count}"
         );
+    }
+
+    #[test]
+    fn batch_worker_count_reserves_headroom_on_high_core_ample_memory_host() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") };
+        // Plenty of RAM, so the memory cap should never bind here -- this
+        // isolates the headroom-reservation behavior on its own. Mirrors the
+        // real call site in analyze_new_tracks_with_progress: resolve the
+        // engine cap, reserve ~2 cores via resolve_analysis_parallelism_budget_with_cap,
+        // then bound by track count.
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "68719476736") };
+        let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
+        let cpu_workers = 24;
+        let total_tracks = 500;
+        let cpu_budget = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
+        let worker_count = resolve_analysis_worker_count_with_cap(total_tracks, cpu_budget, None);
+        // A high-core, high-RAM machine must never spin up one worker per
+        // CPU -- that starves the OS/UI thread and makes the app
+        // unresponsive even though every worker has enough memory.
+        assert!(
+            worker_count < cpu_workers,
+            "expected ~2 cores of headroom on a {cpu_workers}-core host, got worker_count={worker_count}"
+        );
+        assert_eq!(worker_count, 22);
     }
 
     #[test]

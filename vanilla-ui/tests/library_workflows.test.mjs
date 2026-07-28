@@ -65,27 +65,21 @@ test("analyzeSingleTrack reports when local id cannot be resolved", async () => 
   assert.equal(status, "Track is not in local library yet. Scan library first, then analyze.");
 });
 
-test("analyzeTrackIds forwards bpmAnalyzer from analyze_track_piece updates", async () => {
+test("analyzeTrackIds calls analyze_new_tracks and hydrates bpm/key from the response", async () => {
   const state = {
     tracks: [{ id: "1", bpm: null, key: null, durationMs: null, waveformPreview: [] }],
     analysisBpmRange: "full",
     analyzingTrackIds: new Set()
   };
-  const realtimePayloads = [];
+  const analyzeCalls = [];
+  const merged = [];
 
   await analyzeTrackIds(state, ["1"], "Analyze", {}, {
-    shouldUseBatchAnalysis: () => false,
     parseAnalysisBpmRange: () => ({ min: null, max: null }),
     command: async (name, args = {}) => {
-      if (name === "get_system_parallelism") return { workers: 4 };
-      if (name === "analyze_track_piece") {
-        if (args.piece === "bpm_key") {
-          return { bpm: 140, bpmAnalyzer: "stratum", key: "Am" };
-        }
-        if (args.piece === "duration") return { durationMs: 60000 };
-        if (args.piece === "waveform") return { waveformPeaksPath: "/tmp/test.dat", waveformPreview: [10, 20] };
-        if (args.piece === "artwork") return { artworkPath: "/tmp/test.jpg" };
-        return {};
+      if (name === "analyze_new_tracks") {
+        analyzeCalls.push(args);
+        return { jobId: "job-1", analyzed: 1, failed: 0, warnings: [] };
       }
       if (name === "get_tracks_by_ids_with_previews") {
         return { items: [{ id: "1", bpm: 140, bpmAnalyzer: "stratum", key: "Am", durationMs: 60000, waveformPreview: [10, 20] }] };
@@ -93,14 +87,9 @@ test("analyzeTrackIds forwards bpmAnalyzer from analyze_track_piece updates", as
       return {};
     },
     setStatus: () => {},
-    resolveMissingAnalysisPieces: () => ["duration", "artwork", "waveform", "bpm_key"],
     setTrackAnalyzingState: () => {},
-    applyRealtimeAnalyzedTrackUpdate: async (payload) => {
-      realtimePayloads.push(payload);
-    },
     nextPaint: async () => {},
-    mergeHydratedTrackIntoState: () => false,
-    hydrateTrackPreviewFromBackend: async () => {},
+    mergeHydratedTrackIntoState: (item) => { merged.push(item); return true; },
     patchLibraryRowByTrackId: () => {},
     patchPlaylistRowByTrackId: () => {},
     updateLibraryDurationSummary: () => {},
@@ -109,12 +98,14 @@ test("analyzeTrackIds forwards bpmAnalyzer from analyze_track_piece updates", as
     countWarningsForStatus: () => 0
   });
 
-  const bpmPiece = realtimePayloads.find((payload) => Number(payload?.bpm) === 140);
-  assert.ok(bpmPiece);
-  assert.equal(bpmPiece.bpmAnalyzer, "stratum");
+  assert.equal(analyzeCalls.length, 1);
+  assert.deepEqual(analyzeCalls[0].trackIds, ["1"]);
+  const bpmMerge = merged.find((item) => Number(item?.bpm) === 140);
+  assert.ok(bpmMerge);
+  assert.equal(bpmMerge.bpmAnalyzer, "stratum");
 });
 
-test("analyzeTrackIds marks track failed when bpm_key returns empty result", async () => {
+test("analyzeTrackIds reports failed count from analyze_new_tracks response", async () => {
   const state = {
     tracks: [{ id: "1", bpm: null, key: null, durationMs: null, waveformPreview: [] }],
     analysisBpmRange: "full",
@@ -125,15 +116,10 @@ test("analyzeTrackIds marks track failed when bpm_key returns empty result", asy
   let hydrateCalls = 0;
 
   const result = await analyzeTrackIds(state, ["1"], "Analyze missing", {}, {
-    shouldUseBatchAnalysis: () => false,
     parseAnalysisBpmRange: () => ({ min: 70, max: 180 }),
-    command: async (name, args = {}) => {
-      if (name === "get_system_parallelism") return { workers: 4 };
-      if (name === "analyze_track_piece") {
-        if (args.piece === "bpm_key") return { bpm: null, bpmAnalyzer: null, key: null };
-        if (args.piece === "duration") return { durationMs: 60000 };
-        if (args.piece === "waveform") return { waveformPeaksPath: "/tmp/test.dat", waveformPreview: [10, 20] };
-        if (args.piece === "artwork") return { artworkPath: "/tmp/test.jpg" };
+    command: async (name) => {
+      if (name === "analyze_new_tracks") {
+        return { jobId: "job-1", analyzed: 0, failed: 1, warnings: ["1 bpm_key (essentia): no BPM/key result"] };
       }
       if (name === "get_tracks_by_ids_with_previews") {
         hydrateCalls += 1;
@@ -142,12 +128,9 @@ test("analyzeTrackIds marks track failed when bpm_key returns empty result", asy
       return {};
     },
     setStatus: (text) => { statuses.push(String(text || "")); },
-    resolveMissingAnalysisPieces: () => ["duration", "artwork", "waveform", "bpm_key"],
     setTrackAnalyzingState: () => {},
-    applyRealtimeAnalyzedTrackUpdate: async () => {},
     nextPaint: async () => {},
     mergeHydratedTrackIntoState: () => false,
-    hydrateTrackPreviewFromBackend: async () => {},
     patchLibraryRowByTrackId: () => {},
     patchPlaylistRowByTrackId: () => {},
     updateLibraryDurationSummary: () => {},
@@ -158,7 +141,7 @@ test("analyzeTrackIds marks track failed when bpm_key returns empty result", asy
 
   assert.equal(result.analyzed, 0);
   assert.equal(result.failed, 1);
-  assert.equal(hydrateCalls, 1, "final hydration still runs with empty id list");
+  assert.equal(hydrateCalls, 1, "final hydration still runs after a batch call");
   assert.ok(result.warnings.some((w) => String(w).includes("no BPM/key result")));
   assert.ok(statuses.some((s) => s.includes("Analyze missing done: analyzed 0, failed 1")));
 });

@@ -186,24 +186,6 @@ test("command throws on error response", async () => {
   );
 });
 
-test("invoke mock get_system_parallelism returns workers", async () => {
-  const { client } = makeClient();
-  const result = await client.invoke("get_system_parallelism");
-  assert.equal(result.ok, true);
-  assert.ok(result.data.workers >= 1);
-});
-
-test("invoke mock analyze_track_piece returns piece-specific data", async () => {
-  const { client } = makeClient();
-  const bpm = await client.invoke("analyze_track_piece", { request: { trackId: "t1", piece: "bpm_key" } });
-  assert.equal(bpm.data.bpm, 124);
-  assert.equal(bpm.data.key, "8A");
-
-  const wf = await client.invoke("analyze_track_piece", { request: { trackId: "t1", piece: "waveform" } });
-  assert.ok(Array.isArray(wf.data.waveformPreview));
-  assert.ok(wf.data.waveformPeaksPath.includes("t1"));
-});
-
 test("invoke mock remove_tracks_from_playlist removes matching tracks", async () => {
   const playlist = { id: "p1", name: "Set", tracks: [{ id: "t1" }, { id: "t2" }, { id: "t3" }] };
   const { client } = makeClient({ state: { playlists: [playlist] } });

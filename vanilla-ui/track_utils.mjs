@@ -40,15 +40,17 @@ export function formatDurationMs(value) {
 }
 
 export function updateTrackListDurationSummary(target, tracks) {
-  if (!target) return;
   const items = Array.isArray(tracks) ? tracks : [];
   const durations = items
     .map((track) => Number(track?.durationMs))
     .filter((value) => Number.isFinite(value) && value > 0);
   const totalMs = durations.reduce((sum, value) => sum + value, 0);
   const unknownCount = Math.max(0, items.length - durations.length);
-  const unknownSuffix = unknownCount > 0 ? ` (${unknownCount} without length)` : "";
-  target.textContent = `Total time: ${formatDurationMs(totalMs)}${unknownSuffix}`;
+  if (target) {
+    const unknownSuffix = unknownCount > 0 ? ` (${unknownCount} without length)` : "";
+    target.textContent = `Total time: ${formatDurationMs(totalMs)}${unknownSuffix}`;
+  }
+  return { totalMs, unknownCount };
 }
 
 export function getHistoryDateValue(history) {

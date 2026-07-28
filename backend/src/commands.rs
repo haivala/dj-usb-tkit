@@ -9,22 +9,22 @@ use crate::models::{
     CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
     DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
     FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest,
-    GetSystemParallelismData, GetTracksByIdsData, GetTracksByIdsRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, ListPlaylistsData,
-    ListTracksData, ListTracksRequest, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    PlayTrackData, PlayTrackRequest, PlaybackPreflightData, PlaybackPreflightRequest,
-    PlaybackStatusData, RelocateSourceRootData, RelocateSourceRootRequest,
-    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
-    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
-    SetFrontendSettingRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
+    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
+    GetTracksByIdsRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
+    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
+    ListPlaylistsData, ListTracksData, ListTracksRequest, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
+    PlaybackPreflightRequest, PlaybackStatusData, RelocateSourceRootData,
+    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
+    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
+    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
+    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
+    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, RunUsbDiagnosticsData,
+    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData,
+    ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData, SearchTracksRequest,
+    SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
+    ValidateUsbRootRequest,
 };
 use crate::player::PlaybackController;
 use crate::service::BackendService;
@@ -106,10 +106,6 @@ impl BackendCommands {
         req: GetTracksByIdsRequest,
     ) -> ApiResponse<GetTracksByIdsData> {
         wrap(self.service.get_tracks_by_ids_with_previews(req))
-    }
-
-    pub fn get_system_parallelism(&self) -> ApiResponse<GetSystemParallelismData> {
-        wrap(self.service.get_system_parallelism())
     }
 
     pub fn resolve_playback_source(

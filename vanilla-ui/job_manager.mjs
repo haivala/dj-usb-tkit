@@ -116,6 +116,8 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     debugFrontendLog,
     applyRealtimeAnalyzedTrackUpdate,
     refreshSourceRootAnalysisStatus = () => {},
+    bumpLibraryDurationSummary = () => {},
+    setTrackAnalyzingState = () => {},
   } = deps;
   const emitMessage = createEmitMessage(deps);
   const trackInfo = payload?.trackTitle || payload?.trackId;
@@ -171,6 +173,15 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     applyRealtimeAnalyzedTrackUpdate(payload).catch((err) => {
       console.error("[analysis-ui] realtime update failed:", err);
     });
+    // Mark this specific track as analyzing only once the backend actually
+    // starts producing pieces for it, and clear it once its own pieces are
+    // all done -- this reflects the real, capped worker count (only as many
+    // rows show "analyzing" at once as there are active workers) rather than
+    // marking the whole submitted batch as analyzing for the entire call.
+    setTrackAnalyzingState(String(payload.trackId), payload.trackReady !== true);
+    if (payload.trackReady === true) {
+      bumpLibraryDurationSummary(payload.durationMs);
+    }
   }
 
   if (eventName === "job.started" && jobId) {

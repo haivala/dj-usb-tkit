@@ -17,11 +17,13 @@ export function setStatusText(el, text, warningCount = 0) {
     target.append(doc.createTextNode(str));
     return;
   }
-  target.append(doc.createTextNode(str.slice(0, pipeIdx + 1)));
+  const trailing = str.slice(pipeIdx + 1);
+  const leadingSpace = trailing.match(/^\s*/)[0];
+  target.append(doc.createTextNode(str.slice(0, pipeIdx + 1) + leadingSpace));
   const link = doc.createElement("a");
   link.href = "#";
   link.className = "status-warning-link";
-  link.textContent = str.slice(pipeIdx + 1);
+  link.textContent = trailing.slice(leadingSpace.length);
   target.append(link);
 }
 

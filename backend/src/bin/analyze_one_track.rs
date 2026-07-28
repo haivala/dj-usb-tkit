@@ -38,6 +38,8 @@ fn main() {
 
     let analyzed = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
         track_ids: vec![track_id.clone()],
+        bpm_min: None,
+        bpm_max: None,
         analysis_engine,
     });
     if !analyzed.ok {

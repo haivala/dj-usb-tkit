@@ -392,15 +392,6 @@ function isUsbOriginTrack(track) {
   });
 }
 
-function resolveMissingAnalysisPieces(track) {
-  return library.resolveMissingAnalysisPieces(track, {
-    trackHasArtwork: library.trackHasArtwork,
-    trackArtworkChecked: library.trackArtworkChecked,
-    trackHasRenderableWaveform: library.trackHasRenderableWaveform,
-    trackHasBpm: library.trackHasBpm,
-  });
-}
-
 function usbTrackNeedsHydration(track) {
   return library.usbTrackNeedsHydration(track, {
     trackHasRenderableWaveform: library.trackHasRenderableWaveform,
@@ -824,10 +815,13 @@ function scheduleApplySearchLocalFilter() {
   });
 }
 function updateLibraryDurationSummary(tracks) {
-  library.updateLibraryDurationSummary(el, tracks, {
+  library.updateLibraryDurationSummary(el, tracks, state, {
     trackHasCoreAnalysis,
     updateTrackListDurationSummary,
   });
+}
+function bumpLibraryDurationSummary(durationMs) {
+  library.bumpLibraryDurationSummary(el, state, durationMs, { formatDurationMs });
 }
 function renderCurrentPlaylistTracksFromState() {
   library.renderCurrentPlaylistTracksFromState(state, el, {
@@ -997,17 +991,13 @@ async function scanMasterDb() {
 }
 async function analyzeTrackIds(trackIds, modeLabel = "Analyze", options = {}) {
   return library.analyzeTrackIds(state, trackIds, modeLabel, options, {
-    shouldUseBatchAnalysis: library.shouldUseBatchAnalysis,
     parseAnalysisBpmRange: library.parseAnalysisBpmRange,
     command,
     setStatus,
     emitStatus,
-    resolveMissingAnalysisPieces,
     setTrackAnalyzingState,
-    applyRealtimeAnalyzedTrackUpdate,
     nextPaint: jobMgr.nextPaint,
     mergeHydratedTrackIntoState,
-    hydrateTrackPreviewFromBackend,
     patchLibraryRowByTrackId,
     patchPlaylistRowByTrackId,
     updateLibraryDurationSummary: () =>
@@ -1471,6 +1461,8 @@ function handleJobEvent(payload) {
     setStatus,
     emitMessage,
     refreshSourceRootAnalysisStatus,
+    bumpLibraryDurationSummary,
+    setTrackAnalyzingState,
   });
 }
 function handleBackendLogEvent(payload) {

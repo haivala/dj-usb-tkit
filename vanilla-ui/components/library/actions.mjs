@@ -66,21 +66,6 @@ export function isUsbOriginTrack(track, deps = {}) {
   return false;
 }
 
-export function resolveMissingAnalysisPieces(track, deps = {}) {
-  const hasArtwork = deps.trackHasArtwork || trackHasArtwork;
-  const artworkChecked = deps.trackArtworkChecked || trackArtworkChecked;
-  const hasWaveform = deps.trackHasRenderableWaveform || trackHasRenderableWaveform;
-  const hasBpm = deps.trackHasBpm || trackHasBpm;
-
-  const pieces = [];
-  const durationMs = Number(track?.durationMs);
-  if (!Number.isFinite(durationMs) || durationMs <= 0) pieces.push("duration");
-  if (!hasArtwork(track) && !artworkChecked(track)) pieces.push("artwork");
-  if (!hasWaveform(track)) pieces.push("waveform");
-  if (!hasBpm(track)) pieces.push("bpm_key");
-  return pieces;
-}
-
 export function usbTrackNeedsHydration(track, deps = {}) {
   const hasWaveform = deps.trackHasRenderableWaveform || trackHasRenderableWaveform;
   const hasArtwork = deps.trackHasArtwork || trackHasArtwork;
@@ -752,10 +737,10 @@ export function renderCurrentPlaylistTracksFromState(state, el, deps = {}) {
   updateTrackListDurationSummary(el.playlistTotalDuration, state.currentPlaylistTracksView);
 }
 
-export function updateLibraryDurationSummary(el, tracks, deps = {}) {
+export function updateLibraryDurationSummary(el, tracks, state, deps = {}) {
   const {
     trackHasCoreAnalysis = () => false,
-    updateTrackListDurationSummary = () => {}
+    updateTrackListDurationSummary = () => ({ totalMs: 0, unknownCount: 0 })
   } = deps;
   const summaryTracks = Array.isArray(tracks)
     ? tracks.map((track) => {
@@ -764,7 +749,32 @@ export function updateLibraryDurationSummary(el, tracks, deps = {}) {
         return countable ? track : { ...track, durationMs: null };
       })
     : [];
-  updateTrackListDurationSummary(el.libraryTotalDuration, summaryTracks);
+  const { totalMs, unknownCount } = updateTrackListDurationSummary(el.libraryTotalDuration, summaryTracks);
+  if (state) {
+    state.libraryDurationTotalMs = totalMs;
+    state.libraryDurationUnknownCount = unknownCount;
+  }
+}
+
+// O(1) counterpart to updateLibraryDurationSummary() above, for the analysis
+// job:event hot path: bumps the running total by one track's own duration
+// instead of re-scanning the whole visible list on every single track
+// completion (which pins the JS main thread during a large batch and makes
+// the rest of the UI, including scrolling, feel frozen). The running total
+// is kept in sync by updateLibraryDurationSummary()'s full recompute, which
+// still runs at the existing batch-completion checkpoints and corrects any
+// drift (e.g. from the visible/filtered set changing mid-batch).
+export function bumpLibraryDurationSummary(el, state, durationMs, deps = {}) {
+  const { formatDurationMs = () => "" } = deps;
+  const ms = Number(durationMs);
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  state.libraryDurationTotalMs = (state.libraryDurationTotalMs || 0) + ms;
+  state.libraryDurationUnknownCount = Math.max(0, (state.libraryDurationUnknownCount || 0) - 1);
+  if (!el?.libraryTotalDuration) return;
+  const suffix = state.libraryDurationUnknownCount > 0
+    ? ` (${state.libraryDurationUnknownCount} without length)`
+    : "";
+  el.libraryTotalDuration.textContent = `Total time: ${formatDurationMs(state.libraryDurationTotalMs)}${suffix}`;
 }
 
 export function renderLibraryRows(state, el, deps = {}) {
@@ -1057,7 +1067,7 @@ export async function scanLibrary(state, deps) {
   );
 
   const analysis = pendingTrackIds.length > 0
-    ? await analyzeTrackIds(pendingTrackIds, "Scan analysis", { pieceMode: "missing", batchMode: false })
+    ? await analyzeTrackIds(pendingTrackIds, "Scan analysis")
     : { analyzed: 0, failed: 0, warnings: [] };
   const analyzed = Number(analysis?.analyzed || 0);
   const failed = Number(analysis?.failed || 0);
@@ -1135,16 +1145,12 @@ export async function scanMasterDb(state, deps) {
 
 export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", options = {}, deps) {
   const {
-    shouldUseBatchAnalysis,
     parseAnalysisBpmRange,
     command,
     setStatus,
-    resolveMissingAnalysisPieces,
     setTrackAnalyzingState,
-    applyRealtimeAnalyzedTrackUpdate,
     nextPaint,
     mergeHydratedTrackIntoState,
-    hydrateTrackPreviewFromBackend,
     patchLibraryRowByTrackId,
     patchPlaylistRowByTrackId,
     updateLibraryDurationSummary,
@@ -1164,164 +1170,42 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
   }
   const ids = Array.isArray(trackIds) ? trackIds.filter(Boolean) : [];
   if (!ids.length) return;
-  const fullPieces = ["duration", "artwork", "waveform", "bpm_key"];
-  const pieceMode = String(options?.pieceMode || "full").toLowerCase();
-  const useBatchMode = shouldUseBatchAnalysis(ids.length, options);
   const bpmRange = parseAnalysisBpmRange(state.analysisBpmRange);
-  let workers = 1;
-  try {
-    const parallelism = await command("get_system_parallelism");
-    const cores = Math.max(1, Number(parallelism?.workers || 1));
-    workers = Math.max(1, cores - 2);
-  } catch (_) {
-    workers = 1;
-  }
 
   let analyzed = 0;
   let failed = 0;
   const warnings = [];
-  const successfulIds = new Set();
-  let completed = 0;
-  let nextIndex = 0;
 
   emitStatus(`${modeLabel}: 0/${ids.length} track(s) ready...`);
 
-  async function processTrack(trackId) {
-    const id = String(trackId || "").trim();
-    if (!id) return false;
-    const currentTrack = state.tracks.find((track) => String(track.id) === id) || null;
-    const pieces = pieceMode === "missing"
-      ? resolveMissingAnalysisPieces(currentTrack)
-      : fullPieces.slice();
-    if (!pieces.length) return true;
-    if (currentTrack) {
-      for (const piece of pieces) {
-        if (piece === "bpm_key") {
-          currentTrack.bpm = null;
-          currentTrack.key = null;
-          currentTrack.bpmAnalyzer = "";
-        }
-        if (piece === "waveform") { currentTrack.waveformPeaksPath = null; currentTrack.waveformPreview = null; }
-        if (piece === "duration") { currentTrack.durationMs = null; }
-      }
-    }
-    setTrackAnalyzingState(id, true);
-    let bpmKeyObserved = null;
-    for (const piece of pieces) {
-      try {
-        const trackReady = piece === pieces[pieces.length - 1];
-        const pieceData = await command("analyze_track_piece", {
-          trackId: id,
-          piece,
-          bpmMin: bpmRange.min,
-          bpmMax: bpmRange.max,
-          analysisEngine: state.analysisEngine
-        });
-        await applyRealtimeAnalyzedTrackUpdate({
-          trackId: id,
-          bpm: pieceData?.bpm ?? null,
-          bpmAnalyzer: pieceData?.bpmAnalyzer ?? null,
-          key: pieceData?.key ?? null,
-          durationMs: pieceData?.durationMs ?? null,
-          artworkPath: pieceData?.artworkPath ?? null,
-          waveformPeaksPath: pieceData?.waveformPeaksPath ?? null,
-          waveformPreview: pieceData?.waveformPreview ?? null,
-          artworkChecked: piece === "artwork",
-          trackReady
-        });
-        if (piece === "bpm_key") {
-          bpmKeyObserved = {
-            bpm: pieceData?.bpm ?? null,
-            key: pieceData?.key ?? null
-          };
-        }
-        await nextPaint();
-      } catch (err) {
-        const engineLabel = String(state.analysisEngine || "stratum");
-        warnings.push(`${id} ${piece} (${engineLabel}): ${err.message || err}`);
-        setTrackAnalyzingState(id, false);
-        return false;
-      }
-    }
-    if (pieces.includes("bpm_key")) {
-      const bpmNum = Number(bpmKeyObserved?.bpm);
-      const hasBpm = Number.isFinite(bpmNum) && bpmNum > 0;
-      const hasKey = typeof bpmKeyObserved?.key === "string" && bpmKeyObserved.key.trim().length > 0;
-      if (!hasBpm && !hasKey) {
-        const engineLabel = String(state.analysisEngine || "stratum");
-        warnings.push(`${id} bpm_key (${engineLabel}): no BPM/key result`);
-        setTrackAnalyzingState(id, false);
-        return false;
-      }
-    }
-    const hydratedTrack = state.tracks.find((track) => String(track.id) === id) || null;
-    if (hydratedTrack) {
-      const needsPreviewHydration = !Array.isArray(hydratedTrack.waveformPreview)
-        || hydratedTrack.waveformPreview.length === 0;
-      const hasWaveformPath = typeof hydratedTrack.waveformPeaksPath === "string"
-        && hydratedTrack.waveformPeaksPath.trim().length > 0;
-      if (needsPreviewHydration && hasWaveformPath) {
-        await hydrateTrackPreviewFromBackend(id, { updateSummary: false });
-      }
-    }
-    setTrackAnalyzingState(id, false);
-    return true;
-  }
-
-  async function workerLoop() {
-    while (true) {
-      const idx = nextIndex;
-      nextIndex += 1;
-      if (idx >= ids.length) return;
-      const ok = await processTrack(ids[idx]);
-      if (ok) {
-        analyzed += 1;
-        successfulIds.add(String(ids[idx] || "").trim());
-      } else {
-        failed += 1;
-      }
-      completed += 1;
-      if (ok && ids.length > 1 && completed < ids.length) {
-        updateLibraryDurationSummary();
-        renderSourceChips();
-      }
-      emitStatus(`${modeLabel}: ${completed}/${ids.length} track(s) ready...`);
-    }
-  }
-
-  if (useBatchMode) {
+  // Per-row "analyzing" state is driven by job:event (job_manager.mjs), which
+  // only marks a track analyzing once the backend actually starts working on
+  // it -- this reflects the real, memory/CPU-capped worker count instead of
+  // marking every requested track as "analyzing" for the whole batch call,
+  // which would look identical regardless of how many workers are actually
+  // running concurrently.
+  try {
+    const batch = await command("analyze_new_tracks", {
+      trackIds: ids,
+      bpmMin: bpmRange.min,
+      bpmMax: bpmRange.max,
+      analysisEngine: state.analysisEngine
+    });
+    analyzed = Math.max(0, Number(batch?.analyzed || 0));
+    failed = Math.max(0, Number(batch?.failed || 0));
+    const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
+    warnings.push(...batchWarnings.map((w) => String(w)));
+    emitStatus(`${modeLabel}: ${ids.length}/${ids.length} track(s) ready...`);
+  } catch (err) {
+    failed = ids.length;
+    warnings.push(`batch analysis failed: ${err.message || err}`);
+  } finally {
     for (const id of ids) {
-      setTrackAnalyzingState(String(id), true);
+      setTrackAnalyzingState(String(id), false);
     }
-    try {
-      const batch = await command("analyze_new_tracks", {
-        trackIds: ids,
-        analysisEngine: state.analysisEngine
-      });
-      analyzed = Math.max(0, Number(batch?.analyzed || 0));
-      failed = Math.max(0, Number(batch?.failed || 0));
-      const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
-      warnings.push(...batchWarnings.map((w) => String(w)));
-      completed = ids.length;
-      emitStatus(`${modeLabel}: ${completed}/${ids.length} track(s) ready...`);
-    } catch (err) {
-      warnings.push(`batch analysis failed; falling back to piece mode: ${err.message || err}`);
-      const activeWorkers = Math.max(1, Math.min(workers, ids.length));
-      await Promise.all(Array.from({ length: activeWorkers }, () => workerLoop()));
-    } finally {
-      for (const id of ids) {
-        setTrackAnalyzingState(String(id), false);
-      }
-    }
-  } else {
-    const activeWorkers = Math.max(1, Math.min(workers, ids.length));
-    await Promise.all(Array.from({ length: activeWorkers }, () => workerLoop()));
   }
   try {
-    const hydrateIds = useBatchMode
-      ? ids
-      : ids.filter((id) => successfulIds.has(String(id || "").trim()));
-    const hydrated = await command("get_tracks_by_ids_with_previews", { trackIds: hydrateIds });
+    const hydrated = await command("get_tracks_by_ids_with_previews", { trackIds: ids });
     const changedIds = [];
     for (const item of hydrated?.items || []) {
       const changed = mergeHydratedTrackIntoState(item);
@@ -1767,13 +1651,6 @@ export function normalizeAnalysisBpmRange(range) {
   return ANALYSIS_BPM_RANGE_PRESETS.includes(parsed.label)
     ? parsed.label
     : DEFAULT_ANALYSIS_BPM_RANGE;
-}
-
-// --- analysis_flow.mjs ---
-
-export function shouldUseBatchAnalysis(trackCount, options = {}) {
-  const count = Math.max(0, Number(trackCount) || 0);
-  return options?.batchMode !== false && count > 1;
 }
 
 // --- library_pagination.mjs ---

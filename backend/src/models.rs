@@ -135,12 +135,6 @@ pub struct ScanLibraryData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetSystemParallelismData {
-    pub workers: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ResolvePlaybackSourceRequest {
     pub title: String,
     pub artist: String,
@@ -720,6 +714,10 @@ pub struct InspectUsbTrackData {
 pub struct AnalyzeNewTracksRequest {
     #[serde(default)]
     pub track_ids: Vec<String>,
+    #[serde(default)]
+    pub bpm_min: Option<u32>,
+    #[serde(default)]
+    pub bpm_max: Option<u32>,
     #[serde(default)]
     pub analysis_engine: Option<String>,
 }

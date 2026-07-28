@@ -21,6 +21,7 @@ use backend::models::{
     SetFrontendSettingRequest, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
+use backend::service::BackendService;
 use backend::service::anlz::canonical_analysis_bundle_paths;
 use backend::service::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, analysis_bundle_path_variants,
@@ -738,6 +739,8 @@ fn analyzer_fixtures_validate_artwork_and_waveform_behavior() {
     );
 
     let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
         track_ids: indexed_items.iter().map(|t| t.id.clone()).collect(),
         analysis_engine: None,
     });
@@ -2071,6 +2074,8 @@ fn analyze_new_tracks_emits_per_file_progress() {
     let progress_ref = Arc::clone(&progress);
     let analyzed_response = backend.analyze_new_tracks_with_progress(
         AnalyzeNewTracksRequest {
+            bpm_min: None,
+            bpm_max: None,
             track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
             analysis_engine: None,
         },
@@ -2171,6 +2176,8 @@ fn analyze_new_tracks_uses_audio_content_for_bpm_key_not_filename_tokens() {
         assert!(track.key.is_none(), "scan should not prefill key");
 
         let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+            bpm_min: None,
+            bpm_max: None,
             track_ids: vec![track.id.clone()],
             analysis_engine: None,
         });
@@ -2234,6 +2241,8 @@ fn analyze_new_tracks_does_not_guess_bpm_key_from_filename_on_silence() {
         .clone();
 
     let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
         track_ids: vec![track.id.clone()],
         analysis_engine: None,
     });
@@ -2305,6 +2314,8 @@ fn analyze_new_tracks_with_stratum_default_produces_bpm_and_key() {
         .clone();
 
     let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
         track_ids: vec![track.id.clone()],
         analysis_engine: None,
     });
@@ -2346,6 +2357,352 @@ fn analyze_new_tracks_with_stratum_default_produces_bpm_and_key() {
         None => {
             // SAFETY: tests serialize env access through a global mutex.
             unsafe { std::env::remove_var("DJTKIT_ESSENTIA_RUNNER") }
+        }
+    }
+}
+
+#[test]
+fn analyze_new_tracks_respects_requested_bpm_range() {
+    // The batch endpoint used to hardcode resolve_analysis_bpm_range(None, None)
+    // (default 70-180) regardless of the request's bpm_min/bpm_max. This proves
+    // a caller-supplied range is actually threaded through: analyzing a 120bpm
+    // fixture against a range that excludes 120 must not detect ~120bpm.
+    let _guard = test_env_lock().lock().expect("env lock");
+    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
+    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
+    // SAFETY: tests serialize env access through a global mutex.
+    unsafe {
+        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
+        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
+    }
+
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    let source = media.join("Artist - stratum_range_test.wav");
+    write_test_pulsed_key_wav(&source, 120.0, 20_000);
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let track = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items
+        .first()
+        .expect("scanned track")
+        .clone();
+
+    let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: Some(200),
+        bpm_max: Some(220),
+        track_ids: vec![track.id.clone()],
+        analysis_engine: None,
+    });
+    assert!(analyze.ok, "analyze failed: {analyze:?}");
+
+    let analyzed = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search analyzed")
+        .items
+        .first()
+        .expect("analyzed track")
+        .clone();
+    if let Some(bpm) = analyzed.bpm {
+        assert!(
+            (bpm - 120.0).abs() > 5.0,
+            "expected the requested 200-220 bpm range to steer detection away from the \
+             fixture's true 120bpm, got {bpm}"
+        );
+    }
+
+    match prev_enabled {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ENABLE_ESSENTIA_JS") }
+        }
+    }
+    match prev_runner {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ESSENTIA_RUNNER", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ESSENTIA_RUNNER") }
+        }
+    }
+}
+
+#[test]
+fn analyze_new_tracks_commits_periodically_not_only_at_the_end() {
+    // analyze_new_tracks_with_progress used to hold one write transaction
+    // open for the entire batch, committing only once at the very end. For a
+    // long-running batch this blocked every other write in the app (e.g.
+    // settings persistence) until the whole batch finished, surfacing as
+    // SQLITE_BUSY errors once the busy_timeout elapsed. It now commits after
+    // every single track instead of periodically/by batch size -- a fixed
+    // track-count interval doesn't bound wall-clock lock-hold time if
+    // individual tracks are slow (confirmed in practice: a small fixed
+    // interval still held the lock for minutes in a slow/dev build). This
+    // proves commits happen incrementally mid-batch: a separate
+    // BackendService/connection can see already-analyzed tracks before the
+    // analyze_new_tracks_with_progress call itself has returned.
+    let _guard = test_env_lock().lock().expect("env lock");
+    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
+    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
+    let prev_max_workers = std::env::var("DJTKIT_ANALYSIS_MAX_WORKERS").ok();
+    // SAFETY: tests serialize env access through a global mutex.
+    unsafe {
+        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
+        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
+        std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", "3");
+    }
+
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    // Multiple tracks so the run crosses multiple commit boundaries before
+    // the whole call finishes.
+    for i in 0..20 {
+        let source = media.join(format!("Artist - commit_test_{i:02}.wav"));
+        write_test_pulsed_key_wav(&source, 120.0, 3_000);
+    }
+
+    let data_dir = root.path().join("data");
+    let service = BackendService::new(&data_dir).expect("create service");
+    let scan = service
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .expect("scan succeeds");
+    assert_eq!(scan.indexed, 20);
+
+    let track_ids: Vec<String> = service
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 50,
+            cursor: None,
+        })
+        .expect("search succeeds")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(track_ids.len(), 20);
+
+    // A separate service/connection from the one running the batch -- this
+    // is the stand-in for "some other backend operation trying to write or
+    // read while a big analysis batch is still in flight".
+    let observer = BackendService::new(&data_dir).expect("create observer service");
+    let mut saw_mid_batch_commit = false;
+    let mut max_committed_before_done = 0usize;
+    let result = service.analyze_new_tracks_with_progress(
+        AnalyzeNewTracksRequest {
+            track_ids,
+            bpm_min: None,
+            bpm_max: None,
+            analysis_engine: None,
+        },
+        |progress| {
+            if !progress.track_ready || progress.current >= progress.total {
+                return;
+            }
+            let committed = observer
+                .search_tracks(SearchTracksRequest {
+                    query: String::new(),
+                    limit: 50,
+                    cursor: None,
+                })
+                .expect("observer search succeeds")
+                .items
+                .iter()
+                .filter(|t| t.bpm.is_some())
+                .count();
+            max_committed_before_done = max_committed_before_done.max(committed);
+            if committed > 0 {
+                saw_mid_batch_commit = true;
+            }
+        },
+    );
+    assert!(result.is_ok(), "analyze failed: {result:?}");
+    assert!(
+        saw_mid_batch_commit,
+        "expected a separate connection to see at least one already-committed track \
+         before the batch finished (max observed: {max_committed_before_done}); \
+         commits are not happening incrementally"
+    );
+
+    match prev_enabled {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ENABLE_ESSENTIA_JS") }
+        }
+    }
+    match prev_runner {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ESSENTIA_RUNNER", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ESSENTIA_RUNNER") }
+        }
+    }
+    match prev_max_workers {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") }
+        }
+    }
+}
+
+#[test]
+fn analyze_new_tracks_commits_periodically_with_real_worker_count_on_moderate_batch() {
+    // Regression test for the real bug this whole area went through: any
+    // commit interval tied to a track *count* (whether fixed, or scaled by
+    // worker count and capped) can still leave the write lock held for an
+    // unbounded amount of *wall-clock* time if individual tracks are slow.
+    // The batch now commits after every single track instead, which is the
+    // only interval that's actually independent of hardware, worker count,
+    // and per-track duration. This test deliberately does NOT force
+    // DJTKIT_ANALYSIS_MAX_WORKERS, so it exercises the real
+    // available_parallelism()-derived worker count on a moderate (39-track)
+    // batch, matching the exact scenario that originally exposed the bug.
+    let _guard = test_env_lock().lock().expect("env lock");
+    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
+    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
+    let prev_max_workers = std::env::var("DJTKIT_ANALYSIS_MAX_WORKERS").ok();
+    // SAFETY: tests serialize env access through a global mutex.
+    unsafe {
+        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
+        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
+        std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS");
+    }
+
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    for i in 0..39 {
+        let source = media.join(format!("Artist - moderate_batch_{i:02}.wav"));
+        write_test_pulsed_key_wav(&source, 120.0, 2_000);
+    }
+
+    let data_dir = root.path().join("data");
+    let service = BackendService::new(&data_dir).expect("create service");
+    let scan = service
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .expect("scan succeeds");
+    assert_eq!(scan.indexed, 39);
+
+    let track_ids: Vec<String> = service
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 50,
+            cursor: None,
+        })
+        .expect("search succeeds")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(track_ids.len(), 39);
+
+    let observer = BackendService::new(&data_dir).expect("create observer service");
+    let mut saw_mid_batch_commit = false;
+    let result = service.analyze_new_tracks_with_progress(
+        AnalyzeNewTracksRequest {
+            track_ids,
+            bpm_min: None,
+            bpm_max: None,
+            analysis_engine: None,
+        },
+        |progress| {
+            if !progress.track_ready || progress.current >= progress.total {
+                return;
+            }
+            let committed = observer
+                .search_tracks(SearchTracksRequest {
+                    query: String::new(),
+                    limit: 50,
+                    cursor: None,
+                })
+                .expect("observer search succeeds")
+                .items
+                .iter()
+                .filter(|t| t.bpm.is_some())
+                .count();
+            if committed > 0 {
+                saw_mid_batch_commit = true;
+            }
+        },
+    );
+    assert!(result.is_ok(), "analyze failed: {result:?}");
+    assert!(
+        saw_mid_batch_commit,
+        "expected at least one mid-batch commit visible to a separate connection \
+         with the real (uncapped) worker count on a 39-track batch"
+    );
+
+    match prev_enabled {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ENABLE_ESSENTIA_JS") }
+        }
+    }
+    match prev_runner {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ESSENTIA_RUNNER", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ESSENTIA_RUNNER") }
+        }
+    }
+    match prev_max_workers {
+        Some(v) => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", v) }
+        }
+        None => {
+            // SAFETY: tests serialize env access through a global mutex.
+            unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") }
         }
     }
 }
@@ -2640,6 +2997,8 @@ fn analyze_new_tracks_extracts_bpm_key_from_aiff() {
             .clone();
 
         let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+            bpm_min: None,
+            bpm_max: None,
             track_ids: vec![track.id.clone()],
             analysis_engine: None,
         });
@@ -3655,6 +4014,8 @@ fn analyze_from_usb_track_uses_local_audio_only_even_when_usb_has_waveform() {
     let local_track_id = resolved_data.track_id.expect("resolved local track id");
 
     let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
         track_ids: vec![local_track_id.clone()],
         analysis_engine: None,
     });

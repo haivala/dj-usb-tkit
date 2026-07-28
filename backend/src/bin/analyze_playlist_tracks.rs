@@ -51,6 +51,8 @@ fn main() {
 
     let analyze_resp = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
         track_ids,
+        bpm_min: None,
+        bpm_max: None,
         analysis_engine: None,
     });
     if !analyze_resp.ok {

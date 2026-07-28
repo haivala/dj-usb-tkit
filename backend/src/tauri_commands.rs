@@ -18,23 +18,22 @@ use crate::models::{
     CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
     DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
     FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest,
-    GetSystemParallelismData, GetTracksByIdsData, GetTracksByIdsRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
-    ListPlaylistsData, ListTracksData, ListTracksRequest, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, RelocateSourceRootData,
-    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
-    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
-    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
-    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, RunUsbDiagnosticsData,
-    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData,
-    ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData, SearchTracksRequest,
-    SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
-    ValidateUsbRootRequest,
+    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
+    GetTracksByIdsRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
+    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
+    JobEventPayload, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest,
+    PlaybackEventPayload, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
+    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
+    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
+    RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
+    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
+    ResolvePlaybackSourceRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
+    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
+    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
+    SetFrontendSettingRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -703,13 +702,6 @@ pub fn relocate_source_root(
     request: RelocateSourceRootRequest,
 ) -> ApiResponse<RelocateSourceRootData> {
     state.relocate_source_root(request)
-}
-
-#[tauri::command]
-pub fn get_system_parallelism(
-    state: State<'_, BackendCommands>,
-) -> ApiResponse<GetSystemParallelismData> {
-    state.get_system_parallelism()
 }
 
 #[tauri::command]

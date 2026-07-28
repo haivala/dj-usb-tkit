@@ -69,14 +69,6 @@ export function createApiClient({ tauriInvoke, tauriIsTauri, tauriListen, state,
       };
     }
 
-    if (command === "get_system_parallelism") {
-      const workers = Math.max(1, Number(window.navigator?.hardwareConcurrency) || 1);
-      return {
-        ok: true,
-        data: { workers }
-      };
-    }
-
     if (command === "list_tracks") {
       const data = await invoke("search_tracks", {
         request: {
@@ -741,33 +733,6 @@ export function createApiClient({ tauriInvoke, tauriIsTauri, tauriListen, state,
           warnings: []
         }
       };
-    }
-
-    if (command === "analyze_track_piece") {
-      const trackId = String(payload?.request?.trackId || "");
-      const piece = String(payload?.request?.piece || "");
-      const response = {
-        trackId,
-        piece,
-        updated: true,
-        bpm: null,
-        key: null,
-        durationMs: null,
-        artworkPath: null,
-        waveformPeaksPath: null,
-        waveformPreview: null
-      };
-      if (piece === "duration") response.durationMs = 180000;
-      if (piece === "artwork") response.artworkPath = `/tmp/${trackId}.jpg`;
-      if (piece === "waveform") {
-        response.waveformPeaksPath = `/tmp/${trackId}.DAT`;
-        response.waveformPreview = [8, 20, 42, 65, 30, 55];
-      }
-      if (piece === "bpm_key") {
-        response.bpm = 124;
-        response.key = "8A";
-      }
-      return { ok: true, data: response };
     }
 
     if (command === "detect_external_master_db") {

@@ -102,22 +102,21 @@ Runtime behavior differences:
 
 Batch concurrency model:
 
-- multi-track analysis uses a shared-work-queue worker model
-- worker count is bounded by host parallelism, batch size, and available system memory
-- a conservative per-worker memory budget (heavier for the opt-in `essentia` engine than the default `stratum` engine) caps parallelism on RAM-constrained hosts to avoid OOM crashes on high-core-count/lower-RAM machines
-- optional worker caps/diagnostics are available for development and benchmarking (`DJTKIT_ANALYSIS_MAX_WORKERS`, `DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES`, `DJTKIT_ANALYSIS_DEBUG_WORKERS`); with `DJTKIT_ANALYSIS_DEBUG_WORKERS=1`, the resolved cap breakdown prints to the terminal (stderr) as well as the in-app Event Log
-- single-track analysis avoids unnecessary fan-out overhead
+- there is a single analysis dispatch path: the frontend always calls the `analyze_new_tracks` command with the full list of track IDs that need (re-)analysis, whether triggered by "Scan Library", "Analyze Missing Tracks", or a manual single-track reanalyze — there is no separate frontend-driven per-track concurrency mechanism
+- multi-track analysis uses a shared-work-queue worker model; for a single track it processes sequentially without spinning up a thread pool
+- worker count is bounded by host parallelism, batch size, and available system memory, always reserving ~2 cores for the OS/UI thread (`resolve_analysis_parallelism_budget_with_cap`) so a high-core-count/high-RAM host doesn't peg every core and make the app unresponsive during a large batch
+- a conservative per-worker memory budget (heavier for the opt-in `essentia` engine than the default `stratum` engine) caps parallelism on RAM-constrained hosts to avoid OOM crashes on high-core-count/lower-RAM machines — because every caller now goes through this one path, this protection applies uniformly, including the common "Scan Library" auto-analysis flow that used to bypass it entirely
+- optional worker caps/diagnostics are available for development and debugging (`DJTKIT_ANALYSIS_MAX_WORKERS`, `DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES`, `DJTKIT_ANALYSIS_DEBUG_WORKERS`); with `DJTKIT_ANALYSIS_DEBUG_WORKERS=1`, the resolved cap breakdown prints to the terminal (stderr) as well as the in-app Event Log
+- per-piece progress (duration, then artwork, then waveform, then bpm/key) still streams to the UI incrementally as each piece finishes, via `job.progress` events — this is independent of the dispatch path and unaffected by the above
 
 Implemented throughput optimizations:
 
 - dynamic shared-queue scheduling for better tail utilization
 - transaction and prepared-statement reuse for batched DB writes
 - decode-path allocation reuse
-- optional worker-cap controls for reproducible benchmark runs
 
-Benchmark and verification tools:
+Verification tools:
 
-- benchmark command: `backend/src/bin/benchmark_analyze_tracks.rs`
 - waveform/analysis support tools: `backend/src/bin/analyze_playlist_tracks.rs`, `backend/src/bin/analyze_one_track.rs`
 
 Operational commands related to engine runtime:
@@ -130,9 +129,10 @@ Implementation anchors:
 
 - command façade: `backend/src/commands.rs`
 - Tauri bridge: `backend/src/tauri_commands.rs`
-- analysis progress type: `backend/src/service/analysis.rs:122`
-- batched analysis path: `backend/src/service/analysis.rs:439`
-- analysis command entry: `backend/src/service/analysis.rs:432`
+- analysis progress type: `backend/src/service/analysis.rs:137`
+- analysis command entry: `backend/src/service/analysis.rs:474`
+- batched analysis path: `backend/src/service/analysis.rs:481`
+- worker cap resolution: `backend/src/service/analysis.rs` (`resolve_worker_cap_for_engine`)
 - WAV `fmt ` chunk parsing/classification: `backend/src/wav_format.rs`
 - scan-time WAV_EXTENSIBLE detection call site: `backend/src/scanner.rs` (`read_wav_extensible_kind`)
 

@@ -620,6 +620,13 @@ fn main() {
             install_backend_log_sink(app_handle.clone());
             install_backend_panic_hook(app_handle.clone());
 
+            emit_backend_log(
+                &app_handle,
+                "info",
+                "startup",
+                backend::service::BackendService::system_resource_summary(),
+            );
+
             configure_desktop_analysis_runtime(&app_handle)?;
             let fallback = std::env::current_dir()
                 .map(|p| p.join(".app-data"))
@@ -746,7 +753,6 @@ fn main() {
             backend::tauri_commands::materialize_source_track,
             backend::tauri_commands::remove_tracks_by_source_roots,
             backend::tauri_commands::relocate_source_root,
-            backend::tauri_commands::get_system_parallelism,
             backend::tauri_commands::get_tracks_by_ids_with_previews,
             backend::tauri_commands::resolve_playback_source,
             backend::tauri_commands::create_playlist,

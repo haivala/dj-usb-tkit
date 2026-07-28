@@ -12,6 +12,54 @@
 
 ## Unreleased
 
+**Severity:** critical
+
+- Fix the memory-aware analysis worker cap (0.1.5/0.1.6) not applying to the
+  most common analysis trigger. Clicking "Scan Library" ran its automatic
+  post-scan analysis through a second, separate concurrency mechanism — a
+  frontend-driven per-track dispatch loop sized only by CPU core count, with
+  no awareness of available memory or `DJTKIT_ANALYSIS_MAX_WORKERS` — so the
+  memory cap never actually applied to it. All analysis (Scan Library,
+  Analyze Missing Tracks, manual reanalyze) now goes through the single
+  memory/CPU/env-capped backend pipeline; the separate uncapped mechanism has
+  been removed entirely, along with the now-unused `get_system_parallelism`
+  command and the `benchmark_analyze_tracks` dev tool.
+- Fix a custom BPM search range (set in Settings) being silently ignored by
+  any analysis that went through the batch backend path — it always used the
+  default 70-180 range regardless of the configured setting. Now that all
+  analysis is consolidated onto this path, this applied everywhere; the
+  batch command now honors the configured range.
+- Fix the batch analysis worker pool using every available CPU core on
+  high-core-count machines, starving the OS/UI thread and making the app
+  unresponsive during a scan. The worker pool now reserves ~2 cores for the
+  OS/UI, matching the budget the opt-in `essentia` engine's pool already
+  used — a regression from consolidating all analysis onto the single capped
+  pipeline above, which used a cap that bounded worker count by memory and
+  CPU count but never reserved this headroom.
+- Fix the library view (including scrolling) becoming unresponsive during a
+  large batch analysis, independent of CPU/worker count — even a single
+  worker triggered it. Live analysis progress was rebuilding the entire
+  source-folder chip row from scratch and rescanning the whole visible track
+  list on every single track completion; for a batch of hundreds of tracks
+  this pinned the JS main thread almost continuously. Source chips now only
+  refresh at natural batch checkpoints (they don't need to reflect
+  per-track state, only whether a folder is fully analyzed), and the running
+  duration total is updated with a fixed-cost increment per track instead of
+  a full rescan.
+- Fix batch analysis holding a single database write transaction open for
+  the entire batch, committing only once at the very end. SQLite allows only
+  one write transaction at a time even in WAL mode, so any other write
+  attempted while a batch was running (such as saving a settings change)
+  would wait up to 5 seconds and then fail, surfacing as "database is
+  locked" (shown generically as "an internal database error" in the Event
+  Log), and could make the whole app feel stuck until the batch finished.
+  The batch now commits after every individual track instead of only at the
+  end — any commit interval tied to a track *count*, even a small one, can
+  still hold the lock for an unbounded amount of wall-clock time if
+  individual tracks are slow to analyze, so track count isn't a reliable
+  basis for the interval; only "after every track" is actually independent
+  of hardware, worker count, and per-track duration.
+
 ## 0.1.6
 
 **Severity:** critical

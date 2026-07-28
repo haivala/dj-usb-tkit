@@ -8,7 +8,6 @@ import {
   trackHasKey,
   trackHasCoreAnalysis,
   isUsbOriginTrack,
-  resolveMissingAnalysisPieces,
   usbTrackNeedsHydration
 } from "../components/library/actions.mjs";
 
@@ -41,12 +40,6 @@ test("isUsbOriginTrack detects usbAnalysisPath and usb-root paths", () => {
   assert.equal(isUsbOriginTrack({ filePath: "/usb/Contents/a.mp3" }, { usbRoot: "/usb" }), true);
   assert.equal(isUsbOriginTrack({ waveformPeaksPath: "/usb/ANLZ/a.DAT" }, { usbRoot: "/usb" }), true);
   assert.equal(isUsbOriginTrack({ filePath: "/music/a.mp3" }, { usbRoot: "/usb" }), false);
-});
-
-test("resolveMissingAnalysisPieces returns missing parts list", () => {
-  assert.deepEqual(resolveMissingAnalysisPieces({}), ["duration", "artwork", "waveform", "bpm_key"]);
-  assert.deepEqual(resolveMissingAnalysisPieces({ durationMs: 1000, artworkUrl: "x", waveformPreview: [10], bpm: 120 }), []);
-  assert.deepEqual(resolveMissingAnalysisPieces({ durationMs: 1000, artworkChecked: true, waveformPreview: [10], bpm: 120 }), []);
 });
 
 test("usbTrackNeedsHydration true until all core pieces exist", () => {

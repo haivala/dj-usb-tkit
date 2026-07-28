@@ -41,9 +41,12 @@ test("renderCurrentPlaylistTracksFromState renders playlist tracks and empty sta
 test("updateLibraryDurationSummary nulls duration for non-core-analysis tracks", () => {
   const el = { libraryTotalDuration: {} };
   let captured = null;
-  updateLibraryDurationSummary(el, [{ id: "a", durationMs: 100 }, { id: "b", durationMs: 200 }], {
+  updateLibraryDurationSummary(el, [{ id: "a", durationMs: 100 }, { id: "b", durationMs: 200 }], null, {
     trackHasCoreAnalysis: (t) => t.id === "a",
-    updateTrackListDurationSummary: (_target, tracks) => { captured = tracks; }
+    updateTrackListDurationSummary: (_target, tracks) => {
+      captured = tracks;
+      return { totalMs: 100, unknownCount: 1 };
+    }
   });
   assert.equal(captured[0].durationMs, 100);
   assert.equal(captured[1].durationMs, null);

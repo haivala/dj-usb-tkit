@@ -119,7 +119,7 @@ export function bindPlaylistEvents(ctx) {
       emitStatus("No local non-USB tracks in this playlist need analysis.");
       return;
     }
-    analyzeTrackIds(trackIds, "Analyze Missing Tracks", { pieceMode: "missing" }).catch((err) => {
+    analyzeTrackIds(trackIds, "Analyze Missing Tracks").catch((err) => {
       console.error(err);
       emitStatus(`Analyze failed: ${err.message || err}`);
     });
