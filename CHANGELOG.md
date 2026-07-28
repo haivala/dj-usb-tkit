@@ -12,6 +12,8 @@
 
 ## Unreleased
 
+## 0.1.5
+
 **Severity:** critical
 
 - Fix analysis crashing on lower-RAM, high-core-count machines (reported on
