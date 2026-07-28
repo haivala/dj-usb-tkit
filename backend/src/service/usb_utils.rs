@@ -1236,7 +1236,7 @@ mod diag_tests {
     use super::*;
     use crate::models::{DiagStatus, ExportToUsbOptions};
     use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PdbTrackRow};
-    use crate::service::analysis::resolve_analysis_worker_count;
+    use crate::service::analysis::resolve_analysis_worker_count_with_cap;
     use crate::service::diagnostics::{diagnose_contents_integrity, diagnose_playlist_resolution};
     use crate::service::export_helpers::{
         CONTENT_FILENAME_MAX_LEN, ExportManifest, ExportManifestTrack, ExportPlaylistData,
@@ -1276,15 +1276,15 @@ mod diag_tests {
 
     #[test]
     fn analysis_worker_count_uses_cpu_limit() {
-        assert_eq!(resolve_analysis_worker_count(8, 4), 4);
-        assert_eq!(resolve_analysis_worker_count(2, 16), 2);
+        assert_eq!(resolve_analysis_worker_count_with_cap(8, 4, None), 4);
+        assert_eq!(resolve_analysis_worker_count_with_cap(2, 16, None), 2);
     }
 
     #[test]
     fn analysis_worker_count_never_returns_zero() {
-        assert_eq!(resolve_analysis_worker_count(0, 0), 1);
-        assert_eq!(resolve_analysis_worker_count(0, 7), 1);
-        assert_eq!(resolve_analysis_worker_count(7, 0), 1);
+        assert_eq!(resolve_analysis_worker_count_with_cap(0, 0, None), 1);
+        assert_eq!(resolve_analysis_worker_count_with_cap(0, 7, None), 1);
+        assert_eq!(resolve_analysis_worker_count_with_cap(7, 0, None), 1);
     }
 
     #[test]

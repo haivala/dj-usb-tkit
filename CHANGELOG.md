@@ -12,6 +12,15 @@
 
 ## Unreleased
 
+**Severity:** critical
+
+- Fix analysis crashing on lower-RAM, high-core-count machines (reported on
+  a 12-thread/16GB AppImage install). The analysis worker pool
+  previously sized itself from CPU core count alone; it now also caps
+  worker count based on available system memory, using a conservative
+  per-worker budget (higher for the opt-in `essentia` engine, which runs an
+  extra Node.js/WASM process per worker) so a busy or memory-constrained
+  host no longer overcommits RAM during batch analysis.
 - Add drag-and-drop reordering for USB playlists. Grab the handle on a
   playlist row in the USB Playlists panel to reorder it; the new order is
   written back to the USB's PDB and eDB, so it's reflected on CDJs and in

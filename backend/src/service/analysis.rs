@@ -34,6 +34,14 @@ use super::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis, stable_u
 use super::{BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, now};
 
 const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
+// Reserved for the OS, the Tauri/WebKit UI process, and other running apps.
+const ANALYSIS_MEMORY_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+// Extra margin on top of the flat headroom, since per-worker budgets below are estimates.
+const ANALYSIS_MEMORY_USABLE_FRACTION: f64 = 0.75;
+// ~96MB fixed decode buffer (ANALYSIS_DECODE_MAX_SAMPLES f32) + artwork decode/resize + waveform/misc buffers.
+const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 256 * 1024 * 1024;
+// Stratum budget plus a Node.js/WASM child process per worker.
+const ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES: u64 = 400 * 1024 * 1024;
 const ANLZ_DETAIL_DEFAULT_DURATION_MS: u64 = 180_000;
 const ANLZ_DETAIL_BINS_PER_SECOND: f64 = 150.0;
 const LIBRARY_ARTWORK_SIZE_PX: u32 = 80;
@@ -495,22 +503,32 @@ impl BackendService {
             let cpu_workers = std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1);
-            let worker_count = resolve_analysis_worker_count(total, cpu_workers);
-            let debug_workers = std::env::var("DJTKIT_ANALYSIS_DEBUG_WORKERS")
-                .ok()
-                .map(|v| {
-                    let s = v.trim().to_ascii_lowercase();
-                    !(s.is_empty() || s == "0" || s == "false" || s == "off")
-                })
-                .unwrap_or(false);
+            let per_worker_budget = match engine {
+                AnalysisEngine::Essentia => ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES,
+                AnalysisEngine::Stratum => ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES,
+            };
+            let memory_cap = memory_worker_cap(per_worker_budget);
+            let env_cap = analysis_worker_cap_from_env();
+            let combined_cap = combine_worker_caps(env_cap, memory_cap);
+            let worker_count =
+                resolve_analysis_worker_count_with_cap(total, cpu_workers, combined_cap);
+            let debug_workers = analysis_debug_workers_enabled();
 
             if debug_workers {
                 crate::logging::emit(
                     crate::logging::Level::Info,
                     "analysis",
                     &format!(
-                        "debug workers total_tracks={} cpu_workers={} worker_count={}",
-                        total, cpu_workers, worker_count
+                        "debug workers total_tracks={} cpu_workers={} memory_cap={} env_cap={} worker_count={}",
+                        total,
+                        cpu_workers,
+                        memory_cap
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "unavailable".to_string()),
+                        env_cap
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "none".to_string()),
+                        worker_count
                     ),
                 );
             }
@@ -1187,14 +1205,6 @@ where
     )
 }
 
-pub(crate) fn resolve_analysis_worker_count(total_tracks: usize, cpu_workers: usize) -> usize {
-    resolve_analysis_worker_count_with_cap(
-        total_tracks,
-        cpu_workers,
-        analysis_worker_cap_from_env(),
-    )
-}
-
 pub(crate) fn resolve_analysis_worker_count_with_cap(
     total_tracks: usize,
     cpu_workers: usize,
@@ -1206,10 +1216,6 @@ pub(crate) fn resolve_analysis_worker_count_with_cap(
         _ => cpu_workers.max(1),
     };
     tracks.min(cpus)
-}
-
-pub(crate) fn resolve_analysis_parallelism_budget(cpu_workers: usize) -> usize {
-    resolve_analysis_parallelism_budget_with_cap(cpu_workers, analysis_worker_cap_from_env())
 }
 
 pub(crate) fn resolve_analysis_parallelism_budget_with_cap(
@@ -1228,6 +1234,55 @@ fn analysis_worker_cap_from_env() -> Option<usize> {
         .ok()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|v| *v > 0)
+}
+
+/// Pure, deterministic memory-based worker cap. Never returns 0 so analysis
+/// can always make forward progress with at least one worker. `bytes_per_worker
+/// == 0` is treated as "no cap" to avoid a division by zero.
+pub(crate) fn resolve_memory_worker_cap(available_bytes: u64, bytes_per_worker: u64) -> usize {
+    if bytes_per_worker == 0 {
+        return usize::MAX;
+    }
+    let after_headroom = available_bytes.saturating_sub(ANALYSIS_MEMORY_HEADROOM_BYTES);
+    let usable = (after_headroom as f64 * ANALYSIS_MEMORY_USABLE_FRACTION) as u64;
+    (usable / bytes_per_worker).max(1) as usize
+}
+
+/// Reads current available system memory in bytes. Supports a debug/test
+/// override so behavior can be exercised without an actual low-RAM host.
+fn available_system_memory_bytes() -> Option<u64> {
+    if let Ok(raw) = std::env::var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES")
+        && let Some(parsed) = raw.trim().parse::<u64>().ok().filter(|v| *v > 0)
+    {
+        return Some(parsed);
+    }
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let bytes = sys.available_memory();
+    (bytes > 0).then_some(bytes)
+}
+
+/// Combine two optional worker caps by taking the tighter (smaller) bound.
+fn combine_worker_caps(a: Option<usize>, b: Option<usize>) -> Option<usize> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (Some(x), None) | (None, Some(x)) => Some(x),
+        (None, None) => None,
+    }
+}
+
+fn memory_worker_cap(bytes_per_worker: u64) -> Option<usize> {
+    available_system_memory_bytes().map(|bytes| resolve_memory_worker_cap(bytes, bytes_per_worker))
+}
+
+fn analysis_debug_workers_enabled() -> bool {
+    std::env::var("DJTKIT_ANALYSIS_DEBUG_WORKERS")
+        .ok()
+        .map(|v| {
+            let s = v.trim().to_ascii_lowercase();
+            !(s.is_empty() || s == "0" || s == "false" || s == "off")
+        })
+        .unwrap_or(false)
 }
 
 fn analyze_local_track_with_updates(
@@ -1586,7 +1641,27 @@ fn resolve_essentia_worker_config() -> BackendResult<EssentiaWorkerConfig> {
     let cpu_workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    let pool_size = resolve_analysis_parallelism_budget(cpu_workers);
+    let memory_cap = memory_worker_cap(ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES);
+    let env_cap = analysis_worker_cap_from_env();
+    let combined_cap = combine_worker_caps(env_cap, memory_cap);
+    let pool_size = resolve_analysis_parallelism_budget_with_cap(cpu_workers, combined_cap);
+    if analysis_debug_workers_enabled() {
+        crate::logging::emit(
+            crate::logging::Level::Info,
+            "analysis",
+            &format!(
+                "debug workers(essentia) cpu_workers={} memory_cap={} env_cap={} pool_size={}",
+                cpu_workers,
+                memory_cap
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "unavailable".to_string()),
+                env_cap
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                pool_size
+            ),
+        );
+    }
     Ok(EssentiaWorkerConfig {
         node_bin,
         runner_path,
@@ -2233,15 +2308,21 @@ pub(crate) fn build_waveform_preview_from_file_bytes(
 mod tests {
     use super::{
         EssentiaResult, build_waveform_data_from_samples, build_waveform_preview_from_samples,
-        collect_tracks_for_analysis, essentia_result_has_detected_values,
-        resolve_analysis_bpm_range, resolve_analysis_parallelism_budget,
-        resolve_analysis_parallelism_budget_with_cap, resolve_analysis_worker_count,
-        resolve_analysis_worker_count_with_cap, waveform_detail_bins_for_duration,
-        waveform_detail_entries_for_duration, waveform_preview_if_persisted,
+        collect_tracks_for_analysis, combine_worker_caps, essentia_result_has_detected_values,
+        resolve_analysis_bpm_range, resolve_analysis_parallelism_budget_with_cap,
+        resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
+        waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
+        waveform_preview_if_persisted,
     };
     use crate::service::WAVEFORM_PREVIEW_BINS;
     use crate::service::anlz::WaveformData;
     use rusqlite::Connection;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_var_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn setup_tracks_table(conn: &Connection) {
         conn.execute_batch(
@@ -2272,13 +2353,13 @@ mod tests {
 
     #[test]
     fn resolve_analysis_worker_count_uses_detected_parallelism() {
-        let workers = resolve_analysis_worker_count(20, 24);
+        let workers = resolve_analysis_worker_count_with_cap(20, 24, None);
         assert_eq!(workers, 20);
     }
 
     #[test]
     fn resolve_analysis_worker_count_is_bounded_by_tracks_and_cpu() {
-        let workers = resolve_analysis_worker_count(5, 3);
+        let workers = resolve_analysis_worker_count_with_cap(5, 3, None);
         assert_eq!(workers, 3);
     }
 
@@ -2290,21 +2371,75 @@ mod tests {
 
     #[test]
     fn resolve_analysis_parallelism_budget_reserves_two_cores_when_possible() {
-        assert_eq!(resolve_analysis_parallelism_budget(24), 22);
-        assert_eq!(resolve_analysis_parallelism_budget(8), 6);
+        assert_eq!(resolve_analysis_parallelism_budget_with_cap(24, None), 22);
+        assert_eq!(resolve_analysis_parallelism_budget_with_cap(8, None), 6);
     }
 
     #[test]
     fn resolve_analysis_parallelism_budget_never_drops_below_one() {
-        assert_eq!(resolve_analysis_parallelism_budget(2), 1);
-        assert_eq!(resolve_analysis_parallelism_budget(1), 1);
-        assert_eq!(resolve_analysis_parallelism_budget(0), 1);
+        assert_eq!(resolve_analysis_parallelism_budget_with_cap(2, None), 1);
+        assert_eq!(resolve_analysis_parallelism_budget_with_cap(1, None), 1);
+        assert_eq!(resolve_analysis_parallelism_budget_with_cap(0, None), 1);
     }
 
     #[test]
     fn resolve_analysis_parallelism_budget_respects_explicit_cap() {
         assert_eq!(resolve_analysis_parallelism_budget_with_cap(24, Some(5)), 5);
         assert_eq!(resolve_analysis_parallelism_budget_with_cap(4, Some(5)), 2);
+    }
+
+    #[test]
+    fn resolve_memory_worker_cap_scales_with_available_memory() {
+        // 16 GiB available, 256 MiB/worker budget: after 1 GiB headroom = 15
+        // GiB; * 0.75 = 11.25 GiB; / 256MiB = 45.
+        let cap = resolve_memory_worker_cap(17_179_869_184, 268_435_456);
+        assert_eq!(cap, 45);
+    }
+
+    #[test]
+    fn resolve_memory_worker_cap_binds_on_constrained_host() {
+        // 4 GiB available (plausible "available" reading on a busy 16GB
+        // desktop), 256 MiB/worker budget: after 1 GiB headroom = 3 GiB;
+        // * 0.75 = 2.25 GiB; / 256MiB = 9.
+        let cap = resolve_memory_worker_cap(4_294_967_296, 268_435_456);
+        assert_eq!(cap, 9);
+    }
+
+    #[test]
+    fn resolve_memory_worker_cap_never_returns_zero() {
+        assert_eq!(resolve_memory_worker_cap(0, 268_435_456), 1);
+        assert_eq!(resolve_memory_worker_cap(500_000_000, 268_435_456), 1);
+    }
+
+    #[test]
+    fn resolve_memory_worker_cap_treats_zero_budget_as_unbounded() {
+        assert_eq!(resolve_memory_worker_cap(1_000, 0), usize::MAX);
+    }
+
+    #[test]
+    fn combine_worker_caps_takes_tighter_bound() {
+        assert_eq!(combine_worker_caps(Some(12), Some(6)), Some(6));
+        assert_eq!(combine_worker_caps(Some(6), Some(12)), Some(6));
+        assert_eq!(combine_worker_caps(Some(6), None), Some(6));
+        assert_eq!(combine_worker_caps(None, Some(6)), Some(6));
+        assert_eq!(combine_worker_caps(None, None), None);
+    }
+
+    #[test]
+    fn available_system_memory_bytes_respects_env_override() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "2000000000") };
+        assert_eq!(super::available_system_memory_bytes(), Some(2_000_000_000));
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
+    }
+
+    #[test]
+    fn available_system_memory_bytes_ignores_invalid_override() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "not-a-number") };
+        let result = super::available_system_memory_bytes();
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
+        assert!(result.unwrap_or(0) > 0);
     }
 
     #[test]

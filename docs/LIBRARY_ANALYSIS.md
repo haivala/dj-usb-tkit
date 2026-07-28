@@ -103,8 +103,9 @@ Runtime behavior differences:
 Batch concurrency model:
 
 - multi-track analysis uses a shared-work-queue worker model
-- worker count is bounded by host parallelism and batch size
-- optional worker caps/diagnostics are available for development and benchmarking
+- worker count is bounded by host parallelism, batch size, and available system memory
+- a conservative per-worker memory budget (heavier for the opt-in `essentia` engine than the default `stratum` engine) caps parallelism on RAM-constrained hosts to avoid OOM crashes on high-core-count/lower-RAM machines
+- optional worker caps/diagnostics are available for development and benchmarking (`DJTKIT_ANALYSIS_MAX_WORKERS`, `DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES`, `DJTKIT_ANALYSIS_DEBUG_WORKERS`)
 - single-track analysis avoids unnecessary fan-out overhead
 
 Implemented throughput optimizations:
