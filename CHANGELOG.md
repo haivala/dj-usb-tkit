@@ -12,6 +12,8 @@
 
 ## Unreleased
 
+## 0.1.6
+
 **Severity:** critical
 
 - Fix analysis still crashing/hanging on lower-RAM, high-core-count machines
@@ -39,6 +41,9 @@
 - When a status message reports warnings or errors (USB scans/exports,
   library scans/analysis), that part of the status line is now a link
   that jumps straight to the Event Log instead of being inert text.
+- Fix the "Get Node.js" link in the Essentia setup panel not going
+  anywhere — it pointed at a placeholder `#` href instead of the
+  download page.
 
 ## 0.1.5
 
