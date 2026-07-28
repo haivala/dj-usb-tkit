@@ -330,6 +330,64 @@ test("handleJobEvent shows pause/cancel controls only for analysis jobs, hides t
   }
 });
 
+test("handleJobEvent keeps the elapsed timer counting for in-flight tracks after pause, only freezing once none remain", () => {
+  const state = makeState();
+  state.analyzingTrackIds = new Set(["track-1", "track-2"]);
+  const el = makeEl();
+  const origSetInterval = window.setInterval;
+  window.setInterval = () => 42;
+  const deps = {
+    debugFrontendLog: () => {},
+    applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
+    setTrackAnalyzingState: (trackId, active) => {
+      if (active) state.analyzingTrackIds.add(trackId);
+      else state.analyzingTrackIds.delete(trackId);
+    }
+  };
+  try {
+    handleJobEvent(state, el, {
+      event: "job.started",
+      jobId: "j-analysis",
+      jobType: "analysis",
+      stage: "analyze_new_tracks",
+      message: "Analyzing",
+      percent: 0
+    }, deps);
+
+    // Pause is requested while two tracks are still in flight.
+    state.analysisPaused = true;
+
+    // The first in-flight track finishes -- one is still running, so the
+    // timer must not freeze yet.
+    handleJobEvent(state, el, {
+      event: "job.progress",
+      jobId: "j-analysis",
+      stage: "analyze_new_tracks",
+      trackId: "track-1",
+      trackReady: true,
+      durationMs: 1000
+    }, deps);
+    assert.equal(state.progressPausedAtMs, null);
+    assert.equal(state.analyzingTrackIds.size, 1);
+
+    // The second (last) in-flight track finishes -- now it has really
+    // stopped, so the timer should freeze on "(paused)".
+    handleJobEvent(state, el, {
+      event: "job.progress",
+      jobId: "j-analysis",
+      stage: "analyze_new_tracks",
+      trackId: "track-2",
+      trackReady: true,
+      durationMs: 1000
+    }, deps);
+    assert.equal(state.analyzingTrackIds.size, 0);
+    assert.ok(state.progressPausedAtMs > 0);
+    assert.match(el.progressText.textContent, /\(paused\)$/);
+  } finally {
+    window.setInterval = origSetInterval;
+  }
+});
+
 test("formatJobStatusText applies usb import stage-specific override", () => {
   assert.equal(
     formatJobStatusText("usb_read", "fetch_usb_playlists", "Importing USB playlists..."),

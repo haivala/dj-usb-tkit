@@ -227,6 +227,15 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     if (payload.trackReady === true) {
       bumpLibraryDurationSummary(payload.durationMs);
     }
+    // A pause click only stops workers from picking up a *new* track --
+    // whichever track(s) were already in flight keep going, so the elapsed
+    // timer should keep counting during that window instead of jumping to
+    // "(paused)" immediately. Only once every in-flight track has actually
+    // finished (no rows left in the "analyzing" state) has the batch really
+    // stopped.
+    if (state.analysisPaused && state.analyzingTrackIds && state.analyzingTrackIds.size === 0) {
+      pauseProgressHeartbeat(state, el);
+    }
   }
 
   if (eventName === "job.started" && jobId) {

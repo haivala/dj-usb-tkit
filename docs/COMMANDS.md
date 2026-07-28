@@ -49,7 +49,6 @@ The desktop host also emits a unified `job:event` channel carrying the same payl
 - `browse_source_files`
 - `materialize_source_track`
 - `remove_tracks_by_source_roots`
-- `get_system_parallelism`
 - `get_tracks_by_ids_with_previews`
 
 ### Playlists
@@ -94,6 +93,8 @@ The desktop host also emits a unified `job:event` channel carrying the same payl
 
 - `analyze_new_tracks`
 - `analyze_track_piece`
+- `set_analysis_paused`
+- `cancel_analysis`
 
 ### Playback
 

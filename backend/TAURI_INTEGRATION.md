@@ -58,7 +58,6 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `browse_source_files`
   - `materialize_source_track`
   - `remove_tracks_by_source_roots`
-  - `get_system_parallelism`
   - `get_tracks_by_ids_with_previews`
 - Playlists:
   - `create_playlist`
@@ -89,6 +88,8 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
 - Analysis:
   - `analyze_new_tracks`
   - `analyze_track_piece`
+  - `set_analysis_paused`
+  - `cancel_analysis`
   - `download_essentia`
   - `cancel_essentia_download`
   - `remove_essentia`

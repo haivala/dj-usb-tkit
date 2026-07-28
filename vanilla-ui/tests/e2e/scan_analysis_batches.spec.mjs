@@ -804,7 +804,6 @@ test("pause button stops picking up new tracks and resume continues the batch", 
   });
   await page.locator("#progressPauseBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.analysisPaused)).toBe(true);
-  await expect(page.locator("#progressText")).toContainText("(paused)");
 
   // A track already in flight when pause was clicked is allowed to finish
   // (same as the backend's own worker loop), so give that a moment to
@@ -816,8 +815,10 @@ test("pause button stops picking up new tracks and resume continues the batch", 
   // wasn't actually blocking new work.
   await page.waitForTimeout(300);
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(pausedCount);
-  // The timer text stays on "(paused)" the whole time, not just right after
-  // the click.
+  // Only once the batch has genuinely stopped (no track still in flight)
+  // does the elapsed timer freeze on "(paused)" -- this is checked after
+  // settling rather than right after the click, since the click itself only
+  // stops new tracks from starting, not whatever was already running.
   await expect(page.locator("#progressText")).toContainText("(paused)");
 
   await page.locator("#progressPauseBtn").click();
@@ -828,6 +829,38 @@ test("pause button stops picking up new tracks and resume continues the batch", 
   await expect(page.locator("#statusText")).toContainText("analyzed 5, failed 0");
   await expect(page.locator("#progressPauseBtn")).toBeHidden();
   await expect(page.locator("#progressCancelAnalysisBtn")).toBeHidden();
+});
+
+test("pause clicked mid-track keeps the elapsed timer counting until that track actually finishes", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 3, pieceDelayMs: 300 });
+  await page.goto("/");
+
+  await page.locator("#scanLibraryBtn").click();
+  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+
+  // Click pause partway through track 1's own pieces (after "waveform", one
+  // piece before it would report ready) so it's guaranteed to still be
+  // in-flight when the click lands. Dispatched as a direct in-page DOM
+  // click (not Playwright's locator.click()) so the timing isn't at the
+  // mercy of actionability/stability retries while the table is actively
+  // repainting -- those can add hundreds of ms of real time and blow past
+  // the very window this test is trying to land in.
+  await page.waitForFunction(() => (window.__scanTestStats?.pieceEventsByPiece?.waveform || 0) >= 1);
+  await page.evaluate(() => document.getElementById("progressPauseBtn").click());
+
+  // The in-flight track hasn't reported ready yet, so the batch hasn't
+  // really stopped -- the timer must still be ticking, not frozen.
+  await expect(page.locator("#progressText")).not.toContainText("(paused)");
+
+  // Once that track finishes (its bpm/key piece lands), nothing else starts
+  // because we're paused, so now it has genuinely stopped.
+  await expect(page.locator("#progressText")).toContainText("(paused)");
+  const settledCount = await page.locator("#libraryTableBody .bpm-pill").count();
+  expect(settledCount).toBeLessThan(3);
+
+  // Stays stopped -- no further tracks pick up.
+  await page.waitForTimeout(300);
+  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(settledCount);
 });
 
 test("cancel button stops the batch early and reports how many tracks completed", async ({ page }) => {

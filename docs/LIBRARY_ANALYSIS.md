@@ -108,6 +108,7 @@ Batch concurrency model:
 - a conservative per-worker memory budget (heavier for the opt-in `essentia` engine than the default `stratum` engine) caps parallelism on RAM-constrained hosts to avoid OOM crashes on high-core-count/lower-RAM machines — because every caller now goes through this one path, this protection applies uniformly, including the common "Scan Library" auto-analysis flow that used to bypass it entirely
 - optional worker caps/diagnostics are available for development and debugging (`DJTKIT_ANALYSIS_MAX_WORKERS`, `DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES`, `DJTKIT_ANALYSIS_DEBUG_WORKERS`); with `DJTKIT_ANALYSIS_DEBUG_WORKERS=1`, the resolved cap breakdown prints to the terminal (stderr) as well as the in-app Event Log
 - per-piece progress (duration, then artwork, then waveform, then bpm/key) still streams to the UI incrementally as each piece finishes, via `job.progress` events — this is independent of the dispatch path and unaffected by the above
+- a batch can be paused/resumed or cancelled mid-run via `set_analysis_paused`/`cancel_analysis`: both are backed by `Arc<AtomicBool>` flags on `BackendService` (`analysis_paused`, `analysis_cancelled`), reset at the start of every batch, and checked by each worker immediately before it would pop the next track off the shared queue — a track already in flight always finishes normally either way. Pausing blocks that check until resumed; cancelling breaks out of it permanently, and the batch then returns successfully with whatever was analyzed so far plus a warning noting how many of the total were completed
 
 Implemented throughput optimizations:
 
@@ -125,14 +126,20 @@ Operational commands related to engine runtime:
 - `cancel_essentia_download`
 - `remove_essentia`
 
+Operational commands for controlling a running batch:
+
+- `set_analysis_paused`
+- `cancel_analysis`
+
 Implementation anchors:
 
 - command façade: `backend/src/commands.rs`
 - Tauri bridge: `backend/src/tauri_commands.rs`
-- analysis progress type: `backend/src/service/analysis.rs:137`
-- analysis command entry: `backend/src/service/analysis.rs:474`
-- batched analysis path: `backend/src/service/analysis.rs:481`
+- analysis progress type: `backend/src/service/analysis.rs:153`
+- analysis command entry: `backend/src/service/analysis.rs:490`
+- batched analysis path: `backend/src/service/analysis.rs:497`
 - worker cap resolution: `backend/src/service/analysis.rs` (`resolve_worker_cap_for_engine`)
+- pause/cancel flags and checks: `backend/src/service/analysis.rs` (`set_analysis_paused`, `cancel_analysis`)
 - WAV `fmt ` chunk parsing/classification: `backend/src/wav_format.rs`
 - scan-time WAV_EXTENSIBLE detection call site: `backend/src/scanner.rs` (`read_wav_extensible_kind`)
 
@@ -141,4 +148,5 @@ Implementation anchors:
 - Backend analysis coverage: `backend/tests/anlz_pipeline_functional.rs`
 - Backend command contract coverage: `backend/tests/core_command_contract_functional.rs`
 - Engine behavior coverage: `backend/tests/lib_integration.rs`
-- Frontend analysis and hydration coverage: `vanilla-ui/tests/analysis_flow.test.mjs`, `vanilla-ui/tests/analysis_hydration.test.mjs`
+- Frontend analysis and hydration coverage: `vanilla-ui/tests/analysis_hydration.test.mjs`, `vanilla-ui/tests/job_manager.test.mjs`
+- Pause/resume/cancel coverage: `backend/tests/lib_integration.rs` (`analyze_new_tracks_pauses_and_resumes_between_tracks`, `analyze_new_tracks_cancel_stops_early_without_hanging`), `vanilla-ui/tests/e2e/scan_analysis_batches.spec.mjs`

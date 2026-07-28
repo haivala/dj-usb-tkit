@@ -8,7 +8,6 @@ Implemented command set:
   - `list_tracks`
   - `remove_tracks_by_source_roots`
   - `get_tracks_by_ids_with_previews`
-  - `get_system_parallelism`
 - Playlists:
   - `create_playlist`
   - `rename_playlist`
@@ -36,6 +35,8 @@ Implemented command set:
 - Analysis:
   - `analyze_new_tracks`
   - `analyze_track_piece`
+  - `set_analysis_paused`
+  - `cancel_analysis`
 - Playback:
   - `resolve_playback_source`
   - `play_track_native`

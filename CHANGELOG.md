@@ -63,9 +63,11 @@
   lets any tracks currently being analyzed finish, but holds off starting new
   ones until resumed; cancelling does the same but permanently, ending the
   batch early with a status noting how many tracks were analyzed before it
-  stopped. While paused, the progress bar's elapsed-time counter shows
-  "paused" instead of continuing to tick, and picks back up from where it
-  left off (excluding the paused duration) once resumed.
+  stopped. The progress bar's elapsed-time counter keeps ticking for
+  whichever track(s) were already in flight when Pause was pressed, and only
+  switches to "paused" once they actually finish and nothing new has
+  started; resuming picks the counter back up from where it left off
+  (excluding the paused duration) instead of restarting it.
 
 ## 0.1.6
 

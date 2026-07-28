@@ -290,7 +290,14 @@ function toggleAnalysisPause() {
   state.analysisPaused = paused;
   jobMgr.updateAnalysisPauseButtonAppearance(el, paused);
   if (paused) {
-    jobMgr.pauseProgressHeartbeat(state, el);
+    // Only tracks not yet picked up are held back -- anything already in
+    // flight keeps running, so the timer keeps counting until that settles.
+    // job_manager's handleJobEvent freezes it once analyzingTrackIds empties
+    // out. If nothing is in flight right now, it's already effectively
+    // stopped, so reflect that immediately.
+    if (state.analyzingTrackIds.size === 0) {
+      jobMgr.pauseProgressHeartbeat(state, el);
+    }
   } else {
     jobMgr.resumeProgressHeartbeat(state, el);
   }
