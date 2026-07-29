@@ -27,14 +27,13 @@ fn generate_kick_pattern_wav(sample_rate: u32, bpm: f64, duration_secs: f64) -> 
     let kick_decay_samples = (sample_rate as f64 * 0.05) as usize; // 50ms decay
 
     let mut samples = vec![0i16; num_samples];
-    for i in 0..num_samples {
+    for (i, sample) in samples.iter_mut().enumerate() {
         let beat_pos = i % beat_interval_samples;
         if beat_pos < kick_decay_samples {
             let t = beat_pos as f64 / sample_rate as f64;
             let amplitude = (-t * 40.0).exp(); // exponential decay
             let sine = (2.0 * std::f64::consts::PI * kick_freq * t).sin();
-            let value = (sine * amplitude * 30000.0) as i16;
-            samples[i] = value;
+            *sample = (sine * amplitude * 30000.0) as i16;
         }
     }
 

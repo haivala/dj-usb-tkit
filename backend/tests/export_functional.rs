@@ -3161,7 +3161,7 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
     seed_tracks_as_analyzed(&data_dir, &all_ids);
 
     let mut playlist_ids = Vec::with_capacity(3);
-    for i in 0..3usize {
+    for (i, id) in all_ids.iter().enumerate() {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: format!("Reorder Playlist {i}"),
         });
@@ -3169,7 +3169,7 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
         let pid = created.data.expect("playlist data").playlist_id;
         let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: pid.clone(),
-            track_ids: vec![all_ids[i].clone()],
+            track_ids: vec![id.clone()],
             dedupe: DedupeMode::Skip,
         });
         assert!(added.ok, "add tracks to playlist {i} failed: {added:?}");

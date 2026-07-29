@@ -1042,7 +1042,7 @@ fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
         page[40..40 + used_s].copy_from_slice(&payload);
 
         let mut m = PAGE_SIZE;
-        for i in 0..nrs {
+        for (i, &off) in offsets.iter().enumerate() {
             if i % 16 == 0 {
                 let group = i / 16;
                 m -= 2;
@@ -1051,7 +1051,7 @@ fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
                 write_u16_le_at(page, m, *rowpf_words.get(group).unwrap_or(&0));
             }
             m -= 2;
-            write_u16_le_at(page, m, offsets[i]);
+            write_u16_le_at(page, m, off);
         }
     }
 

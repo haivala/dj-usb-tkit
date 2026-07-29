@@ -1195,7 +1195,7 @@ mod tests {
 
         // Build backward-growing index at end of page
         let mut m = len_page;
-        for i in 0..n {
+        for (i, &row_offset) in row_offsets.iter().enumerate() {
             if i % 16 == 0 {
                 // Presence bits: mark all rows in this group as present
                 let group_size = std::cmp::min(16, n - i);
@@ -1204,7 +1204,7 @@ mod tests {
                 page[m..m + 2].copy_from_slice(&bits.to_le_bytes());
             }
             m -= 2;
-            page[m..m + 2].copy_from_slice(&(row_offsets[i] as u16).to_le_bytes());
+            page[m..m + 2].copy_from_slice(&(row_offset as u16).to_le_bytes());
         }
 
         page

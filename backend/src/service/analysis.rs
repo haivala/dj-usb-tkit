@@ -2820,19 +2820,29 @@ mod tests {
         let mut samples = vec![0.0f32; n];
 
         // Quiet intro (0-2s): amplitude 0.05
-        for i in 0..(2 * sample_rate) {
+        for (i, sample) in samples.iter_mut().enumerate().take(2 * sample_rate) {
             let t = i as f32 / sample_rate as f32;
-            samples[i] = (t * 440.0 * std::f32::consts::TAU).sin() * 0.05;
+            *sample = (t * 440.0 * std::f32::consts::TAU).sin() * 0.05;
         }
         // Loud middle (2-8s): amplitude 0.8
-        for i in (2 * sample_rate)..(8 * sample_rate) {
+        for (i, sample) in samples
+            .iter_mut()
+            .enumerate()
+            .take(8 * sample_rate)
+            .skip(2 * sample_rate)
+        {
             let t = i as f32 / sample_rate as f32;
-            samples[i] = (t * 440.0 * std::f32::consts::TAU).sin() * 0.8;
+            *sample = (t * 440.0 * std::f32::consts::TAU).sin() * 0.8;
         }
         // Quiet outro (8-10s): amplitude 0.1
-        for i in (8 * sample_rate)..(10 * sample_rate) {
+        for (i, sample) in samples
+            .iter_mut()
+            .enumerate()
+            .take(10 * sample_rate)
+            .skip(8 * sample_rate)
+        {
             let t = i as f32 / sample_rate as f32;
-            samples[i] = (t * 440.0 * std::f32::consts::TAU).sin() * 0.1;
+            *sample = (t * 440.0 * std::f32::consts::TAU).sin() * 0.1;
         }
 
         let peaks = build_waveform_preview_from_samples(&samples, 100);
@@ -2893,13 +2903,13 @@ mod tests {
         // 2 seconds total: first half is 100Hz bass, second half is 8kHz treble
         let n = sample_rate * 2;
         let mut samples = vec![0.0f32; n];
-        for i in 0..n / 2 {
+        for (i, sample) in samples.iter_mut().enumerate().take(n / 2) {
             let t = i as f32 / sample_rate as f32;
-            samples[i] = (t * 100.0 * std::f32::consts::TAU).sin() * 0.8;
+            *sample = (t * 100.0 * std::f32::consts::TAU).sin() * 0.8;
         }
-        for i in n / 2..n {
+        for (i, sample) in samples.iter_mut().enumerate().skip(n / 2) {
             let t = i as f32 / sample_rate as f32;
-            samples[i] = (t * 8000.0 * std::f32::consts::TAU).sin() * 0.8;
+            *sample = (t * 8000.0 * std::f32::consts::TAU).sin() * 0.8;
         }
 
         let data = build_waveform_data_from_samples(&samples, bins);

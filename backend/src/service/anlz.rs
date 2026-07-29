@@ -347,11 +347,12 @@ fn append_pssi_chunk(
     }
 
     // Reference exports obfuscate bytes after len_e (absolute byte 18 onward in tag).
-    for i in 6..header.len() {
-        header[i] ^= pssi_xor_mask(len_entries, i - 6);
+    let header_len = header.len();
+    for (i, byte) in header.iter_mut().enumerate().skip(6) {
+        *byte ^= pssi_xor_mask(len_entries, i - 6);
     }
-    for i in 0..payload.len() {
-        payload[i] ^= pssi_xor_mask(len_entries, header.len() - 6 + i);
+    for (i, byte) in payload.iter_mut().enumerate() {
+        *byte ^= pssi_xor_mask(len_entries, header_len - 6 + i);
     }
 
     append_anlz_chunk(file, b"PSSI", &header, &payload);

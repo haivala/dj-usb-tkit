@@ -345,8 +345,8 @@ fn draw_lane_filled(
         let start = x * len / width;
         let end = ((x + 1) * len / width).max(start + 1).min(len);
         let mut sum_sq = 0.0f64;
-        for j in start..end {
-            sum_sq += (values[j] as f64) * (values[j] as f64);
+        for &v in &values[start..end] {
+            sum_sq += (v as f64) * (v as f64);
         }
         let rms = (sum_sq / (end - start) as f64).sqrt();
         let bar_h = ((rms / max_val as f64) * height as f64).round() as u32;
