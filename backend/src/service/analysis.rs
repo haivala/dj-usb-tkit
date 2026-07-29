@@ -808,24 +808,39 @@ impl BackendService {
             let tx_db = conn.unchecked_transaction()?;
             let mut persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
             for track in tracks.drain(..) {
-                let result = analyze_track_with_usb_fallback_with_updates(
-                    &track,
-                    &waveform_dir,
-                    &artwork_dir,
-                    bpm_min,
-                    bpm_max,
-                    engine,
-                    |update| {
-                        on_progress(&build_partial_progress(
-                            completed_count,
-                            total,
-                            track.id.clone(),
-                            track.title.clone(),
-                            track.file_path.clone(),
-                            update,
-                        ));
-                    },
-                );
+                // The batch (`total > 1`) branch above sizes a worker pool
+                // against available memory, but a lone single-track analyze
+                // -- the common "click Analyze on this row" action -- has no
+                // pool to size and no coordination with other independent
+                // analyze_new_tracks calls. Without this check, firing it
+                // repeatedly across many tracks (e.g. clicking through the
+                // track list) can pile up concurrent jobs with no memory
+                // awareness at all and crash the process.
+                let result = if !has_memory_headroom_for_engine(engine) {
+                    Err(BackendError::Internal(format!(
+                        "Not enough available memory to start analysis right now (needs ~{} MB free). Wait for other analysis to finish and try again.",
+                        analysis_bytes_per_worker(engine) / (1024 * 1024)
+                    )))
+                } else {
+                    analyze_track_with_usb_fallback_with_updates(
+                        &track,
+                        &waveform_dir,
+                        &artwork_dir,
+                        bpm_min,
+                        bpm_max,
+                        engine,
+                        |update| {
+                            on_progress(&build_partial_progress(
+                                completed_count,
+                                total,
+                                track.id.clone(),
+                                track.title.clone(),
+                                track.file_path.clone(),
+                                update,
+                            ));
+                        },
+                    )
+                };
                 persist_done_result(
                     &mut persist_stmt,
                     track,
@@ -1334,16 +1349,47 @@ fn analysis_worker_cap_from_env() -> Option<usize> {
         .filter(|v| *v > 0)
 }
 
-/// Pure, deterministic memory-based worker cap. Never returns 0 so analysis
+/// Bytes considered safe to hand to analysis workers: total available memory
+/// minus a flat OS/UI headroom, then trimmed by a further safety margin since
+/// the per-worker budgets below are estimates, not hard limits.
+fn resolve_usable_analysis_bytes(available_bytes: u64) -> u64 {
+    let after_headroom = available_bytes.saturating_sub(ANALYSIS_MEMORY_HEADROOM_BYTES);
+    (after_headroom as f64 * ANALYSIS_MEMORY_USABLE_FRACTION) as u64
+}
+
+/// Pure, deterministic memory-based worker cap. Never returns 0 so a batch
 /// can always make forward progress with at least one worker. `bytes_per_worker
 /// == 0` is treated as "no cap" to avoid a division by zero.
 pub(crate) fn resolve_memory_worker_cap(available_bytes: u64, bytes_per_worker: u64) -> usize {
     if bytes_per_worker == 0 {
         return usize::MAX;
     }
-    let after_headroom = available_bytes.saturating_sub(ANALYSIS_MEMORY_HEADROOM_BYTES);
-    let usable = (after_headroom as f64 * ANALYSIS_MEMORY_USABLE_FRACTION) as u64;
-    (usable / bytes_per_worker).max(1) as usize
+    (resolve_usable_analysis_bytes(available_bytes) / bytes_per_worker).max(1) as usize
+}
+
+/// The per-worker memory budget for a given analysis engine, in bytes.
+fn analysis_bytes_per_worker(engine: AnalysisEngine) -> u64 {
+    match engine {
+        AnalysisEngine::Essentia => ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES,
+        AnalysisEngine::Stratum => ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES,
+    }
+}
+
+/// Whether there's currently enough memory headroom to start one more
+/// analysis job for the given engine. Unlike `resolve_memory_worker_cap`
+/// (which always allows at least one worker so a batch never stalls), this
+/// has no floor -- it's used to gate the single-track analyze path, which has
+/// no worker pool to size and can legitimately be refused outright when
+/// memory is genuinely too tight (e.g. many single-track analyses fired in
+/// quick succession from the track list, each its own independent job with
+/// no shared worker-pool cap to bound it).
+pub(crate) fn has_memory_headroom_for_engine(engine: AnalysisEngine) -> bool {
+    match available_system_memory_bytes() {
+        Some(available) => {
+            resolve_usable_analysis_bytes(available) >= analysis_bytes_per_worker(engine)
+        }
+        None => true,
+    }
 }
 
 /// Reads current available system memory in bytes. Supports a debug/test
@@ -1395,10 +1441,7 @@ struct WorkerCapBreakdown {
 }
 
 fn resolve_worker_cap_for_engine(engine: AnalysisEngine) -> WorkerCapBreakdown {
-    let bytes_per_worker = match engine {
-        AnalysisEngine::Essentia => ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES,
-        AnalysisEngine::Stratum => ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES,
-    };
+    let bytes_per_worker = analysis_bytes_per_worker(engine);
     let memory_cap = memory_worker_cap(bytes_per_worker);
     let env_cap = analysis_worker_cap_from_env();
     WorkerCapBreakdown {
@@ -2432,7 +2475,8 @@ mod tests {
     use super::{
         AnalysisEngine, EssentiaResult, build_waveform_data_from_samples,
         build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
-        essentia_result_has_detected_values, resolve_analysis_bpm_range,
+        essentia_result_has_detected_values, has_memory_headroom_for_engine,
+        resolve_analysis_bpm_range,
         resolve_analysis_parallelism_budget_with_cap, resolve_analysis_worker_count_with_cap,
         resolve_memory_worker_cap, resolve_worker_cap_for_engine, strip_appimage_lib_path,
         waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
@@ -2659,6 +2703,27 @@ mod tests {
         // constant is actually selected, not just that some cap exists.
         assert_ne!(stratum_cap.memory_cap, essentia_cap.memory_cap);
         assert!(essentia_cap.memory_cap.unwrap() > stratum_cap.memory_cap.unwrap());
+    }
+
+    #[test]
+    fn has_memory_headroom_for_engine_false_when_below_budget() {
+        let _guard = env_var_lock().lock().unwrap();
+        // 1 GiB available: entirely consumed by the flat headroom alone, so
+        // there's zero usable budget left for even one stratum worker (1.5
+        // GiB/worker) -- this must refuse, not silently proceed.
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "1073741824") };
+        let allowed = has_memory_headroom_for_engine(AnalysisEngine::Stratum);
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn has_memory_headroom_for_engine_true_when_ample() {
+        let _guard = env_var_lock().lock().unwrap();
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "17179869184") };
+        let allowed = has_memory_headroom_for_engine(AnalysisEngine::Stratum);
+        unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
+        assert!(allowed);
     }
 
     #[test]

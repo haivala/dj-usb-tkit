@@ -12,6 +12,14 @@
 
 ## Unreleased
 
+- Fix single-track analyze (clicking "Analyze"/"Reanalyze" on one track row)
+  having no memory check at all — unlike a multi-track batch, it has no
+  worker pool to size against available RAM, so clicking through many track
+  rows in a row could pile up concurrent analysis jobs with no memory
+  awareness and crash the app. It now checks for available memory headroom
+  before starting and fails that track with a clear message instead of
+  proceeding when memory is too tight.
+
 ## 0.1.7
 
 **Severity:** critical
