@@ -204,46 +204,36 @@ fn emit_job_event_with_track<R: tauri::Runtime>(
     job_id: &str,
     job_type: &str,
     stage: &str,
-    current: usize,
-    total: usize,
-    percent: usize,
     message: impl Into<String>,
-    track_id: Option<String>,
-    track_title: Option<String>,
-    file_path: Option<String>,
-    bpm: Option<f64>,
-    bpm_analyzer: Option<String>,
-    key: Option<String>,
-    artwork_path: Option<String>,
-    waveform_peaks_path: Option<String>,
-    waveform_preview: Option<Vec<u8>>,
-    duration_ms: Option<u64>,
-    track_ready: Option<bool>,
-    failed: Option<bool>,
-    error_message: Option<String>,
+    progress: &crate::service::analysis::AnalyzeTrackProgress,
 ) {
+    let total = progress.total.max(1);
+    let percent = (progress.current * 100)
+        .checked_div(total)
+        .unwrap_or(100)
+        .min(100);
     let payload = JobEventPayload {
         event: event_name.to_string(),
         job_id: job_id.to_string(),
         job_type: job_type.to_string(),
         stage: stage.to_string(),
-        current,
+        current: progress.current,
         total,
-        percent: percent.min(100),
+        percent,
         message: message.into(),
-        track_id,
-        track_title,
-        file_path,
-        bpm,
-        bpm_analyzer,
-        key,
-        artwork_path,
-        waveform_peaks_path,
-        waveform_preview,
-        duration_ms,
-        track_ready,
-        failed,
-        error_message,
+        track_id: Some(progress.track_id.clone()),
+        track_title: Some(progress.track_title.clone()),
+        file_path: Some(progress.file_path.clone()),
+        bpm: progress.bpm,
+        bpm_analyzer: progress.bpm_analyzer.clone(),
+        key: progress.key.clone(),
+        artwork_path: progress.artwork_path.clone(),
+        waveform_peaks_path: progress.waveform_peaks_path.clone(),
+        waveform_preview: progress.waveform_preview.clone(),
+        duration_ms: progress.duration_ms,
+        track_ready: Some(progress.track_ready),
+        failed: Some(progress.failed),
+        error_message: progress.error_message.clone(),
         timestamp: Utc::now().to_rfc3339(),
     };
 
@@ -1116,35 +1106,18 @@ pub async fn analyze_new_tracks(
         commands.analyze_new_tracks_with_progress(request, |progress| {
             let current = progress.current;
             let total = progress.total;
-            let file_path = progress.file_path.as_str();
-            let percent = (current * 100).checked_div(total).unwrap_or(100).min(100);
-            let file_name = std::path::Path::new(file_path)
+            let file_name = std::path::Path::new(&progress.file_path)
                 .file_name()
                 .and_then(|s| s.to_str())
-                .unwrap_or(file_path);
+                .unwrap_or(&progress.file_path);
             emit_job_event_with_track(
                 &app_for_task,
                 "job.progress",
                 &job_id_for_task,
                 "analysis",
                 "analyze_new_tracks",
-                current,
-                total.max(1),
-                percent,
                 format!("Analyzing {current}/{total}: {file_name}"),
-                Some(progress.track_id.clone()),
-                Some(progress.track_title.clone()),
-                Some(progress.file_path.clone()),
-                progress.bpm,
-                progress.bpm_analyzer.clone(),
-                progress.key.clone(),
-                progress.artwork_path.clone(),
-                progress.waveform_peaks_path.clone(),
-                progress.waveform_preview.clone(),
-                progress.duration_ms,
-                Some(progress.track_ready),
-                Some(progress.failed),
-                progress.error_message.clone(),
+                progress,
             );
         })
     })

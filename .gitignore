@@ -9,3 +9,4 @@ desktop/src-tauri/gen/schemas/windows-schema.json
 **/.app-data/
 .docker-logs/
 .tmp-diag-data/
+.cargo/
