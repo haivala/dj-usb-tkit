@@ -751,10 +751,12 @@ impl BackendService {
                             track,
                             result,
                             total,
-                            &mut completed_count,
-                            &mut analyzed,
-                            &mut failed,
-                            &mut warnings,
+                            PersistDoneCounters {
+                                completed_count: &mut completed_count,
+                                analyzed: &mut analyzed,
+                                failed: &mut failed,
+                                warnings: &mut warnings,
+                            },
                             &mut on_progress,
                         )?;
                         // Commit after every track (not just periodically) so
@@ -846,10 +848,12 @@ impl BackendService {
                     track,
                     result,
                     total,
-                    &mut completed_count,
-                    &mut analyzed,
-                    &mut failed,
-                    &mut warnings,
+                    PersistDoneCounters {
+                        completed_count: &mut completed_count,
+                        analyzed: &mut analyzed,
+                        failed: &mut failed,
+                        warnings: &mut warnings,
+                    },
                     &mut on_progress,
                 )?;
             }
@@ -1069,17 +1073,27 @@ impl BackendService {
     }
 }
 
+struct PersistDoneCounters<'a> {
+    completed_count: &'a mut usize,
+    analyzed: &'a mut usize,
+    failed: &'a mut usize,
+    warnings: &'a mut Vec<String>,
+}
+
 fn persist_done_result(
     persist_stmt: &mut rusqlite::CachedStatement<'_>,
     track: LocalTrackForAnalysis,
     result: BackendResult<LocalAnalysisResult>,
     total: usize,
-    completed_count: &mut usize,
-    analyzed: &mut usize,
-    failed: &mut usize,
-    warnings: &mut Vec<String>,
+    counters: PersistDoneCounters<'_>,
     on_progress: &mut dyn FnMut(&AnalyzeTrackProgress),
 ) -> BackendResult<()> {
+    let PersistDoneCounters {
+        completed_count,
+        analyzed,
+        failed,
+        warnings,
+    } = counters;
     *completed_count += 1;
     match result {
         Ok(local) => {

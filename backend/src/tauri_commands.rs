@@ -145,12 +145,17 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
+struct JobIdentity<'a> {
+    job_id: &'a str,
+    job_type: &'a str,
+    stage: &'a str,
+}
+
 fn emit_job_event<R: tauri::Runtime>(
     app: &AppHandle<R>,
     event_name: &str,
-    job_id: &str,
-    job_type: &str,
-    stage: &str,
+    identity: JobIdentity<'_>,
     current: usize,
     total: usize,
     percent: usize,
@@ -158,9 +163,9 @@ fn emit_job_event<R: tauri::Runtime>(
 ) {
     let payload = JobEventPayload {
         event: event_name.to_string(),
-        job_id: job_id.to_string(),
-        job_type: job_type.to_string(),
-        stage: stage.to_string(),
+        job_id: identity.job_id.to_string(),
+        job_type: identity.job_type.to_string(),
+        stage: identity.stage.to_string(),
         current,
         total,
         percent: percent.min(100),
@@ -201,9 +206,7 @@ fn emit_job_payload<R: tauri::Runtime>(
 fn emit_job_event_with_track<R: tauri::Runtime>(
     app: &AppHandle<R>,
     event_name: &str,
-    job_id: &str,
-    job_type: &str,
-    stage: &str,
+    identity: JobIdentity<'_>,
     message: impl Into<String>,
     progress: &crate::service::analysis::AnalyzeTrackProgress,
 ) {
@@ -214,9 +217,9 @@ fn emit_job_event_with_track<R: tauri::Runtime>(
         .min(100);
     let payload = JobEventPayload {
         event: event_name.to_string(),
-        job_id: job_id.to_string(),
-        job_type: job_type.to_string(),
-        stage: stage.to_string(),
+        job_id: identity.job_id.to_string(),
+        job_type: identity.job_type.to_string(),
+        stage: identity.stage.to_string(),
         current: progress.current,
         total,
         percent,
@@ -242,17 +245,13 @@ fn emit_job_event_with_track<R: tauri::Runtime>(
 
 fn emit_job_failed<R: tauri::Runtime>(
     app: &AppHandle<R>,
-    job_id: &str,
-    job_type: &str,
-    stage: &str,
+    identity: JobIdentity<'_>,
     response_message: Option<String>,
 ) {
     emit_job_event(
         app,
         "job.failed",
-        job_id,
-        job_type,
-        stage,
+        identity,
         0,
         1,
         100,
@@ -275,29 +274,14 @@ where
     F: FnOnce() -> ApiResponse<T> + Send + 'static,
 {
     let job_id = Uuid::now_v7().to_string();
-    emit_job_event(
-        app,
-        "job.started",
-        &job_id,
+    let identity = JobIdentity {
+        job_id: &job_id,
         job_type,
         stage,
-        0,
-        1,
-        0,
-        started_message,
-    );
+    };
+    emit_job_event(app, "job.started", identity, 0, 1, 0, started_message);
     if let Some((percent, message)) = initial_progress {
-        emit_job_event(
-            app,
-            "job.progress",
-            &job_id,
-            job_type,
-            stage,
-            0,
-            1,
-            percent,
-            message,
-        );
+        emit_job_event(app, "job.progress", identity, 0, 1, percent, message);
     }
 
     let response = match tauri::async_runtime::spawn_blocking(task).await {
@@ -308,23 +292,11 @@ where
     };
 
     if response.ok {
-        emit_job_event(
-            app,
-            "job.completed",
-            &job_id,
-            job_type,
-            stage,
-            1,
-            1,
-            100,
-            completed_message,
-        );
+        emit_job_event(app, "job.completed", identity, 1, 1, 100, completed_message);
     } else {
         emit_job_failed(
             app,
-            &job_id,
-            job_type,
-            stage,
+            identity,
             response.error.as_ref().map(|e| e.message.clone()),
         );
     }
@@ -346,17 +318,12 @@ where
     F: FnOnce(Box<dyn FnMut(usize, usize, &str) + Send>) -> ApiResponse<T> + Send + 'static,
 {
     let job_id = Uuid::now_v7().to_string();
-    emit_job_event(
-        app,
-        "job.started",
-        &job_id,
+    let identity = JobIdentity {
+        job_id: &job_id,
         job_type,
         stage,
-        0,
-        1,
-        0,
-        started_message,
-    );
+    };
+    emit_job_event(app, "job.started", identity, 0, 1, 0, started_message);
 
     let app_for_task = app.clone();
     let job_id_for_task = job_id.clone();
@@ -366,12 +333,15 @@ where
         let progress = Box::new(move |current: usize, total: usize, message: &str| {
             let denom = total.max(1);
             let percent = ((current * 100) / denom).min(100);
+            let identity = JobIdentity {
+                job_id: &job_id_for_task,
+                job_type: &job_type_for_task,
+                stage: &stage_for_task,
+            };
             emit_job_event(
                 &app_for_task,
                 "job.progress",
-                &job_id_for_task,
-                &job_type_for_task,
-                &stage_for_task,
+                identity,
                 current,
                 denom,
                 percent,
@@ -389,23 +359,11 @@ where
     };
 
     if response.ok {
-        emit_job_event(
-            app,
-            "job.completed",
-            &job_id,
-            job_type,
-            stage,
-            1,
-            1,
-            100,
-            completed_message,
-        );
+        emit_job_event(app, "job.completed", identity, 1, 1, 100, completed_message);
     } else {
         emit_job_failed(
             app,
-            &job_id,
-            job_type,
-            stage,
+            identity,
             response.error.as_ref().map(|e| e.message.clone()),
         );
     }
@@ -495,12 +453,15 @@ pub async fn scan_library(
     request: ScanLibraryRequest,
 ) -> Result<ApiResponse<ScanLibraryData>, String> {
     let job_id = Uuid::now_v7().to_string();
+    let identity = JobIdentity {
+        job_id: &job_id,
+        job_type: "scan",
+        stage: "scan_library",
+    };
     emit_job_event(
         &app,
         "job.started",
-        &job_id,
-        "scan",
-        "scan_library",
+        identity,
         0,
         1,
         0,
@@ -509,9 +470,7 @@ pub async fn scan_library(
     emit_job_event(
         &app,
         "job.progress",
-        &job_id,
-        "scan",
-        "scan_library",
+        identity,
         0,
         1,
         30,
@@ -538,23 +497,11 @@ pub async fn scan_library(
                 )
             })
             .unwrap_or_else(|| "Library scan completed".to_string());
-        emit_job_event(
-            &app,
-            "job.completed",
-            &job_id,
-            "scan",
-            "scan_library",
-            1,
-            1,
-            100,
-            summary,
-        );
+        emit_job_event(&app, "job.completed", identity, 1, 1, 100, summary);
     } else {
         emit_job_failed(
             &app,
-            &job_id,
-            "scan",
-            "scan_library",
+            identity,
             response.error.as_ref().map(|e| e.message.clone()),
         );
     }
@@ -569,12 +516,15 @@ pub async fn scan_master_db(
     request: ScanMasterDbRequest,
 ) -> Result<ApiResponse<ScanLibraryData>, String> {
     let job_id = Uuid::now_v7().to_string();
+    let identity = JobIdentity {
+        job_id: &job_id,
+        job_type: "scan",
+        stage: "scan_master_db",
+    };
     emit_job_event(
         &app,
         "job.started",
-        &job_id,
-        "scan",
-        "scan_master_db",
+        identity,
         0,
         1,
         0,
@@ -583,9 +533,7 @@ pub async fn scan_master_db(
     emit_job_event(
         &app,
         "job.progress",
-        &job_id,
-        "scan",
-        "scan_master_db",
+        identity,
         0,
         1,
         30,
@@ -615,23 +563,11 @@ pub async fn scan_master_db(
                 )
             })
             .unwrap_or_else(|| "Desktop library import completed".to_string());
-        emit_job_event(
-            &app,
-            "job.completed",
-            &job_id,
-            "scan",
-            "scan_master_db",
-            1,
-            1,
-            100,
-            summary,
-        );
+        emit_job_event(&app, "job.completed", identity, 1, 1, 100, summary);
     } else {
         emit_job_failed(
             &app,
-            &job_id,
-            "scan",
-            "scan_master_db",
+            identity,
             response.error.as_ref().map(|e| e.message.clone()),
         );
     }
@@ -1077,12 +1013,15 @@ pub async fn analyze_new_tracks(
     request: AnalyzeNewTracksRequest,
 ) -> Result<ApiResponse<AnalyzeNewTracksData>, String> {
     let job_id = Uuid::now_v7().to_string();
+    let identity = JobIdentity {
+        job_id: &job_id,
+        job_type: "analysis",
+        stage: "analyze_new_tracks",
+    };
     emit_job_event(
         &app,
         "job.started",
-        &job_id,
-        "analysis",
-        "analyze_new_tracks",
+        identity,
         0,
         1,
         0,
@@ -1091,9 +1030,7 @@ pub async fn analyze_new_tracks(
     emit_job_event(
         &app,
         "job.progress",
-        &job_id,
-        "analysis",
-        "analyze_new_tracks",
+        identity,
         0,
         1,
         40,
@@ -1110,12 +1047,15 @@ pub async fn analyze_new_tracks(
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or(&progress.file_path);
+            let identity = JobIdentity {
+                job_id: &job_id_for_task,
+                job_type: "analysis",
+                stage: "analyze_new_tracks",
+            };
             emit_job_event_with_track(
                 &app_for_task,
                 "job.progress",
-                &job_id_for_task,
-                "analysis",
-                "analyze_new_tracks",
+                identity,
                 format!("Analyzing {current}/{total}: {file_name}"),
                 progress,
             );
@@ -1134,9 +1074,7 @@ pub async fn analyze_new_tracks(
         emit_job_event(
             &app,
             "job.completed",
-            &job_id,
-            "analysis",
-            "analyze_new_tracks",
+            identity,
             1,
             1,
             100,
@@ -1148,9 +1086,7 @@ pub async fn analyze_new_tracks(
     } else {
         emit_job_failed(
             &app,
-            &job_id,
-            "analysis",
-            "analyze_new_tracks",
+            identity,
             response.error.as_ref().map(|e| e.message.clone()),
         );
     }
