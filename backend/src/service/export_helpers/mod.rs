@@ -946,7 +946,6 @@ pub fn write_pdb(
     mirror_playlist_entries: bool,
     edb_playlist_id: Option<u32>,
     edb_sort_order: Option<u32>,
-    skip_growth_patch: bool,
 ) -> BackendResult<WriteExportPdbResult> {
     write_pdb_fresh_with_overrides(
         usb_root,
@@ -955,7 +954,6 @@ pub fn write_pdb(
         mirror_playlist_entries,
         edb_playlist_id,
         edb_sort_order,
-        skip_growth_patch,
         true,
     )
 }
@@ -975,7 +973,6 @@ pub fn preview_pdb(
         mirror_playlist_entries,
         edb_playlist_id,
         edb_sort_order,
-        false,
         false,
     )
 }
@@ -1098,7 +1095,6 @@ fn write_pdb_fresh_with_overrides(
     mirror_playlist_entries: bool,
     override_playlist_id: Option<u32>,
     override_sort_order: Option<u32>,
-    _skip_growth_patch: bool,
     commit_write: bool,
 ) -> BackendResult<WriteExportPdbResult> {
     use crate::pdb_writer::{
@@ -2051,7 +2047,6 @@ pub fn rewrite_pdb_playlist_from_manifest(
         true,
         Some(playlist_pdb_id),
         Some(sort_order),
-        false,
         true,
     )
 }
@@ -3702,7 +3697,7 @@ mod tests {
             }],
         };
 
-        write_pdb(usb_root, &playlist, &manifest, true, None, None, false)
+        write_pdb(usb_root, &playlist, &manifest, true, None, None)
             .expect("append playlist to pdb");
 
         let pdb_path = usb_root
@@ -3794,8 +3789,7 @@ mod tests {
             usb_root,
             &[("t1", "Song One", "a1.mp3"), ("t2", "Song Two", "a2.mp3")],
         );
-        write_pdb(usb_root, &playlist_a, &manifest_a, true, None, None, false)
-            .expect("export playlist A");
+        write_pdb(usb_root, &playlist_a, &manifest_a, true, None, None).expect("export playlist A");
 
         // Export playlist B with tracks t2 (shared), t3 (exclusive)
         let playlist_b = ExportPlaylistData {
@@ -3812,8 +3806,7 @@ mod tests {
             usb_root,
             &[("t2", "Song Two", "a2.mp3"), ("t3", "Song Three", "a3.mp3")],
         );
-        write_pdb(usb_root, &playlist_b, &manifest_b, true, None, None, false)
-            .expect("export playlist B");
+        write_pdb(usb_root, &playlist_b, &manifest_b, true, None, None).expect("export playlist B");
 
         // Create dummy audio files
         for name in &["a1.mp3", "a2.mp3", "a3.mp3"] {
@@ -3948,8 +3941,7 @@ mod tests {
             usb_root,
             &[("t1", "Song One", "a1.mp3"), ("t2", "Song Two", "a2.mp3")],
         );
-        write_pdb(usb_root, &playlist_a, &manifest_a, true, None, None, false)
-            .expect("export playlist A");
+        write_pdb(usb_root, &playlist_a, &manifest_a, true, None, None).expect("export playlist A");
 
         // Export playlist B with the SAME tracks (fully overlapping)
         let playlist_b = ExportPlaylistData {
@@ -3966,8 +3958,7 @@ mod tests {
             usb_root,
             &[("t1", "Song One", "a1.mp3"), ("t2", "Song Two", "a2.mp3")],
         );
-        write_pdb(usb_root, &playlist_b, &manifest_b, true, None, None, false)
-            .expect("export playlist B");
+        write_pdb(usb_root, &playlist_b, &manifest_b, true, None, None).expect("export playlist B");
 
         let pdb_path = usb_root
             .join(USB_VENDOR_ROOT_DIR)
@@ -4029,7 +4020,7 @@ mod tests {
             })
             .collect();
         let manifest_a = make_test_manifest("pl-a", "Big Playlist", usb_root, &manifest_entries);
-        write_pdb(usb_root, &playlist_a, &manifest_a, true, None, None, false)
+        write_pdb(usb_root, &playlist_a, &manifest_a, true, None, None)
             .expect("export big playlist");
 
         let pdb_path = usb_root
@@ -4269,8 +4260,7 @@ mod tests {
                 ("t4", "Song 4", "a4.mp3"),
             ],
         );
-        write_pdb(usb_root, &playlist, &manifest, true, None, None, false)
-            .expect("export playlist");
+        write_pdb(usb_root, &playlist, &manifest, true, None, None).expect("export playlist");
 
         let bytes = std::fs::read(&pdb_path).expect("read export.pdb");
         let ps = 4096usize;
@@ -4483,7 +4473,7 @@ mod tests {
             }],
         };
 
-        write_pdb(usb_root, &playlist, &manifest, true, None, None, false).expect("initial append");
+        write_pdb(usb_root, &playlist, &manifest, true, None, None).expect("initial append");
         let parsed_before = crate::pdb_reader::parse_pdb(
             &usb_root
                 .join(USB_VENDOR_ROOT_DIR)
@@ -4613,7 +4603,7 @@ mod tests {
             tracks: vec![thin_manifest_track],
         };
 
-        write_pdb(usb_root, &playlist, &manifest, true, None, None, false)
+        write_pdb(usb_root, &playlist, &manifest, true, None, None)
             .expect("write pdb with eDB fallback metadata");
 
         let pdb_path = usb_root
@@ -4721,7 +4711,7 @@ mod tests {
             tracks: vec![thin_manifest_track],
         };
 
-        write_pdb(usb_root, &playlist, &manifest, true, None, None, false)
+        write_pdb(usb_root, &playlist, &manifest, true, None, None)
             .expect("write pdb with eDB fallback metadata");
 
         let backend_data = tempdir().expect("backend data dir");
@@ -4836,7 +4826,7 @@ mod tests {
             tracks: vec![rich_manifest_track],
         };
 
-        write_pdb(usb_root, &playlist, &manifest, true, None, None, false)
+        write_pdb(usb_root, &playlist, &manifest, true, None, None)
             .expect("write pdb with rich manifest metadata");
 
         let backend_data = tempdir().expect("backend data dir");
@@ -4932,7 +4922,7 @@ mod tests {
             warnings: Vec::new(),
             tracks: vec![base_track.clone()],
         };
-        write_pdb(usb_root, &playlist, &base_manifest, true, None, None, false)
+        write_pdb(usb_root, &playlist, &base_manifest, true, None, None)
             .expect("write base playlist to pdb");
 
         let tx = conn.transaction().expect("start additive eDB tx");
@@ -4962,16 +4952,8 @@ mod tests {
             warnings: Vec::new(),
             tracks: vec![add_track_thin_manifest],
         };
-        write_pdb(
-            usb_root,
-            &playlist,
-            &additive_manifest,
-            false,
-            None,
-            None,
-            false,
-        )
-        .expect("append additive track with thin manifest");
+        write_pdb(usb_root, &playlist, &additive_manifest, false, None, None)
+            .expect("append additive track with thin manifest");
 
         let backend_data = tempdir().expect("backend data dir");
         let service = BackendService::new(backend_data.path()).expect("create backend service");
@@ -5748,7 +5730,7 @@ mod tests {
             }],
         };
 
-        super::write_pdb(usb_root, &playlist, &manifest, true, None, None, false).unwrap();
+        super::write_pdb(usb_root, &playlist, &manifest, true, None, None).unwrap();
 
         // Parse result and verify genres/labels survived
         let parsed = crate::pdb_reader::parse_pdb(&pdb_dir.join("export.pdb")).unwrap();

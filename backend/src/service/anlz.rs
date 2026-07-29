@@ -147,32 +147,26 @@ pub(crate) fn usb_analysis_bucket_from_hash(hash: u32) -> u16 {
 // Bundle writer
 // ---------------------------------------------------------------------------
 
+/// Output file paths for a generated ANLZ bundle (DAT/EXT/2EX).
+pub struct AnlzBundlePaths {
+    pub dat_path: PathBuf,
+    pub ext_path: PathBuf,
+    pub twoex_path: PathBuf,
+}
+
 pub fn write_generated_anlz_bundle(
     waveform: &WaveformData,
-    dat_path: &Path,
-    ext_path: &Path,
-    twoex_path: &Path,
+    paths: &AnlzBundlePaths,
     track_path: &str,
     bpm: Option<f64>,
     duration_ms: Option<u64>,
 ) -> BackendResult<()> {
-    write_generated_anlz_bundle_with_first_beat(
-        waveform,
-        dat_path,
-        ext_path,
-        twoex_path,
-        track_path,
-        bpm,
-        duration_ms,
-        None,
-    )
+    write_generated_anlz_bundle_with_first_beat(waveform, paths, track_path, bpm, duration_ms, None)
 }
 
 pub fn write_generated_anlz_bundle_with_first_beat(
     waveform: &WaveformData,
-    dat_path: &Path,
-    ext_path: &Path,
-    twoex_path: &Path,
+    paths: &AnlzBundlePaths,
     track_path: &str,
     bpm: Option<f64>,
     duration_ms: Option<u64>,
@@ -193,12 +187,12 @@ pub fn write_generated_anlz_bundle_with_first_beat(
         first_beat_ms_override,
     );
     let twoex = build_anlz_2ex_file(waveform, track_path, duration_ms);
-    if let Some(parent) = dat_path.parent() {
+    if let Some(parent) = paths.dat_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    atomic_write_bytes(dat_path, &dat)?;
-    atomic_write_bytes(ext_path, &ext)?;
-    atomic_write_bytes(twoex_path, &twoex)?;
+    atomic_write_bytes(&paths.dat_path, &dat)?;
+    atomic_write_bytes(&paths.ext_path, &ext)?;
+    atomic_write_bytes(&paths.twoex_path, &twoex)?;
     Ok(())
 }
 
@@ -1912,27 +1906,27 @@ mod tests {
     #[test]
     fn write_bundle_creates_three_files() {
         let dir = tempdir().unwrap();
-        let dat = dir.path().join("ANLZ0000.DAT");
-        let ext = dir.path().join("ANLZ0000.EXT");
-        let twoex = dir.path().join("ANLZ0000.2EX");
+        let paths = AnlzBundlePaths {
+            dat_path: dir.path().join("ANLZ0000.DAT"),
+            ext_path: dir.path().join("ANLZ0000.EXT"),
+            twoex_path: dir.path().join("ANLZ0000.2EX"),
+        };
 
         write_generated_anlz_bundle(
             &WaveformData::from_peaks(vec![128; 100]),
-            &dat,
-            &ext,
-            &twoex,
+            &paths,
             "",
             None,
             None,
         )
         .unwrap();
 
-        assert!(dat.is_file());
-        assert!(ext.is_file());
-        assert!(twoex.is_file());
-        assert_eq!(&std::fs::read(&dat).unwrap()[0..4], b"PMAI");
-        assert_eq!(&std::fs::read(&ext).unwrap()[0..4], b"PMAI");
-        assert_eq!(&std::fs::read(&twoex).unwrap()[0..4], b"PMAI");
+        assert!(paths.dat_path.is_file());
+        assert!(paths.ext_path.is_file());
+        assert!(paths.twoex_path.is_file());
+        assert_eq!(&std::fs::read(&paths.dat_path).unwrap()[0..4], b"PMAI");
+        assert_eq!(&std::fs::read(&paths.ext_path).unwrap()[0..4], b"PMAI");
+        assert_eq!(&std::fs::read(&paths.twoex_path).unwrap()[0..4], b"PMAI");
     }
 
     #[test]

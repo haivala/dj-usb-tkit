@@ -508,7 +508,6 @@ impl BackendService {
                 mirror_playlist_entries,
                 edb_playlist_id,
                 edb_sort_order,
-                false,
             ) {
                 Ok(WriteExportPdbResult {
                     inserted_tracks,

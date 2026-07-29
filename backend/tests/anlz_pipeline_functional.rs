@@ -7,7 +7,7 @@ use std::io::Write;
 use tempfile::tempdir;
 
 use backend::service::anlz::{
-    WaveformData, build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file,
+    AnlzBundlePaths, WaveformData, build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file,
     write_generated_anlz_bundle,
 };
 
@@ -339,24 +339,21 @@ fn anlz_pipeline_with_generated_kick_pattern() {
 #[test]
 fn anlz_bundle_write_roundtrip() {
     let dir = tempdir().unwrap();
-    let dat_path = dir.path().join("ANLZ0000.DAT");
-    let ext_path = dir.path().join("ANLZ0000.EXT");
-    let twoex_path = dir.path().join("ANLZ0000.2EX");
+    let paths = AnlzBundlePaths {
+        dat_path: dir.path().join("ANLZ0000.DAT"),
+        ext_path: dir.path().join("ANLZ0000.EXT"),
+        twoex_path: dir.path().join("ANLZ0000.2EX"),
+    };
 
     let waveform = WaveformData::from_peaks(vec![80; 500]);
-    write_generated_anlz_bundle(
-        &waveform,
-        &dat_path,
-        &ext_path,
-        &twoex_path,
-        TRACK_PATH,
-        Some(120.0),
-        Some(30_000),
-    )
-    .unwrap();
+    write_generated_anlz_bundle(&waveform, &paths, TRACK_PATH, Some(120.0), Some(30_000)).unwrap();
 
     // All files exist and are valid ANLZ
-    for (path, label) in [(&dat_path, "DAT"), (&ext_path, "EXT"), (&twoex_path, "2EX")] {
+    for (path, label) in [
+        (&paths.dat_path, "DAT"),
+        (&paths.ext_path, "EXT"),
+        (&paths.twoex_path, "2EX"),
+    ] {
         let data = std::fs::read(path).unwrap_or_else(|_| panic!("{label} file should exist"));
         verify_pmai_header(&data, label);
         // All should have PPTH
@@ -367,15 +364,15 @@ fn anlz_bundle_write_roundtrip() {
     }
 
     // Verify DAT has PQTZ
-    let dat = std::fs::read(&dat_path).unwrap();
+    let dat = std::fs::read(&paths.dat_path).unwrap();
     assert!(dat.windows(4).any(|w| w == b"PQTZ"), "DAT should have PQTZ");
 
     // Verify EXT has PWV5
-    let ext = std::fs::read(&ext_path).unwrap();
+    let ext = std::fs::read(&paths.ext_path).unwrap();
     assert!(ext.windows(4).any(|w| w == b"PWV5"), "EXT should have PWV5");
 
     // Verify 2EX has PWV7
-    let twoex = std::fs::read(&twoex_path).unwrap();
+    let twoex = std::fs::read(&paths.twoex_path).unwrap();
     assert!(
         twoex.windows(4).any(|w| w == b"PWV7"),
         "2EX should have PWV7"

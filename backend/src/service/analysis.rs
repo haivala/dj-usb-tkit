@@ -30,7 +30,7 @@ use crate::models::{
     SetAnalysisPausedData,
 };
 
-use super::anlz::{WaveformData, write_generated_anlz_bundle_with_first_beat};
+use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
 use super::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash};
 use super::{BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, now};
@@ -994,22 +994,20 @@ impl BackendService {
                     &path,
                     waveform_detail_bins_for_duration(anlz_duration),
                 )?;
-                let (dat_path, ext_path, twoex_path) =
+                let bundle_paths =
                     local_analysis_bundle_paths(&waveform_dir, &track.id, &track.file_path);
                 let waveform_peaks_path = if waveform.peaks.is_empty() {
                     None
                 } else {
                     write_generated_anlz_bundle_with_first_beat(
                         &waveform,
-                        &dat_path,
-                        &ext_path,
-                        &twoex_path,
+                        &bundle_paths,
                         "",
                         db_bpm,
                         anlz_duration,
                         db_first_beat_ms,
                     )?;
-                    Some(dat_path.to_string_lossy().to_string())
+                    Some(bundle_paths.dat_path.to_string_lossy().to_string())
                 };
                 let waveform_preview =
                     waveform_preview_if_persisted(&waveform, &waveform_peaks_path);
@@ -1533,22 +1531,19 @@ fn analyze_local_track_with_updates(
         });
     }
 
-    let (dat_path, ext_path, twoex_path) =
-        local_analysis_bundle_paths(waveform_dir, track_id, file_path);
+    let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
     let waveform_peaks_path = if waveform.peaks.is_empty() {
         None
     } else {
         write_generated_anlz_bundle_with_first_beat(
             &waveform,
-            &dat_path,
-            &ext_path,
-            &twoex_path,
+            &bundle_paths,
             "",
             bpm,
             duration_ms,
             first_beat_ms,
         )?;
-        Some(dat_path.to_string_lossy().to_string())
+        Some(bundle_paths.dat_path.to_string_lossy().to_string())
     };
 
     let waveform_preview = waveform_preview_if_persisted(&waveform, &waveform_peaks_path);
@@ -1906,7 +1901,7 @@ pub(crate) fn local_analysis_bundle_paths(
     waveform_dir: &Path,
     track_id: &str,
     source_path: &str,
-) -> (PathBuf, PathBuf, PathBuf) {
+) -> AnlzBundlePaths {
     let normalized = source_path.trim().replace('\\', "/").to_ascii_lowercase();
     let seed = if normalized.is_empty() {
         track_id.to_string()
@@ -1914,11 +1909,11 @@ pub(crate) fn local_analysis_bundle_paths(
         format!("src:{normalized}")
     };
     let base = format!("{:08X}", stable_u32_hash(&seed));
-    (
-        waveform_dir.join(format!("{base}.DAT")),
-        waveform_dir.join(format!("{base}.EXT")),
-        waveform_dir.join(format!("{base}.2EX")),
-    )
+    AnlzBundlePaths {
+        dat_path: waveform_dir.join(format!("{base}.DAT")),
+        ext_path: waveform_dir.join(format!("{base}.EXT")),
+        twoex_path: waveform_dir.join(format!("{base}.2EX")),
+    }
 }
 
 pub(crate) fn normalize_text(value: &str) -> String {

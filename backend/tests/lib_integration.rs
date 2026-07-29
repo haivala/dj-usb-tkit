@@ -170,7 +170,7 @@ fn seed_usb_missing_audio_fixture(backend: &BackendCommands, usb_root: &Path) ->
             duration_ms: Some(180_000),
         }],
     };
-    write_pdb(usb_root, &playlist, &manifest, true, None, None, false)
+    write_pdb(usb_root, &playlist, &manifest, true, None, None)
         .expect("seed PDB with missing track");
 
     let db_path = vendor_db_dir(usb_root).join("exportLibrary.db");
@@ -3141,7 +3141,7 @@ fn fetch_usb_playlists_materialization_clears_stale_local_key_when_usb_key_is_mi
         warnings: Vec::new(),
         tracks: vec![manifest_track],
     };
-    write_pdb(&usb, &playlist, &manifest, false, None, None, false).expect("write export pdb");
+    write_pdb(&usb, &playlist, &manifest, false, None, None).expect("write export pdb");
 
     let export_db = vendor_db_dir(&usb).join("exportLibrary.db");
     let conn = open_export_db(&export_db);
@@ -3578,7 +3578,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
         ],
     };
 
-    write_pdb(&usb, &playlist, &manifest, true, None, None, false).expect("write pdb");
+    write_pdb(&usb, &playlist, &manifest, true, None, None).expect("write pdb");
     let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
     let conn = open_export_db(&vendor_db);
     conn.execute(
@@ -3777,7 +3777,7 @@ fn repair_usb_diagnostics_strict_upgrade_is_not_proposed_when_neither_side_is_ri
             duration_ms: None,
         }],
     };
-    write_pdb(&usb, &playlist, &manifest, true, None, None, false).expect("write thin pdb");
+    write_pdb(&usb, &playlist, &manifest, true, None, None).expect("write thin pdb");
 
     let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
     let conn = open_export_db(&vendor_db);

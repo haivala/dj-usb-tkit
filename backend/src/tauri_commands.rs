@@ -266,7 +266,6 @@ async fn run_usb_job<T, F>(
     started_message: &str,
     completed_message: &str,
     initial_progress: Option<(usize, String)>,
-    task_name: &'static str,
     task: F,
 ) -> Result<ApiResponse<T>, String>
 where
@@ -287,7 +286,7 @@ where
     let response = match tauri::async_runtime::spawn_blocking(task).await {
         Ok(resp) => resp,
         Err(err) => ApiResponse::failure(
-            crate::error::BackendError::Internal(format!("{task_name} task failed: {err}")).into(),
+            crate::error::BackendError::Internal(format!("{stage} task failed: {err}")).into(),
         ),
     };
 
@@ -310,7 +309,6 @@ async fn run_usb_job_with_progress<T, F>(
     stage: &str,
     started_message: &str,
     completed_message: &str,
-    task_name: &'static str,
     task: F,
 ) -> Result<ApiResponse<T>, String>
 where
@@ -354,7 +352,7 @@ where
     {
         Ok(resp) => resp,
         Err(err) => ApiResponse::failure(
-            crate::error::BackendError::Internal(format!("{task_name} task failed: {err}")).into(),
+            crate::error::BackendError::Internal(format!("{stage} task failed: {err}")).into(),
         ),
     };
 
@@ -729,7 +727,6 @@ pub async fn validate_usb_root(
         "USB: Validating root",
         "USB: Root validation complete",
         Some((30, "USB: Checking folders and permissions".to_string())),
-        "validate_usb_root",
         move || commands.validate_usb_root(request),
     )
     .await
@@ -748,7 +745,6 @@ pub async fn fetch_usb_playlists(
         "fetch_usb_playlists",
         "USB: Reading playlists",
         "USB: Playlist read complete",
-        "fetch_usb_playlists",
         move |mut progress| {
             commands.fetch_usb_playlists_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -771,7 +767,6 @@ pub async fn fetch_usb_histories(
         "fetch_usb_histories",
         "USB: Reading history",
         "USB: History read complete",
-        "fetch_usb_histories",
         move |mut progress| {
             commands.fetch_usb_histories_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -795,7 +790,6 @@ pub async fn get_usb_player_menu_config(
         "USB: Loading player menu",
         "USB: Player menu loaded",
         Some((40, "USB: Reading menu configuration".to_string())),
-        "get_usb_player_menu_config",
         move || commands.get_usb_player_menu_config(request),
     )
     .await
@@ -815,7 +809,6 @@ pub async fn update_usb_player_menu_config(
         "USB: Updating player menu",
         "USB: Player menu updated",
         Some((45, "USB: Writing menu configuration".to_string())),
-        "update_usb_player_menu_config",
         move || commands.update_usb_player_menu_config(request),
     )
     .await
@@ -835,7 +828,6 @@ pub async fn sync_usb_player_menu_edb_to_pdb(
         "USB: Fixing PDB sync",
         "USB: PDB synced to active menu",
         Some((45, "USB: Writing PDB from active menu".to_string())),
-        "sync_usb_player_menu_edb_to_pdb",
         move || commands.sync_usb_player_menu_edb_to_pdb(request),
     )
     .await
@@ -854,7 +846,6 @@ pub async fn remove_usb_playlist(
         "remove_usb_playlist",
         "USB: Removing playlist",
         "USB: Playlist removal complete",
-        "remove_usb_playlist",
         move |mut progress| {
             commands.remove_usb_playlist_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -877,7 +868,6 @@ pub async fn reorder_usb_playlists(
         "reorder_usb_playlists",
         "USB: Saving playlist order",
         "USB: Playlist order saved",
-        "reorder_usb_playlists",
         move |mut progress| {
             commands.reorder_usb_playlists_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1132,7 +1122,6 @@ pub async fn export_to_usb(
         "export_to_usb",
         "USB: Exporting playlist",
         "USB: Export complete",
-        "export_to_usb",
         move |mut progress| {
             commands.export_to_usb_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1155,7 +1144,6 @@ pub async fn run_usb_diagnostics(
         "run_usb_diagnostics",
         "USB: Running diagnostics",
         "USB: Diagnostics complete",
-        "run_usb_diagnostics",
         move |mut progress| {
             commands.run_usb_diagnostics_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1178,7 +1166,6 @@ pub async fn run_usb_parity_report(
         "run_usb_parity_report",
         "USB: Running parity report",
         "USB: Parity report complete",
-        "run_usb_parity_report",
         move |mut progress| {
             commands.run_usb_parity_report_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1201,7 +1188,6 @@ pub async fn repair_usb_diagnostics(
         "repair_usb_diagnostics",
         "USB: Planning repair fixes",
         "USB: Repair planning complete",
-        "repair_usb_diagnostics",
         move |mut progress| {
             commands.repair_usb_diagnostics_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1232,7 +1218,6 @@ pub async fn initialize_usb(
         "USB: Initializing structure",
         "USB: Initialization complete",
         Some((40, "USB: Creating External library directories".to_string())),
-        "initialize_usb",
         move || commands.initialize_usb(request),
     )
     .await

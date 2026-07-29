@@ -23,7 +23,7 @@ use crate::pdb_reader::parse_pdb;
 
 use super::BackendService;
 use super::analysis::build_waveform_preview_from_audio;
-use super::anlz::{WaveformData, write_generated_anlz_bundle};
+use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle};
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbTrackRowData, load_table_columns,
     remove_track_ids_from_pdb_playlist_entries, replace_export_playlist_row_with_identity,
@@ -4165,7 +4165,6 @@ impl BackendService {
                 true,
                 Some(mpl.playlist_id),
                 Some(mpl.sort_order),
-                true,
             ) {
                 warnings.push(format!(
                     "strict parity upgrade: PDB rewrite failed for '{}': {err}",
@@ -4448,14 +4447,14 @@ impl BackendService {
                 continue;
             }
             let base_dir = target.analysis_dir;
-            let dat = base_dir.join("ANLZ0000.DAT");
-            let ext = base_dir.join("ANLZ0000.EXT");
-            let twoex = base_dir.join("ANLZ0000.2EX");
+            let bundle_paths = AnlzBundlePaths {
+                dat_path: base_dir.join("ANLZ0000.DAT"),
+                ext_path: base_dir.join("ANLZ0000.EXT"),
+                twoex_path: base_dir.join("ANLZ0000.2EX"),
+            };
             if let Err(err) = write_generated_anlz_bundle(
                 &waveform,
-                &dat,
-                &ext,
-                &twoex,
+                &bundle_paths,
                 &target.track_path,
                 None,
                 None,
