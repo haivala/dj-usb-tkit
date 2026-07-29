@@ -2223,22 +2223,38 @@ fn build_manifest_for_merged_playlist(
     (playlist_data, manifest)
 }
 
+/// Merged track metadata fields shared by [`build_merged_pdb_track_row`] call sites.
+struct MergedTrackFields<'a> {
+    title: &'a str,
+    artist: &'a str,
+    album: &'a Option<String>,
+    key: &'a Option<String>,
+    track_number: Option<u32>,
+    bpm: Option<f64>,
+    duration_ms: Option<u64>,
+    media_path: &'a str,
+    analysis_path: &'a str,
+}
+
 /// Build a PDB track row from merged metadata.
 /// When an existing PDB track is available, preserve non-core linkage fields.
 fn build_merged_pdb_track_row(
     track_id: u32,
     existing_pdb: Option<&crate::pdb_reader::PdbTrackRow>,
-    title: &str,
-    artist: &str,
-    album: &Option<String>,
-    key: &Option<String>,
-    track_number: Option<u32>,
-    bpm: Option<f64>,
-    duration_ms: Option<u64>,
-    media_path: &str,
-    analysis_path: &str,
+    fields: MergedTrackFields,
     parsed: &crate::pdb_reader::ParsedPdb,
 ) -> PdbTrackRowData {
+    let MergedTrackFields {
+        title,
+        artist,
+        album,
+        key,
+        track_number,
+        bpm,
+        duration_ms,
+        media_path,
+        analysis_path,
+    } = fields;
     // Find or create dictionary IDs for artist/album/key
     let artist_id = if !artist.is_empty() {
         let canon = canonicalize_playlist_name(artist);
@@ -3922,15 +3938,17 @@ impl BackendService {
                     let pdb_row = build_merged_pdb_track_row(
                         track_id,
                         pdb_track,
-                        &title,
-                        &artist,
-                        &album,
-                        &key,
-                        track_number,
-                        bpm,
-                        duration_ms,
-                        &media_path,
-                        &analysis_path,
+                        MergedTrackFields {
+                            title: &title,
+                            artist: &artist,
+                            album: &album,
+                            key: &key,
+                            track_number,
+                            bpm,
+                            duration_ms,
+                            media_path: &media_path,
+                            analysis_path: &analysis_path,
+                        },
                         &parsed,
                     );
 
@@ -4009,15 +4027,17 @@ impl BackendService {
                         let pdb_row = build_merged_pdb_track_row(
                             pdb_track.id,
                             Some(pdb_track),
-                            &pdb_track.title,
-                            artist_name,
-                            &album,
-                            &key,
-                            track_number_val,
-                            bpm_val,
-                            duration_ms_val,
-                            &pdb_track.track_file_path,
-                            &pdb_track.anlz_path,
+                            MergedTrackFields {
+                                title: &pdb_track.title,
+                                artist: artist_name,
+                                album: &album,
+                                key: &key,
+                                track_number: track_number_val,
+                                bpm: bpm_val,
+                                duration_ms: duration_ms_val,
+                                media_path: &pdb_track.track_file_path,
+                                analysis_path: &pdb_track.anlz_path,
+                            },
                             &parsed,
                         );
 
@@ -4074,15 +4094,17 @@ impl BackendService {
                     let pdb_row = build_merged_pdb_track_row(
                         pdb_track.id,
                         Some(pdb_track),
-                        &pdb_track.title,
-                        artist_name,
-                        &album,
-                        &key,
-                        track_number_val,
-                        bpm_val,
-                        duration_ms_val,
-                        &pdb_track.track_file_path,
-                        &pdb_track.anlz_path,
+                        MergedTrackFields {
+                            title: &pdb_track.title,
+                            artist: artist_name,
+                            album: &album,
+                            key: &key,
+                            track_number: track_number_val,
+                            bpm: bpm_val,
+                            duration_ms: duration_ms_val,
+                            media_path: &pdb_track.track_file_path,
+                            analysis_path: &pdb_track.anlz_path,
+                        },
                         &parsed,
                     );
                     merged_tracks.push(MergedTrack {
