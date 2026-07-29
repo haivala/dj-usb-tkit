@@ -3113,7 +3113,7 @@ fn append_rows_to_existing_page_preserving_footer_state(
 }
 
 fn append_rows_to_t07_tombstone_pages_in_place(
-    bytes: &mut Vec<u8>,
+    bytes: &mut [u8],
     rows: &[Vec<u8>],
     page_size: usize,
 ) -> BackendResult<(usize, usize)> {
@@ -4075,7 +4075,7 @@ pub(crate) fn compute_additive_diff(
 /// `last_page` in the table pointer steps back when the tail data page(s)
 /// become empty after removal.
 pub(crate) fn remove_t08_entries_in_place(
-    bytes: &mut Vec<u8>,
+    bytes: &mut [u8],
     page_size: usize,
     victims: &[T08EntryKey],
 ) -> BackendResult<()> {
@@ -4166,7 +4166,7 @@ pub(crate) fn remove_t08_entries_in_place(
 }
 
 fn synthesize_t19_runtime_rows_in_place(
-    bytes: &mut Vec<u8>,
+    bytes: &mut [u8],
     row_count: usize,
     page_size: usize,
 ) -> BackendResult<()> {
@@ -4467,7 +4467,7 @@ fn mark_track_slot_inactive(
 }
 
 pub(crate) fn patch_playlist_tree_sort_orders_in_place(
-    bytes: &mut Vec<u8>,
+    bytes: &mut [u8],
     patches: &[PdbPlaylistTreeSortOrderPatch],
     page_size: usize,
 ) -> BackendResult<usize> {

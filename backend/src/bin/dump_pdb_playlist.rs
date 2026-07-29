@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use backend::pdb_reader::parse_pdb;
 
@@ -160,7 +160,7 @@ struct TrackDump {
     missing_track_row: bool,
 }
 
-fn print_text(results: &[PlaylistDump], pdb_path: &PathBuf) {
+fn print_text(results: &[PlaylistDump], pdb_path: &Path) {
     println!("pdb={}", pdb_path.display());
     for playlist in results {
         println!(
