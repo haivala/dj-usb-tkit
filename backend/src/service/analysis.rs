@@ -656,9 +656,11 @@ impl BackendService {
                             &track,
                             &waveform_dir,
                             &artwork_dir,
-                            bpm_min,
-                            bpm_max,
-                            engine,
+                            BpmDetectionParams {
+                                bpm_min,
+                                bpm_max,
+                                engine,
+                            },
                             |update| {
                                 let _ = tx_partial.send(WorkerEvent::Partial {
                                     worker_idx,
@@ -828,9 +830,11 @@ impl BackendService {
                         &track,
                         &waveform_dir,
                         &artwork_dir,
-                        bpm_min,
-                        bpm_max,
-                        engine,
+                        BpmDetectionParams {
+                            bpm_min,
+                            bpm_max,
+                            engine,
+                        },
                         |update| {
                             on_progress(&build_partial_progress(
                                 completed_count,
@@ -1312,9 +1316,7 @@ fn analyze_track_with_usb_fallback_with_updates<F>(
     track: &LocalTrackForAnalysis,
     waveform_dir: &Path,
     artwork_dir: &Path,
-    bpm_min: u32,
-    bpm_max: u32,
-    engine: AnalysisEngine,
+    bpm_params: BpmDetectionParams,
     mut on_update: F,
 ) -> BackendResult<LocalAnalysisResult>
 where
@@ -1325,9 +1327,7 @@ where
         &track.id,
         waveform_dir,
         artwork_dir,
-        bpm_min,
-        bpm_max,
-        engine,
+        bpm_params,
         &mut on_update,
     )
 }
@@ -1465,16 +1465,26 @@ fn resolve_worker_cap_for_engine(engine: AnalysisEngine) -> WorkerCapBreakdown {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BpmDetectionParams {
+    bpm_min: u32,
+    bpm_max: u32,
+    engine: AnalysisEngine,
+}
+
 fn analyze_local_track_with_updates(
     file_path: &str,
     track_id: &str,
     waveform_dir: &Path,
     artwork_dir: &Path,
-    bpm_min: u32,
-    bpm_max: u32,
-    engine: AnalysisEngine,
+    bpm_params: BpmDetectionParams,
     on_update: &mut dyn FnMut(TrackPartialUpdate),
 ) -> BackendResult<LocalAnalysisResult> {
+    let BpmDetectionParams {
+        bpm_min,
+        bpm_max,
+        engine,
+    } = bpm_params;
     let path = PathBuf::from(file_path);
     if !path.exists() {
         return Err(BackendError::NotFound(format!(
