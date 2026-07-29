@@ -1279,12 +1279,10 @@ pub(crate) fn diagnose_contents_integrity(
     let mismatch = contents_count as i64 - indexed_count as i64;
     let mismatch_status = if mismatch == 0 {
         DiagStatus::Pass
-    } else if mismatch > 0 {
-        DiagStatus::Warn
-    } else if mismatch.unsigned_abs() <= 5 {
-        DiagStatus::Warn
-    } else {
+    } else if mismatch < 0 && mismatch.unsigned_abs() > 5 {
         DiagStatus::Fail
+    } else {
+        DiagStatus::Warn
     };
     checks.push(DiagCheck {
         label: "Count match".to_string(),
@@ -3344,27 +3342,29 @@ mod tests {
 
     #[test]
     fn parity_counts_use_unique_tracks_when_pdb_has_duplicate_entries() {
-        let mut parsed = ParsedPdb::default();
-        parsed.tracks = vec![
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(1, "A", 1, "/Contents/A.mp3")
-            },
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(2, "B", 1, "/Contents/B.mp3")
-            },
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(3, "C", 1, "/Contents/C.mp3")
-            },
-        ];
+        let mut parsed = ParsedPdb {
+            tracks: vec![
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(1, "A", 1, "/Contents/A.mp3")
+                },
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(2, "B", 1, "/Contents/B.mp3")
+                },
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(3, "C", 1, "/Contents/C.mp3")
+                },
+            ],
+            ..Default::default()
+        };
         parsed.artists.insert(1, "Artist".to_string());
         parsed.playlist_tree.push(PdbPlaylistTreeRow {
             id: 10,
@@ -4016,27 +4016,29 @@ mod tests {
 
     #[test]
     fn playlist_resolution_uses_unique_entries_when_duplicates_exist() {
-        let mut parsed = ParsedPdb::default();
-        parsed.tracks = vec![
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(1, "A", 1, "/Contents/A.mp3")
-            },
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(2, "B", 1, "/Contents/B.mp3")
-            },
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(3, "C", 1, "/Contents/C.mp3")
-            },
-        ];
+        let mut parsed = ParsedPdb {
+            tracks: vec![
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(1, "A", 1, "/Contents/A.mp3")
+                },
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(2, "B", 1, "/Contents/B.mp3")
+                },
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(3, "C", 1, "/Contents/C.mp3")
+                },
+            ],
+            ..Default::default()
+        };
         parsed.artists.insert(1, "Artist".to_string());
         parsed.playlist_tree.push(PdbPlaylistTreeRow {
             id: 10,
@@ -4075,27 +4077,29 @@ mod tests {
 
     #[test]
     fn playlist_resolution_collapses_duplicate_leaf_names() {
-        let mut parsed = ParsedPdb::default();
-        parsed.tracks = vec![
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(1, "A", 1, "/Contents/A.mp3")
-            },
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(2, "B", 1, "/Contents/B.mp3")
-            },
-            PdbTrackRow {
-                tempo_x100: 0,
-                duration_seconds: None,
-                anlz_path: String::new(),
-                ..make_pdb_track(3, "C", 1, "/Contents/C.mp3")
-            },
-        ];
+        let mut parsed = ParsedPdb {
+            tracks: vec![
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(1, "A", 1, "/Contents/A.mp3")
+                },
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(2, "B", 1, "/Contents/B.mp3")
+                },
+                PdbTrackRow {
+                    tempo_x100: 0,
+                    duration_seconds: None,
+                    anlz_path: String::new(),
+                    ..make_pdb_track(3, "C", 1, "/Contents/C.mp3")
+                },
+            ],
+            ..Default::default()
+        };
         parsed.artists.insert(1, "Artist".to_string());
         parsed.playlist_tree.push(PdbPlaylistTreeRow {
             id: 10,

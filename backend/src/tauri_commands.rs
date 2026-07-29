@@ -1117,11 +1117,7 @@ pub async fn analyze_new_tracks(
             let current = progress.current;
             let total = progress.total;
             let file_path = progress.file_path.as_str();
-            let percent = if total == 0 {
-                100
-            } else {
-                ((current * 100) / total).min(100)
-            };
+            let percent = (current * 100).checked_div(total).unwrap_or(100).min(100);
             let file_name = std::path::Path::new(file_path)
                 .file_name()
                 .and_then(|s| s.to_str())

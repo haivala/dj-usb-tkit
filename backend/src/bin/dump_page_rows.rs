@@ -94,8 +94,6 @@ fn parse_pdb_string(row: &[u8], offset: usize) -> String {
     let data = &row[offset + 4..end];
 
     let code = n0;
-    let b7 = (code & 0b0100_0000) != 0;
-    let b6 = (code & 0b0010_0000) != 0;
     let b5 = (code & 0b0001_0000) != 0;
     let b8 = (code & 0b1000_0000) != 0;
     if b5 && b8 {
@@ -106,15 +104,8 @@ fn parse_pdb_string(row: &[u8], offset: usize) -> String {
         String::from_utf16_lossy(&u16s)
             .trim_end_matches('\0')
             .to_string()
-    } else if b6 {
-        String::from_utf8_lossy(data)
-            .trim_end_matches('\0')
-            .to_string()
-    } else if b7 {
-        String::from_utf8_lossy(data)
-            .trim_end_matches('\0')
-            .to_string()
     } else {
+        // ascii and utf8 flag bits both decode the same way here.
         String::from_utf8_lossy(data)
             .trim_end_matches('\0')
             .to_string()

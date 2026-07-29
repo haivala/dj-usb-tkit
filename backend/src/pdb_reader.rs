@@ -1420,9 +1420,11 @@ mod tests {
         let mut first_page_of_type = page_idx;
 
         for (i, (ttype, _)) in table_pages.iter().enumerate() {
-            if prev_type.is_some() && prev_type != Some(*ttype) {
+            if let Some(prev) = prev_type
+                && prev != *ttype
+            {
                 // Finish previous table
-                table_info.push((prev_type.unwrap(), first_page_of_type, page_idx - 1));
+                table_info.push((prev, first_page_of_type, page_idx - 1));
                 first_page_of_type = page_idx;
             }
             prev_type = Some(*ttype);

@@ -280,8 +280,7 @@ fn anlz_pipeline_with_generated_kick_pattern() {
         }
     }
     // For bass-dominant kick pattern, low energy should dominate high in most entries
-    if pwv4_nonzero > 0 {
-        let pct = pwv4_low_dominant * 100 / pwv4_nonzero;
+    if let Some(pct) = (pwv4_low_dominant * 100).checked_div(pwv4_nonzero) {
         assert!(
             pct > 50,
             "PWV4: bass-dominant input should have low > high in majority of entries ({pct}%)"

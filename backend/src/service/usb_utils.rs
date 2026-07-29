@@ -1503,10 +1503,12 @@ mod diag_tests {
 
     #[test]
     fn playlist_resolution_all_resolved() {
-        let mut parsed = ParsedPdb::default();
-        parsed.tracks = vec![make_track(1), make_track(2), make_track(3)];
-        parsed.playlist_tree = vec![make_tree_leaf(10, "MyPlaylist")];
-        parsed.playlist_entries = vec![make_entry(10, 1), make_entry(10, 2), make_entry(10, 3)];
+        let parsed = ParsedPdb {
+            tracks: vec![make_track(1), make_track(2), make_track(3)],
+            playlist_tree: vec![make_tree_leaf(10, "MyPlaylist")],
+            playlist_entries: vec![make_entry(10, 1), make_entry(10, 2), make_entry(10, 3)],
+            ..Default::default()
+        };
 
         let (section, details) = diagnose_playlist_resolution(Some(&parsed));
         assert!(matches!(section.status, DiagStatus::Pass));
@@ -1518,11 +1520,13 @@ mod diag_tests {
 
     #[test]
     fn playlist_resolution_partial_warns() {
-        let mut parsed = ParsedPdb::default();
-        parsed.tracks = vec![make_track(1), make_track(2)];
-        parsed.playlist_tree = vec![make_tree_leaf(10, "Partial")];
         // 10 entries, only 2 track IDs exist (1, 2), rest are orphaned (3..10)
-        parsed.playlist_entries = (1..=10).map(|i| make_entry(10, i)).collect();
+        let parsed = ParsedPdb {
+            tracks: vec![make_track(1), make_track(2)],
+            playlist_tree: vec![make_tree_leaf(10, "Partial")],
+            playlist_entries: (1..=10).map(|i| make_entry(10, i)).collect(),
+            ..Default::default()
+        };
 
         let (section, details) = diagnose_playlist_resolution(Some(&parsed));
         // 2/10 = 20% < 80% threshold → FAIL
@@ -1533,11 +1537,13 @@ mod diag_tests {
 
     #[test]
     fn playlist_resolution_borderline_warn() {
-        let mut parsed = ParsedPdb::default();
         // 9 tracks, 10 entries → 90% resolution → WARN (not PASS, < 100%)
-        parsed.tracks = (1..=9).map(make_track).collect();
-        parsed.playlist_tree = vec![make_tree_leaf(10, "Almost")];
-        parsed.playlist_entries = (1..=10).map(|i| make_entry(10, i)).collect();
+        let parsed = ParsedPdb {
+            tracks: (1..=9).map(make_track).collect(),
+            playlist_tree: vec![make_tree_leaf(10, "Almost")],
+            playlist_entries: (1..=10).map(|i| make_entry(10, i)).collect(),
+            ..Default::default()
+        };
 
         let (section, details) = diagnose_playlist_resolution(Some(&parsed));
         assert!(matches!(section.status, DiagStatus::Warn));
@@ -1546,10 +1552,12 @@ mod diag_tests {
 
     #[test]
     fn playlist_resolution_empty_playlist_passes() {
-        let mut parsed = ParsedPdb::default();
-        parsed.tracks = vec![make_track(1)];
-        parsed.playlist_tree = vec![make_tree_leaf(10, "Empty")];
         // No entries for playlist 10
+        let parsed = ParsedPdb {
+            tracks: vec![make_track(1)],
+            playlist_tree: vec![make_tree_leaf(10, "Empty")],
+            ..Default::default()
+        };
 
         let (section, details) = diagnose_playlist_resolution(Some(&parsed));
         assert!(matches!(section.status, DiagStatus::Pass));
@@ -1567,15 +1575,17 @@ mod diag_tests {
 
     #[test]
     fn playlist_resolution_multiple_playlists() {
-        let mut parsed = ParsedPdb::default();
-        parsed.tracks = vec![make_track(1), make_track(2), make_track(3)];
-        parsed.playlist_tree = vec![make_tree_leaf(10, "Full"), make_tree_leaf(20, "Half")];
-        parsed.playlist_entries = vec![
-            make_entry(10, 1),
-            make_entry(10, 2),
-            make_entry(20, 3),
-            make_entry(20, 999), // orphaned
-        ];
+        let parsed = ParsedPdb {
+            tracks: vec![make_track(1), make_track(2), make_track(3)],
+            playlist_tree: vec![make_tree_leaf(10, "Full"), make_tree_leaf(20, "Half")],
+            playlist_entries: vec![
+                make_entry(10, 1),
+                make_entry(10, 2),
+                make_entry(20, 3),
+                make_entry(20, 999), // orphaned
+            ],
+            ..Default::default()
+        };
 
         let (section, details) = diagnose_playlist_resolution(Some(&parsed));
         assert_eq!(details.len(), 2);

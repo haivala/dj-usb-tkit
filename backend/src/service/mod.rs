@@ -1011,7 +1011,7 @@ impl BackendService {
     }
 
     pub fn search_tracks(&self, req: SearchTracksRequest) -> BackendResult<SearchTracksData> {
-        let limit = req.limit.max(1).min(TRACK_QUERY_LIMIT_MAX);
+        let limit = req.limit.clamp(1, TRACK_QUERY_LIMIT_MAX);
         let query = req.query.trim();
         let signature =
             build_track_cursor_signature(&[TRACK_CURSOR_VERSION, "search_tracks", query]);
@@ -1079,7 +1079,7 @@ impl BackendService {
     }
 
     pub fn list_tracks(&self, req: ListTracksRequest) -> BackendResult<ListTracksData> {
-        let limit = req.limit.max(1).min(TRACK_QUERY_LIMIT_MAX);
+        let limit = req.limit.clamp(1, TRACK_QUERY_LIMIT_MAX);
         let signature = build_track_cursor_signature(&[TRACK_CURSOR_VERSION, "list_tracks"]);
         let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
         let fetch_limit = limit + 1;
@@ -1134,7 +1134,7 @@ impl BackendService {
             });
         }
 
-        let limit = req.limit.max(1).min(5000);
+        let limit = req.limit.clamp(1, 5000);
         let query = req.query.trim().to_lowercase();
         let roots_signature = source_roots.join("\u{1F}");
         let signature = build_track_cursor_signature(&[

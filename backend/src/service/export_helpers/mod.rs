@@ -167,12 +167,11 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
         ) = (
             table_ptr_fields(before, table_type),
             table_ptr_fields(after, table_type),
-        ) {
-            if before_first != after_first {
-                issues.push(format!(
-                    "t{table_type:02} first_page changed {before_first}->{after_first}"
-                ));
-            }
+        ) && before_first != after_first
+        {
+            issues.push(format!(
+                "t{table_type:02} first_page changed {before_first}->{after_first}"
+            ));
         }
     }
 

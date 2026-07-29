@@ -172,7 +172,6 @@ impl BackendService {
         on_progress(0, total_steps, "USB: Preparing export");
 
         let mut warnings = Vec::<String>::new();
-        let playlist = playlist;
         ensure_playlist_tracks_analysis_ready(&usb_root, &playlist)?;
         let local_conn = self.db.connect()?;
         Self::ensure_track_export_identity_schema(&local_conn)?;

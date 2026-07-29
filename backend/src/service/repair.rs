@@ -533,6 +533,7 @@ fn apply_pdb_wrong_history_page_shape_repair(
 /// Valid combinations:
 ///   - flags=0x34 (active page): `(u5=2, num_rl=0)`
 ///   - flags=0x24 (sealed page): `(u5=1, num_rl=nrs-1)` OR `(u5=2, num_rl=0)` (player compat)
+///
 /// Only active (0x34) pages with wrong footer are flagged — they affect player loading.
 #[derive(Debug, Clone)]
 pub(super) struct WrongTrackU5Page {

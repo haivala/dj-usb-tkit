@@ -2476,11 +2476,10 @@ mod tests {
         AnalysisEngine, EssentiaResult, build_waveform_data_from_samples,
         build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
         essentia_result_has_detected_values, has_memory_headroom_for_engine,
-        resolve_analysis_bpm_range,
-        resolve_analysis_parallelism_budget_with_cap, resolve_analysis_worker_count_with_cap,
-        resolve_memory_worker_cap, resolve_worker_cap_for_engine, strip_appimage_lib_path,
-        waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
-        waveform_preview_if_persisted,
+        resolve_analysis_bpm_range, resolve_analysis_parallelism_budget_with_cap,
+        resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
+        resolve_worker_cap_for_engine, strip_appimage_lib_path, waveform_detail_bins_for_duration,
+        waveform_detail_entries_for_duration, waveform_preview_if_persisted,
     };
     use crate::service::WAVEFORM_PREVIEW_BINS;
     use crate::service::anlz::WaveformData;

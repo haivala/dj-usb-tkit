@@ -1,7 +1,7 @@
-/// compare_pdb <pdb-a> <pdb-b>
-///
-/// Byte-level diff between two PDB files annotated with page/offset context.
-/// Reports changed bytes grouped by page.
+//! compare_pdb <pdb-a> <pdb-b>
+//!
+//! Byte-level diff between two PDB files annotated with page/offset context.
+//! Reports changed bytes grouped by page.
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
