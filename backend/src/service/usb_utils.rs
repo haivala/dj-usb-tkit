@@ -993,17 +993,28 @@ fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
         return;
     }
 
-    fn write_data_page(
-        bytes: &mut [u8],
+    struct PageHeaderFields {
         page_idx: u32,
         table_type: u32,
         next_page: u32,
         seq: u32,
         u3: u8,
+    }
+
+    fn write_data_page(
+        bytes: &mut [u8],
+        header: PageHeaderFields,
         rows: &[&[u8]],
         rowpf_words: &[u16],
         tranrf_words: &[u16],
     ) {
+        let PageHeaderFields {
+            page_idx,
+            table_type,
+            next_page,
+            seq,
+            u3,
+        } = header;
         let base = page_idx as usize * PAGE_SIZE;
         let Some(page) = bytes.get_mut(base..base + PAGE_SIZE) else {
             return;
@@ -1109,33 +1120,39 @@ fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
     let t18_refs = t18_rows.iter().map(|r| r.as_slice()).collect::<Vec<_>>();
     write_data_page(
         bytes,
-        36,
-        17,
-        44,
-        4,
-        0xc0,
+        PageHeaderFields {
+            page_idx: 36,
+            table_type: 17,
+            next_page: 44,
+            seq: 4,
+            u3: 0xc0,
+        },
         &t17_refs,
         &[0xffff, 0x003f],
         &[0xffff, 0x003f],
     );
     write_data_page(
         bytes,
-        38,
-        18,
-        45,
-        5,
-        0x20,
+        PageHeaderFields {
+            page_idx: 38,
+            table_type: 18,
+            next_page: 45,
+            seq: 5,
+            u3: 0x20,
+        },
         &t18_refs,
         &[0xffff, 0x0001],
         &[0xffff, 0x0001],
     );
     write_data_page(
         bytes,
-        40,
-        19,
-        41,
-        31,
-        0x20,
+        PageHeaderFields {
+            page_idx: 40,
+            table_type: 19,
+            next_page: 41,
+            seq: 31,
+            u3: 0x20,
+        },
         &[&t19_row],
         &[0x0001],
         &[0x0001],
