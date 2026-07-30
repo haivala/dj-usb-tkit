@@ -12,6 +12,8 @@
 
 ## Unreleased
 
+## 0.1.8
+
 - Fix the play/pause transport button needing multiple clicks — sometimes to
   stop a playing track, sometimes to switch to a different track, sometimes
   silently doing nothing at all. Root cause was a single non-keyed "is a
