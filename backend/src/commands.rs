@@ -4,25 +4,25 @@ use crate::error::BackendResult;
 use crate::error::ErrorPayload;
 use crate::models::{
     AddTracksToPlaylistData, AddTracksToPlaylistRequest, AnalyzeNewTracksData,
-    AnalyzeNewTracksRequest, AnalyzeTrackPieceData, AnalyzeTrackPieceRequest, ApiResponse,
-    BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
-    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
-    DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
-    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
-    GetTracksByIdsRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
-    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
-    ListPlaylistsData, ListTracksData, ListTracksRequest, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
-    PlaybackPreflightRequest, PlaybackStatusData, RelocateSourceRootData,
-    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
-    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
-    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
-    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, RunUsbDiagnosticsData,
-    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData,
-    ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData, SearchTracksRequest,
-    SetAnalysisPausedData, SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
+    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
+    CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
+    DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData, ExportToUsbData,
+    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
+    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, ListPlaylistsData,
+    ListTracksData, ListTracksRequest, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
+    PlayTrackData, PlayTrackRequest, PlaybackPreflightData, PlaybackPreflightRequest,
+    PlaybackStatusData, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
+    RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
+    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
+    ResolvePlaybackSourceRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
+    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
+    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
+    SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
     ValidateUsbRootRequest,
 };
@@ -309,13 +309,6 @@ impl BackendCommands {
             self.service
                 .analyze_new_tracks_with_progress(req, on_progress),
         )
-    }
-
-    pub fn analyze_track_piece(
-        &self,
-        req: AnalyzeTrackPieceRequest,
-    ) -> ApiResponse<AnalyzeTrackPieceData> {
-        wrap(self.service.analyze_track_piece(req))
     }
 
     pub fn set_analysis_paused(&self, paused: bool) -> ApiResponse<SetAnalysisPausedData> {

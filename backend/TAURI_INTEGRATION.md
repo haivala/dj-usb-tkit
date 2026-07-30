@@ -87,7 +87,6 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `export_to_usb`
 - Analysis:
   - `analyze_new_tracks`
-  - `analyze_track_piece`
   - `set_analysis_paused`
   - `cancel_analysis`
   - `download_essentia`

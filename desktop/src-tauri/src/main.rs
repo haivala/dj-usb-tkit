@@ -774,7 +774,6 @@ fn main() {
             backend::tauri_commands::reorder_usb_playlists,
             backend::tauri_commands::inspect_usb_track,
             backend::tauri_commands::analyze_new_tracks,
-            backend::tauri_commands::analyze_track_piece,
             backend::tauri_commands::set_analysis_paused,
             backend::tauri_commands::cancel_analysis,
             backend::tauri_commands::export_to_usb,

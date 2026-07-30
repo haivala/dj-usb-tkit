@@ -12,13 +12,12 @@ use walkdir::WalkDir;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, AnalyzeTrackPieceRequest,
-    CreatePlaylistRequest, DedupeMode, ExportToUsbOptions, ExportToUsbRequest,
-    FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, GetTracksByIdsRequest,
-    InitializeUsbRequest, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistRequest,
-    RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceRequest,
-    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest,
-    SetFrontendSettingRequest, WarningEntry,
+    AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode,
+    ExportToUsbOptions, ExportToUsbRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
+    GetTracksByIdsRequest, InitializeUsbRequest, RemoveTracksBySourceRootsRequest,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
+    ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::BackendService;
@@ -4287,9 +4286,9 @@ fn analyze_from_usb_track_uses_local_audio_only_even_when_usb_has_waveform() {
 }
 
 #[test]
-fn analyze_track_piece_essentia_without_node_returns_error_not_panic() {
-    // When engine is set to essentia but Node.js is not available, analyze_track_piece
-    // for the bpm_key piece should return a graceful error (not panic).
+fn analyze_new_tracks_essentia_without_node_returns_error_not_panic() {
+    // When engine is set to essentia but Node.js is not available, analyze_new_tracks'
+    // bpm/key detection step should return a graceful error (not panic).
     let _guard = test_env_lock().lock().expect("env lock");
     let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
     let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
@@ -4338,23 +4337,28 @@ fn analyze_track_piece_essentia_without_node_returns_error_not_panic() {
         .expect("scanned track")
         .clone();
 
-    // analyze_track_piece with piece=bpm_key should return an error, not panic.
-    let resp = backend.analyze_track_piece(AnalyzeTrackPieceRequest {
-        track_id: track.id.clone(),
-        piece: "bpm_key".to_string(),
+    // analyze_new_tracks for this track should return an error, not panic.
+    let resp = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
         bpm_min: None,
         bpm_max: None,
+        track_ids: vec![track.id.clone()],
         analysis_engine: None,
     });
-    // We expect either a graceful error (ok=false) or success with no BPM/key
-    // (essentia returns None when runner fails). Either way, no panic.
-    if !resp.ok {
-        let err_msg = format!("{resp:?}");
-        assert!(
-            !err_msg.contains("panic"),
-            "should be a graceful error, not a panic"
-        );
-    }
+    // We expect either a graceful per-track failure (counted in `failed`, with a
+    // warning) or success with no BPM/key (essentia returns None when the runner
+    // fails). Either way, no panic, and the call itself still reports ok.
+    assert!(resp.ok, "analyze_new_tracks failed: {resp:?}");
+    let data = resp.data.expect("analyze data");
+    assert_eq!(
+        data.analyzed + data.failed,
+        1,
+        "expected the one track to be accounted for: {data:?}"
+    );
+    let combined = format!("{data:?}");
+    assert!(
+        !combined.contains("panic"),
+        "should be a graceful error, not a panic"
+    );
 
     // Restore env.
     match prev_enabled {

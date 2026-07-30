@@ -1,19 +1,16 @@
 import { test, expect } from "@playwright/test";
 
-// NOTE: analysis is now always dispatched as a single `analyze_new_tracks`
-// batch call per analyzeTrackIds() invocation (see components/library/actions.mjs).
-// The old per-piece `analyze_track_piece` client-side dispatch loop no longer
-// exists. The real backend still reports progressive per-track/per-piece
-// updates during that single batch call via `job:event` events
-// (stage: "analyze_new_tracks", trackReady: false for each of the 4 pieces,
-// then a final trackReady: true event per track once done) — see
+// NOTE: analysis is dispatched as a single `analyze_new_tracks` batch call per
+// analyzeTrackIds() invocation (see components/library/actions.mjs). The
+// backend reports progressive per-track/per-piece updates during that call
+// via `job:event` events (stage: "analyze_new_tracks", trackReady: false for
+// each of the 4 pieces, then a final trackReady: true event per track) — see
 // backend/src/service/analysis.rs (analyze_local_track_with_updates,
 // build_partial_progress, build_done_progress_success) and
 // backend/src/tauri_commands.rs (analyze_new_tracks, emit_job_event_with_track).
 // These mocks simulate that same event sequence so the frontend's real
 // job_manager.mjs handleJobEvent()/applyRealtimeAnalyzedTrackUpdate() codepath
-// is exercised exactly as it is in production, instead of re-implementing a
-// separate (now-nonexistent) per-piece invoke mechanism.
+// is exercised exactly as it is in production.
 
 function installScanAnalysisMock(page, opts = {}) {
   const trackCount = Number(opts?.trackCount || 40);
@@ -208,11 +205,6 @@ function installScanAnalysisMock(page, opts = {}) {
         };
 
         await sleep(Math.max(0, pieceDelayMs));
-        track.durationMs = 180000;
-        pieceEventsByPiece.duration += 1;
-        emitPartial({ durationMs: track.durationMs });
-
-        await sleep(Math.max(0, pieceDelayMs));
         track.artworkPath = `/tmp/${id}.jpg`;
         pieceEventsByPiece.artwork += 1;
         emitPartial({ artworkPath: track.artworkPath });
@@ -225,6 +217,11 @@ function installScanAnalysisMock(page, opts = {}) {
           waveformPeaksPath: track.waveformPeaksPath,
           waveformPreview: track.waveformPreview
         });
+
+        await sleep(Math.max(0, pieceDelayMs));
+        track.durationMs = 180000;
+        pieceEventsByPiece.duration += 1;
+        emitPartial({ durationMs: track.durationMs });
 
         await sleep(Math.max(0, pieceDelayMs));
         track.bpm = 120 + (Number(id.replace(/\D+/g, "")) % 4);
@@ -906,15 +903,9 @@ test("cancel button stops the batch early and reports how many tracks completed"
 });
 
 test("scan recomputes waveform piece even when one already exists", async ({ page }) => {
-  // The old frontend-driven per-piece loop used to compute "missing pieces"
-  // client-side and skip already-present ones before calling
-  // analyze_track_piece. That resolveMissingAnalysisPieces logic was deleted
-  // along with the per-piece dispatch loop. The batch analyze_new_tracks
-  // command (backend/src/service/analysis.rs::analyze_local_track_with_updates)
+  // analyze_new_tracks (backend/src/service/analysis.rs::analyze_local_track_with_updates)
   // has no "skip if already analyzed" branching - it always recomputes
-  // duration, artwork, waveform, and bpm/key for every requested track. This
-  // test now documents that real, current behavior instead of the old
-  // (no-longer-true) skip premise.
+  // artwork, waveform, duration, and bpm/key for every requested track.
   await installScanAnalysisMock(page, {
     trackCount: 1,
     pieceDelayMs: 20,

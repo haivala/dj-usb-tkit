@@ -62,7 +62,7 @@ old root visible for follow-up.
 
 ## Deep technical details
 
-The backend separates indexing and analysis at the command level. `scan_library` is responsible for file discovery, metadata indexing, and local database updates, while `analyze_new_tracks` and `analyze_track_piece` perform CPU-heavy enrichment on tracks already indexed in local storage. This separation is what allows the UI to show track rows quickly and then fill in analysis fields progressively.
+The backend separates indexing and analysis at the command level. `scan_library` is responsible for file discovery, metadata indexing, and local database updates, while `analyze_new_tracks` performs CPU-heavy enrichment on tracks already indexed in local storage. This separation is what allows the UI to show track rows quickly and then fill in analysis fields progressively.
 
 `scan_library` intentionally keeps scanner-side file processing conservative instead of adding broad worker fan-out. In typical music-library workloads, scan speed is dominated by storage I/O and metadata reads; aggressive scanner parallelism can increase random I/O pressure and reduce stability/determinism. Parallelism is applied where it has stronger payoff: analysis workloads (`analyze_new_tracks`) that perform heavier CPU work after decode.
 
@@ -107,7 +107,7 @@ Batch concurrency model:
 - worker count is bounded by host parallelism, batch size, and available system memory, always reserving ~2 cores for the OS/UI thread (`resolve_analysis_parallelism_budget_with_cap`) so a high-core-count/high-RAM host doesn't peg every core and make the app unresponsive during a large batch
 - a conservative per-worker memory budget (heavier for the opt-in `essentia` engine than the default `stratum` engine) caps parallelism on RAM-constrained hosts to avoid OOM crashes on high-core-count/lower-RAM machines — because every caller now goes through this one path, this protection applies uniformly, including the common "Scan Library" auto-analysis flow that used to bypass it entirely
 - optional worker caps/diagnostics are available for development and debugging (`DJTKIT_ANALYSIS_MAX_WORKERS`, `DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES`, `DJTKIT_ANALYSIS_DEBUG_WORKERS`); with `DJTKIT_ANALYSIS_DEBUG_WORKERS=1`, the resolved cap breakdown prints to the terminal (stderr) as well as the in-app Event Log
-- per-piece progress (duration, then artwork, then waveform, then bpm/key) still streams to the UI incrementally as each piece finishes, via `job.progress` events — this is independent of the dispatch path and unaffected by the above
+- per-piece progress (artwork, then waveform, then duration, then bpm/key — matching the track row's left-to-right column order) still streams to the UI incrementally as each piece finishes, via `job.progress` events — this is independent of the dispatch path and unaffected by the above
 - a batch can be paused/resumed or cancelled mid-run via `set_analysis_paused`/`cancel_analysis`: both are backed by `Arc<AtomicBool>` flags on `BackendService` (`analysis_paused`, `analysis_cancelled`), reset at the start of every batch, and checked by each worker immediately before it would pop the next track off the shared queue — a track already in flight always finishes normally either way. Pausing blocks that check until resumed; cancelling breaks out of it permanently, and the batch then returns successfully with whatever was analyzed so far plus a warning noting how many of the total were completed
 
 Implemented throughput optimizations:

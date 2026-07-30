@@ -25,10 +25,7 @@ use symphonia::core::probe::Hint;
 use uuid::Uuid;
 
 use crate::error::{BackendError, BackendResult};
-use crate::models::{
-    AnalyzeNewTracksData, AnalyzeNewTracksRequest, AnalyzeTrackPieceData, AnalyzeTrackPieceRequest,
-    SetAnalysisPausedData,
-};
+use crate::models::{AnalyzeNewTracksData, AnalyzeNewTracksRequest, SetAnalysisPausedData};
 
 use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
@@ -882,197 +879,6 @@ impl BackendService {
         self.analysis_cancelled.store(true, Ordering::SeqCst);
         Ok(())
     }
-
-    pub fn analyze_track_piece(
-        &self,
-        req: AnalyzeTrackPieceRequest,
-    ) -> BackendResult<AnalyzeTrackPieceData> {
-        let track_id = req.track_id.trim().to_string();
-        if track_id.is_empty() {
-            return Err(BackendError::Validation(
-                "track_id is required for analyze_track_piece".to_string(),
-            ));
-        }
-        let piece = req.piece.trim().to_ascii_lowercase();
-        if piece.is_empty() {
-            return Err(BackendError::Validation(
-                "piece is required for analyze_track_piece".to_string(),
-            ));
-        }
-
-        let track = {
-            let conn = self.db.connect()?;
-            let mut track_rows =
-                collect_tracks_for_analysis(&conn, std::slice::from_ref(&track_id))?;
-            track_rows
-                .drain(..)
-                .next()
-                .ok_or_else(|| BackendError::NotFound(format!("track not found: {track_id}")))?
-        };
-        let path = PathBuf::from(&track.file_path);
-        if !path.exists() {
-            return Err(BackendError::NotFound(format!(
-                "audio file not found: {}",
-                path.display()
-            )));
-        }
-
-        let analysis_dir = self.db.data_dir().join("analysis");
-        let waveform_dir = analysis_dir.join("waveforms");
-        let artwork_dir = analysis_dir.join("artwork");
-        std::fs::create_dir_all(&waveform_dir)?;
-        std::fs::create_dir_all(&artwork_dir)?;
-        let updated_at = now();
-        let (bpm_min, bpm_max) = resolve_analysis_bpm_range(req.bpm_min, req.bpm_max);
-        let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
-
-        match piece.as_str() {
-            "duration" => {
-                let duration_ms = detect_track_duration_ms(&path);
-                let conn = self.db.connect()?;
-                conn.execute(
-                    "UPDATE tracks SET duration_ms = COALESCE(?1, duration_ms), updated_at = ?2 WHERE id = ?3",
-                    params![duration_ms, updated_at, track.id],
-                )?;
-                Ok(AnalyzeTrackPieceData {
-                    track_id: track.id,
-                    piece,
-                    updated: duration_ms.is_some(),
-                    bpm: None,
-                    bpm_analyzer: None,
-                    key: None,
-                    duration_ms,
-                    artwork_path: None,
-                    waveform_peaks_path: None,
-                    waveform_preview: None,
-                })
-            }
-            "artwork" => {
-                let artwork_path = resolve_persisted_artwork(&path, &artwork_dir, &track.id);
-                let conn = self.db.connect()?;
-                conn.execute(
-                    "UPDATE tracks SET artwork_path = COALESCE(?1, artwork_path), updated_at = ?2 WHERE id = ?3",
-                    params![artwork_path, updated_at, track.id],
-                )?;
-                Ok(AnalyzeTrackPieceData {
-                    track_id: track.id,
-                    piece,
-                    updated: artwork_path.is_some(),
-                    bpm: None,
-                    bpm_analyzer: None,
-                    key: None,
-                    duration_ms: None,
-                    artwork_path,
-                    waveform_peaks_path: None,
-                    waveform_preview: None,
-                })
-            }
-            "waveform" => {
-                // Fetch current BPM/duration/first_beat_ms from DB so ANLZ files include beat grid + correct entry counts.
-                let conn = self.db.connect()?;
-                let (db_bpm, db_duration, db_first_beat_ms): (
-                    Option<f64>,
-                    Option<u64>,
-                    Option<u32>,
-                ) = conn
-                    .query_row(
-                        "SELECT bpm, duration_ms, first_beat_ms FROM tracks WHERE id = ?1",
-                        params![track.id],
-                        |row| {
-                            Ok((
-                                row.get(0)?,
-                                row.get(1)?,
-                                row.get::<_, Option<i64>>(2)?.map(|v| v as u32),
-                            ))
-                        },
-                    )
-                    .unwrap_or((None, None, None));
-                drop(conn);
-
-                let anlz_duration = db_duration.or_else(|| detect_track_duration_ms(&path));
-                let waveform = build_waveform_data_for_track(
-                    &path,
-                    waveform_detail_bins_for_duration(anlz_duration),
-                )?;
-                let bundle_paths =
-                    local_analysis_bundle_paths(&waveform_dir, &track.id, &track.file_path);
-                let waveform_peaks_path = if waveform.peaks.is_empty() {
-                    None
-                } else {
-                    write_generated_anlz_bundle_with_first_beat(
-                        &waveform,
-                        &bundle_paths,
-                        "",
-                        db_bpm,
-                        anlz_duration,
-                        db_first_beat_ms,
-                    )?;
-                    Some(bundle_paths.dat_path.to_string_lossy().to_string())
-                };
-                let waveform_preview =
-                    waveform_preview_if_persisted(&waveform, &waveform_peaks_path);
-                let conn = self.db.connect()?;
-                conn.execute(
-                    "UPDATE tracks SET waveform_peaks_path = COALESCE(?1, waveform_peaks_path), updated_at = ?2 WHERE id = ?3",
-                    params![waveform_peaks_path, updated_at, track.id],
-                )?;
-                Ok(AnalyzeTrackPieceData {
-                    track_id: track.id,
-                    piece,
-                    updated: waveform_peaks_path.is_some() || waveform_preview.is_some(),
-                    bpm: None,
-                    bpm_analyzer: None,
-                    key: None,
-                    duration_ms: None,
-                    artwork_path: None,
-                    waveform_peaks_path,
-                    waveform_preview,
-                })
-            }
-            "bpm_key" => {
-                let decoded = decode_audio_mono_samples(&path, ANALYSIS_DECODE_MAX_SAMPLES).ok();
-                let bpm_key_result = match decoded.as_ref() {
-                    Some((samples, sample_rate)) => {
-                        detect_bpm_key(engine, samples, *sample_rate, bpm_min, bpm_max)?
-                    }
-                    None => BpmKeyResult {
-                        bpm: None,
-                        key: None,
-                        first_beat_ms: None,
-                    },
-                };
-                let bpm = bpm_key_result.bpm;
-                let key = bpm_key_result.key;
-                let first_beat_ms = bpm_key_result.first_beat_ms.map(|v| v as i64);
-                let analyzer_label: Option<&str> = if bpm.is_some() {
-                    Some(engine.as_str())
-                } else {
-                    None
-                };
-                let conn = self.db.connect()?;
-                conn.execute(
-                    "UPDATE tracks SET bpm = COALESCE(?1, bpm), tonality = COALESCE(?2, tonality), bpm_analyzer = COALESCE(?5, bpm_analyzer), first_beat_ms = COALESCE(?6, first_beat_ms), updated_at = ?3 WHERE id = ?4",
-                    params![bpm, key, updated_at, track.id, analyzer_label, first_beat_ms],
-                )?;
-                Ok(AnalyzeTrackPieceData {
-                    track_id: track.id,
-                    piece,
-                    updated: bpm.is_some() || key.is_some(),
-                    bpm,
-                    bpm_analyzer: analyzer_label.map(|s| s.to_string()),
-                    key,
-                    duration_ms: None,
-                    artwork_path: None,
-                    waveform_peaks_path: None,
-                    waveform_preview: None,
-                })
-            }
-            _ => Err(BackendError::Validation(format!(
-                "unsupported analyze piece '{}'; expected one of: duration, artwork, waveform, bpm_key",
-                req.piece
-            ))),
-        }
-    }
 }
 
 struct PersistDoneCounters<'a> {
@@ -1188,17 +994,6 @@ fn resolve_persisted_artwork(path: &Path, artwork_dir: &Path, track_id: &str) ->
                 .as_deref()
                 .and_then(|found| persist_library_artwork_thumbnail(found, artwork_dir, track_id))
         })
-}
-
-fn build_waveform_data_for_track(path: &Path, bins: usize) -> BackendResult<WaveformData> {
-    let decoded = decode_audio_mono_samples(path, ANALYSIS_DECODE_MAX_SAMPLES).ok();
-    waveform_data_from_decoded_or_file(
-        decoded
-            .as_ref()
-            .map(|(samples, sample_rate)| (samples.as_slice(), *sample_rate)),
-        path,
-        bins,
-    )
 }
 
 fn waveform_data_from_decoded_or_file(
@@ -1492,6 +1287,20 @@ fn analyze_local_track_with_updates(
     }
 
     let decoded = decode_audio_mono_samples(&path, ANALYSIS_DECODE_MAX_SAMPLES).ok();
+
+    // Emission order (artwork, waveform, duration, bpm/key) mirrors the track
+    // row's left-to-right column order in the UI. A couple of pieces still
+    // have to be *computed* earlier than they're emitted: waveform generation
+    // needs duration_ms (for bin count) and bpm/first_beat_ms (embedded into
+    // the ANLZ bundle), so those are computed up front and only emitted later.
+    let persisted_artwork = resolve_persisted_artwork(&path, artwork_dir, track_id);
+    if persisted_artwork.is_some() {
+        on_update(TrackPartialUpdate {
+            artwork_path: persisted_artwork.clone(),
+            ..TrackPartialUpdate::default()
+        });
+    }
+
     let bpm_key_result = match decoded.as_ref() {
         Some((samples, sample_rate)) => {
             detect_bpm_key(engine, samples, *sample_rate, bpm_min, bpm_max)?
@@ -1510,12 +1319,7 @@ fn analyze_local_track_with_updates(
             duration_ms_from_decoded(samples.len(), *sample_rate)
         })
     });
-    if duration_ms.is_some() {
-        on_update(TrackPartialUpdate {
-            duration_ms,
-            ..TrackPartialUpdate::default()
-        });
-    }
+
     let waveform = waveform_data_from_decoded_or_file(
         decoded
             .as_ref()
@@ -1523,14 +1327,6 @@ fn analyze_local_track_with_updates(
         &path,
         waveform_detail_bins_for_duration(duration_ms),
     )?;
-    let persisted_artwork = resolve_persisted_artwork(&path, artwork_dir, track_id);
-    if persisted_artwork.is_some() {
-        on_update(TrackPartialUpdate {
-            artwork_path: persisted_artwork.clone(),
-            ..TrackPartialUpdate::default()
-        });
-    }
-
     let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
     let waveform_peaks_path = if waveform.peaks.is_empty() {
         None
@@ -1545,7 +1341,6 @@ fn analyze_local_track_with_updates(
         )?;
         Some(bundle_paths.dat_path.to_string_lossy().to_string())
     };
-
     let waveform_preview = waveform_preview_if_persisted(&waveform, &waveform_peaks_path);
     if waveform_peaks_path.is_some() || waveform_preview.is_some() {
         on_update(TrackPartialUpdate {
@@ -1554,6 +1349,14 @@ fn analyze_local_track_with_updates(
             ..TrackPartialUpdate::default()
         });
     }
+
+    if duration_ms.is_some() {
+        on_update(TrackPartialUpdate {
+            duration_ms,
+            ..TrackPartialUpdate::default()
+        });
+    }
+
     if bpm.is_some() || key.is_some() {
         on_update(TrackPartialUpdate {
             bpm,

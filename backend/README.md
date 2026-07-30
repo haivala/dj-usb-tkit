@@ -34,7 +34,6 @@ Implemented command set:
   - `detect_external_master_db`
 - Analysis:
   - `analyze_new_tracks`
-  - `analyze_track_piece`
   - `set_analysis_paused`
   - `cancel_analysis`
 - Playback:

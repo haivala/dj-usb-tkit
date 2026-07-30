@@ -744,34 +744,6 @@ pub struct SetAnalysisPausedData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnalyzeTrackPieceRequest {
-    pub track_id: String,
-    pub piece: String,
-    #[serde(default)]
-    pub bpm_min: Option<u32>,
-    #[serde(default)]
-    pub bpm_max: Option<u32>,
-    #[serde(default)]
-    pub analysis_engine: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnalyzeTrackPieceData {
-    pub track_id: String,
-    pub piece: String,
-    pub updated: bool,
-    pub bpm: Option<f64>,
-    pub bpm_analyzer: Option<String>,
-    pub key: Option<String>,
-    pub duration_ms: Option<u64>,
-    pub artwork_path: Option<String>,
-    pub waveform_peaks_path: Option<String>,
-    pub waveform_preview: Option<Vec<u8>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ExportToUsbOptions {
     pub include_artwork: bool,

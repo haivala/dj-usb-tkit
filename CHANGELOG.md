@@ -12,6 +12,14 @@
 
 ## Unreleased
 
+- Remove the `analyze_track_piece` backend command. It was a per-piece
+  (duration/artwork/waveform/bpm-key) analysis endpoint left over from an
+  older frontend dispatch loop; that loop was already deleted in favor of the
+  single `analyze_new_tracks` batch call, leaving `analyze_track_piece`
+  unreachable from the app. Also reorder per-track analysis progress
+  (duration/artwork/waveform/bpm-key) to artwork, then waveform, then
+  duration, then bpm/key, matching the track row's left-to-right column
+  order; audio is still decoded only once per track.
 - Fix single-track analyze (clicking "Analyze"/"Reanalyze" on one track row)
   having no memory check at all — unlike a multi-track batch, it has no
   worker pool to size against available RAM, so clicking through many track

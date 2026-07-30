@@ -13,28 +13,27 @@ use crate::commands::BackendCommands;
 use crate::error::{ErrorCode, ErrorPayload};
 use crate::models::{
     AddTracksToPlaylistData, AddTracksToPlaylistRequest, AnalyzeNewTracksData,
-    AnalyzeNewTracksRequest, AnalyzeTrackPieceData, AnalyzeTrackPieceRequest, ApiResponse,
-    BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
-    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
-    DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
-    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
-    GetTracksByIdsRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
-    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
-    JobEventPayload, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest,
-    PlaybackEventPayload, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
-    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
-    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
-    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
-    ValidateUsbRootRequest,
+    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
+    CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
+    DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData, ExportToUsbData,
+    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
+    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
+    ListPlaylistsData, ListTracksData, ListTracksRequest, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, RelocateSourceRootData,
+    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
+    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
+    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
+    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
+    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, RunUsbDiagnosticsData,
+    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData,
+    ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData, SearchTracksRequest,
+    SetAnalysisPausedData, SetAnalysisPausedRequest, SetFrontendSettingData,
+    SetFrontendSettingRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -1081,19 +1080,6 @@ pub async fn analyze_new_tracks(
         );
     }
     Ok(response)
-}
-
-#[tauri::command]
-pub async fn analyze_track_piece(
-    state: State<'_, BackendCommands>,
-    request: AnalyzeTrackPieceRequest,
-) -> Result<ApiResponse<AnalyzeTrackPieceData>, String> {
-    let commands = state.inner().clone();
-    match tauri::async_runtime::spawn_blocking(move || commands.analyze_track_piece(request)).await
-    {
-        Ok(response) => Ok(response),
-        Err(err) => Err(format!("analyze_track_piece task failed: {err}")),
-    }
 }
 
 #[tauri::command]

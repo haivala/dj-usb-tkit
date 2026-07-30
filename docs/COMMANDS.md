@@ -92,7 +92,6 @@ The desktop host also emits a unified `job:event` channel carrying the same payl
 ### Analysis
 
 - `analyze_new_tracks`
-- `analyze_track_piece`
 - `set_analysis_paused`
 - `cancel_analysis`
 
