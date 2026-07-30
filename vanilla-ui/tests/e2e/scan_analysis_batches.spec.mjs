@@ -715,7 +715,11 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
   await expect(page.locator("#libraryTableBody .track-grid-row").first()).not.toHaveClass(/is-analyzing/);
 });
 
-test("scan progressively changes action buttons to Reanalyze", async ({ page }) => {
+test("scan progressively changes action buttons to Reanalyze", async ({ page }, testInfo) => {
+  // Simulates a full 40-track/4-piece batch (160 progress events + row re-renders); under
+  // CPU contention from the rest of the suite running in parallel this can outrun the
+  // default 5s expect timeout even though the app itself isn't slow — triple it here.
+  testInfo.setTimeout(testInfo.timeout * 3);
   await installScanAnalysisMock(page, { trackCount: 40, pieceDelayMs: 20 });
   await page.goto("/");
 
@@ -736,7 +740,7 @@ test("scan progressively changes action buttons to Reanalyze", async ({ page }) 
 
   await expect(
     page.locator('#libraryTableBody button[data-action="analyze-track"]', { hasText: "Reanalyze" })
-  ).toHaveCount(40);
+  ).toHaveCount(40, { timeout: 15_000 });
   await expect(
     page.locator('#libraryTableBody button[data-action="analyze-track"]', { hasText: /^Analyze$/ })
   ).toHaveCount(0);
