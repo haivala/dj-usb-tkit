@@ -5,6 +5,7 @@ import { bindUsbEvents } from "./components/usb/events.mjs";
 import { bindSettingsEvents } from "./components/settings/events.mjs";
 import { bindEventLogEvents } from "./components/event-log/events.mjs";
 import { bindShellEvents } from "./components/shell/events.mjs";
+import { initTooltips } from "./tooltip.mjs";
 
 export function setStatusText(el, text, warningCount = 0) {
   const target = el.statusText;
@@ -124,17 +125,21 @@ export function closeSettingsDrawer(el) {
 export function updateUsbHealthDot(el, status) {
   if (!el.usbHealthDot) return;
   el.usbHealthDot.classList.remove("health-pass", "health-warn", "health-fail");
+  const setTooltip = (text) => {
+    el.usbHealthDot.dataset.tooltip = text;
+    el.usbHealthDot.setAttribute("aria-label", text);
+  };
   if (status === "PASS") {
     el.usbHealthDot.classList.add("health-pass");
-    el.usbHealthDot.title = "USB health: good";
+    setTooltip("USB health: good");
   } else if (status === "WARN") {
     el.usbHealthDot.classList.add("health-warn");
-    el.usbHealthDot.title = "USB health: warnings";
+    setTooltip("USB health: warnings");
   } else if (status === "FAIL") {
     el.usbHealthDot.classList.add("health-fail");
-    el.usbHealthDot.title = "USB health: issues found";
+    setTooltip("USB health: issues found");
   } else {
-    el.usbHealthDot.title = "USB health: unknown";
+    setTooltip("USB health: unknown");
   }
 }
 
@@ -191,6 +196,7 @@ export function bindEvents(ctx) {
     el.progressCancelAnalysisBtn.addEventListener("click", ctx.cancelAnalysis);
   }
 
+  initTooltips(ctx);
   bindShellEvents(ctx);
   bindSettingsEvents(ctx);
   bindEventLogEvents(ctx);

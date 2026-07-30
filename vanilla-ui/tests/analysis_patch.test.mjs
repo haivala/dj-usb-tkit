@@ -368,7 +368,7 @@ test("jsdom: patchLibraryRowCells updates Analyze to Reanalyze", () => {
   patchLibraryRowCells(row, track, makeDeps({ trackHasCoreAnalysis: () => true }));
   const btn = row.querySelector("[data-action='analyze-track']");
   assert.equal(btn.textContent, "Reanalyze");
-  assert.equal(btn.title, "Recompute waveform/BPM/key");
+  assert.equal(btn.dataset.tooltip, "Recompute waveform/BPM/key");
 });
 
 test("jsdom: patchLibraryRowCells leaves Analyze label when not fully analyzed", () => {

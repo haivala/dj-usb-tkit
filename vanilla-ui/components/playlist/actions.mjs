@@ -65,7 +65,7 @@ export function renderPlaylistTabsAndPanels(state, el, deps) {
         <p class="muted track-total-time" data-playlist-total-duration="${playlist.id}">Total time: 0:00</p>
         <div class="row playlist-actions">
           <p class="muted playlist-export-status">${escapeHtml(formatPlaylistExportStatus(playlist))}</p>
-          <button data-export-playlist="${playlist.id}" title="${escapeHtml(exportTitle)}"${exportDisabledAttr}>Export to USB</button>
+          <button data-export-playlist="${playlist.id}" data-tooltip="${escapeHtml(exportTitle)}"${exportDisabledAttr}>Export to USB</button>
         </div>
       </section>
     `;
@@ -93,7 +93,7 @@ export function renderPlaylistList(state, el, deps) {
     if (state.activeTab === playlist.id) btn.classList.add("active");
     if (state.currentPlaylistId === playlist.id) {
       btn.classList.add("playlist-active-mode");
-      btn.title = "Active playlist";
+      btn.dataset.tooltip = "Active playlist";
     }
     li.appendChild(btn);
     el.navPlaylistList.appendChild(li);
@@ -332,7 +332,7 @@ export function updatePlaylistExportButtons(state, el, deps) {
 
   el.exportPlaylistBtn.disabled = false;
   el.exportPlaylistBtn.textContent = buttonState.text;
-  el.exportPlaylistBtn.title = buttonState.title;
+  el.exportPlaylistBtn.dataset.tooltip = buttonState.title;
 
   const analyzeCandidates = Array.isArray(current?.tracks)
     ? current.tracks.filter((track) => !isUsbOriginTrack(track) && !trackHasCoreAnalysis(track))
@@ -344,7 +344,7 @@ export function updatePlaylistExportButtons(state, el, deps) {
     el.analyzePlaylistMissingBtn.textContent = showAnalyzeMissing
       ? `Analyze Missing Tracks (${analyzeCandidates.length})`
       : "Analyze Missing Tracks";
-    el.analyzePlaylistMissingBtn.title = showAnalyzeMissing
+    el.analyzePlaylistMissingBtn.dataset.tooltip = showAnalyzeMissing
       ? "Analyze missing waveform, BPM, and duration for local non-USB tracks in this playlist"
       : "No local non-USB tracks in this playlist need analysis";
   }
@@ -530,8 +530,8 @@ export function renderPlaylistSidebarItemContent(playlist, deps) {
   const statusTitle = playlist.lastExportedAt ? "Exported to USB" : "";
   return `
     <span class="nav-playlist-name">${escapeHtml(playlist.name)}</span>
-    <span class="nav-playlist-status${statusClass}"${statusTitle ? ` title="${statusTitle}"` : ""}>${statusIcon}</span>
-    <span class="nav-playlist-delete" data-delete-playlist="${playlist.id}" title="Delete playlist" aria-label="Delete playlist" role="button" tabindex="0">&times;</span>
+    <span class="nav-playlist-status${statusClass}"${statusTitle ? ` data-tooltip="${statusTitle}" aria-label="${statusTitle}"` : ""}>${statusIcon}</span>
+    <span class="nav-playlist-delete" data-delete-playlist="${playlist.id}" data-tooltip="Delete playlist" aria-label="Delete playlist" role="button" tabindex="0">&times;</span>
   `;
 }
 

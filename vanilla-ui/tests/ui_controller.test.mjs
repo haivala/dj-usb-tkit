@@ -18,6 +18,7 @@ import {
   createConfirmDialogController,
   bindEvents
 } from "../ui_controller.mjs";
+import { initTooltips } from "../tooltip.mjs";
 
 function makeDom() {
   return new JSDOM(`
@@ -200,6 +201,8 @@ test("updateSourceFilterIndicator, updateScanLibraryButtonLabel, closeSettingsDr
   assert.equal(el.settingsDrawer.classList.contains("hidden"), true);
   assert.equal(el.settingsBackdrop.classList.contains("hidden"), true);
   assert.equal(el.usbHealthDot.classList.contains("health-warn"), true);
+  assert.equal(el.usbHealthDot.dataset.tooltip, "USB health: warnings");
+  assert.equal(el.usbHealthDot.getAttribute("aria-label"), "USB health: warnings");
   assert.equal(document.body.classList.contains("library-onboarding"), true);
 });
 
@@ -478,4 +481,84 @@ test("bindEvents wires confirm buttons and sidebar collapse/expand", () => {
   assert.equal(persisted.length, 2);
   assert.deepEqual(persisted[0], ["sidebar", "sidebar_db", "0"]);
   assert.deepEqual(persisted[1], ["sidebar", "sidebar_db", "1"]);
+});
+
+test("initTooltips shows a custom tooltip for [data-tooltip] elements after the show delay and hides on mouseout", () => {
+  const dom = new JSDOM(`
+    <!doctype html>
+    <body>
+      <button id="target" data-tooltip="Full detail text">Hover me</button>
+    </body>
+  `);
+  const { document } = dom.window;
+  const target = document.getElementById("target");
+
+  let scheduled = null;
+  const windowStub = {
+    setTimeout: (fn) => { scheduled = fn; return 1; },
+    clearTimeout: () => { scheduled = null; },
+    innerWidth: 1024
+  };
+
+  initTooltips({ document, window: windowStub });
+
+  target.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+  assert.equal(typeof scheduled, "function", "show is scheduled, not immediate");
+  scheduled();
+
+  const tooltipEl = document.getElementById("app-tooltip");
+  assert.ok(tooltipEl, "tooltip element created on first show");
+  assert.equal(tooltipEl.textContent, "Full detail text");
+  assert.equal(tooltipEl.classList.contains("app-tooltip--visible"), true);
+  assert.equal(target.getAttribute("aria-describedby"), "app-tooltip");
+
+  target.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+  assert.equal(tooltipEl.classList.contains("app-tooltip--visible"), false);
+  assert.equal(target.hasAttribute("aria-describedby"), false);
+});
+
+test("initTooltips shows immediately on focus and hides on Escape", () => {
+  const dom = new JSDOM(`
+    <!doctype html>
+    <body>
+      <button id="target" data-tooltip="Focus detail">Focus me</button>
+    </body>
+  `);
+  const { document } = dom.window;
+  const target = document.getElementById("target");
+  const windowStub = { setTimeout: () => 1, clearTimeout: () => {}, innerWidth: 1024 };
+
+  initTooltips({ document, window: windowStub });
+
+  target.dispatchEvent(new dom.window.FocusEvent("focusin", { bubbles: true }));
+  const tooltipEl = document.getElementById("app-tooltip");
+  assert.equal(tooltipEl.classList.contains("app-tooltip--visible"), true, "focus shows immediately, no delay");
+
+  document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(tooltipEl.classList.contains("app-tooltip--visible"), false);
+});
+
+test("initTooltips clamps tooltip position within the viewport", () => {
+  const dom = new JSDOM(`
+    <!doctype html>
+    <body>
+      <span id="target" data-tooltip="x"></span>
+    </body>
+  `);
+  const { document } = dom.window;
+  const target = document.getElementById("target");
+  target.getBoundingClientRect = () => ({ top: 5, bottom: 25, left: 2, right: 20, width: 18, height: 20 });
+  const windowStub = { setTimeout: (fn) => { fn(); return 1; }, clearTimeout: () => {}, innerWidth: 100 };
+
+  initTooltips({ document, window: windowStub });
+  target.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+
+  const tooltipEl = document.getElementById("app-tooltip");
+  tooltipEl.getBoundingClientRect = () => ({ width: 150, height: 24 });
+
+  target.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+  target.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+
+  assert.equal(tooltipEl.style.left, "8px", "clamped to the left viewport margin instead of going negative");
+  assert.equal(tooltipEl.style.top, "31px", "flips below the target since above would clip the viewport top");
 });

@@ -32,10 +32,10 @@ export function createTrackRow(track, options, deps) {
   const hasRenderableWaveform = hasColorWaveform || (peaks.length > 0 && peaks.some((v) => v > 0));
   const peaksData = peaks.length ? escapeHtml(peaks.join(",")) : "";
   const waveformCell = hasRenderableWaveform
-    ? `<div class="waveform waveform-canvas" ${waveformAttrs} data-peaks="${peaksData}" aria-label="waveform preview" title="${escapeHtml(track.waveformPeaksPath || track.usbAnalysisPath || "")}"><canvas class="waveform-canvas-el" aria-hidden="true"></canvas><i class="waveform-playhead" aria-hidden="true"></i></div>`
-    : `<div class="waveform" ${waveformAttrs} aria-label="waveform preview" title="${escapeHtml(track.waveformPeaksPath || track.usbAnalysisPath || "")}"><i class="waveform-playhead" aria-hidden="true"></i></div>`;
+    ? `<div class="waveform waveform-canvas" ${waveformAttrs} data-peaks="${peaksData}" aria-label="waveform preview" data-tooltip="${escapeHtml(track.waveformPeaksPath || track.usbAnalysisPath || "")}"><canvas class="waveform-canvas-el" aria-hidden="true"></canvas><i class="waveform-playhead" aria-hidden="true"></i></div>`
+    : `<div class="waveform" ${waveformAttrs} aria-label="waveform preview" data-tooltip="${escapeHtml(track.waveformPeaksPath || track.usbAnalysisPath || "")}"><i class="waveform-playhead" aria-hidden="true"></i></div>`;
   const playInWaveform = options.secondaryActionLabel
-    ? `<button class="transport-btn ${isPlayingTrack ? "is-playing" : ""}" data-action="${options.secondaryActionType}" data-index="${options.index}" data-id="${escapeHtml(renderTrackId)}" data-row-key="${escapeHtml(rowKey)}" data-origin="${escapeHtml(options.origin || "usb")}" aria-label="${transportLabel}" title="${transportLabel}">${transportIcon}</button>`
+    ? `<button class="transport-btn ${isPlayingTrack ? "is-playing" : ""}" data-action="${options.secondaryActionType}" data-index="${options.index}" data-id="${escapeHtml(renderTrackId)}" data-row-key="${escapeHtml(rowKey)}" data-origin="${escapeHtml(options.origin || "usb")}" aria-label="${transportLabel}" data-tooltip="${transportLabel}">${transportIcon}</button>`
     : "";
   const waveformWithAction = `<div class="waveform-cell">${playInWaveform}${waveformCell}</div>`;
 
@@ -55,16 +55,16 @@ export function createTrackRow(track, options, deps) {
         : "Create and activate a playlist first, then add tracks to it.");
     const primary = options.actionLabel
       ? (options.compactAddButton
-        ? `<button class="track-add-btn" data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} title="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`
-        : `<button data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} title="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`)
+        ? `<button class="track-add-btn" data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} data-tooltip="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`
+        : `<button data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} data-tooltip="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`)
       : "";
     const analysisButtons = options.enableAnalyzeActions
-      ? `<button data-action="analyze-track" data-id="${escapeHtml(renderTrackId)}" title="${trackHasCoreAnalysis(track) ? "Recompute waveform/BPM/key" : "Analyze missing waveform/BPM/key"}">${trackHasCoreAnalysis(track) ? "Reanalyze" : "Analyze"}</button>`
+      ? `<button data-action="analyze-track" data-id="${escapeHtml(renderTrackId)}" data-tooltip="${trackHasCoreAnalysis(track) ? "Recompute waveform/BPM/key" : "Analyze missing waveform/BPM/key"}">${trackHasCoreAnalysis(track) ? "Reanalyze" : "Analyze"}</button>`
       : "";
     actionCell = `<div role="cell" class="track-grid-cell td-action"><div class="action-buttons">${primary}${analysisButtons}</div></div>`;
   }
 
-  const bpmTitle = track.bpmAnalyzer ? ` title="${escapeHtml(`Analyzed with: ${track.bpmAnalyzer}`)}"` : "";
+  const bpmTitle = track.bpmAnalyzer ? ` data-tooltip="${escapeHtml(`Analyzed with: ${track.bpmAnalyzer}`)}"` : "";
   const bpmCell = track.bpm
     ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(track.bpm)}</span>`
     : "-";
@@ -75,11 +75,13 @@ export function createTrackRow(track, options, deps) {
     ? `<span class="key-pill ${keyHueClass}">${escapeHtml(track.key)}</span>`
     : "-";
   const formatInfo = describeTrackFormat(track);
+  const formatTooltip = formatTrackFormatTooltip(formatInfo);
+  const formatTooltipAttr = formatTooltip ? ` data-tooltip="${escapeHtml(formatTooltip)}"` : "";
   const formatCell = formatInfo.warning
     ? (formatInfo.kind === "autofix"
-      ? `<div role="cell" class="track-grid-cell td-format"><span class="format-badge autofix" title="${escapeHtml(formatInfo.warning)}">${escapeHtml(formatInfo.label)} ⟳</span></div>`
-      : `<div role="cell" class="track-grid-cell td-format"><span class="format-badge warn" title="${escapeHtml(formatInfo.warning)}">${escapeHtml(formatInfo.label)} ⚠</span></div>`)
-    : `<div role="cell" class="track-grid-cell td-format"><span class="format-badge">${escapeHtml(formatInfo.label)}</span></div>`;
+      ? `<div role="cell" class="track-grid-cell td-format"><span class="format-badge autofix"${formatTooltipAttr}>${escapeHtml(formatInfo.label)} ⟳</span></div>`
+      : `<div role="cell" class="track-grid-cell td-format"><span class="format-badge warn"${formatTooltipAttr}>${escapeHtml(formatInfo.label)} ⚠</span></div>`)
+    : `<div role="cell" class="track-grid-cell td-format"><span class="format-badge"${formatTooltipAttr}>${escapeHtml(formatInfo.label)}</span></div>`;
   const durationCell = `<div role="cell" class="track-grid-cell td-length">${escapeHtml(formatTrackDuration(track))}</div>`;
 
   return `
@@ -169,6 +171,19 @@ function formatDurationMs(value) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatTrackFormatDetail(sampleRate, bitDepth, bitrate) {
+  const parts = [];
+  if (sampleRate) {
+    parts.push(`${(sampleRate / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} kHz`);
+  }
+  if (bitDepth) {
+    parts.push(`${bitDepth}-bit`);
+  } else if (bitrate) {
+    parts.push(`${bitrate} kbps`);
+  }
+  return parts.join(" · ");
+}
+
 function describeTrackFormat(track) {
   const direct = String(track?.formatExt || "").trim().toLowerCase();
   const inferred = (() => {
@@ -179,6 +194,10 @@ function describeTrackFormat(track) {
   })();
   const ext = direct || inferred;
   const label = ext ? ext.toUpperCase() : "Unknown";
+  const sampleRate = Number(track?.sampleRateHz || 0) || null;
+  const bitDepth = Number(track?.bitDepth || 0) || null;
+  const bitrate = Number(track?.bitrateKbps || 0) || null;
+  const detail = formatTrackFormatDetail(sampleRate, bitDepth, bitrate);
 
   if (ext === "wav") {
     const wavExtensibleKind = track?.wavExtensibleKind || null;
@@ -187,6 +206,7 @@ function describeTrackFormat(track) {
         label,
         kind: "autofix",
         warning: "Uses an extended WAV header (WAVE_FORMAT_EXTENSIBLE) that some CDJs reject. Will be automatically converted to standard PCM on export.",
+        detail,
       };
     }
     if (wavExtensibleKind === "extensible_other") {
@@ -194,15 +214,18 @@ function describeTrackFormat(track) {
         label,
         kind: "warn",
         warning: "Uses an extended WAV header with a non-standard subformat - cannot be safely converted and may not play on CDJ hardware.",
+        detail,
       };
     }
   }
 
-  const sampleRate = Number(track?.sampleRateHz || 0) || null;
-  const bitDepth = Number(track?.bitDepth || 0) || null;
-  const bitrate = Number(track?.bitrateKbps || 0) || null;
   const warning = validateFormatCompatibility(ext, sampleRate, bitDepth, bitrate);
-  return { label, kind: warning ? "warn" : null, warning };
+  return { label, kind: warning ? "warn" : null, warning, detail };
+}
+
+function formatTrackFormatTooltip(formatInfo) {
+  if (formatInfo.warning && formatInfo.detail) return `${formatInfo.detail} — ${formatInfo.warning}`;
+  return formatInfo.warning || formatInfo.detail || "";
 }
 
 function validateFormatCompatibility(ext, sampleRate, bitDepth, bitrate) {

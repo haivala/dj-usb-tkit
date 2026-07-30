@@ -70,8 +70,8 @@ export function renderEventLog(state, el, document, deps) {
     const code = escapeHtml(collapsedCode || "unknown");
     const count = Math.max(1, Number(item.count) || 1);
     const details = String(item.details || "").trim();
-    const detailsAttr = details ? ` title="${escapeHtml(details)}"` : "";
-    const countBadge = count > 1 ? `<span class="event-log-count" title="Coalesced occurrences">x${count}</span>` : "";
+    const detailsAttr = details ? ` data-tooltip="${escapeHtml(details)}"` : "";
+    const countBadge = count > 1 ? `<span class="event-log-count" data-tooltip="Coalesced occurrences">x${count}</span>` : "";
     return `<div class="event-log-row"><div class="event-log-time">${hh}:${mm}:${ss}</div><div class="event-log-level level-${level}">${level}</div><div class="event-log-source">${source}</div><div class="event-log-message"${detailsAttr}><span class="event-log-code">[${code}]</span> ${message} ${countBadge}</div></div>`;
   }).join("");
 }

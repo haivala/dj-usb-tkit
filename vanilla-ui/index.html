@@ -42,8 +42,8 @@
     </h1>
     <div class="status-wrap">
       <div class="status" id="statusText">Idle</div>
-      <button class="help-btn" id="helpBtn" title="Help" aria-label="Help">?</button>
-      <button class="settings-btn" id="settingsBtn" title="Settings" aria-label="Settings">&#9881;</button>
+      <button class="help-btn" id="helpBtn" data-tooltip="Help" aria-label="Help">?</button>
+      <button class="settings-btn" id="settingsBtn" data-tooltip="Settings" aria-label="Settings">&#9881;</button>
       <div class="playlist-badge inactive" id="playlistBadge">
         <span class="badge-dot"></span>
         <span id="badgeLabel">No active playlist</span>
@@ -59,7 +59,7 @@
   <div class="app-layout">
     <aside class="nav-sidebar" id="navSidebar">
       <div class="nav-sidebar-header">
-        <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="Collapse sidebar" aria-label="Collapse sidebar">&#9666;</button>
+        <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" data-tooltip="Collapse sidebar" aria-label="Collapse sidebar">&#9666;</button>
       </div>
       <nav class="nav-items" role="navigation" aria-label="App sections">
         <button class="nav-item active" data-view="library" aria-current="true">
@@ -83,7 +83,7 @@
         <div class="nav-section-label">Playlists</div>
         <ul class="nav-playlist-list" id="navPlaylistList">
           <li class="nav-playlist-add-item">
-            <button class="nav-item nav-add-playlist" id="addPlaylistBtn" title="New playlist" aria-label="New playlist">
+            <button class="nav-item nav-add-playlist" id="addPlaylistBtn" data-tooltip="New playlist" aria-label="New playlist">
               <span class="nav-icon">+</span>
               <span class="nav-label">New</span>
             </button>
@@ -92,11 +92,11 @@
         </ul>
       </nav>
       <div class="nav-sidebar-footer">
-        <button class="nav-sidebar-footer-link" id="websiteBtn" title="Website">
+        <button class="nav-sidebar-footer-link" id="websiteBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           <span class="nav-label">Website</span>
         </button>
-        <button class="nav-sidebar-footer-link" id="donateBtn" title="Donate">
+        <button class="nav-sidebar-footer-link" id="donateBtn" data-tooltip="Please consider donating">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
           <span class="nav-label">Donate</span>
         </button>
@@ -166,7 +166,7 @@
           <div class="usb-cfg-connect-row">
             <button id="selectUsbFolderBtn" data-primary>Select USB Folder</button>
             <span class="usb-path-badge" id="usbRootPathText">No USB selected</span>
-            <span class="usb-health-dot" id="usbHealthDot" title="USB health unknown"></span>
+            <span class="usb-health-dot" id="usbHealthDot" data-tooltip="USB health unknown" aria-label="USB health unknown"></span>
           </div>
           <div class="usb-cfg-recent-row" id="usbRecentRow">
             <span class="muted">Recent:</span>

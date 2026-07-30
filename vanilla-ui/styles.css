@@ -2012,6 +2012,35 @@ input[type="checkbox"] {
   font-size: 13px;
 }
 
+/* ── tooltip ────────────────────────────────────────── */
+
+.app-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1100;
+  max-width: 320px;
+  padding: 4px 8px;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-all;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease;
+}
+
+.app-tooltip--visible {
+  visibility: visible;
+  opacity: 1;
+}
+
 /* ── progress footer ────────────────────────────────── */
 
 .progress-footer {

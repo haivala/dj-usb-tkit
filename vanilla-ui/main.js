@@ -1628,7 +1628,7 @@ function runDeferredInitialLoad() {
 const sidebarExpandBtn = document.createElement("button");
 sidebarExpandBtn.className = "sidebar-expand-btn";
 sidebarExpandBtn.textContent = "\u25B8";
-sidebarExpandBtn.title = "Expand sidebar";
+sidebarExpandBtn.dataset.tooltip = "Expand sidebar";
 sidebarExpandBtn.setAttribute("aria-label", "Expand sidebar");
 document.body.appendChild(sidebarExpandBtn);
 

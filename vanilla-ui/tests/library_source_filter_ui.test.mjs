@@ -173,7 +173,7 @@ test("renderSourceChips renders missing source as unchecked relocation chip", ()
   assert.equal(checkbox.checked, false);
   assert.equal(checkbox.disabled, true);
   assert.equal(checkbox.getAttribute("aria-label"), "Source folder missing");
-  assert.match(chip.querySelector(".source-chip-path").getAttribute("title"), /Click to relocate/);
+  assert.match(chip.querySelector(".source-chip-path").getAttribute("data-tooltip"), /Click to relocate/);
 });
 
 test("relocateSourceRoot replaces source and preserves playlist track identity state", async () => {

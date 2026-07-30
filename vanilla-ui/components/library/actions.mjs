@@ -667,7 +667,7 @@ export function renderSourceChips(state, el, deps = {}) {
     chip.className = `source-chip${fullyAnalyzed && !missing ? " source-chip-analyzed" : ""}${missing ? " source-chip-missing" : ""}`;
     if (missing) {
       chip.dataset.sourceRelocateIndex = String(index);
-      chip.title = "Source folder missing. Click to relocate.";
+      chip.dataset.tooltip = "Source folder missing. Click to relocate.";
     }
     const checkedAttr = !missing && state.sourceRootEnabled[path] !== false ? "checked" : "";
     const disabledAttr = missing ? "disabled" : "";
@@ -675,7 +675,7 @@ export function renderSourceChips(state, el, deps = {}) {
     const pathTitle = missing
       ? `Folder missing. Click to relocate: ${path}`
       : path;
-    chip.innerHTML = `<input class="source-chip-toggle" type="checkbox" data-source-toggle-index="${index}" ${checkedAttr} ${disabledAttr} aria-label="${escapeHtml(ariaLabel)}" /><span class="source-chip-path" title="${escapeHtml(pathTitle)}">${escapeHtml(path)}</span><button class="source-chip-remove" data-source-index="${index}" aria-label="Remove">&times;</button>`;
+    chip.innerHTML = `<input class="source-chip-toggle" type="checkbox" data-source-toggle-index="${index}" ${checkedAttr} ${disabledAttr} aria-label="${escapeHtml(ariaLabel)}" /><span class="source-chip-path" data-tooltip="${escapeHtml(pathTitle)}" aria-label="${escapeHtml(pathTitle)}">${escapeHtml(path)}</span><button class="source-chip-remove" data-source-index="${index}" aria-label="Remove">&times;</button>`;
     el.sourceChipsContainer.appendChild(chip);
   });
 
@@ -1473,7 +1473,7 @@ export function patchLibraryRowCells(row, track, deps) {
 
   const bpmTd = row.querySelector(".td-bpm");
   if (bpmTd) {
-    const bpmTitle = track.bpmAnalyzer ? ` title="${escapeHtml(`Analyzed with: ${track.bpmAnalyzer}`)}"` : "";
+    const bpmTitle = track.bpmAnalyzer ? ` data-tooltip="${escapeHtml(`Analyzed with: ${track.bpmAnalyzer}`)}"` : "";
     bpmTd.innerHTML = track.bpm
       ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(track.bpm)}</span>`
       : "-";
@@ -1544,7 +1544,7 @@ export function patchLibraryRowCells(row, track, deps) {
     const analyzeBtn = actionTd.querySelector("[data-action='analyze-track']");
     if (analyzeBtn && trackHasCoreAnalysis(track)) {
       analyzeBtn.textContent = "Reanalyze";
-      analyzeBtn.title = "Recompute waveform/BPM/key";
+      analyzeBtn.dataset.tooltip = "Recompute waveform/BPM/key";
     }
   }
 

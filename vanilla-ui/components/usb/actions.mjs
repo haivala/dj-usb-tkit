@@ -1014,7 +1014,7 @@ function buildPlayerMenuItemButton(documentObj, item, selectedKind, side) {
     const tag = documentObj.createElement("span");
     tag.className = `player-menu-item-origin is-${origin}`;
     tag.textContent = origin === "pdb_only" ? "PDB" : "eDB";
-    tag.title = origin === "pdb_only"
+    tag.dataset.tooltip = origin === "pdb_only"
       ? "Only in PDB t16 (eDB missing this kind)"
       : "Only in eDB menuItem (not in PDB t16)";
     button.appendChild(tag);
@@ -1416,10 +1416,9 @@ export function renderUsbPlaylists(state, el, deps = {}) {
   usbRight?.classList.remove("hidden");
   state.usbPlaylists.forEach((playlist, index) => {
     const count = Number(playlist.trackCount ?? playlist.tracks?.length ?? 0);
-    const source = String(playlist.source || "unknown");
     el.usbPlaylists.insertAdjacentHTML(
       "beforeend",
-      `<li data-usb-playlist-li="${index}"><button data-usb-playlist-index="${index}" data-usb-playlist="${escapeHtml(playlist.id)}" title="Source: ${escapeHtml(source)}"><span class="drag-handle" data-usb-drag-handle draggable="true" title="Drag to reorder">&#10495;</span><span class="playlist-label">${escapeHtml(playlist.name)} (${count})</span><span class="playlist-remove" data-usb-remove-playlist="${escapeHtml(playlist.id)}" title="Remove">&times;</span></button></li>`
+      `<li data-usb-playlist-li="${index}"><button data-usb-playlist-index="${index}" data-usb-playlist="${escapeHtml(playlist.id)}"><span class="drag-handle" data-usb-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">&#10495;</span><span class="playlist-label">${escapeHtml(playlist.name)} (${count})</span><span class="playlist-remove" data-usb-remove-playlist="${escapeHtml(playlist.id)}" data-tooltip="Remove" aria-label="Remove">&times;</span></button></li>`
     );
   });
 }
@@ -1572,7 +1571,7 @@ export function renderUsbRecentRoots(el, rows, document) {
     btn.type = "button";
     btn.className = "usb-cfg-recent-btn";
     btn.dataset.usbRecentPath = path;
-    btn.title = path;
+    btn.dataset.tooltip = path;
     btn.style.direction = "rtl";
     btn.style.textAlign = "left";
     btn.textContent = path;

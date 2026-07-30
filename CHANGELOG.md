@@ -12,6 +12,13 @@
 
 ## Unreleased
 
+- Replace native browser `title=""` tooltips throughout the app with a custom
+  tooltip that appears in ~150ms instead of the browser's native ~1s hover
+  delay. This was most noticeable on the source-folder chips: the full path
+  was already exposed on hover (visually truncated with an ellipsis), but the
+  slow native delay made it read as "the feature is missing." Format badges
+  in the library table now also show sample-rate/bit-depth (or bitrate)
+  detail on hover for every track, not just ones with a compatibility warning.
 - Remove the `analyze_track_piece` backend command. It was a per-piece
   (duration/artwork/waveform/bpm-key) analysis endpoint left over from an
   older frontend dispatch loop; that loop was already deleted in favor of the

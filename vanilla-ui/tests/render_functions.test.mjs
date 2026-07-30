@@ -114,7 +114,7 @@ test("createTrackRow uses helpful add-button tooltip when no playlist is active"
     }
   );
 
-  assert.ok(html.includes("title=\"Create and activate a playlist first, then add tracks to it.\""));
+  assert.ok(html.includes("data-tooltip=\"Create and activate a playlist first, then add tracks to it.\""));
   assert.ok(html.includes("disabled"));
 });
 
@@ -317,7 +317,7 @@ test("createTrackRow shows a plain badge for a wav with no extensible header iss
     bitDepth: 16
   });
 
-  assert.ok(html.includes('class="format-badge">WAV</span>'));
+  assert.ok(html.includes('class="format-badge" data-tooltip="44.1 kHz · 16-bit">WAV</span>'));
   assert.ok(!html.includes('class="format-badge warn"'));
   assert.ok(!html.includes('class="format-badge autofix"'));
 });

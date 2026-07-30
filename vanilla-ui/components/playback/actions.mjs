@@ -52,7 +52,7 @@ export function updateTransportButtonsInDom(state, document) {
       );
     btn.classList.toggle("is-playing", isPlaying);
     btn.setAttribute("aria-label", isPlaying ? "Stop" : "Play");
-    btn.setAttribute("title", isPlaying ? "Stop" : "Play");
+    btn.dataset.tooltip = isPlaying ? "Stop" : "Play";
     btn.innerHTML = isPlaying
       ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>`
       : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg>`;
