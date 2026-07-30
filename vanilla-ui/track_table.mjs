@@ -32,8 +32,8 @@ export function createTrackRow(track, options, deps) {
   const hasRenderableWaveform = hasColorWaveform || (peaks.length > 0 && peaks.some((v) => v > 0));
   const peaksData = peaks.length ? escapeHtml(peaks.join(",")) : "";
   const waveformCell = hasRenderableWaveform
-    ? `<div class="waveform waveform-canvas" ${waveformAttrs} data-peaks="${peaksData}" aria-label="waveform preview" data-tooltip="${escapeHtml(track.waveformPeaksPath || track.usbAnalysisPath || "")}"><canvas class="waveform-canvas-el" aria-hidden="true"></canvas><i class="waveform-playhead" aria-hidden="true"></i></div>`
-    : `<div class="waveform" ${waveformAttrs} aria-label="waveform preview" data-tooltip="${escapeHtml(track.waveformPeaksPath || track.usbAnalysisPath || "")}"><i class="waveform-playhead" aria-hidden="true"></i></div>`;
+    ? `<div class="waveform waveform-canvas" ${waveformAttrs} data-peaks="${peaksData}" aria-label="waveform preview" data-tooltip="Play from here"><canvas class="waveform-canvas-el" aria-hidden="true"></canvas><i class="waveform-playhead" aria-hidden="true"></i></div>`
+    : `<div class="waveform" ${waveformAttrs} aria-label="waveform preview" data-tooltip="Play from here"><i class="waveform-playhead" aria-hidden="true"></i></div>`;
   const playInWaveform = options.secondaryActionLabel
     ? `<button class="transport-btn ${isPlayingTrack ? "is-playing" : ""}" data-action="${options.secondaryActionType}" data-index="${options.index}" data-id="${escapeHtml(renderTrackId)}" data-row-key="${escapeHtml(rowKey)}" data-origin="${escapeHtml(options.origin || "usb")}" aria-label="${transportLabel}" data-tooltip="${transportLabel}">${transportIcon}</button>`
     : "";
