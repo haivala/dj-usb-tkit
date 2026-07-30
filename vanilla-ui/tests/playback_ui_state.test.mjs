@@ -62,3 +62,31 @@ test("inactive playback never marks button playing or stop", () => {
   assert.equal(isTransportButtonPlaying(state, { rowKey: "usb:9", trackId: "local-9" }), false);
   assert.equal(shouldToggleStop(state, "usb:9", true), false);
 });
+
+test("a pending stop immediately reads as not-playing even while playbackActive is still true", () => {
+  const state = {
+    playbackActive: true,
+    playbackRowKey: "row:1",
+    playbackTrackId: "local-1",
+    playbackPendingKind: "stop",
+  };
+
+  assert.equal(isTransportButtonPlaying(state, { rowKey: "row:1", trackId: "local-1" }), false);
+  assert.equal(shouldToggleStop(state, "row:1", true), false);
+});
+
+test("a pending play immediately reads as playing for its target row before playbackActive flips", () => {
+  const state = {
+    playbackActive: false,
+    playbackRowKey: null,
+    playbackTrackId: null,
+    playbackPendingKind: "play",
+    playbackPendingRowKey: "row:2",
+    playbackPendingTrackId: "local-2",
+  };
+
+  assert.equal(isTransportButtonPlaying(state, { rowKey: "row:2", trackId: "local-2" }), true);
+  assert.equal(isTransportButtonPlaying(state, { rowKey: "row:3", trackId: "local-3" }), false);
+  assert.equal(shouldToggleStop(state, "row:2", false), true);
+  assert.equal(shouldToggleStop(state, "row:3", false), false);
+});

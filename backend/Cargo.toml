@@ -15,7 +15,14 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 lofty = "0.22"
-rodio = "0.20"
+# default-features disabled deliberately: this project no longer uses rodio's own Decoder at
+# all (see src/symphonia_decoder.rs) because rodio's private ReadSeekSource never reports a
+# byte length to symphonia, which several demuxers (FLAC in particular) need to seek at all.
+# rodio is kept purely for its audio *output* engine (Sink/OutputStream, built on the
+# always-on `cpal` dependency) — no decoder feature flags are needed for that.
+rodio = { version = "0.20", default-features = false }
+# Used directly by src/symphonia_decoder.rs for all audio decoding/seeking (every format in
+# scanner.rs's AUDIO_EXTENSIONS, via symphonia's own format probing).
 symphonia = { version = "0.5", default-features = false, features = ["all-formats", "all-codecs"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"

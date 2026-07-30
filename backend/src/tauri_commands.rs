@@ -2,7 +2,6 @@
 
 use std::panic::{self, AssertUnwindSafe};
 use std::thread;
-use std::time::Duration;
 
 use chrono::Utc;
 use serde::Serialize;
@@ -393,53 +392,40 @@ fn emit_playback_event<R: tauri::Runtime>(
     let _ = app.emit(PLAYBACK_EVENT_CHANNEL, payload);
 }
 
-pub fn start_playback_event_pump(app: AppHandle, commands: BackendCommands) {
+/// Relays natural end-of-track notifications from the playback worker thread to the
+/// frontend. Purely reactive — blocks on `recv()`, no polling loop — the worker thread
+/// itself (`player.rs`) is what detects a sink emptying on its own, using the same
+/// serialized loop that processes explicit Play/Stop commands, so this relay can never
+/// race an explicit stop the way a separate status-polling thread could.
+pub fn start_playback_transition_relay(
+    app: AppHandle,
+    transitions: std::sync::mpsc::Receiver<crate::player::PlaybackTransition>,
+) {
     thread::spawn(move || {
-        let mut was_playing = false;
-        let mut last_path: Option<String> = None;
-        let mut last_position_bucket: u64 = 0;
-
-        loop {
-            thread::sleep(Duration::from_millis(250));
-            let status = match commands.get_playback_status_native().data {
-                Some(data) => data,
-                None => continue,
-            };
-            let is_playing = status.playing;
-            let path = status.path.clone();
-            let position_ms = status.position_ms;
-            let duration_ms = status.duration_ms;
-            let position_bucket = position_ms / 200;
-            let path_changed = path != last_path;
-
-            if is_playing
-                && (!was_playing || path_changed || position_bucket != last_position_bucket)
-            {
-                emit_playback_event(
-                    &app,
-                    "playback.progress",
-                    path.clone(),
-                    true,
-                    position_ms,
-                    duration_ms,
-                    None,
-                );
-            } else if was_playing && !is_playing {
-                emit_playback_event(
-                    &app,
-                    "playback.stopped",
-                    path.clone(),
-                    false,
-                    0,
-                    duration_ms,
-                    None,
-                );
-            }
-
-            was_playing = is_playing;
-            last_path = path;
-            last_position_bucket = position_bucket;
+        while let Ok(transition) = transitions.recv() {
+            emit_playback_event(
+                &app,
+                "playback.stopped",
+                transition.path,
+                false,
+                0,
+                transition.duration_ms,
+                None,
+            );
         }
+        // The channel only disconnects if the playback worker thread exited (panicked or
+        // the process is shutting down) — natural end-of-track detection is silently gone
+        // for the rest of the session, so this needs to be visible, not just dropped.
+        let _ = app.emit(
+            "backend:log",
+            serde_json::json!({
+                "level": "warn",
+                "source": "playback",
+                "code": "playback.transition_relay_stopped",
+                "message": "playback transition relay stopped: worker channel disconnected; natural end-of-track detection is no longer active",
+                "timestamp": Utc::now().to_rfc3339(),
+            }),
+        );
     });
 }
 

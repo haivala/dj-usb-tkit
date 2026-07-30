@@ -9,6 +9,14 @@ function normalizeLevel(value) {
   return "info";
 }
 
+// A warning or error should never be visible only in the transient status bar — this
+// decides whether a status update should also persist to the Event Log. Startup-phase
+// status is always mirrored too (coalesced, for reviewing a failed startup afterward).
+export function shouldPersistStatusToEventLog(level, isStartupPhase) {
+  if (isStartupPhase) return true;
+  return level === "warn" || level === "error";
+}
+
 function normalizeSource(value) {
   const raw = String(value || "").trim();
   return raw || "ui";

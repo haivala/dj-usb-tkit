@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createMessageBus, normalizeUiMessage } from "../message_bus.mjs";
+import { createMessageBus, normalizeUiMessage, shouldPersistStatusToEventLog } from "../message_bus.mjs";
 
 test("normalizeUiMessage returns canonical preformatted payload", () => {
   const msg = normalizeUiMessage({
@@ -45,5 +45,17 @@ test("message bus routes preformatted text without consumer-side rewriting", () 
   assert.equal(entries[0].message, "scan:stage - exact text");
   assert.equal(entries[0].details, "ctx: test");
   assert.equal(entries[0].coalesceKey, "library.scan.status");
+});
+
+test("shouldPersistStatusToEventLog persists warn/error regardless of startup phase", () => {
+  assert.equal(shouldPersistStatusToEventLog("warn", false), true);
+  assert.equal(shouldPersistStatusToEventLog("error", false), true);
+  assert.equal(shouldPersistStatusToEventLog("warn", true), true);
+  assert.equal(shouldPersistStatusToEventLog("error", true), true);
+});
+
+test("shouldPersistStatusToEventLog persists info only during startup phase", () => {
+  assert.equal(shouldPersistStatusToEventLog("info", true), true);
+  assert.equal(shouldPersistStatusToEventLog("info", false), false);
 });
 

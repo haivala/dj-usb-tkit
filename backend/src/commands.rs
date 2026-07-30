@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{mpsc, Arc, Mutex};
 
 use crate::error::BackendResult;
 use crate::error::ErrorPayload;
@@ -26,7 +27,7 @@ use crate::models::{
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
     ValidateUsbRootRequest,
 };
-use crate::player::PlaybackController;
+use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
 
 fn wrap<T: serde::Serialize>(result: BackendResult<T>) -> ApiResponse<T> {
@@ -39,15 +40,25 @@ fn wrap<T: serde::Serialize>(result: BackendResult<T>) -> ApiResponse<T> {
 pub struct BackendCommands {
     service: BackendService,
     playback: PlaybackController,
+    playback_transitions: Arc<Mutex<Option<mpsc::Receiver<PlaybackTransition>>>>,
 }
 
 impl BackendCommands {
     pub fn new(data_dir: impl AsRef<Path>) -> Result<Self, ErrorPayload> {
         let service = BackendService::new(data_dir).map_err(ErrorPayload::from)?;
+        let (playback, transition_rx) = PlaybackController::new();
         Ok(Self {
             service,
-            playback: PlaybackController::new(),
+            playback,
+            playback_transitions: Arc::new(Mutex::new(Some(transition_rx))),
         })
+    }
+
+    /// Hands off the natural-stop notification channel to whichever caller asks first
+    /// (the Tauri transition relay, at startup). Returns `None` on every subsequent call —
+    /// there is exactly one consumer for the process's lifetime.
+    pub fn take_playback_transitions(&self) -> Option<mpsc::Receiver<PlaybackTransition>> {
+        self.playback_transitions.lock().ok()?.take()
     }
 
     pub fn scan_library(&self, req: ScanLibraryRequest) -> ApiResponse<ScanLibraryData> {

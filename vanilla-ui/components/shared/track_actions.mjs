@@ -49,7 +49,13 @@ export function handleTrackAction({ action, track, origin, target, event, state,
     const helpers = getPlaybackUiStateHelpers();
     const stopRequested = helpers?.shouldToggleStop
       ? helpers.shouldToggleStop(state, rowKey, isTrackCurrentlyPlaying(track))
-      : ((rowKey && state.playbackRowKey === rowKey) || isTrackCurrentlyPlaying(track));
+      : (
+        state?.playbackPendingKind === "stop"
+          ? false
+          : state?.playbackPendingKind === "play"
+            ? ((rowKey && state.playbackPendingRowKey === rowKey) || isTrackCurrentlyPlaying(track))
+            : ((rowKey && state.playbackRowKey === rowKey) || isTrackCurrentlyPlaying(track))
+      );
     if (stopRequested) {
       stopPlaybackFromUi().catch((err) => {
         console.error(err);

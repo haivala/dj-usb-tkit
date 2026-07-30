@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   stopPlaybackIfActive,
-  playTrackFromOriginController as playTrackFromOrigin
+  stopPlaybackFromUi,
+  playTrackFromOriginController as playTrackFromOrigin,
+  playTrackFromOrigin as playTrackFromOriginCore
 } from "../components/playback/actions.mjs";
 
 test("stopPlaybackIfActive clears playback state and UI", async () => {
@@ -34,6 +36,7 @@ test("stopPlaybackIfActive clears playback state and UI", async () => {
   assert.equal(state.activeWaveform, null);
   assert.equal(state.playbackStopPromise, null);
   assert.deepEqual(calls, [
+    "transport",
     "stop_playback_native",
     "clear",
     "transport",
@@ -66,4 +69,113 @@ test("playTrackFromOrigin dedupes concurrent starts", async () => {
   assert.deepEqual(result, ["ok", "ok"]);
   assert.equal(starts, 1);
   assert.equal(state.playbackStartPromise, null);
+});
+
+test("switching tracks while a start is pending immediately supersedes rather than being dropped", async () => {
+  const state = {
+    playbackStartPromise: null,
+    playbackStopPromise: null,
+    playbackGeneration: 0,
+    playbackPendingKind: null,
+    playbackPendingRowKey: null,
+    playbackPendingTrackId: null
+  };
+  const startedTracks = [];
+  let resolveA;
+  const pendingA = new Promise((resolve) => { resolveA = resolve; });
+
+  const resultA = playTrackFromOrigin(state, { id: "A" }, "local", { rowKey: "row-A" }, {
+    playTrackFromOriginCore: async () => {
+      startedTracks.push("A");
+      await pendingA;
+      return "A-ok";
+    }
+  });
+
+  const resultB = playTrackFromOrigin(state, { id: "B" }, "local", { rowKey: "row-B" }, {
+    playTrackFromOriginCore: async () => {
+      startedTracks.push("B");
+      return "B-ok";
+    }
+  });
+
+  assert.deepEqual(startedTracks, ["A", "B"]);
+  assert.equal(state.playbackPendingRowKey, "row-B");
+  assert.equal(state.playbackPendingTrackId, "B");
+
+  resolveA();
+  const [a, b] = await Promise.all([resultA, resultB]);
+  assert.equal(a, "A-ok");
+  assert.equal(b, "B-ok");
+  assert.equal(state.playbackPendingKind, null);
+});
+
+test("stop supersedes a pending start; the stale start's success is not committed", async () => {
+  const state = {
+    playbackStartPromise: null,
+    playbackStopPromise: null,
+    playbackActive: false,
+    playbackTrackId: null,
+    playbackPath: null,
+    playbackRowKey: null,
+    activeWaveform: null,
+    playbackGeneration: 0,
+    playbackPendingKind: null,
+    playbackPendingRowKey: null,
+    playbackPendingTrackId: null,
+    playbackBackendQueue: null,
+    sourceRoots: ["/music"],
+    usbRoot: null,
+    usbRootValid: false
+  };
+  const calls = [];
+  let resolvePlay;
+  const pendingPlay = new Promise((resolve) => { resolvePlay = resolve; });
+
+  const commonDeps = {
+    command: async (name, payload) => {
+      calls.push(name);
+      if (name === "play_track_native") {
+        await pendingPlay;
+        return { path: payload.path, durationMs: 1000, positionMs: 0 };
+      }
+      if (name === "stop_playback_native") {
+        return { stopped: true };
+      }
+      throw new Error(`unexpected command ${name}`);
+    },
+    resolveLocalTrackForPlayback: async () => null,
+    trackPathMatchesAnyRoot: (fp, roots) => roots.some((r) => String(fp || "").startsWith(r)),
+    clearAllWaveformPlayheads: () => {},
+    setWaveformPlayhead: () => {},
+    updateTransportButtonsInDom: () => {},
+    setStatus: () => {},
+    warn: () => {}
+  };
+
+  const startPromise = playTrackFromOrigin(state, {
+    id: "t1",
+    title: "Track",
+    filePath: "/music/Track.mp3"
+  }, "library", { rowKey: "row-1" }, {
+    playTrackFromOriginCore: playTrackFromOriginCore,
+    ...commonDeps
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ["play_track_native"]);
+
+  const stopPromise = stopPlaybackFromUi(state, commonDeps);
+  assert.equal(state.playbackPendingKind, "stop");
+  assert.equal(state.playbackActive, false);
+
+  resolvePlay();
+  await Promise.all([startPromise, stopPromise]);
+
+  assert.deepEqual(calls, ["play_track_native", "stop_playback_native"]);
+  assert.equal(state.playbackActive, false);
+  assert.equal(state.playbackTrackId, null);
+  assert.equal(state.playbackPath, null);
+  assert.equal(state.playbackRowKey, null);
+  assert.equal(state.playbackPendingKind, null);
 });

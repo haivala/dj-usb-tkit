@@ -80,29 +80,94 @@ export function scrubRatioFromPointer(event, waveformElement) {
   return Math.max(0, Math.min(1, x / rect.width));
 }
 
+// Drives the waveform playhead by wall-clock interpolation from a single known
+// position/duration snapshot, instead of depending on a stream of backend push events.
+export function startPlayheadInterpolation(state, {
+  waveformEl,
+  initialPositionMs,
+  durationMs,
+  setWaveformPlayhead: setWaveformPlayheadFn,
+  requestAnimationFrameFn,
+  cancelAnimationFrameFn,
+  nowFn = () => Date.now()
+}) {
+  stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
+  if (!waveformEl || !(durationMs > 0) || typeof requestAnimationFrameFn !== "function") return;
+
+  const startWallClockMs = nowFn();
+  const tick = () => {
+    if (state.activeWaveform !== waveformEl) return;
+    const elapsedMs = nowFn() - startWallClockMs;
+    const positionMs = Math.min(durationMs, initialPositionMs + elapsedMs);
+    setWaveformPlayheadFn(waveformEl, positionMs / durationMs, true);
+    state.playheadAnimationHandle = requestAnimationFrameFn(tick);
+  };
+  tick();
+}
+
+export function stopPlayheadInterpolation(state, { cancelAnimationFrameFn } = {}) {
+  if (state.playheadAnimationHandle != null && typeof cancelAnimationFrameFn === "function") {
+    cancelAnimationFrameFn(state.playheadAnimationHandle);
+  }
+  state.playheadAnimationHandle = null;
+}
+
+export function beginPlaybackIntent(state, kind, target = {}) {
+  state.playbackGeneration = (state.playbackGeneration || 0) + 1;
+  state.playbackPendingKind = kind;
+  state.playbackPendingRowKey = kind === "play" ? (target.rowKey || null) : null;
+  state.playbackPendingTrackId = kind === "play" ? (target.trackId || null) : null;
+  return state.playbackGeneration;
+}
+
+export function isGenerationCurrent(state, generation) {
+  return generation === undefined || state.playbackGeneration === generation;
+}
+
+export function clearPlaybackIntentIfCurrent(state, generation) {
+  if (!isGenerationCurrent(state, generation)) return;
+  state.playbackPendingKind = null;
+  state.playbackPendingRowKey = null;
+  state.playbackPendingTrackId = null;
+}
+
+export function withBackendQueue(state, jobFn) {
+  const prior = state.playbackBackendQueue || Promise.resolve();
+  const run = prior.catch(() => {}).then(jobFn);
+  state.playbackBackendQueue = run.catch(() => {});
+  return run;
+}
+
 export async function stopPlaybackFromUi(state, deps) {
   const {
     command,
     clearAllWaveformPlayheads,
     updateTransportButtonsInDom,
-    setStatus
+    setStatus,
+    cancelAnimationFrameFn
   } = deps;
   if (state.playbackStopPromise) return state.playbackStopPromise;
-  if (!state.playbackActive) {
+  if (!state.playbackActive && state.playbackPendingKind !== "play") {
     setStatus("Idle");
     return;
   }
-  state.playbackStopPromise = (async () => {
+  const generation = beginPlaybackIntent(state, "stop");
+  updateTransportButtonsInDom();
+  state.playbackStopPromise = withBackendQueue(state, async () => {
     await command("stop_playback_native");
-    state.playbackActive = false;
-    state.playbackTrackId = null;
-    state.playbackPath = null;
-    state.playbackRowKey = null;
-    state.activeWaveform = null;
-    clearAllWaveformPlayheads();
+    if (isGenerationCurrent(state, generation)) {
+      state.playbackActive = false;
+      state.playbackTrackId = null;
+      state.playbackPath = null;
+      state.playbackRowKey = null;
+      state.activeWaveform = null;
+      stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
+      clearAllWaveformPlayheads();
+      clearPlaybackIntentIfCurrent(state, generation);
+    }
     updateTransportButtonsInDom();
     setStatus("Idle");
-  })();
+  });
   try {
     await state.playbackStopPromise;
   } finally {
@@ -411,6 +476,10 @@ export function getTrackPlaybackPath(track, deps) {
 
 export function isTrackCurrentlyPlaying(track, state, deps) {
   const { normalizePath, getTrackPlaybackPath } = deps;
+  if (state.playbackPendingKind === "stop") return false;
+  if (state.playbackPendingKind === "play") {
+    return !!(state.playbackPendingTrackId && track?.id && state.playbackPendingTrackId === track.id);
+  }
   if (!state.playbackActive) return false;
   if (state.playbackTrackId && track?.id && state.playbackTrackId === track.id) return true;
   const a = normalizePath(getTrackPlaybackPath(track));
@@ -426,12 +495,18 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
     setWaveformPlayhead,
     updateTransportButtonsInDom,
     setStatus,
-    warn
+    warn,
+    generation,
+    requestAnimationFrameFn,
+    cancelAnimationFrameFn
   } = deps;
 
   let localTrack = null;
   const trackPath = String(track?.filePath || "").trim();
-  const isLibraryOrigin = String(origin || "").toLowerCase() === "library";
+  const originLower = String(origin || "").toLowerCase();
+  // Real callers pass "local" for library/playlist tracks (see components/library/events.mjs,
+  // components/playlist/events.mjs); "library" is kept for backward compatibility.
+  const isLibraryOrigin = originLower === "local" || originLower === "library";
   if (isLibraryOrigin && trackPath) {
     localTrack = {
       id: track?.id || null,
@@ -503,53 +578,82 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
   };
 
   if (playPath && sourceLabel !== "Unavailable") {
-    try {
-      const playback = await playNativeWithRecovery(playPath);
-      if (waveformEl) {
-        clearAllWaveformPlayheads();
-        state.activeWaveform = waveformEl;
-        const duration = Number(playback?.durationMs || 0);
-        const position = Number(playback?.positionMs || 0);
-        setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : startRatio, true);
-      }
-      state.playbackActive = true;
-      state.playbackTrackId = playId;
-      state.playbackPath = playback?.path || playPath;
-      state.playbackRowKey = options.rowKey || null;
-      updateTransportButtonsInDom();
-      setStatus(`Playing from ${sourceLabel}: ${title}`);
-      return;
-    } catch (err) {
-      if (libraryPath && usbPath && usbPath !== playPath) {
-        try {
-          const playback = await playNativeWithRecovery(usbPath);
-          if (waveformEl) {
-            clearAllWaveformPlayheads();
-            state.activeWaveform = waveformEl;
-            const duration = Number(playback?.durationMs || 0);
-            const position = Number(playback?.positionMs || 0);
-            setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : startRatio, true);
+    return withBackendQueue(state, async () => {
+      if (!isGenerationCurrent(state, generation)) return;
+      try {
+        const playback = await playNativeWithRecovery(playPath);
+        if (!isGenerationCurrent(state, generation)) return;
+        if (waveformEl) {
+          clearAllWaveformPlayheads();
+          state.activeWaveform = waveformEl;
+          const duration = Number(playback?.durationMs || 0);
+          const position = Number(playback?.positionMs || 0);
+          if (duration > 0) {
+            startPlayheadInterpolation(state, {
+              waveformEl,
+              initialPositionMs: position,
+              durationMs: duration,
+              setWaveformPlayhead,
+              requestAnimationFrameFn,
+              cancelAnimationFrameFn
+            });
+          } else {
+            setWaveformPlayhead(waveformEl, startRatio, true);
           }
-          state.playbackActive = true;
-          state.playbackTrackId = track?.id || null;
-          state.playbackPath = playback?.path || usbPath;
-          state.playbackRowKey = options.rowKey || null;
-          updateTransportButtonsInDom();
-          setStatus(`Playing from USB (library unavailable): ${title}`);
-          return;
-        } catch (fallbackErr) {
-          const message = fallbackErr?.message || String(fallbackErr);
-          setStatus(`Playback failed (${sourceLabel}): ${message}`);
-          return;
         }
+        state.playbackActive = true;
+        state.playbackTrackId = playId;
+        state.playbackPath = playback?.path || playPath;
+        state.playbackRowKey = options.rowKey || null;
+        updateTransportButtonsInDom();
+        setStatus(`Playing from ${sourceLabel}: ${title}`);
+        return;
+      } catch (err) {
+        if (libraryPath && usbPath && usbPath !== playPath) {
+          try {
+            const playback = await playNativeWithRecovery(usbPath);
+            if (!isGenerationCurrent(state, generation)) return;
+            if (waveformEl) {
+              clearAllWaveformPlayheads();
+              state.activeWaveform = waveformEl;
+              const duration = Number(playback?.durationMs || 0);
+              const position = Number(playback?.positionMs || 0);
+              if (duration > 0) {
+                startPlayheadInterpolation(state, {
+                  waveformEl,
+                  initialPositionMs: position,
+                  durationMs: duration,
+                  setWaveformPlayhead,
+                  requestAnimationFrameFn,
+                  cancelAnimationFrameFn
+                });
+              } else {
+                setWaveformPlayhead(waveformEl, startRatio, true);
+              }
+            }
+            state.playbackActive = true;
+            state.playbackTrackId = track?.id || null;
+            state.playbackPath = playback?.path || usbPath;
+            state.playbackRowKey = options.rowKey || null;
+            updateTransportButtonsInDom();
+            setStatus(`Playing from USB (library unavailable): ${title}`);
+            return;
+          } catch (fallbackErr) {
+            if (!isGenerationCurrent(state, generation)) return;
+            const message = fallbackErr?.message || String(fallbackErr);
+            setStatus(`Playback failed (${sourceLabel}): ${message}`, { level: "error", source: "playback" });
+            return;
+          }
+        }
+        if (!isGenerationCurrent(state, generation)) return;
+        const message = err?.message || String(err);
+        setStatus(`Playback failed (${sourceLabel}): ${message}`, { level: "error", source: "playback" });
+        return;
       }
-      const message = err?.message || String(err);
-      setStatus(`Playback failed (${sourceLabel}): ${message}`);
-      return;
-    }
+    });
   }
 
-  setStatus("Cannot play: track not found in Library or selected USB.");
+  setStatus("Cannot play: track not found in Library or selected USB.", { level: "warn", source: "playback" });
 }
 export async function stopPlaybackIfActive(state, deps) {
   const {
@@ -557,25 +661,32 @@ export async function stopPlaybackIfActive(state, deps) {
     clearAllWaveformPlayheads,
     updateTransportButtonsInDom,
     setStatus,
-    warn
+    warn,
+    cancelAnimationFrameFn
   } = deps;
   if (state.playbackStopPromise) return state.playbackStopPromise;
-  if (!state.playbackActive) return;
-  state.playbackStopPromise = (async () => {
+  if (!state.playbackActive && state.playbackPendingKind !== "play") return;
+  const generation = beginPlaybackIntent(state, "stop");
+  updateTransportButtonsInDom();
+  state.playbackStopPromise = withBackendQueue(state, async () => {
     try {
       await command("stop_playback_native");
     } catch (err) {
       warn("Failed to stop playback on context change:", err);
     }
-    state.playbackActive = false;
-    state.playbackTrackId = null;
-    state.playbackPath = null;
-    state.playbackRowKey = null;
-    state.activeWaveform = null;
-    clearAllWaveformPlayheads();
+    if (isGenerationCurrent(state, generation)) {
+      state.playbackActive = false;
+      state.playbackTrackId = null;
+      state.playbackPath = null;
+      state.playbackRowKey = null;
+      state.activeWaveform = null;
+      stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
+      clearAllWaveformPlayheads();
+      clearPlaybackIntentIfCurrent(state, generation);
+    }
     updateTransportButtonsInDom();
     setStatus("Idle");
-  })();
+  });
   try {
     await state.playbackStopPromise;
   } finally {
@@ -584,15 +695,29 @@ export async function stopPlaybackIfActive(state, deps) {
 }
 
 export async function playTrackFromOriginController(state, track, origin, options = {}, deps) {
-  const { playTrackFromOriginCore } = deps;
-  if (state.playbackStartPromise) {
+  const { playTrackFromOriginCore, updateTransportButtonsInDom } = deps;
+  const rowKey = options.rowKey || null;
+  const trackId = track?.id || null;
+
+  if (
+    state.playbackStartPromise
+    && state.playbackPendingKind === "play"
+    && (state.playbackPendingRowKey || null) === rowKey
+    && (state.playbackPendingTrackId || null) === trackId
+  ) {
     return state.playbackStartPromise;
   }
+
+  const generation = beginPlaybackIntent(state, "play", { rowKey, trackId });
+  updateTransportButtonsInDom?.();
+
   const run = (async () => {
-    if (state.playbackStopPromise) {
-      await state.playbackStopPromise;
+    try {
+      return await playTrackFromOriginCore(state, track, origin, options, { ...deps, generation });
+    } finally {
+      clearPlaybackIntentIfCurrent(state, generation);
+      updateTransportButtonsInDom?.();
     }
-    return playTrackFromOriginCore(state, track, origin, options, deps);
   })();
   state.playbackStartPromise = run;
   try {
@@ -603,12 +728,23 @@ export async function playTrackFromOriginController(state, track, origin, option
     }
   }
 }
+export function findTrackIdByPath(state, path, deps) {
+  const { normalizePath } = deps;
+  const target = normalizePath(path || "");
+  if (!target) return null;
+  const match = (state.tracks || []).find((t) => normalizePath(t.filePath || "") === target);
+  return match?.id || null;
+}
+
 export function handlePlaybackEvent(state, payload, deps) {
   const {
     setWaveformPlayhead,
     updateTransportButtonsInDom,
     clearAllWaveformPlayheads,
-    setStatus
+    setStatus,
+    resolveTrackIdForPath,
+    requestAnimationFrameFn,
+    cancelAnimationFrameFn
   } = deps;
 
   if (!payload || typeof payload !== "object") return;
@@ -618,27 +754,51 @@ export function handlePlaybackEvent(state, payload, deps) {
   const position = Number(payload.positionMs || 0);
   const duration = Number(payload.durationMs || 0);
 
-  if (
-    eventName === "playback.started"
-    || eventName === "playback.seeked"
-    || eventName === "playback.progress"
-  ) {
+  if (eventName === "playback.started" || eventName === "playback.seeked") {
+    // These are one-shot confirmations tied directly to our own play_track_native call
+    // (unlike a continuous progress stream). If we have no active path and nothing
+    // pending, this can't be a legitimate confirmation of anything we're waiting on —
+    // treat a stray playing:true here as noise rather than reviving cleared state.
+    const noActiveOrPendingContext = !state.playbackActive && !state.playbackPath && state.playbackPendingKind !== "play";
+    if (playing && noActiveOrPendingContext) return;
+
+    const pathChanged = path !== null && path !== state.playbackPath;
     state.playbackActive = playing;
     state.playbackPath = path;
+    if (pathChanged) {
+      state.playbackTrackId = typeof resolveTrackIdForPath === "function" ? resolveTrackIdForPath(path) : null;
+      state.playbackRowKey = null;
+    }
     if (state.activeWaveform) {
-      const fraction = duration > 0 ? position / duration : 0;
-      setWaveformPlayhead(state.activeWaveform, fraction, playing);
+      if (playing && duration > 0) {
+        startPlayheadInterpolation(state, {
+          waveformEl: state.activeWaveform,
+          initialPositionMs: position,
+          durationMs: duration,
+          setWaveformPlayhead,
+          requestAnimationFrameFn,
+          cancelAnimationFrameFn
+        });
+      } else {
+        setWaveformPlayhead(state.activeWaveform, duration > 0 ? position / duration : 0, playing);
+      }
     }
     updateTransportButtonsInDom();
     return;
   }
 
   if (eventName === "playback.stopped") {
+    // A natural end-of-track notification and a fresh explicit play for a different
+    // track travel to us via independent threads with no ordering guarantee — if this
+    // "stopped" is for a path we've already moved on from, it's stale; don't let it
+    // blank out whatever is now actually playing.
+    if (path !== null && path !== state.playbackPath) return;
     state.playbackActive = false;
     state.playbackPath = null;
     state.playbackTrackId = null;
     state.playbackRowKey = null;
     state.activeWaveform = null;
+    stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
     clearAllWaveformPlayheads();
     updateTransportButtonsInDom();
     setStatus("Idle");

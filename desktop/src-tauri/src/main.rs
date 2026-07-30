@@ -677,16 +677,25 @@ fn main() {
                 "startup",
                 "startup: backend initialized",
             );
-            backend::tauri_commands::start_playback_event_pump(
-                app.handle().clone(),
-                commands.clone(),
-            );
-            emit_backend_log(
-                &app_handle,
-                "info",
-                "startup",
-                "startup: playback event pump started",
-            );
+            if let Some(transitions) = commands.take_playback_transitions() {
+                backend::tauri_commands::start_playback_transition_relay(
+                    app.handle().clone(),
+                    transitions,
+                );
+                emit_backend_log(
+                    &app_handle,
+                    "info",
+                    "startup",
+                    "startup: playback transition relay started",
+                );
+            } else {
+                emit_backend_log(
+                    &app_handle,
+                    "warn",
+                    "startup",
+                    "playback transition receiver already taken; natural end-of-track detection disabled",
+                );
+            }
             app.manage(commands);
             app.manage(backend::tauri_commands::EssentiaDownloadCancel(
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

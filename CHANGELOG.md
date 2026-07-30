@@ -12,6 +12,49 @@
 
 ## Unreleased
 
+- Fix the play/pause transport button needing multiple clicks — sometimes to
+  stop a playing track, sometimes to switch to a different track, sometimes
+  silently doing nothing at all. Root cause was a single non-keyed "is a
+  request in flight" latch: while one play/stop request was still resolving,
+  the next click for a _different_ track was silently dropped instead of
+  either queuing or superseding it. Play/stop now use a generation counter and
+  a synchronous pending-intent so a new click always immediately reflects the
+  user's latest intent, and a small backend-call queue guarantees whichever
+  click was truly last is the one that wins. Also fixed: a global "click away
+  from the playing row stops playback" listener that fired _before_ the
+  clicked button's own play/stop logic on every track switch, effectively
+  turning every switch into two competing backend commands instead of one; a
+  dead-code fast path meant every single play — even a track already known
+  locally — paid for an unnecessary database round-trip; and a stale
+  "still playing" snapshot from a backend status-poll thread could arrive
+  after an explicit stop and silently revive the "playing" state.
+- Remove the backend's 250ms playback-status poll thread entirely. It existed
+  to detect a track finishing on its own and to push waveform progress
+  updates, but pushed events over the same channel as direct play/stop
+  replies with no ordering guarantee between the two — the source of the
+  stale-snapshot bug above. Natural end-of-track detection now happens inside
+  the same serialized thread that already handles explicit play/stop
+  commands (via a conditional receive timeout), so it can't race them by
+  construction; the frontend now computes the waveform playhead position
+  itself from a wall-clock timer instead of depending on a stream of pushed
+  progress ticks.
+- Fix seeking/scrubbing to a point in a track being slow — sometimes slow
+  enough to hit a 5-second internal timeout and fail outright — because the
+  backend's fallback seek implementation decoded and discarded every sample
+  from the start of the track up to the target position rather than actually
+  seeking. Playback now decodes and seeks through a small custom audio source
+  built directly on the same `symphonia` decoding library already bundled for
+  format support, replacing reliance on the `rodio` crate's own decoder (whose
+  seek implementation couldn't report a stream length to the FLAC/MP3 seek
+  logic, silently forcing the slow fallback for compressed formats). Seeking
+  to any point in an MP3, FLAC, WAV, AAC/M4A, MP4, or Opus/OGG file is now
+  effectively instant regardless of file length or seek position. `rodio` is
+  still used for actual audio output (device I/O, buffering, mixing) — only
+  its decoding path was replaced.
+- Fix playback errors/warnings (e.g. a failed play or an unsupported file)
+  only ever flashing briefly in the status bar with no way to review them
+  afterward. Any status update tagged as a warning or error now also persists
+  to the Event Log, the same as backend-reported issues already did.
 - Replace native browser `title=""` tooltips throughout the app with a custom
   tooltip that appears in ~150ms instead of the browser's native ~1s hover
   delay. This was most noticeable on the source-folder chips: the full path
@@ -79,7 +122,7 @@
   locked" (shown generically as "an internal database error" in the Event
   Log), and could make the whole app feel stuck until the batch finished.
   The batch now commits after every individual track instead of only at the
-  end — any commit interval tied to a track *count*, even a small one, can
+  end — any commit interval tied to a track _count_, even a small one, can
   still hold the lock for an unbounded amount of wall-clock time if
   individual tracks are slow to analyze, so track count isn't a reliable
   basis for the interval; only "after every track" is actually independent

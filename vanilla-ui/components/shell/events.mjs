@@ -74,6 +74,7 @@ export function bindShellEvents(ctx) {
 
   document.addEventListener("click", (event) => {
     if (!state.playbackActive) return;
+    if (event.target?.closest?.('[data-action="play-library"],[data-action="play-usb"],[data-action="play-history"],[data-action="scrub-play"]')) return;
     const inActiveRow = event.target?.closest?.(`.track-grid-row[data-playback-row="${state.playbackRowKey}"]`);
     if (inActiveRow) return;
     stopPlaybackIfActive().catch((err) => {

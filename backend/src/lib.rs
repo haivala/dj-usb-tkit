@@ -11,6 +11,7 @@ pub mod player;
 pub mod scanner;
 pub mod service;
 pub mod shape_compare;
+mod symphonia_decoder;
 pub mod usb_formats;
 pub mod utils;
 pub mod wav_format;

@@ -8,7 +8,9 @@ import {
   setWaveformPlayhead,
   clearAllWaveformPlayheads,
   scrubRatioFromPointer,
-  stopPlaybackFromUi
+  stopPlaybackFromUi,
+  startPlayheadInterpolation,
+  stopPlayheadInterpolation
 } from "../components/playback/actions.mjs";
 
 test("getPlaybackUiStateHelpers reads global playbackUiState", () => {
@@ -93,8 +95,96 @@ test("stopPlaybackFromUi clears playback state and updates UI", async () => {
     setStatus: (text) => { calls.push(text); }
   });
 
-  assert.deepEqual(calls, ["stop_playback_native", "clear", "transport", "Idle"]);
+  assert.deepEqual(calls, ["transport", "stop_playback_native", "clear", "transport", "Idle"]);
   assert.equal(state.playbackActive, false);
   assert.equal(state.playbackTrackId, null);
   assert.equal(state.playbackStopPromise, null);
+});
+
+test("startPlayheadInterpolation ticks once immediately and schedules the next frame", () => {
+  const state = { activeWaveform: null };
+  const waveformEl = { id: "wf" };
+  state.activeWaveform = waveformEl;
+  const ticks = [];
+  let scheduled = null;
+
+  startPlayheadInterpolation(state, {
+    waveformEl,
+    initialPositionMs: 5000,
+    durationMs: 20000,
+    setWaveformPlayhead: (_wf, fraction, playing) => { ticks.push({ fraction, playing }); },
+    requestAnimationFrameFn: (fn) => { scheduled = fn; return 7; },
+    cancelAnimationFrameFn: () => {},
+    nowFn: () => 0
+  });
+
+  assert.equal(ticks.length, 1);
+  assert.equal(ticks[0].fraction, 0.25);
+  assert.equal(ticks[0].playing, true);
+  assert.equal(state.playheadAnimationHandle, 7);
+  assert.equal(typeof scheduled, "function");
+});
+
+test("startPlayheadInterpolation stops ticking once a different waveform becomes active", () => {
+  const state = { activeWaveform: null };
+  const waveformEl = { id: "wf" };
+  state.activeWaveform = waveformEl;
+  const ticks = [];
+  let scheduled = null;
+
+  startPlayheadInterpolation(state, {
+    waveformEl,
+    initialPositionMs: 0,
+    durationMs: 10000,
+    setWaveformPlayhead: () => { ticks.push(1); },
+    requestAnimationFrameFn: (fn) => { scheduled = fn; return 1; },
+    cancelAnimationFrameFn: () => {},
+    nowFn: () => 0
+  });
+  assert.equal(ticks.length, 1);
+
+  state.activeWaveform = { id: "other" };
+  scheduled();
+
+  assert.equal(ticks.length, 1, "tick should no-op once superseded");
+});
+
+test("startPlayheadInterpolation does nothing without a waveform element or duration", () => {
+  const state = {};
+  let ticked = false;
+  startPlayheadInterpolation(state, {
+    waveformEl: null,
+    initialPositionMs: 0,
+    durationMs: 10000,
+    setWaveformPlayhead: () => { ticked = true; },
+    requestAnimationFrameFn: () => 1,
+    cancelAnimationFrameFn: () => {}
+  });
+  assert.equal(ticked, false);
+
+  startPlayheadInterpolation(state, {
+    waveformEl: { id: "wf" },
+    initialPositionMs: 0,
+    durationMs: 0,
+    setWaveformPlayhead: () => { ticked = true; },
+    requestAnimationFrameFn: () => 1,
+    cancelAnimationFrameFn: () => {}
+  });
+  assert.equal(ticked, false);
+});
+
+test("stopPlayheadInterpolation cancels the scheduled frame and clears the handle", () => {
+  const state = { playheadAnimationHandle: 42 };
+  const cancelled = [];
+  stopPlayheadInterpolation(state, { cancelAnimationFrameFn: (handle) => cancelled.push(handle) });
+  assert.deepEqual(cancelled, [42]);
+  assert.equal(state.playheadAnimationHandle, null);
+});
+
+test("stopPlayheadInterpolation is a no-op when nothing was scheduled", () => {
+  const state = { playheadAnimationHandle: null };
+  let cancelCalls = 0;
+  stopPlayheadInterpolation(state, { cancelAnimationFrameFn: () => { cancelCalls += 1; } });
+  assert.equal(cancelCalls, 0);
+  assert.equal(state.playheadAnimationHandle, null);
 });

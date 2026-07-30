@@ -61,7 +61,7 @@ import { createApiClient } from "./api_client.mjs";
 import * as jobMgr from "./job_manager.mjs";
 import * as bootstrap from "./startup_bootstrap.mjs";
 import * as uiCtrl from "./ui_controller.mjs";
-import { createMessageBus } from "./message_bus.mjs";
+import { createMessageBus, shouldPersistStatusToEventLog } from "./message_bus.mjs";
 import { openExternalUrl } from "./components/settings/events.mjs";
 import {
   fetchUpdateInfo as fetchUpdateInfoRemote,
@@ -346,14 +346,16 @@ function emitMessage(input = {}) {
 
 function setStatus(text, meta = {}) {
   const statusText = String(text || "");
-  const eventLog = state.startupPhase
+  const level = meta.level || "info";
+  const eventLog = shouldPersistStatusToEventLog(level, state.startupPhase)
     ? {
       text: statusText,
-      coalesceKey: "startup.status"
+      details: meta.details ?? null,
+      coalesceKey: meta.coalesceKey ?? (state.startupPhase ? "startup.status" : null)
     }
     : null;
   emitMessage({
-    level: meta.level || "info",
+    level,
     source: meta.source || "ui",
     code: meta.code || null,
     status: { text: statusText, warningCount: meta.warningCount || 0 },
@@ -656,6 +658,7 @@ async function stopPlaybackIfActive() {
     updateTransportButtonsInDom,
     setStatus,
     warn: (...a) => console.warn(...a),
+    cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
   });
 }
 async function stopPlaybackFromUi() {
@@ -664,6 +667,7 @@ async function stopPlaybackFromUi() {
     clearAllWaveformPlayheads,
     updateTransportButtonsInDom,
     setStatus,
+    cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
   });
 }
 async function playTrackFromOrigin(track, origin, options = {}) {
@@ -677,6 +681,8 @@ async function playTrackFromOrigin(track, origin, options = {}) {
     updateTransportButtonsInDom,
     setStatus,
     warn: (...a) => console.warn(...a),
+    requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
+    cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
   });
 }
 
@@ -686,6 +692,9 @@ function handlePlaybackEvent(payload) {
     updateTransportButtonsInDom,
     clearAllWaveformPlayheads,
     setStatus,
+    resolveTrackIdForPath: (path) => playback.findTrackIdByPath(state, path, { normalizePath }),
+    requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
+    cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
   });
 }
 

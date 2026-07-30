@@ -1,43 +1,40 @@
 use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rodio::buffer::SamplesBuffer;
 use rodio::cpal::default_host;
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{Decoder, OutputStream, Sink, Source};
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
+use rodio::{OutputStream, Sink, Source};
 
 use crate::error::{BackendError, BackendResult};
 use crate::models::{PlaybackPreflightData, PlaybackStatusData};
 
 const PLAYBACK_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+const NATURAL_STOP_CHECK_INTERVAL: Duration = Duration::from_millis(250);
+
+/// A natural end-of-track notification: the loaded sink emptied on its own, without an
+/// explicit `Stop` command. Detected by the same serialized worker thread that processes
+/// explicit Play/Stop commands (see `check_natural_stop`), so it can never race a stop/play
+/// the way a separate polling thread could.
+#[derive(Debug, Clone)]
+pub struct PlaybackTransition {
+    pub path: Option<String>,
+    pub duration_ms: Option<u64>,
+}
 
 #[derive(Debug, Clone)]
 pub struct PlaybackController {
     tx: mpsc::Sender<PlaybackCommand>,
 }
 
-impl Default for PlaybackController {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl PlaybackController {
-    pub fn new() -> Self {
+    pub fn new() -> (Self, mpsc::Receiver<PlaybackTransition>) {
         let (tx, rx) = mpsc::channel::<PlaybackCommand>();
-        thread::spawn(move || playback_worker(rx));
-        Self { tx }
+        let (transition_tx, transition_rx) = mpsc::channel::<PlaybackTransition>();
+        thread::spawn(move || playback_worker(rx, transition_tx));
+        (Self { tx }, transition_rx)
     }
 
     pub fn play_path(
@@ -118,10 +115,26 @@ struct WorkerState {
     duration_ms: Option<u64>,
 }
 
-fn playback_worker(rx: mpsc::Receiver<PlaybackCommand>) {
+fn playback_worker(rx: mpsc::Receiver<PlaybackCommand>, transitions: mpsc::Sender<PlaybackTransition>) {
     let mut state = WorkerState::default();
 
-    while let Ok(command) = rx.recv() {
+    loop {
+        let command = if state.sink.is_some() {
+            match rx.recv_timeout(NATURAL_STOP_CHECK_INTERVAL) {
+                Ok(command) => command,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    check_natural_stop(&mut state, &transitions);
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            match rx.recv() {
+                Ok(command) => command,
+                Err(_) => break,
+            }
+        };
+
         match command {
             PlaybackCommand::Play {
                 path,
@@ -141,6 +154,19 @@ fn playback_worker(rx: mpsc::Receiver<PlaybackCommand>) {
             }
         }
     }
+}
+
+/// Checks whether the loaded sink emptied on its own (natural end of track) and, if so,
+/// tears it down (mirroring an explicit stop) and notifies the transition channel once.
+fn check_natural_stop(state: &mut WorkerState, transitions: &mpsc::Sender<PlaybackTransition>) {
+    let sink_emptied = state.sink.as_ref().is_some_and(|sink| sink.empty());
+    if !sink_emptied {
+        return;
+    }
+    let path = state.path.clone();
+    let duration_ms = state.duration_ms;
+    stop_in_worker(state);
+    let _ = transitions.send(PlaybackTransition { path, duration_ms });
 }
 
 fn play_in_worker(
@@ -177,63 +203,27 @@ fn play_in_worker(
     let sink = Sink::try_new(stream_handle)
         .map_err(|err| BackendError::Internal(format!("failed to create audio sink: {err}")))?;
 
-    let file = File::open(&normalized)?;
-    let reader = BufReader::new(file);
-    match Decoder::new(reader) {
-        Ok(decoder) => {
-            let duration_ms = decoder
-                .total_duration()
-                .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64);
-            let offset_ms = compute_target_offset_ms(start_offset_ms, start_ratio, duration_ms);
-            if offset_ms > 0 {
-                sink.append(decoder.skip_duration(Duration::from_millis(offset_ms)));
-            } else {
-                sink.append(decoder);
-            }
-            sink.play();
-            Ok(load_playback_state(
-                state,
-                sink,
-                normalized,
-                offset_ms,
-                duration_ms,
-            ))
-        }
-        Err(rodio_err) => {
-            let decoded = match decode_audio_pcm_symphonia(&normalized) {
-                Ok(v) => v,
-                Err(sym_err) => {
-                    return Err(BackendError::Internal(format!(
-                        "decoder error (rodio: {rodio_err}; symphonia: {sym_err})"
-                    )));
-                }
-            };
-            let duration_ms = Some(
-                (((decoded.samples.len() as u128) * 1000u128)
-                    / ((decoded.sample_rate.max(1) as u128) * (decoded.channels.max(1) as u128)))
-                    .min(u128::from(u64::MAX)) as u64,
-            );
-            let offset_ms = compute_target_offset_ms(start_offset_ms, start_ratio, duration_ms);
-            let src = SamplesBuffer::new(
-                decoded.channels.max(1),
-                decoded.sample_rate.max(1),
-                decoded.samples,
-            );
-            if offset_ms > 0 {
-                sink.append(src.skip_duration(Duration::from_millis(offset_ms)));
-            } else {
-                sink.append(src);
-            }
-            sink.play();
-            Ok(load_playback_state(
-                state,
-                sink,
-                normalized,
-                offset_ms,
-                duration_ms,
-            ))
-        }
+    let mut decoder = crate::symphonia_decoder::SeekableSymphoniaSource::open(Path::new(&normalized))
+        .map_err(|err| BackendError::Internal(format!("decoder error: {err}")))?;
+
+    let duration_ms = decoder
+        .total_duration()
+        .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64);
+    let offset_ms = compute_target_offset_ms(start_offset_ms, start_ratio, duration_ms);
+    if offset_ms > 0 && decoder.try_seek(Duration::from_millis(offset_ms)).is_err() {
+        // Falls back only for a source whose format genuinely has no seek table.
+        sink.append(decoder.skip_duration(Duration::from_millis(offset_ms)));
+    } else {
+        sink.append(decoder);
     }
+    sink.play();
+    Ok(load_playback_state(
+        state,
+        sink,
+        normalized,
+        offset_ms,
+        duration_ms,
+    ))
 }
 
 fn load_playback_state(
@@ -250,88 +240,6 @@ fn load_playback_state(
     state.start_offset_ms = offset_ms;
     state.duration_ms = duration_ms;
     snapshot(state)
-}
-
-struct DecodedPcm {
-    samples: Vec<f32>,
-    sample_rate: u32,
-    channels: u16,
-}
-
-fn decode_audio_pcm_symphonia(path: &str) -> Result<DecodedPcm, String> {
-    let file = File::open(path).map_err(|err| err.to_string())?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = Path::new(path).extension().and_then(|v| v.to_str()) {
-        hint.with_extension(ext);
-    }
-
-    let probed = symphonia::default::get_probe()
-        .format(
-            &hint,
-            mss,
-            &FormatOptions {
-                enable_gapless: false,
-                ..Default::default()
-            },
-            &MetadataOptions::default(),
-        )
-        .map_err(|err| err.to_string())?;
-
-    let mut format = probed.format;
-    let track = format
-        .default_track()
-        .ok_or_else(|| "missing default audio track".to_string())?;
-    let track_id = track.id;
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|err| err.to_string())?;
-
-    let mut samples = Vec::<f32>::new();
-    let mut sample_rate = track.codec_params.sample_rate.unwrap_or(44_100).max(1);
-    let mut channels_out: u16 = 1;
-
-    loop {
-        let packet = match format.next_packet() {
-            Ok(packet) => packet,
-            Err(SymphoniaError::IoError(err))
-                if err.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break;
-            }
-            Err(SymphoniaError::ResetRequired) => continue,
-            Err(err) => return Err(err.to_string()),
-        };
-
-        if packet.track_id() != track_id {
-            continue;
-        }
-
-        let decoded = match decoder.decode(&packet) {
-            Ok(decoded) => decoded,
-            Err(SymphoniaError::DecodeError(_)) => continue,
-            Err(SymphoniaError::ResetRequired) => continue,
-            Err(err) => return Err(err.to_string()),
-        };
-
-        sample_rate = decoded.spec().rate.max(1);
-        let channels = decoded.spec().channels.count().max(1);
-        channels_out = u16::try_from(channels).unwrap_or(1).max(1);
-        let mut sample_buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec());
-        sample_buf.copy_interleaved_ref(decoded);
-        let interleaved = sample_buf.samples();
-        samples.extend_from_slice(interleaved);
-    }
-
-    if samples.is_empty() {
-        return Err("decoder produced no samples".to_string());
-    }
-
-    Ok(DecodedPcm {
-        samples,
-        sample_rate,
-        channels: channels_out,
-    })
 }
 
 fn compute_target_offset_ms(
@@ -357,9 +265,7 @@ pub fn run_playback_preflight(path: &str) -> BackendResult<PlaybackPreflightData
     let file_exists = Path::new(&normalized).exists();
     let file_readable = File::open(&normalized).is_ok();
     let file_decodable = if file_readable {
-        let file = File::open(&normalized)?;
-        Decoder::new(BufReader::new(file)).is_ok()
-            || decode_audio_pcm_symphonia(&normalized).is_ok()
+        crate::symphonia_decoder::SeekableSymphoniaSource::open(Path::new(&normalized)).is_ok()
     } else {
         false
     };
@@ -643,17 +549,110 @@ fn normalize_and_validate_path(path: &str) -> BackendResult<String> {
 mod tests {
     use super::*;
 
+    fn flac_fixture_path() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/formats/track_format_flac.flac")
+    }
+
+    fn mp3_fixture_path() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/noart/track_no_art.mp3")
+    }
+
     #[test]
-    fn symphonia_fallback_decodes_flac_fixture() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/audio/formats/track_format_flac.flac");
-        let decoded = decode_audio_pcm_symphonia(path.to_string_lossy().as_ref())
-            .expect("symphonia should decode flac fixture");
-        assert!(
-            !decoded.samples.is_empty(),
-            "decoded sample buffer should not be empty"
+    fn seekable_symphonia_source_decodes_flac_fixture_and_supports_real_seek() {
+        // This is the actual point of bypassing rodio::Decoder: its private ReadSeekSource
+        // always reports byte_len() == None, and FLAC's demuxer unconditionally needs a real
+        // byte length to seek at all (regardless of SeekMode) — so through rodio's own
+        // decoder, FLAC seeking always fails with SeekError::Unseekable. Our own
+        // FileMediaSource reports a real length, so this now genuinely works.
+        let mut decoder = crate::symphonia_decoder::SeekableSymphoniaSource::open(
+            &flac_fixture_path(),
+        )
+        .expect("should decode flac fixture");
+        let duration = decoder
+            .total_duration()
+            .expect("flac fixture should report a duration");
+        assert!(duration.as_millis() > 0, "duration should be positive");
+
+        decoder
+            .try_seek(duration / 2)
+            .expect("flac fixture should support real seeking with a known byte length");
+    }
+
+    #[test]
+    fn seekable_symphonia_source_decodes_mp3_fixture_and_supports_real_seek() {
+        let mut decoder = crate::symphonia_decoder::SeekableSymphoniaSource::open(
+            &mp3_fixture_path(),
+        )
+        .expect("should decode mp3 fixture");
+        let duration = decoder
+            .total_duration()
+            .expect("mp3 fixture should report a duration");
+        assert!(duration.as_millis() > 1000, "fixture should be more than a second long");
+
+        decoder
+            .try_seek(duration / 2)
+            .expect("mp3 fixture should support seeking");
+    }
+
+    #[test]
+    fn run_playback_preflight_reports_flac_fixture_as_decodable() {
+        let preflight = run_playback_preflight(flac_fixture_path().to_str().unwrap())
+            .expect("preflight should succeed for a readable fixture");
+        assert!(preflight.file_exists);
+        assert!(preflight.file_readable);
+        // Device availability varies by test environment; decodability specifically is what
+        // this test guards (the field this branch used to gate on `decode_audio_pcm_symphonia`,
+        // now removed, still needs to report the fixture as decodable via rodio alone).
+        assert_ne!(
+            preflight.message, "Audio file is not decodable by playback engine",
+            "flac fixture should be reported as decodable"
         );
-        assert!(decoded.sample_rate > 0, "sample rate should be positive");
-        assert!(decoded.channels > 0, "channel count should be positive");
+    }
+
+    #[test]
+    fn natural_stop_detected_when_sink_has_no_queued_audio() {
+        let (sink, _unused_output) = Sink::new_idle();
+        // sink.empty() == true immediately — nothing was ever appended.
+        let mut state = WorkerState {
+            sink: Some(sink),
+            path: Some("fake/track.mp3".to_string()),
+            duration_ms: Some(1234),
+            started_at: Some(Instant::now()),
+            ..Default::default()
+        };
+        let (tx, rx) = mpsc::channel();
+
+        check_natural_stop(&mut state, &tx);
+
+        let transition = rx.try_recv().expect("expected a natural-stop transition");
+        assert_eq!(transition.path.as_deref(), Some("fake/track.mp3"));
+        assert_eq!(transition.duration_ms, Some(1234));
+        assert!(
+            state.sink.is_none(),
+            "sink should be torn down, mirroring an explicit stop"
+        );
+        assert!(state.started_at.is_none());
+    }
+
+    #[test]
+    fn natural_stop_not_detected_while_sink_still_has_queued_audio() {
+        let (sink, _unused_output) = Sink::new_idle();
+        // Bumps len() > 0; the infinite Zero source is never polled/drained in this test.
+        sink.append(rodio::source::Zero::<f32>::new(1, 44_100));
+        let mut state = WorkerState {
+            sink: Some(sink),
+            ..Default::default()
+        };
+        let (tx, rx) = mpsc::channel();
+
+        check_natural_stop(&mut state, &tx);
+
+        assert!(
+            rx.try_recv().is_err(),
+            "no transition should fire while audio is still queued"
+        );
+        assert!(state.sink.is_some(), "sink should be left untouched");
     }
 }

@@ -200,6 +200,7 @@ test("playback policy reports unavailable when neither library nor usb path is p
     activeWaveform: null
   };
   let status = "";
+  let statusMeta = null;
 
   await playTrackFromOrigin(state, {
     id: "t1",
@@ -215,10 +216,129 @@ test("playback policy reports unavailable when neither library nor usb path is p
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
     updateTransportButtonsInDom: () => {},
-    setStatus: (text) => { status = text; },
+    setStatus: (text, meta) => { status = text; statusMeta = meta; },
     warn: () => {}
   });
 
   assert.equal(state.playbackActive, false);
   assert.equal(status, "Cannot play: track not found in Library or selected USB.");
+  assert.equal(statusMeta?.level, "warn");
+  assert.equal(statusMeta?.source, "playback");
+});
+
+test("playback failure is reported with level:error so it persists to the Event Log", async () => {
+  const state = {
+    sourceRoots: ["/music"],
+    usbRoot: null,
+    usbRootValid: false,
+    playbackActive: false,
+    playbackTrackId: null,
+    playbackPath: null,
+    playbackRowKey: null,
+    activeWaveform: null
+  };
+  let status = "";
+  let statusMeta = null;
+
+  await playTrackFromOrigin(state, {
+    id: "t-local",
+    title: "Track",
+    filePath: "/music/Track.mp3"
+  }, "library", { rowKey: "r1" }, {
+    command: async (name) => {
+      if (name === "play_track_native") throw new Error("decoder error: unrecognized format");
+      throw new Error(`unexpected command ${name}`);
+    },
+    resolveLocalTrackForPlayback: async () => null,
+    trackPathMatchesAnyRoot: pathInRoots,
+    clearAllWaveformPlayheads: () => {},
+    setWaveformPlayhead: () => {},
+    updateTransportButtonsInDom: () => {},
+    setStatus: (text, meta) => { status = text; statusMeta = meta; },
+    warn: () => {}
+  });
+
+  assert.match(status, /Playback failed \(Library\)/);
+  assert.equal(statusMeta?.level, "error");
+  assert.equal(statusMeta?.source, "playback");
+});
+
+test("origin \"local\" (the real origin string used by library/playlist UI) skips resolve_playback_source", async () => {
+  const calls = [];
+  const state = {
+    sourceRoots: ["/music"],
+    usbRoot: null,
+    usbRootValid: false,
+    playbackActive: false,
+    playbackTrackId: null,
+    playbackPath: null,
+    playbackRowKey: null,
+    activeWaveform: null
+  };
+
+  await playTrackFromOrigin(state, {
+    id: "t-local",
+    title: "Track",
+    filePath: "/music/Track.mp3"
+  }, "local", { rowKey: "r1" }, {
+    command: async (name, payload) => {
+      calls.push(name);
+      if (name === "play_track_native") {
+        return { path: payload.path, durationMs: 1000, positionMs: 0 };
+      }
+      throw new Error(`unexpected command ${name}`);
+    },
+    resolveLocalTrackForPlayback: async () => null,
+    trackPathMatchesAnyRoot: pathInRoots,
+    clearAllWaveformPlayheads: () => {},
+    setWaveformPlayhead: () => {},
+    updateTransportButtonsInDom: () => {},
+    setStatus: () => {},
+    warn: () => {}
+  });
+
+  assert.deepEqual(calls, ["play_track_native"]);
+  assert.equal(state.playbackTrackId, "t-local");
+  assert.equal(state.playbackPath, "/music/Track.mp3");
+});
+
+test("a stale generation skips the native call and never commits state", async () => {
+  const state = {
+    sourceRoots: ["/music"],
+    usbRoot: null,
+    usbRootValid: false,
+    playbackActive: false,
+    playbackTrackId: null,
+    playbackPath: null,
+    playbackRowKey: null,
+    activeWaveform: null,
+    playbackGeneration: 2
+  };
+  let playCalled = false;
+
+  await playTrackFromOrigin(state, {
+    id: "t-local",
+    title: "Track",
+    filePath: "/music/Track.mp3"
+  }, "library", { rowKey: "r1" }, {
+    command: async (name) => {
+      if (name === "play_track_native") {
+        playCalled = true;
+        return { path: "/music/Track.mp3", durationMs: 1000, positionMs: 0 };
+      }
+      throw new Error(`unexpected command ${name}`);
+    },
+    resolveLocalTrackForPlayback: async () => null,
+    trackPathMatchesAnyRoot: pathInRoots,
+    clearAllWaveformPlayheads: () => {},
+    setWaveformPlayhead: () => {},
+    updateTransportButtonsInDom: () => {},
+    setStatus: () => {},
+    warn: () => {},
+    generation: 1
+  });
+
+  assert.equal(playCalled, false);
+  assert.equal(state.playbackActive, false);
+  assert.equal(state.playbackTrackId, null);
 });
