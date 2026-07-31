@@ -1583,9 +1583,14 @@ fn strict_raw_coverage_issue_from_parity_checks(checks: &[DiagCheck]) -> Option<
     ))
 }
 
+/// (history_id, sequence_no, name, attribute, history_id_parent)
+type HistoryRow = (i64, i64, String, i64, i64);
+/// (history_id, content_id, sequence_no)
+type HistoryContentRow = (i64, i64, i64);
+
 fn derive_history_sync_payload(
     parsed: &crate::pdb_reader::ParsedPdb,
-) -> (Vec<(i64, i64, String, i64, i64)>, Vec<(i64, i64, i64)>) {
+) -> (Vec<HistoryRow>, Vec<HistoryContentRow>) {
     let history_rows = parsed
         .history_playlists
         .iter()

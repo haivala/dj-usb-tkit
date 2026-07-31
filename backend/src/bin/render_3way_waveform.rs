@@ -363,7 +363,10 @@ fn draw_lane_filled(
 // Data loading — PWV7
 // ---------------------------------------------------------------------------
 
-fn load_pwv7_waveforms(usb_root: &Path) -> BTreeMap<String, (Vec<u8>, Vec<u8>, Vec<u8>)> {
+/// (low, mid, high) waveform band data.
+type Pwv7Waveform = (Vec<u8>, Vec<u8>, Vec<u8>);
+
+fn load_pwv7_waveforms(usb_root: &Path) -> BTreeMap<String, Pwv7Waveform> {
     let mut result = BTreeMap::new();
     let anlz_map = match load_path_to_anlz_map(usb_root) {
         Ok(m) => m,

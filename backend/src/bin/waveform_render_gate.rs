@@ -324,7 +324,10 @@ fn split_three(values: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     (mid, high, low)
 }
 
-fn split_six(values: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+/// (b0, b1, b2, b3, b4, b5) waveform band data.
+type SixBands = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
+
+fn split_six(values: &[u8]) -> SixBands {
     let mut b0 = Vec::<u8>::new();
     let mut b1 = Vec::<u8>::new();
     let mut b2 = Vec::<u8>::new();

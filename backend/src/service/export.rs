@@ -9,6 +9,9 @@ use serde_json::json;
 use crate::error::{BackendError, BackendResult};
 use crate::models::{ExportToUsbData, ExportToUsbRequest, WarningEntry};
 
+/// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
+type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
+
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
     WriteExportLibraryDbResult, WriteExportPdbResult, collect_manifest_owned_paths,
@@ -198,8 +201,7 @@ impl BackendService {
         // Build identity lookup from existing USB PDB: identity fields + artwork path per track
         let existing_usb_identity_by_path = {
             let pdb_path = vendor_pdb_path(&usb_root);
-            let mut map =
-                HashMap::<String, (Option<u32>, Option<u32>, Option<u32>, Option<String>)>::new();
+            let mut map = HashMap::<String, UsbTrackIdentity>::new();
             if let Ok(parsed) = parse_pdb(&pdb_path) {
                 for track in &parsed.tracks {
                     let path_key = canonicalize_playlist_name(&track.track_file_path);
@@ -762,7 +764,7 @@ impl BackendService {
     fn resolve_manifest_identity(
         conn: &rusqlite::Connection,
         track_id: &str,
-        existing_identity: Option<&(Option<u32>, Option<u32>, Option<u32>, Option<String>)>,
+        existing_identity: Option<&UsbTrackIdentity>,
         owns_waveform: bool,
         app_master_db_id: i64,
         app_content_link_id: i64,
