@@ -373,101 +373,6 @@ export function resolveLocalTrack(track, state) {
   return null;
 }
 
-export function scoreLocalTrackCandidate(candidate, sourceTrack) {
-  const matcher = globalThis?.playbackMatch;
-  if (matcher && typeof matcher.scoreLocalTrackCandidate === "function") {
-    return matcher.scoreLocalTrackCandidate(candidate, sourceTrack);
-  }
-  if (!candidate?.filePath) return -1;
-
-  const normalize = (v) => String(v || "").trim().toLowerCase();
-  const normPath = (v) => String(v || "").replace(/\\/g, "/").trim().toLowerCase();
-  const fileName = (v) => {
-    const p = normPath(v);
-    const idx = p.lastIndexOf("/");
-    return idx >= 0 ? p.slice(idx + 1) : p;
-  };
-  const stem = (v) => {
-    const f = fileName(v);
-    const idx = f.lastIndexOf(".");
-    return idx > 0 ? f.slice(0, idx) : f;
-  };
-
-  const srcTitle = normalize(sourceTrack?.title);
-  const srcArtist = normalize(sourceTrack?.artist);
-  const srcAlbum = normalize(sourceTrack?.album);
-  const srcPath = normPath(sourceTrack?.filePath);
-  const srcFile = fileName(sourceTrack?.filePath);
-  const srcStem = stem(sourceTrack?.filePath);
-
-  const candTitle = normalize(candidate.title);
-  const candArtist = normalize(candidate.artist);
-  const candAlbum = normalize(candidate.album);
-  const candPath = normPath(candidate.filePath);
-  const candFile = fileName(candidate.filePath);
-  const candStem = stem(candidate.filePath);
-
-  let score = 0;
-  if (srcTitle && candTitle === srcTitle) score += 12;
-  if (srcArtist && candArtist === srcArtist) score += 12;
-  if (srcAlbum && candAlbum === srcAlbum) score += 8;
-  if (srcPath && candPath === srcPath) score += 24;
-  if (srcFile && candFile === srcFile) score += 16;
-  if (srcStem && candStem === srcStem) score += 8;
-
-  const srcBpm = Number(sourceTrack?.bpm);
-  const candBpm = Number(candidate?.bpm);
-  if (Number.isFinite(srcBpm) && Number.isFinite(candBpm) && Math.abs(srcBpm - candBpm) <= 0.15) {
-    score += 4;
-  }
-
-  return score;
-}
-
-export async function resolveLocalTrackForPlayback(track, state, deps) {
-  const {
-    command,
-    normalizeTrack
-  } = deps;
-  const resolveLocalTrackFn = deps.resolveLocalTrack || ((value) => resolveLocalTrack(value, state));
-  const scoreLocalTrackCandidateFn = deps.scoreLocalTrackCandidate || scoreLocalTrackCandidate;
-
-  const local = resolveLocalTrackFn(track);
-  if (local?.filePath) return local;
-
-  const query = String(track?.title || "").trim();
-  if (!query) return null;
-
-  try {
-    const data = await command("search_tracks", {
-      query,
-      limit: 250,
-      cursor: null
-    });
-    const remote = (data?.items || []).map((t) => normalizeTrack(t, "lib-srch"));
-    if (!remote.length) return null;
-
-    const matcher = globalThis?.playbackMatch;
-    if (matcher && typeof matcher.selectBestLocalMatch === "function") {
-      return matcher.selectBestLocalMatch(track, remote, 16);
-    }
-
-    let best = null;
-    let bestScore = -1;
-    for (const candidate of remote) {
-      const score = scoreLocalTrackCandidateFn(candidate, track);
-      if (score > bestScore) {
-        bestScore = score;
-        best = candidate;
-      }
-    }
-    return bestScore >= 16 ? best : null;
-  } catch (err) {
-    console.warn("Fallback local lookup failed:", err);
-    return null;
-  }
-}
-
 export function getTrackPlaybackPath(track, deps) {
   const { resolveLocalTrack } = deps;
   const localTrack = resolveLocalTrack(track);
@@ -489,7 +394,6 @@ export function isTrackCurrentlyPlaying(track, state, deps) {
 export async function playTrackFromOrigin(state, track, origin, options = {}, deps) {
   const {
     command,
-    resolveLocalTrackForPlayback,
     trackPathMatchesAnyRoot,
     clearAllWaveformPlayheads,
     setWaveformPlayhead,
@@ -531,11 +435,8 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
         };
       }
     } catch (err) {
-      warn("resolve_playback_source failed, using frontend matcher fallback:", err);
+      warn("resolve_playback_source failed:", err);
     }
-  }
-  if (!localTrack) {
-    localTrack = await resolveLocalTrackForPlayback(track);
   }
   const artist = String(track?.artist || "").trim();
   const titlePart = localTrack?.title || track?.title || "Unknown Title";

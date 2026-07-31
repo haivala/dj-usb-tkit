@@ -144,7 +144,6 @@ test("stop supersedes a pending start; the stale start's success is not committe
       }
       throw new Error(`unexpected command ${name}`);
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: (fp, roots) => roots.some((r) => String(fp || "").startsWith(r)),
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},

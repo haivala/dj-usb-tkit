@@ -642,15 +642,6 @@ function promoteTrackIdentity(oldId, newId) {
   library.promoteTrackIdentity(state, el, oldId, newId, { cssEscape });
 }
 
-async function resolveLocalTrackForPlayback(track) {
-  return playback.resolveLocalTrackForPlayback(track, state, {
-    command,
-    normalizeTrack,
-    resolveLocalTrack,
-    scoreLocalTrackCandidate: playback.scoreLocalTrackCandidate,
-  });
-}
-
 async function stopPlaybackIfActive() {
   return playback.stopPlaybackIfActive(state, {
     command,
@@ -674,7 +665,6 @@ async function playTrackFromOrigin(track, origin, options = {}) {
   return playback.playTrackFromOriginController(state, track, origin, options, {
     playTrackFromOriginCore: playback.playTrackFromOrigin,
     command,
-    resolveLocalTrackForPlayback,
     trackPathMatchesAnyRoot: library.trackPathMatchesAnyRoot,
     clearAllWaveformPlayheads,
     setWaveformPlayhead,

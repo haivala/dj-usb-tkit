@@ -40,7 +40,6 @@ test("playback policy prefers library path when available", async () => {
       }
       throw new Error(`unexpected command ${name}`);
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: pathInRoots,
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
@@ -85,7 +84,6 @@ test("playback policy falls back to USB path when library playback fails", async
       }
       throw new Error(`unexpected command ${name}`);
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: pathInRoots,
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
@@ -129,7 +127,6 @@ test("playback retries once after recoverable native busy error", async () => {
       }
       throw new Error(`unexpected command ${name}`);
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: pathInRoots,
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
@@ -173,7 +170,6 @@ test("playback status reports USB when resolver returns non-library path with tr
       }
       throw new Error(`unexpected command ${name}`);
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: pathInRoots,
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
@@ -186,6 +182,48 @@ test("playback status reports USB when resolver returns non-library path with tr
   assert.equal(play.payload.path, "/usb/Contents/Track.mp3");
   assert.equal(state.playbackTrackId, "t-usb");
   assert.match(status, /Playing from USB/);
+});
+
+test("playback does not search frontend tracks when backend resolver has no HDD match", async () => {
+  const calls = [];
+  const state = {
+    sourceRoots: ["/music"],
+    usbRoot: "/usb",
+    usbRootValid: true,
+    playbackActive: false,
+    playbackTrackId: null,
+    playbackPath: null,
+    playbackRowKey: null,
+    activeWaveform: null
+  };
+
+  await playTrackFromOrigin(state, {
+    id: "t-usb",
+    title: "Track",
+    filePath: "/usb/Contents/Track.mp3"
+  }, "usb", { rowKey: "r1" }, {
+    command: async (name, payload) => {
+      calls.push({ name, payload });
+      if (name === "resolve_playback_source") {
+        return { resolvedPath: null, trackId: null };
+      }
+      if (name === "play_track_native") {
+        return { path: payload.path, durationMs: 1000, positionMs: 100 };
+      }
+      throw new Error(`unexpected command ${name}`);
+    },
+    trackPathMatchesAnyRoot: pathInRoots,
+    clearAllWaveformPlayheads: () => {},
+    setWaveformPlayhead: () => {},
+    updateTransportButtonsInDom: () => {},
+    setStatus: () => {},
+    warn: () => {}
+  });
+
+  assert.deepEqual(calls.map((c) => c.name), ["resolve_playback_source", "play_track_native"]);
+  assert.equal(calls[1].payload.path, "/usb/Contents/Track.mp3");
+  assert.equal(state.playbackTrackId, "t-usb");
+  assert.equal(state.playbackPath, "/usb/Contents/Track.mp3");
 });
 
 test("playback policy reports unavailable when neither library nor usb path is playable", async () => {
@@ -211,7 +249,6 @@ test("playback policy reports unavailable when neither library nor usb path is p
       if (name === "resolve_playback_source") return { resolvedPath: null, trackId: null };
       throw new Error("play_track_native should not be called");
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: pathInRoots,
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
@@ -249,7 +286,6 @@ test("playback failure is reported with level:error so it persists to the Event 
       if (name === "play_track_native") throw new Error("decoder error: unrecognized format");
       throw new Error(`unexpected command ${name}`);
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: pathInRoots,
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
@@ -288,7 +324,6 @@ test("origin \"local\" (the real origin string used by library/playlist UI) skip
       }
       throw new Error(`unexpected command ${name}`);
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: pathInRoots,
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
@@ -328,7 +363,6 @@ test("a stale generation skips the native call and never commits state", async (
       }
       throw new Error(`unexpected command ${name}`);
     },
-    resolveLocalTrackForPlayback: async () => null,
     trackPathMatchesAnyRoot: pathInRoots,
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},

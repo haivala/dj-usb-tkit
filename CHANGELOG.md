@@ -12,6 +12,11 @@
 
 ## Unreleased
 
+- Remove frontend heuristic local-file matching from USB/imported track
+  playback. Playback now substitutes an HDD/library file only when backend
+  `resolve_playback_source` returns a verified match; if no verified HDD match
+  exists, playback can still use the selected USB source path.
+
 ## 0.1.8
 
 - Fix the play/pause transport button needing multiple clicks — sometimes to

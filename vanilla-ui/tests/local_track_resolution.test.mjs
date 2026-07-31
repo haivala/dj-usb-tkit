@@ -5,7 +5,6 @@ import {
   shouldAllowResolvedFallback,
   resolveLocalTrackIdAsync,
   resolveLocalTrack,
-  resolveLocalTrackForPlayback,
   getTrackPlaybackPath,
   isTrackCurrentlyPlaying
 } from "../components/playback/actions.mjs";
@@ -71,24 +70,6 @@ test("resolveLocalTrack finds exact file path candidate", () => {
   };
   const resolved = resolveLocalTrack({ filePath: "/music/b.mp3", title: "Other", artist: "Other" }, state);
   assert.equal(resolved?.id, "x2");
-});
-
-test("resolveLocalTrackForPlayback uses search fallback and returns best match", async () => {
-  const state = { tracks: [] };
-  const result = await resolveLocalTrackForPlayback({ title: "Song A", artist: "Artist A" }, state, {
-    command: async (name) => {
-      if (name !== "search_tracks") throw new Error("unexpected command");
-      return {
-        items: [
-          { id: "weak", title: "Song A", artist: "Else", filePath: "/music/else.mp3" },
-          { id: "best", title: "Song A", artist: "Artist A", filePath: "/music/song-a.mp3" }
-        ]
-      };
-    },
-    normalizeTrack: (t) => t,
-    resolveLocalTrack: () => null
-  });
-  assert.equal(result?.id, "best");
 });
 
 test("isTrackCurrentlyPlaying compares normalized playback path", () => {

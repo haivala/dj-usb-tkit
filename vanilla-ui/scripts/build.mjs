@@ -12,7 +12,6 @@ const staticFiles = [
   "index.html",
   "styles.css",
   "text-icon.svg",
-  "playback_match.js",
   "playback_ui_state.js",
   "playback_source_label.js"
 ];

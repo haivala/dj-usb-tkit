@@ -4,7 +4,7 @@
 
 Playlist management follows a local flow: create playlists, add tracks, keep order by stored playlist position, and remove tracks when needed. The same playlist context remains available while moving between library and USB sections.
 
-Playback is backend-driven. For tracks coming from imported USB content, the app first attempts to resolve a verified local file match. When a verified local match exists, playback uses the local path to reduce repeated USB reads; otherwise playback can use the USB source path.
+Playback is backend-driven. For tracks coming from imported USB content, the app first asks the backend to resolve a verified local file match. When the backend returns a verified local match, playback uses the local path to reduce repeated USB reads; otherwise playback can use the USB source path.
 
 Transport state is pushed through backend events, so the UI reflects start/progress/stop updates without tight polling loops.
 
@@ -28,11 +28,11 @@ Playback architecture is backend-owned so transport behavior stays consistent ac
 
 Playback resolution is source-aware:
 
-1. For imported USB tracks, the app attempts local-track resolution first.
-2. Resolution requires a verified identity match before substituting local media.
+1. For imported USB tracks, the app asks backend `resolve_playback_source` for a local-track match first.
+2. Only a backend-resolved match can substitute local media; the frontend does not guess local files with heuristic search.
 3. If no verified local candidate exists, playback can fall back to USB path playback.
 
-This prevents the common failure mode of matching the wrong local file by loose metadata and preserves a safer fallback for unresolved tracks.
+This prevents the common failure mode of matching the wrong local file by loose metadata while still preserving USB playback for unresolved tracks.
 
 Preflight checks (`playback_preflight_native`) and status queries (`get_playback_status_native`) allow the UI to render actionable state before or during transport actions. Stop behavior is explicit via `stop_playback_native`, which normalizes cleanup in both backend and UI.
 
