@@ -25,6 +25,26 @@ The app stores a small waveform preview for UI use, but player ANLZ files need h
 
 For example, a 180 second track needs `27004` detail entries (`ceil(180 * 150) + 4`).
 
+### Why `+ 4`
+
+The `+ 4` is not a rounding fudge factor — it is a verified fixed tail pad that only
+becomes a flat constant once the right "duration" is fed into the formula.
+
+The duration used here is `detect_track_duration_ms` (`backend/src/service/analysis.rs`),
+which comes from Symphonia's `codec_params.n_frames`: the MP3 header's declared total
+frame count (`n_frames * samples_per_frame / sample_rate`). This is the **raw, encoder
+delay/padding-unstripped** duration — it is *longer* than the gapless-trimmed playable
+length that `ffmpeg`/`mutagen` report, because it does not subtract the LAME/Xing encoder
+priming and padding samples.
+
+This was verified against a real rekordbox-generated export covering many tracks of varied
+duration and encoder settings: comparing rekordbox's actual on-disk `PWV3` entry counts to
+`ceil(duration_seconds * 150)` computed from the stored integer `length` (seconds) field
+gives deltas scattered across a wide range per track — clearly not a flat `+4`. But computed
+from the raw MP3 frame count (total encoded frames × `1152` samples/frame ÷ sample rate,
+i.e. what Symphonia's `n_frames` reflects), the delta is **exactly `+4` on every track** in
+the sample.
+
 ## Export Cache Policy
 
 USB export does not generate or regenerate ANLZ from source audio. Export is a copy/linking step:

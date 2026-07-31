@@ -897,10 +897,15 @@ fn resample_energy(energy: &[u8], count: usize) -> Vec<u8> {
 
 /// Compute detail entry count from duration.
 ///
-/// Reference exports consistently use a slightly longer detail stream than a
-/// plain `round(duration_seconds * 150)` calculation. The observed fit on
-/// reference USBs is `ceil(duration_seconds * 150) + 4`, which aligns both
-/// PWV5 and PWV7 header entry counts with device-working exports.
+/// `duration_ms` here is the raw, encoder-delay/padding-*unstripped* duration
+/// from `detect_track_duration_ms` (Symphonia `n_frames * samples_per_frame /
+/// sample_rate` — the MP3 header's declared frame count, not the gapless-
+/// trimmed playable length ffmpeg/mutagen would report). Reference RB exports
+/// were verified to use exactly `ceil(that_raw_duration_seconds * 150) + 4`
+/// entries — a fixed 4-entry tail pad on top of the raw duration, not a
+/// rounding artifact. Using a gapless-trimmed duration instead reproduces
+/// deltas of 10-140+ entries per track rather than a flat +4; see
+/// `docs/WAVEFORMS.md` "Why + 4" for the full derivation.
 fn detail_entry_count(duration_ms: Option<u64>) -> u32 {
     let duration_secs = duration_ms.unwrap_or(180_000) as f64 / 1000.0;
     ((duration_secs * 150.0).ceil() as u32)
