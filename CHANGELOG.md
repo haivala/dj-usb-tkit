@@ -12,6 +12,8 @@
 
 ## Unreleased
 
+## 0.1.9
+
 **Severity:** critical
 
 - Fix history import and diagnostics treating rekordbox's own blank
