@@ -15,9 +15,40 @@ use tempfile::{TempDir, tempdir};
 const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
 const USB_VENDOR_DB_DIR: &str = "rekordbox";
 const PDB_HEADER_COMPATIBILITY_FIX_ID: &str = "repair_pdb_header_compatibility_field";
+const PDB_SENTINEL_U5_FIX_ID: &str = "repair_pdb_sentinel_u5_on_data_pages";
+const PDB_WRONG_PAGE_FLAGS_FIX_ID: &str = "repair_pdb_wrong_page_flags";
+const PDB_ZERO_TRANRF_FIX_ID: &str = "repair_pdb_zero_tranrf_on_track_pages";
+const PDB_WRONG_TRACK_U5_FIX_ID: &str = "repair_pdb_wrong_track_u5_num_rl";
+const PDB_WRONG_HISTORY_SHAPE_FIX_ID: &str = "repair_pdb_wrong_history_page_shape";
+const PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID: &str = "repair_pdb_wrong_playlist_tree_shape";
 
 fn vendor_db_dir(usb_root: &Path) -> std::path::PathBuf {
     usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
+}
+
+/// Locate the first non-sentinel, non-empty data page of `table_type` in a
+/// real exported PDB. Mirrors the page-header scan every `detect_pdb_*`
+/// function in `service::repair` performs: idx@+4, table_type@+8,
+/// flags@+0x1b (0x64 = sentinel/index page, skipped).
+fn find_pdb_data_page(bytes: &[u8], page_size: usize, table_type: u32) -> Option<usize> {
+    let total = bytes.len() / page_size;
+    (1..total).find(|&i| {
+        let off = i * page_size;
+        let idx = u32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap());
+        if idx == 0 {
+            return false;
+        }
+        let flags = bytes[off + 0x1b];
+        if flags == 0x64 {
+            return false;
+        }
+        let tt = u32::from_le_bytes(bytes[off + 8..off + 12].try_into().unwrap());
+        tt == table_type
+    })
+}
+
+fn read_pdb_page_size(bytes: &[u8]) -> usize {
+    u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize
 }
 
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -3261,3 +3292,781 @@ fn multi_track_export_produces_structurally_clean_pdb() {
     assert_no_pdb_structural_repairs(&backend, &usb);
     assert_pdb_crossrefs_clean(&usb);
 }
+
+// ── End-to-end PDB byte-corruption repair wiring ──────────────────────────
+//
+// These exercise the orchestrator wiring in
+// `repair_usb_diagnostics_with_progress` (proposal + apply/skip branches
+// per fix id) that the byte-level unit tests in `service::repair::tests`
+// don't reach, by corrupting a single targeted field on a real page of a
+// freshly exported PDB (same technique as `thin_first_pdb_track_row_fields`
+// / `mutate_first_pdb_analysis_path` above) and driving the fix through
+// `BackendCommands::repair_usb_diagnostics`.
+
+fn read_write_pdb(pdb_path: &Path, mutate: impl FnOnce(&mut Vec<u8>, usize)) {
+    let mut bytes = fs::read(pdb_path).expect("read export pdb");
+    let page_size = read_pdb_page_size(&bytes);
+    mutate(&mut bytes, page_size);
+    fs::write(pdb_path, bytes).expect("write export pdb");
+}
+
+fn assert_fix_proposed(backend: &BackendCommands, usb: &Path, fix_id: &str) {
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(preview.ok, "repair preview failed: {preview:?}");
+    let data = preview.data.expect("preview data");
+    assert!(
+        data.proposed_fixes.iter().any(|f| f.id == fix_id),
+        "expected fix '{fix_id}' to be proposed: {:#?}",
+        data.proposed_fixes
+    );
+}
+
+fn assert_fix_not_proposed(backend: &BackendCommands, usb: &Path, fix_id: &str) {
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(preview.ok, "repair preview failed: {preview:?}");
+    let data = preview.data.expect("preview data");
+    assert!(
+        !data.proposed_fixes.iter().any(|f| f.id == fix_id),
+        "expected fix '{fix_id}' to no longer be proposed: {:#?}",
+        data.proposed_fixes
+    );
+}
+
+fn apply_fix_and_assert_applied(backend: &BackendCommands, usb: &Path, fix_id: &str) {
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec![fix_id.to_string()],
+    });
+    assert!(repair.ok, "repair apply failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes.iter().any(|m| !m.is_empty()) && !data.applied_fixes.is_empty(),
+        "expected '{fix_id}' to be applied: {data:#?}"
+    );
+    assert!(
+        data.failed_fixes.is_empty(),
+        "unexpected repair failures: {:#?}",
+        data.failed_fixes
+    );
+}
+
+#[test]
+fn repair_pdb_sentinel_u5_detects_and_fixes_via_orchestrator() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
+        let off = page * page_size;
+        bytes[off + 0x20..off + 0x22].copy_from_slice(&0x1FFFu16.to_le_bytes());
+        bytes[off + 0x22..off + 0x24].copy_from_slice(&0x1FFFu16.to_le_bytes());
+    });
+
+    assert_fix_proposed(&backend, &usb, PDB_SENTINEL_U5_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_SENTINEL_U5_FIX_ID);
+    assert_no_pdb_structural_repairs(&backend, &usb);
+}
+
+#[test]
+fn repair_pdb_wrong_page_flags_detects_and_fixes_via_orchestrator() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
+        bytes[page * page_size + 0x1b] = 0x11; // neither 0x24 nor 0x34
+    });
+
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+    // Not `assert_no_pdb_structural_repairs`: the correction target for tt=0
+    // is 0x34 (active), which legitimately differs from this fixture's
+    // originally-exported sealed (0x24) page and exposes an unrelated,
+    // genuinely separate stale-sentinel-B-tree condition. Only assert the
+    // fix under test actually resolved.
+    assert_fix_not_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+}
+
+#[test]
+fn repair_pdb_zero_tranrf_detects_and_fixes_via_orchestrator() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
+        let off = page * page_size;
+        let rowpf_off = off + page_size - 4;
+        let tranrf_off = off + page_size - 2;
+        let rowpf = u16::from_le_bytes(bytes[rowpf_off..rowpf_off + 2].try_into().unwrap());
+        assert_ne!(rowpf, 0, "expected the real track row to be active (rowpf != 0)");
+        bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&0u16.to_le_bytes());
+    });
+
+    assert_fix_proposed(&backend, &usb, PDB_ZERO_TRANRF_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_ZERO_TRANRF_FIX_ID);
+    assert_no_pdb_structural_repairs(&backend, &usb);
+}
+
+#[test]
+fn repair_pdb_wrong_history_page_shape_detects_and_fixes_via_orchestrator() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 17).expect("tt=17 data page");
+        let off = page * page_size;
+        let nrs = bytes[off + 0x18];
+        assert!(nrs > 1, "need nrs > 1 to construct the old-bug pattern");
+        bytes[off + 0x20..off + 0x22].copy_from_slice(&1u16.to_le_bytes());
+        bytes[off + 0x22..off + 0x24].copy_from_slice(&(nrs as u16 - 1).to_le_bytes());
+    });
+
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
+    assert_no_pdb_structural_repairs(&backend, &usb);
+}
+
+#[test]
+fn repair_pdb_wrong_track_u5_detects_and_fixes_via_orchestrator() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
+        let off = page * page_size;
+        bytes[off + 0x1b] = 0x34; // active
+        bytes[off + 0x20..off + 0x22].copy_from_slice(&99u16.to_le_bytes());
+        bytes[off + 0x22..off + 0x24].copy_from_slice(&99u16.to_le_bytes());
+    });
+
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_TRACK_U5_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_TRACK_U5_FIX_ID);
+    // Same rationale as the wrong_page_flags test above: forcing this page
+    // active (0x34) exposes an unrelated stale-sentinel-B-tree condition.
+    assert_fix_not_proposed(&backend, &usb, PDB_WRONG_TRACK_U5_FIX_ID);
+}
+
+#[test]
+fn repair_pdb_wrong_playlist_tree_shape_detects_and_fixes_via_orchestrator() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 7).expect("tt=7 data page");
+        let off = page * page_size;
+        bytes[off + 0x22..off + 0x24].copy_from_slice(&5u16.to_le_bytes()); // num_rl != 0
+    });
+
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID);
+    assert_no_pdb_structural_repairs(&backend, &usb);
+}
+
+#[test]
+fn repair_pdb_fix_not_in_selected_ids_is_skipped_not_applied() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
+        bytes[page * page_size + 0x1b] = 0x11;
+    });
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
+    });
+    assert!(repair.ok, "repair apply failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.skipped_fixes
+            .iter()
+            .any(|m| m.contains("Repair PDB Data Page Flags") && m.contains("not selected")),
+        "expected the unselected fix to be reported as skipped: {:#?}",
+        data.skipped_fixes
+    );
+    assert!(
+        !data.applied_fixes.iter().any(|m| m.contains("Page Flags")),
+        "unselected fix must not have been applied: {:#?}",
+        data.applied_fixes
+    );
+
+    // The corruption must still be present since the fix wasn't applied.
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+}
+
+// ── fix_empty_analysis_files ──────────────────────────────────────────────
+
+fn find_exported_anlz_dat(usb: &Path) -> PathBuf {
+    walkdir::WalkDir::new(usb.join(USB_VENDOR_ROOT_DIR).join("USBANLZ"))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .find(|e| e.file_name() == "ANLZ0000.DAT")
+        .map(|e| e.path().to_path_buf())
+        .expect("expected an exported ANLZ0000.DAT bundle")
+}
+
+#[test]
+fn repair_fix_empty_analysis_files_regenerates_from_source_audio() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+
+    let dat_path = find_exported_anlz_dat(&usb);
+    let ext_path = dat_path.with_extension("EXT");
+    let twoex_path = dat_path.with_extension("2EX");
+    assert!(
+        fs::metadata(&dat_path).expect("dat metadata").len() > 0,
+        "fixture bundle should start non-empty"
+    );
+
+    // Corrupt: truncate the whole bundle to empty files.
+    fs::write(&dat_path, []).expect("truncate DAT");
+    fs::write(&ext_path, []).expect("truncate EXT");
+    fs::write(&twoex_path, []).expect("truncate 2EX");
+
+    assert_fix_proposed(&backend, &usb, "fix_empty_analysis_files");
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["fix_empty_analysis_files".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    // scan_anlz_warnings reports each bundle member (.DAT/.EXT/.2EX)
+    // separately, so a single regenerated bundle counts as 3 "fixed".
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m.contains("Fix Empty Analysis Files") && m.contains("fixed 3")),
+        "expected the empty bundle to be reported fixed: {:#?}",
+        data.applied_fixes
+    );
+
+    let regenerated_len = fs::metadata(&dat_path).expect("dat metadata after repair").len();
+    assert!(
+        regenerated_len > 0,
+        "DAT bundle should be regenerated with real waveform content"
+    );
+    assert_fix_not_proposed(&backend, &usb, "fix_empty_analysis_files");
+}
+
+#[test]
+fn repair_fix_empty_analysis_files_skips_unmapped_stray_bundle() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+
+    // An empty analysis bundle with no corresponding PDB/eDB track mapping
+    // (a stray leftover, not referenced by anything) can't be regenerated —
+    // there's no source audio to derive it from.
+    let stray_dir = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join("USBANLZ")
+        .join("P0AA")
+        .join("DEADBEEF");
+    fs::create_dir_all(&stray_dir).expect("create stray analysis dir");
+    fs::write(stray_dir.join("ANLZ0000.DAT"), []).expect("write empty stray DAT");
+    fs::write(stray_dir.join("ANLZ0000.EXT"), []).expect("write empty stray EXT");
+    fs::write(stray_dir.join("ANLZ0000.2EX"), []).expect("write empty stray 2EX");
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["fix_empty_analysis_files".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    // Nothing was fixed (no mapping to regenerate from), so this lands in
+    // `skipped_fixes` with the generic "nothing to apply" message rather
+    // than `applied_fixes` — see `repair_usb_diagnostics_with_progress`'s
+    // fixed/failed/else dispatch for "fix_empty_analysis_files".
+    assert!(
+        data.skipped_fixes
+            .iter()
+            .any(|m| m.contains("Fix Empty Analysis Files") && m.contains("nothing to apply")),
+        "expected the stray bundle to be reported as skipped: {:#?}",
+        data.skipped_fixes
+    );
+    assert!(
+        data.warnings
+            .iter()
+            .any(|w| w.message.contains("source audio mapping not found")),
+        "expected a skip-reason warning for the unmapped stray bundle: {:#?}",
+        data.warnings
+    );
+}
+
+// ── remove_missing_audio_references ───────────────────────────────────────
+
+fn find_contents_audio_file(usb: &Path) -> PathBuf {
+    walkdir::WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .find(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .expect("expected exported audio file under Contents")
+}
+
+#[test]
+fn repair_remove_missing_audio_references_deletes_dangling_track_refs() {
+    // Two tracks are needed: deleting the *only* audio file on the USB would
+    // empty Contents/ entirely, which the detector treats as a DB-only
+    // snapshot (can't tell what's "missing" vs. never-copied) rather than
+    // evidence of a dangling reference — see `any_audio_on_usb` in
+    // `repair_usb_diagnostics_with_progress`. Keeping a second track's audio
+    // file in place is what makes the deleted one look genuinely missing.
+    let (_root, backend, usb, _target_playlist, _control_playlist) =
+        setup_two_playlist_strict_parity_fixture();
+
+    let audio_files: Vec<PathBuf> = walkdir::WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+    assert_eq!(audio_files.len(), 2, "expected two exported audio files");
+    let missing_file = &audio_files[0];
+
+    let track_id = {
+        let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+        let file_name = missing_file.file_name().unwrap().to_string_lossy().into_owned();
+        conn.query_row(
+            "SELECT content_id FROM content WHERE path LIKE ?1",
+            [format!("%{file_name}")],
+            |r| r.get::<_, i64>(0),
+        )
+        .expect("content row for the file about to go missing")
+    };
+
+    fs::remove_file(missing_file).expect("delete one referenced audio file");
+
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(preview.ok, "preview failed: {preview:?}");
+    let preview_data = preview.data.expect("preview data");
+    assert!(
+        preview_data
+            .detected_issues
+            .iter()
+            .any(|i| i.contains("missing audio")),
+        "expected missing-audio issue detected: {:#?}",
+        preview_data.detected_issues
+    );
+    let proposal = preview_data
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "remove_missing_audio_references")
+        .expect("remove_missing_audio_references should be proposed");
+    assert!(proposal.supported, "fix should be auto-supported: {proposal:?}");
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["remove_missing_audio_references".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m.contains("Remove Missing Audio References")),
+        "expected the fix to be applied: {:#?}",
+        data.applied_fixes
+    );
+
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let remaining_content: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content WHERE content_id = ?1",
+            [track_id],
+            |r| r.get(0),
+        )
+        .expect("count content");
+    assert_eq!(remaining_content, 0, "content row should be removed");
+    let remaining_links: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM playlist_content WHERE content_id = ?1",
+            [track_id],
+            |r| r.get(0),
+        )
+        .expect("count playlist_content");
+    assert_eq!(
+        remaining_links, 0,
+        "playlist_content link should be removed"
+    );
+
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb after repair");
+    assert!(
+        parsed
+            .playlist_entries
+            .iter()
+            .all(|e| e.track_id != track_id as u32),
+        "PDB playlist entry for the missing track should be removed: {:?}",
+        parsed.playlist_entries
+    );
+}
+
+#[test]
+fn repair_remove_missing_audio_references_is_manual_only_when_index_drift_present() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+
+    fs::remove_file(find_contents_audio_file(&usb)).expect("delete referenced audio file");
+
+    // Drop an unrelated, unindexed real audio file into Contents/ so
+    // canonical-path index drift is also present — this must force the
+    // missing-audio fix into manual-only mode.
+    let stray_dir = usb.join("Contents").join("Stray Artist").join("Stray Album");
+    fs::create_dir_all(&stray_dir).expect("create stray contents dir");
+    copy_audio_fixture(
+        &stray_dir,
+        "noart/track_no_art.mp3",
+        "99 Unindexed Stray.mp3",
+    );
+
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(preview.ok, "preview failed: {preview:?}");
+    let preview_data = preview.data.expect("preview data");
+    let proposal = preview_data
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "remove_missing_audio_references")
+        .expect("remove_missing_audio_references should still be proposed");
+    assert!(
+        !proposal.supported,
+        "fix must be manual-only while index drift is present: {proposal:?}"
+    );
+
+    let track_id = {
+        let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+        conn.query_row("SELECT content_id FROM content LIMIT 1", [], |r| r.get::<_, i64>(0))
+            .expect("content row")
+    };
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["remove_missing_audio_references".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.skipped_fixes
+            .iter()
+            .any(|m| m.contains("Remove Missing Audio References")
+                && m.contains("preview-only/manual")),
+        "expected manual-only skip message: {:#?}",
+        data.skipped_fixes
+    );
+
+    // Nothing should have been deleted since the fix stayed unsupported.
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let remaining_content: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content WHERE content_id = ?1",
+            [track_id],
+            |r| r.get(0),
+        )
+        .expect("count content");
+    assert_eq!(
+        remaining_content, 1,
+        "content row must be untouched in manual-only mode"
+    );
+}
+
+// ── Remaining repair_usb_diagnostics_with_progress orchestrator branches ──
+
+#[test]
+fn repair_detects_unindexed_audio_under_contents() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+
+    let stray_dir = usb.join("Contents").join("Stray Artist").join("Stray Album");
+    fs::create_dir_all(&stray_dir).expect("create stray contents dir");
+    copy_audio_fixture(
+        &stray_dir,
+        "noart/track_no_art.mp3",
+        "99 Unindexed Stray.mp3",
+    );
+
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(preview.ok, "preview failed: {preview:?}");
+    let data = preview.data.expect("preview data");
+
+    assert!(
+        data.detected_issues
+            .iter()
+            .any(|i| i.contains("missing from the canonical-path indexed set")),
+        "expected unindexed-audio issue detected: {:#?}",
+        data.detected_issues
+    );
+    assert!(
+        data.proposed_fixes
+            .iter()
+            .any(|f| f.id == "manual_reimport_unindexed_audio" && !f.supported),
+        "expected the manual-only unindexed-audio guidance fix: {:#?}",
+        data.proposed_fixes
+    );
+    assert!(
+        data.unsupported_items
+            .iter()
+            .any(|i| i.issue.contains("unindexed audio file")),
+        "expected an unsupported-item entry for the unindexed audio: {:#?}",
+        data.unsupported_items
+    );
+}
+
+#[test]
+fn repair_reports_missing_audio_scan_skipped_when_contents_absent() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+
+    fs::remove_dir_all(usb.join("Contents")).expect("remove Contents directory");
+
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(preview.ok, "preview failed: {preview:?}");
+    let data = preview.data.expect("preview data");
+    assert!(
+        data.warnings.iter().any(|w| w
+            .message
+            .contains("missing-audio scan skipped: Contents directory is absent or empty")),
+        "expected the DB-only-snapshot warning: {:#?}",
+        data.warnings
+    );
+}
+
+#[test]
+fn repair_reports_parity_preview_unavailable_when_edb_unreadable() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+
+    // Truncate the eDB to a few garbage bytes so it can't be opened as SQLite
+    // at all — the parity report must fail gracefully with a warning rather
+    // than aborting the whole repair preview.
+    let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
+    fs::write(&edb_path, b"not a sqlite database").expect("corrupt eDB");
+
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(
+        preview.ok,
+        "repair preview must still succeed (graceful degradation): {preview:?}"
+    );
+    let data = preview.data.expect("preview data");
+    assert!(
+        data.warnings
+            .iter()
+            .any(|w| w.message.contains("parity preview unavailable")),
+        "expected a parity-unavailable warning: {:#?}",
+        data.warnings
+    );
+}
+
+#[test]
+fn repair_apply_reports_failure_when_pdb_is_read_only() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
+        bytes[page * page_size + 0x1b] = 0x11; // invalid flags
+    });
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+
+    let mut perms = fs::metadata(&pdb_path).expect("pdb metadata").permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(&pdb_path, perms).expect("make pdb read-only");
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec![PDB_WRONG_PAGE_FLAGS_FIX_ID.to_string()],
+    });
+
+    // Restore write permission before any assertion can early-return, so the
+    // TempDir's own cleanup never trips over a read-only file.
+    let mut perms = fs::metadata(&pdb_path).expect("pdb metadata").permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    fs::set_permissions(&pdb_path, perms).expect("restore pdb write permission");
+
+    assert!(repair.ok, "repair call itself should still return ok: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.failed_fixes
+            .iter()
+            .any(|m| m.contains("Repair PDB Data Page Flags")),
+        "expected the write failure to be reported in failed_fixes: {:#?}",
+        data.failed_fixes
+    );
+}
+
+// ── apply_strict_parity_upgrade edge cases ────────────────────────────────
+
+#[test]
+fn strict_repair_picks_up_pdb_only_playlist_with_no_edb_counterpart() {
+    let (_root, backend, usb, target_playlist, control_playlist) =
+        setup_two_playlist_strict_parity_fixture();
+
+    // Delete the eDB-side playlist row (and its membership) for the control
+    // playlist, leaving only the PDB playlist_tree/playlist_entries rows —
+    // the `(None, Some(pdb))` arm in apply_strict_parity_upgrade's playlist
+    // identity match.
+    {
+        let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+        let playlist_id: i64 = conn
+            .query_row(
+                "SELECT playlist_id FROM playlist WHERE name = ?1",
+                [&control_playlist],
+                |r| r.get(0),
+            )
+            .expect("control playlist id");
+        conn.execute(
+            "DELETE FROM playlist_content WHERE playlist_id = ?1",
+            [playlist_id],
+        )
+        .expect("delete control playlist_content");
+        conn.execute("DELETE FROM playlist WHERE playlist_id = ?1", [playlist_id])
+            .expect("delete control playlist row");
+    }
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m.contains("Upgrade Export Data To Strict Parity")),
+        "expected strict parity upgrade to apply: {:#?}",
+        data.applied_fixes
+    );
+
+    // The PDB-only playlist must have been written back into eDB.
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let restored: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM playlist WHERE name = ?1",
+            [&control_playlist],
+            |r| r.get(0),
+        )
+        .expect("count restored control playlist");
+    assert_eq!(
+        restored, 1,
+        "PDB-only playlist should be propagated back into eDB"
+    );
+
+    let _ = target_playlist;
+}
+
+#[test]
+fn strict_repair_skips_orphaned_playlist_tree_entry_without_erroring() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+
+    // Change the exported track's own id in its PDB row, leaving the
+    // playlist_entries row (which still references the old id) dangling —
+    // `pdb_track_by_id.get(&entry.track_id)` must not find it and the entry
+    // must be skipped rather than panicking.
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
+        let id_off = page * page_size + 0x28 + 72; // heap_start + TOMBSTONE_ID_TABLES[tt=0] offset
+        let old_id = u32::from_le_bytes(bytes[id_off..id_off + 4].try_into().unwrap());
+        let new_id = old_id + 1000;
+        bytes[id_off..id_off + 4].copy_from_slice(&new_id.to_le_bytes());
+    });
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
+    });
+    assert!(
+        repair.ok,
+        "repair must complete without erroring on a dangling playlist_tree entry: {repair:?}"
+    );
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.failed_fixes.is_empty(),
+        "orphaned entry must be skipped, not reported as a failure: {:#?}",
+        data.failed_fixes
+    );
+}
+
+#[test]
+fn strict_repair_reports_failure_when_pdb_rewrite_cannot_be_written() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+
+    // Force a genuine strict-parity discrepancy so the upgrade actually has
+    // a playlist to rewrite (a byte-clean export has nothing to do).
+    {
+        let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+        let playlist_id: i64 = conn
+            .query_row(
+                "SELECT playlist_id FROM playlist WHERE name = ?1",
+                [&playlist_name],
+                |r| r.get(0),
+            )
+            .expect("playlist id");
+        let content_id: i64 = conn
+            .query_row(
+                "SELECT content_id FROM playlist_content WHERE playlist_id = ?1 LIMIT 1",
+                [playlist_id],
+                |r| r.get(0),
+            )
+            .expect("content id");
+        conn.execute(
+            "DELETE FROM playlist_content WHERE playlist_id = ?1 AND content_id = ?2",
+            rusqlite::params![playlist_id, content_id],
+        )
+        .expect("delete content entry to force strict-parity drift");
+    }
+    assert_fix_proposed(&backend, &usb, "upgrade_export_data_to_strict_parity");
+
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let mut perms = fs::metadata(&pdb_path).expect("pdb metadata").permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(&pdb_path, perms).expect("make pdb read-only");
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
+    });
+
+    let mut perms = fs::metadata(&pdb_path).expect("pdb metadata").permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    fs::set_permissions(&pdb_path, perms).expect("restore pdb write permission");
+
+    assert!(repair.ok, "repair call itself should still return ok: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.failed_fixes
+            .iter()
+            .any(|m| m.contains("Upgrade Export Data To Strict Parity")),
+        "expected the PDB write failure to be reported: {:#?}",
+        data.failed_fixes
+    );
+}
+
+

@@ -16,6 +16,14 @@
   playback. Playback now substitutes an HDD/library file only when backend
   `resolve_playback_source` returns a verified match; if no verified HDD match
   exists, playback can still use the selected USB source path.
+- Add test coverage for the USB repair engine (`service::repair`), raising its
+  line coverage from ~63% to ~85%. Most of the gap was in the individual PDB
+  byte-level repair functions (wrong page flags, sentinel u5, zero tranrf,
+  wrong track/history/playlist-tree footer shape, stale sentinel B-tree,
+  tombstoned row ids, EC data-page conflicts) and in the repair orchestrator's
+  per-fix proposal/apply/skip wiring, none of which were previously exercised
+  because no existing test constructed the specific corrupted-page byte
+  patterns each one detects. No behavior change — tests only.
 
 ## 0.1.8
 
