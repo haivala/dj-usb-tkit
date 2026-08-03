@@ -77,6 +77,52 @@ test("validateAndSetUsbRoot exposes one-click init state for writable missing-st
   assert.equal(diagCalled, false);
 });
 
+test("validateAndSetUsbRoot renders structured WarningEntry warnings as their message text, not [object Object]", async () => {
+  const initRow = { classList: makeClassList() };
+  const state = {
+    usbRoot: null,
+    usbRootValid: false,
+    usbNeedsInit: false,
+    usbWritable: false
+  };
+  const el = {
+    usbInitRow: initRow,
+    usbInitHint: { textContent: "" },
+    initializeUsbBtn: { disabled: true }
+  };
+
+  let lastStatus = "";
+  const valid = await validateAndSetUsbRoot(state, el, "/tmp/usb", false, {
+    command: async () => ({
+      valid: false,
+      hasWriteAccess: true,
+      normalizedRoot: "/tmp/usb",
+      hasVendorRoot: false,
+      hasContents: false,
+      hasPdb: false,
+      warnings: [
+        { level: "warn", code: "usb.validate.missing-vendor-root", message: "Missing vendor root folder", source: "usb-validate" },
+        { level: "warn", code: "usb.validate.missing-contents", message: "Missing Contents directory", source: "usb-validate" }
+      ]
+    }),
+    persistUsbRoot: () => {},
+    updateUsbRootText: () => {},
+    resetUsbStateViews: () => {},
+    updateUsbConfigControlsVisibility: () => {},
+    updateUsbSubNavDisabledState: () => {},
+    updatePlaylistExportButtons: () => {},
+    setStatus: (text) => { lastStatus = text; },
+    runUsbDiagnostics: async () => {},
+    warn: () => {},
+    scheduler: () => {}
+  });
+
+  assert.equal(valid, false);
+  assert.doesNotMatch(el.usbInitHint.textContent, /\[object Object\]/);
+  assert.match(el.usbInitHint.textContent, /Missing vendor root folder \| Missing Contents directory/);
+  assert.doesNotMatch(lastStatus, /\[object Object\]/);
+});
+
 test("validateAndSetUsbRoot valid USB triggers diagnostics path and hides init controls", async () => {
   const initRow = { classList: makeClassList() };
   initRow.classList.add("hidden");

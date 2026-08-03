@@ -143,7 +143,51 @@ test("analyzeTrackIds reports failed count from analyze_new_tracks response", as
   assert.equal(result.failed, 1);
   assert.equal(hydrateCalls, 1, "final hydration still runs after a batch call");
   assert.ok(result.warnings.some((w) => String(w).includes("no BPM/key result")));
-  assert.ok(statuses.some((s) => s.includes("Analyze missing done: analyzed 0, failed 1")));
+});
+
+test("analyzeTrackIds surfaces the auto-select-limit notice from a structured WarningEntry, not [object Object]", async () => {
+  const state = {
+    tracks: [{ id: "1", bpm: null, key: null, durationMs: null, waveformPreview: [] }],
+    analysisBpmRange: "full",
+    analyzingTrackIds: new Set()
+  };
+  const statuses = [];
+
+  const result = await analyzeTrackIds(state, ["1"], "Analyze", {}, {
+    parseAnalysisBpmRange: () => ({ min: null, max: null }),
+    command: async (name) => {
+      if (name === "analyze_new_tracks") {
+        return {
+          jobId: "job-1",
+          analyzed: 1,
+          failed: 0,
+          warnings: [{
+            level: "info",
+            code: "analysis.auto-select-limit",
+            message: "Auto analysis limit reached: selected 1 of 5 eligible tracks (limit 1). Run analysis again or select tracks explicitly to continue.",
+            source: "analysis"
+          }]
+        };
+      }
+      if (name === "get_tracks_by_ids_with_previews") return { items: [] };
+      return {};
+    },
+    setStatus: (text) => { statuses.push(String(text || "")); },
+    setTrackAnalyzingState: () => {},
+    nextPaint: async () => {},
+    mergeHydratedTrackIntoState: () => false,
+    patchLibraryRowByTrackId: () => {},
+    patchPlaylistRowByTrackId: () => {},
+    updateLibraryDurationSummary: () => {},
+    renderSourceChips: () => {},
+    refreshCurrentPlaylistTracks: async () => {},
+    countWarningsForStatus: () => 0
+  });
+
+  assert.equal(result.warnings.length, 1);
+  const finalStatus = statuses[statuses.length - 1];
+  assert.doesNotMatch(finalStatus, /\[object Object\]/);
+  assert.match(finalStatus, /Auto analysis limit reached: selected 1 of 5 eligible tracks/);
 });
 
 test("applyRealtimeAnalyzedTrackUpdate skips no-change warning for empty bpm/key payload", async () => {

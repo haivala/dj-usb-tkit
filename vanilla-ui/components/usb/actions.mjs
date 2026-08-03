@@ -13,6 +13,18 @@ function resolveEmitStatus(deps = {}) {
   return () => {};
 }
 
+function warningEntryText(entry) {
+  if (entry && typeof entry === "object") return String(entry.message || "").trim();
+  return String(entry || "").trim();
+}
+
+function joinWarningTexts(warnings) {
+  return (Array.isArray(warnings) ? warnings : [])
+    .map(warningEntryText)
+    .filter(Boolean)
+    .join(" | ");
+}
+
 export function knownUsbPlaylistNamesFromPlaylists(playlists) {
   const names = new Set();
   for (const playlist of playlists || []) {
@@ -639,12 +651,12 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
     el.usbInitRow.classList.toggle("hidden", !canInitialize);
   }
   if (el.usbInitHint) {
-    const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+    const warningText = joinWarningTexts(result?.warnings);
     if (canInitialize) {
-      const reason = warnings.length ? ` (${warnings.join(" | ")})` : "";
+      const reason = warningText ? ` (${warningText})` : "";
       el.usbInitHint.textContent = `USB folder is writable but missing External library structure${reason}`;
     } else if (!valid) {
-      const reason = warnings.length ? ` (${warnings.join(" | ")})` : "";
+      const reason = warningText ? ` (${warningText})` : "";
       el.usbInitHint.textContent = `USB folder is not ready for initialization${reason}`;
     }
   }
@@ -659,10 +671,9 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
   updatePlaylistExportButtons();
   if (!silent) {
     if (valid) {
-      const warningText = Array.isArray(result?.warnings) && result.warnings.length
-        ? ` (${result.warnings.join(" | ")})`
-        : "";
-      emitStatus(`USB root selected: ${state.usbRoot}${warningText}. Running diagnostics...`);
+      const selectedWarningText = joinWarningTexts(result?.warnings);
+      const reason = selectedWarningText ? ` (${selectedWarningText})` : "";
+      emitStatus(`USB root selected: ${state.usbRoot}${reason}. Running diagnostics...`);
       const _docObj = deps.documentObj ?? (typeof document !== "undefined" ? document : null);
       const _healthCard = _docObj?.getElementById?.("usbHealthCard") ?? null;
       if (_healthCard) {
@@ -678,8 +689,8 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
     } else if (canInitialize) {
       emitStatus('USB selected but not initialized. Click "Initialize USB Structure" to continue.');
     } else {
-      const warnings = Array.isArray(result?.warnings) ? result.warnings.join(" | ") : "invalid USB root";
-      emitStatus(`USB root invalid: ${warnings}`);
+      const invalidWarningText = joinWarningTexts(result?.warnings) || "invalid USB root";
+      emitStatus(`USB root invalid: ${invalidWarningText}`);
     }
   }
   return valid;

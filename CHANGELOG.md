@@ -38,6 +38,13 @@
   failed command, a repair finding, or an import warning all land in the
   Event Log the same way, immediately. `error.rs` also gained a distinct
   `DbError` code (previously folded into the generic `InternalError`).
+- Fix USB status/hint text rendering `[object Object]` and the "Auto analysis
+  limit reached" notice silently disappearing after the Event Log unification
+  above changed several commands' `warnings` field from plain strings to
+  structured entries (`{level, code, message, source}`). `validate_usb_root`,
+  `analyze_new_tracks`, and `scan_master_db` warning consumers in the frontend
+  now read the `message` field instead of stringifying or re-joining the
+  whole entry.
 
 ## 0.1.8
 

@@ -449,6 +449,39 @@ test("scanMasterDb emits generic error status on command failure", async () => {
   assert.ok(statuses[1].startsWith("Desktop library import failed:"), statuses[1]);
 });
 
+test("scanMasterDb forwards structured WarningEntry scan warnings to logWarnings unwrapped", async () => {
+  const state = { externalMasterDbPath: "/path/to/master.db" };
+  const logged = [];
+  await scanMasterDb(state, {
+    emitStatus: () => {},
+    command: async () => ({
+      indexed: 3,
+      updated: 1,
+      notFound: [],
+      warnings: [{
+        level: "warn",
+        code: "master_db.scan_diag",
+        message: "3 file(s) had unreadable ANLZ analysis",
+        source: "scan_master_db"
+      }]
+    }),
+    resetAndLoadLibraryTracks: async () => {},
+    LIBRARY_LOAD_LIMIT_POST_SCAN: 500,
+    refreshCurrentPlaylistTracks: async () => {},
+    persistMasterDbEnabled: () => {},
+    persistSourcesEverConfigured: () => {},
+    renderSourceChips: () => {},
+    logWarnings: (source, warnings) => { logged.push({ source, warnings }); }
+  });
+
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].warnings.length, 1);
+  const entry = logged[0].warnings[0];
+  assert.equal(entry.level, "warn");
+  assert.equal(entry.message, "3 file(s) had unreadable ANLZ analysis");
+  assert.notEqual(typeof entry.message, "object", "message must not be a re-wrapped WarningEntry object");
+});
+
 test("refreshSourceRootAnalysisStatus queries every non-missing root, including disabled ones", async () => {
   const state = {
     sourceRoots: ["/music/a", "/music/b"],

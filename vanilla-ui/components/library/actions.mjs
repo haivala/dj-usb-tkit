@@ -13,10 +13,15 @@ function resolveEmitStatus(deps = {}) {
   return () => {};
 }
 
+function warningEntryText(entry) {
+  if (entry && typeof entry === "object") return String(entry.message || "").trim();
+  return String(entry || "").trim();
+}
+
 function findAnalysisAutoLimitWarning(warnings) {
   if (!Array.isArray(warnings)) return null;
   for (const warning of warnings) {
-    const text = String(warning || "").trim();
+    const text = warningEntryText(warning);
     if (text.startsWith("Auto analysis limit reached:")) {
       return text;
     }
@@ -1134,7 +1139,9 @@ export async function scanMasterDb(state, deps) {
   if (scanWarnings.length > 0) {
     logWarnings?.(
       "master.db",
-      scanWarnings.map((msg) => ({ level: "info", message: msg, code: "master_db.scan_diag" })),
+      scanWarnings.map((entry) => (entry && typeof entry === "object"
+        ? entry
+        : { level: "info", message: entry, code: "master_db.scan_diag" })),
       "desktop library import"
     );
   }
@@ -1194,7 +1201,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     analyzed = Math.max(0, Number(batch?.analyzed || 0));
     failed = Math.max(0, Number(batch?.failed || 0));
     const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
-    warnings.push(...batchWarnings.map((w) => String(w)));
+    warnings.push(...batchWarnings);
     emitStatus(`${modeLabel}: ${ids.length}/${ids.length} track(s) ready...`);
   } catch (err) {
     failed = ids.length;
