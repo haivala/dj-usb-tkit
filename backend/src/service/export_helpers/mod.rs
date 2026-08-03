@@ -55,7 +55,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 
 use crate::error::{BackendError, BackendResult};
-use crate::models::ExportToUsbOptions;
+use crate::models::{ExportToUsbOptions, WarningEntry};
 use crate::pdb_reader::parse_pdb;
 use crate::utils::{collect_chain as collect_chain_pages, page_offset, table_ptr_fields};
 
@@ -291,7 +291,7 @@ pub struct ExportManifest {
     pub options: ExportToUsbOptions,
     pub exported_tracks: usize,
     pub skipped_tracks: usize,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<WarningEntry>,
     pub tracks: Vec<ExportManifestTrack>,
 }
 
@@ -405,11 +405,15 @@ pub fn write_edb_playlist(
         )));
     }
 
-    let mut unlock_warnings = Vec::<String>::new();
+    let mut unlock_warnings = Vec::<WarningEntry>::new();
     let Some(mut conn) = open_edb_rw(usb_root, &mut unlock_warnings) else {
         return Err(BackendError::Internal(format!(
             "unable to open eDB in read-write mode ({})",
-            unlock_warnings.join(" | ")
+            unlock_warnings
+                .iter()
+                .map(|w| w.message.as_str())
+                .collect::<Vec<_>>()
+                .join(" | ")
         )));
     };
 
@@ -1367,7 +1371,7 @@ fn write_pdb_fresh_with_overrides(
     let mut edb_identity_by_path =
         HashMap::<String, (Option<u32>, Option<u32>, Option<u32>, Option<u16>)>::new();
     {
-        let mut unlock_warnings = Vec::<String>::new();
+        let mut unlock_warnings = Vec::<WarningEntry>::new();
         if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings)
             && table_exists(&conn, "content")
         {
@@ -3356,7 +3360,7 @@ mod tests {
         assert!(
             warnings
                 .iter()
-                .any(|warning| warning.contains("analysis bundle missing")),
+                .any(|warning| warning.message.contains("analysis bundle missing")),
             "expected missing bundle warning, got {warnings:?}"
         );
 
@@ -4553,7 +4557,7 @@ mod tests {
         crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
             .expect("initialize usb skeleton");
 
-        let mut unlock_warnings = Vec::<String>::new();
+        let mut unlock_warnings = Vec::<WarningEntry>::new();
         let conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
         let mut seed_track = mapping_test_track();
         seed_track.exported_path =
@@ -4654,7 +4658,7 @@ mod tests {
         crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
             .expect("initialize usb skeleton");
 
-        let mut unlock_warnings = Vec::<String>::new();
+        let mut unlock_warnings = Vec::<WarningEntry>::new();
         let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
 
         let mut seed_track = mapping_test_track();
@@ -4742,7 +4746,7 @@ mod tests {
         crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
             .expect("initialize usb skeleton");
 
-        let mut unlock_warnings = Vec::<String>::new();
+        let mut unlock_warnings = Vec::<WarningEntry>::new();
         let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
 
         let mut rich_manifest_track = mapping_test_track();
@@ -4861,7 +4865,7 @@ mod tests {
         crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
             .expect("initialize usb skeleton");
 
-        let mut unlock_warnings = Vec::<String>::new();
+        let mut unlock_warnings = Vec::<WarningEntry>::new();
         let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
 
         let mut base_track = mapping_test_track();

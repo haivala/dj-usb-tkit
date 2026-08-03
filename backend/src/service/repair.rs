@@ -12,6 +12,7 @@ use crate::edb::{
     try_read_playlists_with_metadata_from_edb,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::logging::{self, Level};
 use crate::models::{
     DiagCheck, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
     RepairFixProposal, RepairUnsupportedItem, RepairUsbDiagnosticsData,
@@ -59,46 +60,6 @@ const PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID: &str = "repair_pdb_tombstoned_play
 const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_pages";
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
 
-fn diagnostics_warning_entry(message: String) -> WarningEntry {
-    let lower = message.to_lowercase();
-    let (level, code) = if message.starts_with("slow-media suspected:") {
-        ("warn", "usb.diagnostics.slow-media")
-    } else if message.starts_with("PDB header compatibility field") {
-        ("warn", "usb.diagnostics.pdb-header-compatibility")
-    } else if message.contains("sentinel u5=0x1FFF") {
-        ("error", "usb.diagnostics.pdb-sentinel-u5")
-    } else if message.contains("wrong page_flags byte") {
-        ("error", "usb.diagnostics.pdb-wrong-page-flags")
-    } else if message.contains("tranrf=0") {
-        ("error", "usb.diagnostics.pdb-zero-tranrf")
-    } else if message.contains("wrong u5/num_rl shape") {
-        ("error", "usb.diagnostics.pdb-wrong-history-shape")
-    } else if message.contains("tombstoned row(s) with non-zero id") {
-        ("error", "usb.diagnostics.pdb-tombstoned-playlist-id")
-    } else if message.contains("stale sentinel b-tree") {
-        ("error", "usb.diagnostics.pdb-stale-sentinel-btree")
-    } else if message.contains("playlist_tree page") && message.contains("wrong shape") {
-        ("error", "usb.diagnostics.pdb-wrong-playlist-tree-shape")
-    } else if message.starts_with("unindexed audio file:") {
-        ("warn", "usb.diagnostics.unindexed-audio")
-    } else if message.starts_with("missing-audio reference:") {
-        ("warn", "usb.diagnostics.missing-audio")
-    } else if message.starts_with("PDB and eDB menus disagree") {
-        ("warn", "usb.diagnostics.player-menu-divergence")
-    } else if lower.contains("malformed") || lower.contains("corrupt") {
-        ("warn", "usb.diagnostics.malformed")
-    } else if lower.contains("failed") || lower.contains("error") {
-        ("error", "usb.diagnostics.error")
-    } else {
-        ("info", "usb.diagnostics.info")
-    };
-    WarningEntry {
-        level: level.to_string(),
-        code: code.to_string(),
-        message,
-        source: "usb-diagnostics".to_string(),
-    }
-}
 
 #[derive(Debug, Default, Clone)]
 struct StrictParityUpgradeApplyResult {
@@ -1645,7 +1606,7 @@ struct EdbMenuRow {
 
 fn load_edb_menu_rows(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<Vec<EdbMenuRow>> {
     let Some(conn) = open_edb_rw(usb_root, warnings) else {
         return Err(crate::error::BackendError::Validation(
@@ -1695,7 +1656,7 @@ fn load_edb_menu_rows(
 /// Non-empty divergence means the two indexes disagree; Fix PDB sync resolves it.
 pub(crate) fn load_usb_player_menu_config_public(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(
     Vec<UsbPlayerMenuItem>,
     Vec<UsbPlayerMenuItem>,
@@ -1708,7 +1669,7 @@ pub(crate) fn load_usb_player_menu_config_public(
 /// Used to keep PDB t17 in sync with eDB.category after a menu config save.
 fn load_t17_encoded_rows(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<Vec<[u8; 8]>> {
     let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
         return Ok(Vec::new());
@@ -1744,7 +1705,7 @@ fn load_t17_encoded_rows(
 
 fn load_usb_player_menu_config(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(
     Vec<UsbPlayerMenuItem>,
     Vec<UsbPlayerMenuItem>,
@@ -1860,7 +1821,7 @@ fn load_usb_player_menu_config(
 fn mirror_edb_category_from_pdb_kinds(
     usb_root: &std::path::Path,
     pdb_kind_order: &[u32],
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<bool> {
     let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
         return Err(crate::error::BackendError::Validation(
@@ -1909,8 +1870,11 @@ fn mirror_edb_category_from_pdb_kinds(
         let mut mirrored_menu_ids = HashSet::<i64>::new();
         for (seq, kind) in desired_kinds.iter().enumerate() {
             let Some(menu_id) = menu_item_id_by_kind.get(kind).copied() else {
-                warnings.push(format!(
-                    "PDB kind {kind} has no matching eDB menuItem; eDB cannot mirror it"
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-player-menu",
+                    "usb.player-menu.pdb-kind-unmapped",
+                    format!("PDB kind {kind} has no matching eDB menuItem; eDB cannot mirror it"),
                 ));
                 continue;
             };
@@ -2123,12 +2087,16 @@ pub(crate) fn restore_pdb_playlist_sort_orders(
 
 pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
     let parsed = parse_pdb(&vendor_pdb_path(usb_root))?;
     let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
-        warnings
-            .push("strict parity upgrade: unable to open eDB for playlist order sync".to_string());
+        warnings.push(logging::log(
+            Level::Error,
+            "usb-repair",
+            "usb.repair.strict-parity.order-sync-edb-open-failed",
+            "strict parity upgrade: unable to open eDB for playlist order sync",
+        ));
         return Ok(0);
     };
     if !table_exists(&conn, "playlist") {
@@ -2364,17 +2332,14 @@ impl BackendService {
         req: GetUsbPlayerMenuConfigRequest,
     ) -> BackendResult<GetUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
         let (current_items, available_items, divergence) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
         Ok(GetUsbPlayerMenuConfigData {
             current_items,
             available_items,
             divergence,
-            warnings: warnings
-                .into_iter()
-                .map(diagnostics_warning_entry)
-                .collect(),
+            warnings,
         })
     }
 
@@ -2388,7 +2353,7 @@ impl BackendService {
         req: GetUsbPlayerMenuConfigRequest,
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let mut warnings = Vec::new();
+        let mut warnings = Vec::<WarningEntry>::new();
 
         let mut edb_rows = load_edb_menu_rows(&usb_root, &mut warnings)?;
         edb_rows.sort_by_key(|r| r.menu_item_id);
@@ -2401,18 +2366,33 @@ impl BackendService {
         let pdb_updated =
             super::export_helpers::patch_pdb_columns_menu_set_by_kind(&usb_root, &all_rows)?;
         if pdb_updated {
-            warnings.push("PDB t16 columns restored from eDB menuItem catalog".to_string());
+            warnings.push(logging::log(
+                Level::Info,
+                "usb-player-menu",
+                "usb.player-menu.t16-restored",
+                "PDB t16 columns restored from eDB menuItem catalog",
+            ));
         }
 
         match load_t17_encoded_rows(&usb_root, &mut warnings) {
             Ok(t17_rows) if !t17_rows.is_empty() => {
                 match super::export_helpers::patch_pdb_t17_category_snapshot(&usb_root, &t17_rows) {
                     Ok(true) => {
-                        warnings.push("PDB t17 category snapshot updated".to_string());
+                        warnings.push(logging::log(
+                            Level::Info,
+                            "usb-player-menu",
+                            "usb.player-menu.t17-snapshot-updated",
+                            "PDB t17 category snapshot updated",
+                        ));
                     }
                     Ok(false) => {}
                     Err(e) => {
-                        warnings.push(format!("PDB t17 update skipped: {e}"));
+                        warnings.push(logging::log(
+                            Level::Warn,
+                            "usb-player-menu",
+                            "usb.player-menu.t17-update-skipped",
+                            format!("PDB t17 update skipped: {e}"),
+                        ));
                     }
                 }
             }
@@ -2427,10 +2407,7 @@ impl BackendService {
             current_items,
             available_items,
             divergence,
-            warnings: warnings
-                .into_iter()
-                .map(diagnostics_warning_entry)
-                .collect(),
+            warnings,
         })
     }
 
@@ -2439,7 +2416,7 @@ impl BackendService {
         req: UpdateUsbPlayerMenuConfigRequest,
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
 
         let (before_current, before_available, _before_divergence) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
@@ -2497,8 +2474,11 @@ impl BackendService {
         let mut final_kinds = Vec::<u32>::with_capacity(desired_kinds.len());
         for kind in &desired_kinds {
             if !name_by_kind.contains_key(kind) {
-                warnings.push(format!(
-                    "dropped unknown player menu kind {kind}: no display name available"
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-player-menu",
+                    "usb.player-menu.dropped-unknown-kind",
+                    format!("dropped unknown player menu kind {kind}: no display name available"),
                 ));
                 continue;
             }
@@ -2515,8 +2495,11 @@ impl BackendService {
 
         if let Err(err) = mirror_edb_category_from_pdb_kinds(&usb_root, &final_kinds, &mut warnings)
         {
-            warnings.push(format!(
-                "eDB write failed ({err}); restoring eDB from snapshot"
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-player-menu",
+                "usb.player-menu.edb-write-failed",
+                format!("eDB write failed ({err}); restoring eDB from snapshot"),
             ));
             if let Some(snapshot) = edb_snapshot.as_ref() {
                 let _ = std::fs::write(&edb_path, snapshot);
@@ -2543,11 +2526,21 @@ impl BackendService {
                         &usb_root, &t17_rows,
                     ) {
                         Ok(true) => {
-                            warnings.push("PDB t17 category snapshot updated".to_string());
+                            warnings.push(logging::log(
+                                Level::Info,
+                                "usb-player-menu",
+                                "usb.player-menu.t17-snapshot-updated",
+                                "PDB t17 category snapshot updated",
+                            ));
                         }
                         Ok(false) => {}
                         Err(e) => {
-                            warnings.push(format!("PDB t17 update skipped: {e}"));
+                            warnings.push(logging::log(
+                                Level::Warn,
+                                "usb-player-menu",
+                                "usb.player-menu.t17-update-skipped",
+                                format!("PDB t17 update skipped: {e}"),
+                            ));
                         }
                     }
                 }
@@ -2560,10 +2553,7 @@ impl BackendService {
             current_items,
             available_items,
             divergence,
-            warnings: warnings
-                .into_iter()
-                .map(diagnostics_warning_entry)
-                .collect(),
+            warnings,
         })
     }
 
@@ -2614,11 +2604,7 @@ impl BackendService {
         let mut applied_fixes = Vec::<String>::new();
         let mut skipped_fixes = Vec::<String>::new();
         let mut failed_fixes = Vec::<String>::new();
-        let mut warnings = diagnostics
-            .warnings
-            .iter()
-            .map(|w| w.message.clone())
-            .collect::<Vec<_>>();
+        let mut warnings = diagnostics.warnings.clone();
         let mut estimated_file_writes = 0usize;
         let estimated_file_deletes = 0usize;
         let mut missing_audio_track_ids = HashSet::<u32>::new();
@@ -2629,6 +2615,7 @@ impl BackendService {
         let mut sync_edb_history_needed = false;
 
         let anlz_scan_warnings = scan_anlz_warnings(&usb_root);
+        warnings.extend(anlz_scan_warnings.iter().cloned());
         let mut empty_analysis_paths = diagnostics
             .warnings
             .iter()
@@ -2643,12 +2630,14 @@ impl BackendService {
             .filter_map(|line| line.strip_prefix("analysis malformed entry is empty: "))
             .map(|s| s.trim().to_string())
             .collect::<Vec<_>>();
-        empty_analysis_paths.extend(anlz_scan_warnings.iter().filter_map(|line| {
-            line.strip_prefix("analysis file appears empty: ")
+        empty_analysis_paths.extend(anlz_scan_warnings.iter().filter_map(|w| {
+            w.message
+                .strip_prefix("analysis file appears empty: ")
                 .map(str::to_string)
         }));
-        malformed_analysis_entries.extend(anlz_scan_warnings.iter().filter_map(|line| {
-            line.strip_prefix("analysis malformed entry is empty: ")
+        malformed_analysis_entries.extend(anlz_scan_warnings.iter().filter_map(|w| {
+            w.message
+                .strip_prefix("analysis malformed entry is empty: ")
                 .map(str::to_string)
         }));
         empty_analysis_paths.sort();
@@ -2974,7 +2963,12 @@ impl BackendService {
                         .push(normalize_pdb_path_for_edb_lookup(&track.track_file_path));
                 }
             } else {
-                warnings.push("missing-audio scan skipped: Contents directory is absent or empty (DB-only snapshot)".to_string());
+                warnings.push(logging::log(
+                    Level::Info,
+                    "usb-diagnostics",
+                    "usb.diagnostics.missing-audio-scan-skipped",
+                    "missing-audio scan skipped: Contents directory is absent or empty (DB-only snapshot)",
+                ));
             }
         }
         missing_audio_paths.sort();
@@ -3029,12 +3023,22 @@ impl BackendService {
                         ),
                         reason: "Automatic deletion is intentionally disabled for canonical-path index drift. Recommended flow: copy files to safety/media library, import into playlists, export again. (Strict raw-count drift is reported separately in parity checks.)".to_string(),
                     });
-                warnings.push(format!(
-                        "canonical-path unindexed audio files detected: {} (see Event Log source=usb-diagnostics)",
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.unindexed-audio-summary",
+                    format!(
+                        "canonical-path unindexed audio files detected: {}",
                         unindexed_audio_paths.len()
-                    ));
+                    ),
+                ));
                 for path in &unindexed_audio_paths {
-                    warnings.push(format!("unindexed audio file: {path}"));
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-diagnostics",
+                        "usb.diagnostics.unindexed-audio",
+                        format!("unindexed audio file: {path}"),
+                    ));
                 }
             }
         }
@@ -3075,12 +3079,20 @@ impl BackendService {
                         unindexed_audio_paths.len(),
                     ),
                 });
-                warnings.push(
-                    "missing-audio auto-repair disabled: canonical-path unindexed audio files are present; manual re-import recommended first".to_string(),
-                );
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.missing-audio-auto-repair-disabled",
+                    "missing-audio auto-repair disabled: canonical-path unindexed audio files are present; manual re-import recommended first",
+                ));
             }
             for path in &missing_audio_paths {
-                warnings.push(format!("missing-audio reference: {path}"));
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.missing-audio",
+                    format!("missing-audio reference: {path}"),
+                ));
             }
         }
 
@@ -3136,7 +3148,12 @@ impl BackendService {
                     strict_raw_coverage_issue_from_parity_checks(&report.checks)
                 {
                     detected_issues.push(raw_issue.clone());
-                    warnings.push(raw_issue);
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-diagnostics",
+                        "usb.diagnostics.strict-raw-coverage",
+                        raw_issue,
+                    ));
                 }
                 let strict_count = report
                     .playlist_details
@@ -3161,10 +3178,15 @@ impl BackendService {
                         estimated_deletes: 0,
                     });
                 }
-                warnings.extend(report.warnings.into_iter().map(|w| w.message));
+                warnings.extend(report.warnings);
             }
             Err(err) => {
-                warnings.push(format!("parity preview unavailable: {err}"));
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.parity-preview-unavailable",
+                    format!("parity preview unavailable: {err}"),
+                ));
             }
         }
 
@@ -3179,7 +3201,9 @@ impl BackendService {
         };
 
         if req.apply {
-            warnings.extend(backup_usb_databases(&usb_root));
+            warnings.extend(backup_usb_databases(&usb_root).into_iter().map(|message| {
+                logging::log(Level::Info, "usb-diagnostics", "usb.diagnostics.backup", message)
+            }));
 
             if selected.contains("fix_empty_analysis_files") {
                 let (fixed, skipped, failed, write_count) = self.apply_fix_empty_analysis_files(
@@ -3553,10 +3577,7 @@ impl BackendService {
             failed_fixes,
             estimated_file_writes,
             estimated_file_deletes,
-            warnings: warnings
-                .into_iter()
-                .map(diagnostics_warning_entry)
-                .collect(),
+            warnings,
             duration_ms: start.elapsed().as_millis() as u64,
         })
     }
@@ -3566,7 +3587,7 @@ impl BackendService {
         &self,
         usb_root: &std::path::Path,
         target_playlist_names: Option<&HashSet<String>>,
-        warnings: &mut Vec<String>,
+        warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<StrictParityUpgradeApplyResult> {
         let mut result = StrictParityUpgradeApplyResult::default();
         let pdb_path = vendor_pdb_path(usb_root);
@@ -4171,9 +4192,14 @@ impl BackendService {
                 Some(mpl.playlist_id),
                 Some(mpl.sort_order),
             ) {
-                warnings.push(format!(
-                    "strict parity upgrade: PDB rewrite failed for '{}': {err}",
-                    mpl.name
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-repair",
+                    "usb.repair.strict-parity.pdb-rewrite-failed",
+                    format!(
+                        "strict parity upgrade: PDB rewrite failed for '{}': {err}",
+                        mpl.name
+                    ),
                 ));
                 result.failed_playlists += 1;
             }
@@ -4181,8 +4207,11 @@ impl BackendService {
         if result.merged_playlists > 0
             && let Err(err) = restore_pdb_playlist_sort_orders(usb_root, &desired_pdb_sort_by_id)
         {
-            warnings.push(format!(
-                "strict parity upgrade: PDB playlist order restore failed: {err}"
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-repair",
+                "usb.repair.strict-parity.pdb-order-restore-failed",
+                format!("strict parity upgrade: PDB playlist order restore failed: {err}"),
             ));
             result.failed_playlists += 1;
         }
@@ -4205,8 +4234,11 @@ impl BackendService {
                     );
                     if removed > 0 {
                         if let Err(err) = std::fs::write(&pdb_path, &pdb_bytes) {
-                            warnings.push(format!(
-                                "strict parity upgrade: failed to write deduplicated PDB: {err}"
+                            warnings.push(logging::log(
+                                Level::Error,
+                                "usb-repair",
+                                "usb.repair.strict-parity.dedup-write-failed",
+                                format!("strict parity upgrade: failed to write deduplicated PDB: {err}"),
                             ));
                         } else {
                             result.duplicate_entries_removed = removed;
@@ -4214,8 +4246,11 @@ impl BackendService {
                     }
                 }
                 Err(err) => {
-                    warnings.push(format!(
-                        "strict parity upgrade: unable to read PDB for duplicate cleanup: {err}"
+                    warnings.push(logging::log(
+                        Level::Error,
+                        "usb-repair",
+                        "usb.repair.strict-parity.dedup-read-failed",
+                        format!("strict parity upgrade: unable to read PDB for duplicate cleanup: {err}"),
                     ));
                 }
             }
@@ -4265,11 +4300,21 @@ impl BackendService {
                         .map(|(name, (id, sort, _))| (name, (id, sort)))
                         .collect()
                 } else {
-                    warnings.push("strict parity upgrade: unable to parse rewritten PDB for playlist identity sync; falling back to merged ids".to_string());
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-repair",
+                        "usb.repair.strict-parity.identity-sync-parse-failed",
+                        "strict parity upgrade: unable to parse rewritten PDB for playlist identity sync; falling back to merged ids",
+                    ));
                     HashMap::new()
                 }
             } else {
-                warnings.push("strict parity upgrade: rewritten PDB missing during playlist identity sync; falling back to merged ids".to_string());
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-repair",
+                    "usb.repair.strict-parity.identity-sync-pdb-missing",
+                    "strict parity upgrade: rewritten PDB missing during playlist identity sync; falling back to merged ids",
+                ));
                 HashMap::new()
             }
         };
@@ -4281,9 +4326,11 @@ impl BackendService {
                 continue;
             }
             let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
-                warnings.push(format!(
-                    "strict parity upgrade: unable to open eDB for playlist '{}'",
-                    mpl.name
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-repair",
+                    "usb.repair.strict-parity.edb-open-failed",
+                    format!("strict parity upgrade: unable to open eDB for playlist '{}'", mpl.name),
                 ));
                 result.failed_playlists += 1;
                 continue;
@@ -4306,9 +4353,11 @@ impl BackendService {
             match write_edb_playlist(usb_root, &playlist_data, &manifest, true) {
                 Ok(_) => result.edb_playlists_written += 1,
                 Err(err) => {
-                    warnings.push(format!(
-                        "strict parity upgrade: eDB write failed for '{}': {err}",
-                        mpl.name
+                    warnings.push(logging::log(
+                        Level::Error,
+                        "usb-repair",
+                        "usb.repair.strict-parity.edb-write-failed",
+                        format!("strict parity upgrade: eDB write failed for '{}': {err}", mpl.name),
                     ));
                     result.failed_playlists += 1;
                 }
@@ -4317,8 +4366,11 @@ impl BackendService {
         if result.merged_playlists > 0
             && let Err(err) = sync_edb_playlist_sort_orders_from_pdb(usb_root, warnings)
         {
-            warnings.push(format!(
-                "strict parity upgrade: eDB playlist order sync failed: {err}"
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-repair",
+                "usb.repair.strict-parity.edb-order-sync-failed",
+                format!("strict parity upgrade: eDB playlist order sync failed: {err}"),
             ));
             result.failed_playlists += 1;
         }
@@ -4330,7 +4382,7 @@ impl BackendService {
         &self,
         usb_root: &std::path::Path,
         empty_analysis_paths: &[String],
-        warnings: &mut Vec<String>,
+        warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize, usize, usize)> {
         if empty_analysis_paths.is_empty() {
             return Ok((0, 0, 0, 0));
@@ -4425,16 +4477,22 @@ impl BackendService {
                 .or_else(|| map_by_dir.get(&key_dir).cloned());
             let Some(target) = target else {
                 skipped += 1;
-                warnings.push(format!(
-                    "repair skipped (empty analysis): source audio mapping not found for {empty_path}"
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-repair",
+                    "usb.repair.empty-analysis.no-mapping",
+                    format!("repair skipped (empty analysis): source audio mapping not found for {empty_path}"),
                 ));
                 continue;
             };
             let source_audio = target.source_audio;
             if !std::path::Path::new(&source_audio).is_file() {
                 skipped += 1;
-                warnings.push(format!(
-                    "repair skipped (empty analysis): source audio missing for {empty_path} -> {source_audio}"
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-repair",
+                    "usb.repair.empty-analysis.source-missing",
+                    format!("repair skipped (empty analysis): source audio missing for {empty_path} -> {source_audio}"),
                 ));
                 continue;
             }
@@ -4446,8 +4504,11 @@ impl BackendService {
             .unwrap_or_else(|_| WaveformData::empty());
             if waveform.peaks.is_empty() {
                 failed += 1;
-                warnings.push(format!(
-                    "repair failed (empty analysis): unable to analyze source audio {source_audio}"
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-repair",
+                    "usb.repair.empty-analysis.analyze-failed",
+                    format!("repair failed (empty analysis): unable to analyze source audio {source_audio}"),
                 ));
                 continue;
             }
@@ -4465,8 +4526,11 @@ impl BackendService {
                 None,
             ) {
                 failed += 1;
-                warnings.push(format!(
-                    "repair failed (empty analysis): {empty_path}: {err}"
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-repair",
+                    "usb.repair.empty-analysis.write-failed",
+                    format!("repair failed (empty analysis): {empty_path}: {err}"),
                 ));
                 continue;
             }
@@ -4481,7 +4545,7 @@ impl BackendService {
         &self,
         usb_root: &std::path::Path,
         parsed: &crate::pdb_reader::ParsedPdb,
-        warnings: &mut Vec<String>,
+        warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize)> {
         let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
         let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
@@ -4517,7 +4581,7 @@ impl BackendService {
         usb_root: &std::path::Path,
         missing_track_ids: &HashSet<u32>,
         missing_paths: &[String],
-        warnings: &mut Vec<String>,
+        warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize, usize)> {
         if missing_track_ids.is_empty() || missing_paths.is_empty() {
             return Ok((0, 0, 0));
@@ -4579,25 +4643,34 @@ impl BackendService {
                         }
                     }
                 } else {
-                    warnings.push(
-                        "repair skipped (missing audio): eDB content path column not found"
-                            .to_string(),
-                    );
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-repair",
+                        "usb.repair.missing-audio.no-path-column",
+                        "repair skipped (missing audio): eDB content path column not found",
+                    ));
                 }
             }
             tx.commit()?;
         } else {
-            warnings
-                .push("repair skipped (missing audio): unable to open eDB read-write".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-repair",
+                "usb.repair.missing-audio.edb-open-failed",
+                "repair skipped (missing audio): unable to open eDB read-write",
+            ));
         }
 
         let removed_pdb_entries =
             match remove_track_ids_from_pdb_playlist_entries(usb_root, missing_track_ids) {
                 Ok(removed) => removed,
                 Err(err) => {
-                    warnings.push(format!(
-                    "repair skipped (missing audio): unable to update PDB playlist entries ({err})"
-                ));
+                    warnings.push(logging::log(
+                        Level::Error,
+                        "usb-repair",
+                        "usb.repair.missing-audio.pdb-update-failed",
+                        format!("repair skipped (missing audio): unable to update PDB playlist entries ({err})"),
+                    ));
                     0
                 }
             };

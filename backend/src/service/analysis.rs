@@ -25,7 +25,10 @@ use symphonia::core::probe::Hint;
 use uuid::Uuid;
 
 use crate::error::{BackendError, BackendResult};
-use crate::models::{AnalyzeNewTracksData, AnalyzeNewTracksRequest, SetAnalysisPausedData};
+use crate::logging::{self, Level};
+use crate::models::{
+    AnalyzeNewTracksData, AnalyzeNewTracksRequest, SetAnalysisPausedData, WarningEntry,
+};
 
 use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
@@ -513,7 +516,12 @@ impl BackendService {
                 job_id,
                 analyzed: 0,
                 failed: 0,
-                warnings: vec!["No eligible tracks found for analysis".to_string()],
+                warnings: vec![logging::log(
+                    Level::Info,
+                    "analysis",
+                    "analysis.no-eligible-tracks",
+                    "No eligible tracks found for analysis",
+                )],
             });
         }
 
@@ -525,16 +533,21 @@ impl BackendService {
 
         let mut analyzed = 0usize;
         let mut failed = 0usize;
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
         if let Some(total) = auto_eligible_total
             && total > tracks.len()
         {
-            warnings.push(format!(
+            warnings.push(logging::log(
+                Level::Info,
+                "analysis",
+                "analysis.auto-select-limit",
+                format!(
                     "Auto analysis limit reached: selected {} of {} eligible tracks (limit {}). Run analysis again or select tracks explicitly to continue.",
                     tracks.len(),
                     total,
                     ANALYSIS_AUTO_SELECT_LIMIT
-                ));
+                ),
+            ));
         }
         let total = tracks.len();
         let (bpm_min, bpm_max) = resolve_analysis_bpm_range(req.bpm_min, req.bpm_max);
@@ -576,7 +589,6 @@ impl BackendService {
                         .unwrap_or_else(|| "none".to_string()),
                     worker_count
                 );
-                eprintln!("[analysis] {line}");
                 crate::logging::emit(crate::logging::Level::Info, "analysis", &line);
             }
 
@@ -692,8 +704,11 @@ impl BackendService {
                         // All workers exited early because the batch was
                         // cancelled -- not a genuine error.
                         if self.analysis_cancelled.load(Ordering::SeqCst) {
-                            warnings.push(format!(
-                                "Analysis cancelled: {completed_count} of {total} tracks analyzed"
+                            warnings.push(logging::log(
+                                Level::Info,
+                                "analysis",
+                                "analysis.cancelled",
+                                format!("Analysis cancelled: {completed_count} of {total} tracks analyzed"),
                             ));
                             break;
                         }
@@ -885,7 +900,7 @@ struct PersistDoneCounters<'a> {
     completed_count: &'a mut usize,
     analyzed: &'a mut usize,
     failed: &'a mut usize,
-    warnings: &'a mut Vec<String>,
+    warnings: &'a mut Vec<WarningEntry>,
 }
 
 fn persist_done_result(
@@ -927,7 +942,12 @@ fn persist_done_result(
         Err(err) => {
             *failed += 1;
             let err_msg = err.to_string();
-            warnings.push(format!("{}: {}", track.file_path, err_msg));
+            warnings.push(logging::log(
+                Level::Error,
+                "analysis",
+                "analysis.track-failed",
+                format!("{}: {}", track.file_path, err_msg),
+            ));
             on_progress(&build_done_progress_error(
                 *completed_count,
                 total,
@@ -1646,7 +1666,6 @@ fn resolve_essentia_worker_config() -> BackendResult<EssentiaWorkerConfig> {
                 .unwrap_or_else(|| "none".to_string()),
             pool_size
         );
-        eprintln!("[analysis] {line}");
         crate::logging::emit(crate::logging::Level::Info, "analysis", &line);
     }
     Ok(EssentiaWorkerConfig {

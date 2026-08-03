@@ -8,6 +8,8 @@ use walkdir::WalkDir;
 
 use crate::edb::open_edb_from_usb_root;
 use crate::error::{BackendError, BackendResult};
+use crate::logging::{self, Level};
+use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
 
 use super::WAVEFORM_PREVIEW_BINS;
@@ -385,7 +387,7 @@ pub(crate) fn downsample_waveform_payload(payload: &[u8], bins: usize) -> Vec<u8
     peaks
 }
 
-pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<String> {
+pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<WarningEntry> {
     let anlz_root = usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_ANALYSIS_DIR);
     if !anlz_root.exists() {
         return Vec::new();
@@ -397,9 +399,11 @@ pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<String> {
             Ok(e) => {
                 // Surface malformed/anomalous entries under USBANLZ as diagnostics warnings.
                 if is_malformed_anlz_entry_name(e.path()) {
-                    warnings.push(format!(
-                        "analysis entry malformed: {}",
-                        sanitize_warning_path(e.path())
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-analysis",
+                        "usb.analysis.entry-malformed",
+                        format!("analysis entry malformed: {}", sanitize_warning_path(e.path())),
                     ));
                 }
 
@@ -421,33 +425,55 @@ pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<String> {
                     if let Ok(md) = e.metadata()
                         && md.len() == 0
                     {
-                        warnings.push(format!(
-                            "analysis malformed entry is empty: {}",
-                            sanitize_warning_path(e.path())
+                        warnings.push(logging::log(
+                            Level::Warn,
+                            "usb-analysis",
+                            "usb.analysis.malformed-entry-empty",
+                            format!(
+                                "analysis malformed entry is empty: {}",
+                                sanitize_warning_path(e.path())
+                            ),
                         ));
                     }
-                    warnings.push(format!(
-                        "analysis entry malformed: {}",
-                        sanitize_warning_path(e.path())
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-analysis",
+                        "usb.analysis.entry-malformed",
+                        format!("analysis entry malformed: {}", sanitize_warning_path(e.path())),
                     ));
                     continue;
                 }
                 match e.metadata() {
                     Ok(md) => {
                         if md.len() == 0 {
-                            warnings.push(format!(
-                                "analysis file appears empty: {}",
-                                sanitize_warning_path(e.path())
+                            warnings.push(logging::log(
+                                Level::Warn,
+                                "usb-analysis",
+                                "usb.analysis.file-empty",
+                                format!(
+                                    "analysis file appears empty: {}",
+                                    sanitize_warning_path(e.path())
+                                ),
                             ));
                         }
                     }
-                    Err(err) => warnings.push(format!(
-                        "failed to read analysis file metadata {}: {err}",
-                        sanitize_warning_path(e.path())
+                    Err(err) => warnings.push(logging::log(
+                        Level::Error,
+                        "usb-analysis",
+                        "usb.analysis.metadata-read-failed",
+                        format!(
+                            "failed to read analysis file metadata {}: {err}",
+                            sanitize_warning_path(e.path())
+                        ),
                     )),
                 }
             }
-            Err(err) => warnings.push(format!("failed to walk USBANLZ analysis directory: {err}")),
+            Err(err) => warnings.push(logging::log(
+                Level::Error,
+                "usb-analysis",
+                "usb.analysis.walk-failed",
+                format!("failed to walk USBANLZ analysis directory: {err}"),
+            )),
         }
     }
     warnings
@@ -567,7 +593,7 @@ pub(crate) fn analysis_bundle_exists(usb_root: &Path, anlz_path: &str) -> bool {
 
 pub(crate) fn load_existing_analysis_paths_by_content_path(
     usb_root: &Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> HashMap<String, String> {
     let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
         return HashMap::new();
@@ -1357,7 +1383,7 @@ mod diag_tests {
         assert!(
             warnings
                 .iter()
-                .all(|w| !w.contains("USBMNG.DAT") && !w.contains("analysis entry malformed"))
+                .all(|w| !w.message.contains("USBMNG.DAT") && !w.message.contains("analysis entry malformed"))
         );
     }
 
@@ -1378,7 +1404,7 @@ mod diag_tests {
         assert!(
             warnings
                 .iter()
-                .all(|w| !w.contains("ANLZ0001.2EX") && !w.contains("analysis entry malformed")),
+                .all(|w| !w.message.contains("ANLZ0001.2EX") && !w.message.contains("analysis entry malformed")),
             "numbered ANLZ bundle members should not be treated as malformed"
         );
     }
@@ -2206,7 +2232,7 @@ mod diag_tests {
         .unwrap();
         drop(conn);
 
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
         let map = load_existing_analysis_paths_by_content_path(&tmp, &mut warnings);
         let anlz = map
             .get(&canonicalize_playlist_name(

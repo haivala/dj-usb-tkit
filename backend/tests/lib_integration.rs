@@ -2916,7 +2916,7 @@ fn analyze_new_tracks_cancel_stops_early_without_hanging() {
     );
     let expected_warning = format!("Analysis cancelled: {} of 6 tracks analyzed", data.analyzed);
     assert!(
-        data.warnings.iter().any(|w| w == &expected_warning),
+        data.warnings.iter().any(|w| w.message == expected_warning),
         "expected warning {expected_warning:?}, got: {:?}",
         data.warnings
     );

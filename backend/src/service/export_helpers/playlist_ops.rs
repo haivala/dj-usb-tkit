@@ -10,6 +10,8 @@ use crate::edb::{
     open_edb_from_usb_root, open_edb_rw, preferred_export_playlist_row_id, table_exists,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::logging::{self, Level};
+use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
 use crate::service::usb_utils::canonicalize_playlist_name;
 use crate::service::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
@@ -40,21 +42,35 @@ pub fn remove_playlist_from_edb(
     usb_root: &Path,
     name_candidates: &[String],
     exclusive_track_paths: &[String],
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
-    let mut unlock_warnings = Vec::<String>::new();
+    let mut unlock_warnings = Vec::<WarningEntry>::new();
     let Some(mut conn) = open_edb_rw(usb_root, &mut unlock_warnings) else {
         if !unlock_warnings.is_empty() {
-            warnings.push(format!(
-                "eDB playlist removal skipped: {}",
-                unlock_warnings.join(" | ")
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.remove.edb-open-failed",
+                format!(
+                    "eDB playlist removal skipped: {}",
+                    unlock_warnings
+                        .iter()
+                        .map(|w| w.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                ),
             ));
         }
         return Ok(0);
     };
     let tx = conn.transaction()?;
     if !table_exists(&tx, "playlist") || !table_exists(&tx, "playlist_content") {
-        warnings.push("eDB playlist removal skipped: missing playlist tables".to_string());
+        warnings.push(logging::log(
+            Level::Warn,
+            "usb-import",
+            "usb.remove.missing-tables",
+            "eDB playlist removal skipped: missing playlist tables",
+        ));
         return Ok(0);
     }
 
@@ -96,7 +112,12 @@ pub fn remove_playlist_from_edb(
         for path in exclusive_track_paths {
             let deleted = tx.execute("DELETE FROM content WHERE path = ?1", params![path])?;
             if deleted > 0 {
-                warnings.push(format!("removed content row: {path}"));
+                warnings.push(logging::log(
+                    Level::Info,
+                    "usb-import",
+                    "usb.remove.db-cleaned",
+                    format!("removed content row: {path}"),
+                ));
             }
         }
         // Also clean up image rows that are no longer referenced
@@ -116,7 +137,7 @@ pub fn remove_playlist_and_tracks_from_pdb(
     usb_root: &Path,
     playlist_id_hint: Option<&str>,
     name_candidates: &[String],
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<PlaylistRemovalPdbResult> {
     let empty_result = PlaylistRemovalPdbResult {
         removed_playlist_count: 0,
@@ -128,7 +149,12 @@ pub fn remove_playlist_and_tracks_from_pdb(
         .join(USB_VENDOR_DB_DIR)
         .join("export.pdb");
     if !pdb_path.is_file() {
-        warnings.push("PDB playlist removal skipped: PDB missing".to_string());
+        warnings.push(logging::log(
+            Level::Warn,
+            "usb-import",
+            "usb.remove.pdb-missing",
+            "PDB playlist removal skipped: PDB missing",
+        ));
         return Ok(empty_result);
     }
     let parsed = parse_pdb(&pdb_path)?;
@@ -298,11 +324,15 @@ pub fn verify_edb_content(
     playlist: &ExportPlaylistData,
     manifest: &ExportManifest,
 ) -> BackendResult<()> {
-    let mut warnings = Vec::<String>::new();
+    let mut warnings = Vec::<WarningEntry>::new();
     let Some(conn) = open_edb_from_usb_root(usb_root, &mut warnings) else {
         return Err(BackendError::Internal(format!(
             "export verification failed: unable to read eDB ({})",
-            warnings.join(" | ")
+            warnings
+                .iter()
+                .map(|w| w.message.as_str())
+                .collect::<Vec<_>>()
+                .join(" | ")
         )));
     };
 

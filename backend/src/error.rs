@@ -24,7 +24,20 @@ pub enum ErrorCode {
     ValidationError,
     NotFound,
     IoError,
+    DbError,
     InternalError,
+}
+
+impl ErrorCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ErrorCode::ValidationError => "error.validation",
+            ErrorCode::NotFound => "error.not_found",
+            ErrorCode::IoError => "error.io",
+            ErrorCode::DbError => "error.db",
+            ErrorCode::InternalError => "error.internal",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,7 +78,7 @@ impl From<BackendError> for ErrorPayload {
                 #[cfg(not(debug_assertions))]
                 let message = "an internal database error occurred".to_string();
                 Self {
-                    code: ErrorCode::InternalError,
+                    code: ErrorCode::DbError,
                     message,
                     details: None,
                 }

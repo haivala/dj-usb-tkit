@@ -8,8 +8,9 @@ use rusqlite::{OptionalExtension, params, types::Value};
 use serde::Serialize;
 
 use crate::error::{BackendError, BackendResult};
+use crate::logging::{self, Level};
 use crate::metadata::sanitize_metadata;
-use crate::models::UsbTrack;
+use crate::models::{UsbTrack, WarningEntry};
 use crate::service::usb_utils::resolve_usb_side_path;
 use crate::service::usb_vendor_compat::{
     DEFAULT_MASTER_DB_KEY, DEFAULT_USB_EDB_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
@@ -159,7 +160,7 @@ fn effective_sqlcipher_keys() -> Vec<String> {
     ]
 }
 
-pub fn open_edb(path: &Path, warnings: &mut Vec<String>) -> Option<rusqlite::Connection> {
+pub fn open_edb(path: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlite::Connection> {
     if !path.exists() {
         return None;
     }
@@ -169,7 +170,12 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<String>) -> Option<rusqlite::Con
     if let Ok(plain) = open_ro()
         && has_schema(&plain)
     {
-        warnings.push("eDB opened without SQLCipher key".to_string());
+        warnings.push(logging::log(
+            Level::Info,
+            "edb",
+            "edb.open.no-key",
+            "eDB opened without SQLCipher key",
+        ));
         return Some(plain);
     }
 
@@ -177,7 +183,12 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<String>) -> Option<rusqlite::Con
     let mut attempts = 0usize;
     for raw_key in &merged_keys {
         if !is_safe_sqlcipher_key(raw_key) {
-            warnings.push("skipping SQLCipher key with unsafe characters".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "edb",
+                "edb.open.unsafe-key",
+                "skipping SQLCipher key with unsafe characters",
+            ));
             continue;
         }
         attempts += 1;
@@ -192,25 +203,33 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<String>) -> Option<rusqlite::Con
             } else {
                 "default master"
             };
-            warnings.push(format!("eDB unlocked via SQLCipher with {key_label} key"));
+            warnings.push(logging::log(
+                Level::Info,
+                "edb",
+                "edb.open.unlocked",
+                format!("eDB unlocked via SQLCipher with {key_label} key"),
+            ));
             return Some(candidate);
         }
     }
-    warnings.push(format!(
-        "eDB unreadable after trying {attempts} SQLCipher key(s)"
+    warnings.push(logging::log(
+        Level::Warn,
+        "edb",
+        "edb.open.failed",
+        format!("eDB unreadable after trying {attempts} SQLCipher key(s)"),
     ));
     None
 }
 
 pub fn open_edb_from_usb_root(
     usb_root: &Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> Option<rusqlite::Connection> {
     let path = edb_path_from_usb_root(usb_root);
     open_edb(&path, warnings)
 }
 
-pub fn open_edb_rw(usb_root: &Path, warnings: &mut Vec<String>) -> Option<rusqlite::Connection> {
+pub fn open_edb_rw(usb_root: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlite::Connection> {
     let db_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -239,14 +258,24 @@ pub fn open_edb_rw(usb_root: &Path, warnings: &mut Vec<String>) -> Option<rusqli
     if let Ok(plain) = open_rw()
         && has_schema(&plain)
     {
-        warnings.push("eDB opened read-write without SQLCipher key".to_string());
+        warnings.push(logging::log(
+            Level::Info,
+            "edb",
+            "edb.open-rw.no-key",
+            "eDB opened read-write without SQLCipher key",
+        ));
         return Some(plain);
     }
 
     let merged_keys = effective_sqlcipher_keys();
     for raw_key in &merged_keys {
         if !is_safe_sqlcipher_key(raw_key) {
-            warnings.push("skipping SQLCipher key with unsafe characters".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "edb",
+                "edb.open-rw.unsafe-key",
+                "skipping SQLCipher key with unsafe characters",
+            ));
             continue;
         }
         let batch = format!("PRAGMA key='{raw_key}';");
@@ -255,7 +284,12 @@ pub fn open_edb_rw(usb_root: &Path, warnings: &mut Vec<String>) -> Option<rusqli
             continue;
         }
         if has_schema(&candidate) {
-            warnings.push("eDB opened read-write with SQLCipher key".to_string());
+            warnings.push(logging::log(
+                Level::Info,
+                "edb",
+                "edb.open-rw.unlocked",
+                "eDB opened read-write with SQLCipher key",
+            ));
             return Some(candidate);
         }
     }
@@ -264,7 +298,7 @@ pub fn open_edb_rw(usb_root: &Path, warnings: &mut Vec<String>) -> Option<rusqli
 
 pub fn try_read_track_index_from_edb(
     usb_root: &Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> Option<HashMap<u32, UsbTrack>> {
     let conn = open_edb_from_usb_root(usb_root, warnings)?;
     let has_length_col = conn
@@ -314,7 +348,12 @@ pub fn try_read_track_index_from_edb(
     let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
         Err(err) => {
-            warnings.push(format!("eDB content query failed: {err}"));
+            warnings.push(logging::log(
+                Level::Error,
+                "edb",
+                "edb.content-query-failed",
+                format!("eDB content query failed: {err}"),
+            ));
             return None;
         }
     };
@@ -367,7 +406,12 @@ pub fn try_read_track_index_from_edb(
     }) {
         Ok(r) => r,
         Err(err) => {
-            warnings.push(format!("eDB content row mapping failed: {err}"));
+            warnings.push(logging::log(
+                Level::Error,
+                "edb",
+                "edb.content-row-mapping-failed",
+                format!("eDB content row mapping failed: {err}"),
+            ));
             return None;
         }
     };
@@ -384,9 +428,11 @@ pub fn try_read_track_index_from_edb(
     }
 
     if !index.is_empty() {
-        warnings.push(format!(
-            "loaded {} track metadata rows from eDB content index",
-            index.len()
+        warnings.push(logging::log(
+            Level::Info,
+            "edb",
+            "edb.loaded-track-index",
+            format!("loaded {} track metadata rows from eDB content index", index.len()),
         ));
         Some(index)
     } else {
@@ -400,7 +446,7 @@ pub fn try_read_track_index_from_edb(
 
 pub fn try_read_content_date_created_index_from_edb(
     usb_root: &Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> Option<HashMap<u32, String>> {
     let conn = open_edb_from_usb_root(usb_root, warnings)?;
     let has_date_created_col = conn
@@ -413,7 +459,12 @@ pub fn try_read_content_date_created_index_from_edb(
         .unwrap_or(0)
         > 0;
     if !has_date_created_col {
-        warnings.push("eDB content.dateCreated column not found".to_string());
+        warnings.push(logging::log(
+            Level::Info,
+            "edb",
+            "edb.date-created-column-missing",
+            "eDB content.dateCreated column not found",
+        ));
         return None;
     }
 
@@ -426,7 +477,12 @@ pub fn try_read_content_date_created_index_from_edb(
     ) {
         Ok(s) => s,
         Err(err) => {
-            warnings.push(format!("eDB dateCreated query failed: {err}"));
+            warnings.push(logging::log(
+                Level::Error,
+                "edb",
+                "edb.date-created-query-failed",
+                format!("eDB dateCreated query failed: {err}"),
+            ));
             return None;
         }
     };
@@ -436,7 +492,12 @@ pub fn try_read_content_date_created_index_from_edb(
     }) {
         Ok(r) => r,
         Err(err) => {
-            warnings.push(format!("eDB dateCreated row mapping failed: {err}"));
+            warnings.push(logging::log(
+                Level::Error,
+                "edb",
+                "edb.date-created-row-mapping-failed",
+                format!("eDB dateCreated row mapping failed: {err}"),
+            ));
             return None;
         }
     };
@@ -455,9 +516,11 @@ pub fn try_read_content_date_created_index_from_edb(
     }
 
     if !out.is_empty() {
-        warnings.push(format!(
-            "loaded {} dateCreated value(s) from eDB content index",
-            out.len()
+        warnings.push(logging::log(
+            Level::Info,
+            "edb",
+            "edb.loaded-date-created-index",
+            format!("loaded {} dateCreated value(s) from eDB content index", out.len()),
         ));
         Some(out)
     } else {
@@ -467,21 +530,21 @@ pub fn try_read_content_date_created_index_from_edb(
 
 pub fn try_read_playlists_with_metadata_from_edb(
     usb_root: &Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> Option<HashMap<String, ExportDbPlaylist>> {
     try_read_playlists_with_metadata_from_edb_internal(usb_root, warnings, true)
 }
 
 pub fn try_read_playlists_with_metadata_from_edb_db_only(
     usb_root: &Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> Option<HashMap<String, ExportDbPlaylist>> {
     try_read_playlists_with_metadata_from_edb_internal(usb_root, warnings, false)
 }
 
 fn try_read_playlists_with_metadata_from_edb_internal(
     usb_root: &Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
     resolve_paths: bool,
 ) -> Option<HashMap<String, ExportDbPlaylist>> {
     let conn = open_edb_from_usb_root(usb_root, warnings)?;
@@ -534,7 +597,12 @@ fn try_read_playlists_with_metadata_from_edb_internal(
     ) {
         Ok(s) => s,
         Err(err) => {
-            warnings.push(format!("eDB schema query failed: {err}"));
+            warnings.push(logging::log(
+                Level::Error,
+                "edb",
+                "edb.playlist-schema-query-failed",
+                format!("eDB schema query failed: {err}"),
+            ));
             return None;
         }
     };
@@ -548,7 +616,12 @@ fn try_read_playlists_with_metadata_from_edb_internal(
     }) {
         Ok(r) => r,
         Err(err) => {
-            warnings.push(format!("eDB playlist query failed: {err}"));
+            warnings.push(logging::log(
+                Level::Error,
+                "edb",
+                "edb.playlist-query-failed",
+                format!("eDB playlist query failed: {err}"),
+            ));
             return None;
         }
     };
@@ -676,7 +749,12 @@ fn try_read_playlists_with_metadata_from_edb_internal(
     }
 
     if !out.is_empty() {
-        warnings.push(format!("loaded {} playlist(s) from eDB", out.len()));
+        warnings.push(logging::log(
+            Level::Info,
+            "edb",
+            "edb.loaded-playlists",
+            format!("loaded {} playlist(s) from eDB", out.len()),
+        ));
         Some(out)
     } else {
         None
@@ -1678,8 +1756,8 @@ mod tests {
 
         assert!(conn.is_some(), "plain sqlite db should open");
         assert_eq!(
-            warnings,
-            vec!["eDB opened read-write without SQLCipher key".to_string()]
+            warnings.iter().map(|w| w.message.as_str()).collect::<Vec<_>>(),
+            vec!["eDB opened read-write without SQLCipher key"]
         );
     }
 
@@ -1695,7 +1773,7 @@ mod tests {
 
         assert!(conn.is_none(), "schema-less db should not open");
         assert!(
-            warnings.iter().all(|w| !w.contains("unsafe characters")),
+            warnings.iter().all(|w| !w.message.contains("unsafe characters")),
             "unexpected unsafe-key warning: {warnings:?}"
         );
         assert!(warnings.is_empty(), "expected no warnings: {warnings:?}");
@@ -1713,7 +1791,7 @@ mod tests {
         assert!(
             warnings
                 .iter()
-                .any(|w| w.starts_with("eDB unreadable after trying")),
+                .any(|w| w.message.starts_with("eDB unreadable after trying")),
             "expected unreadable warning: {warnings:?}"
         );
     }

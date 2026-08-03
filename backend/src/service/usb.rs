@@ -11,6 +11,7 @@ use crate::edb::{
     try_read_playlists_with_metadata_from_edb, try_read_track_index_from_edb,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::logging::{self, Level};
 use crate::models::{
     FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, InspectUsbTrackData, InspectUsbTrackRequest, RemoveUsbPlaylistData,
@@ -110,7 +111,7 @@ fn edb_track_index_from_playlist_tracks(
 fn merge_full_edb_track_index(
     usb_root: &std::path::Path,
     track_by_id: &mut HashMap<u32, UsbTrack>,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) {
     if let Some(all_edb_tracks) = try_read_track_index_from_edb(usb_root, warnings) {
         track_by_id.extend(all_edb_tracks);
@@ -150,51 +151,6 @@ fn select_history_rows(
     } else {
         (t17_playlists, t18_entries)
     }
-}
-
-fn usb_warning(level: &str, code: &str, message: String) -> WarningEntry {
-    WarningEntry {
-        level: level.to_string(),
-        code: code.to_string(),
-        message,
-        source: "usb-import".to_string(),
-    }
-}
-
-fn playlist_log_entry_info(message: String) -> WarningEntry {
-    usb_warning("info", "usb.playlists.info", message)
-}
-
-fn playlist_log_entry_warn(code: &str, message: String) -> WarningEntry {
-    usb_warning("warn", code, message)
-}
-
-fn remove_playlist_warning_entry(message: String) -> WarningEntry {
-    let (level, code) = if message.starts_with("deleted:") {
-        ("info", "usb.remove.file-deleted")
-    } else if message.starts_with("removed content row") {
-        ("info", "usb.remove.db-cleaned")
-    } else if message.contains("not found") || message.contains("missing") {
-        ("warn", "usb.remove.file-missing")
-    } else if message.starts_with("slow-media suspected:") {
-        ("warn", "usb.remove.slow-media")
-    } else {
-        ("info", "usb.remove.info")
-    };
-    usb_warning(level, code, message)
-}
-
-fn history_warning_entry(message: String) -> WarningEntry {
-    let (level, code) = if message.starts_with("slow-media suspected:") {
-        ("warn", "usb.histories.slow-media")
-    } else {
-        ("info", "usb.histories.info")
-    };
-    usb_warning(level, code, message)
-}
-
-fn reorder_playlist_warning_entry(message: String) -> WarningEntry {
-    usb_warning("warn", "usb.reorder.warn", message)
 }
 
 fn normalize_date_created(value: &str) -> Option<NaiveDate> {
@@ -279,15 +235,23 @@ fn cleanup_empty_dirs_recursive(dir: &std::path::Path) {
 }
 
 fn push_usb_stage_timing(
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
     stage: &str,
     started: &mut std::time::Instant,
 ) {
     let elapsed = started.elapsed().as_millis();
-    warnings.push(format!("stage timing: {stage}: {elapsed}ms"));
+    warnings.push(logging::log(
+        Level::Info,
+        "usb-import",
+        "usb.import.stage-timing",
+        format!("stage timing: {stage}: {elapsed}ms"),
+    ));
     if elapsed >= SLOW_USB_STAGE_MS {
-        warnings.push(format!(
-            "slow-media suspected: stage '{stage}' took {elapsed}ms"
+        warnings.push(logging::log(
+            Level::Warn,
+            "usb-import",
+            "usb.import.slow-media",
+            format!("slow-media suspected: stage '{stage}' took {elapsed}ms"),
         ));
     }
     *started = std::time::Instant::now();
@@ -298,10 +262,15 @@ impl BackendService {
         &self,
         req: ValidateUsbRootRequest,
     ) -> BackendResult<ValidateUsbRootData> {
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
         let trimmed = req.path.trim();
         if trimmed.is_empty() {
-            warnings.push("USB path is empty".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.path-empty",
+                "USB path is empty",
+            ));
             return Ok(ValidateUsbRootData {
                 valid: false,
                 has_write_access: false,
@@ -323,7 +292,12 @@ impl BackendService {
             raw
         };
         if !candidate.exists() {
-            warnings.push(format!("Path does not exist: {}", candidate.display()));
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.path-not-found",
+                format!("Path does not exist: {}", candidate.display()),
+            ));
             return Ok(ValidateUsbRootData {
                 valid: false,
                 has_write_access: false,
@@ -343,19 +317,38 @@ impl BackendService {
         let has_edb = vendor_edb_path(&normalized).is_file();
 
         if !has_vendor_root {
-            warnings.push("Missing vendor root directory".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.missing-vendor-root",
+                "Missing vendor root directory",
+            ));
         }
         if !has_contents {
-            warnings.push("Missing contents directory".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.missing-contents",
+                "Missing contents directory",
+            ));
         }
         if !has_pdb {
-            warnings.push("Missing PDB in vendor db directory".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.missing-pdb",
+                "Missing PDB in vendor db directory",
+            ));
         }
 
         let has_write_access = has_write_access(&normalized);
         if !has_write_access {
-            warnings
-                .push("USB appears read-only: imports may work but export will fail".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.read-only",
+                "USB appears read-only: imports may work but export will fail",
+            ));
         }
 
         Ok(ValidateUsbRootData {
@@ -385,7 +378,7 @@ impl BackendService {
     where
         F: FnMut(usize, usize, &str),
     {
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
         let mut stage_started = std::time::Instant::now();
         on_progress(2, 100, "USB: Resolving root");
         on_progress(10, 100, "USB: Parsing PDB");
@@ -394,12 +387,16 @@ impl BackendService {
         let pdb_path = vendor_pdb_path(&usb_root);
         let parsed = if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
-            warnings.extend(parsed.warnings.clone());
+            warnings.extend(parsed.warnings.iter().map(|message| {
+                logging::log(Level::Warn, "usb-import", "usb.import.pdb-parse", message.clone())
+            }));
             Some(parsed)
         } else {
-            warnings.push(format!(
-                "PDB not found under {}; continuing with eDB-only mode",
-                usb_root.display()
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.pdb-not-found",
+                format!("PDB not found under {}; continuing with eDB-only mode", usb_root.display()),
             ));
             None
         };
@@ -552,8 +549,11 @@ impl BackendService {
         let (deduped_items, collapsed) = dedupe_usb_playlists_by_name(items);
         items = deduped_items;
         if collapsed > 0 {
-            warnings.push(format!(
-                "collapsed {collapsed} duplicate playlist name(s) from USB sources"
+            warnings.push(logging::log(
+                Level::Info,
+                "usb-import",
+                "usb.playlists.collapsed-duplicates",
+                format!("collapsed {collapsed} duplicate playlist name(s) from USB sources"),
             ));
         }
 
@@ -570,49 +570,61 @@ impl BackendService {
             &mut stage_started,
         );
 
-        warnings.insert(0, format!("USB root in use: {}", usb_root.display()));
+        warnings.insert(
+            0,
+            logging::log(
+                Level::Info,
+                "usb-import",
+                "usb.import.root-in-use",
+                format!("USB root in use: {}", usb_root.display()),
+            ),
+        );
+
+        if !source_counts.is_empty() {
+            let pdb_count = source_counts.get("pdb").copied().unwrap_or(0);
+            let edb_count = source_counts.get("eDB").copied().unwrap_or(0);
+            if edb_count > 0 {
+                warnings.push(logging::log(
+                    Level::Info,
+                    "usb-import",
+                    "usb.playlists.source-edb",
+                    format!("used eDB as playlist source for {edb_count} playlist(s)"),
+                ));
+            }
+            if pdb_count > 0 {
+                warnings.push(logging::log(
+                    Level::Info,
+                    "usb-import",
+                    "usb.playlists.source-pdb",
+                    format!("used PDB as playlist source for {pdb_count} playlist(s)"),
+                ));
+            }
+        }
+        if !empty_source_playlists.is_empty() {
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.playlists.empty-source",
+                format!(
+                    "{} playlist(s) had zero static track entries in export data: {}",
+                    empty_source_playlists.len(),
+                    empty_source_playlists.join(", ")
+                ),
+            ));
+        }
+        if materialized_tracks > 0 {
+            warnings.push(logging::log(
+                Level::Info,
+                "usb-import",
+                "usb.playlists.materialized",
+                format!("materialized {materialized_tracks} USB track row(s) into local library"),
+            ));
+        }
 
         Ok(FetchUsbPlaylistsData {
             items,
             stats,
-            warnings: {
-                if !source_counts.is_empty() {
-                    let pdb_count = source_counts.get("pdb").copied().unwrap_or(0);
-                    let edb_count = source_counts.get("eDB").copied().unwrap_or(0);
-                    if edb_count > 0 {
-                        warnings.push(format!(
-                            "used eDB as playlist source for {edb_count} playlist(s)"
-                        ));
-                    }
-                    if pdb_count > 0 {
-                        warnings.push(format!(
-                            "used PDB as playlist source for {pdb_count} playlist(s)"
-                        ));
-                    }
-                }
-                if !empty_source_playlists.is_empty() {
-                    warnings.push(format!(
-                        "{} playlist(s) had zero static track entries in export data: {}",
-                        empty_source_playlists.len(),
-                        empty_source_playlists.join(", ")
-                    ));
-                }
-                if materialized_tracks > 0 {
-                    warnings.push(format!(
-                        "materialized {materialized_tracks} USB track row(s) into local library"
-                    ));
-                }
-                warnings
-                    .into_iter()
-                    .map(|message| {
-                        if message.starts_with("slow-media suspected:") {
-                            playlist_log_entry_warn("usb.playlists.slow-media", message)
-                        } else {
-                            playlist_log_entry_info(message)
-                        }
-                    })
-                    .collect()
-            },
+            warnings,
         })
     }
 
@@ -638,7 +650,7 @@ impl BackendService {
     where
         F: FnMut(usize, usize, &str),
     {
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
         on_progress(0, 100, "USB: Resolving USB root");
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
 
@@ -677,17 +689,19 @@ impl BackendService {
             &mut warnings,
         )?;
         if edb_updated == 0 {
-            warnings.push("reorder: eDB playlist order sync updated 0 rows".to_string());
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.reorder.zero-rows-synced",
+                "reorder: eDB playlist order sync updated 0 rows",
+            ));
         }
 
         on_progress(100, 100, "USB: Playlist order saved");
 
         Ok(ReorderUsbPlaylistsData {
             reordered: patched,
-            warnings: warnings
-                .into_iter()
-                .map(reorder_playlist_warning_entry)
-                .collect(),
+            warnings,
         })
     }
 
@@ -706,7 +720,7 @@ impl BackendService {
     where
         F: FnMut(usize, usize, &str),
     {
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
         let mut stage_started = std::time::Instant::now();
         let name = req.playlist_name.trim().to_string();
         if name.is_empty() {
@@ -756,8 +770,11 @@ impl BackendService {
         let tracks_kept_shared = pdb_result.shared_track_count;
 
         if tracks_kept_shared > 0 {
-            warnings.push(format!(
-                "{tracks_kept_shared} shared tracks preserved (used by other playlists)"
+            warnings.push(logging::log(
+                Level::Info,
+                "usb-import",
+                "usb.remove.shared-tracks-preserved",
+                format!("{tracks_kept_shared} shared tracks preserved (used by other playlists)"),
             ));
         }
 
@@ -816,13 +833,20 @@ impl BackendService {
                 prune_stale_export_owned_files(&usb_root, &stale_paths, &mut warnings)?;
             files_deleted = prune_result.removed;
             if prune_result.missing > 0 {
-                warnings.push(format!(
-                    "{} files already missing from USB",
-                    prune_result.missing
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-import",
+                    "usb.remove.file-missing",
+                    format!("{} files already missing from USB", prune_result.missing),
                 ));
             }
             for path in &stale_paths {
-                warnings.push(format!("deleted: {path}"));
+                warnings.push(logging::log(
+                    Level::Info,
+                    "usb-import",
+                    "usb.remove.file-deleted",
+                    format!("deleted: {path}"),
+                ));
             }
         }
         push_usb_stage_timing(
@@ -880,10 +904,7 @@ impl BackendService {
             tracks_removed,
             files_deleted,
             tracks_kept_shared,
-            warnings: warnings
-                .into_iter()
-                .map(remove_playlist_warning_entry)
-                .collect(),
+            warnings,
         })
     }
 
@@ -895,7 +916,7 @@ impl BackendService {
     where
         F: FnMut(usize, usize, &str),
     {
-        let mut stage_warnings = Vec::<String>::new();
+        let mut stage_warnings = Vec::<WarningEntry>::new();
         let mut stage_started = std::time::Instant::now();
         on_progress(2, 100, "USB: Resolving root");
         on_progress(10, 100, "USB: Parsing PDB");
@@ -916,22 +937,29 @@ impl BackendService {
                     edb_history_content_rows: 0,
                 },
                 warnings: vec![
-                    format!("USB root in use: {}", usb_root.display()),
-                    format!(
-                        "PDB not found under {}; history import requires PDB",
-                        usb_root.display()
+                    logging::log(
+                        Level::Info,
+                        "usb-import",
+                        "usb.import.root-in-use",
+                        format!("USB root in use: {}", usb_root.display()),
                     ),
-                ]
-                .into_iter()
-                .map(history_warning_entry)
-                .collect(),
+                    logging::log(
+                        Level::Warn,
+                        "usb-import",
+                        "usb.histories.pdb-not-found",
+                        format!(
+                            "PDB not found under {}; history import requires PDB",
+                            usb_root.display()
+                        ),
+                    ),
+                ],
             });
         }
 
         let parsed = parse_pdb(&pdb_path)?;
         push_usb_stage_timing(&mut stage_warnings, "parse PDB", &mut stage_started);
         on_progress(30, 100, "USB: Reading supplemental databases");
-        let mut supplemental_warnings = Vec::<String>::new();
+        let mut supplemental_warnings = Vec::<WarningEntry>::new();
         let supplemental_edb_playlist_tracks =
             try_read_playlists_with_metadata_from_edb(&usb_root, &mut supplemental_warnings).map(
                 |m| {
@@ -956,7 +984,12 @@ impl BackendService {
         let export_log = match export_log::load_export_log(&usb_root) {
             Ok(log) => log,
             Err(err) => {
-                supplemental_warnings.push(format!("USB export log ignored: {err}"));
+                supplemental_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-import",
+                    "usb.histories.export-log-ignored",
+                    format!("USB export log ignored: {err}"),
+                ));
                 None
             }
         };
@@ -1111,20 +1144,42 @@ impl BackendService {
         apply_history_dates_from_track_date_created(&mut items, &date_created_by_track_id);
 
         on_progress(90, 100, "USB: Finalizing history import");
-        let mut warnings = parsed.warnings;
-        warnings.push(format!(
-            "history import: selected populated history table family from t11/t12 vs t17/t18: playlists={}, entries={}",
-            history_playlists.len(),
-            selected_history_entries.len()
+        let mut warnings: Vec<WarningEntry> = parsed
+            .warnings
+            .iter()
+            .map(|message| {
+                logging::log(Level::Warn, "usb-import", "usb.import.pdb-parse", message.clone())
+            })
+            .collect();
+        warnings.push(logging::log(
+            Level::Info,
+            "usb-import",
+            "usb.histories.selected-table-family",
+            format!(
+                "history import: selected populated history table family from t11/t12 vs t17/t18: playlists={}, entries={}",
+                history_playlists.len(),
+                selected_history_entries.len()
+            ),
         ));
-        warnings.insert(0, format!("USB root in use: {}", usb_root.display()));
+        warnings.insert(
+            0,
+            logging::log(
+                Level::Info,
+                "usb-import",
+                "usb.import.root-in-use",
+                format!("USB root in use: {}", usb_root.display()),
+            ),
+        );
         warnings.extend(supplemental_warnings);
         warnings.extend(stage_warnings);
         let materialized_tracks = self.materialize_usb_history_tracks(&mut items)?;
         push_usb_stage_timing(&mut warnings, "finalize history import", &mut stage_started);
         if materialized_tracks > 0 {
-            warnings.push(format!(
-                "materialized {materialized_tracks} USB history track row(s) into local library"
+            warnings.push(logging::log(
+                Level::Info,
+                "usb-import",
+                "usb.histories.materialized",
+                format!("materialized {materialized_tracks} USB history track row(s) into local library"),
             ));
         }
 
@@ -1157,7 +1212,7 @@ impl BackendService {
                 edb_history_rows,
                 edb_history_content_rows,
             },
-            warnings: warnings.into_iter().map(history_warning_entry).collect(),
+            warnings,
         })
     }
 
@@ -1282,7 +1337,7 @@ impl BackendService {
             BackendError::Validation("trackId must be a numeric USB track id".to_string())
         })?;
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
 
         let pdb_path = vendor_pdb_path(&usb_root);
         let file_hint = req
@@ -1299,7 +1354,9 @@ impl BackendService {
 
         if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
-            warnings.extend(parsed.warnings);
+            warnings.extend(parsed.warnings.iter().map(|message| {
+                logging::log(Level::Warn, "usb-import", "usb.import.pdb-parse", message.clone())
+            }));
             let mut best: Option<(&crate::pdb_reader::PdbTrackRow, i32)> = None;
             for t in parsed.tracks.iter().filter(|t| t.id == track_id) {
                 let artist = parsed
@@ -1394,9 +1451,11 @@ impl BackendService {
                 }
             }
         } else {
-            warnings.push(format!(
-                "PDB not found under {}; using DB fallback only",
-                usb_root.display()
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.pdb-not-found",
+                format!("PDB not found under {}; using DB fallback only", usb_root.display()),
             ));
         }
 

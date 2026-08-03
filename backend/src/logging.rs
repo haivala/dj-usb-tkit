@@ -47,6 +47,28 @@ pub fn emit(level: Level, source: &str, message: &str) {
     }
 }
 
+/// The one way to produce a log line that a command also wants to return in
+/// its own `Vec<WarningEntry>` response field: state `(level, code)`
+/// explicitly at the point the message is created, emit it live via
+/// `emit()`, and get back the `WarningEntry` to push. Replaces the old
+/// pattern of building a bare `String` and re-classifying it later by
+/// guessing from substrings.
+pub fn log(
+    level: Level,
+    source: &str,
+    code: &str,
+    message: impl Into<String>,
+) -> crate::models::WarningEntry {
+    let message = message.into();
+    emit(level, source, &message);
+    crate::models::WarningEntry {
+        level: level.as_str().to_string(),
+        code: code.to_string(),
+        message,
+        source: source.to_string(),
+    }
+}
+
 /// Convenience macro: `backend_log!(warn, "pdb-writer", "msg {x}")`.
 #[macro_export]
 macro_rules! backend_log {

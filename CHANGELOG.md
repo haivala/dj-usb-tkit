@@ -24,6 +24,20 @@
   per-fix proposal/apply/skip wiring, none of which were previously exercised
   because no existing test constructed the specific corrupted-page byte
   patterns each one detects. No behavior change — tests only.
+- Unify all backend logging into the Event Log. Previously there were four
+  disconnected paths: per-command warning lists classified after the fact by
+  four independently-hand-rolled guessers (two of which, in the diagnostics
+  and repair modules, disagreed with each other on identical conditions — the
+  same corruption could show up as `warn` from one command and `error` from
+  another); a separate live-event path used by only two files; a handful of
+  `eprintln!`-only messages that never reached the UI at all (notably
+  `scan_master_db`'s ANLZ/artwork-miss diagnostics); and command failures,
+  which never reached the Event Log at all. Every message now states its own
+  level/code at the point it's created and is emitted through one function
+  that both returns it in the command's response and pushes it live — so a
+  failed command, a repair finding, or an import warning all land in the
+  Event Log the same way, immediately. `error.rs` also gained a distinct
+  `DbError` code (previously folded into the generic `InternalError`).
 
 ## 0.1.8
 

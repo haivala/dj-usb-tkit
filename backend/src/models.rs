@@ -23,6 +23,14 @@ impl<T: Serialize> ApiResponse<T> {
     }
 
     pub fn failure(error: ErrorPayload) -> Self {
+        // Single choke point: every error returned by any command — Tauri or
+        // headless — passes through here, so this is where every failure
+        // reaches the Event Log. See backend/src/logging.rs.
+        crate::logging::emit(
+            crate::logging::Level::Error,
+            error.code.as_str(),
+            &error.message,
+        );
         Self {
             ok: false,
             data: None,
@@ -130,7 +138,7 @@ pub struct ScanLibraryData {
     #[serde(default)]
     pub not_found: Vec<String>,
     #[serde(default)]
-    pub warnings: Vec<String>,
+    pub warnings: Vec<WarningEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -456,7 +464,7 @@ pub struct ValidateUsbRootData {
     pub has_contents: bool,
     pub has_pdb: bool,
     pub has_edb: bool,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<WarningEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -706,7 +714,7 @@ pub struct InspectUsbTrackRequest {
 pub struct InspectUsbTrackData {
     pub source: String,
     pub track: UsbTrack,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<WarningEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -728,7 +736,7 @@ pub struct AnalyzeNewTracksData {
     pub job_id: String,
     pub analyzed: usize,
     pub failed: usize,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<WarningEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

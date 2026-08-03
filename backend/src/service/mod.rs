@@ -34,6 +34,7 @@ use base64::Engine;
 
 use crate::db::Db;
 use crate::error::{BackendError, BackendResult};
+use crate::logging::{self, Level};
 use crate::models::{
     AddTracksToPlaylistData, AddTracksToPlaylistRequest, BrowseSourceFilesData,
     BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
@@ -49,6 +50,7 @@ use crate::models::{
     ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ScanLibraryData, ScanLibraryRequest,
     ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
     SetFrontendSettingRequest, SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track,
+    WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -381,12 +383,17 @@ impl BackendService {
                 not_found.push(root);
             }
         }
-        let mut warnings = Vec::<String>::new();
+        let mut warnings = Vec::<WarningEntry>::new();
         if !not_found.is_empty() {
-            warnings.push(format!(
-                "{} source folder(s) missing or not directories: {}",
-                not_found.len(),
-                not_found.join(", ")
+            warnings.push(logging::log(
+                Level::Warn,
+                "library-scan",
+                "scan.source-folders-missing",
+                format!(
+                    "{} source folder(s) missing or not directories: {}",
+                    not_found.len(),
+                    not_found.join(", ")
+                ),
             ));
         }
 
@@ -814,6 +821,7 @@ impl BackendService {
         let mut artwork_ok = 0usize;
         let mut sample_anlz: Option<String> = None;
         let mut sample_img: Option<String> = None;
+        let mut warnings = Vec::<WarningEntry>::new();
 
         for t in &tracks {
             if !std::path::Path::new(&t.file_path).exists() {
@@ -862,9 +870,12 @@ impl BackendService {
                         anlz_abs.to_str().map(str::to_owned)
                     } else {
                         anlz_miss += 1;
-                        eprintln!(
-                            "[scan_master_db] ANLZ not found (AnalysisDataPath={anlz_rel:?})"
-                        );
+                        warnings.push(logging::log(
+                            Level::Warn,
+                            "scan-master-db",
+                            "scan.master-db.anlz-not-found",
+                            format!("ANLZ not found (AnalysisDataPath={anlz_rel:?})"),
+                        ));
                         None
                     }
                 }
@@ -883,7 +894,12 @@ impl BackendService {
                     match resolve_master_db_resource_path(&master_path, img_rel, |p| p.is_file()) {
                         None => {
                             artwork_miss += 1;
-                            eprintln!("[scan_master_db] artwork not found (ImagePath={img_rel:?})");
+                            warnings.push(logging::log(
+                                Level::Warn,
+                                "scan-master-db",
+                                "scan.master-db.artwork-not-found",
+                                format!("artwork not found (ImagePath={img_rel:?})"),
+                            ));
                             None
                         }
                         Some(src) => {
@@ -896,9 +912,12 @@ impl BackendService {
                                 }
                                 Err(e) => {
                                     artwork_miss += 1;
-                                    eprintln!(
-                                        "[scan_master_db] artwork copy failed {src:?} -> {dest:?}: {e}"
-                                    );
+                                    warnings.push(logging::log(
+                                        Level::Error,
+                                        "scan-master-db",
+                                        "scan.master-db.artwork-copy-failed",
+                                        format!("artwork copy failed {src:?} -> {dest:?}: {e}"),
+                                    ));
                                     None
                                 }
                             }
@@ -972,32 +991,69 @@ impl BackendService {
 
         tx.commit()?;
 
-        let mut warnings = Vec::<String>::new();
         if let Some(p) = sample_anlz {
-            warnings.push(format!("AnalysisDataPath sample: {p}"));
+            warnings.push(logging::log(
+                Level::Info,
+                "scan-master-db",
+                "scan.master-db.anlz-sample",
+                format!("AnalysisDataPath sample: {p}"),
+            ));
         }
         if let Some(p) = sample_img {
-            warnings.push(format!("ImagePath sample: {p}"));
+            warnings.push(logging::log(
+                Level::Info,
+                "scan-master-db",
+                "scan.master-db.image-sample",
+                format!("ImagePath sample: {p}"),
+            ));
         }
         if anlz_null > 0 {
-            warnings.push(format!("{anlz_null} track(s) have no AnalysisDataPath"));
+            warnings.push(logging::log(
+                Level::Info,
+                "scan-master-db",
+                "scan.master-db.anlz-null",
+                format!("{anlz_null} track(s) have no AnalysisDataPath"),
+            ));
         }
         if anlz_miss > 0 {
-            warnings.push(format!("{anlz_miss} ANLZ path(s) not found on disk"));
+            warnings.push(logging::log(
+                Level::Warn,
+                "scan-master-db",
+                "scan.master-db.anlz-miss-summary",
+                format!("{anlz_miss} ANLZ path(s) not found on disk"),
+            ));
         }
         if anlz_ok > 0 {
-            warnings.push(format!("{anlz_ok} ANLZ path(s) resolved OK"));
+            warnings.push(logging::log(
+                Level::Info,
+                "scan-master-db",
+                "scan.master-db.anlz-ok",
+                format!("{anlz_ok} ANLZ path(s) resolved OK"),
+            ));
         }
         if artwork_null > 0 {
-            warnings.push(format!("{artwork_null} track(s) have no ImagePath"));
+            warnings.push(logging::log(
+                Level::Info,
+                "scan-master-db",
+                "scan.master-db.artwork-null",
+                format!("{artwork_null} track(s) have no ImagePath"),
+            ));
         }
         if artwork_miss > 0 {
-            warnings.push(format!(
-                "{artwork_miss} artwork source file(s) not found or copy failed"
+            warnings.push(logging::log(
+                Level::Warn,
+                "scan-master-db",
+                "scan.master-db.artwork-miss-summary",
+                format!("{artwork_miss} artwork source file(s) not found or copy failed"),
             ));
         }
         if artwork_ok > 0 {
-            warnings.push(format!("{artwork_ok} artwork file(s) copied OK"));
+            warnings.push(logging::log(
+                Level::Info,
+                "scan-master-db",
+                "scan.master-db.artwork-ok",
+                format!("{artwork_ok} artwork file(s) copied OK"),
+            ));
         }
 
         Ok(ScanLibraryData {

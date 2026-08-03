@@ -7,6 +7,7 @@ use crate::edb::{
     try_read_playlists_with_metadata_from_edb_db_only,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::logging::{self, Level};
 use crate::models::{
     DiagCheck, DiagCountsSummary, DiagSection, DiagStatus, DiagSummaryRow, PlayerCounterSnapshot,
     PlayerPageSignal, PlayerTableSignal, PlaylistDiagEntry, RunUsbDiagnosticsData,
@@ -187,52 +188,9 @@ fn compute_player_counter_snapshot(
     })
 }
 
-fn diagnostics_warning_entry(message: String) -> WarningEntry {
-    let lower = message.to_lowercase();
-    let (level, code) = if message.starts_with("slow-media suspected:") {
-        ("warn", "usb.diagnostics.slow-media")
-    } else if message.starts_with("PDB header compatibility field") {
-        ("warn", "usb.diagnostics.pdb-header-compatibility")
-    } else if message.starts_with("history-only track:") {
-        ("info", "usb.diagnostics.history-only")
-    } else if message.starts_with("unindexed audio file:") {
-        ("info", "usb.diagnostics.unindexed-audio")
-    } else if message.starts_with("missing-audio reference:") {
-        ("warn", "usb.diagnostics.missing-audio")
-    } else if message.starts_with("PDB and eDB menus disagree") {
-        ("warn", "usb.diagnostics.player-menu-divergence")
-    } else if message.contains("stale b-tree index") {
-        ("error", "usb.diagnostics.pdb-stale-sentinel-btree")
-    } else if message.contains("playlist_tree page") && message.contains("wrong shape") {
-        ("warn", "usb.diagnostics.pdb-wrong-playlist-tree-shape")
-    } else if message.contains("tombstoned row") && message.contains("non-zero id") {
-        ("warn", "usb.diagnostics.pdb-tombstoned-ids")
-    } else if message.contains("track page") && message.contains("wrong u5/num_rl shape") {
-        ("warn", "usb.diagnostics.pdb-wrong-page-shape")
-    } else if message.contains("wrong u5/num_rl shape") {
-        ("error", "usb.diagnostics.pdb-wrong-page-shape")
-    } else if message.contains("ACTV flag in multi-page chain") {
-        ("warn", "usb.diagnostics.pdb-t00-multipage-active")
-    } else if message.contains("empty_candidate pointing to another table") {
-        ("error", "usb.diagnostics.pdb-ec-data-page-conflict")
-    } else if lower.contains("malformed") || lower.contains("corrupt") {
-        ("warn", "usb.diagnostics.malformed")
-    } else if lower.contains("failed") || lower.contains("error") {
-        ("error", "usb.diagnostics.error")
-    } else {
-        ("info", "usb.diagnostics.info")
-    };
-    WarningEntry {
-        level: level.to_string(),
-        code: code.to_string(),
-        message,
-        source: "usb-diagnostics".to_string(),
-    }
-}
-
 pub(crate) fn collect_edb_indexed_paths(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> HashSet<String> {
     let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
         return HashSet::new();
@@ -241,7 +199,12 @@ pub(crate) fn collect_edb_indexed_paths(
         return HashSet::new();
     }
     let Ok(content_columns) = load_table_columns(&conn, "content") else {
-        warnings.push("eDB content column scan failed".to_string());
+        warnings.push(logging::log(
+            Level::Error,
+            "usb-diagnostics",
+            "usb.diagnostics.edb-content-column-scan-failed",
+            "eDB content column scan failed",
+        ));
         return HashSet::new();
     };
     let has_column = |name: &str| content_columns.iter().any(|column| column == name);
@@ -264,16 +227,23 @@ pub(crate) fn collect_edb_indexed_paths(
             "folder_file",
         )
     } else {
-        warnings.push(
-            "eDB content schema missing path columns (expected path or FolderPath/FileNameL)"
-                .to_string(),
-        );
+        warnings.push(logging::log(
+            Level::Warn,
+            "usb-diagnostics",
+            "usb.diagnostics.edb-schema-missing-path-columns",
+            "eDB content schema missing path columns (expected path or FolderPath/FileNameL)",
+        ));
         return HashSet::new();
     };
     let mut stmt = match conn.prepare(query_sql) {
         Ok(stmt) => stmt,
         Err(err) => {
-            warnings.push(format!("eDB playlist path query prepare failed: {err}"));
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-diagnostics",
+                "usb.diagnostics.edb-path-query-prepare-failed",
+                format!("eDB playlist path query prepare failed: {err}"),
+            ));
             return HashSet::new();
         }
     };
@@ -287,7 +257,12 @@ pub(crate) fn collect_edb_indexed_paths(
     }) {
         Ok(rows) => rows,
         Err(err) => {
-            warnings.push(format!("eDB playlist path query failed: {err}"));
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-diagnostics",
+                "usb.diagnostics.edb-path-query-failed",
+                format!("eDB playlist path query failed: {err}"),
+            ));
             return HashSet::new();
         }
     };
@@ -319,7 +294,7 @@ pub(crate) fn collect_edb_indexed_paths(
 
 fn collect_edb_content_paths_exact(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> HashSet<String> {
     let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
         return HashSet::new();
@@ -394,7 +369,7 @@ pub(crate) fn collect_strict_indexed_paths(
     parsed: &crate::pdb_reader::ParsedPdb,
     edb_playlists: &HashMap<String, ExportDbPlaylist>,
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> HashSet<String> {
     // All PDB tracks regardless of playlist/history membership
     let pdb_track_paths = parsed
@@ -434,7 +409,7 @@ pub(crate) struct ReferenceOnlyEdbFieldUsage {
 
 fn scan_reference_only_edb_field_usage(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<WarningEntry>,
 ) -> ReferenceOnlyEdbFieldUsage {
     let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
         return ReferenceOnlyEdbFieldUsage::default();
@@ -497,20 +472,33 @@ impl BackendService {
         const SLOW_USB_STAGE_MS: u128 = 3_000;
         let start = std::time::Instant::now();
         let mut stage_started = std::time::Instant::now();
-        let mut note_stage = |name: &str, raw_warnings: &mut Vec<String>| {
+        let mut note_stage = |name: &str, raw_warnings: &mut Vec<WarningEntry>| {
             let elapsed = stage_started.elapsed().as_millis();
-            raw_warnings.push(format!("stage timing: {name}: {elapsed}ms"));
+            raw_warnings.push(logging::log(
+                Level::Info,
+                "usb-diagnostics",
+                "usb.diagnostics.stage-timing",
+                format!("stage timing: {name}: {elapsed}ms"),
+            ));
             if elapsed >= SLOW_USB_STAGE_MS {
-                raw_warnings.push(format!(
-                    "slow-media suspected: stage '{name}' took {elapsed}ms"
+                raw_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.slow-media",
+                    format!("slow-media suspected: stage '{name}' took {elapsed}ms"),
                 ));
             }
             stage_started = std::time::Instant::now();
         };
         on_progress(2, 100, "USB: Resolving root");
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let mut raw_warnings = Vec::<String>::new();
-        raw_warnings.push(format!("USB root: {}", usb_root.display()));
+        let mut raw_warnings = Vec::<WarningEntry>::new();
+        raw_warnings.push(logging::log(
+            Level::Info,
+            "usb-diagnostics",
+            "usb.diagnostics.info",
+            format!("USB root: {}", usb_root.display()),
+        ));
         note_stage("resolve usb root", &mut raw_warnings);
 
         let pdb_path = vendor_pdb_path(&usb_root);
@@ -533,7 +521,7 @@ impl BackendService {
 
         // eDB history counts
         {
-            let mut edb_warnings = Vec::new();
+            let mut edb_warnings = Vec::<WarningEntry>::new();
             let edb_conn = open_edb_from_usb_root(&usb_root, &mut edb_warnings);
             let (edb_h, edb_hc) = if let Some(conn) = edb_conn.as_ref() {
                 let h = if table_exists(conn, "history") {
@@ -627,7 +615,12 @@ impl BackendService {
                 } else {
                     pl_names.into_iter().collect::<Vec<_>>().join(", ")
                 };
-                raw_warnings.push(format!("history-only track: {norm} ({pl_str})"));
+                raw_warnings.push(logging::log(
+                    Level::Info,
+                    "usb-diagnostics",
+                    "usb.diagnostics.history-only",
+                    format!("history-only track: {norm} ({pl_str})"),
+                ));
                 out.insert(norm);
             }
             out
@@ -679,7 +672,7 @@ impl BackendService {
         note_stage("playlist resolution", &mut raw_warnings);
 
         {
-            let mut menu_warnings = Vec::<String>::new();
+            let mut menu_warnings = Vec::<WarningEntry>::new();
             if let Ok((_current, _available, divergence)) =
                 crate::service::repair::load_usb_player_menu_config_public(
                     &usb_root,
@@ -687,14 +680,17 @@ impl BackendService {
                 )
                 && !divergence.is_empty()
             {
-                raw_warnings.push(format!(
-                    "PDB and eDB menus disagree ({} active menu items missing from PDB)",
-                    divergence.in_edb_visible_only.len()
+                raw_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.player-menu-divergence",
+                    format!(
+                        "PDB and eDB menus disagree ({} active menu items missing from PDB)",
+                        divergence.in_edb_visible_only.len()
+                    ),
                 ));
             }
-            for warning in menu_warnings {
-                raw_warnings.push(warning);
-            }
+            raw_warnings.extend(menu_warnings);
             note_stage("player menu divergence", &mut raw_warnings);
         }
 
@@ -717,11 +713,7 @@ impl BackendService {
             cdj_counter_snapshot: parsed_opt
                 .as_ref()
                 .and_then(|(parsed, _)| compute_player_counter_snapshot(&usb_root, parsed)),
-            warnings: raw_warnings
-                .iter()
-                .cloned()
-                .map(diagnostics_warning_entry)
-                .collect(),
+            warnings: raw_warnings,
             duration_ms: start.elapsed().as_millis() as u64,
         })
     }
@@ -744,25 +736,45 @@ impl BackendService {
         const SLOW_USB_STAGE_MS: u128 = 3_000;
         let start = std::time::Instant::now();
         let mut stage_started = std::time::Instant::now();
-        let mut note_stage = |name: &str, raw_warnings: &mut Vec<String>| {
+        let mut note_stage = |name: &str, raw_warnings: &mut Vec<WarningEntry>| {
             let elapsed = stage_started.elapsed().as_millis();
-            raw_warnings.push(format!("stage timing: {name}: {elapsed}ms"));
+            raw_warnings.push(logging::log(
+                Level::Info,
+                "usb-diagnostics",
+                "usb.diagnostics.stage-timing",
+                format!("stage timing: {name}: {elapsed}ms"),
+            ));
             if elapsed >= SLOW_USB_STAGE_MS {
-                raw_warnings.push(format!(
-                    "slow-media suspected: stage '{name}' took {elapsed}ms"
+                raw_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.slow-media",
+                    format!("slow-media suspected: stage '{name}' took {elapsed}ms"),
                 ));
             }
             stage_started = std::time::Instant::now();
         };
         on_progress(2, 100, "USB: Resolving root");
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let mut raw_warnings = vec![format!("USB root: {}", usb_root.display())];
+        let mut raw_warnings = vec![logging::log(
+            Level::Info,
+            "usb-diagnostics",
+            "usb.diagnostics.info",
+            format!("USB root: {}", usb_root.display()),
+        )];
         note_stage("resolve usb root", &mut raw_warnings);
 
         on_progress(20, 100, "USB: Parsing PDB");
         let pdb_path = vendor_pdb_path(&usb_root);
         let parsed = parse_pdb(&pdb_path)?;
-        raw_warnings.extend(parsed.warnings.clone());
+        raw_warnings.extend(parsed.warnings.iter().map(|message| {
+            logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-parse",
+                message.clone(),
+            )
+        }));
         note_stage("parse PDB", &mut raw_warnings);
 
         on_progress(45, 100, "USB: Reading eDB");
@@ -794,7 +806,12 @@ impl BackendService {
         extra_paths.sort();
         let extra_count = extra_paths.len();
         for path in &extra_paths {
-            raw_warnings.push(format!("unindexed audio file: {path}"));
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.unindexed-audio",
+                format!("unindexed audio file: {path}"),
+            ));
         }
         let strict_raw_coverage =
             evaluate_strict_raw_coverage_parity(missing_count, extra_count, indexed_paths.len());
@@ -816,11 +833,7 @@ impl BackendService {
             checks,
             summary_rows,
             playlist_details,
-            warnings: raw_warnings
-                .iter()
-                .cloned()
-                .map(diagnostics_warning_entry)
-                .collect(),
+            warnings: raw_warnings,
             duration_ms: start.elapsed().as_millis() as u64,
         })
     }
@@ -828,7 +841,7 @@ impl BackendService {
 
 pub(crate) fn diagnose_pdb_integrity(
     pdb_path: &std::path::Path,
-    raw_warnings: &mut Vec<String>,
+    raw_warnings: &mut Vec<WarningEntry>,
 ) -> (
     DiagSection,
     Option<(
@@ -920,8 +933,13 @@ pub(crate) fn diagnose_pdb_integrity(
             format!("value {header_compat} at bytes 0x10..0x14")
         };
         if matches!(header_compat_status, DiagStatus::Warn) {
-            raw_warnings.push(format!(
-                "PDB header compatibility field is {header_compat}; run repair_pdb_header_compatibility_field to restore a compatible value."
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-header-compatibility",
+                format!(
+                    "PDB header compatibility field is {header_compat}; run repair_pdb_header_compatibility_field to restore a compatible value."
+                ),
             ));
         }
         checks.push(DiagCheck {
@@ -937,21 +955,36 @@ pub(crate) fn diagnose_pdb_integrity(
         let bad_flags = super::repair::detect_pdb_wrong_page_flags(pdb_path);
         let bad_tranrf = super::repair::detect_pdb_zero_tranrf_all_tables(pdb_path);
         if !bad_u5.is_empty() {
-            raw_warnings.push(format!(
-                "{} PDB data page(s) with sentinel u5=0x1FFF (may be rejected by some DJ software and player firmware); run repair_pdb_sentinel_u5_on_data_pages to fix.",
-                bad_u5.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-sentinel-u5",
+                format!(
+                    "{} PDB data page(s) with sentinel u5=0x1FFF (may be rejected by some DJ software and player firmware); run repair_pdb_sentinel_u5_on_data_pages to fix.",
+                    bad_u5.len()
+                ),
             ));
         }
         if !bad_flags.is_empty() {
-            raw_warnings.push(format!(
-                "{} PDB data page(s) with wrong page_flags byte (may be rejected by some DJ software and player firmware); run repair_pdb_wrong_page_flags to fix.",
-                bad_flags.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-wrong-page-flags",
+                format!(
+                    "{} PDB data page(s) with wrong page_flags byte (may be rejected by some DJ software and player firmware); run repair_pdb_wrong_page_flags to fix.",
+                    bad_flags.len()
+                ),
             ));
         }
         if !bad_tranrf.is_empty() {
-            raw_warnings.push(format!(
-                "{} data page(s) with tranrf=0 on last-row group and active rows (player may reject database); run repair_pdb_zero_tranrf_on_track_pages to fix.",
-                bad_tranrf.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-zero-tranrf",
+                format!(
+                    "{} data page(s) with tranrf=0 on last-row group and active rows (player may reject database); run repair_pdb_zero_tranrf_on_track_pages to fix.",
+                    bad_tranrf.len()
+                ),
             ));
         }
         let any_bad = !bad_u5.is_empty() || !bad_flags.is_empty() || !bad_tranrf.is_empty();
@@ -1002,16 +1035,26 @@ pub(crate) fn diagnose_pdb_integrity(
         let mut warn_parts = Vec::new();
 
         if !stale_btree.is_empty() {
-            raw_warnings.push(format!(
-                "{} sentinel page(s) with stale b-tree index (may be rejected by some DJ software); run repair_pdb_stale_sentinel_btree to fix.",
-                stale_btree.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-stale-sentinel-btree",
+                format!(
+                    "{} sentinel page(s) with stale b-tree index (may be rejected by some DJ software); run repair_pdb_stale_sentinel_btree to fix.",
+                    stale_btree.len()
+                ),
             ));
             warn_parts.push(format!("{} sentinel(s) stale b-tree", stale_btree.len()));
         }
         if !wrong_pl_tree.is_empty() {
-            raw_warnings.push(format!(
-                "{} playlist_tree page(s) with wrong shape (u5/num_rl); run repair_pdb_wrong_playlist_tree_shape to fix.",
-                wrong_pl_tree.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-wrong-playlist-tree-shape",
+                format!(
+                    "{} playlist_tree page(s) with wrong shape (u5/num_rl); run repair_pdb_wrong_playlist_tree_shape to fix.",
+                    wrong_pl_tree.len()
+                ),
             ));
             warn_parts.push(format!(
                 "{} playlist_tree page(s) wrong shape",
@@ -1019,9 +1062,14 @@ pub(crate) fn diagnose_pdb_integrity(
             ));
         }
         if !tombstoned.is_empty() {
-            raw_warnings.push(format!(
-                "{} tombstoned row(s) with non-zero id; run repair_pdb_tombstoned_playlist_tree_ids to fix.",
-                tombstoned.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-tombstoned-playlist-id",
+                format!(
+                    "{} tombstoned row(s) with non-zero id; run repair_pdb_tombstoned_playlist_tree_ids to fix.",
+                    tombstoned.len()
+                ),
             ));
             warn_parts.push(format!(
                 "{} tombstoned row(s) non-zero id",
@@ -1029,9 +1077,14 @@ pub(crate) fn diagnose_pdb_integrity(
             ));
         }
         if !wrong_track_u5.is_empty() {
-            raw_warnings.push(format!(
-                "{} track page(s) with wrong u5/num_rl shape; run repair_pdb_wrong_track_u5_num_rl to fix.",
-                wrong_track_u5.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-wrong-track-u5",
+                format!(
+                    "{} track page(s) with wrong u5/num_rl shape; run repair_pdb_wrong_track_u5_num_rl to fix.",
+                    wrong_track_u5.len()
+                ),
             ));
             warn_parts.push(format!(
                 "{} track page(s) wrong shape",
@@ -1039,9 +1092,14 @@ pub(crate) fn diagnose_pdb_integrity(
             ));
         }
         if !wrong_history.is_empty() {
-            raw_warnings.push(format!(
-                "{} history page(s) with wrong u5/num_rl shape; run repair_pdb_wrong_history_page_shape to fix.",
-                wrong_history.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-wrong-history-shape",
+                format!(
+                    "{} history page(s) with wrong u5/num_rl shape; run repair_pdb_wrong_history_page_shape to fix.",
+                    wrong_history.len()
+                ),
             ));
             warn_parts.push(format!(
                 "{} history page(s) wrong shape",
@@ -1049,9 +1107,14 @@ pub(crate) fn diagnose_pdb_integrity(
             ));
         }
         if !t00_multipage_active.is_empty() {
-            raw_warnings.push(format!(
-                "{} tt=0 track page(s) with ACTV flag in multi-page chain (rejected); run repair_pdb_t00_multipage_active_pages to fix.",
-                t00_multipage_active.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-t00-multipage-active",
+                format!(
+                    "{} tt=0 track page(s) with ACTV flag in multi-page chain (rejected); run repair_pdb_t00_multipage_active_pages to fix.",
+                    t00_multipage_active.len()
+                ),
             ));
             warn_parts.push(format!(
                 "{} track page(s) ACTV in multi-page chain",
@@ -1059,10 +1122,15 @@ pub(crate) fn diagnose_pdb_integrity(
             ));
         }
         if !ec_conflicts.is_empty() {
-            raw_warnings.push(format!(
-                "{} table(s) with empty_candidate pointing to another table's data page \
-                 (may cause write-pointer conflict rejection); run repair_pdb_ec_data_page_conflict to fix.",
-                ec_conflicts.len()
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-ec-data-page-conflict",
+                format!(
+                    "{} table(s) with empty_candidate pointing to another table's data page \
+                     (may cause write-pointer conflict rejection); run repair_pdb_ec_data_page_conflict to fix.",
+                    ec_conflicts.len()
+                ),
             ));
             fail_parts.push(format!(
                 "{} table(s) write-pointer conflict",
@@ -1186,7 +1254,14 @@ pub(crate) fn diagnose_pdb_integrity(
 
     // Parse warnings
     if !parsed.warnings.is_empty() {
-        raw_warnings.extend(parsed.warnings.iter().cloned());
+        raw_warnings.extend(parsed.warnings.iter().map(|message| {
+            logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-parse",
+                message.clone(),
+            )
+        }));
         checks.push(DiagCheck {
             label: "Parse warnings".to_string(),
             status: DiagStatus::Warn,
@@ -1209,7 +1284,7 @@ pub(crate) fn diagnose_pdb_integrity(
 
 pub(crate) fn diagnose_edb_access(
     usb_root: &std::path::Path,
-    raw_warnings: &mut Vec<String>,
+    raw_warnings: &mut Vec<WarningEntry>,
 ) -> DiagSection {
     let mut checks = Vec::new();
 
@@ -1222,18 +1297,18 @@ pub(crate) fn diagnose_edb_access(
             link: None,
         });
     } else {
-        let mut edb_warnings = Vec::new();
+        let mut edb_warnings = Vec::<WarningEntry>::new();
         let conn = open_edb_from_usb_root(usb_root, &mut edb_warnings);
         let (status, detail) = if conn.is_some() {
             let key_msg = edb_warnings
                 .last()
-                .cloned()
+                .map(|w| w.message.clone())
                 .unwrap_or_else(|| "Opened successfully".to_string());
             (DiagStatus::Pass, key_msg)
         } else {
             let msg = edb_warnings
                 .last()
-                .cloned()
+                .map(|w| w.message.clone())
                 .unwrap_or_else(|| "Unable to open".to_string());
             (DiagStatus::Fail, msg)
         };

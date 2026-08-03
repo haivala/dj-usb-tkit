@@ -1508,9 +1508,9 @@ fn export_to_usb_skips_missing_source_files_and_reports_warning() {
     assert_eq!(data.exported_tracks, 1, "expected one exported track");
     assert_eq!(data.skipped_tracks, 1, "expected one skipped track");
     assert!(
-        data.warnings
-            .iter()
-            .any(|w| { w.source == "export" && w.level == "warn" && w.code == "export.warn" }),
+        data.warnings.iter().any(|w| {
+            w.source == "export" && w.level == "warn" && w.code == "export.missing-source-file"
+        }),
         "expected structured export warning, got {:?}",
         data.warnings
     );
@@ -1856,7 +1856,7 @@ fn export_to_usb_option_matrix_controls_artwork_analysis_and_prune_behavior() {
         second
             .warnings
             .iter()
-            .any(|w| w.source == "export" && w.level == "info" && w.code == "export.info"),
+            .any(|w| w.source == "export" && w.level == "info" && w.code == "export.prune-stale-summary"),
         "expected structured prune/export info warning"
     );
 
@@ -2390,7 +2390,7 @@ fn first_export_after_initialize_usb_writes_export_pdb_without_skip_warning() {
         !data
             .warnings
             .iter()
-            .any(|w| w.code == "export.warn" && w.source == "export"),
+            .any(|w| w.source == "export" && (w.level == "warn" || w.level == "error")),
         "expected seeded PDB to be appendable, warnings: {:?}",
         data.warnings
     );
