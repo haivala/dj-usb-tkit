@@ -29,7 +29,7 @@ use super::export_helpers::{
 use super::usb_helpers::{
     PlaylistCandidate, build_usb_track_id_index, decode_history_playlist_id,
     decode_history_track_id, dedupe_usb_playlists_by_name, history_entry_sort_key,
-    lookup_playlist_tracks, merge_playlist_tracks, normalize_packed_id,
+    is_named_history_playlist, lookup_playlist_tracks, merge_playlist_tracks, normalize_packed_id,
     parse_history_name_numeric_id, parse_history_slot_id, sanitize_history_name, sanitize_text,
 };
 use super::usb_utils::{
@@ -151,6 +151,18 @@ fn select_history_rows(
     } else {
         (t17_playlists, t18_entries)
     }
+}
+
+/// Drop blank/template history playlist rows. Fresh or never-played exports
+/// ship a fixed block of these alongside t17/t18 (empty name, no track
+/// link) — real rekordbox-recorded sessions are always named "HISTORY NNN".
+fn filter_named_history_playlists(
+    playlists: Vec<PdbHistoryPlaylistRow>,
+) -> Vec<PdbHistoryPlaylistRow> {
+    playlists
+        .into_iter()
+        .filter(|row| is_named_history_playlist(&row.name))
+        .collect()
 }
 
 fn normalize_date_created(value: &str) -> Option<NaiveDate> {
@@ -1051,6 +1063,7 @@ impl BackendService {
         on_progress(70, 100, "USB: Resolving history entries");
         let (history_playlists, selected_history_entries) =
             select_history_rows(&parsed.history_playlists, &parsed.history_entries);
+        let history_playlists = filter_named_history_playlists(history_playlists);
 
         let known_history_ids = history_playlists
             .iter()
@@ -1492,7 +1505,7 @@ impl BackendService {
 mod tests {
     use super::{
         apply_history_dates_from_track_date_created, build_history_track_date_index,
-        normalize_date_created, select_history_rows,
+        filter_named_history_playlists, normalize_date_created, select_history_rows,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
@@ -1789,5 +1802,68 @@ mod tests {
         assert_eq!(history_playlists[0].source_table, 11);
         assert_eq!(history_entries.len(), 1);
         assert_eq!(history_entries[0].source_table, 12);
+    }
+
+    // --- filter_named_history_playlists ---
+
+    #[test]
+    fn filter_named_history_playlists_drops_blank_seed_rows() {
+        // Shaped like the real byte-level data confirmed on several unrelated
+        // fresh/never-played rekordbox exports: a block of blank-name
+        // template rows shipped alongside one real session.
+        let playlists = vec![
+            PdbHistoryPlaylistRow {
+                id: 65537,
+                name: String::new(),
+                source_table: 17,
+            },
+            PdbHistoryPlaylistRow {
+                id: 393221,
+                name: "\u{1}".to_string(),
+                source_table: 17,
+            },
+            PdbHistoryPlaylistRow {
+                id: 10,
+                name: "HISTORY 001".to_string(),
+                source_table: 17,
+            },
+        ];
+
+        let filtered = filter_named_history_playlists(playlists);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, 10);
+    }
+
+    #[test]
+    fn filter_named_history_playlists_drops_all_seed_only_export() {
+        // A fresh/never-played export: every t17 row is a blank template
+        // slot, no real session recorded yet.
+        let playlists = (0..22)
+            .map(|id| PdbHistoryPlaylistRow {
+                id,
+                name: String::new(),
+                source_table: 17,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(filter_named_history_playlists(playlists).is_empty());
+    }
+
+    #[test]
+    fn filter_named_history_playlists_keeps_all_real_sessions() {
+        let playlists = vec![
+            PdbHistoryPlaylistRow {
+                id: 1,
+                name: "HISTORY 001".to_string(),
+                source_table: 17,
+            },
+            PdbHistoryPlaylistRow {
+                id: 2,
+                name: "HISTORY 002".to_string(),
+                source_table: 17,
+            },
+        ];
+
+        assert_eq!(filter_named_history_playlists(playlists).len(), 2);
     }
 }

@@ -12,6 +12,17 @@
 
 ## Unreleased
 
+**Severity:** critical
+
+- Fix history import and diagnostics treating rekordbox's own blank
+  template history-menu rows as real history. Every fresh or never-played
+  rekordbox export ships a fixed block of empty, unnamed history-playlist
+  placeholder rows; a fallback path added while hardening history import
+  against hardware-recorded history started surfacing these as a batch of
+  phantom "History N" playlists with fabricated track entries, and
+  diagnostics reported misleading history counts for drives that had never
+  actually recorded any DJ history. Only rekordbox-recorded sessions (named
+  `HISTORY NNN`) are now surfaced as history.
 - Remove frontend heuristic local-file matching from USB/imported track
   playback. Playback now substitutes an HDD/library file only when backend
   `resolve_playback_source` returns a verified match; if no verified HDD match

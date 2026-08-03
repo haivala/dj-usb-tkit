@@ -138,6 +138,15 @@ pub(crate) fn sanitize_history_name(value: &str) -> String {
     sanitize_text(value)
 }
 
+/// Real rekordbox-recorded history sessions are always named `"HISTORY NNN"`.
+/// Fresh/never-played exports ship `t17`/`t18` with a fixed block of blank
+/// template/seed rows (no name, no track link) alongside this real data;
+/// this predicate is the same rule `derive_history_sync_payload` in
+/// `repair.rs` already uses to exclude them.
+pub(crate) fn is_named_history_playlist(name: &str) -> bool {
+    name.starts_with("HISTORY ")
+}
+
 pub(crate) fn history_entry_sort_key(raw: u32) -> u32 {
     let low = raw & 0xFFFF;
     if low != 0 { low } else { raw }
@@ -392,6 +401,23 @@ mod tests {
         let (deduped, collapsed) = dedupe_usb_playlists_by_name(items);
         assert_eq!(deduped.len(), 2);
         assert_eq!(collapsed, 0);
+    }
+
+    // --- is_named_history_playlist ---
+
+    #[test]
+    fn is_named_history_playlist_accepts_real_session_name() {
+        assert!(is_named_history_playlist("HISTORY 001"));
+    }
+
+    #[test]
+    fn is_named_history_playlist_rejects_blank_name() {
+        assert!(!is_named_history_playlist(""));
+    }
+
+    #[test]
+    fn is_named_history_playlist_rejects_non_history_name() {
+        assert!(!is_named_history_playlist("Not History"));
     }
 
     // --- decode_history_track_id ---

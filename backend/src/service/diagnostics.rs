@@ -23,6 +23,7 @@ use crate::utils::{
 
 use super::BackendService;
 use super::export_helpers::{load_table_columns, table_exists};
+use super::usb_helpers::is_named_history_playlist;
 use super::usb_utils::{
     canonicalize_playlist_name, collect_contents_audio_files, repair_utf8_mojibake,
     resolve_usb_root,
@@ -451,6 +452,26 @@ fn scan_reference_only_edb_field_usage(
         playlist_linked_tracks: max_playlist_linked_tracks,
         populated_fields,
     }
+}
+
+/// Count PDB history playlists/entries that look like real rekordbox-recorded
+/// sessions, excluding the blank template/seed rows every fresh or
+/// never-played export ships in t17/t18 (see `is_named_history_playlist`).
+fn count_named_history_rows(
+    playlists: &[crate::pdb_reader::PdbHistoryPlaylistRow],
+    entries: &[crate::pdb_reader::PdbHistoryEntryRow],
+) -> (usize, usize) {
+    let named_history_ids = playlists
+        .iter()
+        .filter(|row| is_named_history_playlist(&row.name))
+        .map(|row| row.id)
+        .collect::<HashSet<_>>();
+    let hp = named_history_ids.len();
+    let he = entries
+        .iter()
+        .filter(|row| named_history_ids.contains(&row.playlist_id))
+        .count();
+    (hp, he)
 }
 
 impl BackendService {
@@ -1178,10 +1199,15 @@ pub(crate) fn diagnose_pdb_integrity(
         link: None,
     });
 
-    // History playlists in PDB
+    // History playlists in PDB. Fresh/never-played exports ship t17/t18 with
+    // a fixed block of blank template/seed rows (no name, no track link)
+    // alongside any real recorded sessions; only count rows that look like
+    // real rekordbox-recorded history, matching the same rule
+    // `derive_history_sync_payload` already uses for the eDB history-sync
+    // repair.
     {
-        let hp = parsed.history_playlists.len();
-        let he = parsed.history_entries.len();
+        let (hp, he) =
+            count_named_history_rows(&parsed.history_playlists, &parsed.history_entries);
         let hr = parsed.history_rows.len();
         if hp > 0 || he > 0 || hr > 0 {
             checks.push(DiagCheck {
@@ -3179,13 +3205,75 @@ mod tests {
 
     use super::{
         ExportDbPlaylist, ReferenceOnlyEdbFieldUsage, build_usb_parity_comparison,
-        diagnose_contents_integrity, diagnose_playlist_resolution_with_db,
-        diagnose_playlist_resolution_with_edb_internal, evaluate_strict_raw_coverage_parity,
-        normalize_pdb_path_for_edb_lookup, normalize_track_path_for_identity, track_identity_key,
+        count_named_history_rows, diagnose_contents_integrity,
+        diagnose_playlist_resolution_with_db, diagnose_playlist_resolution_with_edb_internal,
+        evaluate_strict_raw_coverage_parity, normalize_pdb_path_for_edb_lookup,
+        normalize_track_path_for_identity, track_identity_key,
     };
     use crate::models::{DiagStatus, UsbTrack};
-    use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PdbTrackRow};
+    use crate::pdb_reader::{
+        ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistEntryRow,
+        PdbPlaylistTreeRow, PdbTrackRow,
+    };
     use tempfile::tempdir;
+
+    // --- count_named_history_rows ---
+
+    #[test]
+    fn count_named_history_rows_excludes_seed_only_export() {
+        // Shaped like the real byte-level data confirmed on several unrelated
+        // fresh/never-played rekordbox exports: blank template playlists
+        // paired with trackless entries, no real session.
+        let playlists = (0..22)
+            .map(|id| PdbHistoryPlaylistRow {
+                id,
+                name: String::new(),
+                source_table: 17,
+            })
+            .collect::<Vec<_>>();
+        let entries = (0..17)
+            .map(|id| PdbHistoryEntryRow {
+                track_id: None,
+                playlist_id: id,
+                entry_index: 1,
+                source_table: 18,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(count_named_history_rows(&playlists, &entries), (0, 0));
+    }
+
+    #[test]
+    fn count_named_history_rows_counts_real_sessions_only() {
+        let playlists = vec![
+            PdbHistoryPlaylistRow {
+                id: 1,
+                name: "HISTORY 001".to_string(),
+                source_table: 17,
+            },
+            PdbHistoryPlaylistRow {
+                id: 2,
+                name: String::new(),
+                source_table: 17,
+            },
+        ];
+        let entries = vec![
+            PdbHistoryEntryRow {
+                track_id: Some(101),
+                playlist_id: 1,
+                entry_index: 1,
+                source_table: 18,
+            },
+            PdbHistoryEntryRow {
+                track_id: None,
+                playlist_id: 2,
+                entry_index: 1,
+                source_table: 18,
+            },
+        ];
+
+        assert_eq!(count_named_history_rows(&playlists, &entries), (1, 1));
+    }
 
     #[test]
     fn track_identity_prefers_contents_path_for_absolute_usb_path() {

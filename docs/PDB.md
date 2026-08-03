@@ -151,6 +151,31 @@ The current writer leaves `t09`-`t12` and `t14`-`t15` empty during normal
 export. The reader can parse `t11` and `t12` as legacy history-family fallback
 tables when `t17` and `t18` are empty.
 
+### t17/t18 blank template rows on fresh/never-played exports
+
+Verified byte-level against several unrelated rekordbox exports, none ever
+played on hardware, including a rekordbox-initialized drive with zero tracks
+or playlists. All of them ship `t17`/`t18` pre-populated with a fixed,
+byte-identical block of blank template/seed rows (same ids, same shapes,
+regardless of the export's actual library or track count):
+
+- `t17` (`history_playlists`) rows have `name` empty (or a single stray
+  control byte). Real rekordbox-recorded sessions are always named
+  `"HISTORY NNN"`.
+- `t18` (`history_entries`) rows are physically 8 bytes — no `track_id`
+  field at all (`parse_history_entry_row`'s short-row branch always yields
+  `track_id: None` for these).
+
+These are not corruption and not something this app writes; they ship as
+part of rekordbox's own export template and are present even when `t11`/`t12`
+(the hardware-only legacy fallback tables) are completely empty, i.e. on the
+most common case of a freshly exported or never-played drive. Any reader
+that surfaces `t17`/`t18` rows as user-facing history (import, diagnostics)
+must filter on the `"HISTORY "` name prefix first — this is the same rule
+`derive_history_sync_payload` (`repair.rs`, used by the eDB history-sync
+repair) already applied, now also applied by `is_named_history_playlist`
+(`usb_helpers.rs`) at the USB history import and diagnostics read paths.
+
 ## Page Header
 
 Every page begins with a 40-byte header. Data rows grow forward from `0x28`.
