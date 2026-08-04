@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rusqlite::params;
 
@@ -74,26 +74,6 @@ struct StrictParityUpgradeApplyResult {
 struct PdbHeaderCompatibilityRepair {
     current_value: u32,
     target_value: u32,
-    source: PdbHeaderCompatibilitySource,
-}
-
-#[derive(Debug, Clone)]
-enum PdbHeaderCompatibilitySource {
-    PreviousSnapshot(PathBuf),
-    Fallback,
-}
-
-impl PdbHeaderCompatibilitySource {
-    fn user_label(&self) -> String {
-        match self {
-            Self::PreviousSnapshot(path) => path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| format!("previous PDB snapshot {name}"))
-                .unwrap_or_else(|| "previous PDB snapshot".to_string()),
-            Self::Fallback => "built-in compatibility value".to_string(),
-        }
-    }
 }
 
 fn pdb_header_compatibility_value_from_bytes(bytes: &[u8]) -> Option<u32> {
@@ -113,53 +93,22 @@ fn is_known_pdb_header_compatibility_value(value: u32) -> bool {
     matches!(value, 1 | PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE)
 }
 
-fn previous_pdb_header_compatibility_value(usb_root: &Path) -> Option<(u32, PathBuf)> {
-    let pdb_path = vendor_pdb_path(usb_root);
-    let previous_dir = pdb_path.parent()?.join("backups");
-    let mut candidates = Vec::<(String, u32, PathBuf)>::new();
-    for entry in std::fs::read_dir(previous_dir).ok()? {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let path = entry.path();
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !file_name.starts_with("export_")
-            || path.extension().and_then(|ext| ext.to_str()) != Some("pdb")
-        {
-            continue;
-        }
-        let Some(value) = read_pdb_header_compatibility_value(&path) else {
-            continue;
-        };
-        if is_known_pdb_header_compatibility_value(value) {
-            candidates.push((file_name.to_string(), value, path));
-        }
-    }
-    candidates.sort_by(|a, b| a.0.cmp(&b.0));
-    candidates.pop().map(|(_, value, path)| (value, path))
-}
-
+/// `docs/PDB.md` "File header `0x10` compatibility field" confirms both `1`
+/// and `5` are accepted by every tested validator. Comparing against the
+/// most recent backup snapshot's value here would cause this repair to
+/// oscillate forever: the writer always emits `5` on a fresh export, so any
+/// export following a prior application of this repair (which patches to
+/// `1`) immediately re-flags "drift" back toward `1`, and applying it again
+/// just sets up the next export to flag drift back toward `5`. Only an
+/// actually-unknown value is worth repairing.
 fn detect_pdb_header_compatibility_repair(usb_root: &Path) -> Option<PdbHeaderCompatibilityRepair> {
     let current_value = read_pdb_header_compatibility_value(&vendor_pdb_path(usb_root))?;
-    if let Some((target_value, path)) = previous_pdb_header_compatibility_value(usb_root)
-        && current_value != target_value
-    {
-        return Some(PdbHeaderCompatibilityRepair {
-            current_value,
-            target_value,
-            source: PdbHeaderCompatibilitySource::PreviousSnapshot(path),
-        });
-    }
-
     if is_known_pdb_header_compatibility_value(current_value) {
         return None;
     }
     Some(PdbHeaderCompatibilityRepair {
         current_value,
         target_value: PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE,
-        source: PdbHeaderCompatibilitySource::Fallback,
     })
 }
 
@@ -2919,10 +2868,8 @@ impl BackendService {
                 id: PDB_HEADER_COMPATIBILITY_FIX_ID.to_string(),
                 title: "Repair PDB Header Compatibility Field".to_string(),
                 description: format!(
-                    "Patch only bytes 0x10..0x14 from {} to {} using {}.",
-                    repair.current_value,
-                    repair.target_value,
-                    repair.source.user_label()
+                    "Patch only bytes 0x10..0x14 from {} to the built-in compatibility value {}.",
+                    repair.current_value, repair.target_value,
                 ),
                 supported: true,
                 destructive: false,
@@ -3484,10 +3431,8 @@ impl BackendService {
                 if let Some(repair) = pdb_header_compatibility_repair.as_ref() {
                     match apply_pdb_header_compatibility_repair(&usb_root, repair) {
                         Ok(true) => applied_fixes.push(format!(
-                            "Repair PDB Header Compatibility Field: wrote 0x10..0x14 {}->{} using {}",
-                            repair.current_value,
-                            repair.target_value,
-                            repair.source.user_label()
+                            "Repair PDB Header Compatibility Field: wrote 0x10..0x14 {}->{}",
+                            repair.current_value, repair.target_value,
                         )),
                         Ok(false) => skipped_fixes.push(
                             "Repair PDB Header Compatibility Field: nothing to apply".to_string(),

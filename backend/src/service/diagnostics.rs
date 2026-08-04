@@ -77,33 +77,6 @@ fn read_pdb_header_compatibility_value(path: &std::path::Path) -> Option<u32> {
     read_u32_le_at(&header, 0x10)
 }
 
-fn previous_pdb_header_compatibility_value(pdb_path: &std::path::Path) -> Option<(u32, String)> {
-    let previous_dir = pdb_path.parent()?.join("backups");
-    let mut candidates = Vec::<(String, u32)>::new();
-    for entry in std::fs::read_dir(previous_dir).ok()? {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let path = entry.path();
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !file_name.starts_with("export_")
-            || path.extension().and_then(|ext| ext.to_str()) != Some("pdb")
-        {
-            continue;
-        }
-        let Some(value) = read_pdb_header_compatibility_value(&path) else {
-            continue;
-        };
-        if is_known_pdb_header_compatibility_value(value) {
-            candidates.push((file_name.to_string(), value));
-        }
-    }
-    candidates.sort_by(|a, b| a.0.cmp(&b.0));
-    candidates.pop().map(|(name, value)| (value, name))
-}
-
 fn compute_player_counter_snapshot(
     usb_root: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
@@ -934,21 +907,18 @@ pub(crate) fn diagnose_pdb_integrity(
     });
 
     if let Some(header_compat) = read_pdb_header_compatibility_value(pdb_path) {
-        let previous_compat = previous_pdb_header_compatibility_value(pdb_path);
-        let drift_target = previous_compat
-            .as_ref()
-            .and_then(|(value, name)| (header_compat != *value).then_some((*value, name)));
+        // docs/PDB.md "File header 0x10 compatibility field": both 1 and 5 are
+        // confirmed accepted by every tested validator. Comparing against a
+        // backup snapshot's value here would flag "drift" every time a fresh
+        // export (writer always emits 5) follows a prior repair application
+        // (which patches to 1) — an unwinnable oscillation, not a real issue.
         let invalid_current = !is_known_pdb_header_compatibility_value(header_compat);
-        let header_compat_status = if drift_target.is_some() || invalid_current {
+        let header_compat_status = if invalid_current {
             DiagStatus::Warn
         } else {
             DiagStatus::Pass
         };
-        let detail = if let Some((target, name)) = drift_target {
-            format!(
-                "value {header_compat} at bytes 0x10..0x14; previous local PDB snapshot {name} has {target}"
-            )
-        } else if invalid_current {
+        let detail = if invalid_current {
             format!("value {header_compat} at bytes 0x10..0x14; expected a known-compatible value")
         } else {
             format!("value {header_compat} at bytes 0x10..0x14")

@@ -30,6 +30,16 @@
 
 ## Unreleased
 
+- **Fix:** stop the "Repair PDB Header Compatibility Field" diagnostic from
+  perpetually re-flagging itself. It compared the PDB file header's
+  compatibility byte against the most recent local backup snapshot and
+  proposed patching toward that snapshot's value on any difference — but the
+  writer always emits `5` on a fresh export while applying the repair patches
+  to whatever the snapshot held (often `1`), so every export/repair cycle
+  flipped the value and re-triggered the opposite-direction "fix" against the
+  next snapshot, never converging. Both `1` and `5` are confirmed accepted by
+  every tested validator, so a differing backup snapshot is no longer treated
+  as an issue; only a genuinely unrecognized value is repaired now.
 - **New feature:** add an "Export Tracklist" button to the USB History panel.
   Exports the selected history session's tracks as a plain `.txt` file
   (`Artist - Title` per line), with a choice of which track the list starts

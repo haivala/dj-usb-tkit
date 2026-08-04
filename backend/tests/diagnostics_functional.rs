@@ -1154,7 +1154,16 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
 }
 
 #[test]
-fn diagnostics_and_repair_pdb_header_compatibility_use_previous_snapshot_when_present() {
+fn diagnostics_and_repair_pdb_header_compatibility_ignores_backup_snapshot_drift() {
+    // Regression test: a previous version of this check compared the current
+    // value against the most recent backup snapshot and flagged "drift" when
+    // they differed. Since the writer always emits 5 on a fresh export while
+    // this repair (when it existed) patched to 1, that comparison oscillated
+    // forever across repeated apply/export cycles — the exact anti-pattern
+    // `docs/PDB.md` and this repair are meant to avoid. Both 1 and 5 are
+    // confirmed validator-accepted, so a differing backup snapshot must not
+    // be treated as an issue, and the current value must not be "corrected"
+    // to match it.
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
     let pdb_path = vendor_db_dir(&usb).join("export.pdb");
     create_previous_pdb_snapshot_with_header(&usb, &pdb_path, "export_2099-01-01_00-00-00.pdb", 1);
@@ -1172,21 +1181,26 @@ fn diagnostics_and_repair_pdb_header_compatibility_use_previous_snapshot_when_pr
         .find(|c| c.label == "PDB header compatibility")
         .expect("header compatibility check");
     assert!(
-        matches!(header_check.status, backend::models::DiagStatus::Warn),
-        "unexpected header check: {header_check:?}"
-    );
-    assert!(
-        header_check.detail.contains("previous local PDB snapshot"),
-        "unexpected header detail: {header_check:?}"
+        matches!(header_check.status, backend::models::DiagStatus::Pass),
+        "known-compatible value differing from a backup snapshot must not warn: {header_check:?}"
     );
 
-    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
-        apply: true,
-        selected_fix_ids: vec![PDB_HEADER_COMPATIBILITY_FIX_ID.to_string()],
+        apply: false,
+        selected_fix_ids: Vec::new(),
     });
-    assert!(repair.ok, "repair failed: {repair:?}");
-    assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 1);
+    assert!(preview.ok, "repair preview failed: {preview:?}");
+    let preview_data = preview.data.expect("preview data");
+    assert!(
+        !preview_data
+            .proposed_fixes
+            .iter()
+            .any(|fix| fix.id == PDB_HEADER_COMPATIBILITY_FIX_ID),
+        "no repair should be proposed for a known-compatible value: {:?}",
+        preview_data.proposed_fixes
+    );
+    assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 5);
 }
 
 #[test]
