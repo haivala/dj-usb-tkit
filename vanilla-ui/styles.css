@@ -2977,6 +2977,29 @@ td button[data-action]:disabled,
 
 .confirm-actions {
   justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.tracklist-export-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tracklist-export-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tracklist-export-field select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Empty states ────────────────────────────── */

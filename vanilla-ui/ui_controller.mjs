@@ -183,6 +183,63 @@ export function createConfirmDialogController(el) {
   };
 }
 
+export function createTracklistExportDialogController(el) {
+  let resolveFn = null;
+  let isOpen = false;
+
+  function syncPlacementVisibility() {
+    const enabled = !!el.tracklistExportTimesToggle?.checked;
+    if (el.tracklistExportPlacementRow) {
+      el.tracklistExportPlacementRow.classList.toggle("hidden", !enabled);
+    }
+  }
+
+  function populateStartTrackOptions(tracks) {
+    const select = el.tracklistExportStartTrack;
+    if (!select) return;
+    const doc = select.ownerDocument;
+    select.textContent = "";
+    (tracks || []).forEach((track, index) => {
+      const option = doc.createElement("option");
+      option.value = String(index);
+      const label = `${index + 1}. ${track?.artist || ""} - ${track?.title || ""}`;
+      option.textContent = label.length > 64 ? `${label.slice(0, 63)}…` : label;
+      select.append(option);
+    });
+    select.value = "0";
+  }
+
+  return {
+    isOpen() {
+      return isOpen;
+    },
+    close(result) {
+      if (!isOpen) return;
+      isOpen = false;
+      el.tracklistExportOverlay.hidden = true;
+      const resolver = resolveFn;
+      resolveFn = null;
+      if (resolver) resolver(result || null);
+    },
+    open({ tracks = [], defaultTimesEnabled = true, defaultPlacement = "before" } = {}) {
+      if (isOpen) {
+        this.close(null);
+      }
+      isOpen = true;
+      populateStartTrackOptions(tracks);
+      el.tracklistExportTimesToggle.checked = defaultTimesEnabled;
+      el.tracklistExportPlacement.value = defaultPlacement;
+      syncPlacementVisibility();
+      el.tracklistExportOverlay.hidden = false;
+      el.tracklistExportOkBtn.focus();
+      return new Promise((resolve) => {
+        resolveFn = resolve;
+      });
+    },
+    syncPlacementVisibility
+  };
+}
+
 export function bindEvents(ctx) {
   const { state, el } = ctx;
 

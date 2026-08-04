@@ -15,6 +15,8 @@ export function bindUsbEvents(ctx) {
     applyUsbRepairs,
     showDiagReportView,
     refreshHistory,
+    exportHistoryTracklist,
+    tracklistExportDialog,
     loadUsbPlayerMenuConfig,
     syncUsbPlayerMenuEditorControls,
     handleUsbPlayerMenuListClick,
@@ -110,6 +112,29 @@ export function bindUsbEvents(ctx) {
 
   el.refreshHistoryBtn.addEventListener("click", () => {
     refreshHistory().catch(catchErr(emitStatus));
+  });
+
+  el.exportHistoryTracklistBtn?.addEventListener("click", () => {
+    exportHistoryTracklist().catch(catchErr(emitStatus));
+  });
+
+  el.tracklistExportTimesToggle?.addEventListener("change", () => {
+    tracklistExportDialog?.syncPlacementVisibility();
+  });
+  el.tracklistExportOkBtn?.addEventListener("click", () => {
+    const timesOn = !!el.tracklistExportTimesToggle?.checked;
+    tracklistExportDialog?.close({
+      timeMode: timesOn ? el.tracklistExportPlacement.value : "off",
+      startIndex: Number(el.tracklistExportStartTrack?.value) || 0
+    });
+  });
+  el.tracklistExportCancelBtn?.addEventListener("click", () => {
+    tracklistExportDialog?.close(null);
+  });
+  el.tracklistExportOverlay?.addEventListener("click", (event) => {
+    if (event.target === el.tracklistExportOverlay) {
+      tracklistExportDialog?.close(null);
+    }
   });
 
   el.usbPlayerMenuAddBtn?.addEventListener("click", () => {
@@ -282,8 +307,10 @@ export function bindUsbEvents(ctx) {
     });
     const index = btn.dataset.historyIndex;
 
+    state.selectedHistoryIndex = Number(index);
     const history = state.histories[Number(index)];
     state.historyTracks = history?.tracks || [];
+    if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = !state.historyTracks.length;
     setActiveListItem(el.historyList, btn);
     renderHistoryTracks();
     historySelectionHydrationToken += 1;

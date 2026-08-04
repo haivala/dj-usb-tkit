@@ -45,6 +45,7 @@ export function createInitialState() {
     usbPlaylistTracksView: [],
     usbTrackSearch: "",
     histories: [],
+    selectedHistoryIndex: null,
     historyTracks: [],
     historyTracksView: [],
     historyTrackSearch: "",

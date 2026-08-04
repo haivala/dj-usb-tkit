@@ -278,6 +278,7 @@
         <h2>USB History</h2>
         <div class="row mb-sm">
           <button id="refreshHistoryBtn" data-primary disabled>Import History</button>
+          <button id="exportHistoryTracklistBtn" disabled>Export Tracklist</button>
         </div>
         <p class="muted" id="historyCountsText">0 sessions, 0 tracks</p>
         <div class="split">
@@ -505,6 +506,34 @@
       <div class="row confirm-actions">
         <button id="confirmCancelBtn">Cancel</button>
         <button id="confirmOkBtn" data-primary>Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="confirm-overlay" id="tracklistExportOverlay" hidden>
+    <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="tracklistExportTitle">
+      <h3 id="tracklistExportTitle">Export Tracklist</h3>
+      <div class="tracklist-export-body">
+        <div class="tracklist-export-field" id="tracklistExportStartRow">
+          <label for="tracklistExportStartTrack">Start from track</label>
+          <select id="tracklistExportStartTrack"></select>
+        </div>
+        <label class="usb-cfg-toggle-row" for="tracklistExportTimesToggle">
+          <input type="checkbox" id="tracklistExportTimesToggle" checked />
+          <span>Include estimated times</span>
+          <span class="muted usb-cfg-toggle-hint">Times are estimated by summing track lengths in play order &mdash; CDJs do not record per-track playback times in the USB.</span>
+        </label>
+        <div class="tracklist-export-field" id="tracklistExportPlacementRow">
+          <label for="tracklistExportPlacement">Time placement</label>
+          <select id="tracklistExportPlacement">
+            <option value="before" selected>Before track (0:00 Artist - Title)</option>
+            <option value="after">After track (Artist - Title - 0:00)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row confirm-actions">
+        <button id="tracklistExportCancelBtn">Cancel</button>
+        <button id="tracklistExportOkBtn" data-primary>Export&hellip;</button>
       </div>
     </div>
   </div>

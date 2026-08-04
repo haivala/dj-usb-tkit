@@ -112,6 +112,7 @@ These are desktop host commands, not backend API envelope commands:
 - `get_backend_log_buffer`
 - `pick_source_folders`
 - `pick_usb_folder`
+- `save_text_file`
 - `allow_asset_paths`
 - `show_window`
 - `set_theme_background`

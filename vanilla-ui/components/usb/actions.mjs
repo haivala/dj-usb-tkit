@@ -514,6 +514,7 @@ export function resetUsbStateViews(state, el, deps = {}) {
   state.usbPlaylistTracks = [];
   state.usbPlaylistTracksView = [];
   state.histories = [];
+  state.selectedHistoryIndex = null;
   state.historyTracks = [];
   state.historyTracksView = [];
   state.usbPlayerMenuCurrent = [];
@@ -523,6 +524,7 @@ export function resetUsbStateViews(state, el, deps = {}) {
 
   el.usbCountsText.textContent = "";
   el.historyCountsText.textContent = "";
+  if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
   hideUsbDiagnostics(el);
 
   renderUsbPlaylists();
@@ -971,13 +973,49 @@ export async function refreshHistory(state, el, deps) {
     ? counts.importedTracks
     : state.histories.reduce((sum, history) => sum + (history.tracks?.length || 0), 0);
   el.historyCountsText.textContent = `${importedPlaylists} sessions, ${importedTracks} tracks`;
+  state.selectedHistoryIndex = null;
   state.historyTracks = [];
+  if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList();
   renderHistoryTracks();
   const warningCount = countWarningsForStatus(data.warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   logWarnings("usb-import", data.warnings, "fetch_usb_histories");
   emitStatus(`USB histories loaded: ${state.histories.length}${warningSuffix}`, { warningCount });
+}
+
+export function sanitizeTracklistFileName(name) {
+  const cleaned = String(name || "")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${cleaned || "tracklist"}.txt`;
+}
+
+export async function exportHistoryTracklist(state, el, deps = {}) {
+  const { invoke = async () => false, tracklistExportDialog, buildTracklistText = () => "" } = deps;
+  const emitStatus = resolveEmitStatus(deps);
+
+  const history = state.histories[state.selectedHistoryIndex];
+  if (!history || !state.historyTracks.length) {
+    emitStatus("Select a history session first");
+    return;
+  }
+
+  const choice = await tracklistExportDialog.open({
+    tracks: state.historyTracks,
+    defaultTimesEnabled: true,
+    defaultPlacement: "before"
+  });
+  if (!choice) return;
+
+  const startIndex = Math.min(Math.max(Number(choice.startIndex) || 0, 0), state.historyTracks.length - 1);
+  const text = buildTracklistText(state.historyTracks.slice(startIndex), choice.timeMode);
+  const saved = await invoke("save_text_file", {
+    suggestedFileName: sanitizeTracklistFileName(history.name),
+    contents: text
+  });
+  emitStatus(saved ? `Tracklist exported: ${history.name}` : "Tracklist export cancelled");
 }
 
 function toMenuOptionLabel(item) {

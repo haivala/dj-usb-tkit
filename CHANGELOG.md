@@ -8,9 +8,37 @@
   under the version heading:
 
   **Severity:** critical
+
+  Every entry is prefixed with its category, bolded, followed by a colon:
+
+  - **New feature:** user-facing capability that didn't exist before
+  - **Fix:** corrects incorrect behavior
+  - **Improvement:** changes/refactors existing behavior without fixing a bug
+    or adding a new capability
+  - **Chore:** tests, docs, tooling, or other non-user-facing changes
+
+  When a release is flagged critical, the Severity line must point at which
+  item(s) below are the critical ones — not every entry in a critical release
+  is necessarily itself critical. Do this by appending `(CRITICAL)` to the
+  category prefix of the affected entry/entries, then referencing them from
+  the Severity line, e.g.:
+
+  **Severity:** critical — see item(s) marked **(CRITICAL)** below.
+  ...
+  - **Fix (CRITICAL):** ...
 -->
 
 ## Unreleased
+
+- **New feature:** add an "Export Tracklist" button to the USB History panel.
+  Exports the selected history session's tracks as a plain `.txt` file
+  (`Artist - Title` per line), with a choice of which track the list starts
+  from and an option to include estimated cumulative times before or after
+  each track. Times are always an estimate — summed from track length in
+  play order starting from the chosen track — since CDJs never record a
+  per-track playback timestamp in the USB, and often not even a reliable
+  session date; this app estimates the latter from track metadata when the
+  USB doesn't provide one directly.
 
 ## 0.1.9
 

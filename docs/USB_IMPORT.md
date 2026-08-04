@@ -63,6 +63,24 @@ These rules are important for robust import on mixed-vendor or older USB content
 
 History source selection is explicit. Import prefers PDB `t17/t18` history tables and only falls back to `t11/t12` when `t17/t18` are empty. This avoids mixing incompatible history-table families and makes history provenance predictable.
 
+An imported history session can be exported as a plain-text tracklist
+("Export Tracklist" on the USB History panel), with a choice of which track
+in the session the list starts from and an option to include estimated
+cumulative per-track times, placed before or after each `Artist - Title`
+line. These times are always an estimate — summed from track `durationMs`
+in the session's play order starting from the chosen track — because CDJs
+never record a per-track playback timestamp in the USB at all: neither PDB
+(`t17/t18` entry rows) nor eDB (`history`/`history_content`) carry any
+per-track timestamp field. Even the session-level date shown elsewhere in
+the History panel isn't guaranteed to be a real hardware-recorded value —
+PDB `t19` rows can carry a date per history session when the CDJ wrote one,
+but when that's absent the app estimates it from the session's own tracks'
+`date_added` metadata instead (`apply_history_dates_from_track_date_created`
+in `backend/src/service/usb.rs`). This export is pure frontend formatting
+over already-imported `UsbHistory` data
+(`vanilla-ui/track_utils.mjs::buildTracklistText`); it does not read PDB/eDB
+again and is unrelated to the USB export/write pipeline.
+
 Corruption tolerance is intentional: unreadable optional analysis artifacts should produce warnings rather than aborting whole playlist/history imports. The command returns partial-but-usable data whenever safe to do so.
 
 Implementation anchors:

@@ -9,6 +9,8 @@ import {
   handleUsbPlayerMenuListClick,
   renderUsbPlayerMenuEditor,
   syncUsbPlayerMenuEditorControls,
+  exportHistoryTracklist,
+  sanitizeTracklistFileName,
 } from "../components/usb/actions.mjs";
 
 test("runUsbDiagnostics requires usb root", async () => {
@@ -51,6 +53,149 @@ test("refreshHistory populates state and summary counts", async () => {
   assert.equal(renderedLists, 1);
   assert.equal(renderedTracks, 1);
   assert.match(status, /USB histories loaded: 1 \| \(1 warning\(s\)\)/);
+});
+
+test("sanitizeTracklistFileName strips invalid characters and falls back to a default", () => {
+  assert.equal(sanitizeTracklistFileName("HISTORY 003"), "HISTORY 003.txt");
+  assert.equal(sanitizeTracklistFileName('Set: A/B "Live"?'), "Set- A-B -Live-.txt");
+  assert.equal(sanitizeTracklistFileName("   "), "tracklist.txt");
+  assert.equal(sanitizeTracklistFileName(""), "tracklist.txt");
+});
+
+test("exportHistoryTracklist requires a selected history session", async () => {
+  const state = { histories: [], selectedHistoryIndex: null, historyTracks: [] };
+  let status = "";
+  let invokeCalled = false;
+
+  await exportHistoryTracklist(state, {}, {
+    setStatus: (text) => { status = text; },
+    invoke: async () => { invokeCalled = true; return true; }
+  });
+
+  assert.equal(status, "Select a history session first");
+  assert.equal(invokeCalled, false);
+});
+
+test("exportHistoryTracklist does nothing when the options dialog is cancelled", async () => {
+  const state = {
+    histories: [{ name: "HISTORY 001" }],
+    selectedHistoryIndex: 0,
+    historyTracks: [{ artist: "A", title: "B", durationMs: 1000 }]
+  };
+  let invokeCalled = false;
+  let buildCalled = false;
+
+  await exportHistoryTracklist(state, {}, {
+    setStatus: () => {},
+    invoke: async () => { invokeCalled = true; return true; },
+    buildTracklistText: () => { buildCalled = true; return ""; },
+    tracklistExportDialog: { open: async () => null }
+  });
+
+  assert.equal(invokeCalled, false);
+  assert.equal(buildCalled, false);
+});
+
+test("exportHistoryTracklist builds text from historyTracks and saves via save_text_file", async () => {
+  const state = {
+    histories: [{ name: "HISTORY 001" }],
+    selectedHistoryIndex: 0,
+    historyTracks: [{ artist: "A", title: "B", durationMs: 1000 }]
+  };
+  let status = "";
+  let invokeArgs = null;
+  let buildArgs = null;
+  let openArgs = null;
+
+  await exportHistoryTracklist(state, {}, {
+    setStatus: (text) => { status = text; },
+    invoke: async (cmd, payload) => {
+      invokeArgs = { cmd, payload };
+      return true;
+    },
+    buildTracklistText: (tracks, timeMode) => {
+      buildArgs = { tracks, timeMode };
+      return "A - B";
+    },
+    tracklistExportDialog: {
+      open: async (opts) => { openArgs = opts; return { timeMode: "before", startIndex: 0 }; }
+    }
+  });
+
+  assert.deepEqual(openArgs.tracks, state.historyTracks);
+  assert.deepEqual(buildArgs.tracks, state.historyTracks);
+  assert.equal(buildArgs.timeMode, "before");
+  assert.equal(invokeArgs.cmd, "save_text_file");
+  assert.equal(invokeArgs.payload.suggestedFileName, "HISTORY 001.txt");
+  assert.equal(invokeArgs.payload.contents, "A - B");
+  assert.match(status, /Tracklist exported: HISTORY 001/);
+});
+
+test("exportHistoryTracklist slices historyTracks from the chosen start index", async () => {
+  const state = {
+    histories: [{ name: "HISTORY 001" }],
+    selectedHistoryIndex: 0,
+    historyTracks: [
+      { artist: "A", title: "One", durationMs: 1000 },
+      { artist: "B", title: "Two", durationMs: 1000 },
+      { artist: "C", title: "Three", durationMs: 1000 }
+    ]
+  };
+  let buildArgs = null;
+
+  await exportHistoryTracklist(state, {}, {
+    setStatus: () => {},
+    invoke: async () => true,
+    buildTracklistText: (tracks, timeMode) => {
+      buildArgs = { tracks, timeMode };
+      return "";
+    },
+    tracklistExportDialog: { open: async () => ({ timeMode: "off", startIndex: 1 }) }
+  });
+
+  assert.deepEqual(buildArgs.tracks, [
+    { artist: "B", title: "Two", durationMs: 1000 },
+    { artist: "C", title: "Three", durationMs: 1000 }
+  ]);
+});
+
+test("exportHistoryTracklist clamps an out-of-range start index instead of throwing", async () => {
+  const state = {
+    histories: [{ name: "HISTORY 001" }],
+    selectedHistoryIndex: 0,
+    historyTracks: [{ artist: "A", title: "One", durationMs: 1000 }]
+  };
+  let buildArgs = null;
+
+  await exportHistoryTracklist(state, {}, {
+    setStatus: () => {},
+    invoke: async () => true,
+    buildTracklistText: (tracks, timeMode) => {
+      buildArgs = { tracks, timeMode };
+      return "";
+    },
+    tracklistExportDialog: { open: async () => ({ timeMode: "off", startIndex: 99 }) }
+  });
+
+  assert.deepEqual(buildArgs.tracks, [{ artist: "A", title: "One", durationMs: 1000 }]);
+});
+
+test("exportHistoryTracklist reports cancellation when the save dialog is dismissed", async () => {
+  const state = {
+    histories: [{ name: "HISTORY 001" }],
+    selectedHistoryIndex: 0,
+    historyTracks: [{ artist: "A", title: "B", durationMs: 1000 }]
+  };
+  let status = "";
+
+  await exportHistoryTracklist(state, {}, {
+    setStatus: (text) => { status = text; },
+    invoke: async () => false,
+    buildTracklistText: () => "A - B",
+    tracklistExportDialog: { open: async () => ({ timeMode: "off" }) }
+  });
+
+  assert.match(status, /Tracklist export cancelled/);
 });
 
 test("exportPlaylistToUsb blocks when playlist tracks are missing and logs generic failures", async () => {

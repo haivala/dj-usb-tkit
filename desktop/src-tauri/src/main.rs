@@ -140,6 +140,45 @@ async fn pick_usb_folder(app: tauri::AppHandle) -> Result<Option<String>, String
 }
 
 #[tauri::command]
+async fn save_text_file(
+    app: tauri::AppHandle,
+    suggested_file_name: String,
+    contents: String,
+) -> Result<bool, String> {
+    let (tx, rx) = mpsc::channel::<Option<FilePath>>();
+
+    app.dialog()
+        .file()
+        .set_title("Save tracklist")
+        .add_filter("Text", &["txt"])
+        .set_file_name(&suggested_file_name)
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+
+    let selected = tauri::async_runtime::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|err| format!("dialog task failed: {err}"))?
+        .map_err(|err| format!("dialog response failed: {err}"))?;
+
+    let Some(path) = selected else {
+        return Ok(false);
+    };
+
+    let path_buf = match path {
+        FilePath::Path(path_buf) => path_buf,
+        FilePath::Url(url) => url
+            .to_file_path()
+            .map_err(|_| "unsupported file URL for save target".to_string())?,
+    };
+
+    fs::write(&path_buf, contents)
+        .map_err(|err| format!("failed to write {}: {err}", path_buf.display()))?;
+
+    Ok(true)
+}
+
+#[tauri::command]
 async fn allow_asset_paths(app: tauri::AppHandle, paths: Vec<String>) -> Result<usize, String> {
     let mut allowed = 0usize;
     for value in paths {
@@ -803,6 +842,7 @@ fn main() {
             get_backend_log_buffer,
             pick_source_folders,
             pick_usb_folder,
+            save_text_file,
             allow_asset_paths,
             show_window,
             set_theme_background

@@ -53,6 +53,21 @@ export function updateTrackListDurationSummary(target, tracks) {
   return { totalMs, unknownCount };
 }
 
+export function buildTracklistText(tracks, timeMode) {
+  const items = Array.isArray(tracks) ? tracks : [];
+  let cumulativeMs = 0;
+  return items
+    .map((track) => {
+      const line = `${track?.artist || ""} - ${track?.title || ""}`;
+      if (timeMode !== "before" && timeMode !== "after") return line;
+      const stamp = formatDurationMs(cumulativeMs);
+      const durationMs = Number(track?.durationMs);
+      cumulativeMs += Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
+      return timeMode === "before" ? `${stamp} ${line}` : `${line} - ${stamp}`;
+    })
+    .join("\n");
+}
+
 export function getHistoryDateValue(history) {
   return history?.createdAt || history?.sourceCreatedAt || history?.sourcePlayedAt || "";
 }

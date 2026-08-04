@@ -56,6 +56,7 @@ import {
   getHistoryDateDisplay,
   formatTimestampLocal,
   filterTracksByQuery,
+  buildTracklistText,
 } from "./track_utils.mjs";
 import { createApiClient } from "./api_client.mjs";
 import * as jobMgr from "./job_manager.mjs";
@@ -181,6 +182,7 @@ const el = {
   addSelectedBtn: document.getElementById("addSelectedBtn"),
   refreshUsbBtn: document.getElementById("refreshUsbBtn"),
   refreshHistoryBtn: document.getElementById("refreshHistoryBtn"),
+  exportHistoryTracklistBtn: document.getElementById("exportHistoryTracklistBtn"),
   runUsbParityBtn: document.getElementById("runUsbParityBtn"),
   exportSyncModeGroup: document.getElementById("exportSyncModeGroup"),
   exportSyncModeMirror: document.getElementById("exportSyncModeMirror"),
@@ -228,6 +230,14 @@ const el = {
   confirmMessage: document.getElementById("confirmMessage"),
   confirmOkBtn: document.getElementById("confirmOkBtn"),
   confirmCancelBtn: document.getElementById("confirmCancelBtn"),
+  tracklistExportOverlay: document.getElementById("tracklistExportOverlay"),
+  tracklistExportTitle: document.getElementById("tracklistExportTitle"),
+  tracklistExportStartTrack: document.getElementById("tracklistExportStartTrack"),
+  tracklistExportTimesToggle: document.getElementById("tracklistExportTimesToggle"),
+  tracklistExportPlacementRow: document.getElementById("tracklistExportPlacementRow"),
+  tracklistExportPlacement: document.getElementById("tracklistExportPlacement"),
+  tracklistExportOkBtn: document.getElementById("tracklistExportOkBtn"),
+  tracklistExportCancelBtn: document.getElementById("tracklistExportCancelBtn"),
   helpBtn: document.getElementById("helpBtn"),
   helpOverlay: document.getElementById("helpOverlay"),
   helpCloseBtn: document.getElementById("helpCloseBtn"),
@@ -239,6 +249,7 @@ const el = {
 };
 
 const confirmDialog = uiCtrl.createConfirmDialogController(el);
+const tracklistExportDialog = uiCtrl.createTracklistExportDialogController(el);
 
 // --- Closures that bind state/el/deps ---
 
@@ -1420,6 +1431,15 @@ async function refreshHistory() {
     renderHistoryTracks,
   });
 }
+async function exportHistoryTracklist() {
+  return usb.exportHistoryTracklist(state, el, {
+    setStatus,
+    emitStatus,
+    invoke,
+    tracklistExportDialog,
+    buildTracklistText,
+  });
+}
 async function loadUsbPlayerMenuConfig() {
   return usb.loadUsbPlayerMenuConfig(state, el, {
     setStatus,
@@ -1641,6 +1661,7 @@ function bindEvents() {
     eventLogStore,
     sidebarExpandBtn,
     confirmDialog,
+    tracklistExportDialog,
     constants: {
       STORAGE_KEY_SIDEBAR_COLLAPSED,
       FRONTEND_DB_KEY_SIDEBAR_COLLAPSED,
@@ -1703,6 +1724,7 @@ function bindEvents() {
     applyUsbRepairs,
     showDiagReportView,
     refreshHistory,
+    exportHistoryTracklist,
     loadUsbPlayerMenuConfig,
     renderUsbPlayerMenuEditor,
     syncUsbPlayerMenuEditorControls,
