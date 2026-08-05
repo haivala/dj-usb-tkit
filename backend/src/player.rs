@@ -655,4 +655,159 @@ mod tests {
         );
         assert!(state.sink.is_some(), "sink should be left untouched");
     }
+
+    #[test]
+    fn compute_target_offset_ms_prefers_explicit_offset_over_ratio() {
+        assert_eq!(compute_target_offset_ms(Some(5_000), Some(0.5), Some(10_000)), 5_000);
+    }
+
+    #[test]
+    fn compute_target_offset_ms_falls_back_to_ratio_when_offset_is_zero() {
+        assert_eq!(compute_target_offset_ms(None, Some(0.25), Some(8_000)), 2_000);
+    }
+
+    #[test]
+    fn compute_target_offset_ms_clamps_ratio_outside_unit_range() {
+        assert_eq!(compute_target_offset_ms(None, Some(1.5), Some(4_000)), 4_000);
+    }
+
+    #[test]
+    fn compute_target_offset_ms_clamps_explicit_offset_to_duration() {
+        assert_eq!(compute_target_offset_ms(Some(9_000), None, Some(4_000)), 4_000);
+    }
+
+    #[test]
+    fn compute_target_offset_ms_defaults_to_zero_without_duration_or_offset() {
+        assert_eq!(compute_target_offset_ms(None, None, None), 0);
+    }
+
+    #[test]
+    fn normalize_and_validate_path_rejects_empty_path() {
+        let err = normalize_and_validate_path("   ").unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn normalize_and_validate_path_rejects_missing_file() {
+        let err = normalize_and_validate_path("/nonexistent/path/to/track.mp3").unwrap_err();
+        assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn normalize_and_validate_path_rejects_directory() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio");
+        let err = normalize_and_validate_path(dir.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn normalize_and_validate_path_accepts_existing_file() {
+        let normalized = normalize_and_validate_path(mp3_fixture_path().to_str().unwrap())
+            .expect("existing file should normalize successfully");
+        assert!(normalized.ends_with("track_no_art.mp3"));
+    }
+
+    #[test]
+    fn snapshot_reports_idle_state_when_no_sink_loaded() {
+        let mut state = WorkerState::default();
+        let status = snapshot(&mut state);
+        assert!(!status.playing);
+        assert_eq!(status.position_ms, 0);
+        assert_eq!(status.path, None);
+        assert_eq!(status.duration_ms, None);
+    }
+
+    #[test]
+    fn snapshot_clamps_position_to_duration_and_reports_playing() {
+        let (sink, _unused_output) = Sink::new_idle();
+        // Bumps len() > 0 so `snapshot` sees the sink as playing without actually
+        // decoding audio.
+        sink.append(rodio::source::Zero::<f32>::new(1, 44_100));
+        let mut state = WorkerState {
+            sink: Some(sink),
+            path: Some("fake/track.mp3".to_string()),
+            duration_ms: Some(10),
+            // Comfortably larger than any scheduling jitter, so elapsed time will
+            // exceed duration_ms without risking Instant subtraction underflow.
+            started_at: Some(Instant::now() - Duration::from_millis(500)),
+            ..Default::default()
+        };
+
+        let status = snapshot(&mut state);
+
+        assert!(status.playing);
+        assert_eq!(status.position_ms, 10, "position should clamp to duration_ms");
+    }
+
+    #[test]
+    fn snapshot_clears_started_at_when_not_playing() {
+        let mut state = WorkerState {
+            started_at: Some(Instant::now()),
+            ..Default::default()
+        };
+        snapshot(&mut state);
+        assert!(state.started_at.is_none());
+    }
+
+    #[test]
+    fn is_blocked_device_name_matches_known_problematic_names_case_insensitively() {
+        for name in [
+            "JACK Audio Connection Kit",
+            "surround51:CARD=default",
+            "OSS Loopback",
+            "dmix:CARD=PCH",
+        ] {
+            assert!(is_blocked_device_name(name), "{name} should be blocked");
+        }
+        assert!(!is_blocked_device_name("USB Audio Device"));
+    }
+
+    #[test]
+    fn run_playback_preflight_reports_non_audio_file_as_not_decodable() {
+        let manifest_toml = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let preflight = run_playback_preflight(manifest_toml.to_str().unwrap())
+            .expect("preflight should succeed even for a non-audio file");
+        assert!(preflight.file_exists);
+        assert!(preflight.file_readable);
+        assert!(!preflight.ready);
+        assert_eq!(
+            preflight.message,
+            "Audio file is not decodable by playback engine"
+        );
+    }
+
+    #[test]
+    fn open_output_stream_does_not_panic_regardless_of_hardware_availability() {
+        // No audio device is guaranteed in CI/sandboxed environments; this only
+        // asserts that the ALSA/stderr noise-silencing wrappers unwind cleanly
+        // either way (Ok or Err).
+        let _ = open_output_stream();
+    }
+
+    #[test]
+    fn playback_controller_status_reports_idle_before_any_play() {
+        let (controller, _transitions) = PlaybackController::new();
+        let status = controller.status().expect("status should succeed");
+        assert!(!status.playing);
+        assert_eq!(status.path, None);
+        assert_eq!(status.position_ms, 0);
+    }
+
+    #[test]
+    fn playback_controller_stop_is_a_no_op_when_nothing_is_loaded() {
+        let (controller, _transitions) = PlaybackController::new();
+        let status = controller
+            .stop()
+            .expect("stop should succeed even when idle");
+        assert!(!status.playing);
+    }
+
+    #[test]
+    fn playback_controller_play_path_rejects_missing_file() {
+        let (controller, _transitions) = PlaybackController::new();
+        let err = controller
+            .play_path("/nonexistent/path/to/track.mp3", None, None)
+            .expect_err("missing file should be rejected before touching audio hardware");
+        assert!(matches!(err, BackendError::NotFound(_)));
+    }
 }
