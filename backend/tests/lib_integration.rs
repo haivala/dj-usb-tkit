@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::Deserialize;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::process::Command;
 
 use tempfile::tempdir;
 use walkdir::WalkDir;
@@ -210,57 +209,6 @@ fn seed_usb_missing_audio_fixture(backend: &BackendCommands, usb_root: &Path) ->
         .map(|t| t.id)
         .expect("seeded track id");
     (missing_path, track_id)
-}
-
-fn with_essentia_js_analysis_env<F>(f: F)
-where
-    F: FnOnce(bool),
-{
-    let _guard = test_env_lock().lock().expect("env lock");
-    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
-
-    let runner =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../desktop/scripts/essentia_runner.cjs");
-    let available = runner.is_file() && essentia_runner_probe_succeeds(&runner);
-    if available {
-        // SAFETY: tests serialize env access through a global mutex.
-        unsafe {
-            std::env::set_var(
-                "DJTKIT_ESSENTIA_RUNNER",
-                runner.to_string_lossy().to_string(),
-            );
-        }
-    }
-
-    f(available);
-
-    match prev_runner {
-        Some(v) => {
-            // SAFETY: tests serialize env access through a global mutex.
-            unsafe { std::env::set_var("DJTKIT_ESSENTIA_RUNNER", v) }
-        }
-        None => {
-            // SAFETY: tests serialize env access through a global mutex.
-            unsafe { std::env::remove_var("DJTKIT_ESSENTIA_RUNNER") }
-        }
-    }
-}
-
-fn essentia_runner_probe_succeeds(runner: &Path) -> bool {
-    let probe = tempdir().expect("probe tempdir");
-    let pcm_path = probe.path().join("probe.f32");
-    fs::write(&pcm_path, 0.0f32.to_le_bytes()).expect("write probe pcm");
-    Command::new("node")
-        .arg(runner.to_string_lossy().to_string())
-        .arg(format!(
-            r#"{{"pcmPath":"{}","sampleRate":44100,"bpmMin":70,"bpmMax":180}}"#,
-            pcm_path.to_string_lossy()
-        ))
-        .output()
-        .map(|output| {
-            output.status.success() && String::from_utf8_lossy(&output.stdout).contains(r#""ok""#)
-        })
-        .unwrap_or(false)
 }
 
 #[test]
@@ -2142,71 +2090,67 @@ fn analyze_new_tracks_emits_per_file_progress() {
 
 #[test]
 fn analyze_new_tracks_uses_audio_content_for_bpm_key_not_filename_tokens() {
-    with_essentia_js_analysis_env(|available| {
-        if !available {
-            return;
-        }
-        let root = tempdir().expect("temp root");
-        let media = root.path().join("media");
-        fs::create_dir_all(&media).expect("create media");
-        let misleading = media.join("Artist - 174_1B_misleading.wav");
-        write_test_pulsed_key_wav(&misleading, 120.0, 20_000);
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    let misleading = media.join("Artist - 174_1B_misleading.wav");
+    write_test_pulsed_key_wav(&misleading, 120.0, 20_000);
 
-        let data_dir = root.path().join("data");
-        let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-        let scan = backend.scan_library(ScanLibraryRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
-            incremental: true,
-        });
-        assert!(scan.ok, "scan failed: {scan:?}");
-
-        let before = backend
-            .search_tracks(SearchTracksRequest {
-                query: String::new(),
-                limit: 10,
-                cursor: None,
-            })
-            .data
-            .expect("before search")
-            .items;
-        let track = before.first().expect("scanned track");
-        assert!(track.bpm.is_none(), "scan should not prefill bpm");
-        assert!(track.key.is_none(), "scan should not prefill key");
-
-        let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
-            bpm_min: None,
-            bpm_max: None,
-            track_ids: vec![track.id.clone()],
-            analysis_engine: None,
-        });
-        assert!(analyze.ok, "analyze failed: {analyze:?}");
-
-        let after = backend
-            .search_tracks(SearchTracksRequest {
-                query: String::new(),
-                limit: 10,
-                cursor: None,
-            })
-            .data
-            .expect("after search")
-            .items;
-        let analyzed = after.first().expect("analyzed track");
-        let bpm = analyzed.bpm.expect("audio-derived bpm");
-        assert!(
-            (110.0..=130.0).contains(&bpm),
-            "expected bpm near 120 from audio pulses, got {bpm}"
-        );
-        let key = analyzed.key.clone().expect("audio-derived key");
-        assert_ne!(
-            key, "1B",
-            "key should not come from misleading filename token"
-        );
-        assert_ne!(
-            key, "174",
-            "key should not come from misleading numeric token"
-        );
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
     });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let before = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("before search")
+        .items;
+    let track = before.first().expect("scanned track");
+    assert!(track.bpm.is_none(), "scan should not prefill bpm");
+    assert!(track.key.is_none(), "scan should not prefill key");
+
+    let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
+        track_ids: vec![track.id.clone()],
+        analysis_engine: None,
+    });
+    assert!(analyze.ok, "analyze failed: {analyze:?}");
+
+    let after = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("after search")
+        .items;
+    let analyzed = after.first().expect("analyzed track");
+    let bpm = analyzed.bpm.expect("audio-derived bpm");
+    assert!(
+        (110.0..=130.0).contains(&bpm),
+        "expected bpm near 120 from audio pulses, got {bpm}"
+    );
+    let key = analyzed.key.clone().expect("audio-derived key");
+    assert_ne!(
+        key, "1B",
+        "key should not come from misleading filename token"
+    );
+    assert_ne!(
+        key, "174",
+        "key should not come from misleading numeric token"
+    );
+
 }
 
 #[test]
@@ -3210,66 +3154,62 @@ fn fetch_usb_playlists_materialization_clears_stale_local_key_when_usb_key_is_mi
 
 #[test]
 fn analyze_new_tracks_extracts_bpm_key_from_aiff() {
-    with_essentia_js_analysis_env(|available| {
-        if !available {
-            return;
-        }
-        let root = tempdir().expect("temp root");
-        let media = root.path().join("media");
-        fs::create_dir_all(&media).expect("create media");
-        let source = media.join("Artist - aiff_analysis.aiff");
-        write_test_pulsed_key_aiff(&source, 120.0, 20_000);
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    let source = media.join("Artist - aiff_analysis.aiff");
+    write_test_pulsed_key_aiff(&source, 120.0, 20_000);
 
-        let data_dir = root.path().join("data");
-        let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-        let scan = backend.scan_library(ScanLibraryRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
-            incremental: true,
-        });
-        assert!(scan.ok, "scan failed: {scan:?}");
-
-        let track = backend
-            .search_tracks(SearchTracksRequest {
-                query: String::new(),
-                limit: 10,
-                cursor: None,
-            })
-            .data
-            .expect("search data")
-            .items
-            .first()
-            .expect("scanned track")
-            .clone();
-
-        let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
-            bpm_min: None,
-            bpm_max: None,
-            track_ids: vec![track.id.clone()],
-            analysis_engine: None,
-        });
-        assert!(analyze.ok, "analyze failed: {analyze:?}");
-
-        let analyzed = backend
-            .search_tracks(SearchTracksRequest {
-                query: String::new(),
-                limit: 10,
-                cursor: None,
-            })
-            .data
-            .expect("search analyzed")
-            .items
-            .first()
-            .expect("analyzed track")
-            .clone();
-        let bpm = analyzed.bpm.expect("aiff bpm");
-        assert!(
-            (110.0..=130.0).contains(&bpm),
-            "expected bpm near 120 from AIFF pulses, got {bpm}"
-        );
-        let key = analyzed.key.expect("aiff key");
-        assert!(!key.trim().is_empty(), "expected non-empty key");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
     });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let track = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items
+        .first()
+        .expect("scanned track")
+        .clone();
+
+    let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
+        track_ids: vec![track.id.clone()],
+        analysis_engine: None,
+    });
+    assert!(analyze.ok, "analyze failed: {analyze:?}");
+
+    let analyzed = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search analyzed")
+        .items
+        .first()
+        .expect("analyzed track")
+        .clone();
+    let bpm = analyzed.bpm.expect("aiff bpm");
+    assert!(
+        (110.0..=130.0).contains(&bpm),
+        "expected bpm near 120 from AIFF pulses, got {bpm}"
+    );
+    let key = analyzed.key.expect("aiff key");
+    assert!(!key.trim().is_empty(), "expected non-empty key");
+
 }
 
 #[test]
