@@ -3,24 +3,7 @@ import assert from "node:assert/strict";
 import {
   detectExternalMasterDb
 } from "../components/usb/actions.mjs";
-
-function makeClassList() {
-  const classes = new Set();
-  return {
-    add(name) { classes.add(name); },
-    remove(name) { classes.delete(name); },
-    toggle(name, force) {
-      if (typeof force === "boolean") {
-        if (force) classes.add(name);
-        else classes.delete(name);
-        return;
-      }
-      if (classes.has(name)) classes.delete(name);
-      else classes.add(name);
-    },
-    contains(name) { return classes.has(name); }
-  };
-}
+import { makeClassList } from "./fixtures/dom.mjs";
 
 test("detectExternalMasterDb populates state and calls renderSourceChips when DB is found", async () => {
   const toggleClassList = makeClassList();

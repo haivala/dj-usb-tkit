@@ -37,6 +37,7 @@
   didn't), so a freshly-analyzed track's waveform kept its stale color on
   those two views until the row was fully re-rendered some other way.
 - **Chore:** de-duplicate frontend JS boilerplate in `vanilla-ui`
+- **Chore:** trim unit tests that duplicated existing e2e coverage in `vanilla-ui`, consolidate a shared test DOM fixture, add an opt-in e2e coverage report (`npm run test:e2e:coverage`)
 
 ## 0.1.10
 

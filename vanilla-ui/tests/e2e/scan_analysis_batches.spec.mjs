@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./coverage-fixture.mjs";
 
 // NOTE: analysis is dispatched as a single `analyze_new_tracks` batch call per
 // analyzeTrackIds() invocation (see components/library/actions.mjs). The

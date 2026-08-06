@@ -20,20 +20,7 @@ import {
   handleJobEvent,
   formatJobStatusText
 } from "../job_manager.mjs";
-
-function makeClassList() {
-  const classes = new Set();
-  return {
-    add(name) { classes.add(name); },
-    remove(name) { classes.delete(name); },
-    toggle(name, force) {
-      if (force) classes.add(name);
-      else classes.delete(name);
-    },
-    contains(name) { return classes.has(name); },
-    entries() { return classes; }
-  };
-}
+import { makeClassList } from "./fixtures/dom.mjs";
 
 function makeButton() {
   return {

@@ -26,6 +26,9 @@ await build({
   platform: "browser",
   target: ["chrome110", "safari16"],
   outfile: path.join(distDir, "main.js"),
+  // External sourcemap is opt-in only -- dist/ is the real Tauri production
+  // frontend bundle, so it must never ship with source attached by default.
+  sourcemap: process.env.COVERAGE ? true : false,
   logLevel: "info"
 });
 

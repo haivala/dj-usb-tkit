@@ -1,19 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { updateUsbConfigControlsVisibility } from "../components/usb/actions.mjs";
-
-function makeClassList() {
-  const classes = new Set();
-  return {
-    add(name) { classes.add(name); },
-    remove(name) { classes.delete(name); },
-    toggle(name, force) {
-      if (force) classes.add(name);
-      else classes.delete(name);
-    },
-    contains(name) { return classes.has(name); }
-  };
-}
+import { makeClassList } from "./fixtures/dom.mjs";
 
 test("updateUsbConfigControlsVisibility hides controls and diagnostics without valid root", () => {
   const state = { usbRoot: "/tmp/usb", usbRootValid: false };

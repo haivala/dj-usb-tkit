@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./coverage-fixture.mjs";
 
 test("playlist analyze-missing only targets local non-USB tracks", async ({ page }) => {
   await page.addInitScript(() => {

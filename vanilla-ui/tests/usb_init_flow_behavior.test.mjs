@@ -1,28 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { hydrateUsbTrackMetadata, validateAndSetUsbRoot } from "../components/usb/actions.mjs";
-
-function makeClassList() {
-  const classes = new Set();
-  return {
-    add(name) { classes.add(name); },
-    remove(name) { classes.delete(name); },
-    toggle(name, force) {
-      if (typeof force === "boolean") {
-        if (force) classes.add(name);
-        else classes.delete(name);
-        return force;
-      }
-      if (classes.has(name)) {
-        classes.delete(name);
-        return false;
-      }
-      classes.add(name);
-      return true;
-    },
-    contains(name) { return classes.has(name); }
-  };
-}
+import { makeClassList } from "./fixtures/dom.mjs";
 
 test("validateAndSetUsbRoot exposes one-click init state for writable missing-structure USB", async () => {
   const initRow = { classList: makeClassList() };

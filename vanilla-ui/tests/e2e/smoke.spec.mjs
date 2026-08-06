@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./coverage-fixture.mjs";
 
 function installBasicTauriMock(page, opts = {}) {
   return page.addInitScript(({ opts }) => {

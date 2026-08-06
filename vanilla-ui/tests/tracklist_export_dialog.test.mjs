@@ -61,18 +61,6 @@ test("createTracklistExportDialogController resolves null on cancel", async () =
   assert.equal(await promise, null);
 });
 
-test("open() populates the start-track select from the given tracks, defaulting to the first", () => {
-  const { el, controller } = makeController();
-  controller.open({ tracks: TRACKS });
-
-  const options = Array.from(el.tracklistExportStartTrack.options);
-  assert.equal(options.length, 3);
-  assert.equal(options[0].value, "0");
-  assert.equal(options[0].textContent, "1. Artist A - Title A");
-  assert.equal(options[2].textContent, "3. Artist C - Title C");
-  assert.equal(el.tracklistExportStartTrack.value, "0");
-});
-
 test("open() rebuilds the start-track select on every open (no stale options from a prior session)", () => {
   const { el, controller } = makeController();
   controller.open({ tracks: TRACKS });

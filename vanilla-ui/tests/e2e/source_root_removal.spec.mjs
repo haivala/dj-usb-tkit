@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./coverage-fixture.mjs";
 
 function installSourceRemovalMock(page) {
   return page.addInitScript(() => {

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./coverage-fixture.mjs";
 
 function installEmptyStateMock(page) {
   return page.addInitScript(() => {

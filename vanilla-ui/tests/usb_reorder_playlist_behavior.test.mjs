@@ -43,33 +43,6 @@ test("reorderUsbPlaylists requires selected usb root", async () => {
   assert.equal(commandCalls, 0);
 });
 
-test("reorderUsbPlaylists sends ordered ids and reports success", async () => {
-  const state = {
-    usbRoot: "/tmp/usb",
-    usbRootValid: true,
-    usbPlaylists: [{ id: "usb-pl-2" }, { id: "usb-pl-1" }, { id: "usb-pl-3" }]
-  };
-  let status = "";
-  let payload = null;
-  let refreshed = 0;
-
-  await reorderUsbPlaylists(state, {}, {
-    setStatus: (text) => { status = text; },
-    command: async (name, data) => {
-      assert.equal(name, "reorder_usb_playlists");
-      payload = data;
-    },
-    refreshUsb: async () => { refreshed += 1; }
-  });
-
-  assert.deepEqual(payload, {
-    usbRoot: "/tmp/usb",
-    orderedPlaylistIds: ["usb-pl-2", "usb-pl-1", "usb-pl-3"]
-  });
-  assert.equal(status, "Playlist order saved");
-  assert.equal(refreshed, 1);
-});
-
 test("reorderUsbPlaylists surfaces an error status and still refreshes", async () => {
   const state = {
     usbRoot: "/tmp/usb",

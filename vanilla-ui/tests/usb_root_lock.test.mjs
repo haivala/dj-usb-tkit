@@ -22,25 +22,7 @@ import {
 } from "../components/usb/actions.mjs";
 import { updatePlaylistExportButtons } from "../components/playlist/actions.mjs";
 import { handleJobEvent } from "../job_manager.mjs";
-
-function makeClassList() {
-  const classes = new Set();
-  return {
-    add(name) { classes.add(name); },
-    remove(name) { classes.delete(name); },
-    toggle(name, force) {
-      if (typeof force === "boolean") {
-        if (force) classes.add(name);
-        else classes.delete(name);
-        return force;
-      }
-      if (classes.has(name)) { classes.delete(name); return false; }
-      classes.add(name);
-      return true;
-    },
-    contains(name) { return classes.has(name); }
-  };
-}
+import { makeClassList } from "./fixtures/dom.mjs";
 
 test("pickUsbFolder rejects while any locking job type is active, without opening the picker", async (t) => {
   for (const jobType of USB_ROOT_LOCKING_JOB_TYPES) {
