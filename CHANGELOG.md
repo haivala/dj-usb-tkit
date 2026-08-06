@@ -38,6 +38,7 @@
   those two views until the row was fully re-rendered some other way.
 - **Chore:** de-duplicate frontend JS boilerplate in `vanilla-ui`
 - **Chore:** trim unit tests that duplicated existing e2e coverage in `vanilla-ui`, consolidate a shared test DOM fixture, add an opt-in e2e coverage report (`npm run test:e2e:coverage`)
+- **Fix:** determine track USB-origin authoritatively on the backend (`Track.isUsbPath`, matched against the full `usb_devices` registry) instead of a frontend heuristic that only checked whichever USB root happened to be selected in the current session
 
 ## 0.1.10
 

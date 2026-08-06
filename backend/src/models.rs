@@ -106,6 +106,11 @@ pub struct Track {
     pub created_at: String,
     pub updated_at: String,
     pub master_db_source: bool,
+    /// Authoritative: true when `file_path` falls under any known USB device
+    /// root (current or previously pruned). Computed fresh on every read
+    /// against the `usb_devices` registry -- not stored. See
+    /// `untainted_usb_root_paths`/`browse_path_matches_root`.
+    pub is_usb_path: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

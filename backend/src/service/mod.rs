@@ -1211,6 +1211,7 @@ impl BackendService {
         };
 
         let (has_more, next_cursor) = paginate_tracks(&mut items, limit, &signature);
+        apply_is_usb_path(&conn, &mut items)?;
         Ok(SearchTracksData {
             total,
             items,
@@ -1244,6 +1245,7 @@ impl BackendService {
             rows.collect::<Result<Vec<_>, _>>()?
         };
         let (has_more, next_cursor) = paginate_tracks(&mut items, limit, &signature);
+        apply_is_usb_path(&conn, &mut items)?;
         Ok(ListTracksData {
             total: total as usize,
             items,
@@ -1343,6 +1345,7 @@ impl BackendService {
                         created_at: now.clone(),
                         updated_at: now,
                         master_db_source: false,
+                        is_usb_path: false,
                     }
                 }
             })
@@ -1420,6 +1423,7 @@ impl BackendService {
             .take(limit + 1)
             .collect::<Vec<_>>();
         let (has_more, next_cursor) = paginate_tracks(&mut page_items, limit, &signature);
+        apply_is_usb_path(&conn, &mut page_items)?;
         Ok(BrowseSourceFilesData {
             total,
             items: page_items,
@@ -1729,6 +1733,7 @@ impl BackendService {
         let rows = stmt.query_map(params_from_iter(ids.iter()), |row| row_to_track(row, true))?;
         let mut found = rows.collect::<Result<Vec<_>, _>>()?;
         found.sort_by(|a, b| a.id.cmp(&b.id));
+        apply_is_usb_path(&conn, &mut found)?;
 
         Ok(GetTracksByIdsData { items: found })
     }
@@ -1931,7 +1936,8 @@ impl BackendService {
         )?;
 
         let rows = stmt.query_map(params![req.playlist_id], |row| row_to_track(row, true))?;
-        let items = rows.collect::<Result<Vec<_>, _>>()?;
+        let mut items = rows.collect::<Result<Vec<_>, _>>()?;
+        apply_is_usb_path(&conn, &mut items)?;
 
         Ok(GetPlaylistTracksData {
             playlist_id: req.playlist_id,
@@ -2217,6 +2223,24 @@ pub(crate) fn untainted_usb_root_paths(conn: &rusqlite::Connection) -> BackendRe
         .collect())
 }
 
+/// Sets `is_usb_path` on every track, one query for the whole batch (not
+/// per-row). Mirrors `resolve_playback_source`'s `is_usb_rooted` check
+/// exactly: matched against `file_path` only, against every known USB
+/// device root (including pruned ones -- see `untainted_usb_root_paths`).
+/// Call this from any method that returns `Track` rows to the frontend.
+pub(crate) fn apply_is_usb_path(
+    conn: &rusqlite::Connection,
+    tracks: &mut [Track],
+) -> BackendResult<()> {
+    let usb_root_paths = untainted_usb_root_paths(conn)?;
+    for track in tracks.iter_mut() {
+        track.is_usb_path = usb_root_paths
+            .iter()
+            .any(|root| browse_path_matches_root(&track.file_path, root));
+    }
+    Ok(())
+}
+
 const FINGERPRINT_MATCH_DURATION_TOLERANCE_MS: i64 = 2000;
 
 /// Finds a single high-confidence local-track match for a USB-sourced
@@ -2463,6 +2487,9 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
         master_db_source: is_master_db,
+        // Filled in by callers that expose Track to the frontend (see
+        // apply_is_usb_path); internal-only callers leave this false.
+        is_usb_path: false,
     })
 }
 

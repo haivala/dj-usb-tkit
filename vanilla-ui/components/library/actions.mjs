@@ -52,20 +52,14 @@ export function trackHasCoreAnalysis(track, deps = {}) {
     && durationMs > 0;
 }
 
-export function isUsbOriginTrack(track, deps = {}) {
-  const {
-    usbRoot = "",
-    normalizePath = (value) => String(value || "").replace(/\\/g, "/").trim().toLowerCase()
-  } = deps;
+// Authoritative: `isUsbPath` is computed backend-side (see apply_is_usb_path
+// in backend/src/service/mod.rs) against the full known USB-device
+// registry, not just whichever root happens to be selected in this session.
+// `usbAnalysisPath` is a separate, still-legitimate signal for USB-browse-
+// origin tracks (fetch_usb_playlists/fetch_usb_histories).
+export function isUsbOriginTrack(track) {
   if (!track) return false;
-  const usbAnalysisPath = String(track.usbAnalysisPath || "").trim();
-  if (usbAnalysisPath) return true;
-  const normUsbRoot = normalizePath(usbRoot || "");
-  const filePath = normalizePath(track.filePath || "");
-  const waveformPath = normalizePath(track.waveformPeaksPath || "");
-  if (normUsbRoot && filePath && filePath.startsWith(normUsbRoot)) return true;
-  if (normUsbRoot && waveformPath && waveformPath.startsWith(normUsbRoot)) return true;
-  return false;
+  return !!track.usbAnalysisPath || !!track.isUsbPath;
 }
 
 export function usbTrackNeedsHydration(track, deps = {}) {
@@ -142,7 +136,8 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     createdAt: track?.createdAt || track?.created_at || "",
     updatedAt: track?.updatedAt || track?.updated_at || "",
     searchText: `${title} ${artist} ${album}`.toLowerCase(),
-    masterDbSource: !!(track?.masterDbSource ?? track?.master_db_source)
+    masterDbSource: !!(track?.masterDbSource ?? track?.master_db_source),
+    isUsbPath: !!(track?.isUsbPath ?? track?.is_usb_path)
   };
 }
 

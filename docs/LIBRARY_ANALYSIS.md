@@ -35,6 +35,13 @@ Analysis engine selection is user-controlled from Settings. The default engine i
 3. Use "Analyze Missing Tracks" for only that playlist's unanalyzed local tracks.
 4. Export after missing-analysis count reaches zero.
 
+"Local" here is decided by the backend-computed `Track.isUsbPath` field (see
+`docs/APP_DATA_MODEL.md`), not a frontend guess — a track whose `filePath`
+falls under any known USB device root is excluded from "Analyze Missing"
+regardless of which drive is currently selected. If a track still turns out
+to be unavailable at export time, export skips it and reports a warning via
+the Event Log rather than failing (`export.missing-source-file`).
+
 ### Missing or moved source folders
 
 Source folders are recoverable state. If a configured source folder is renamed,

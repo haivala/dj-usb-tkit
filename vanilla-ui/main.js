@@ -310,10 +310,7 @@ const trackHasCoreAnalysis = (track) => library.trackHasCoreAnalysis(track, {
     trackHasBpm: library.trackHasBpm,
   });
 
-const isUsbOriginTrack = (track) => library.isUsbOriginTrack(track, {
-    usbRoot: state.usbRoot || "",
-    normalizePath,
-  });
+const isUsbOriginTrack = (track) => library.isUsbOriginTrack(track);
 
 const usbTrackNeedsHydration = (track) => library.usbTrackNeedsHydration(track, {
     trackHasRenderableWaveform: library.trackHasRenderableWaveform,
