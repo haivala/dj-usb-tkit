@@ -1,33 +1,15 @@
 (function (root) {
-  function normalizePath(value) {
-    return String(value || "")
-      .replaceAll("\\", "/")
-      .replace(/\/+/g, "/")
-      .replace(/\/$/, "")
-      .toLowerCase();
-  }
-
-  function pathMatchesAnyRoot(filePath, roots) {
-    const fp = normalizePath(filePath);
-    if (!fp) return false;
-    const list = Array.isArray(roots) ? roots : [];
-    return list.some((rootPath) => {
-      const root = normalizePath(rootPath);
-      if (!root) return false;
-      return fp === root || fp.startsWith(`${root}/`);
-    });
-  }
-
+  // Backend guarantees (see resolve_playback_source's USB-root exclusion and
+  // track_id fast path) that libraryResolved:true only ever means a genuine
+  // local track was found -- no path-prefix/sourceRoots check needed here
+  // anymore.
   function getPlaybackSourceLabel(input) {
     const origin = String(input && input.origin || "");
     const isExternalOrigin = origin === "usb" || origin === "history";
     const libraryResolved = !!(input && input.libraryResolved);
     const hasUsbContext = !!(input && input.hasUsbContext);
-    const roots = input && input.sourceRoots || [];
-    const resolvedPath = input && input.resolvedPath || "";
-    const inConfiguredRoots = pathMatchesAnyRoot(resolvedPath, roots);
 
-    if (libraryResolved && inConfiguredRoots) {
+    if (libraryResolved) {
       return isExternalOrigin ? "Library (matched)" : "Library";
     }
     return isExternalOrigin && hasUsbContext ? "USB" : "Local file";
@@ -35,7 +17,6 @@
 
   const api = {
     getPlaybackSourceLabel,
-    pathMatchesAnyRoot,
   };
 
   if (typeof module !== "undefined" && module.exports) {

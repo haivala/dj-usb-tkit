@@ -140,7 +140,7 @@ fn save_export_log(usb_root: &Path, log: &UsbExportLog) -> BackendResult<()> {
     Ok(())
 }
 
-fn build_export_log_record(
+pub(crate) fn build_export_log_record(
     playlist: &ExportPlaylistData,
     manifest: &ExportManifest,
 ) -> UsbExportLogRecord {
@@ -295,6 +295,7 @@ mod tests {
             usb_analysis_path_raw: None,
             waveform_preview: None,
             duration_ms: None,
+            file_size_bytes: None,
         }
     }
 

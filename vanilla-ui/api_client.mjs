@@ -384,6 +384,18 @@ export function createApiClient({ tauriInvoke, tauriIsTauri, tauriListen, state,
       };
     }
 
+    if (command === "list_usb_devices") {
+      return { ok: true, data: { items: state?.__mockUsbDevices || [] } };
+    }
+
+    if (command === "prune_usb_device") {
+      const id = String(payload?.request?.id || payload?.id || "");
+      if (Array.isArray(state?.__mockUsbDevices)) {
+        state.__mockUsbDevices = state.__mockUsbDevices.filter((d) => d.id !== id);
+      }
+      return { ok: true, data: { pruned: !!id } };
+    }
+
     if (command === "fetch_usb_playlists") {
       return {
         ok: true,

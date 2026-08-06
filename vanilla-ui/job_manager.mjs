@@ -1,5 +1,7 @@
 // Job progress bar management: set/dismiss/heartbeat/withProgress.
 
+import { USB_ROOT_LOCKING_JOB_TYPES } from "./components/usb/actions.mjs";
+
 export function setProgress(state, el, active, percent = 0, text = "", opts = {}) {
   el.progressFooter.classList.toggle("active", active);
   el.progressFooter.classList.toggle("error", !!opts.error);
@@ -163,6 +165,7 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     refreshSourceRootAnalysisStatus = () => {},
     bumpLibraryDurationSummary = () => {},
     setTrackAnalyzingState = () => {},
+    setUsbRootControlsLocked,
   } = deps;
   const emitMessage = createEmitMessage(deps);
   const trackInfo = payload?.trackTitle || payload?.trackId;
@@ -241,6 +244,9 @@ export function handleJobEvent(state, el, payload, deps = {}) {
   if (eventName === "job.started" && jobId) {
     state.activeJobId = jobId;
     state.activeJobType = jobType;
+    if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
+      setUsbRootControlsLocked?.(true);
+    }
     setAnalysisControlsVisible(state, el, jobType === "analysis");
     state.lastJobEventAtMs = Date.now();
     setProgress(state, el, true, percent, message || "Working...");
@@ -292,6 +298,9 @@ export function handleJobEvent(state, el, payload, deps = {}) {
       });
     }
     Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
+    if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
+      setUsbRootControlsLocked?.(false);
+    }
     state.activeJobId = null;
     state.activeJobType = null;
     setAnalysisControlsVisible(state, el, false);
@@ -315,6 +324,9 @@ export function handleJobEvent(state, el, payload, deps = {}) {
         coalesceKey: `${jobType}.failed.${stage || "unknown"}`
       }
     });
+    if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
+      setUsbRootControlsLocked?.(false);
+    }
     state.activeJobId = null;
     state.activeJobType = null;
     setAnalysisControlsVisible(state, el, false);

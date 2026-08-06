@@ -119,6 +119,44 @@ impl Db {
               UNIQUE(playlist_id, position)
             );
 
+            CREATE TABLE IF NOT EXISTS usb_devices (
+              id TEXT PRIMARY KEY,
+              root_path TEXT NOT NULL,
+              root_path_key TEXT NOT NULL UNIQUE,
+              label TEXT,
+              mounted INTEGER NOT NULL DEFAULT 0,
+              first_seen_at TEXT NOT NULL,
+              last_seen_at TEXT NOT NULL,
+              deleted_at TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS track_usb_links (
+              id TEXT PRIMARY KEY,
+              track_id TEXT NOT NULL,
+              usb_device_id TEXT NOT NULL,
+              usb_file_path TEXT NOT NULL,
+              first_seen_at TEXT NOT NULL,
+              last_seen_at TEXT NOT NULL,
+              FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+              FOREIGN KEY(usb_device_id) REFERENCES usb_devices(id) ON DELETE CASCADE,
+              UNIQUE(usb_device_id, usb_file_path)
+            );
+
+            CREATE TABLE IF NOT EXISTS usb_device_exports (
+              id TEXT PRIMARY KEY,
+              usb_device_id TEXT NOT NULL,
+              playlist_id TEXT,
+              playlist_name TEXT NOT NULL,
+              exported_at TEXT NOT NULL,
+              track_count INTEGER NOT NULL,
+              track_fingerprints TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(usb_device_id) REFERENCES usb_devices(id) ON DELETE CASCADE,
+              FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE SET NULL
+            );
+
             CREATE TABLE IF NOT EXISTS app_settings (
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL,
@@ -137,6 +175,14 @@ impl Db {
               ON playlist_tracks (playlist_id, position);
             CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track
               ON playlist_tracks (track_id);
+            CREATE INDEX IF NOT EXISTS idx_usb_devices_last_seen
+              ON usb_devices (last_seen_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_track_usb_links_track
+              ON track_usb_links (track_id);
+            CREATE INDEX IF NOT EXISTS idx_track_usb_links_device
+              ON track_usb_links (usb_device_id);
+            CREATE INDEX IF NOT EXISTS idx_usb_device_exports_device
+              ON usb_device_exports (usb_device_id, exported_at DESC);
             "#,
         )?;
 

@@ -1962,6 +1962,7 @@ fn resolve_playback_source_prefers_local_track_by_fingerprint() {
         bpm: None,
         file_path: Some("/some/usb/path/Track One.mp3".to_string()),
         file_size_bytes: None,
+        track_id: None,
     });
     assert!(resolved.ok, "resolve failed: {resolved:?}");
     let data = resolved.data.expect("resolve data");
@@ -4141,87 +4142,319 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
     }
 }
 
+/// Replaces a formerly-broken test of the same behavior that only ever ran
+/// if a literal `./USB` directory happened to exist in the current working
+/// directory (so it silently no-op'd in every real CI/dev run). This
+/// version is deterministic: it scans a real local track, exports it to a
+/// synthetic USB root, and browses the export back to prove
+/// `materialize_usb_track_row` dedupes the USB-side row against the
+/// genuine local track (by fingerprint + duration + file size) instead of
+/// creating a second, disconnected row -- the root cause that let playback
+/// silently fall back to the USB copy even when a local copy existed.
 #[test]
-fn analyze_from_usb_track_uses_local_audio_only_even_when_usb_has_waveform() {
-    let usb_root = std::env::current_dir().expect("current dir").join("USB");
-    let pdb_file = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
-    let contents_root = usb_root.join("Contents");
-    if !pdb_file.is_file() || !contents_root.is_dir() {
-        return;
-    }
-
+fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touching_it() {
     let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    let track_path = media.join("Test Artist - Dedup Roundtrip.wav");
+    write_test_wav(&track_path, 440.0, 500);
+
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    let playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
-        usb_root: Some(usb_root.to_string_lossy().to_string()),
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
     });
-    assert!(playlists.ok, "fetch usb playlists failed: {playlists:?}");
-    let items = playlists.data.expect("usb playlist data").items;
-
-    let usb_track = items
-        .iter()
-        .flat_map(|p| p.tracks.iter())
-        .find(|t| {
-            !t.id.trim().is_empty()
-                && !t.file_path.trim().is_empty()
-                && t.waveform_preview
-                    .as_ref()
-                    .map(|w| !w.is_empty())
-                    .unwrap_or(false)
-                && !t.title.trim().is_empty()
-                && !t.artist.trim().is_empty()
-        })
-        .cloned();
-    let Some(usb_track) = usb_track else {
-        return;
-    };
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
 
     let scan = backend.scan_library(ScanLibraryRequest {
-        source_roots: vec![contents_root.to_string_lossy().to_string()],
+        source_roots: vec![media.to_string_lossy().to_string()],
         incremental: true,
     });
-    assert!(scan.ok, "scan contents failed: {scan:?}");
+    assert!(scan.ok, "scan failed: {scan:?}");
 
-    let resolved = backend.resolve_playback_source(ResolvePlaybackSourceRequest {
-        title: usb_track.title.clone(),
-        artist: usb_track.artist.clone(),
-        album: usb_track.album.clone(),
-        bpm: usb_track.bpm,
-        file_path: Some(usb_track.file_path.clone()),
-        file_size_bytes: None,
-    });
-    assert!(resolved.ok, "resolve local track failed: {resolved:?}");
-    let resolved_data = resolved.data.expect("resolved data");
-    let local_track_id = resolved_data.track_id.expect("resolved local track id");
-
-    let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
-        bpm_min: None,
-        bpm_max: None,
-        track_ids: vec![local_track_id.clone()],
-        analysis_engine: None,
-    });
-    assert!(analyze.ok, "analyze failed: {analyze:?}");
-
-    let local = backend
-        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-            track_ids: vec![local_track_id.clone()],
+    let local_track = backend
+        .search_tracks(SearchTracksRequest {
+            query: "Dedup Roundtrip".to_string(),
+            limit: 10,
+            cursor: None,
         })
         .data
-        .expect("get tracks with previews")
+        .expect("search data")
         .items
         .into_iter()
-        .find(|t| t.id == local_track_id)
-        .expect("local track after analyze");
+        .next()
+        .expect("scanned local track");
 
-    let local_wave = local.waveform_preview.expect("local waveform preview");
-    assert!(
-        !local_wave.is_empty(),
-        "local analysis must generate waveform preview from local audio"
+    // Simulate an already-analyzed track (duration/waveform/bpm are
+    // populated by analyze_new_tracks in real usage; setting them directly
+    // keeps this test fast while still exercising the confidence-gated
+    // match -- export requires a fully-analyzed track anyway).
+    seed_track_analysis_fields(&data_dir, &local_track.id);
+    let db_path = data_dir.join("backend.db");
+    let sentinel_waveform_path: String = rusqlite::Connection::open(&db_path)
+        .expect("open backend db")
+        .query_row(
+            "SELECT waveform_peaks_path FROM tracks WHERE id = ?1",
+            rusqlite::params![local_track.id],
+            |row| row.get(0),
+        )
+        .expect("seeded waveform path");
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Dedup Roundtrip Playlist".to_string(),
+    });
+    assert!(created.ok, "create playlist failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+
+    let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![local_track.id.clone()],
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(add.ok, "add to playlist failed: {add:?}");
+
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+
+    let track_count_before: i64 = rusqlite::Connection::open(&db_path)
+        .expect("open db")
+        .query_row("SELECT COUNT(1) FROM tracks", [], |row| row.get(0))
+        .expect("count tracks");
+    assert_eq!(track_count_before, 1, "export itself must not create extra track rows");
+
+    let usb_playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(usb_playlists.ok, "fetch usb playlists failed: {usb_playlists:?}");
+    let usb_track = usb_playlists
+        .data
+        .expect("usb playlist data")
+        .items
+        .into_iter()
+        .flat_map(|p| p.tracks)
+        .find(|t| t.title.contains("Dedup Roundtrip"))
+        .expect("roundtrip usb track");
+
+    assert_eq!(
+        usb_track.local_track_id.as_deref(),
+        Some(local_track.id.as_str()),
+        "usb-browsed row should dedupe to the genuine local track, not spawn a placeholder"
+    );
+
+    let conn = rusqlite::Connection::open(&db_path).expect("reopen backend db");
+    let track_count_after: i64 = conn
+        .query_row("SELECT COUNT(1) FROM tracks", [], |row| row.get(0))
+        .expect("count tracks after browse");
+    assert_eq!(
+        track_count_after, 1,
+        "browsing the usb copy must not create a second, disconnected tracks row"
+    );
+    let waveform_after: Option<String> = conn
+        .query_row(
+            "SELECT waveform_peaks_path FROM tracks WHERE id = ?1",
+            rusqlite::params![local_track.id],
+            |row| row.get(0),
+        )
+        .expect("waveform after browse");
+    assert_eq!(
+        waveform_after.as_deref(),
+        Some(sentinel_waveform_path.as_str()),
+        "genuine local track's waveform_peaks_path must never be clobbered by a USB-sourced match"
+    );
+
+    let link_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM track_usb_links WHERE track_id = ?1",
+            rusqlite::params![local_track.id],
+            |row| row.get(0),
+        )
+        .expect("count track_usb_links");
+    assert_eq!(link_count, 1, "expected a track_usb_links row recording this device's copy");
+}
+
+#[test]
+fn export_to_usb_records_usb_device_export_history() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    let track_path = media.join("Test Artist - Export History.wav");
+    write_test_wav(&track_path, 440.0, 500);
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    let local_track = backend
+        .search_tracks(SearchTracksRequest {
+            query: "Export History".to_string(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items
+        .into_iter()
+        .next()
+        .expect("scanned local track");
+    seed_track_analysis_fields(&data_dir, &local_track.id);
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Export History Playlist".to_string(),
+    });
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![local_track.id.clone()],
+        dedupe: DedupeMode::Skip,
+    });
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+
+    let db_path = data_dir.join("backend.db");
+    let conn = rusqlite::Connection::open(&db_path).expect("open db");
+    let (found_playlist_id, playlist_name, track_count): (Option<String>, String, i64) = conn
+        .query_row(
+            "SELECT playlist_id, playlist_name, track_count FROM usb_device_exports",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("usb_device_exports row");
+    assert_eq!(found_playlist_id, Some(playlist_id.clone()));
+    assert_eq!(playlist_name, "Export History Playlist");
+    assert_eq!(track_count, 1);
+
+    // Now delete the playlist and confirm the export history row survives
+    // with its snapshotted name, matching the on-drive log's behavior.
+    backend.delete_playlist(backend::models::DeletePlaylistRequest {
+        playlist_id: playlist_id.clone(),
+    });
+    let (found_playlist_id_after, playlist_name_after): (Option<String>, String) = conn
+        .query_row(
+            "SELECT playlist_id, playlist_name FROM usb_device_exports",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("usb_device_exports row after delete");
+    assert_eq!(found_playlist_id_after, None, "playlist_id should be nulled out, not the row removed");
+    assert_eq!(playlist_name_after, "Export History Playlist");
+}
+
+/// The other half of the same fix: once the local copy is gone, browsing
+/// the USB export again should fall back to creating a placeholder row
+/// (still linked so playback/UI works), not silently do nothing.
+#[test]
+fn fetch_usb_playlists_creates_placeholder_when_no_local_match() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    let track_path = media.join("Test Artist - Placeholder Case.wav");
+    write_test_wav(&track_path, 440.0, 500);
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    let local_track = backend
+        .search_tracks(SearchTracksRequest {
+            query: "Placeholder Case".to_string(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items
+        .into_iter()
+        .next()
+        .expect("scanned local track");
+    seed_track_analysis_fields(&data_dir, &local_track.id);
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Placeholder Case Playlist".to_string(),
+    });
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![local_track.id.clone()],
+        dedupe: DedupeMode::Skip,
+    });
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+
+    // Remove the genuine local track entirely -- only the USB-side copy remains.
+    let removed = backend.remove_tracks_by_source_roots(RemoveTracksBySourceRootsRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+    });
+    assert!(removed.ok, "remove by source roots failed: {removed:?}");
+    assert_eq!(removed.data.expect("removed data").removed, 1);
+
+    let usb_playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(usb_playlists.ok, "fetch usb playlists failed: {usb_playlists:?}");
+    let usb_track = usb_playlists
+        .data
+        .expect("usb playlist data")
+        .items
+        .into_iter()
+        .flat_map(|p| p.tracks)
+        .find(|t| t.title.contains("Placeholder Case"))
+        .expect("roundtrip usb track");
+
+    let placeholder_id = usb_track
+        .local_track_id
+        .clone()
+        .expect("placeholder track id should still be materialized");
+    assert_ne!(
+        placeholder_id, local_track.id,
+        "with no genuine local copy left, browsing must materialize a fresh placeholder row"
     );
 }
 

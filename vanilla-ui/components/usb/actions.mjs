@@ -7,6 +7,33 @@ export function normalizePlaylistNameForCompare(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+// Job types that scope a Tauri command to state.usbRoot -- while one of
+// these is running, the currently-selected root must not change underneath
+// it, or an in-flight response (e.g. a parity report) can land after the
+// user has already switched to a different drive and get rendered as if it
+// belonged to the new one.
+export const USB_ROOT_LOCKING_JOB_TYPES = new Set(["usb_read", "usb_write", "diagnostics", "export"]);
+
+export function isUsbRootChangeBlocked(state) {
+  return !!state.activeJobId && USB_ROOT_LOCKING_JOB_TYPES.has(state.activeJobType);
+}
+
+export function setUsbRootControlsLocked(state, el, locked, deps = {}) {
+  if (el.selectUsbFolderBtn) {
+    el.selectUsbFolderBtn.disabled = !!locked;
+    el.selectUsbFolderBtn.title = locked ? "Please wait for the current USB operation to finish" : "";
+  }
+  el.usbRecentList?.querySelectorAll("button").forEach((btn) => { btn.disabled = !!locked; });
+  if (locked) {
+    if (el.exportPlaylistBtn) el.exportPlaylistBtn.disabled = true;
+  } else {
+    // Don't just flip disabled=false here -- the export button's disabled
+    // state is normally owned by playlist/usbRootValid logic (see below),
+    // so hand back to that recompute instead of overriding it.
+    deps.updatePlaylistExportButtons?.();
+  }
+}
+
 function resolveEmitStatus(deps = {}) {
   if (typeof deps.emitStatus === "function") return deps.emitStatus;
   if (typeof deps.setStatus === "function") return deps.setStatus;
@@ -617,6 +644,11 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
     scheduler
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
+
+  if (isUsbRootChangeBlocked(state)) {
+    if (!silent) emitStatus("Please wait for the current USB operation to finish before switching drives");
+    return false;
+  }
 
   const input = String(path || "").trim();
   const previousRoot = state.usbRoot;
@@ -1563,8 +1595,14 @@ export async function initializeUsb(state, el, deps = {}) {
 export async function pickUsbFolder(deps = {}) {
   const {
     invoke = async () => null,
-    validateAndSetUsbRoot = async () => {}
+    validateAndSetUsbRoot = async () => {},
+    state = {},
+    emitStatus
   } = deps;
+  if (isUsbRootChangeBlocked(state)) {
+    resolveEmitStatus({ emitStatus })("Please wait for the current USB operation to finish before switching drives");
+    return null;
+  }
   const selected = await invoke("pick_usb_folder");
   if (!selected) return null;
   await validateAndSetUsbRoot(String(selected), false);
@@ -1604,7 +1642,35 @@ export function rebuildKnownUsbPlaylistNames(state) {
   state.usbKnownPlaylistNames = knownUsbPlaylistNamesFromPlaylists(state.usbPlaylists);
 }
 
-export function renderUsbRecentRoots(el, rows, document) {
+// Replaces the old localStorage/app_settings "recent USB roots" list with a
+// live query against the usb_devices table -- so mount state and pruning
+// are always accurate, not a client-side cache that can drift from it.
+export async function loadUsbDevices(state, command) {
+  try {
+    const data = await command("list_usb_devices");
+    const items = Array.isArray(data?.items) ? data.items : [];
+    state.usbDevices = items;
+    state.usbRecentRoots = items.map((item) => String(item?.rootPath || "").trim()).filter(Boolean);
+  } catch (err) {
+    console.warn("Failed to load USB devices:", err);
+    state.usbDevices = [];
+    state.usbRecentRoots = [];
+  }
+  return state.usbRecentRoots;
+}
+
+export async function pruneUsbDevice(state, id, deps = {}) {
+  const { command, reload = () => {} } = deps;
+  if (!id) return;
+  try {
+    await command("prune_usb_device", { id });
+  } catch (err) {
+    console.warn(`Failed to prune USB device ${id}:`, err);
+  }
+  await reload();
+}
+
+export function renderUsbRecentRoots(el, rows, document, state = {}) {
   if (!el?.usbRecentRow || !el?.usbRecentList) return;
   el.usbRecentList.innerHTML = "";
   const normalizedRows = Array.isArray(rows)
@@ -1615,7 +1681,13 @@ export function renderUsbRecentRoots(el, rows, document) {
     return;
   }
   el.usbRecentRow.classList.remove("hidden");
+  const locked = isUsbRootChangeBlocked(state);
+  const devicesByPath = new Map(
+    (Array.isArray(state.usbDevices) ? state.usbDevices : []).map((d) => [String(d?.rootPath || "").trim(), d])
+  );
   normalizedRows.forEach((path) => {
+    const row = document.createElement("span");
+    row.className = "usb-cfg-recent-item";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "usb-cfg-recent-btn";
@@ -1624,7 +1696,22 @@ export function renderUsbRecentRoots(el, rows, document) {
     btn.style.direction = "rtl";
     btn.style.textAlign = "left";
     btn.textContent = path;
-    el.usbRecentList.appendChild(btn);
+    btn.disabled = locked;
+    row.appendChild(btn);
+
+    const device = devicesByPath.get(path);
+    if (device?.id) {
+      const pruneBtn = document.createElement("button");
+      pruneBtn.type = "button";
+      pruneBtn.className = "usb-cfg-recent-prune-btn";
+      pruneBtn.dataset.usbPruneDeviceId = device.id;
+      pruneBtn.dataset.tooltip = "Forget this USB device";
+      pruneBtn.setAttribute("aria-label", `Forget ${path}`);
+      pruneBtn.textContent = "×";
+      pruneBtn.disabled = locked;
+      row.appendChild(pruneBtn);
+    }
+    el.usbRecentList.appendChild(row);
   });
 }
 

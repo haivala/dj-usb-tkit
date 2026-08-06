@@ -185,7 +185,7 @@ export async function initApp(state, deps = {}) {
     loadSourceRootEnabledFromStorage,
     loadMasterDbEnabledFromStorage,
     loadSourcesEverConfiguredFromStorage,
-    loadUsbRecentRootsFromStorage,
+    loadUsbDevices,
     renderUsbRecentRoots,
     persistSourceRootEnabled,
     syncAssetScopePaths,
@@ -225,7 +225,7 @@ export async function initApp(state, deps = {}) {
   loadSourceRootEnabledFromStorage();
   loadMasterDbEnabledFromStorage();
   loadSourcesEverConfiguredFromStorage();
-  loadUsbRecentRootsFromStorage();
+  await loadUsbDevices();
   renderUsbRecentRoots();
 
   for (const root of state.sourceRoots || []) {

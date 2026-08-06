@@ -71,7 +71,6 @@ pub(crate) const SETTING_UI_ANALYSIS_BPM_RANGE: &str = "ui_analysis_bpm_range_v1
 pub(crate) const SETTING_UI_ANALYSIS_ENGINE: &str = "ui_analysis_engine_v1";
 pub(crate) const SETTING_UI_SIDEBAR_COLLAPSED: &str = "ui_sidebar_collapsed_v1";
 pub(crate) const SETTING_UI_HELP_SEEN: &str = "ui_help_seen_v1";
-pub(crate) const SETTING_UI_USB_RECENT_ROOTS: &str = "ui_usb_recent_roots_v1";
 const WAVEFORM_PREVIEW_BINS: usize = 2400;
 
 const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
@@ -109,7 +108,7 @@ fn browse_path_key(path: &str) -> String {
     path.trim().replace('\\', "/").to_ascii_lowercase()
 }
 
-fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
+pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
     let file_key = browse_path_key(file_path);
     let root_key = browse_path_key(root).trim_end_matches('/').to_string();
     !root_key.is_empty() && (file_key == root_key || file_key.starts_with(&format!("{root_key}/")))
@@ -141,7 +140,7 @@ fn source_root_status(root: &str) -> SourceRootStatus {
     }
 }
 
-fn normalize_source_root_for_matching(value: &str) -> String {
+pub(crate) fn normalize_source_root_for_matching(value: &str) -> String {
     value
         .trim()
         .replace('\\', "/")
@@ -297,8 +296,93 @@ impl BackendService {
             analysis_paused: Arc::new(AtomicBool::new(false)),
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
         };
+        svc.reset_mounted_usb_devices()?;
+        svc.backfill_usb_devices_from_legacy_settings()?;
         svc.backfill_track_fingerprints()?;
+        svc.merge_orphaned_usb_placeholder_tracks()?;
         Ok(svc)
+    }
+
+    /// Mount state from a previous OS/app session can't be trusted (crash,
+    /// drive physically removed while the app was closed) -- reset it
+    /// unconditionally on every launch, before anything else touches
+    /// `usb_devices`.
+    fn reset_mounted_usb_devices(&self) -> BackendResult<()> {
+        let conn = self.db.connect()?;
+        conn.execute(
+            "UPDATE usb_devices SET mounted = 0, updated_at = ?1 WHERE mounted != 0",
+            params![now()],
+        )?;
+        Ok(())
+    }
+
+    /// One-time migration: seed `usb_devices` from the legacy
+    /// `ui_usb_root_v1`/`ui_usb_recent_roots_v1` app_settings entries so
+    /// pre-existing databases get retroactive USB-vs-local protection with
+    /// no per-track migration needed. `ui_usb_recent_roots_v1` is deleted
+    /// afterward since its data now lives in `usb_devices` -- on the next
+    /// launch this becomes an immediate no-op. `ui_usb_root_v1` is left in
+    /// place; it serves an unrelated purpose (pre-filling the USB picker
+    /// with the last-chosen root), not device-list bookkeeping.
+    fn backfill_usb_devices_from_legacy_settings(&self) -> BackendResult<()> {
+        let conn = self.db.connect()?;
+        let now_ts = now();
+
+        let mut seen = std::collections::HashSet::<String>::new();
+        let mut roots = Vec::<String>::new();
+        let push_root = |raw: &str, roots: &mut Vec<String>, seen: &mut std::collections::HashSet<String>| {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let key = normalize_source_root_for_matching(trimmed);
+            if seen.insert(key) {
+                roots.push(trimmed.to_string());
+            }
+        };
+
+        if let Some(root_value) = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![SETTING_UI_USB_ROOT],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        {
+            push_root(&root_value, &mut roots, &mut seen);
+        }
+
+        // "ui_usb_recent_roots_v1": the legacy recent-roots list. Read here by
+        // its literal key (not a shared constant) because this one-time
+        // migration is now the only remaining reader anywhere in the
+        // codebase -- the setting is no longer part of
+        // frontend_ui_setting_keys(), so nothing else needs its name.
+        if let Some(recent_value) = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params!["ui_usb_recent_roots_v1"],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        {
+            // Malformed JSON is tolerated -- skip this contribution, don't fail startup.
+            if let Ok(entries) = serde_json::from_str::<Vec<String>>(&recent_value) {
+                for entry in entries {
+                    push_root(&entry, &mut roots, &mut seen);
+                }
+            }
+
+            conn.execute(
+                "DELETE FROM app_settings WHERE key = ?1",
+                params!["ui_usb_recent_roots_v1"],
+            )?;
+        }
+
+        for root in roots {
+            usb_utils::upsert_usb_device(&conn, Path::new(&root), false, &now_ts)?;
+        }
+
+        Ok(())
     }
 
     /// One-line CPU/RAM summary for the startup Event Log, so support
@@ -1652,6 +1736,34 @@ impl BackendService {
         &self,
         req: ResolvePlaybackSourceRequest,
     ) -> BackendResult<ResolvePlaybackSourceData> {
+        let conn = self.db.connect()?;
+        let usb_root_paths = untainted_usb_root_paths(&conn)?;
+        let is_usb_rooted =
+            |path: &str| usb_root_paths.iter().any(|root| browse_path_matches_root(path, root));
+
+        // Fast path: any origin (library, playlist, USB, history) may carry
+        // the id of the row it was dispatched from. If that row is a
+        // genuine local track, resolve to it directly with a single indexed
+        // lookup -- no fingerprint scan needed. If it turns out to be
+        // USB-rooted (e.g. a playlist entry created before this fix, still
+        // pointing at a stale placeholder), fall through to the
+        // fingerprint/title search below so it can self-heal.
+        if let Some(id) = req.track_id.as_deref().filter(|id| !id.trim().is_empty()) {
+            let mut stmt = conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks WHERE id = ?1"))?;
+            let track = stmt
+                .query_row(params![id], |row| row_to_track(row, false))
+                .optional()?;
+            if let Some(track) = track
+                && !is_usb_rooted(&track.file_path)
+            {
+                return Ok(ResolvePlaybackSourceData {
+                    resolved_path: Some(track.file_path.clone()),
+                    matched_by: "self".to_string(),
+                    track_id: Some(track.id),
+                });
+            }
+        }
+
         let title = req.title.trim();
         let artist = req.artist.trim();
         if title.is_empty() || artist.is_empty() {
@@ -1662,13 +1774,16 @@ impl BackendService {
             });
         }
 
-        let conn = self.db.connect()?;
         let fingerprint = build_track_match_fingerprint(title, artist, req.album.as_deref());
         let mut stmt = conn.prepare(
             &format!("SELECT {TRACK_COLS} FROM tracks WHERE match_fingerprint = ?1 ORDER BY updated_at DESC LIMIT 64"),
         )?;
         let rows = stmt.query_map(params![fingerprint], |row| row_to_track(row, false))?;
-        let candidates = rows.collect::<Result<Vec<_>, _>>()?;
+        let candidates = rows
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|t| !is_usb_rooted(&t.file_path))
+            .collect::<Vec<_>>();
 
         if let Some(track) = best_candidate(candidates, &req) {
             return Ok(ResolvePlaybackSourceData {
@@ -1683,7 +1798,11 @@ impl BackendService {
             "SELECT {TRACK_COLS} FROM tracks WHERE title LIKE ?1 ORDER BY updated_at DESC LIMIT 200"
         ))?;
         let rows = stmt.query_map(params![like], |row| row_to_track(row, false))?;
-        let candidates = rows.collect::<Result<Vec<_>, _>>()?;
+        let candidates = rows
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|t| !is_usb_rooted(&t.file_path))
+            .collect::<Vec<_>>();
         if let Some(track) = best_candidate(candidates, &req) {
             return Ok(ResolvePlaybackSourceData {
                 resolved_path: Some(track.file_path.clone()),
@@ -2051,8 +2170,107 @@ fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_ANALYSIS_ENGINE,
         SETTING_UI_SIDEBAR_COLLAPSED,
         SETTING_UI_HELP_SEEN,
-        SETTING_UI_USB_RECENT_ROOTS,
     ]
+}
+
+/// The user's currently-configured local library folders, read directly from
+/// `app_settings` (the same JSON array `SETTING_UI_SOURCE_ROOTS` the frontend
+/// persists). An explicit "this is my library folder" assertion from the user
+/// outranks stale USB-device history for that same path (see
+/// `usb_utils::all_usb_device_root_paths`). Tolerates a missing key (fresh
+/// install) or malformed JSON by returning an empty list rather than failing.
+pub(crate) fn configured_source_roots(conn: &rusqlite::Connection) -> BackendResult<Vec<String>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![SETTING_UI_SOURCE_ROOTS],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(raw
+        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+        .unwrap_or_default())
+}
+
+/// All known USB device root paths, minus any that are also currently
+/// configured as a local `sourceRoots` folder. `all_usb_device_root_paths`
+/// intentionally never forgets a path once it's been seen as a USB root
+/// (see its doc comment) -- an explicit "this is my library folder"
+/// assertion from the user is what overrides that stale taint for reused
+/// mount paths (e.g. `/mnt/data` remounted as a permanent local folder),
+/// not the passage of time or a prune action.
+pub(crate) fn untainted_usb_root_paths(conn: &rusqlite::Connection) -> BackendResult<Vec<String>> {
+    let source_roots = configured_source_roots(conn)?;
+    let all_roots = usb_utils::all_usb_device_root_paths(conn)?;
+    Ok(all_roots
+        .into_iter()
+        .filter(|root| {
+            !source_roots
+                .iter()
+                .any(|sr| normalize_source_root_for_matching(sr) == normalize_source_root_for_matching(root))
+        })
+        .collect())
+}
+
+const FINGERPRINT_MATCH_DURATION_TOLERANCE_MS: i64 = 2000;
+
+/// Finds a single high-confidence local-track match for a USB-sourced
+/// fingerprint. Duration (tolerance-based) and file size (exact) must both
+/// agree whenever both sides have the data -- fingerprinting alone is
+/// text-only (lowercased title/artist/album) and can't distinguish
+/// same-length variants like a Clean vs. Explicit edit, so both gates are
+/// required together, each only when its data is actually available.
+/// Returns `None` (no match) whenever zero or more than one candidate
+/// survives -- a spurious extra placeholder row is a strictly safer failure
+/// mode than silently linking the wrong audio file. Candidates whose own
+/// `file_path` falls under a known (untainted) USB root are skipped
+/// entirely: a placeholder row matching another placeholder is never a
+/// genuine match.
+pub(crate) fn find_confident_fingerprint_match(
+    conn: &rusqlite::Connection,
+    fingerprint: &str,
+    incoming_duration_ms: Option<i64>,
+    incoming_file_size_bytes: Option<i64>,
+    usb_root_paths: &[String],
+) -> BackendResult<Option<String>> {
+    if fingerprint.trim().is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare(
+        "SELECT id, file_path, duration_ms, file_size_bytes FROM tracks WHERE match_fingerprint = ?1",
+    )?;
+    let rows: Vec<(String, String, Option<i64>, Option<i64>)> = stmt
+        .query_map(params![fingerprint], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<Result<_, _>>()?;
+
+    let mut passing = Vec::new();
+    for (id, path, cand_duration, cand_size) in rows {
+        if usb_root_paths
+            .iter()
+            .any(|root| browse_path_matches_root(&path, root))
+        {
+            continue;
+        }
+        let duration_ok = match (incoming_duration_ms, cand_duration) {
+            (Some(a), Some(b)) => (a - b).abs() <= FINGERPRINT_MATCH_DURATION_TOLERANCE_MS,
+            _ => true,
+        };
+        let size_ok = match (incoming_file_size_bytes, cand_size) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        };
+        if duration_ok && size_ok {
+            passing.push(id);
+        }
+    }
+
+    if passing.len() == 1 {
+        Ok(passing.into_iter().next())
+    } else {
+        Ok(None)
+    }
 }
 
 fn source_root_keys_equal(left: &str, right: &str) -> bool {
@@ -2243,7 +2461,7 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
     })
 }
 
-pub(crate) fn build_track_match_fingerprint(
+pub fn build_track_match_fingerprint(
     title: &str,
     artist: &str,
     album: Option<&str>,
@@ -2296,6 +2514,15 @@ fn best_candidate(candidates: Vec<Track>, req: &ResolvePlaybackSourceRequest) ->
     let mut best: Option<Track> = None;
     let mut best_score = -1i32;
     for candidate in candidates {
+        // A known file-size mismatch is stronger evidence of "different
+        // file" than any positive score contribution elsewhere can
+        // outweigh -- veto outright rather than merely downweighting.
+        if let (Some(req_size), Some(candidate_size)) =
+            (req.file_size_bytes, candidate.file_size_bytes)
+            && req_size != candidate_size
+        {
+            continue;
+        }
         let score = score_playback_candidate(&candidate, req);
         if score > best_score {
             best_score = score;
@@ -2655,5 +2882,113 @@ mod tests {
         assert_eq!(decoded.file_path, "/music/a.mp3");
         assert_eq!(decoded.id, "track-a");
         assert_eq!(decoded.signature, sig);
+    }
+
+    // --- find_confident_fingerprint_match / untainted_usb_root_paths ---
+
+    fn test_db() -> (tempfile::TempDir, crate::db::Db) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::Db::new(dir.path()).expect("db init");
+        (dir, db)
+    }
+
+    fn insert_track(
+        conn: &rusqlite::Connection,
+        id: &str,
+        file_path: &str,
+        fingerprint: &str,
+        duration_ms: Option<i64>,
+        file_size_bytes: Option<i64>,
+    ) {
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, file_size_bytes, match_fingerprint, created_at, updated_at)
+             VALUES (?1, 'T', 'A', ?2, ?3, ?4, ?5, datetime('now'), datetime('now'))",
+            params![id, file_path, duration_ms, file_size_bytes, fingerprint],
+        )
+        .expect("insert track");
+    }
+
+    #[test]
+    fn find_confident_fingerprint_match_requires_duration_and_size_agreement() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        insert_track(&conn, "local-1", "/music/a.mp3", "fp1", Some(200_000), Some(1_000));
+
+        // Both agree -> match.
+        let matched = find_confident_fingerprint_match(&conn, "fp1", Some(201_000), Some(1_000), &[])
+            .expect("query");
+        assert_eq!(matched, Some("local-1".to_string()));
+
+        // Duration diverges beyond tolerance -> no match.
+        let no_match = find_confident_fingerprint_match(&conn, "fp1", Some(210_000), Some(1_000), &[])
+            .expect("query");
+        assert_eq!(no_match, None);
+
+        // Duration matches but size diverges -> no match (Clean/Explicit collision case).
+        let no_match_size = find_confident_fingerprint_match(&conn, "fp1", Some(200_500), Some(999), &[])
+            .expect("query");
+        assert_eq!(no_match_size, None);
+    }
+
+    #[test]
+    fn find_confident_fingerprint_match_relaxes_missing_gate_data() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        insert_track(&conn, "local-1", "/music/a.mp3", "fp1", Some(200_000), None);
+
+        // Local candidate has no file_size_bytes recorded -- duration alone,
+        // when it matches, is still enough (missing data doesn't force a
+        // non-match, it just isn't checked).
+        let matched = find_confident_fingerprint_match(&conn, "fp1", Some(200_100), Some(9_999), &[])
+            .expect("query");
+        assert_eq!(matched, Some("local-1".to_string()));
+    }
+
+    #[test]
+    fn find_confident_fingerprint_match_refuses_to_pick_between_two_candidates() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        insert_track(&conn, "local-1", "/music/a.mp3", "fp1", Some(200_000), Some(1_000));
+        insert_track(&conn, "local-2", "/music/b.mp3", "fp1", Some(200_000), Some(1_000));
+
+        let result = find_confident_fingerprint_match(&conn, "fp1", Some(200_000), Some(1_000), &[])
+            .expect("query");
+        assert_eq!(result, None, "ambiguous ties must not auto-merge");
+    }
+
+    #[test]
+    fn find_confident_fingerprint_match_skips_candidates_under_a_known_usb_root() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        insert_track(&conn, "placeholder-1", "/mnt/usb1/Contents/a.mp3", "fp1", Some(200_000), Some(1_000));
+
+        let result = find_confident_fingerprint_match(
+            &conn,
+            "fp1",
+            Some(200_000),
+            Some(1_000),
+            &["/mnt/usb1".to_string()],
+        )
+        .expect("query");
+        assert_eq!(result, None, "placeholder-vs-placeholder must never be treated as a match");
+    }
+
+    #[test]
+    fn untainted_usb_root_paths_excludes_configured_source_roots() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        usb_utils::upsert_usb_device(&conn, Path::new("/mnt/data"), false, &now())
+            .expect("seed usb device");
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))",
+            params![SETTING_UI_SOURCE_ROOTS, r#"["/mnt/data"]"#],
+        )
+        .expect("seed source roots setting");
+
+        let paths = untainted_usb_root_paths(&conn).expect("untainted paths");
+        assert!(
+            !paths.iter().any(|p| p == "/mnt/data"),
+            "a path reused as a configured source root should no longer be treated as USB-tainted"
+        );
     }
 }

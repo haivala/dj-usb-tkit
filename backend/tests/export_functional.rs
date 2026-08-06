@@ -1686,9 +1686,15 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
         "wrong track added to playlist: {:?}",
         added
     );
-    assert!(
-        added.file_path.contains("/Contents/"),
-        "expected imported usb-backed local track path: {:?}",
+    // materialize_usb_track_row now dedupes a USB-browsed row against the
+    // genuine local track (matched by fingerprint + duration + file size)
+    // instead of always spawning a second, disconnected row for the
+    // exported Contents/ copy -- so this playlist entry should resolve back
+    // to the original local media path, not the USB-side path.
+    assert_eq!(
+        added.file_path,
+        track_path.to_string_lossy(),
+        "expected usb-browsed track to dedupe to the genuine local track path: {:?}",
         added
     );
     assert!(

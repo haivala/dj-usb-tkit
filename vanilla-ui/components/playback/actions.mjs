@@ -39,6 +39,12 @@ export function getPlaybackUiStateHelpers() {
   return globalThis?.playbackUiState || null;
 }
 
+function getPlaybackSourceLabelFn(deps = {}) {
+  if (typeof deps.getPlaybackSourceLabel === "function") return deps.getPlaybackSourceLabel;
+  const fallback = globalThis?.playbackSourceLabel?.getPlaybackSourceLabel;
+  return typeof fallback === "function" ? fallback : () => "Local file";
+}
+
 export function updateTransportButtonsInDom(state, document) {
   const helpers = getPlaybackUiStateHelpers();
   document.querySelectorAll(".transport-btn").forEach((btn) => {
@@ -405,62 +411,55 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
     cancelAnimationFrameFn
   } = deps;
 
-  let localTrack = null;
   const trackPath = String(track?.filePath || "").trim();
   const originLower = String(origin || "").toLowerCase();
-  // Real callers pass "local" for library/playlist tracks (see components/library/events.mjs,
-  // components/playlist/events.mjs); "library" is kept for backward compatibility.
-  const isLibraryOrigin = originLower === "local" || originLower === "library";
-  if (isLibraryOrigin && trackPath) {
-    localTrack = {
-      id: track?.id || null,
-      title: track?.title || "Unknown Title",
-      filePath: trackPath
-    };
-  } else {
-    try {
-      const resolved = await command("resolve_playback_source", {
-        title: track?.title || "",
-        artist: track?.artist || "",
-        album: track?.album || null,
-        bpm: Number.isFinite(Number(track?.bpm)) ? Number(track.bpm) : null,
-        filePath: track?.filePath || null,
-        fileSizeBytes: Number.isFinite(Number(track?.fileSizeBytes)) ? Number(track.fileSizeBytes) : null
-      });
-      if (resolved?.resolvedPath) {
-        localTrack = {
-          id: resolved?.trackId || null,
-          title: track?.title || "Unknown Title",
-          filePath: resolved.resolvedPath
-        };
-      }
-    } catch (err) {
-      warn("resolve_playback_source failed:", err);
-    }
+
+  // Every origin (library, playlist, USB, history) now routes through the
+  // same resolution call -- Steps 6/6c on the backend guarantee this only
+  // ever returns a genuine local row (or a fast "self" match for the
+  // already-fine common case), so a playlist entry that still references a
+  // stale USB placeholder self-heals here with no migration required.
+  let resolved = null;
+  try {
+    resolved = await command("resolve_playback_source", {
+      title: track?.title || "",
+      artist: track?.artist || "",
+      album: track?.album || null,
+      bpm: Number.isFinite(Number(track?.bpm)) ? Number(track.bpm) : null,
+      filePath: track?.filePath || null,
+      fileSizeBytes: Number.isFinite(Number(track?.fileSizeBytes)) ? Number(track.fileSizeBytes) : null,
+      trackId: track?.id || null
+    });
+  } catch (err) {
+    warn("resolve_playback_source failed:", err);
   }
+
   const artist = String(track?.artist || "").trim();
-  const titlePart = localTrack?.title || track?.title || "Unknown Title";
+  const titlePart = track?.title || "Unknown Title";
   const title = artist ? `${artist} - ${titlePart}` : titlePart;
   const startRatio = Math.max(0, Math.min(1, Number(options.startRatio) || 0));
   const waveformEl = options.waveformEl || null;
 
   const hasUsbContext = !!state.usbRoot && !!state.usbRootValid;
-  const resolvedPath = String(localTrack?.filePath || "").trim();
-  const libraryPath = trackPathMatchesAnyRoot(resolvedPath, state.sourceRoots || [])
-    ? resolvedPath
-    : (trackPathMatchesAnyRoot(trackPath, state.sourceRoots || []) ? trackPath : "");
-  // master.db tracks live anywhere — not necessarily under a source root
-  const masterDbPath = (!libraryPath && track?.masterDbSource) ? (resolvedPath || trackPath) : "";
+  const isLibraryResolved = resolved?.matchedBy === "self"
+    || resolved?.matchedBy === "hash"
+    || resolved?.matchedBy === "metadata";
+  const libraryPath = isLibraryResolved ? String(resolved?.resolvedPath || "").trim() : "";
+  // "is this literally under the mounted USB root" -- unrelated to the backend fix,
+  // this is just how the transient audio-file fallback below decides it has a USB copy to try.
   const usbPath = hasUsbContext && trackPathMatchesAnyRoot(trackPath, [state.usbRoot])
     ? trackPath
     : "";
 
-  const isLibraryResolved = !!(libraryPath || masterDbPath);
-  const playPath = libraryPath || masterDbPath || usbPath;
+  const playPath = libraryPath || usbPath;
   const playId = isLibraryResolved
-    ? (localTrack?.id || track?.id || null)
-    : (track?.id || localTrack?.id || null);
-  const sourceLabel = isLibraryResolved ? "Library" : (usbPath ? "USB" : "Unavailable");
+    ? (resolved?.trackId || track?.id || null)
+    : (track?.id || null);
+  const sourceLabel = getPlaybackSourceLabelFn(deps)({
+    origin: originLower,
+    libraryResolved: isLibraryResolved,
+    hasUsbContext
+  });
 
   const playNativeWithRecovery = async (path) => {
     try {
@@ -478,7 +477,7 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
     }
   };
 
-  if (playPath && sourceLabel !== "Unavailable") {
+  if (playPath) {
     return withBackendQueue(state, async () => {
       if (!isGenerationCurrent(state, generation)) return;
       try {
@@ -506,6 +505,7 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
         state.playbackTrackId = playId;
         state.playbackPath = playback?.path || playPath;
         state.playbackRowKey = options.rowKey || null;
+        state.playbackLabelContext = { origin: originLower, libraryResolved: isLibraryResolved, hasUsbContext, title };
         updateTransportButtonsInDom();
         setStatus(`Playing from ${sourceLabel}: ${title}`);
         return;
@@ -536,6 +536,7 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
             state.playbackTrackId = track?.id || null;
             state.playbackPath = playback?.path || usbPath;
             state.playbackRowKey = options.rowKey || null;
+            state.playbackLabelContext = { origin: originLower, libraryResolved: false, hasUsbContext, title };
             updateTransportButtonsInDom();
             setStatus(`Playing from USB (library unavailable): ${title}`);
             return;
@@ -685,6 +686,15 @@ export function handlePlaybackEvent(state, payload, deps) {
       }
     }
     updateTransportButtonsInDom();
+    // Make the status line a live projection of playback state rather than
+    // a one-shot string frozen at play-dispatch time -- recompute the
+    // label from the same context playTrackFromOrigin stashed, so later
+    // events (e.g. a seek) keep it accurate.
+    if (playing && state.playbackLabelContext) {
+      const { origin, libraryResolved, hasUsbContext, title } = state.playbackLabelContext;
+      const label = getPlaybackSourceLabelFn(deps)({ origin, libraryResolved, hasUsbContext });
+      setStatus(`Playing from ${label}: ${title}`);
+    }
     return;
   }
 
@@ -699,6 +709,7 @@ export function handlePlaybackEvent(state, payload, deps) {
     state.playbackTrackId = null;
     state.playbackRowKey = null;
     state.activeWaveform = null;
+    state.playbackLabelContext = null;
     stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
     clearAllWaveformPlayheads();
     updateTransportButtonsInDom();

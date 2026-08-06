@@ -34,6 +34,7 @@ export function bindUsbEvents(ctx) {
     setActiveListItem,
     getHistoryDateDisplay,
     addTracksToCurrentPlaylist,
+    pruneUsbDevice,
   } = ctx;
   const patchUsbTrackRow = typeof ctx.patchUsbTrackRow === "function"
     ? ctx.patchUsbTrackRow
@@ -79,6 +80,12 @@ export function bindUsbEvents(ctx) {
   });
 
   el.usbRecentList?.addEventListener("click", (event) => {
+    const pruneBtn = event.target.closest("[data-usb-prune-device-id]");
+    if (pruneBtn) {
+      const deviceId = String(pruneBtn.dataset.usbPruneDeviceId || "").trim();
+      if (deviceId) pruneUsbDevice?.(deviceId).catch(catchErr(emitStatus));
+      return;
+    }
     const btn = event.target.closest("[data-usb-recent-path]");
     if (!btn) return;
     const selectedPath = String(btn.dataset.usbRecentPath || "").trim();

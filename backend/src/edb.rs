@@ -401,6 +401,7 @@ pub fn try_read_track_index_from_edb(
                 duration_ms: length_seconds
                     .filter(|v| *v > 0)
                     .map(|v| (v as u64).saturating_mul(1000)),
+                file_size_bytes: None,
             },
         ))
     }) {
@@ -714,6 +715,7 @@ fn try_read_playlists_with_metadata_from_edb_internal(
                 duration_ms: length_seconds
                     .filter(|v| *v > 0)
                     .map(|v| (v as u64).saturating_mul(1000)),
+                file_size_bytes: None,
             })
         }) {
             Ok(r) => r,

@@ -5,66 +5,56 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { getPlaybackSourceLabel } = require("../playback_source_label.js");
 
-test("usb origin resolved to configured library root is labeled Library (matched)", () => {
+test("usb origin resolved to a genuine local track is labeled Library (matched)", () => {
   const label = getPlaybackSourceLabel({
     origin: "usb",
     libraryResolved: true,
-    hasUsbContext: true,
-    resolvedPath: "/Music/House/track.mp3",
-    sourceRoots: ["/Music"]
+    hasUsbContext: true
   });
   assert.equal(label, "Library (matched)");
 });
 
-test("usb origin resolved outside configured library roots is labeled USB", () => {
+test("history origin resolved to a genuine local track is labeled Library (matched)", () => {
   const label = getPlaybackSourceLabel({
-    origin: "usb",
+    origin: "history",
     libraryResolved: true,
-    hasUsbContext: true,
-    resolvedPath: "/media/USB1/Contents/track.mp3",
-    sourceRoots: ["/Music"]
+    hasUsbContext: true
   });
-  assert.equal(label, "USB");
+  assert.equal(label, "Library (matched)");
 });
 
-test("local origin resolved inside configured roots is labeled Library", () => {
+test("local origin resolved to a genuine local track is labeled Library", () => {
   const label = getPlaybackSourceLabel({
     origin: "local",
     libraryResolved: true,
-    resolvedPath: "/Music/House/track.mp3",
-    sourceRoots: ["/Music"]
+    hasUsbContext: false
   });
   assert.equal(label, "Library");
 });
 
-test("usb without library match is labeled USB", () => {
+test("usb origin without a library match falls back to USB when usb context is present", () => {
   const label = getPlaybackSourceLabel({
     origin: "usb",
     libraryResolved: false,
-    hasUsbContext: true,
-    resolvedPath: "",
-    sourceRoots: ["/Music"]
+    hasUsbContext: true
   });
   assert.equal(label, "USB");
 });
 
-test("local origin resolved outside configured roots is labeled Local file", () => {
+test("local origin without a library match is labeled Local file", () => {
   const label = getPlaybackSourceLabel({
     origin: "local",
-    libraryResolved: true,
-    resolvedPath: "/media/USB1/Contents/track.mp3",
-    sourceRoots: ["/Music"]
+    libraryResolved: false,
+    hasUsbContext: false
   });
   assert.equal(label, "Local file");
 });
 
-test("usb origin without usb context is not labeled USB", () => {
+test("usb origin without usb context and no library match is labeled Local file", () => {
   const label = getPlaybackSourceLabel({
     origin: "usb",
     libraryResolved: false,
-    hasUsbContext: false,
-    resolvedPath: "",
-    sourceRoots: ["/Music"]
+    hasUsbContext: false
   });
   assert.equal(label, "Local file");
 });

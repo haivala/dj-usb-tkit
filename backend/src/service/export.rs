@@ -22,15 +22,16 @@ use super::export_helpers::{
     prune_stale_export_owned_files, stable_u32_hash, to_usb_relative_path, verify_edb_content,
     verify_pdb_content, write_edb_playlist, write_pdb,
 };
-use super::export_log::append_export_log_record;
+use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_utils::{
-    analysis_bundle_exists, canonicalize_playlist_name,
+    self, analysis_bundle_exists, canonicalize_playlist_name,
     load_existing_analysis_paths_by_content_path, load_existing_analysis_paths_by_pdb_track_path,
     resolve_usb_root, resolve_usb_side_path,
 };
 use super::usb_vendor_compat::{backup_usb_databases, vendor_pdb_path};
 use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, now};
 use crate::pdb_reader::parse_pdb;
+use uuid::Uuid;
 
 fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<String> {
     let candidate = path?.trim();
@@ -606,6 +607,36 @@ impl BackendService {
                     format!("USB export log append skipped: {err}"),
                 ));
             }
+            // Additive, always-queryable counterpart to the on-drive JSON
+            // log above -- that log stays the source of truth for
+            // portability (another machine reading this drive still needs
+            // it); this table is what lets the app answer "what have I
+            // exported to USB devices, and when" without the drive mounted.
+            // mark_mounted=false: an export happening implies the device
+            // was already validated/mounted earlier in the flow, this call
+            // only resolves/bumps the usb_devices row.
+            let export_conn = self.db.connect()?;
+            let usb_device_id =
+                usb_utils::upsert_usb_device(&export_conn, &usb_root, false, &now())?;
+            let export_record = build_export_log_record(&playlist, &manifest);
+            let track_fingerprints_json =
+                serde_json::to_string(&export_record.track_fingerprints).map_err(|err| {
+                    BackendError::Internal(format!("failed to encode track fingerprints: {err}"))
+                })?;
+            export_conn.execute(
+                "INSERT INTO usb_device_exports (id, usb_device_id, playlist_id, playlist_name, exported_at, track_count, track_fingerprints, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    Uuid::now_v7().to_string(),
+                    usb_device_id,
+                    playlist.id,
+                    export_record.playlist_name,
+                    export_record.exported_at,
+                    manifest.tracks.len() as i64,
+                    track_fingerprints_json,
+                    now(),
+                ],
+            )?;
         }
 
         Ok(ExportToUsbData {

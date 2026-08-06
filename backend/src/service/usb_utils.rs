@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use rusqlite::OptionalExtension;
 use walkdir::WalkDir;
 
 use crate::edb::open_edb_from_usb_root;
@@ -85,6 +86,81 @@ pub(crate) fn normalize_usb_root_path(path: std::path::PathBuf) -> std::path::Pa
     }
 
     path
+}
+
+/// Upsert a `usb_devices` row for `root`, keyed on its normalized path.
+/// Any touch clears `deleted_at` (seeing a device again un-prunes it).
+/// `mark_mounted=true` additionally makes this the ONLY mounted device --
+/// every other row is unmounted in the same call (`validate_usb_root`'s
+/// success path is the sole caller that passes `true`). `mark_mounted=false`
+/// only bumps `last_seen_at`, leaving mounted state untouched everywhere
+/// else (the USB browse/materialize and export paths must not imply "just
+/// mounted" or silently unmount whatever the user actually has selected).
+pub(crate) fn upsert_usb_device(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    mark_mounted: bool,
+    now_ts: &str,
+) -> BackendResult<String> {
+    let root_path = root.to_string_lossy().to_string();
+    let root_path_key = super::normalize_source_root_for_matching(&root_path);
+
+    let existing_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM usb_devices WHERE root_path_key = ?1",
+            rusqlite::params![root_path_key],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let id = if let Some(id) = existing_id {
+        conn.execute(
+            "UPDATE usb_devices SET root_path = ?1, last_seen_at = ?2, updated_at = ?2, deleted_at = NULL WHERE id = ?3",
+            rusqlite::params![root_path, now_ts, id],
+        )?;
+        id
+    } else {
+        let id = uuid::Uuid::now_v7().to_string();
+        conn.execute(
+            "INSERT INTO usb_devices (id, root_path, root_path_key, label, mounted, first_seen_at, last_seen_at, deleted_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, 0, ?4, ?4, NULL, ?4, ?4)",
+            rusqlite::params![id, root_path, root_path_key, now_ts],
+        )?;
+        id
+    };
+
+    if mark_mounted {
+        conn.execute(
+            "UPDATE usb_devices SET mounted = 0, updated_at = ?1 WHERE mounted != 0 AND id != ?2",
+            rusqlite::params![now_ts, id],
+        )?;
+        conn.execute(
+            "UPDATE usb_devices SET mounted = 1, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now_ts, id],
+        )?;
+    }
+
+    Ok(id)
+}
+
+/// All known device root paths (display form), ANY mount state, ANY age,
+/// INCLUDING soft-deleted devices. Used only for the "is this path
+/// untrustworthy as durable local storage" check (materialize matching,
+/// `resolve_playback_source` exclusion) -- a path that was ever on removable
+/// media stays untrustworthy even after the user prunes it from their UI
+/// list, since pruning doesn't change the underlying filesystem fact.
+///
+/// Note the asymmetry with `list_usb_devices` (UI-facing, filters
+/// `WHERE deleted_at IS NULL`) on purpose -- those two read paths have
+/// different correctness requirements and must not share a single query.
+pub(crate) fn all_usb_device_root_paths(conn: &rusqlite::Connection) -> BackendResult<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT root_path FROM usb_devices")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut paths = Vec::new();
+    for row in rows {
+        paths.push(row?);
+    }
+    Ok(paths)
 }
 
 pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<std::path::PathBuf> {
@@ -1328,6 +1404,128 @@ mod diag_tests {
         assert_eq!(resolve_analysis_worker_count_with_cap(0, 0, None), 1);
         assert_eq!(resolve_analysis_worker_count_with_cap(0, 7, None), 1);
         assert_eq!(resolve_analysis_worker_count_with_cap(7, 0, None), 1);
+    }
+
+    fn test_db() -> (tempfile::TempDir, crate::db::Db) {
+        let dir = tempdir().expect("tempdir");
+        let db = crate::db::Db::new(dir.path()).expect("db init");
+        (dir, db)
+    }
+
+    #[test]
+    fn upsert_usb_device_inserts_then_updates_last_seen_without_duplicating() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id1 = upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-01T00:00:00Z")
+            .expect("first upsert");
+        let id2 = upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-02T00:00:00Z")
+            .expect("second upsert");
+        assert_eq!(id1, id2, "same root should resolve to the same device row");
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(1) FROM usb_devices", [], |row| row.get(0))
+            .expect("count devices");
+        assert_eq!(count, 1);
+
+        let last_seen: String = conn
+            .query_row(
+                "SELECT last_seen_at FROM usb_devices WHERE id = ?1",
+                params![id1],
+                |row| row.get(0),
+            )
+            .expect("last_seen_at");
+        assert_eq!(last_seen, "2026-01-02T00:00:00Z");
+    }
+
+    #[test]
+    fn upsert_usb_device_mark_mounted_unmounts_every_other_device() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id_a = upsert_usb_device(&conn, Path::new("/mnt/usbA"), true, "2026-01-01T00:00:00Z")
+            .expect("mount A");
+        let mounted_a: i64 = conn
+            .query_row(
+                "SELECT mounted FROM usb_devices WHERE id = ?1",
+                params![id_a],
+                |row| row.get(0),
+            )
+            .expect("mounted A");
+        assert_eq!(mounted_a, 1);
+
+        let id_b = upsert_usb_device(&conn, Path::new("/mnt/usbB"), true, "2026-01-01T00:01:00Z")
+            .expect("mount B");
+        let mounted_a_after: i64 = conn
+            .query_row(
+                "SELECT mounted FROM usb_devices WHERE id = ?1",
+                params![id_a],
+                |row| row.get(0),
+            )
+            .expect("mounted A after");
+        let mounted_b: i64 = conn
+            .query_row(
+                "SELECT mounted FROM usb_devices WHERE id = ?1",
+                params![id_b],
+                |row| row.get(0),
+            )
+            .expect("mounted B");
+        assert_eq!(mounted_a_after, 0, "A should be unmounted once B is mounted");
+        assert_eq!(mounted_b, 1);
+    }
+
+    #[test]
+    fn upsert_usb_device_without_mark_mounted_never_changes_mount_state() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id_a = upsert_usb_device(&conn, Path::new("/mnt/usbA"), true, "2026-01-01T00:00:00Z")
+            .expect("mount A");
+        upsert_usb_device(&conn, Path::new("/mnt/usbB"), false, "2026-01-01T00:01:00Z")
+            .expect("touch B without mounting");
+        let mounted_a: i64 = conn
+            .query_row(
+                "SELECT mounted FROM usb_devices WHERE id = ?1",
+                params![id_a],
+                |row| row.get(0),
+            )
+            .expect("mounted A");
+        assert_eq!(mounted_a, 1, "browsing another root must not unmount the currently mounted device");
+    }
+
+    #[test]
+    fn upsert_usb_device_clears_deleted_at_on_any_touch() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id = upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-01T00:00:00Z")
+            .expect("first upsert");
+        conn.execute(
+            "UPDATE usb_devices SET deleted_at = ?1 WHERE id = ?2",
+            params!["2026-01-02T00:00:00Z", id],
+        )
+        .expect("soft delete");
+        upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-03T00:00:00Z")
+            .expect("re-touch");
+        let deleted_at: Option<String> = conn
+            .query_row(
+                "SELECT deleted_at FROM usb_devices WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .expect("deleted_at");
+        assert_eq!(deleted_at, None, "re-picking the same root should un-prune it");
+    }
+
+    #[test]
+    fn all_usb_device_root_paths_includes_soft_deleted_devices() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id = upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-01T00:00:00Z")
+            .expect("upsert");
+        conn.execute(
+            "UPDATE usb_devices SET deleted_at = ?1 WHERE id = ?2",
+            params!["2026-01-02T00:00:00Z", id],
+        )
+        .expect("soft delete");
+        let paths = all_usb_device_root_paths(&conn).expect("root paths");
+        assert!(paths.iter().any(|p| p == "/mnt/usb1"));
     }
 
     #[test]

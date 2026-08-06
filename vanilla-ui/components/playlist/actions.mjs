@@ -319,7 +319,8 @@ export function updatePlaylistExportButtons(state, el, deps) {
     getCurrentPlaylist,
     computeExportButtonState,
     isUsbOriginTrack,
-    trackHasCoreAnalysis
+    trackHasCoreAnalysis,
+    isUsbRootChangeBlocked
   } = deps;
   const current = getCurrentPlaylist();
   const buttonState = computeExportButtonState({
@@ -330,7 +331,7 @@ export function updatePlaylistExportButtons(state, el, deps) {
     knownUsbPlaylistNames: state.usbKnownPlaylistNames
   });
 
-  el.exportPlaylistBtn.disabled = false;
+  el.exportPlaylistBtn.disabled = !!isUsbRootChangeBlocked?.(state);
   el.exportPlaylistBtn.textContent = buttonState.text;
   el.exportPlaylistBtn.dataset.tooltip = buttonState.title;
 
@@ -497,6 +498,13 @@ export async function addTracksToCurrentPlaylist(tracks, deps) {
       trackIds,
       dedupe: "skip"
     });
+    // Backend unconditionally nulls out last_exported_* on every
+    // add_tracks_to_playlist call (mod.rs) -- mirror that here so the
+    // sidebar's "exported to USB" checkmark doesn't keep showing stale
+    // state until an unrelated list_playlists refetch happens.
+    playlist.lastExportedAt = null;
+    playlist.lastExportedUsbRoot = null;
+    playlist.lastExportedTrackCount = null;
     progress(80, "Refreshing playlist...");
     await refreshCurrentPlaylistTracks();
     if (typeof pushEventLog === "function") {

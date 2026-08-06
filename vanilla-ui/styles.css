@@ -2311,17 +2311,49 @@ td button[data-action]:disabled,
   flex-wrap: wrap;
 }
 
-.usb-cfg-recent-btn {
-  font-size: 11px;
-  padding: 4px 8px;
+.usb-cfg-recent-item {
+  display: inline-flex;
+  align-items: center;
+  max-width: 280px;
+  padding: 4px 6px 4px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--bg-elevated);
+}
+
+.usb-cfg-recent-btn {
+  flex: 1 1 auto;
+  font-size: 11px;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--ink-secondary);
-  max-width: 260px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.usb-cfg-recent-btn:hover {
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+
+.usb-cfg-recent-prune-btn {
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  margin-left: 6px;
+  border: none;
+  background: transparent;
+  color: var(--ink-secondary);
+  flex-shrink: 0;
+}
+.usb-cfg-recent-prune-btn:hover:not(:disabled) {
+  color: var(--danger, #c0392b);
+  background: none;
+  border: none;
+  box-shadow: none;
 }
 
 .usb-cfg-toolbar {

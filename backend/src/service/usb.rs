@@ -33,14 +33,18 @@ use super::usb_helpers::{
     parse_history_name_numeric_id, parse_history_slot_id, sanitize_history_name, sanitize_text,
 };
 use super::usb_utils::{
-    artwork_path_to_data_url, canonicalize_or_self, canonicalize_playlist_name, has_write_access,
-    load_waveform_preview_from_analysis_path, normalize_usb_root_path, parse_history_numeric_id,
-    resolve_usb_root, resolve_usb_side_path,
+    self, artwork_path_to_data_url, canonicalize_or_self, canonicalize_playlist_name,
+    has_write_access, load_waveform_preview_from_analysis_path, normalize_usb_root_path,
+    parse_history_numeric_id, resolve_usb_root, resolve_usb_side_path,
 };
 use super::usb_vendor_compat::{
     USB_CONTENTS_DIR, USB_VENDOR_ROOT_DIR, vendor_edb_path, vendor_pdb_path,
 };
-use super::{BackendService, build_track_match_fingerprint, export_log, now};
+use super::{
+    BackendService, FINGERPRINT_MATCH_DURATION_TOLERANCE_MS, browse_path_matches_root,
+    build_track_match_fingerprint, export_log, find_confident_fingerprint_match, now,
+    untainted_usb_root_paths,
+};
 
 const SLOW_USB_STAGE_MS: u128 = 3_000;
 
@@ -94,6 +98,7 @@ fn build_usb_track_index(
                     usb_analysis_path_raw: Some(t.anlz_path.clone()),
                     waveform_preview: None,
                     duration_ms: t.duration_seconds.map(|s| u64::from(s) * 1000),
+                    file_size_bytes: t.file_size_bytes.map(i64::from),
                 },
             )
         })
@@ -323,6 +328,9 @@ impl BackendService {
         }
 
         let normalized = normalize_usb_root_path(canonicalize_or_self(candidate));
+        let mount_conn = self.db.connect()?;
+        usb_utils::upsert_usb_device(&mount_conn, &normalized, true, &now())?;
+        drop(mount_conn);
         let has_vendor_root = normalized.join(USB_VENDOR_ROOT_DIR).is_dir();
         let has_contents = normalized.join(USB_CONTENTS_DIR).is_dir();
         let has_pdb = vendor_pdb_path(&normalized).is_file();
@@ -373,6 +381,42 @@ impl BackendService {
             has_edb,
             warnings,
         })
+    }
+
+    pub fn list_usb_devices(&self) -> BackendResult<crate::models::ListUsbDevicesData> {
+        let conn = self.db.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, root_path, label, mounted, first_seen_at, last_seen_at
+             FROM usb_devices
+             WHERE deleted_at IS NULL
+             ORDER BY last_seen_at DESC",
+        )?;
+        let items = stmt
+            .query_map([], |row| {
+                Ok(crate::models::UsbDeviceSummary {
+                    id: row.get(0)?,
+                    root_path: row.get(1)?,
+                    label: row.get(2)?,
+                    mounted: row.get::<_, i64>(3)? != 0,
+                    first_seen_at: row.get(4)?,
+                    last_seen_at: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(crate::models::ListUsbDevicesData { items })
+    }
+
+    pub fn prune_usb_device(
+        &self,
+        req: crate::models::PruneUsbDeviceRequest,
+    ) -> BackendResult<crate::models::PruneUsbDeviceData> {
+        let conn = self.db.connect()?;
+        let now_ts = now();
+        let changed = conn.execute(
+            "UPDATE usb_devices SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            params![now_ts, req.id],
+        )?;
+        Ok(crate::models::PruneUsbDeviceData { pruned: changed > 0 })
     }
 
     pub fn fetch_usb_playlists(
@@ -575,7 +619,7 @@ impl BackendService {
             playlist_referenced_tracks: referenced_track_ids.len(),
             playlist_entries: playlist_entries_total,
         };
-        let materialized_tracks = self.materialize_usb_playlist_tracks(&mut items)?;
+        let materialized_tracks = self.materialize_usb_playlist_tracks(&mut items, &usb_root)?;
         push_usb_stage_timing(
             &mut warnings,
             "finalize playlist import",
@@ -1120,6 +1164,7 @@ impl BackendService {
                                         usb_analysis_path_raw: None,
                                         waveform_preview: None,
                                         duration_ms: None,
+                                        file_size_bytes: None,
                                     },
                                 )
                             })
@@ -1185,7 +1230,7 @@ impl BackendService {
         );
         warnings.extend(supplemental_warnings);
         warnings.extend(stage_warnings);
-        let materialized_tracks = self.materialize_usb_history_tracks(&mut items)?;
+        let materialized_tracks = self.materialize_usb_history_tracks(&mut items, &usb_root)?;
         push_usb_stage_timing(&mut warnings, "finalize history import", &mut stage_started);
         if materialized_tracks > 0 {
             warnings.push(logging::log(
@@ -1232,15 +1277,24 @@ impl BackendService {
     fn materialize_usb_playlist_tracks(
         &self,
         playlists: &mut [UsbPlaylist],
+        usb_root: &std::path::Path,
     ) -> BackendResult<usize> {
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
         let now_ts = now();
+        let usb_device_id = usb_utils::upsert_usb_device(&tx, usb_root, false, &now_ts)?;
+        let usb_root_paths = untainted_usb_root_paths(&tx)?;
         let mut materialized = 0usize;
 
         for playlist in playlists {
             for track in &mut playlist.tracks {
-                if self.materialize_usb_track_row(&tx, track, &now_ts)? {
+                if self.materialize_usb_track_row(
+                    &tx,
+                    track,
+                    &now_ts,
+                    &usb_device_id,
+                    &usb_root_paths,
+                )? {
                     materialized += 1;
                 }
             }
@@ -1250,15 +1304,27 @@ impl BackendService {
         Ok(materialized)
     }
 
-    fn materialize_usb_history_tracks(&self, histories: &mut [UsbHistory]) -> BackendResult<usize> {
+    fn materialize_usb_history_tracks(
+        &self,
+        histories: &mut [UsbHistory],
+        usb_root: &std::path::Path,
+    ) -> BackendResult<usize> {
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
         let now_ts = now();
+        let usb_device_id = usb_utils::upsert_usb_device(&tx, usb_root, false, &now_ts)?;
+        let usb_root_paths = untainted_usb_root_paths(&tx)?;
         let mut materialized = 0usize;
 
         for history in histories {
             for track in &mut history.tracks {
-                if self.materialize_usb_track_row(&tx, track, &now_ts)? {
+                if self.materialize_usb_track_row(
+                    &tx,
+                    track,
+                    &now_ts,
+                    &usb_device_id,
+                    &usb_root_paths,
+                )? {
                     materialized += 1;
                 }
             }
@@ -1268,78 +1334,216 @@ impl BackendService {
         Ok(materialized)
     }
 
+    /// Matches an incoming USB-sourced track against existing `tracks` rows
+    /// before ever creating a placeholder row, so a USB copy of a song the
+    /// user already has locally links to that genuine row instead of
+    /// spawning a second, disconnected one (which also structurally
+    /// prevents the genuine row's `waveform_peaks_path` from ever being
+    /// clobbered by USB-sourced data, since a matched row is never written
+    /// to at all). See the "Confidence gate" note below for why a fingerprint
+    /// match alone isn't sufficient to merge.
     fn materialize_usb_track_row(
         &self,
         tx: &rusqlite::Transaction<'_>,
         track: &mut UsbTrack,
         now_ts: &str,
+        usb_device_id: &str,
+        usb_root_paths: &[String],
     ) -> BackendResult<bool> {
         let file_path = track.file_path.trim();
         if file_path.is_empty() {
             return Ok(false);
         }
 
-        let existing_id = tx
-            .query_row(
-                "SELECT id FROM tracks WHERE file_path = ?1 LIMIT 1",
-                params![file_path],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-
-        let id = existing_id.unwrap_or_else(|| Uuid::now_v7().to_string());
-        let file_size_bytes: Option<i64> = None;
         let fingerprint =
             build_track_match_fingerprint(&track.title, &track.artist, track.album.as_deref());
-        let track_number = track.track_number.map(|v| v.max(1));
-        let bpm = track.bpm.filter(|&v| v > 0.0);
-        let key = track
-            .key
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(ToString::to_string);
+
+        let matched_id = find_confident_fingerprint_match(
+            tx,
+            &fingerprint,
+            track.duration_ms.map(|v| v as i64),
+            track.file_size_bytes,
+            usb_root_paths,
+        )?;
+
+        let id = if let Some(id) = matched_id {
+            // Genuine local row: don't touch title/artist/album/file_path/
+            // waveform_peaks_path -- just record that this device also has
+            // a copy of it.
+            id
+        } else {
+            let existing_id = tx
+                .query_row(
+                    "SELECT id FROM tracks WHERE file_path = ?1 LIMIT 1",
+                    params![file_path],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+
+            let id = existing_id.unwrap_or_else(|| Uuid::now_v7().to_string());
+            let track_number = track.track_number.map(|v| v.max(1));
+            let bpm = track.bpm.filter(|&v| v > 0.0);
+            let key = track
+                .key
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToString::to_string);
+
+            tx.execute(
+                r#"
+                INSERT INTO tracks (
+                  id, title, artist, album, track_number, bpm, tonality, file_path, file_size_bytes,
+                  file_modified_at, artwork_path, waveform_peaks_path, duration_ms, match_fingerprint, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13, ?14, ?14)
+                ON CONFLICT(file_path) DO UPDATE SET
+                  title = excluded.title,
+                  artist = excluded.artist,
+                  album = excluded.album,
+                  track_number = COALESCE(excluded.track_number, tracks.track_number),
+                  bpm = COALESCE(excluded.bpm, tracks.bpm),
+                  tonality = excluded.tonality,
+                  file_size_bytes = COALESCE(excluded.file_size_bytes, tracks.file_size_bytes),
+                  artwork_path = excluded.artwork_path,
+                  waveform_peaks_path = COALESCE(tracks.waveform_peaks_path, excluded.waveform_peaks_path),
+                  duration_ms = COALESCE(excluded.duration_ms, tracks.duration_ms),
+                  match_fingerprint = COALESCE(excluded.match_fingerprint, tracks.match_fingerprint),
+                  updated_at = excluded.updated_at
+                "#,
+                params![
+                    id,
+                    track.title,
+                    track.artist,
+                    track.album,
+                    track_number,
+                    bpm,
+                    key,
+                    file_path,
+                    track.file_size_bytes,
+                    track.artwork_path,
+                    track.waveform_peaks_path,
+                    track.duration_ms,
+                    fingerprint,
+                    now_ts
+                ],
+            )?;
+            id
+        };
 
         tx.execute(
             r#"
-            INSERT INTO tracks (
-              id, title, artist, album, track_number, bpm, tonality, file_path, file_size_bytes,
-              file_modified_at, artwork_path, waveform_peaks_path, duration_ms, match_fingerprint, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13, ?14, ?14)
-            ON CONFLICT(file_path) DO UPDATE SET
-              title = excluded.title,
-              artist = excluded.artist,
-              album = excluded.album,
-              track_number = COALESCE(excluded.track_number, tracks.track_number),
-              bpm = COALESCE(excluded.bpm, tracks.bpm),
-              tonality = excluded.tonality,
-              file_size_bytes = COALESCE(excluded.file_size_bytes, tracks.file_size_bytes),
-              artwork_path = excluded.artwork_path,
-              waveform_peaks_path = COALESCE(excluded.waveform_peaks_path, tracks.waveform_peaks_path),
-              duration_ms = COALESCE(excluded.duration_ms, tracks.duration_ms),
-              match_fingerprint = COALESCE(excluded.match_fingerprint, tracks.match_fingerprint),
-              updated_at = excluded.updated_at
+            INSERT INTO track_usb_links (id, track_id, usb_device_id, usb_file_path, first_seen_at, last_seen_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+            ON CONFLICT(usb_device_id, usb_file_path) DO UPDATE SET
+              track_id = excluded.track_id,
+              last_seen_at = excluded.last_seen_at
             "#,
-            params![
-                id,
-                track.title,
-                track.artist,
-                track.album,
-                track_number,
-                bpm,
-                key,
-                file_path,
-                file_size_bytes,
-                track.artwork_path,
-                track.waveform_peaks_path,
-                track.duration_ms,
-                fingerprint,
-                now_ts
-            ],
+            params![Uuid::now_v7().to_string(), id, usb_device_id, file_path, now_ts],
         )?;
 
         track.local_track_id = Some(id);
         Ok(true)
+    }
+
+    /// One-time (but safely re-runnable) cleanup of duplicate `tracks` rows
+    /// created by the *pre-fix* `materialize_usb_track_row`, which matched
+    /// purely by `file_path` and so always spawned a second, disconnected
+    /// row for a USB copy of a song the user already had locally. This does
+    /// not touch playback correctness going forward (Step 6/6c's exclusion
+    /// and `track_id` fast path already handle that) -- it only removes the
+    /// now-redundant duplicate rows so Library search/browse stops showing
+    /// the same song twice.
+    ///
+    /// Deliberately more conservative than the live per-track path in
+    /// `materialize_usb_track_row`: a missing duration or file size on the
+    /// placeholder row blocks the merge here rather than relaxing that gate,
+    /// since a batch pass has no per-track human moment to notice a bad
+    /// merge the way a fresh browse does.
+    pub fn merge_orphaned_usb_placeholder_tracks(
+        &self,
+    ) -> BackendResult<crate::models::MergeUsbPlaceholderTracksData> {
+        let mut conn = self.db.connect()?;
+        let tx = conn.transaction()?;
+        let usb_root_paths = untainted_usb_root_paths(&tx)?;
+
+        let mut stmt = tx.prepare(
+            "SELECT id, file_path, match_fingerprint, duration_ms, file_size_bytes FROM tracks
+             WHERE match_fingerprint IS NOT NULL AND match_fingerprint != ''",
+        )?;
+        type Row = (String, String, Option<i64>, Option<i64>);
+        let rows: Vec<(String, Row)> = stmt
+            .query_map([], |row| {
+                let fingerprint: String = row.get(2)?;
+                Ok((
+                    fingerprint,
+                    (row.get(0)?, row.get(1)?, row.get(3)?, row.get(4)?),
+                ))
+            })?
+            .collect::<Result<_, _>>()?;
+        drop(stmt);
+
+        let mut by_fingerprint = HashMap::<String, Vec<Row>>::new();
+        for (fingerprint, row) in rows {
+            by_fingerprint.entry(fingerprint).or_default().push(row);
+        }
+
+        let mut merged = 0usize;
+        for group in by_fingerprint.into_values() {
+            let (locals, placeholders): (Vec<Row>, Vec<Row>) = group.into_iter().partition(
+                |(_, path, _, _)| {
+                    !usb_root_paths
+                        .iter()
+                        .any(|root| browse_path_matches_root(path, root))
+                },
+            );
+            if locals.len() != 1 {
+                // Zero or ambiguous local candidates for this fingerprint --
+                // leave every row in the group alone.
+                continue;
+            }
+            let (local_id, _local_path, local_duration, local_size) = &locals[0];
+
+            for (placeholder_id, _placeholder_path, placeholder_duration, placeholder_size) in
+                &placeholders
+            {
+                let duration_ok = matches!(
+                    (local_duration, placeholder_duration),
+                    (Some(a), Some(b)) if (a - b).abs() <= FINGERPRINT_MATCH_DURATION_TOLERANCE_MS
+                );
+                let size_ok =
+                    matches!((local_size, placeholder_size), (Some(a), Some(b)) if a == b);
+                if !duration_ok || !size_ok {
+                    continue;
+                }
+
+                // Avoid landing the same track twice in one playlist: drop
+                // the placeholder's row wherever the local track is already
+                // present in that playlist, then reassign whatever's left.
+                tx.execute(
+                    "DELETE FROM playlist_tracks
+                     WHERE track_id = ?1
+                       AND playlist_id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = ?2)",
+                    params![placeholder_id, local_id],
+                )?;
+                tx.execute(
+                    "UPDATE playlist_tracks SET track_id = ?1 WHERE track_id = ?2",
+                    params![local_id, placeholder_id],
+                )?;
+                // track_usb_links' UNIQUE(usb_device_id, usb_file_path) means
+                // a given (device, path) pair can only ever belong to one
+                // row regardless of track_id, so this reassignment can never
+                // collide with an existing link on the local row.
+                tx.execute(
+                    "UPDATE track_usb_links SET track_id = ?1 WHERE track_id = ?2",
+                    params![local_id, placeholder_id],
+                )?;
+                tx.execute("DELETE FROM tracks WHERE id = ?1", params![placeholder_id])?;
+                merged += 1;
+            }
+        }
+
+        tx.commit()?;
+        Ok(crate::models::MergeUsbPlaceholderTracksData { merged })
     }
 
     pub fn inspect_usb_track(
@@ -1458,6 +1662,7 @@ impl BackendService {
                             duration_ms: t
                                 .duration_seconds
                                 .map(|seconds| u64::from(seconds) * 1000),
+                            file_size_bytes: t.file_size_bytes.map(i64::from),
                         },
                         warnings,
                     });
@@ -1530,6 +1735,7 @@ mod tests {
             usb_analysis_path_raw: None,
             waveform_preview: None,
             duration_ms: None,
+            file_size_bytes: None,
         }
     }
 

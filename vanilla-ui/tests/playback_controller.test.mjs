@@ -135,6 +135,9 @@ test("stop supersedes a pending start; the stale start's success is not committe
   const commonDeps = {
     command: async (name, payload) => {
       calls.push(name);
+      if (name === "resolve_playback_source") {
+        return { resolvedPath: "/music/Track.mp3", trackId: "t1", matchedBy: "self" };
+      }
       if (name === "play_track_native") {
         await pendingPlay;
         return { path: payload.path, durationMs: 1000, positionMs: 0 };
@@ -162,7 +165,7 @@ test("stop supersedes a pending start; the stale start's success is not committe
   });
 
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(calls, ["play_track_native"]);
+  assert.deepEqual(calls, ["resolve_playback_source", "play_track_native"]);
 
   const stopPromise = stopPlaybackFromUi(state, commonDeps);
   assert.equal(state.playbackPendingKind, "stop");
@@ -171,7 +174,7 @@ test("stop supersedes a pending start; the stale start's success is not committe
   resolvePlay();
   await Promise.all([startPromise, stopPromise]);
 
-  assert.deepEqual(calls, ["play_track_native", "stop_playback_native"]);
+  assert.deepEqual(calls, ["resolve_playback_source", "play_track_native", "stop_playback_native"]);
   assert.equal(state.playbackActive, false);
   assert.equal(state.playbackTrackId, null);
   assert.equal(state.playbackPath, null);

@@ -77,6 +77,12 @@ function installTauriMock(page, mode) {
           if (command === "list_playlists") {
             return { ok: true, data: { items: [] } };
           }
+          if (command === "list_usb_devices") {
+            return { ok: true, data: { items: [] } };
+          }
+          if (command === "prune_usb_device") {
+            return { ok: true, data: { pruned: true } };
+          }
           if (command === "search_tracks") {
             return { ok: true, data: { total: 0, items: [] } };
           }

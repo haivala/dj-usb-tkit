@@ -6,7 +6,6 @@ export const STORAGE_KEY_ACCENT_HUE = "djusbtkit.accentHue";
 export const STORAGE_KEY_SOURCE_ROOTS = "djusbtkit.sourceRoots";
 export const STORAGE_KEY_SOURCE_ROOT_ENABLED = "djusbtkit.sourceRootEnabled";
 export const STORAGE_KEY_USB_ROOT = "djusbtkit.usbRoot";
-export const STORAGE_KEY_USB_RECENT_ROOTS = "djusbtkit.usbRecentRoots";
 export const STORAGE_KEY_EXPORT_PRUNE_STALE = "djusbtkit.exportPruneStale";
 export const STORAGE_KEY_EXPORT_BACKUP = "djusbtkit.exportBackup";
 export const STORAGE_KEY_ANALYSIS_BPM_RANGE = "djusbtkit.analysisBpmRange";
@@ -22,7 +21,6 @@ export const FRONTEND_DB_KEY_ACCENT_HUE = "ui_accent_hue_v1";
 export const FRONTEND_DB_KEY_SOURCE_ROOTS = "ui_source_roots_v1";
 export const FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED = "ui_source_root_enabled_v1";
 export const FRONTEND_DB_KEY_USB_ROOT = "ui_usb_root_v1";
-export const FRONTEND_DB_KEY_USB_RECENT_ROOTS = "ui_usb_recent_roots_v1";
 export const FRONTEND_DB_KEY_EXPORT_PRUNE_STALE = "ui_export_prune_stale_v1";
 export const FRONTEND_DB_KEY_EXPORT_BACKUP = "ui_export_backup_v1";
 export const FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE = "ui_analysis_bpm_range_v1";
@@ -38,7 +36,6 @@ export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_SOURCE_ROOTS, dbKey: FRONTEND_DB_KEY_SOURCE_ROOTS },
   { storageKey: STORAGE_KEY_SOURCE_ROOT_ENABLED, dbKey: FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED },
   { storageKey: STORAGE_KEY_USB_ROOT, dbKey: FRONTEND_DB_KEY_USB_ROOT },
-  { storageKey: STORAGE_KEY_USB_RECENT_ROOTS, dbKey: FRONTEND_DB_KEY_USB_RECENT_ROOTS },
   { storageKey: STORAGE_KEY_EXPORT_PRUNE_STALE, dbKey: FRONTEND_DB_KEY_EXPORT_PRUNE_STALE },
   { storageKey: STORAGE_KEY_EXPORT_BACKUP, dbKey: FRONTEND_DB_KEY_EXPORT_BACKUP },
   { storageKey: STORAGE_KEY_ANALYSIS_BPM_RANGE, dbKey: FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE },

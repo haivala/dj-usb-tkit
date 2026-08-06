@@ -516,7 +516,7 @@ function updateUsbRootText(path, valid = false) {
   usb.updateUsbRootText(el, path, valid);
 }
 function renderUsbRecentRoots() {
-  usb.renderUsbRecentRoots(el, state.usbRecentRoots, document);
+  usb.renderUsbRecentRoots(el, state.usbRecentRoots, document, state);
 }
 
 function patchTrackAnalysisFields(track, payload) {
@@ -560,6 +560,7 @@ function updatePlaylistExportButtons() {
     computeExportButtonState: usb.computeExportButtonState,
     isUsbOriginTrack,
     trackHasCoreAnalysis,
+    isUsbRootChangeBlocked: usb.isUsbRootChangeBlocked,
   });
 }
 
@@ -684,6 +685,7 @@ async function playTrackFromOrigin(track, origin, options = {}) {
     warn: (...a) => console.warn(...a),
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
+    getPlaybackSourceLabel: globalThis?.playbackSourceLabel?.getPlaybackSourceLabel,
   });
 }
 
@@ -696,6 +698,7 @@ function handlePlaybackEvent(payload) {
     resolveTrackIdForPath: (path) => playback.findTrackIdByPath(state, path, { normalizePath }),
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
+    getPlaybackSourceLabel: globalThis?.playbackSourceLabel?.getPlaybackSourceLabel,
   });
 }
 
@@ -1086,8 +1089,10 @@ function loadMasterDbEnabledFromStorage() {
 function loadSourcesEverConfiguredFromStorage() {
   settings.loadSourcesEverConfiguredFromStorage(state);
 }
-function loadUsbRecentRootsFromStorage() {
-  settings.loadUsbRecentRootsFromStorage(state);
+async function loadUsbDevices() {
+  const rows = await usb.loadUsbDevices(state, command);
+  renderUsbRecentRoots();
+  return rows;
 }
 function persistMasterDbEnabled(enabled) {
   settings.persistMasterDbEnabled(command, enabled);
@@ -1095,8 +1100,8 @@ function persistMasterDbEnabled(enabled) {
 function persistSourcesEverConfigured(value) {
   settings.persistSourcesEverConfigured(command, value);
 }
-function rememberUsbRecentRoot(path) {
-  settings.rememberUsbRecentRoot(state, command, path, renderUsbRecentRoots);
+async function pruneUsbDevice(id) {
+  return usb.pruneUsbDevice(state, id, { command, reload: loadUsbDevices });
 }
 
 // --- Playlist closures ---
@@ -1266,7 +1271,7 @@ async function validateAndSetUsbRoot(path, silent = false) {
     warn: (...a) => console.warn(...a),
     scheduler: (fn, ms) => window.setTimeout(fn, ms),
   });
-  if (state.usbRoot) rememberUsbRecentRoot(state.usbRoot);
+  if (state.usbRoot) await loadUsbDevices();
   await syncAssetScopePaths();
   return result;
 }
@@ -1280,7 +1285,7 @@ async function initializeUsb() {
   });
 }
 async function pickUsbFolder() {
-  return usb.pickUsbFolder({ invoke, validateAndSetUsbRoot });
+  return usb.pickUsbFolder({ invoke, validateAndSetUsbRoot, state, emitStatus });
 }
 async function syncAssetScopePaths() {
   return usb.syncAssetScopePaths(state, {
@@ -1505,6 +1510,9 @@ async function exportPlaylistToUsb(playlistId) {
 
 // --- Bootstrap closures ---
 
+function setUsbRootControlsLocked(locked) {
+  usb.setUsbRootControlsLocked(state, el, locked, { updatePlaylistExportButtons });
+}
 function handleJobEvent(payload) {
   jobMgr.handleJobEvent(state, el, payload, {
     debugFrontendLog,
@@ -1515,6 +1523,7 @@ function handleJobEvent(payload) {
     refreshSourceRootAnalysisStatus,
     bumpLibraryDurationSummary,
     setTrackAnalyzingState,
+    setUsbRootControlsLocked,
   });
 }
 function handleBackendLogEvent(payload) {
@@ -1739,6 +1748,7 @@ function bindEvents() {
     patchUsbTrackRow,
     patchHistoryTrackRow,
     addTracksToCurrentPlaylist,
+    pruneUsbDevice,
     getLibraryVisibleTracks,
     analyzeSingleTrack,
     getPlaybackUiStateHelpers: playback.getPlaybackUiStateHelpers,
@@ -1794,7 +1804,7 @@ async function init() {
     loadSourceRootEnabledFromStorage,
     loadMasterDbEnabledFromStorage,
     loadSourcesEverConfiguredFromStorage,
-    loadUsbRecentRootsFromStorage,
+    loadUsbDevices,
     renderUsbRecentRoots,
     persistSourceRootEnabled,
     syncAssetScopePaths,

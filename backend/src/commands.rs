@@ -13,9 +13,10 @@ use crate::models::{
     GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, ListPlaylistsData,
-    ListTracksData, ListTracksRequest, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    PlayTrackData, PlayTrackRequest, PlaybackPreflightData, PlaybackPreflightRequest,
-    PlaybackStatusData, RelocateSourceRootData, RelocateSourceRootRequest,
+    ListTracksData, ListTracksRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
@@ -187,6 +188,18 @@ impl BackendCommands {
         req: ValidateUsbRootRequest,
     ) -> ApiResponse<ValidateUsbRootData> {
         wrap(self.service.validate_usb_root(req))
+    }
+
+    pub fn list_usb_devices(&self) -> ApiResponse<ListUsbDevicesData> {
+        wrap(self.service.list_usb_devices())
+    }
+
+    pub fn prune_usb_device(&self, req: PruneUsbDeviceRequest) -> ApiResponse<PruneUsbDeviceData> {
+        wrap(self.service.prune_usb_device(req))
+    }
+
+    pub fn merge_orphaned_usb_placeholder_tracks(&self) -> ApiResponse<MergeUsbPlaceholderTracksData> {
+        wrap(self.service.merge_orphaned_usb_placeholder_tracks())
     }
 
     pub fn fetch_usb_playlists(

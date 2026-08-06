@@ -20,10 +20,12 @@ use crate::models::{
     GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
-    ListPlaylistsData, ListTracksData, ListTracksRequest, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, RelocateSourceRootData,
-    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
+    ListPlaylistsData, ListTracksData, ListTracksRequest, ListUsbDevicesData,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData,
+    PlayTrackData, PlayTrackRequest, PlaybackEventPayload, PlaybackPreflightData,
+    PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
+    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
+    RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
     RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
     ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
@@ -715,6 +717,26 @@ pub async fn validate_usb_root(
         move || commands.validate_usb_root(request),
     )
     .await
+}
+
+#[tauri::command]
+pub fn list_usb_devices(state: State<'_, BackendCommands>) -> ApiResponse<ListUsbDevicesData> {
+    state.list_usb_devices()
+}
+
+#[tauri::command]
+pub fn prune_usb_device(
+    state: State<'_, BackendCommands>,
+    request: PruneUsbDeviceRequest,
+) -> ApiResponse<PruneUsbDeviceData> {
+    state.prune_usb_device(request)
+}
+
+#[tauri::command]
+pub fn merge_orphaned_usb_placeholder_tracks(
+    state: State<'_, BackendCommands>,
+) -> ApiResponse<MergeUsbPlaceholderTracksData> {
+    state.merge_orphaned_usb_placeholder_tracks()
 }
 
 #[tauri::command]

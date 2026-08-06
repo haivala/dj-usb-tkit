@@ -4,9 +4,6 @@ import assert from "node:assert/strict";
 import {
   persistSetting,
   hydrateLocalStorageFromFrontendSettingsDb,
-  loadUsbRecentRootsFromStorage,
-  persistUsbRecentRoots,
-  rememberUsbRecentRoot,
   persistSourceRoots,
   persistUsbRoot,
   loadSourceRootsFromStorage,
@@ -20,12 +17,12 @@ import {
   STORAGE_KEY_SOURCE_ROOT_ENABLED,
   STORAGE_KEY_SOURCES_EVER_CONFIGURED,
   STORAGE_KEY_USB_ROOT,
-  STORAGE_KEY_USB_RECENT_ROOTS,
+  STORAGE_KEY_ANALYSIS_ENGINE,
   FRONTEND_DB_KEY_THEME,
   FRONTEND_DB_KEY_SOURCE_ROOTS,
   FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED,
   FRONTEND_DB_KEY_USB_ROOT,
-  FRONTEND_DB_KEY_USB_RECENT_ROOTS
+  FRONTEND_DB_KEY_ANALYSIS_ENGINE
 } from "../settings_keys.mjs";
 
 function installLocalStorage() {
@@ -98,71 +95,13 @@ test("hydrateLocalStorageFromFrontendSettingsDb copies DB-backed values into loc
     return {
       values: {
         [FRONTEND_DB_KEY_THEME]: "light",
-        [FRONTEND_DB_KEY_USB_RECENT_ROOTS]: "[\"/usb/a\"]"
+        [FRONTEND_DB_KEY_ANALYSIS_ENGINE]: "stratum"
       }
     };
   });
 
   assert.equal(localStorage.getItem(STORAGE_KEY_THEME), "light");
-  assert.equal(localStorage.getItem(STORAGE_KEY_USB_RECENT_ROOTS), "[\"/usb/a\"]");
-});
-
-test("loadUsbRecentRootsFromStorage normalizes, deduplicates, and drops blanks", () => {
-  const state = makeState();
-  localStorage.setItem(STORAGE_KEY_USB_RECENT_ROOTS, JSON.stringify([
-    "/usb/a",
-    " /usb/b ",
-    "",
-    "/usb/a",
-    null
-  ]));
-
-  loadUsbRecentRootsFromStorage(state);
-
-  assert.deepEqual(state.usbRecentRoots, ["/usb/a", "/usb/b"]);
-});
-
-test("persistUsbRecentRoots truncates to eight entries and writes settings", () => {
-  const state = makeState();
-  state.usbRecentRoots = [
-    "1", "2", "3", "4", "5", "6", "7", "8", "9"
-  ];
-  const calls = [];
-
-  persistUsbRecentRoots(state, async (name, payload) => {
-    calls.push({ name, payload });
-  });
-
-  assert.deepEqual(state.usbRecentRoots, ["1", "2", "3", "4", "5", "6", "7", "8"]);
-  assert.equal(
-    localStorage.getItem(STORAGE_KEY_USB_RECENT_ROOTS),
-    JSON.stringify(["1", "2", "3", "4", "5", "6", "7", "8"])
-  );
-  assert.deepEqual(calls, [{
-    name: "set_frontend_setting",
-    payload: {
-      key: FRONTEND_DB_KEY_USB_RECENT_ROOTS,
-      value: JSON.stringify(["1", "2", "3", "4", "5", "6", "7", "8"])
-    }
-  }]);
-});
-
-test("rememberUsbRecentRoot promotes existing paths, persists, and rerenders", () => {
-  const state = makeState();
-  state.usbRecentRoots = ["/usb/b", "/usb/a"];
-  const calls = [];
-  let renders = 0;
-
-  rememberUsbRecentRoot(
-    state,
-    async (name, payload) => { calls.push({ name, payload }); },
-    " /usb/a ",
-    () => { renders += 1; }
-  );
-
-  assert.deepEqual(state.usbRecentRoots, ["/usb/a", "/usb/b"]);
-  assert.equal(renders, 1);
-  assert.equal(calls.length, 1);
+  assert.equal(localStorage.getItem(STORAGE_KEY_ANALYSIS_ENGINE), "stratum");
 });
 
 test("persistSourceRoots and persistUsbRoot encode values through persistSetting", () => {

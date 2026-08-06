@@ -59,6 +59,29 @@ test("addTracksToCurrentPlaylist sends multiple track IDs with dedupe=skip and r
   assert.match(status, /Added 3 tracks \(skipped 1\) to Main/);
 });
 
+test("addTracksToCurrentPlaylist clears the playlist's exported-to-USB status", async () => {
+  const playlist = {
+    id: "pl-1",
+    name: "Main",
+    lastExportedAt: "2026-01-01T00:00:00Z",
+    lastExportedUsbRoot: "/mnt/usb1",
+    lastExportedTrackCount: 5
+  };
+
+  await addTracksToCurrentPlaylist([{ id: "1" }], {
+    requireCurrentPlaylist: () => playlist,
+    resolveLocalTrackId: (track) => track.id,
+    withProgress: async (_label, run) => run(() => {}),
+    command: async () => ({ added: 1, skipped: 0 }),
+    refreshCurrentPlaylistTracks: async () => {},
+    setStatus: () => {}
+  });
+
+  assert.equal(playlist.lastExportedAt, null, "checkmark should disappear after a post-export add");
+  assert.equal(playlist.lastExportedUsbRoot, null);
+  assert.equal(playlist.lastExportedTrackCount, null);
+});
+
 test("addTracksToCurrentPlaylist uses existing localTrackId for usb-origin tracks", async () => {
   let capturedCommand = null;
 

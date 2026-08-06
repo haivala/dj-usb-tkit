@@ -154,6 +154,14 @@ pub struct ResolvePlaybackSourceRequest {
     pub file_path: Option<String>,
     #[serde(default)]
     pub file_size_bytes: Option<i64>,
+    /// The id of the row this playback request originated from, if any
+    /// (any origin -- library, playlist, USB, history). Lets
+    /// `resolve_playback_source` take a fast, indexed self-lookup path for
+    /// the common case (a genuine local row) before falling back to the
+    /// fingerprint/title search, and lets a playlist entry that still
+    /// references a stale USB placeholder self-heal on next play.
+    #[serde(default)]
+    pub track_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -487,6 +495,42 @@ pub struct FetchUsbPlaylistsRequest {
     pub usb_root: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeUsbPlaceholderTracksData {
+    pub merged: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbDeviceSummary {
+    pub id: String,
+    pub root_path: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    pub mounted: bool,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUsbDevicesData {
+    pub items: Vec<UsbDeviceSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneUsbDeviceRequest {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneUsbDeviceData {
+    pub pruned: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbTrack {
@@ -511,6 +555,12 @@ pub struct UsbTrack {
     pub waveform_preview: Option<Vec<u8>>,
     #[serde(default)]
     pub duration_ms: Option<u64>,
+    /// File size as recorded by Rekordbox at export/analysis time (from the
+    /// PDB), not a fresh stat of the mounted file. Used to gate fingerprint
+    /// matching against local tracks so same-length variants (e.g. Clean vs
+    /// Explicit edits) don't get silently merged.
+    #[serde(default)]
+    pub file_size_bytes: Option<i64>,
 }
 
 impl UsbTrack {

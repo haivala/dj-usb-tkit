@@ -246,6 +246,7 @@ mod tests {
             usb_analysis_path_raw: None,
             waveform_preview: None,
             duration_ms: None,
+            file_size_bytes: None,
         }
     }
 

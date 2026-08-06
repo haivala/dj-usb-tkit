@@ -30,6 +30,41 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** stop USB-vs-local playback and materialization from
+  silently diverging. Browsing a USB playlist/history that contained a song
+  the user already had locally always created a second, disconnected
+  `tracks` row instead of recognizing the existing one — which could let
+  `resolve_playback_source` return the USB-mounted copy instead of the local
+  disk copy (unnecessary USB read wear, and playback breaking entirely once
+  the drive is unmounted), and could silently overwrite a correct local
+  `waveform_peaks_path` with a USB-sourced one. Fixed by matching incoming
+  USB tracks against existing local tracks by fingerprint (title/artist/album)
+  plus a duration + exact file-size confidence gate before ever creating a
+  placeholder row, by excluding any known USB-device root from playback
+  resolution, and by giving every playback origin (library, playlist, USB,
+  history) a `track_id` fast path so an already-saved playlist entry
+  referencing a stale USB placeholder self-heals the next time it's played,
+  with no migration required. A one-time startup pass also merges USB
+  placeholder rows left behind by the old behavior back into their genuine
+  local counterpart.
+- **New feature:** add a `usb_devices` registry (recent USB roots with mount
+  state, replacing the old localStorage-based recent-roots list) and a
+  `usb_device_exports` table recording export history per device, queryable
+  even when that exact drive isn't currently mounted.
+- **Fix:** prevent switching the selected USB drive while a USB-scoped job
+  (parity report, diagnostics, repair, playlist read/write, or export) is
+  still running, so a slow response for the old drive can no longer land
+  after the UI has already moved on to a different one and get rendered as
+  if it belonged to the new drive.
+- **Fix:** clear a playlist's "exported to USB" checkmark immediately when
+  tracks are added to it after export, not just when tracks are removed.
+  The backend already nulled the playlist's export-status fields on every
+  add, but the frontend only refreshed the track list afterward and never
+  updated its cached copy of that status, so the checkmark kept showing
+  "exported" until an unrelated action happened to refetch the playlist
+  list.
 - **Fix:** stop the "Repair PDB Header Compatibility Field" diagnostic from
   perpetually re-flagging itself. It compared the PDB file header's
   compatibility byte against the most recent local backup snapshot and

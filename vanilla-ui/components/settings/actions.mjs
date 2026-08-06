@@ -2,10 +2,10 @@
 
 import {
   STORAGE_KEY_SOURCE_ROOTS, STORAGE_KEY_SOURCE_ROOT_ENABLED,
-  STORAGE_KEY_USB_ROOT, STORAGE_KEY_USB_RECENT_ROOTS,
+  STORAGE_KEY_USB_ROOT,
   STORAGE_KEY_MASTER_DB_ENABLED, STORAGE_KEY_SOURCES_EVER_CONFIGURED,
   FRONTEND_DB_KEY_SOURCE_ROOTS, FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED,
-  FRONTEND_DB_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_RECENT_ROOTS,
+  FRONTEND_DB_KEY_USB_ROOT,
   FRONTEND_DB_KEY_MASTER_DB_ENABLED, FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED,
   FRONTEND_SETTING_BINDINGS
 } from "../../settings_keys.mjs";
@@ -56,44 +56,6 @@ export async function hydrateLocalStorageFromFrontendSettingsDb(command, state) 
       localStorage.setItem(binding.storageKey, String(values[binding.dbKey] ?? ""));
     } catch {}
   }
-}
-
-export function loadUsbRecentRootsFromStorage(state) {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_USB_RECENT_ROOTS);
-    if (!raw) {
-      state.usbRecentRoots = [];
-      return;
-    }
-    const parsed = JSON.parse(raw);
-    state.usbRecentRoots = Array.isArray(parsed)
-      ? parsed
-        .map((entry) => String(entry || "").trim())
-        .filter((entry, index, arr) => entry.length > 0 && arr.indexOf(entry) === index)
-      : [];
-  } catch {
-    state.usbRecentRoots = [];
-  }
-}
-
-export function persistUsbRecentRoots(state, command) {
-  const rows = Array.isArray(state.usbRecentRoots) ? state.usbRecentRoots.slice(0, 8) : [];
-  state.usbRecentRoots = rows;
-  persistSetting(
-    command,
-    STORAGE_KEY_USB_RECENT_ROOTS,
-    FRONTEND_DB_KEY_USB_RECENT_ROOTS,
-    JSON.stringify(rows)
-  );
-}
-
-export function rememberUsbRecentRoot(state, command, path, renderCallback) {
-  const normalized = String(path || "").trim();
-  if (!normalized) return;
-  const without = state.usbRecentRoots.filter((row) => row !== normalized);
-  state.usbRecentRoots = [normalized, ...without].slice(0, 8);
-  persistUsbRecentRoots(state, command);
-  if (renderCallback) renderCallback();
 }
 
 export function persistSourceRoots(command, roots) {
