@@ -301,6 +301,21 @@ pub fn try_read_track_index_from_edb(
     warnings: &mut Vec<WarningEntry>,
 ) -> Option<HashMap<u32, UsbTrack>> {
     let conn = open_edb_from_usb_root(usb_root, warnings)?;
+    try_read_track_index_from_edb_with_conn(&conn, usb_root, warnings)
+}
+
+/// Same as `try_read_track_index_from_edb`, but reuses an already-open eDB
+/// connection instead of opening/decrypting a fresh one. Callers that need
+/// several eDB reads in the same operation (e.g. `fetch_usb_playlists`,
+/// `fetch_usb_histories`) should open once via `open_edb_from_usb_root` and
+/// pass the same connection to every `_with_conn` helper -- re-opening per
+/// read was previously responsible for redundant SQLCipher key-negotiation
+/// work that could dominate wall time on a large eDB even on fast media.
+pub fn try_read_track_index_from_edb_with_conn(
+    conn: &rusqlite::Connection,
+    usb_root: &Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> Option<HashMap<u32, UsbTrack>> {
     let has_length_col = conn
         .query_row(
             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'length'",
@@ -450,6 +465,16 @@ pub fn try_read_content_date_created_index_from_edb(
     warnings: &mut Vec<WarningEntry>,
 ) -> Option<HashMap<u32, String>> {
     let conn = open_edb_from_usb_root(usb_root, warnings)?;
+    try_read_content_date_created_index_from_edb_with_conn(&conn, warnings)
+}
+
+/// Same as `try_read_content_date_created_index_from_edb`, but reuses an
+/// already-open eDB connection. See `try_read_track_index_from_edb_with_conn`
+/// for why this exists.
+pub fn try_read_content_date_created_index_from_edb_with_conn(
+    conn: &rusqlite::Connection,
+    warnings: &mut Vec<WarningEntry>,
+) -> Option<HashMap<u32, String>> {
     let has_date_created_col = conn
         .query_row(
             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'dateCreated'",
@@ -533,22 +558,35 @@ pub fn try_read_playlists_with_metadata_from_edb(
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> Option<HashMap<String, ExportDbPlaylist>> {
-    try_read_playlists_with_metadata_from_edb_internal(usb_root, warnings, true)
+    let conn = open_edb_from_usb_root(usb_root, warnings)?;
+    try_read_playlists_with_metadata_from_edb_with_conn(&conn, usb_root, warnings)
 }
 
 pub fn try_read_playlists_with_metadata_from_edb_db_only(
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> Option<HashMap<String, ExportDbPlaylist>> {
-    try_read_playlists_with_metadata_from_edb_internal(usb_root, warnings, false)
+    let conn = open_edb_from_usb_root(usb_root, warnings)?;
+    try_read_playlists_with_metadata_from_edb_internal_with_conn(&conn, usb_root, warnings, false)
 }
 
-fn try_read_playlists_with_metadata_from_edb_internal(
+/// Same as `try_read_playlists_with_metadata_from_edb`, but reuses an
+/// already-open eDB connection. See `try_read_track_index_from_edb_with_conn`
+/// for why this exists.
+pub fn try_read_playlists_with_metadata_from_edb_with_conn(
+    conn: &rusqlite::Connection,
+    usb_root: &Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> Option<HashMap<String, ExportDbPlaylist>> {
+    try_read_playlists_with_metadata_from_edb_internal_with_conn(conn, usb_root, warnings, true)
+}
+
+fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
+    conn: &rusqlite::Connection,
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,
     resolve_paths: bool,
 ) -> Option<HashMap<String, ExportDbPlaylist>> {
-    let conn = open_edb_from_usb_root(usb_root, warnings)?;
     let has_length_col = conn
         .query_row(
             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'length'",

@@ -12,8 +12,9 @@ use walkdir::WalkDir;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode,
-    ExportToUsbOptions, ExportToUsbRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
-    GetTracksByIdsRequest, InitializeUsbRequest, RemoveTracksBySourceRootsRequest,
+    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
+    GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
+    RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
     ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
     ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest, WarningEntry,
@@ -3150,6 +3151,168 @@ fn fetch_usb_playlists_materialization_clears_stale_local_key_when_usb_key_is_mi
             .is_empty(),
         "USB materialization should clear stale local artwork when USB row has no artwork: {:?}",
         reloaded
+    );
+}
+
+/// Regression test for a false-positive "slow-media suspected" warning:
+/// `fetch_usb_histories`'s "read supplemental databases" stage used to open
+/// and SQLCipher-decrypt the same eDB file from scratch up to 4 times in a
+/// single call (once per read helper, plus once more for the history
+/// COUNT(*) queries), which on a large eDB could take long enough to trip
+/// the timing-based slow-media warning purely from redundant CPU/SQL work,
+/// not actual media speed. It's now opened once and the connection is
+/// reused. Asserting on the exact open-success warning count (rather than a
+/// failure count, which has no cheap-to-build fixture in this codebase) is
+/// the direct, observable proof the dedup landed.
+#[test]
+fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let init = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(init.ok, "initialize usb failed: {init:?}");
+
+    let usb_file = usb
+        .join("Contents")
+        .join("Artist")
+        .join("edb_reuse")
+        .join("Artist - edb_reuse.wav");
+    fs::create_dir_all(usb_file.parent().expect("usb file parent"))
+        .expect("create usb contents parent");
+    write_test_wav(&usb_file, 440.0, 1000);
+
+    let playlist = ExportPlaylistData {
+        id: "usb-playlist".to_string(),
+        name: "EDB Reuse".to_string(),
+        tracks: Vec::new(),
+    };
+    let manifest_track = ExportManifestTrack {
+        id: "manifest-track".to_string(),
+        master_db_id: None,
+        master_content_id: None,
+        content_link: None,
+        position: 1,
+        track_number: Some(1),
+        title: "edb_reuse".to_string(),
+        artist: "Artist".to_string(),
+        album: Some("edb_reuse".to_string()),
+        bpm: Some(128.0),
+        key: None,
+        source_path: usb_file.to_string_lossy().to_string(),
+        exported_path: format!(
+            "/Contents/Artist/edb_reuse/{}",
+            usb_file.file_name().expect("usb file").to_string_lossy()
+        ),
+        file_modified_at: Some("1714521600".to_string()),
+        file_size_bytes: std::fs::metadata(&usb_file)
+            .ok()
+            .and_then(|m| i64::try_from(m.len()).ok()),
+        sample_rate_hz: None,
+        bit_depth: None,
+        bitrate_kbps: None,
+        disc_number: None,
+        subtitle: None,
+        comment: None,
+        title_for_search: None,
+        kuvo_delivery_comment: None,
+        dj_play_count: None,
+        rating: None,
+        color_id: None,
+        artist_id_lyricist: None,
+        artist_id_original_artist: None,
+        artist_id_remixer: None,
+        artist_id_composer: None,
+        genre_id: None,
+        genre: None,
+        label_id: None,
+        isrc: None,
+        release_year: None,
+        release_date: None,
+        recorded_date: None,
+        file_type: Some(1),
+        owns_exported_media: true,
+        owns_artwork: true,
+        owns_waveform: true,
+        artwork_path: None,
+        waveform_path: Some("/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT".to_string()),
+        duration_ms: Some(180_000),
+    };
+    let manifest = ExportManifest {
+        version: 1,
+        generated_at: "1970-01-01T00:00:00Z".to_string(),
+        playlist_id: playlist.id.clone(),
+        playlist_name: playlist.name.clone(),
+        usb_root: usb.to_string_lossy().to_string(),
+        options: ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        },
+        exported_tracks: 1,
+        skipped_tracks: 0,
+        warnings: Vec::new(),
+        tracks: vec![manifest_track],
+    };
+    write_pdb(&usb, &playlist, &manifest, false, None, None).expect("write export pdb");
+
+    let export_db = vendor_db_dir(&usb).join("exportLibrary.db");
+    let conn = open_export_db(&export_db);
+    conn.execute(
+        r#"INSERT OR REPLACE INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (1, 'EDB Reuse', 0, 1)"#,
+        [],
+    )
+    .expect("insert playlist");
+    conn.execute(
+        r#"INSERT OR REPLACE INTO artist (artist_id, name) VALUES (1, 'Artist')"#,
+        [],
+    )
+    .expect("insert artist");
+    conn.execute(
+        r#"INSERT OR REPLACE INTO content (content_id, title, artist_id_artist, bpmx100, path, analysisDataFilePath, length, key_id, dateCreated)
+           VALUES (1, 'Artist - edb_reuse', 1, 12800, ?1, '/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT', 180, NULL, '2026-01-01')"#,
+        rusqlite::params![format!(
+            "/Contents/Artist/edb_reuse/{}",
+            usb_file.file_name().expect("usb file").to_string_lossy()
+        )],
+    )
+    .expect("insert content");
+    conn.execute(
+        r#"INSERT OR REPLACE INTO playlist_content (playlist_id, content_id, sequenceNo) VALUES (1, 1, 1)"#,
+        [],
+    )
+    .expect("insert playlist content");
+    conn.execute(
+        r#"INSERT OR REPLACE INTO history (history_id, sequenceNo, name, attribute, history_id_parent) VALUES (1, 1, 'HISTORY 001', 0, 0)"#,
+        [],
+    )
+    .expect("insert history");
+    conn.execute(
+        r#"INSERT OR REPLACE INTO history_content (history_id, content_id, sequenceNo) VALUES (1, 1, 1)"#,
+        [],
+    )
+    .expect("insert history content");
+    drop(conn);
+
+    let histories = backend.fetch_usb_histories(FetchUsbHistoriesRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(histories.ok, "fetch usb histories failed: {histories:?}");
+    let warnings = histories.data.expect("histories data").warnings;
+
+    let open_success_count = warnings
+        .iter()
+        .filter(|w| w.code == "edb.open.no-key" || w.code == "edb.open.unlocked")
+        .count();
+    assert_eq!(
+        open_success_count, 1,
+        "expected the eDB to be opened exactly once (reused thereafter), got warnings: {warnings:?}"
     );
 }
 

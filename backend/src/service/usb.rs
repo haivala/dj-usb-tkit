@@ -7,8 +7,9 @@ use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::edb::{
-    open_edb_from_usb_root, table_exists, try_read_content_date_created_index_from_edb,
-    try_read_playlists_with_metadata_from_edb, try_read_track_index_from_edb,
+    open_edb_from_usb_root, table_exists, try_read_content_date_created_index_from_edb_with_conn,
+    try_read_playlists_with_metadata_from_edb_with_conn, try_read_track_index_from_edb,
+    try_read_track_index_from_edb_with_conn,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
@@ -46,7 +47,7 @@ use super::{
     untainted_usb_root_paths,
 };
 
-const SLOW_USB_STAGE_MS: u128 = 3_000;
+const SLOW_USB_STAGE_MS: u128 = 8_000;
 
 fn build_usb_track_index(
     parsed: &crate::pdb_reader::ParsedPdb,
@@ -114,11 +115,12 @@ fn edb_track_index_from_playlist_tracks(
 }
 
 fn merge_full_edb_track_index(
+    conn: &rusqlite::Connection,
     usb_root: &std::path::Path,
     track_by_id: &mut HashMap<u32, UsbTrack>,
     warnings: &mut Vec<WarningEntry>,
 ) {
-    if let Some(all_edb_tracks) = try_read_track_index_from_edb(usb_root, warnings) {
+    if let Some(all_edb_tracks) = try_read_track_index_from_edb_with_conn(conn, usb_root, warnings) {
         track_by_id.extend(all_edb_tracks);
     }
 }
@@ -256,6 +258,31 @@ fn push_usb_stage_timing(
     stage: &str,
     started: &mut std::time::Instant,
 ) {
+    push_usb_stage_timing_with_threshold(warnings, stage, started, SLOW_USB_STAGE_MS);
+}
+
+/// Extra allowance for eDB-heavy stages whose wall-clock cost scales with
+/// library size (SQL joins over `content`/`playlist`/etc. that grow with
+/// track count), not media speed -- see `push_usb_stage_timing_with_threshold`
+/// for why a flat threshold alone misdiagnoses "slow media" on large-but-fast
+/// libraries.
+const SLOW_USB_STAGE_PER_TRACK_MS: u128 = 1;
+
+fn slow_stage_threshold_ms(item_count: usize) -> u128 {
+    SLOW_USB_STAGE_MS + (item_count as u128) * SLOW_USB_STAGE_PER_TRACK_MS
+}
+
+/// Same as `push_usb_stage_timing`, but with an explicit threshold instead
+/// of the flat `SLOW_USB_STAGE_MS` default. Stages whose cost is genuinely
+/// proportional to library size (not media speed) should pass a threshold
+/// computed via `slow_stage_threshold_ms` instead of assuming every stage
+/// costs the same regardless of how much data it reads.
+fn push_usb_stage_timing_with_threshold(
+    warnings: &mut Vec<WarningEntry>,
+    stage: &str,
+    started: &mut std::time::Instant,
+    threshold_ms: u128,
+) {
     let elapsed = started.elapsed().as_millis();
     warnings.push(logging::log(
         Level::Info,
@@ -263,7 +290,7 @@ fn push_usb_stage_timing(
         "usb.import.stage-timing",
         format!("stage timing: {stage}: {elapsed}ms"),
     ));
-    if elapsed >= SLOW_USB_STAGE_MS {
+    if elapsed >= threshold_ms {
         warnings.push(logging::log(
             Level::Warn,
             "usb-import",
@@ -459,7 +486,13 @@ impl BackendService {
         push_usb_stage_timing(&mut warnings, "parse PDB", &mut stage_started);
 
         on_progress(30, 100, "USB: Reading eDB");
-        let edb_playlists = try_read_playlists_with_metadata_from_edb(&usb_root, &mut warnings);
+        // Open the eDB once and reuse it for every read below -- opening it
+        // per-call was redundantly re-running SQLCipher key negotiation
+        // (see try_read_track_index_from_edb_with_conn's doc comment).
+        let edb_conn = open_edb_from_usb_root(&usb_root, &mut warnings);
+        let edb_playlists = edb_conn.as_ref().and_then(|conn| {
+            try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root, &mut warnings)
+        });
         let edb_playlist_tracks = edb_playlists.as_ref().map(|m| {
             m.iter()
                 .map(|(name, playlist)| (name.clone(), playlist.tracks.clone()))
@@ -467,13 +500,20 @@ impl BackendService {
         });
         let mut edb_track_by_id =
             edb_track_index_from_playlist_tracks(edb_playlist_tracks.as_ref());
-        merge_full_edb_track_index(&usb_root, &mut edb_track_by_id, &mut warnings);
+        if let Some(conn) = edb_conn.as_ref() {
+            merge_full_edb_track_index(conn, &usb_root, &mut edb_track_by_id, &mut warnings);
+        }
         let eedb_playlist_tracks_canonical = edb_playlist_tracks.as_ref().map(|m| {
             m.iter()
                 .map(|(name, tracks)| (canonicalize_playlist_name(name), tracks.clone()))
                 .collect::<HashMap<_, _>>()
         });
-        push_usb_stage_timing(&mut warnings, "read eDB", &mut stage_started);
+        push_usb_stage_timing_with_threshold(
+            &mut warnings,
+            "read eDB",
+            &mut stage_started,
+            slow_stage_threshold_ms(edb_track_by_id.len()),
+        );
 
         let mut track_by_id = HashMap::<u32, UsbTrack>::new();
         let mut entries_by_playlist =
@@ -1016,26 +1056,47 @@ impl BackendService {
         push_usb_stage_timing(&mut stage_warnings, "parse PDB", &mut stage_started);
         on_progress(30, 100, "USB: Reading supplemental databases");
         let mut supplemental_warnings = Vec::<WarningEntry>::new();
-        let supplemental_edb_playlist_tracks =
-            try_read_playlists_with_metadata_from_edb(&usb_root, &mut supplemental_warnings).map(
-                |m| {
-                    m.into_iter()
-                        .map(|(name, playlist)| (name, playlist.tracks))
-                        .collect::<HashMap<_, _>>()
-                },
-            );
+        // Open the eDB once and reuse it for every read below -- opening it
+        // per-call was redundantly re-running SQLCipher key negotiation up
+        // to 4x in this one stage (see try_read_track_index_from_edb_with_conn's
+        // doc comment), which could dominate wall time on a large eDB even
+        // on fast media and misdiagnose as "slow media suspected".
+        let supplemental_edb_conn = open_edb_from_usb_root(&usb_root, &mut supplemental_warnings);
+        let supplemental_edb_playlist_tracks = supplemental_edb_conn
+            .as_ref()
+            .and_then(|conn| {
+                try_read_playlists_with_metadata_from_edb_with_conn(
+                    conn,
+                    &usb_root,
+                    &mut supplemental_warnings,
+                )
+            })
+            .map(|m| {
+                m.into_iter()
+                    .map(|(name, playlist)| (name, playlist.tracks))
+                    .collect::<HashMap<_, _>>()
+            });
         let mut supplemental_track_by_id =
             edb_track_index_from_playlist_tracks(supplemental_edb_playlist_tracks.as_ref());
-        merge_full_edb_track_index(
-            &usb_root,
-            &mut supplemental_track_by_id,
-            &mut supplemental_warnings,
-        );
+        if let Some(conn) = supplemental_edb_conn.as_ref() {
+            merge_full_edb_track_index(
+                conn,
+                &usb_root,
+                &mut supplemental_track_by_id,
+                &mut supplemental_warnings,
+            );
+        }
         let mut date_created_by_track_id = build_history_track_date_index(&parsed.tracks);
         if date_created_by_track_id.is_empty() {
-            date_created_by_track_id =
-                try_read_content_date_created_index_from_edb(&usb_root, &mut supplemental_warnings)
-                    .unwrap_or_default();
+            date_created_by_track_id = supplemental_edb_conn
+                .as_ref()
+                .and_then(|conn| {
+                    try_read_content_date_created_index_from_edb_with_conn(
+                        conn,
+                        &mut supplemental_warnings,
+                    )
+                })
+                .unwrap_or_default();
         }
         let export_log = match export_log::load_export_log(&usb_root) {
             Ok(log) => log,
@@ -1050,8 +1111,8 @@ impl BackendService {
             }
         };
         let (edb_history_rows, edb_history_content_rows) =
-            if let Some(conn) = open_edb_from_usb_root(&usb_root, &mut supplemental_warnings) {
-                let history_rows = if table_exists(&conn, "history") {
+            if let Some(conn) = supplemental_edb_conn.as_ref() {
+                let history_rows = if table_exists(conn, "history") {
                     conn.query_row(
                         "SELECT COUNT(*) FROM history",
                         [],
@@ -1063,7 +1124,7 @@ impl BackendService {
                 } else {
                     0
                 };
-                let history_content_rows = if table_exists(&conn, "history_content") {
+                let history_content_rows = if table_exists(conn, "history_content") {
                     conn.query_row(
                         "SELECT COUNT(*) FROM history_content",
                         [],
@@ -1079,10 +1140,11 @@ impl BackendService {
             } else {
                 (0, 0)
             };
-        push_usb_stage_timing(
+        push_usb_stage_timing_with_threshold(
             &mut stage_warnings,
             "read supplemental databases",
             &mut stage_started,
+            slow_stage_threshold_ms(supplemental_track_by_id.len()),
         );
         let history_date_by_num = parsed.history_rows.iter().fold(
             std::collections::HashMap::<u32, String>::new(),
@@ -1709,8 +1771,9 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_history_dates_from_track_date_created, build_history_track_date_index,
-        filter_named_history_playlists, normalize_date_created, select_history_rows,
+        SLOW_USB_STAGE_MS, apply_history_dates_from_track_date_created,
+        build_history_track_date_index, filter_named_history_playlists, normalize_date_created,
+        select_history_rows, slow_stage_threshold_ms,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
@@ -2071,5 +2134,20 @@ mod tests {
         ];
 
         assert_eq!(filter_named_history_playlists(playlists).len(), 2);
+    }
+
+    #[test]
+    fn slow_stage_threshold_ms_equals_baseline_at_zero_items() {
+        assert_eq!(slow_stage_threshold_ms(0), SLOW_USB_STAGE_MS);
+    }
+
+    #[test]
+    fn slow_stage_threshold_ms_scales_linearly_above_baseline() {
+        let baseline = slow_stage_threshold_ms(0);
+        let at_1000 = slow_stage_threshold_ms(1_000);
+        let at_2000 = slow_stage_threshold_ms(2_000);
+        assert!(at_1000 > baseline, "threshold should grow with item count");
+        // Linear: doubling the item count should double the allowance added on top of baseline.
+        assert_eq!((at_2000 - baseline), (at_1000 - baseline) * 2);
     }
 }
