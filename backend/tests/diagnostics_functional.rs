@@ -3418,7 +3418,10 @@ fn repair_pdb_zero_tranrf_detects_and_fixes_via_orchestrator() {
         let rowpf_off = off + page_size - 4;
         let tranrf_off = off + page_size - 2;
         let rowpf = u16::from_le_bytes(bytes[rowpf_off..rowpf_off + 2].try_into().unwrap());
-        assert_ne!(rowpf, 0, "expected the real track row to be active (rowpf != 0)");
+        assert_ne!(
+            rowpf, 0,
+            "expected the real track row to be active (rowpf != 0)"
+        );
         bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&0u16.to_le_bytes());
     });
 
@@ -3560,7 +3563,9 @@ fn repair_fix_empty_analysis_files_regenerates_from_source_audio() {
         data.applied_fixes
     );
 
-    let regenerated_len = fs::metadata(&dat_path).expect("dat metadata after repair").len();
+    let regenerated_len = fs::metadata(&dat_path)
+        .expect("dat metadata after repair")
+        .len();
     assert!(
         regenerated_len > 0,
         "DAT bundle should be regenerated with real waveform content"
@@ -3645,7 +3650,11 @@ fn repair_remove_missing_audio_references_deletes_dangling_track_refs() {
 
     let track_id = {
         let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
-        let file_name = missing_file.file_name().unwrap().to_string_lossy().into_owned();
+        let file_name = missing_file
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         conn.query_row(
             "SELECT content_id FROM content WHERE path LIKE ?1",
             [format!("%{file_name}")],
@@ -3676,7 +3685,10 @@ fn repair_remove_missing_audio_references_deletes_dangling_track_refs() {
         .iter()
         .find(|f| f.id == "remove_missing_audio_references")
         .expect("remove_missing_audio_references should be proposed");
-    assert!(proposal.supported, "fix should be auto-supported: {proposal:?}");
+    assert!(
+        proposal.supported,
+        "fix should be auto-supported: {proposal:?}"
+    );
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -3735,7 +3747,10 @@ fn repair_remove_missing_audio_references_is_manual_only_when_index_drift_presen
     // Drop an unrelated, unindexed real audio file into Contents/ so
     // canonical-path index drift is also present — this must force the
     // missing-audio fix into manual-only mode.
-    let stray_dir = usb.join("Contents").join("Stray Artist").join("Stray Album");
+    let stray_dir = usb
+        .join("Contents")
+        .join("Stray Artist")
+        .join("Stray Album");
     fs::create_dir_all(&stray_dir).expect("create stray contents dir");
     copy_audio_fixture(
         &stray_dir,
@@ -3762,8 +3777,10 @@ fn repair_remove_missing_audio_references_is_manual_only_when_index_drift_presen
 
     let track_id = {
         let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
-        conn.query_row("SELECT content_id FROM content LIMIT 1", [], |r| r.get::<_, i64>(0))
-            .expect("content row")
+        conn.query_row("SELECT content_id FROM content LIMIT 1", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .expect("content row")
     };
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
@@ -3803,7 +3820,10 @@ fn repair_remove_missing_audio_references_is_manual_only_when_index_drift_presen
 fn repair_detects_unindexed_audio_under_contents() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
 
-    let stray_dir = usb.join("Contents").join("Stray Artist").join("Stray Album");
+    let stray_dir = usb
+        .join("Contents")
+        .join("Stray Artist")
+        .join("Stray Album");
     fs::create_dir_all(&stray_dir).expect("create stray contents dir");
     copy_audio_fixture(
         &stray_dir,
@@ -3920,7 +3940,10 @@ fn repair_apply_reports_failure_when_pdb_is_read_only() {
     perms.set_readonly(false);
     fs::set_permissions(&pdb_path, perms).expect("restore pdb write permission");
 
-    assert!(repair.ok, "repair call itself should still return ok: {repair:?}");
+    assert!(
+        repair.ok,
+        "repair call itself should still return ok: {repair:?}"
+    );
     let data = repair.data.expect("repair data");
     assert!(
         data.failed_fixes
@@ -4072,7 +4095,10 @@ fn strict_repair_reports_failure_when_pdb_rewrite_cannot_be_written() {
     perms.set_readonly(false);
     fs::set_permissions(&pdb_path, perms).expect("restore pdb write permission");
 
-    assert!(repair.ok, "repair call itself should still return ok: {repair:?}");
+    assert!(
+        repair.ok,
+        "repair call itself should still return ok: {repair:?}"
+    );
     let data = repair.data.expect("repair data");
     assert!(
         data.failed_fixes
@@ -4082,5 +4108,3 @@ fn strict_repair_reports_failure_when_pdb_rewrite_cannot_be_written() {
         data.failed_fixes
     );
 }
-
-

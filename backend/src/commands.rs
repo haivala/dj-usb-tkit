@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use crate::error::BackendResult;
 use crate::error::ErrorPayload;
@@ -198,7 +198,9 @@ impl BackendCommands {
         wrap(self.service.prune_usb_device(req))
     }
 
-    pub fn merge_orphaned_usb_placeholder_tracks(&self) -> ApiResponse<MergeUsbPlaceholderTracksData> {
+    pub fn merge_orphaned_usb_placeholder_tracks(
+        &self,
+    ) -> ApiResponse<MergeUsbPlaceholderTracksData> {
         wrap(self.service.merge_orphaned_usb_placeholder_tracks())
     }
 

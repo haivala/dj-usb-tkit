@@ -479,7 +479,10 @@ pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<WarningEntry
                         Level::Warn,
                         "usb-analysis",
                         "usb.analysis.entry-malformed",
-                        format!("analysis entry malformed: {}", sanitize_warning_path(e.path())),
+                        format!(
+                            "analysis entry malformed: {}",
+                            sanitize_warning_path(e.path())
+                        ),
                     ));
                 }
 
@@ -515,7 +518,10 @@ pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<WarningEntry
                         Level::Warn,
                         "usb-analysis",
                         "usb.analysis.entry-malformed",
-                        format!("analysis entry malformed: {}", sanitize_warning_path(e.path())),
+                        format!(
+                            "analysis entry malformed: {}",
+                            sanitize_warning_path(e.path())
+                        ),
                     ));
                     continue;
                 }
@@ -1468,7 +1474,10 @@ mod diag_tests {
                 |row| row.get(0),
             )
             .expect("mounted B");
-        assert_eq!(mounted_a_after, 0, "A should be unmounted once B is mounted");
+        assert_eq!(
+            mounted_a_after, 0,
+            "A should be unmounted once B is mounted"
+        );
         assert_eq!(mounted_b, 1);
     }
 
@@ -1487,7 +1496,10 @@ mod diag_tests {
                 |row| row.get(0),
             )
             .expect("mounted A");
-        assert_eq!(mounted_a, 1, "browsing another root must not unmount the currently mounted device");
+        assert_eq!(
+            mounted_a, 1,
+            "browsing another root must not unmount the currently mounted device"
+        );
     }
 
     #[test]
@@ -1510,7 +1522,10 @@ mod diag_tests {
                 |row| row.get(0),
             )
             .expect("deleted_at");
-        assert_eq!(deleted_at, None, "re-picking the same root should un-prune it");
+        assert_eq!(
+            deleted_at, None,
+            "re-picking the same root should un-prune it"
+        );
     }
 
     #[test]
@@ -1578,11 +1593,8 @@ mod diag_tests {
 
         let warnings = scan_anlz_warnings(temp.path());
 
-        assert!(
-            warnings
-                .iter()
-                .all(|w| !w.message.contains("USBMNG.DAT") && !w.message.contains("analysis entry malformed"))
-        );
+        assert!(warnings.iter().all(|w| !w.message.contains("USBMNG.DAT")
+            && !w.message.contains("analysis entry malformed")));
     }
 
     #[test]
@@ -1600,9 +1612,8 @@ mod diag_tests {
         let warnings = scan_anlz_warnings(temp.path());
 
         assert!(
-            warnings
-                .iter()
-                .all(|w| !w.message.contains("ANLZ0001.2EX") && !w.message.contains("analysis entry malformed")),
+            warnings.iter().all(|w| !w.message.contains("ANLZ0001.2EX")
+                && !w.message.contains("analysis entry malformed")),
             "numbered ANLZ bundle members should not be treated as malformed"
         );
     }

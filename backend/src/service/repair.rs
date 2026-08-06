@@ -60,7 +60,6 @@ const PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID: &str = "repair_pdb_tombstoned_play
 const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_pages";
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
 
-
 #[derive(Debug, Default, Clone)]
 struct StrictParityUpgradeApplyResult {
     merged_playlists: usize,
@@ -3149,7 +3148,12 @@ impl BackendService {
 
         if req.apply {
             warnings.extend(backup_usb_databases(&usb_root).into_iter().map(|message| {
-                logging::log(Level::Info, "usb-diagnostics", "usb.diagnostics.backup", message)
+                logging::log(
+                    Level::Info,
+                    "usb-diagnostics",
+                    "usb.diagnostics.backup",
+                    message,
+                )
             }));
 
             if selected.contains("fix_empty_analysis_files") {
@@ -4183,7 +4187,9 @@ impl BackendService {
                                 Level::Error,
                                 "usb-repair",
                                 "usb.repair.strict-parity.dedup-write-failed",
-                                format!("strict parity upgrade: failed to write deduplicated PDB: {err}"),
+                                format!(
+                                    "strict parity upgrade: failed to write deduplicated PDB: {err}"
+                                ),
                             ));
                         } else {
                             result.duplicate_entries_removed = removed;
@@ -4195,7 +4201,9 @@ impl BackendService {
                         Level::Error,
                         "usb-repair",
                         "usb.repair.strict-parity.dedup-read-failed",
-                        format!("strict parity upgrade: unable to read PDB for duplicate cleanup: {err}"),
+                        format!(
+                            "strict parity upgrade: unable to read PDB for duplicate cleanup: {err}"
+                        ),
                     ));
                 }
             }
@@ -4275,7 +4283,10 @@ impl BackendService {
                     Level::Error,
                     "usb-repair",
                     "usb.repair.strict-parity.edb-open-failed",
-                    format!("strict parity upgrade: unable to open eDB for playlist '{}'", mpl.name),
+                    format!(
+                        "strict parity upgrade: unable to open eDB for playlist '{}'",
+                        mpl.name
+                    ),
                 ));
                 result.failed_playlists += 1;
                 continue;
@@ -4302,7 +4313,10 @@ impl BackendService {
                         Level::Error,
                         "usb-repair",
                         "usb.repair.strict-parity.edb-write-failed",
-                        format!("strict parity upgrade: eDB write failed for '{}': {err}", mpl.name),
+                        format!(
+                            "strict parity upgrade: eDB write failed for '{}': {err}",
+                            mpl.name
+                        ),
                     ));
                     result.failed_playlists += 1;
                 }
@@ -4606,19 +4620,21 @@ impl BackendService {
             ));
         }
 
-        let removed_pdb_entries =
-            match remove_track_ids_from_pdb_playlist_entries(usb_root, missing_track_ids) {
-                Ok(removed) => removed,
-                Err(err) => {
-                    warnings.push(logging::log(
+        let removed_pdb_entries = match remove_track_ids_from_pdb_playlist_entries(
+            usb_root,
+            missing_track_ids,
+        ) {
+            Ok(removed) => removed,
+            Err(err) => {
+                warnings.push(logging::log(
                         Level::Error,
                         "usb-repair",
                         "usb.repair.missing-audio.pdb-update-failed",
                         format!("repair skipped (missing audio): unable to update PDB playlist entries ({err})"),
                     ));
-                    0
-                }
-            };
+                0
+            }
+        };
 
         Ok((
             removed_db_content,
@@ -4945,7 +4961,11 @@ mod tests {
         std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
         let mut bytes = Vec::with_capacity(pages.len() * TEST_PAGE_SIZE);
         for p in &pages {
-            assert_eq!(p.len(), TEST_PAGE_SIZE, "page must be exactly one page long");
+            assert_eq!(
+                p.len(),
+                TEST_PAGE_SIZE,
+                "page must be exactly one page long"
+            );
             bytes.extend_from_slice(p);
         }
         std::fs::write(&pdb_path, &bytes).expect("write test pdb");
@@ -4972,8 +4992,14 @@ mod tests {
 
         let bytes = std::fs::read(&pdb_path).unwrap();
         let off = TEST_PAGE_SIZE;
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()), 3);
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()), 0);
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
+            3
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
+            0
+        );
 
         assert!(
             detect_pdb_sentinel_u5_on_data_pages(&pdb_path).is_empty(),
@@ -4993,7 +5019,10 @@ mod tests {
         assert_eq!(pages[0].page_index, 1);
         assert_eq!(pages[0].correct_flags, 0x24);
 
-        assert_eq!(apply_pdb_wrong_page_flags_repair(&usb_root, &[]).unwrap(), 0);
+        assert_eq!(
+            apply_pdb_wrong_page_flags_repair(&usb_root, &[]).unwrap(),
+            0
+        );
 
         let patched = apply_pdb_wrong_page_flags_repair(&usb_root, &pages).unwrap();
         assert_eq!(patched, 1);
@@ -5074,8 +5103,14 @@ mod tests {
 
         let bytes = std::fs::read(&pdb_path).unwrap();
         let off = TEST_PAGE_SIZE;
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()), 4);
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()), 0);
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
+            4
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
+            0
+        );
         assert!(detect_pdb_wrong_history_page_shape(&pdb_path).is_empty());
     }
 
@@ -5100,8 +5135,14 @@ mod tests {
 
         let bytes = std::fs::read(&pdb_path).unwrap();
         let off = TEST_PAGE_SIZE;
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()), 2);
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()), 0);
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
+            2
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
+            0
+        );
         assert!(detect_pdb_wrong_track_u5(&pdb_path).is_empty());
     }
 
@@ -5122,7 +5163,11 @@ mod tests {
         let pdb_path = vendor_pdb_path(&usb_root);
 
         let pages = detect_pdb_t00_multipage_active_pages(&pdb_path);
-        assert_eq!(pages.len(), 1, "only the predecessor page should be flagged");
+        assert_eq!(
+            pages.len(),
+            1,
+            "only the predecessor page should be flagged"
+        );
         assert_eq!(pages[0].page_index, 1);
 
         assert_eq!(
@@ -5135,8 +5180,14 @@ mod tests {
         let bytes = std::fs::read(&pdb_path).unwrap();
         let off = TEST_PAGE_SIZE; // page 1
         assert_eq!(bytes[off + 0x1b], 0x24, "predecessor page must become SEAL");
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()), 1);
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()), 3);
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
+            1
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
+            3
+        );
         // Terminal page 2 must be left untouched.
         let off2 = TEST_PAGE_SIZE * 2;
         assert_eq!(bytes[off2 + 0x1b], 0x34);
@@ -5165,8 +5216,14 @@ mod tests {
 
         let bytes = std::fs::read(&pdb_path).unwrap();
         let off = TEST_PAGE_SIZE;
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()), 6);
-        assert_eq!(u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()), 0);
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
+            6
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
+            0
+        );
         assert!(detect_pdb_wrong_playlist_tree_shape(&pdb_path).is_empty());
     }
 
@@ -5194,7 +5251,11 @@ mod tests {
         let pdb_path = vendor_pdb_path(&usb_root);
 
         let items = detect_pdb_tombstoned_playlist_tree_ids(&pdb_path);
-        assert_eq!(items.len(), 1, "expected the duplicate tombstoned id to be flagged");
+        assert_eq!(
+            items.len(),
+            1,
+            "expected the duplicate tombstoned id to be flagged"
+        );
         assert_eq!(items[0].page_index, 1);
         assert_eq!(items[0].id_field_offset, heap_start + 0x20 + 12);
 
@@ -5207,7 +5268,10 @@ mod tests {
 
         let bytes = std::fs::read(&pdb_path).unwrap();
         let id_off = TEST_PAGE_SIZE + heap_start + 0x20 + 12;
-        assert_eq!(u32::from_le_bytes(bytes[id_off..id_off + 4].try_into().unwrap()), 0);
+        assert_eq!(
+            u32::from_le_bytes(bytes[id_off..id_off + 4].try_into().unwrap()),
+            0
+        );
         assert!(detect_pdb_tombstoned_playlist_tree_ids(&pdb_path).is_empty());
     }
 
@@ -5238,7 +5302,10 @@ mod tests {
 
         let bytes = std::fs::read(&pdb_path).unwrap();
         let soff = TEST_PAGE_SIZE * 2;
-        assert_eq!(u16::from_le_bytes(bytes[soff + 0x38..soff + 0x3a].try_into().unwrap()), 1);
+        assert_eq!(
+            u16::from_le_bytes(bytes[soff + 0x38..soff + 0x3a].try_into().unwrap()),
+            1
+        );
         assert_eq!(
             u32::from_le_bytes(bytes[soff + 0x3c..soff + 0x40].try_into().unwrap()),
             8, // page_index(1) * 8
@@ -5276,9 +5343,16 @@ mod tests {
 
         let bytes = std::fs::read(&pdb_path).unwrap();
         let new_ec = u32::from_le_bytes(bytes[toff + 4..toff + 8].try_into().unwrap());
-        assert_eq!(new_ec, 2, "ec should be relocated past the physical end of the file");
+        assert_eq!(
+            new_ec, 2,
+            "ec should be relocated past the physical end of the file"
+        );
         // The (former) conflicting page's next_page must be repointed too.
-        let p1_next = u32::from_le_bytes(bytes[TEST_PAGE_SIZE + 0x0c..TEST_PAGE_SIZE + 0x10].try_into().unwrap());
+        let p1_next = u32::from_le_bytes(
+            bytes[TEST_PAGE_SIZE + 0x0c..TEST_PAGE_SIZE + 0x10]
+                .try_into()
+                .unwrap(),
+        );
         assert_eq!(p1_next, new_ec);
         assert!(detect_pdb_ec_data_page_conflicts(&pdb_path).is_empty());
     }
@@ -5336,15 +5410,16 @@ mod tests {
             .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, &mut warnings)
             .expect("sync edb history");
         assert_eq!(history_written, 1);
-        assert_eq!(history_content_written, 1, "the track_id=0 entry must be dropped");
+        assert_eq!(
+            history_content_written, 1,
+            "the track_id=0 entry must be dropped"
+        );
 
         let conn = open_edb_rw(&usb_root, &mut Vec::new()).expect("re-open eDB rw");
         let (hid, name): (i64, String) = conn
-            .query_row(
-                "SELECT history_id, name FROM history",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
+            .query_row("SELECT history_id, name FROM history", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
             .expect("history row");
         assert_eq!(hid, 10);
         assert_eq!(name, "HISTORY 001");

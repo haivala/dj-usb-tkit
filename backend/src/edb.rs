@@ -229,7 +229,10 @@ pub fn open_edb_from_usb_root(
     open_edb(&path, warnings)
 }
 
-pub fn open_edb_rw(usb_root: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlite::Connection> {
+pub fn open_edb_rw(
+    usb_root: &Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> Option<rusqlite::Connection> {
     let db_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -448,7 +451,10 @@ pub fn try_read_track_index_from_edb_with_conn(
             Level::Info,
             "edb",
             "edb.loaded-track-index",
-            format!("loaded {} track metadata rows from eDB content index", index.len()),
+            format!(
+                "loaded {} track metadata rows from eDB content index",
+                index.len()
+            ),
         ));
         Some(index)
     } else {
@@ -546,7 +552,10 @@ pub fn try_read_content_date_created_index_from_edb_with_conn(
             Level::Info,
             "edb",
             "edb.loaded-date-created-index",
-            format!("loaded {} dateCreated value(s) from eDB content index", out.len()),
+            format!(
+                "loaded {} dateCreated value(s) from eDB content index",
+                out.len()
+            ),
         ));
         Some(out)
     } else {
@@ -1796,7 +1805,10 @@ mod tests {
 
         assert!(conn.is_some(), "plain sqlite db should open");
         assert_eq!(
-            warnings.iter().map(|w| w.message.as_str()).collect::<Vec<_>>(),
+            warnings
+                .iter()
+                .map(|w| w.message.as_str())
+                .collect::<Vec<_>>(),
             vec!["eDB opened read-write without SQLCipher key"]
         );
     }
@@ -1813,7 +1825,9 @@ mod tests {
 
         assert!(conn.is_none(), "schema-less db should not open");
         assert!(
-            warnings.iter().all(|w| !w.message.contains("unsafe characters")),
+            warnings
+                .iter()
+                .all(|w| !w.message.contains("unsafe characters")),
             "unexpected unsafe-key warning: {warnings:?}"
         );
         assert!(warnings.is_empty(), "expected no warnings: {warnings:?}");

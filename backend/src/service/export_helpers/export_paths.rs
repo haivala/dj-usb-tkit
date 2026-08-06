@@ -341,7 +341,10 @@ pub fn export_analysis_bundle_for_track(
             Level::Warn,
             "export",
             "export.analysis-bundle-missing",
-            format!("analysis bundle missing for track {} (no DAT path)", track.id),
+            format!(
+                "analysis bundle missing for track {} (no DAT path)",
+                track.id
+            ),
         ));
         return Ok(None);
     };

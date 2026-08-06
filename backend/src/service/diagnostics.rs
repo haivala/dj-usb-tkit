@@ -1176,8 +1176,7 @@ pub(crate) fn diagnose_pdb_integrity(
     // `derive_history_sync_payload` already uses for the eDB history-sync
     // repair.
     {
-        let (hp, he) =
-            count_named_history_rows(&parsed.history_playlists, &parsed.history_entries);
+        let (hp, he) = count_named_history_rows(&parsed.history_playlists, &parsed.history_entries);
         let hr = parsed.history_rows.len();
         if hp > 0 || he > 0 || hr > 0 {
             checks.push(DiagCheck {

@@ -20,10 +20,10 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
-use rodio::source::SeekError as RodioSeekError;
 use rodio::Source;
+use rodio::source::SeekError as RodioSeekError;
 use symphonia::core::audio::{AudioBufferRef, SampleBuffer, SignalSpec};
-use symphonia::core::codecs::{Decoder as CodecDecoder, DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::{CODEC_TYPE_NULL, Decoder as CodecDecoder, DecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, SeekedTo};
 use symphonia::core::io::{MediaSource, MediaSourceStream};
@@ -110,7 +110,10 @@ impl SeekableSymphoniaSource {
             hint.with_extension(ext);
         }
 
-        let format_opts = FormatOptions { enable_gapless: true, ..Default::default() };
+        let format_opts = FormatOptions {
+            enable_gapless: true,
+            ..Default::default()
+        };
         let metadata_opts = MetadataOptions::default();
         let mut probed = symphonia::default::get_probe()
             .format(&hint, mss, &format_opts, &metadata_opts)
@@ -270,7 +273,13 @@ impl Source for SeekableSymphoniaSource {
 
         let seek_res = self
             .format
-            .seek(SeekMode::Accurate, SeekTo::Time { time, track_id: None })
+            .seek(
+                SeekMode::Accurate,
+                SeekTo::Time {
+                    time,
+                    track_id: None,
+                },
+            )
             .map_err(|err| RodioSeekError::Other(Box::new(to_decoder_error(err))))?;
 
         self.refine_position(seek_res)
@@ -281,7 +290,12 @@ impl Source for SeekableSymphoniaSource {
     }
 }
 
-fn skip_back_a_tiny_bit(Time { mut seconds, mut frac }: Time) -> Time {
+fn skip_back_a_tiny_bit(
+    Time {
+        mut seconds,
+        mut frac,
+    }: Time,
+) -> Time {
     frac -= 0.0001;
     if frac < 0.0 {
         seconds = seconds.saturating_sub(1);

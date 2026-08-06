@@ -330,16 +330,17 @@ impl BackendService {
 
         let mut seen = std::collections::HashSet::<String>::new();
         let mut roots = Vec::<String>::new();
-        let push_root = |raw: &str, roots: &mut Vec<String>, seen: &mut std::collections::HashSet<String>| {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                return;
-            }
-            let key = normalize_source_root_for_matching(trimmed);
-            if seen.insert(key) {
-                roots.push(trimmed.to_string());
-            }
-        };
+        let push_root =
+            |raw: &str, roots: &mut Vec<String>, seen: &mut std::collections::HashSet<String>| {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return;
+                }
+                let key = normalize_source_root_for_matching(trimmed);
+                if seen.insert(key) {
+                    roots.push(trimmed.to_string());
+                }
+            };
 
         if let Some(root_value) = conn
             .query_row(
@@ -1738,8 +1739,11 @@ impl BackendService {
     ) -> BackendResult<ResolvePlaybackSourceData> {
         let conn = self.db.connect()?;
         let usb_root_paths = untainted_usb_root_paths(&conn)?;
-        let is_usb_rooted =
-            |path: &str| usb_root_paths.iter().any(|root| browse_path_matches_root(path, root));
+        let is_usb_rooted = |path: &str| {
+            usb_root_paths
+                .iter()
+                .any(|root| browse_path_matches_root(path, root))
+        };
 
         // Fast path: any origin (library, playlist, USB, history) may carry
         // the id of the row it was dispatched from. If that row is a
@@ -1749,7 +1753,8 @@ impl BackendService {
         // pointing at a stale placeholder), fall through to the
         // fingerprint/title search below so it can self-heal.
         if let Some(id) = req.track_id.as_deref().filter(|id| !id.trim().is_empty()) {
-            let mut stmt = conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks WHERE id = ?1"))?;
+            let mut stmt =
+                conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks WHERE id = ?1"))?;
             let track = stmt
                 .query_row(params![id], |row| row_to_track(row, false))
                 .optional()?;
@@ -2205,9 +2210,9 @@ pub(crate) fn untainted_usb_root_paths(conn: &rusqlite::Connection) -> BackendRe
     Ok(all_roots
         .into_iter()
         .filter(|root| {
-            !source_roots
-                .iter()
-                .any(|sr| normalize_source_root_for_matching(sr) == normalize_source_root_for_matching(root))
+            !source_roots.iter().any(|sr| {
+                normalize_source_root_for_matching(sr) == normalize_source_root_for_matching(root)
+            })
         })
         .collect())
 }
@@ -2461,11 +2466,7 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
     })
 }
 
-pub fn build_track_match_fingerprint(
-    title: &str,
-    artist: &str,
-    album: Option<&str>,
-) -> String {
+pub fn build_track_match_fingerprint(title: &str, artist: &str, album: Option<&str>) -> String {
     let normalized = format!(
         "{}|{}|{}",
         normalize_hash_part(title),
@@ -2912,21 +2913,31 @@ mod tests {
     fn find_confident_fingerprint_match_requires_duration_and_size_agreement() {
         let (_dir, db) = test_db();
         let conn = db.connect().expect("connect");
-        insert_track(&conn, "local-1", "/music/a.mp3", "fp1", Some(200_000), Some(1_000));
+        insert_track(
+            &conn,
+            "local-1",
+            "/music/a.mp3",
+            "fp1",
+            Some(200_000),
+            Some(1_000),
+        );
 
         // Both agree -> match.
-        let matched = find_confident_fingerprint_match(&conn, "fp1", Some(201_000), Some(1_000), &[])
-            .expect("query");
+        let matched =
+            find_confident_fingerprint_match(&conn, "fp1", Some(201_000), Some(1_000), &[])
+                .expect("query");
         assert_eq!(matched, Some("local-1".to_string()));
 
         // Duration diverges beyond tolerance -> no match.
-        let no_match = find_confident_fingerprint_match(&conn, "fp1", Some(210_000), Some(1_000), &[])
-            .expect("query");
+        let no_match =
+            find_confident_fingerprint_match(&conn, "fp1", Some(210_000), Some(1_000), &[])
+                .expect("query");
         assert_eq!(no_match, None);
 
         // Duration matches but size diverges -> no match (Clean/Explicit collision case).
-        let no_match_size = find_confident_fingerprint_match(&conn, "fp1", Some(200_500), Some(999), &[])
-            .expect("query");
+        let no_match_size =
+            find_confident_fingerprint_match(&conn, "fp1", Some(200_500), Some(999), &[])
+                .expect("query");
         assert_eq!(no_match_size, None);
     }
 
@@ -2939,8 +2950,9 @@ mod tests {
         // Local candidate has no file_size_bytes recorded -- duration alone,
         // when it matches, is still enough (missing data doesn't force a
         // non-match, it just isn't checked).
-        let matched = find_confident_fingerprint_match(&conn, "fp1", Some(200_100), Some(9_999), &[])
-            .expect("query");
+        let matched =
+            find_confident_fingerprint_match(&conn, "fp1", Some(200_100), Some(9_999), &[])
+                .expect("query");
         assert_eq!(matched, Some("local-1".to_string()));
     }
 
@@ -2948,11 +2960,26 @@ mod tests {
     fn find_confident_fingerprint_match_refuses_to_pick_between_two_candidates() {
         let (_dir, db) = test_db();
         let conn = db.connect().expect("connect");
-        insert_track(&conn, "local-1", "/music/a.mp3", "fp1", Some(200_000), Some(1_000));
-        insert_track(&conn, "local-2", "/music/b.mp3", "fp1", Some(200_000), Some(1_000));
+        insert_track(
+            &conn,
+            "local-1",
+            "/music/a.mp3",
+            "fp1",
+            Some(200_000),
+            Some(1_000),
+        );
+        insert_track(
+            &conn,
+            "local-2",
+            "/music/b.mp3",
+            "fp1",
+            Some(200_000),
+            Some(1_000),
+        );
 
-        let result = find_confident_fingerprint_match(&conn, "fp1", Some(200_000), Some(1_000), &[])
-            .expect("query");
+        let result =
+            find_confident_fingerprint_match(&conn, "fp1", Some(200_000), Some(1_000), &[])
+                .expect("query");
         assert_eq!(result, None, "ambiguous ties must not auto-merge");
     }
 
@@ -2960,7 +2987,14 @@ mod tests {
     fn find_confident_fingerprint_match_skips_candidates_under_a_known_usb_root() {
         let (_dir, db) = test_db();
         let conn = db.connect().expect("connect");
-        insert_track(&conn, "placeholder-1", "/mnt/usb1/Contents/a.mp3", "fp1", Some(200_000), Some(1_000));
+        insert_track(
+            &conn,
+            "placeholder-1",
+            "/mnt/usb1/Contents/a.mp3",
+            "fp1",
+            Some(200_000),
+            Some(1_000),
+        );
 
         let result = find_confident_fingerprint_match(
             &conn,
@@ -2970,7 +3004,10 @@ mod tests {
             &["/mnt/usb1".to_string()],
         )
         .expect("query");
-        assert_eq!(result, None, "placeholder-vs-placeholder must never be treated as a match");
+        assert_eq!(
+            result, None,
+            "placeholder-vs-placeholder must never be treated as a match"
+        );
     }
 
     #[test]

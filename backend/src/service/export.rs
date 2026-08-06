@@ -456,7 +456,10 @@ impl BackendService {
                             Level::Warn,
                             "export",
                             "export.pdb-preview-topology-risk",
-                            format!("PDB preview topology risk: {} issue(s)", topology_issues.len()),
+                            format!(
+                                "PDB preview topology risk: {} issue(s)",
+                                topology_issues.len()
+                            ),
                         ));
                         warnings.extend(topology_issues.into_iter().map(|issue| {
                             logging::log(
@@ -479,9 +482,11 @@ impl BackendService {
             }
         } else {
             if options.backup_before_export {
-                warnings.extend(backup_usb_databases(&usb_root).into_iter().map(|message| {
-                    logging::log(Level::Info, "export", "export.backup", message)
-                }));
+                warnings.extend(
+                    backup_usb_databases(&usb_root).into_iter().map(|message| {
+                        logging::log(Level::Info, "export", "export.backup", message)
+                    }),
+                );
             }
             // Write eDB first (master), then sync PDB to match eDB playlist IDs
             match write_edb_playlist(&usb_root, &playlist, &manifest, mirror_playlist_entries) {
@@ -619,8 +624,8 @@ impl BackendService {
             let usb_device_id =
                 usb_utils::upsert_usb_device(&export_conn, &usb_root, false, &now())?;
             let export_record = build_export_log_record(&playlist, &manifest);
-            let track_fingerprints_json =
-                serde_json::to_string(&export_record.track_fingerprints).map_err(|err| {
+            let track_fingerprints_json = serde_json::to_string(&export_record.track_fingerprints)
+                .map_err(|err| {
                     BackendError::Internal(format!("failed to encode track fingerprints: {err}"))
                 })?;
             export_conn.execute(
@@ -1178,5 +1183,4 @@ mod tests {
             other => panic!("unexpected error variant: {other:?}"),
         }
     }
-
 }

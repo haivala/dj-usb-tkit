@@ -75,7 +75,10 @@ fn main() {
     );
     if !analyze_data.warnings.is_empty() {
         for warning in analyze_data.warnings {
-            println!("warning: {warning}");
+            println!(
+                "warning: [{}][{}][{}] {}",
+                warning.level, warning.source, warning.code, warning.message
+            );
         }
     }
 }

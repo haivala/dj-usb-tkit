@@ -107,7 +107,7 @@ fn scan_and_export_single_track(
     let track_id = track.id.clone();
     let title = track.title.clone();
     let artist = track.artist.clone();
-    seed_tracks_as_analyzed(data_dir, &[track_id.clone()]);
+    seed_tracks_as_analyzed(data_dir, std::slice::from_ref(&track_id));
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
@@ -155,7 +155,9 @@ fn validate_usb_root_reports_empty_path_as_invalid() {
     assert!(!data.has_write_access);
     assert_eq!(data.normalized_root, None);
     assert!(
-        data.warnings.iter().any(|w| w.code == "usb.import.path-empty"),
+        data.warnings
+            .iter()
+            .any(|w| w.code == "usb.import.path-empty"),
         "expected empty-path warning, got {:?}",
         data.warnings
     );
@@ -205,14 +207,16 @@ fn validate_usb_root_reports_uninitialized_directory_as_invalid() {
     assert!(!data.has_contents);
     assert!(!data.has_pdb);
     assert!(data.normalized_root.is_some());
-    assert!(data
-        .warnings
-        .iter()
-        .any(|w| w.code == "usb.import.missing-vendor-root"));
-    assert!(data
-        .warnings
-        .iter()
-        .any(|w| w.code == "usb.import.missing-contents"));
+    assert!(
+        data.warnings
+            .iter()
+            .any(|w| w.code == "usb.import.missing-vendor-root")
+    );
+    assert!(
+        data.warnings
+            .iter()
+            .any(|w| w.code == "usb.import.missing-contents")
+    );
 }
 
 #[test]
@@ -451,10 +455,11 @@ fn fetch_usb_histories_returns_empty_result_when_pdb_is_missing() {
     assert!(data.items.is_empty());
     assert_eq!(data.counts.imported_playlists, 0);
     assert_eq!(data.counts.imported_tracks, 0);
-    assert!(data
-        .warnings
-        .iter()
-        .any(|w| w.code == "usb.histories.pdb-not-found"));
+    assert!(
+        data.warnings
+            .iter()
+            .any(|w| w.code == "usb.histories.pdb-not-found")
+    );
 }
 
 #[test]
@@ -505,12 +510,13 @@ fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks()
     assert_eq!(data.counts.pdb_t12_entries, 2);
     assert_eq!(data.items.len(), 1, "expected the single injected history");
     let history = &data.items[0];
-    assert_eq!(history.tracks.len(), 2, "expected both tracks in history order");
+    assert_eq!(
+        history.tracks.len(),
+        2,
+        "expected both tracks in history order"
+    );
     assert!(
-        history
-            .tracks
-            .iter()
-            .all(|t| t.local_track_id.is_some()),
+        history.tracks.iter().all(|t| t.local_track_id.is_some()),
         "history tracks should be materialized into the local library: {:?}",
         history.tracks
     );

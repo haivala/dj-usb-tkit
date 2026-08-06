@@ -14,10 +14,10 @@ use backend::models::{
     AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode,
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
     GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
-    RemoveTracksBySourceRootsRequest,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
-    ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest, WarningEntry,
+    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
+    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest,
+    WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::BackendService;
@@ -2152,7 +2152,6 @@ fn analyze_new_tracks_uses_audio_content_for_bpm_key_not_filename_tokens() {
         key, "174",
         "key should not come from misleading numeric token"
     );
-
 }
 
 #[test]
@@ -3373,7 +3372,6 @@ fn analyze_new_tracks_extracts_bpm_key_from_aiff() {
     );
     let key = analyzed.key.expect("aiff key");
     assert!(!key.trim().is_empty(), "expected non-empty key");
-
 }
 
 #[test]
@@ -4396,12 +4394,18 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
         .expect("open db")
         .query_row("SELECT COUNT(1) FROM tracks", [], |row| row.get(0))
         .expect("count tracks");
-    assert_eq!(track_count_before, 1, "export itself must not create extra track rows");
+    assert_eq!(
+        track_count_before, 1,
+        "export itself must not create extra track rows"
+    );
 
     let usb_playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
     });
-    assert!(usb_playlists.ok, "fetch usb playlists failed: {usb_playlists:?}");
+    assert!(
+        usb_playlists.ok,
+        "fetch usb playlists failed: {usb_playlists:?}"
+    );
     let usb_track = usb_playlists
         .data
         .expect("usb playlist data")
@@ -4445,7 +4449,10 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
             |row| row.get(0),
         )
         .expect("count track_usb_links");
-    assert_eq!(link_count, 1, "expected a track_usb_links row recording this device's copy");
+    assert_eq!(
+        link_count, 1,
+        "expected a track_usb_links row recording this device's copy"
+    );
 }
 
 #[test]
@@ -4528,7 +4535,10 @@ fn export_to_usb_records_usb_device_export_history() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .expect("usb_device_exports row after delete");
-    assert_eq!(found_playlist_id_after, None, "playlist_id should be nulled out, not the row removed");
+    assert_eq!(
+        found_playlist_id_after, None,
+        "playlist_id should be nulled out, not the row removed"
+    );
     assert_eq!(playlist_name_after, "Export History Playlist");
 }
 
@@ -4601,7 +4611,10 @@ fn fetch_usb_playlists_creates_placeholder_when_no_local_match() {
     let usb_playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
     });
-    assert!(usb_playlists.ok, "fetch usb playlists failed: {usb_playlists:?}");
+    assert!(
+        usb_playlists.ok,
+        "fetch usb playlists failed: {usb_playlists:?}"
+    );
     let usb_track = usb_playlists
         .data
         .expect("usb playlist data")

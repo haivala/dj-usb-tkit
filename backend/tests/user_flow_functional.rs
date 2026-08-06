@@ -36,6 +36,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     write_test_pulsed_key_wav(&source_a.join("Artist - A120.wav"), 120.0, 20_000);
     write_test_pulsed_key_wav(&source_a.join("Artist - B128.wav"), 128.0, 20_000);
     write_test_pulsed_key_wav(&source_b.join("Artist - C132.wav"), 132.0, 20_000);
+    write_test_pulsed_key_wav(&source_b.join("Artist - D136.wav"), 136.0, 20_000);
 
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
@@ -49,7 +50,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     });
     assert!(scan_all.ok, "scan all failed: {scan_all:?}");
     let scan_all_data = scan_all.data.expect("scan all data");
-    assert_eq!(scan_all_data.indexed, 3, "expected 3 indexed tracks");
+    assert_eq!(scan_all_data.indexed, 4, "expected 4 indexed tracks");
 
     // Remove just the file, not the whole source-b directory: the scanner
     // deliberately treats a vanished source ROOT as "not found" rather than
@@ -84,7 +85,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         .data
         .expect("remaining tracks data")
         .items;
-    assert_eq!(remaining_tracks.len(), 2, "expected two remaining tracks");
+    assert_eq!(remaining_tracks.len(), 3, "expected three remaining tracks");
     let remaining_ids = remaining_tracks
         .iter()
         .map(|t| t.id.clone())
@@ -98,7 +99,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     });
     assert!(analyzed.ok, "analyze failed: {analyzed:?}");
     let analyzed_data = analyzed.data.expect("analyze data");
-    assert_eq!(analyzed_data.analyzed, 2, "expected 2 analyzed tracks");
+    assert_eq!(analyzed_data.analyzed, 3, "expected 3 analyzed tracks");
     assert_eq!(analyzed_data.failed, 0, "analysis should not fail");
 
     let analyzed_tracks = backend
@@ -147,7 +148,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         dedupe: DedupeMode::Skip,
     });
     assert!(add_source_tracks.ok, "add source tracks failed");
-    assert_eq!(add_source_tracks.data.expect("add source data").added, 2);
+    assert_eq!(add_source_tracks.data.expect("add source data").added, 3);
 
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -160,7 +161,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         }),
     });
     assert!(export.ok, "export failed: {export:?}");
-    assert_eq!(export.data.expect("export data").exported_tracks, 2);
+    assert_eq!(export.data.expect("export data").exported_tracks, 3);
 
     let parsed = parse_pdb(&pdb_path(&usb)).expect("parse exported pdb");
     let history_track_ids = parsed
@@ -213,6 +214,16 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
                 history_items
             )
         });
+    let library_track_id = remaining_ids
+        .iter()
+        .find(|id| *id != &usb_local_track_id && *id != &history_local_track_id)
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a library-only track id distinct from USB/history ids: remaining={:?}, usb={:?}, history={:?}",
+                remaining_ids, usb_local_track_id, history_local_track_id
+            )
+        });
 
     let target_playlist = backend.create_playlist(CreatePlaylistRequest {
         name: "Flow Target Playlist".to_string(),
@@ -225,7 +236,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
 
     let add_from_library = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
         playlist_id: target_playlist_id.clone(),
-        track_ids: vec![remaining_ids[0].clone()],
+        track_ids: vec![library_track_id.clone()],
         dedupe: DedupeMode::Skip,
     });
     assert!(add_from_library.ok, "add from library failed");
@@ -258,7 +269,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         "expected 3 tracks in target playlist"
     );
     let id_set = target_items.into_iter().map(|t| t.id).collect::<Vec<_>>();
-    assert!(id_set.iter().any(|id| id == &remaining_ids[0]));
+    assert!(id_set.iter().any(|id| id == &library_track_id));
     assert!(id_set.iter().any(|id| id == &usb_local_track_id));
     assert!(id_set.iter().any(|id| id == &history_local_track_id));
 
@@ -541,7 +552,6 @@ fn analyze_local_track_waveform_preview_comes_from_anlz_roundtrip() {
         preview.iter().any(|&v| v > 0),
         "waveform preview must have at least one non-zero value"
     );
-
 }
 
 #[test]
@@ -684,7 +694,6 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
         after.updated_at, before_updated_at,
         "startup hydration must not mutate updated_at (no reanalysis side effects)"
     );
-
 }
 
 #[test]

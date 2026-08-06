@@ -84,6 +84,7 @@
   per-track playback timestamp in the USB, and often not even a reliable
   session date; this app estimates the latter from track metadata when the
   USB doesn't provide one directly.
+- **Chore:** cargo fmt,clippy,update
 
 ## 0.1.9
 

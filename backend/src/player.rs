@@ -115,7 +115,10 @@ struct WorkerState {
     duration_ms: Option<u64>,
 }
 
-fn playback_worker(rx: mpsc::Receiver<PlaybackCommand>, transitions: mpsc::Sender<PlaybackTransition>) {
+fn playback_worker(
+    rx: mpsc::Receiver<PlaybackCommand>,
+    transitions: mpsc::Sender<PlaybackTransition>,
+) {
     let mut state = WorkerState::default();
 
     loop {
@@ -203,8 +206,9 @@ fn play_in_worker(
     let sink = Sink::try_new(stream_handle)
         .map_err(|err| BackendError::Internal(format!("failed to create audio sink: {err}")))?;
 
-    let mut decoder = crate::symphonia_decoder::SeekableSymphoniaSource::open(Path::new(&normalized))
-        .map_err(|err| BackendError::Internal(format!("decoder error: {err}")))?;
+    let mut decoder =
+        crate::symphonia_decoder::SeekableSymphoniaSource::open(Path::new(&normalized))
+            .map_err(|err| BackendError::Internal(format!("decoder error: {err}")))?;
 
     let duration_ms = decoder
         .total_duration()
@@ -555,8 +559,7 @@ mod tests {
     }
 
     fn mp3_fixture_path() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/audio/noart/track_no_art.mp3")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio/noart/track_no_art.mp3")
     }
 
     #[test]
@@ -566,10 +569,9 @@ mod tests {
         // byte length to seek at all (regardless of SeekMode) — so through rodio's own
         // decoder, FLAC seeking always fails with SeekError::Unseekable. Our own
         // FileMediaSource reports a real length, so this now genuinely works.
-        let mut decoder = crate::symphonia_decoder::SeekableSymphoniaSource::open(
-            &flac_fixture_path(),
-        )
-        .expect("should decode flac fixture");
+        let mut decoder =
+            crate::symphonia_decoder::SeekableSymphoniaSource::open(&flac_fixture_path())
+                .expect("should decode flac fixture");
         let duration = decoder
             .total_duration()
             .expect("flac fixture should report a duration");
@@ -582,14 +584,16 @@ mod tests {
 
     #[test]
     fn seekable_symphonia_source_decodes_mp3_fixture_and_supports_real_seek() {
-        let mut decoder = crate::symphonia_decoder::SeekableSymphoniaSource::open(
-            &mp3_fixture_path(),
-        )
-        .expect("should decode mp3 fixture");
+        let mut decoder =
+            crate::symphonia_decoder::SeekableSymphoniaSource::open(&mp3_fixture_path())
+                .expect("should decode mp3 fixture");
         let duration = decoder
             .total_duration()
             .expect("mp3 fixture should report a duration");
-        assert!(duration.as_millis() > 1000, "fixture should be more than a second long");
+        assert!(
+            duration.as_millis() > 1000,
+            "fixture should be more than a second long"
+        );
 
         decoder
             .try_seek(duration / 2)
@@ -658,22 +662,34 @@ mod tests {
 
     #[test]
     fn compute_target_offset_ms_prefers_explicit_offset_over_ratio() {
-        assert_eq!(compute_target_offset_ms(Some(5_000), Some(0.5), Some(10_000)), 5_000);
+        assert_eq!(
+            compute_target_offset_ms(Some(5_000), Some(0.5), Some(10_000)),
+            5_000
+        );
     }
 
     #[test]
     fn compute_target_offset_ms_falls_back_to_ratio_when_offset_is_zero() {
-        assert_eq!(compute_target_offset_ms(None, Some(0.25), Some(8_000)), 2_000);
+        assert_eq!(
+            compute_target_offset_ms(None, Some(0.25), Some(8_000)),
+            2_000
+        );
     }
 
     #[test]
     fn compute_target_offset_ms_clamps_ratio_outside_unit_range() {
-        assert_eq!(compute_target_offset_ms(None, Some(1.5), Some(4_000)), 4_000);
+        assert_eq!(
+            compute_target_offset_ms(None, Some(1.5), Some(4_000)),
+            4_000
+        );
     }
 
     #[test]
     fn compute_target_offset_ms_clamps_explicit_offset_to_duration() {
-        assert_eq!(compute_target_offset_ms(Some(9_000), None, Some(4_000)), 4_000);
+        assert_eq!(
+            compute_target_offset_ms(Some(9_000), None, Some(4_000)),
+            4_000
+        );
     }
 
     #[test]
@@ -736,7 +752,10 @@ mod tests {
         let status = snapshot(&mut state);
 
         assert!(status.playing);
-        assert_eq!(status.position_ms, 10, "position should clamp to duration_ms");
+        assert_eq!(
+            status.position_ms, 10,
+            "position should clamp to duration_ms"
+        );
     }
 
     #[test]

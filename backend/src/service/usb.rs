@@ -120,7 +120,8 @@ fn merge_full_edb_track_index(
     track_by_id: &mut HashMap<u32, UsbTrack>,
     warnings: &mut Vec<WarningEntry>,
 ) {
-    if let Some(all_edb_tracks) = try_read_track_index_from_edb_with_conn(conn, usb_root, warnings) {
+    if let Some(all_edb_tracks) = try_read_track_index_from_edb_with_conn(conn, usb_root, warnings)
+    {
         track_by_id.extend(all_edb_tracks);
     }
 }
@@ -443,7 +444,9 @@ impl BackendService {
             "UPDATE usb_devices SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
             params![now_ts, req.id],
         )?;
-        Ok(crate::models::PruneUsbDeviceData { pruned: changed > 0 })
+        Ok(crate::models::PruneUsbDeviceData {
+            pruned: changed > 0,
+        })
     }
 
     pub fn fetch_usb_playlists(
@@ -471,7 +474,12 @@ impl BackendService {
         let parsed = if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
             warnings.extend(parsed.warnings.iter().map(|message| {
-                logging::log(Level::Warn, "usb-import", "usb.import.pdb-parse", message.clone())
+                logging::log(
+                    Level::Warn,
+                    "usb-import",
+                    "usb.import.pdb-parse",
+                    message.clone(),
+                )
             }));
             Some(parsed)
         } else {
@@ -479,7 +487,10 @@ impl BackendService {
                 Level::Warn,
                 "usb-import",
                 "usb.import.pdb-not-found",
-                format!("PDB not found under {}; continuing with eDB-only mode", usb_root.display()),
+                format!(
+                    "PDB not found under {}; continuing with eDB-only mode",
+                    usb_root.display()
+                ),
             ));
             None
         };
@@ -1268,7 +1279,12 @@ impl BackendService {
             .warnings
             .iter()
             .map(|message| {
-                logging::log(Level::Warn, "usb-import", "usb.import.pdb-parse", message.clone())
+                logging::log(
+                    Level::Warn,
+                    "usb-import",
+                    "usb.import.pdb-parse",
+                    message.clone(),
+                )
             })
             .collect();
         warnings.push(logging::log(
@@ -1299,7 +1315,9 @@ impl BackendService {
                 Level::Info,
                 "usb-import",
                 "usb.histories.materialized",
-                format!("materialized {materialized_tracks} USB history track row(s) into local library"),
+                format!(
+                    "materialized {materialized_tracks} USB history track row(s) into local library"
+                ),
             ));
         }
 
@@ -1551,13 +1569,12 @@ impl BackendService {
 
         let mut merged = 0usize;
         for group in by_fingerprint.into_values() {
-            let (locals, placeholders): (Vec<Row>, Vec<Row>) = group.into_iter().partition(
-                |(_, path, _, _)| {
+            let (locals, placeholders): (Vec<Row>, Vec<Row>) =
+                group.into_iter().partition(|(_, path, _, _)| {
                     !usb_root_paths
                         .iter()
                         .any(|root| browse_path_matches_root(path, root))
-                },
-            );
+                });
             if locals.len() != 1 {
                 // Zero or ambiguous local candidates for this fingerprint --
                 // leave every row in the group alone.
@@ -1634,7 +1651,12 @@ impl BackendService {
         if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
             warnings.extend(parsed.warnings.iter().map(|message| {
-                logging::log(Level::Warn, "usb-import", "usb.import.pdb-parse", message.clone())
+                logging::log(
+                    Level::Warn,
+                    "usb-import",
+                    "usb.import.pdb-parse",
+                    message.clone(),
+                )
             }));
             let mut best: Option<(&crate::pdb_reader::PdbTrackRow, i32)> = None;
             for t in parsed.tracks.iter().filter(|t| t.id == track_id) {
@@ -1735,7 +1757,10 @@ impl BackendService {
                 Level::Warn,
                 "usb-import",
                 "usb.import.pdb-not-found",
-                format!("PDB not found under {}; using DB fallback only", usb_root.display()),
+                format!(
+                    "PDB not found under {}; using DB fallback only",
+                    usb_root.display()
+                ),
             ));
         }
 

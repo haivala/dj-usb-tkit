@@ -19,14 +19,22 @@ fn db_migration_is_idempotent_and_adds_expected_columns() {
 
     {
         let conn = Connection::open(&db_path).expect("open once-migrated db");
-        assert_eq!(usb_table_count(&conn), 3, "usb tables should exist after first migration");
+        assert_eq!(
+            usb_table_count(&conn),
+            3,
+            "usb tables should exist after first migration"
+        );
     }
 
     let backend_again = BackendCommands::new(&data_dir).expect("second init idempotent");
     drop(backend_again);
 
     let conn = Connection::open(&db_path).expect("open migrated db");
-    assert_eq!(usb_table_count(&conn), 3, "usb tables should still exist after second migration");
+    assert_eq!(
+        usb_table_count(&conn),
+        3,
+        "usb tables should still exist after second migration"
+    );
     assert!(has_column(&conn, "tracks", "track_number"));
     assert!(has_column(&conn, "tracks", "format_ext"));
     assert!(has_column(&conn, "tracks", "sample_rate_hz"));
@@ -134,14 +142,20 @@ fn validate_usb_root_marks_device_mounted() {
     let resp = backend.validate_usb_root(ValidateUsbRootRequest {
         path: usb_dir.to_string_lossy().to_string(),
     });
-    assert!(resp.ok, "validate_usb_root should succeed: {:?}", resp.error);
+    assert!(
+        resp.ok,
+        "validate_usb_root should succeed: {:?}",
+        resp.error
+    );
     drop(backend);
 
     let conn = Connection::open(data_dir.join("backend.db")).expect("open db");
     let mounted: i64 = conn
-        .query_row("SELECT mounted FROM usb_devices WHERE root_path_key = ?1", rusqlite::params![
-            normalize_path_for_test(&usb_dir)
-        ], |row| row.get(0))
+        .query_row(
+            "SELECT mounted FROM usb_devices WHERE root_path_key = ?1",
+            rusqlite::params![normalize_path_for_test(&usb_dir)],
+            |row| row.get(0),
+        )
         .expect("mounted row");
     assert_eq!(mounted, 1);
 }
@@ -257,7 +271,11 @@ fn usb_devices_backfilled_from_legacy_root_settings() {
         .expect("query")
         .collect::<Result<_, _>>()
         .expect("collect");
-    assert_eq!(rows.len(), 2, "both distinct legacy roots should be backfilled");
+    assert_eq!(
+        rows.len(),
+        2,
+        "both distinct legacy roots should be backfilled"
+    );
     for (_, mounted) in &rows {
         assert_eq!(*mounted, 0, "backfilled devices must not be marked mounted");
     }
@@ -341,5 +359,8 @@ fn startup_resets_previously_mounted_usb_devices() {
             |row| row.get(0),
         )
         .expect("mounted");
-    assert_eq!(mounted, 0, "mount state from a prior session must not survive restart");
+    assert_eq!(
+        mounted, 0,
+        "mount state from a prior session must not survive restart"
+    );
 }

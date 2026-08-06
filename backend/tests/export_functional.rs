@@ -1859,10 +1859,9 @@ fn export_to_usb_option_matrix_controls_artwork_analysis_and_prune_behavior() {
         "expected no analysis export when include_analysis=false"
     );
     assert!(
-        second
-            .warnings
-            .iter()
-            .any(|w| w.source == "export" && w.level == "info" && w.code == "export.prune-stale-summary"),
+        second.warnings.iter().any(|w| w.source == "export"
+            && w.level == "info"
+            && w.code == "export.prune-stale-summary"),
         "expected structured prune/export info warning"
     );
 
