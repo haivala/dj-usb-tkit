@@ -30,6 +30,14 @@
 
 ## Unreleased
 
+- **Fix:** restore waveform color refresh on USB/history track rows after
+  analysis completes. `patchUsbTrackRow` and `patchHistoryTrackRow` were
+  missing `setWaveformColorData` from the deps passed to the shared row-patch
+  helper (the library and playlist row-patch call sites had it, these two
+  didn't), so a freshly-analyzed track's waveform kept its stale color on
+  those two views until the row was fully re-rendered some other way.
+- **Chore:** de-duplicate frontend JS boilerplate in `vanilla-ui`
+
 ## 0.1.10
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

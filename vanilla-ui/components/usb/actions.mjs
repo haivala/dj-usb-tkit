@@ -1,7 +1,9 @@
 import {
   missingSourceRootsArray,
-  playlistTracksAffectedByMissingRoots
+  playlistTracksAffectedByMissingRoots,
+  warningEntryText
 } from "../library/actions.mjs";
+import { resolveEmitStatus } from "../shared/track_actions.mjs";
 
 export function normalizePlaylistNameForCompare(value) {
   return String(value || "").trim().toLowerCase();
@@ -32,17 +34,6 @@ export function setUsbRootControlsLocked(state, el, locked, deps = {}) {
     // so hand back to that recompute instead of overriding it.
     deps.updatePlaylistExportButtons?.();
   }
-}
-
-function resolveEmitStatus(deps = {}) {
-  if (typeof deps.emitStatus === "function") return deps.emitStatus;
-  if (typeof deps.setStatus === "function") return deps.setStatus;
-  return () => {};
-}
-
-function warningEntryText(entry) {
-  if (entry && typeof entry === "object") return String(entry.message || "").trim();
-  return String(entry || "").trim();
 }
 
 function joinWarningTexts(warnings) {
@@ -123,6 +114,22 @@ export function diagStatusIcon(status) {
   return "\u2717";
 }
 
+function renderDiagCheckRow(container, check, deps = {}) {
+  const { escapeHtml, documentObj, switchView } = deps;
+  const doc = documentObj || document;
+  const row = doc.createElement("div");
+  row.className = `diag-check diag-check-${check.status.toLowerCase()}`;
+  row.innerHTML = `<span class="diag-indicator">${diagStatusIcon(check.status)}</span> <strong>${escapeHtml(check.label)}</strong>: ${escapeHtml(check.detail)}`;
+  if (check.link === "event-log" && typeof switchView === "function") {
+    const btn = doc.createElement("button");
+    btn.className = "diag-log-link";
+    btn.textContent = "→ event log";
+    btn.addEventListener("click", () => switchView("event-log").catch((err) => console.error(err)));
+    row.appendChild(btn);
+  }
+  container.appendChild(row);
+}
+
 export function renderDiagnosticsReport(el, data, deps = {}) {
   const { escapeHtml, showDiagReportView: showReport, updateUsbHealthDot, switchView } = deps;
   el.usbDiagnosticsCard.classList.remove("hidden");
@@ -199,17 +206,7 @@ export function renderDiagnosticsReport(el, data, deps = {}) {
     div.appendChild(header);
 
     for (const check of (sec.checks || [])) {
-      const row = (deps.documentObj || document).createElement("div");
-      row.className = `diag-check diag-check-${check.status.toLowerCase()}`;
-      row.innerHTML = `<span class="diag-indicator">${diagStatusIcon(check.status)}</span> <strong>${escapeHtml(check.label)}</strong>: ${escapeHtml(check.detail)}`;
-      if (check.link === "event-log" && typeof switchView === "function") {
-        const btn = (deps.documentObj || document).createElement("button");
-        btn.className = "diag-log-link";
-        btn.textContent = "→ event log";
-        btn.addEventListener("click", () => switchView("event-log").catch((err) => console.error(err)));
-        row.appendChild(btn);
-      }
-      div.appendChild(row);
+      renderDiagCheckRow(div, check, { escapeHtml, documentObj: deps.documentObj, switchView });
     }
 
     el.diagSections.appendChild(div);
@@ -269,10 +266,7 @@ export function renderParityReport(el, data, deps = {}) {
     div.appendChild(table);
   }
   for (const check of section.checks) {
-    const row = (deps.documentObj || document).createElement("div");
-    row.className = `diag-check diag-check-${check.status.toLowerCase()}`;
-    row.innerHTML = `<span class="diag-indicator">${diagStatusIcon(check.status)}</span> <strong>${escapeHtml(check.label)}</strong>: ${escapeHtml(check.detail)}`;
-    div.appendChild(row);
+    renderDiagCheckRow(div, check, { escapeHtml, documentObj: deps.documentObj });
   }
   el.diagSections.appendChild(div);
 

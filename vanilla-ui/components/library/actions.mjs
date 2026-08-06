@@ -1,3 +1,6 @@
+import { resolveEmitStatus } from "../shared/track_actions.mjs";
+import { formatDurationMs } from "../../track_utils.mjs";
+
 export function trackHasRenderableWaveform(track) {
   const hasPreview = Array.isArray(track?.waveformPreview)
     && track.waveformPreview.length > 0
@@ -7,13 +10,7 @@ export function trackHasRenderableWaveform(track) {
   return hasPreview || hasWaveformPath;
 }
 
-function resolveEmitStatus(deps = {}) {
-  if (typeof deps.emitStatus === "function") return deps.emitStatus;
-  if (typeof deps.setStatus === "function") return deps.setStatus;
-  return () => {};
-}
-
-function warningEntryText(entry) {
+export function warningEntryText(entry) {
   if (entry && typeof entry === "object") return String(entry.message || "").trim();
   return String(entry || "").trim();
 }
@@ -1612,16 +1609,7 @@ export function createAnalysisPatchQueue() {
 
 function formatDurationMsInternal(value) {
   const rawMs = Number(value);
-  if (!Number.isFinite(rawMs) || rawMs <= 0) return "-";
-  const ms = Math.max(0, Math.round(rawMs));
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  }
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return Number.isFinite(rawMs) && rawMs > 0 ? formatDurationMs(rawMs) : "-";
 }
 
 // --- analysis_settings.mjs ---
@@ -1702,20 +1690,9 @@ export function enabledSourceRoots(sourceRoots, sourceRootEnabled = {}, missingS
   });
 }
 
-export function filterTracksBySourceRoots(tracks, sourceRoots, sourceRootEnabled = {}) {
-  const list = Array.isArray(tracks) ? tracks : [];
-  const enabled = enabledSourceRoots(sourceRoots, sourceRootEnabled);
-  if (!enabled.length) return [];
-  return list.filter((track) => trackPathMatchesAnyRoot(track?.filePath, enabled));
-}
-
 export function scanLibraryButtonLabel(sourceRoots) {
   const count = Array.isArray(sourceRoots) ? sourceRoots.length : 0;
   return count > 1 ? "Scan Libraries" : "Scan Library";
-}
-
-export function trackPathIsInsideSelectedRoots(filePath, sourceRoots) {
-  return trackPathMatchesAnyRoot(filePath, sourceRoots);
 }
 
 // --- cover_url.mjs ---

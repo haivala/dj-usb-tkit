@@ -1,3 +1,5 @@
+import { resolveEmitStatus } from "../shared/track_actions.mjs";
+
 export function renderPlaylistTabsAndPanels(state, el, deps) {
   const {
     document,
@@ -71,12 +73,6 @@ export function renderPlaylistTabsAndPanels(state, el, deps) {
     `;
     el.playlistPanels.appendChild(panel);
   });
-}
-
-function resolveEmitStatus(deps = {}) {
-  if (typeof deps.emitStatus === "function") return deps.emitStatus;
-  if (typeof deps.setStatus === "function") return deps.setStatus;
-  return () => {};
 }
 
 export function renderPlaylistList(state, el, deps) {

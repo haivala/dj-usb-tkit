@@ -94,15 +94,46 @@ const { invoke, command, isTauriRuntime, getTauriEventListen } =
 
 let ThemeManager, AccentManager;
 
+const ELEMENT_IDS = [
+  "statusText", "playlistBadge", "badgeLabel", "navSidebar",
+  "sidebarCollapseBtn", "donateBtn", "navPlaylistList", "addPlaylistBtn",
+  "playlistPanelTitle", "playlistSearchInput", "playlistTracksBody", "playlistTableWrap",
+  "playlistEmptyState", "playlistTotalDuration", "playlistExportStatus", "analyzePlaylistMissingBtn",
+  "exportPlaylistBtn", "settingsBtn", "settingsDrawer", "settingsBackdrop",
+  "settingsCloseBtn", "settingsVersionText", "settingsUpdateNote", "criticalUpdateBanner",
+  "criticalUpdateText", "criticalUpdateDismissBtn", "openEventLogBtn", "accentHueSlider",
+  "accentSwatch", "accentResetBtn", "sourceFilterIndicator", "selectionActions",
+  "usbConnectionBar", "usbSelectedControls", "usbInitRow", "usbInitHint",
+  "usbHealthDot", "initializeUsbBtn", "sourceChipsContainer", "sourceBar",
+  "sourceFilterHeader", "addSourceBtn", "importMasterDbBtn", "librarySearch",
+  "libraryTableBody", "libraryTableWrap", "libraryEmptyState", "libraryContent",
+  "selectAllTracks", "selectionCount", "usbPlaylists", "usbTrackSearch",
+  "usbPlaylistTracks", "usbPlaylistTotalDuration", "historyList", "historyTrackSearch",
+  "historyTracks", "historyTotalDuration", "usbPlayerMenuAvailable", "usbPlayerMenuCurrent",
+  "usbPlayerMenuAddBtn", "usbPlayerMenuRemoveBtn", "usbPlayerMenuUpBtn", "usbPlayerMenuDownBtn",
+  "usbPlayerMenuDivergence", "usbPlayerMenuDivergenceMessage", "usbPlayerMenuSyncBtn", "usbPlayerMenuRestoreBtn",
+  "libraryTotalDuration", "scanLibraryBtn", "addSelectedBtn", "refreshUsbBtn",
+  "refreshHistoryBtn", "exportHistoryTracklistBtn", "runUsbParityBtn", "exportSyncModeGroup",
+  "exportSyncModeMirror", "exportSyncModeAdditive", "exportBackupCheckbox", "analysisBpmRangeSelect",
+  "analysisEngineSelect", "analysisEngineStatus", "essentiaInstallRow", "essentiaNodeStatus",
+  "essentiaDownloadBtn", "essentiaCancelBtn", "essentiaRemoveBtn", "selectUsbFolderBtn",
+  "usbRecentRow", "usbRecentList", "usbRootPathText", "externalMasterDbToggle",
+  "externalMasterDbCheckbox", "externalMasterDbPath", "usbCountsText", "historyCountsText",
+  "progressFooter", "progressText", "progressFill", "progressDismiss",
+  "progressPauseBtn", "progressCancelAnalysisBtn", "usbDiagnosticsCard", "diagOverallStatus",
+  "diagDuration", "diagSections", "diagReportView", "diagRepairPanel",
+  "diagRepairSummary", "diagRepairFixes", "diagBackToReportBtn", "diagPlaylistDetails",
+  "diagPlaylistTableBody", "reDiagnoseBtn", "previewRepairsBtn", "applyRepairsBtn",
+  "confirmOverlay", "confirmTitle", "confirmMessage", "confirmOkBtn",
+  "confirmCancelBtn", "tracklistExportOverlay", "tracklistExportTitle", "tracklistExportStartTrack",
+  "tracklistExportTimesToggle", "tracklistExportPlacementRow", "tracklistExportPlacement", "tracklistExportOkBtn",
+  "tracklistExportCancelBtn", "helpBtn", "helpOverlay", "helpCloseBtn",
+  "eventLogLevelFilter", "eventLogSourceFilter", "eventLogClearBtn", "eventLogSummary",
+  "eventLogList",
+];
+
 const el = {
-  statusText: document.getElementById("statusText"),
-  playlistBadge: document.getElementById("playlistBadge"),
-  badgeLabel: document.getElementById("badgeLabel"),
-  navSidebar: document.getElementById("navSidebar"),
-  sidebarCollapseBtn: document.getElementById("sidebarCollapseBtn"),
-  donateBtn: document.getElementById("donateBtn"),
-  navPlaylistList: document.getElementById("navPlaylistList"),
-  addPlaylistBtn: document.getElementById("addPlaylistBtn"),
+  ...Object.fromEntries(ELEMENT_IDS.map((id) => [id, document.getElementById(id)])),
   panels: {
     library: document.getElementById("panel-library"),
     usb: document.getElementById("panel-usb"),
@@ -112,140 +143,6 @@ const el = {
     "event-log": document.getElementById("panel-event-log"),
     playlist: document.getElementById("panel-playlist"),
   },
-  playlistPanelTitle: document.getElementById("playlistPanelTitle"),
-  playlistSearchInput: document.getElementById("playlistSearchInput"),
-  playlistTracksBody: document.getElementById("playlistTracksBody"),
-  playlistTableWrap: document.getElementById("playlistTableWrap"),
-  playlistEmptyState: document.getElementById("playlistEmptyState"),
-  playlistTotalDuration: document.getElementById("playlistTotalDuration"),
-  playlistExportStatus: document.getElementById("playlistExportStatus"),
-  analyzePlaylistMissingBtn: document.getElementById(
-    "analyzePlaylistMissingBtn",
-  ),
-  exportPlaylistBtn: document.getElementById("exportPlaylistBtn"),
-  settingsBtn: document.getElementById("settingsBtn"),
-  settingsDrawer: document.getElementById("settingsDrawer"),
-  settingsBackdrop: document.getElementById("settingsBackdrop"),
-  settingsCloseBtn: document.getElementById("settingsCloseBtn"),
-  settingsVersionText: document.getElementById("settingsVersionText"),
-  settingsUpdateNote: document.getElementById("settingsUpdateNote"),
-  criticalUpdateBanner: document.getElementById("criticalUpdateBanner"),
-  criticalUpdateText: document.getElementById("criticalUpdateText"),
-  criticalUpdateDismissBtn: document.getElementById("criticalUpdateDismissBtn"),
-  openEventLogBtn: document.getElementById("openEventLogBtn"),
-  accentHueSlider: document.getElementById("accentHueSlider"),
-  accentSwatch: document.getElementById("accentSwatch"),
-  accentResetBtn: document.getElementById("accentResetBtn"),
-  sourceFilterIndicator: document.getElementById("sourceFilterIndicator"),
-  selectionActions: document.getElementById("selectionActions"),
-  usbConnectionBar: document.getElementById("usbConnectionBar"),
-  usbSelectedControls: document.getElementById("usbSelectedControls"),
-  usbInitRow: document.getElementById("usbInitRow"),
-  usbInitHint: document.getElementById("usbInitHint"),
-  usbHealthDot: document.getElementById("usbHealthDot"),
-  initializeUsbBtn: document.getElementById("initializeUsbBtn"),
-  sourceChipsContainer: document.getElementById("sourceChipsContainer"),
-  sourceBar: document.getElementById("sourceBar"),
-  sourceFilterHeader: document.getElementById("sourceFilterHeader"),
-  addSourceBtn: document.getElementById("addSourceBtn"),
-  importMasterDbBtn: document.getElementById("importMasterDbBtn"),
-  librarySearch: document.getElementById("librarySearch"),
-  libraryTableBody: document.getElementById("libraryTableBody"),
-  libraryTableWrap: document.getElementById("libraryTableWrap"),
-  libraryEmptyState: document.getElementById("libraryEmptyState"),
-  libraryContent: document.getElementById("libraryContent"),
-  selectAllTracks: document.getElementById("selectAllTracks"),
-  selectionCount: document.getElementById("selectionCount"),
-  usbPlaylists: document.getElementById("usbPlaylists"),
-
-  usbTrackSearch: document.getElementById("usbTrackSearch"),
-  usbPlaylistTracks: document.getElementById("usbPlaylistTracks"),
-  usbPlaylistTotalDuration: document.getElementById("usbPlaylistTotalDuration"),
-  historyList: document.getElementById("historyList"),
-
-  historyTrackSearch: document.getElementById("historyTrackSearch"),
-  historyTracks: document.getElementById("historyTracks"),
-  historyTotalDuration: document.getElementById("historyTotalDuration"),
-
-  usbPlayerMenuAvailable: document.getElementById("usbPlayerMenuAvailable"),
-  usbPlayerMenuCurrent: document.getElementById("usbPlayerMenuCurrent"),
-  usbPlayerMenuAddBtn: document.getElementById("usbPlayerMenuAddBtn"),
-  usbPlayerMenuRemoveBtn: document.getElementById("usbPlayerMenuRemoveBtn"),
-  usbPlayerMenuUpBtn: document.getElementById("usbPlayerMenuUpBtn"),
-  usbPlayerMenuDownBtn: document.getElementById("usbPlayerMenuDownBtn"),
-  usbPlayerMenuDivergence: document.getElementById("usbPlayerMenuDivergence"),
-  usbPlayerMenuDivergenceMessage: document.getElementById("usbPlayerMenuDivergenceMessage"),
-  usbPlayerMenuSyncBtn: document.getElementById("usbPlayerMenuSyncBtn"),
-  usbPlayerMenuRestoreBtn: document.getElementById("usbPlayerMenuRestoreBtn"),
-  libraryTotalDuration: document.getElementById("libraryTotalDuration"),
-  scanLibraryBtn: document.getElementById("scanLibraryBtn"),
-  addSelectedBtn: document.getElementById("addSelectedBtn"),
-  refreshUsbBtn: document.getElementById("refreshUsbBtn"),
-  refreshHistoryBtn: document.getElementById("refreshHistoryBtn"),
-  exportHistoryTracklistBtn: document.getElementById("exportHistoryTracklistBtn"),
-  runUsbParityBtn: document.getElementById("runUsbParityBtn"),
-  exportSyncModeGroup: document.getElementById("exportSyncModeGroup"),
-  exportSyncModeMirror: document.getElementById("exportSyncModeMirror"),
-  exportSyncModeAdditive: document.getElementById("exportSyncModeAdditive"),
-  exportBackupCheckbox: document.getElementById("exportBackupCheckbox"),
-  analysisBpmRangeSelect: document.getElementById("analysisBpmRangeSelect"),
-  analysisEngineSelect: document.getElementById("analysisEngineSelect"),
-  analysisEngineStatus: document.getElementById("analysisEngineStatus"),
-  essentiaInstallRow: document.getElementById("essentiaInstallRow"),
-  essentiaNodeStatus: document.getElementById("essentiaNodeStatus"),
-  essentiaDownloadBtn: document.getElementById("essentiaDownloadBtn"),
-  essentiaCancelBtn: document.getElementById("essentiaCancelBtn"),
-  essentiaRemoveBtn: document.getElementById("essentiaRemoveBtn"),
-  selectUsbFolderBtn: document.getElementById("selectUsbFolderBtn"),
-  usbRecentRow: document.getElementById("usbRecentRow"),
-  usbRecentList: document.getElementById("usbRecentList"),
-  usbRootPathText: document.getElementById("usbRootPathText"),
-  externalMasterDbToggle: document.getElementById("externalMasterDbToggle"),
-  externalMasterDbCheckbox: document.getElementById("externalMasterDbCheckbox"),
-  externalMasterDbPath: document.getElementById("externalMasterDbPath"),
-  usbCountsText: document.getElementById("usbCountsText"),
-  historyCountsText: document.getElementById("historyCountsText"),
-  progressFooter: document.getElementById("progressFooter"),
-  progressText: document.getElementById("progressText"),
-  progressFill: document.getElementById("progressFill"),
-  progressDismiss: document.getElementById("progressDismiss"),
-  progressPauseBtn: document.getElementById("progressPauseBtn"),
-  progressCancelAnalysisBtn: document.getElementById("progressCancelAnalysisBtn"),
-  usbDiagnosticsCard: document.getElementById("usbDiagnosticsCard"),
-  diagOverallStatus: document.getElementById("diagOverallStatus"),
-  diagDuration: document.getElementById("diagDuration"),
-  diagSections: document.getElementById("diagSections"),
-  diagReportView: document.getElementById("diagReportView"),
-  diagRepairPanel: document.getElementById("diagRepairPanel"),
-  diagRepairSummary: document.getElementById("diagRepairSummary"),
-  diagRepairFixes: document.getElementById("diagRepairFixes"),
-  diagBackToReportBtn: document.getElementById("diagBackToReportBtn"),
-  diagPlaylistDetails: document.getElementById("diagPlaylistDetails"),
-  diagPlaylistTableBody: document.getElementById("diagPlaylistTableBody"),
-  reDiagnoseBtn: document.getElementById("reDiagnoseBtn"),
-  previewRepairsBtn: document.getElementById("previewRepairsBtn"),
-  applyRepairsBtn: document.getElementById("applyRepairsBtn"),
-  confirmOverlay: document.getElementById("confirmOverlay"),
-  confirmTitle: document.getElementById("confirmTitle"),
-  confirmMessage: document.getElementById("confirmMessage"),
-  confirmOkBtn: document.getElementById("confirmOkBtn"),
-  confirmCancelBtn: document.getElementById("confirmCancelBtn"),
-  tracklistExportOverlay: document.getElementById("tracklistExportOverlay"),
-  tracklistExportTitle: document.getElementById("tracklistExportTitle"),
-  tracklistExportStartTrack: document.getElementById("tracklistExportStartTrack"),
-  tracklistExportTimesToggle: document.getElementById("tracklistExportTimesToggle"),
-  tracklistExportPlacementRow: document.getElementById("tracklistExportPlacementRow"),
-  tracklistExportPlacement: document.getElementById("tracklistExportPlacement"),
-  tracklistExportOkBtn: document.getElementById("tracklistExportOkBtn"),
-  tracklistExportCancelBtn: document.getElementById("tracklistExportCancelBtn"),
-  helpBtn: document.getElementById("helpBtn"),
-  helpOverlay: document.getElementById("helpOverlay"),
-  helpCloseBtn: document.getElementById("helpCloseBtn"),
-  eventLogLevelFilter: document.getElementById("eventLogLevelFilter"),
-  eventLogSourceFilter: document.getElementById("eventLogSourceFilter"),
-  eventLogClearBtn: document.getElementById("eventLogClearBtn"),
-  eventLogSummary: document.getElementById("eventLogSummary"),
-  eventLogList: document.getElementById("eventLogList"),
 };
 
 const confirmDialog = uiCtrl.createConfirmDialogController(el);
@@ -333,9 +230,7 @@ function startProgressHeartbeat() {
 function stopProgressHeartbeat() {
   jobMgr.stopProgressHeartbeat(state);
 }
-function withProgress(label, fn) {
-  return jobMgr.withProgress(state, el, label, fn);
-}
+const withProgress = (label, fn) => jobMgr.withProgress(state, el, label, fn);
 
 const messageBus = createMessageBus({
   setStatusText: (text, warningCount) => uiCtrl.setStatusText(el, text, warningCount),
@@ -351,9 +246,7 @@ const messageBus = createMessageBus({
   pushEventLog: pushEventLogRaw,
 });
 
-function emitMessage(input = {}) {
-  return messageBus.emitMessage(input);
-}
+const emitMessage = (input = {}) => messageBus.emitMessage(input);
 
 function setStatus(text, meta = {}) {
   const statusText = String(text || "");
@@ -374,9 +267,7 @@ function setStatus(text, meta = {}) {
   });
 }
 
-function emitStatus(text, meta = {}) {
-  return setStatus(text, meta);
-}
+const emitStatus = (text, meta = {}) => setStatus(text, meta);
 
 function pushEventLog(entry = {}) {
   const text = String(entry.message ?? entry.text ?? "").trim();
@@ -398,55 +289,39 @@ function debugFrontendLog(message, meta = null) {
   bootstrap.debugFrontendLog(message, meta, { isTauriRuntime, invoke });
 }
 
-function toPlayableUrl(path) {
-  return playback.toPlayableUrl(path, {
+const toPlayableUrl = (path) => playback.toPlayableUrl(path, {
     isTauriRuntime,
     tauriConvertFileSrc,
     windowObj: window,
   });
-}
-function normalizePath(value) {
-  return library.normalizePath(value);
-}
+const normalizePath = (value) => library.normalizePath(value);
 
-function normalizeTrack(track, fallbackIdPrefix = "t") {
-  return library.normalizeTrack(track, fallbackIdPrefix, {
+const normalizeTrack = (track, fallbackIdPrefix = "t") => library.normalizeTrack(track, fallbackIdPrefix, {
     toPlayableUrl,
     appendUrlRevision: library.appendUrlRevision,
     normalizeDurationMs,
   });
-}
 
-function buildCoverSrcCandidates(track) {
-  return library.buildCoverSrcCandidates(track, { toPlayableUrl });
-}
-function attachCoverFallbackHandlers(root = document) {
-  return library.attachCoverFallbackHandlers(root, { document });
-}
+const buildCoverSrcCandidates = (track) => library.buildCoverSrcCandidates(track, { toPlayableUrl });
+const attachCoverFallbackHandlers = (root = document) => library.attachCoverFallbackHandlers(root, { document });
 
-function trackHasCoreAnalysis(track) {
-  return library.trackHasCoreAnalysis(track, {
+const trackHasCoreAnalysis = (track) => library.trackHasCoreAnalysis(track, {
     trackHasRenderableWaveform: library.trackHasRenderableWaveform,
     trackHasBpm: library.trackHasBpm,
   });
-}
 
-function isUsbOriginTrack(track) {
-  return library.isUsbOriginTrack(track, {
+const isUsbOriginTrack = (track) => library.isUsbOriginTrack(track, {
     usbRoot: state.usbRoot || "",
     normalizePath,
   });
-}
 
-function usbTrackNeedsHydration(track) {
-  return library.usbTrackNeedsHydration(track, {
+const usbTrackNeedsHydration = (track) => library.usbTrackNeedsHydration(track, {
     trackHasRenderableWaveform: library.trackHasRenderableWaveform,
     trackHasArtwork: library.trackHasArtwork,
     trackArtworkChecked: library.trackArtworkChecked,
     trackHasBpm: library.trackHasBpm,
     trackHasKey: library.trackHasKey,
   });
-}
 
 function getCurrentPlaylist() {
   return state.playlists.find((p) => p.id === state.currentPlaylistId) || null;
@@ -519,23 +394,15 @@ function renderUsbRecentRoots() {
   usb.renderUsbRecentRoots(el, state.usbRecentRoots, document, state);
 }
 
-function patchTrackAnalysisFields(track, payload) {
-  return library.patchTrackAnalysisFields(track, payload, { toPlayableUrl });
-}
+const patchTrackAnalysisFields = (track, payload) => library.patchTrackAnalysisFields(track, payload, { toPlayableUrl });
 
-function normalizeUsbPlaylist(p) {
-  return library.normalizeUsbPlaylist(p, { normalizeTrack });
-}
+const normalizeUsbPlaylist = (p) => library.normalizeUsbPlaylist(p, { normalizeTrack });
 
-function renderPlaylistSidebarItemContent(p) {
-  return playlist.renderPlaylistSidebarItemContent(p, { escapeHtml });
-}
+const renderPlaylistSidebarItemContent = (p) => playlist.renderPlaylistSidebarItemContent(p, { escapeHtml });
 function updatePlaylistPanelTitle(p) {
   playlist.updatePlaylistPanelTitle(el, p, { formatDurationMs });
 }
-function formatPlaylistExportStatus(p) {
-  return playlist.formatPlaylistExportStatus(p, { formatTimestampLocal });
-}
+const formatPlaylistExportStatus = (p) => playlist.formatPlaylistExportStatus(p, { formatTimestampLocal });
 function populatePlaylistPanel(p) {
   playlist.populatePlaylistPanel(el, state, p, {
     updatePlaylistPanelTitle,
@@ -550,10 +417,6 @@ function renderPlaylistList() {
     renderPlaylistSidebarItemContent,
   });
 }
-function renderPlaylistTabsAndPanels() {
-  renderPlaylistList();
-}
-
 function updatePlaylistExportButtons() {
   playlist.updatePlaylistExportButtons(state, el, {
     getCurrentPlaylist,
@@ -564,8 +427,7 @@ function updatePlaylistExportButtons() {
   });
 }
 
-function createTrackRow(track, options) {
-  return trackTable.createTrackRow(track, options, {
+const createTrackRow = (track, options) => trackTable.createTrackRow(track, options, {
     state,
     buildCoverSrcCandidates,
     isTrackCurrentlyPlaying,
@@ -573,7 +435,6 @@ function createTrackRow(track, options) {
     trackHasCoreAnalysis,
     getKeyHue,
   });
-}
 
 function renderTrackTable(tbody, tracks, options = {}) {
   trackTable.renderTrackTable(tbody, tracks, options, {
@@ -587,11 +448,9 @@ function renderTrackTable(tbody, tracks, options = {}) {
   });
 }
 
-function applySortToTracks(tracks, tbodyId) {
-  return shell.applySortToTracks(tableSortState, tracks, tbodyId, {
+const applySortToTracks = (tracks, tbodyId) => shell.applySortToTracks(tableSortState, tracks, tbodyId, {
     sortTracks: trackTable.sortTracks,
   });
-}
 
 function handleSortHeaderClick(e) {
   shell.handleSortHeaderClick(tableSortState, e, {
@@ -622,40 +481,27 @@ function clearAllWaveformPlayheads() {
 function setWaveformPlayhead(element, fraction, playing) {
   playback.setWaveformPlayhead(element, fraction, playing);
 }
-function resolveLocalTrackId(track) {
-  return playback.resolveLocalTrackId(track, state, { normalizePath });
-}
-function resolveLocalTrack(track) {
-  return playback.resolveLocalTrack(track, state);
-}
-function shouldAllowResolvedFallback(track) {
-  return playback.shouldAllowResolvedFallback(track, state, { normalizePath });
-}
-function getTrackPlaybackPath(track) {
-  return playback.getTrackPlaybackPath(track, { resolveLocalTrack });
-}
-function isTrackCurrentlyPlaying(track) {
-  return playback.isTrackCurrentlyPlaying(track, state, {
+const resolveLocalTrackId = (track) => playback.resolveLocalTrackId(track, state, { normalizePath });
+const resolveLocalTrack = (track) => playback.resolveLocalTrack(track, state);
+const shouldAllowResolvedFallback = (track) => playback.shouldAllowResolvedFallback(track, state, { normalizePath });
+const getTrackPlaybackPath = (track) => playback.getTrackPlaybackPath(track, { resolveLocalTrack });
+const isTrackCurrentlyPlaying = (track) => playback.isTrackCurrentlyPlaying(track, state, {
     normalizePath,
     getTrackPlaybackPath,
   });
-}
 
-async function resolveLocalTrackIdAsync(track) {
-  return playback.resolveLocalTrackIdAsync(track, state, {
+const resolveLocalTrackIdAsync = async (track) => playback.resolveLocalTrackIdAsync(track, state, {
     command,
     normalizePath,
     promoteTrackIdentity,
     resolveLocalTrackId,
     shouldAllowResolvedFallback,
   });
-}
 function promoteTrackIdentity(oldId, newId) {
   library.promoteTrackIdentity(state, el, oldId, newId, { cssEscape });
 }
 
-async function stopPlaybackIfActive() {
-  return playback.stopPlaybackIfActive(state, {
+const stopPlaybackIfActive = async () => playback.stopPlaybackIfActive(state, {
     command,
     clearAllWaveformPlayheads,
     updateTransportButtonsInDom,
@@ -663,18 +509,14 @@ async function stopPlaybackIfActive() {
     warn: (...a) => console.warn(...a),
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
   });
-}
-async function stopPlaybackFromUi() {
-  return playback.stopPlaybackFromUi(state, {
+const stopPlaybackFromUi = async () => playback.stopPlaybackFromUi(state, {
     command,
     clearAllWaveformPlayheads,
     updateTransportButtonsInDom,
     setStatus,
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
   });
-}
-async function playTrackFromOrigin(track, origin, options = {}) {
-  return playback.playTrackFromOriginController(state, track, origin, options, {
+const playTrackFromOrigin = async (track, origin, options = {}) => playback.playTrackFromOriginController(state, track, origin, options, {
     playTrackFromOriginCore: playback.playTrackFromOrigin,
     command,
     trackPathMatchesAnyRoot: library.trackPathMatchesAnyRoot,
@@ -687,7 +529,6 @@ async function playTrackFromOrigin(track, origin, options = {}) {
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
     getPlaybackSourceLabel: globalThis?.playbackSourceLabel?.getPlaybackSourceLabel,
   });
-}
 
 function handlePlaybackEvent(payload) {
   playback.handlePlaybackEvent(state, payload, {
@@ -711,83 +552,44 @@ analysisPatchQueue.init(
   (cb) => setTimeout(cb, 0),
 );
 
-function patchLibraryRowByTrackId(trackId) {
-  return library.patchLibraryRowByTrackId(state, el, trackId, {
+const patchRowCellDeps = {
+  escapeHtml,
+  getKeyHue,
+  buildCoverSrcCandidates,
+  attachCoverFallbackHandlers,
+  drawWaveformCanvas,
+  trackHasCoreAnalysis,
+  invalidateWaveformCache,
+  setWaveformColorData,
+};
+
+const patchLibraryRowByTrackId = (trackId) => library.patchLibraryRowByTrackId(state, el, trackId, {
     cssEscape,
     patchLibraryRowCells: (row, track) =>
-      library.patchLibraryRowCells(row, track, {
-        escapeHtml,
-        getKeyHue,
-        buildCoverSrcCandidates,
-        attachCoverFallbackHandlers,
-        drawWaveformCanvas,
-        trackHasCoreAnalysis,
-        invalidateWaveformCache,
-        setWaveformColorData,
-      }),
+      library.patchLibraryRowCells(row, track, patchRowCellDeps),
   });
-}
-function patchPlaylistRowByTrackId(trackId) {
-  return library.patchPlaylistRowByTrackId(state, el, trackId, {
+const patchPlaylistRowByTrackId = (trackId) => library.patchPlaylistRowByTrackId(state, el, trackId, {
     cssEscape,
     getCurrentPlaylist,
     patchLibraryRowCells: (row, track) =>
-      library.patchLibraryRowCells(row, track, {
-        escapeHtml,
-        getKeyHue,
-        buildCoverSrcCandidates,
-        attachCoverFallbackHandlers,
-        drawWaveformCanvas,
-        trackHasCoreAnalysis,
-        invalidateWaveformCache,
-        setWaveformColorData,
-      }),
+      library.patchLibraryRowCells(row, track, patchRowCellDeps),
   });
-}
-function patchUsbTrackRow(track) {
+function patchTrackRowInContainer(container, track) {
   const trackId = String(track?.id || "").trim();
   if (!trackId) return false;
   const selector = `.track-grid-row[data-track-origin="usb"][data-track-id="${cssEscape(trackId)}"]`;
-  const rows = el.usbPlaylistTracks?.querySelectorAll?.(selector) || [];
+  const rows = container?.querySelectorAll?.(selector) || [];
   if (!rows.length) return false;
   let patched = false;
   rows.forEach((row) => {
-    if (library.patchLibraryRowCells(row, track, {
-      escapeHtml,
-      getKeyHue,
-      buildCoverSrcCandidates,
-      attachCoverFallbackHandlers,
-      drawWaveformCanvas,
-      trackHasCoreAnalysis,
-      invalidateWaveformCache,
-    })) {
+    if (library.patchLibraryRowCells(row, track, patchRowCellDeps)) {
       patched = true;
     }
   });
   return patched;
 }
-function patchHistoryTrackRow(track) {
-  const trackId = String(track?.id || "").trim();
-  if (!trackId) return false;
-  const selector = `.track-grid-row[data-track-origin="usb"][data-track-id="${cssEscape(trackId)}"]`;
-  const rows = el.historyTracks?.querySelectorAll?.(selector) || [];
-  if (!rows.length) return false;
-  let patched = false;
-  rows.forEach((row) => {
-    if (library.patchLibraryRowCells(row, track, {
-      escapeHtml,
-      getKeyHue,
-      buildCoverSrcCandidates,
-      attachCoverFallbackHandlers,
-      drawWaveformCanvas,
-      trackHasCoreAnalysis,
-      invalidateWaveformCache,
-    })) {
-      patched = true;
-    }
-  });
-  return patched;
-}
+const patchUsbTrackRow = (track) => patchTrackRowInContainer(el.usbPlaylistTracks, track);
+const patchHistoryTrackRow = (track) => patchTrackRowInContainer(el.historyTracks, track);
 function setTrackAnalyzingState(trackId, active) {
   library.setTrackAnalyzingState(state, trackId, active, {
     patchLibraryRowByTrackId,
@@ -802,9 +604,7 @@ function setTrackAnalyzingState(trackId, active) {
 
 // --- Library closures ---
 
-function getLibraryVisibleTracks() {
-  return library.getLibraryVisibleTracks(state);
-}
+const getLibraryVisibleTracks = () => library.getLibraryVisibleTracks(state);
 
 function renderLibraryRows() {
   library.renderLibraryRows(state, el, {
@@ -829,20 +629,16 @@ function renderSourceChips() {
     updateSourceFilterIndicator,
   });
 }
-async function refreshSourceRootAnalysisStatus() {
-  return library.refreshSourceRootAnalysisStatus(state, {
+const refreshSourceRootAnalysisStatus = async () => library.refreshSourceRootAnalysisStatus(state, {
     command,
     renderSourceChips,
   });
-}
-async function checkSourceRoots(options = {}) {
-  return library.refreshMissingSourceRoots(state, {
+const checkSourceRoots = async (options = {}) => library.refreshMissingSourceRoots(state, {
     command,
     renderSourceChips,
     emitStatus,
     silent: options?.silent !== false,
   });
-}
 function applySearchLocalFilter() {
   library.applySearchLocalFilter(state, el, {
     renderLibraryRows,
@@ -889,14 +685,11 @@ function scheduleRealtimeTrackRender() {
     delayMs: 60,
   });
 }
-function mergeHydratedTrackIntoState(rawTrack) {
-  return library.mergeHydratedTrackIntoState(state, rawTrack, {
+const mergeHydratedTrackIntoState = (rawTrack) => library.mergeHydratedTrackIntoState(state, rawTrack, {
     normalizeTrack,
   });
-}
 
-async function applyRealtimeAnalyzedTrackUpdate(payload) {
-  return library.applyRealtimeAnalyzedTrackUpdate(state, payload, {
+const applyRealtimeAnalyzedTrackUpdate = async (payload) => library.applyRealtimeAnalyzedTrackUpdate(state, payload, {
     patchTrackAnalysisFields,
     debugFrontendLog,
     log: (...a) => console.log(...a),
@@ -905,9 +698,7 @@ async function applyRealtimeAnalyzedTrackUpdate(payload) {
     scheduleRealtimeTrackRender,
     hydrateTrackPreviewFromBackend,
   });
-}
-async function hydrateTrackPreviewFromBackend(trackId, options = {}) {
-  return library.hydrateTrackPreviewFromBackend(state, trackId, options, {
+const hydrateTrackPreviewFromBackend = async (trackId, options = {}) => library.hydrateTrackPreviewFromBackend(state, trackId, options, {
     command,
     mergeHydratedTrackIntoState,
     patchLibraryRowByTrackId,
@@ -917,9 +708,7 @@ async function hydrateTrackPreviewFromBackend(trackId, options = {}) {
     scheduleRealtimeTrackRender,
     renderSourceChips,
   });
-}
-async function hydrateLoadedTracksPreviewsInBackground() {
-  return library.hydrateLoadedTracksPreviewsInBackground(state, {
+const hydrateLoadedTracksPreviewsInBackground = async () => library.hydrateLoadedTracksPreviewsInBackground(state, {
     getLibraryVisibleTracks,
     command,
     mergeHydratedTrackIntoState,
@@ -930,7 +719,6 @@ async function hydrateLoadedTracksPreviewsInBackground() {
     renderSourceChips,
     batchSize: 48,
   });
-}
 async function loadTracks(
   query = "",
   limit = LIBRARY_LOAD_LIMIT_DEFAULT,
@@ -957,9 +745,7 @@ async function resetAndLoadLibraryTracks(
     ensureLibraryContainerFilled,
   }, options);
 }
-async function loadMoreLibraryTracks(limit = LIBRARY_LOAD_LIMIT_DEFAULT) {
-  return library.loadMoreLibraryTracks(state, limit, { loadTracks });
-}
+const loadMoreLibraryTracks = async (limit = LIBRARY_LOAD_LIMIT_DEFAULT) => library.loadMoreLibraryTracks(state, limit, { loadTracks });
 async function ensureLibraryContainerFilled(
   limit = LIBRARY_LOAD_LIMIT_DEFAULT,
 ) {
@@ -986,8 +772,7 @@ function handleWindowLibraryScroll() {
     emitStatus,
   });
 }
-async function scanLibrary() {
-  return library.scanLibrary(state, {
+const scanLibrary = async () => library.scanLibrary(state, {
     setStatus,
     emitStatus,
     command,
@@ -995,7 +780,7 @@ async function scanLibrary() {
     resetAndLoadLibraryTracks,
     LIBRARY_LOAD_LIMIT_POST_SCAN,
     trackPathIsInsideSelectedRoots: (fp) =>
-      library.trackPathIsInsideSelectedRoots(
+      library.trackPathMatchesAnyRoot(
         fp,
         library.enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots)
       ),
@@ -1005,9 +790,7 @@ async function scanLibrary() {
     countWarningsForStatus: eventLog.countWarningsForStatus,
     renderSourceChips,
   });
-}
-async function relocateSourceRoot(oldRoot) {
-  return library.relocateSourceRoot(state, oldRoot, {
+const relocateSourceRoot = async (oldRoot) => library.relocateSourceRoot(state, oldRoot, {
     pickSourceFolders,
     command,
     persistSourceRoots,
@@ -1020,9 +803,7 @@ async function relocateSourceRoot(oldRoot) {
     LIBRARY_LOAD_LIMIT_DEFAULT,
     emitStatus,
   });
-}
-async function scanMasterDb() {
-  return library.scanMasterDb(state, {
+const scanMasterDb = async () => library.scanMasterDb(state, {
     setStatus,
     emitStatus,
     command,
@@ -1034,9 +815,7 @@ async function scanMasterDb() {
     renderSourceChips,
     logWarnings,
   });
-}
-async function analyzeTrackIds(trackIds, modeLabel = "Analyze", options = {}) {
-  return library.analyzeTrackIds(state, trackIds, modeLabel, options, {
+const analyzeTrackIds = async (trackIds, modeLabel = "Analyze", options = {}) => library.analyzeTrackIds(state, trackIds, modeLabel, options, {
     parseAnalysisBpmRange: library.parseAnalysisBpmRange,
     command,
     setStatus,
@@ -1054,9 +833,7 @@ async function analyzeTrackIds(trackIds, modeLabel = "Analyze", options = {}) {
     countWarningsForStatus: eventLog.countWarningsForStatus,
     logWarnings,
   });
-}
-async function analyzeSingleTrack(track, modeLabel = null) {
-  return library.analyzeSingleTrack(state, track, modeLabel, {
+const analyzeSingleTrack = async (track, modeLabel = null) => library.analyzeSingleTrack(state, track, modeLabel, {
     resolveLocalTrackId,
     resolveLocalTrackIdAsync,
     setStatus,
@@ -1064,7 +841,6 @@ async function analyzeSingleTrack(track, modeLabel = null) {
     trackHasCoreAnalysis,
     analyzeTrackIds,
   });
-}
 
 // --- Settings closures ---
 
@@ -1100,9 +876,7 @@ function persistMasterDbEnabled(enabled) {
 function persistSourcesEverConfigured(value) {
   settings.persistSourcesEverConfigured(command, value);
 }
-async function pruneUsbDevice(id) {
-  return usb.pruneUsbDevice(state, id, { command, reload: loadUsbDevices });
-}
+const pruneUsbDevice = async (id) => usb.pruneUsbDevice(state, id, { command, reload: loadUsbDevices });
 
 // --- Playlist closures ---
 
@@ -1127,13 +901,11 @@ function startPlaylistRename(playlistId) {
     formatPlaylistExportStatus,
   });
 }
-async function loadPlaylists() {
-  return playlist.loadPlaylists(state, {
+const loadPlaylists = async () => playlist.loadPlaylists(state, {
     command,
-    renderPlaylistTabsAndPanels,
+    renderPlaylistTabsAndPanels: renderPlaylistList,
     updatePlaylistExportButtons,
   });
-}
 async function refreshCurrentPlaylistTracks() {
   playlist.refreshCurrentPlaylistTracks(state, el, {
     getCurrentPlaylist,
@@ -1149,8 +921,7 @@ async function refreshCurrentPlaylistTracks() {
     renderPlaylistList,
   });
 }
-async function createPlaylist(name) {
-  return playlist.createPlaylist(name, {
+const createPlaylist = async (name) => playlist.createPlaylist(name, {
     setStatus,
     emitStatus,
     withProgress,
@@ -1160,9 +931,7 @@ async function createPlaylist(name) {
     updateModeText,
     switchTab,
   });
-}
-async function deletePlaylist(playlistId) {
-  return playlist.deletePlaylist(playlistId, {
+const deletePlaylist = async (playlistId) => playlist.deletePlaylist(playlistId, {
     state,
     openConfirmDialog: (opts) => confirmDialog.open(opts),
     command,
@@ -1172,9 +941,7 @@ async function deletePlaylist(playlistId) {
     setStatus,
     emitStatus,
   });
-}
-async function addTracksToCurrentPlaylist(tracks) {
-  return playlist.addTracksToCurrentPlaylist(tracks, {
+const addTracksToCurrentPlaylist = async (tracks) => playlist.addTracksToCurrentPlaylist(tracks, {
     requireCurrentPlaylist,
     resolveLocalTrackId,
     resolveLocalTrackIdAsync,
@@ -1186,7 +953,6 @@ async function addTracksToCurrentPlaylist(tracks) {
     command,
     refreshCurrentPlaylistTracks,
   });
-}
 
 // --- USB closures ---
 
@@ -1239,13 +1005,11 @@ function showDiagReportView() {
 function showDiagRepairView() {
   usb.showDiagRepairView(el);
 }
-function hydrateUsbTrackMetadata(track) {
-  return usb.hydrateUsbTrackMetadata(state, track, {
+const hydrateUsbTrackMetadata = (track) => usb.hydrateUsbTrackMetadata(state, track, {
     usbTrackNeedsHydration,
     command,
     normalizeTrack,
   });
-}
 
 function loadUsbRootFromStorage() {
   usb.loadUsbRootFromStorage(state, el, {
@@ -1275,34 +1039,24 @@ async function validateAndSetUsbRoot(path, silent = false) {
   await syncAssetScopePaths();
   return result;
 }
-async function initializeUsb() {
-  return usb.initializeUsb(state, el, {
+const initializeUsb = async () => usb.initializeUsb(state, el, {
     command,
     setStatus,
     emitStatus,
     validateAndSetUsbRoot,
     logError: (...a) => console.error(...a),
   });
-}
-async function pickUsbFolder() {
-  return usb.pickUsbFolder({ invoke, validateAndSetUsbRoot, state, emitStatus });
-}
-async function syncAssetScopePaths() {
-  return usb.syncAssetScopePaths(state, {
+const pickUsbFolder = async () => usb.pickUsbFolder({ invoke, validateAndSetUsbRoot, state, emitStatus });
+const syncAssetScopePaths = async () => usb.syncAssetScopePaths(state, {
     invoke,
     warn: (...a) => console.warn(...a),
   });
-}
-async function detectExternalMasterDb() {
-  return usb.detectExternalMasterDb(state, el, {
+const detectExternalMasterDb = async () => usb.detectExternalMasterDb(state, el, {
     command,
     warn: (...a) => console.warn(...a),
     renderSourceChips,
   });
-}
-async function pickSourceFolders() {
-  return usb.pickSourceFolders({ invoke });
-}
+const pickSourceFolders = async () => usb.pickSourceFolders({ invoke });
 
 function renderDiagnosticsReport(data) {
   usb.renderDiagnosticsReport(el, data, {
@@ -1339,8 +1093,7 @@ function renderRepairPreview(data) {
   });
 }
 
-async function refreshUsb() {
-  return usb.refreshUsb(state, el, {
+const refreshUsb = async () => usb.refreshUsb(state, el, {
     setStatus,
     emitStatus,
     command,
@@ -1355,9 +1108,7 @@ async function refreshUsb() {
     countWarningsForStatus: eventLog.countWarningsForStatus,
     logWarnings,
   });
-}
-async function removeUsbPlaylist(p) {
-  return usb.removeUsbPlaylist(state, p, {
+const removeUsbPlaylist = async (p) => usb.removeUsbPlaylist(state, p, {
     setStatus,
     emitStatus,
     openConfirmDialog: (opts) => confirmDialog.open(opts),
@@ -1365,67 +1116,41 @@ async function removeUsbPlaylist(p) {
     refreshUsb,
     countWarningsForStatus: eventLog.countWarningsForStatus,
   });
-}
-async function reorderUsbPlaylists() {
-  return usb.reorderUsbPlaylists(state, el, {
+const reorderUsbPlaylists = async () => usb.reorderUsbPlaylists(state, el, {
     setStatus,
     emitStatus,
     command,
     refreshUsb,
   });
-}
-async function runUsbDiagnostics() {
-  return usb.runUsbDiagnostics(state, {
-    setStatus,
-    emitStatus,
-    command,
-    setProgress,
-    startProgressHeartbeat,
-    stopProgressHeartbeat,
+const usbJobBaseDeps = {
+  setStatus,
+  emitStatus,
+  command,
+  setProgress,
+  startProgressHeartbeat,
+  stopProgressHeartbeat,
+  logWarnings,
+};
+
+const runUsbDiagnostics = async () => usb.runUsbDiagnostics(state, {
+    ...usbJobBaseDeps,
     normalizePlaylistNameForCompare: usb.normalizePlaylistNameForCompare,
     updatePlaylistExportButtons,
     renderDiagnosticsReport,
-    logWarnings,
   });
-}
-async function runUsbParityReport() {
-  return usb.runUsbParityReport(state, {
-    setStatus,
-    emitStatus,
-    command,
-    setProgress,
-    startProgressHeartbeat,
-    stopProgressHeartbeat,
+const runUsbParityReport = async () => usb.runUsbParityReport(state, {
+    ...usbJobBaseDeps,
     renderParityReport,
-    logWarnings,
   });
-}
-async function previewUsbRepairs() {
-  return usb.previewUsbRepairs(state, {
-    setStatus,
-    emitStatus,
-    command,
-    setProgress,
-    startProgressHeartbeat,
-    stopProgressHeartbeat,
+const previewUsbRepairs = async () => usb.previewUsbRepairs(state, {
+    ...usbJobBaseDeps,
     renderRepairPreview,
-    logWarnings,
   });
-}
-async function applyUsbRepairs() {
-  return usb.applyUsbRepairs(state, {
-    setStatus,
-    emitStatus,
-    command,
-    setProgress,
-    startProgressHeartbeat,
-    stopProgressHeartbeat,
-    logWarnings,
+const applyUsbRepairs = async () => usb.applyUsbRepairs(state, {
+    ...usbJobBaseDeps,
     runUsbDiagnostics,
   });
-}
-async function refreshHistory() {
-  return usb.refreshHistory(state, el, {
+const refreshHistory = async () => usb.refreshHistory(state, el, {
     setStatus,
     emitStatus,
     command,
@@ -1435,58 +1160,26 @@ async function refreshHistory() {
     renderHistoryList,
     renderHistoryTracks,
   });
-}
-async function exportHistoryTracklist() {
-  return usb.exportHistoryTracklist(state, el, {
+const exportHistoryTracklist = async () => usb.exportHistoryTracklist(state, el, {
     setStatus,
     emitStatus,
     invoke,
     tracklistExportDialog,
     buildTracklistText,
   });
-}
-async function loadUsbPlayerMenuConfig() {
-  return usb.loadUsbPlayerMenuConfig(state, el, {
-    setStatus,
-    emitStatus,
-    command,
-    documentObj: document,
-  });
-}
-async function addUsbPlayerMenuItems() {
-  return usb.addUsbPlayerMenuItems(state, el, {
-    setStatus,
-    emitStatus,
-    command,
-    documentObj: document,
-  });
-}
-async function removeUsbPlayerMenuItems() {
-  return usb.removeUsbPlayerMenuItems(state, el, {
-    setStatus,
-    emitStatus,
-    command,
-    documentObj: document,
-  });
-}
-async function moveUsbPlayerMenuItems(direction) {
-  return usb.moveUsbPlayerMenuItems(state, el, {
-    setStatus,
-    emitStatus,
-    command,
-    documentObj: document,
-  }, direction);
-}
-async function syncUsbPlayerMenusEdbToPdb() {
-  return usb.syncUsbPlayerMenusEdbToPdb(state, el, {
-    setStatus,
-    emitStatus,
-    command,
-    documentObj: document,
-  });
-}
-async function exportPlaylistToUsb(playlistId) {
-  return usb.exportPlaylistToUsb(state, el, playlistId, {
+const usbPlayerMenuDeps = {
+  setStatus,
+  emitStatus,
+  command,
+  documentObj: document,
+};
+
+const loadUsbPlayerMenuConfig = async () => usb.loadUsbPlayerMenuConfig(state, el, usbPlayerMenuDeps);
+const addUsbPlayerMenuItems = async () => usb.addUsbPlayerMenuItems(state, el, usbPlayerMenuDeps);
+const removeUsbPlayerMenuItems = async () => usb.removeUsbPlayerMenuItems(state, el, usbPlayerMenuDeps);
+const moveUsbPlayerMenuItems = async (direction) => usb.moveUsbPlayerMenuItems(state, el, usbPlayerMenuDeps, direction);
+const syncUsbPlayerMenusEdbToPdb = async () => usb.syncUsbPlayerMenusEdbToPdb(state, el, usbPlayerMenuDeps);
+const exportPlaylistToUsb = async (playlistId) => usb.exportPlaylistToUsb(state, el, playlistId, {
     setStatus,
     emitStatus,
     emitMessage,
@@ -1506,7 +1199,6 @@ async function exportPlaylistToUsb(playlistId) {
     renderUsbPlaylistTracks,
     refreshMissingSourceRoots: checkSourceRoots,
   });
-}
 
 // --- Bootstrap closures ---
 
@@ -1530,8 +1222,7 @@ function handleBackendLogEvent(payload) {
   bootstrap.handleBackendLogEvent(payload, { pushEventLog });
 }
 
-async function registerBackendJobEvents() {
-  return bootstrap.registerBackendJobEvents(state, {
+const registerBackendJobEvents = async () => bootstrap.registerBackendJobEvents(state, {
     isTauriRuntime,
     unregisterBackendJobEvents,
     getTauriEventListen,
@@ -1539,12 +1230,9 @@ async function registerBackendJobEvents() {
     handlePlaybackEvent,
     handleBackendLogEvent,
   });
-}
-async function unregisterBackendJobEvents() {
-  return bootstrap.unregisterBackendJobEvents(state, {
+const unregisterBackendJobEvents = async () => bootstrap.unregisterBackendJobEvents(state, {
     warn: (...a) => console.warn(...a),
   });
-}
 
 async function switchView(viewId) {
   const switched = await bootstrap.switchView(state, el, viewId, {
@@ -1565,8 +1253,7 @@ async function switchView(viewId) {
   }
   return switched;
 }
-async function switchTab(tab) {
-  return bootstrap.switchTab(state, el, tab, {
+const switchTab = async (tab) => bootstrap.switchTab(state, el, tab, {
     staticTabs: STATIC_TABS,
     stopPlaybackIfActive,
     syncLibraryOnboardingMode,
@@ -1578,16 +1265,12 @@ async function switchTab(tab) {
     documentObj: document,
     renderWaveformsIn,
   });
-}
-function hydrateAppVersionLabel() {
-  return bootstrap.hydrateAppVersionLabel(el, {
+const hydrateAppVersionLabel = () => bootstrap.hydrateAppVersionLabel(el, {
     appVersionFallback: APP_VERSION_FALLBACK,
     tauriIsTauri,
     tauriGetVersion,
   });
-}
-function checkForUpdate() {
-  return bootstrap.checkForUpdate(state, el, {
+const checkForUpdate = () => bootstrap.checkForUpdate(state, el, {
     resolveVersion: async () => {
       if (!tauriIsTauri()) return null;
       try {
@@ -1609,7 +1292,6 @@ function checkForUpdate() {
         openUrl: (url) => openExternalUrl(window, url),
       }),
   });
-}
 function restoreStoredUiPrefs() {
   bootstrap.restoreStoredUiPrefs(state, el, {
     localStorageObj: localStorage,
@@ -1634,8 +1316,7 @@ function showHelpOnFirstVisit() {
     storageKeyHelpSeen: STORAGE_KEY_HELP_SEEN,
   });
 }
-function runDeferredInitialLoad() {
-  return bootstrap.runDeferredInitialLoad(state, {
+const runDeferredInitialLoad = () => bootstrap.runDeferredInitialLoad(state, {
     setTimeoutFn: (cb) => setTimeout(cb, 0),
     withProgress,
     loadPlaylists,
@@ -1649,7 +1330,6 @@ function runDeferredInitialLoad() {
     setStatus,
     logError: (e) => console.error(e),
   });
-}
 
 // --- Sidebar expand button ---
 
@@ -1780,8 +1460,7 @@ function bindEvents() {
   return uiCtrl.bindEvents(bindCtx);
 }
 
-async function init() {
-  return bootstrap.initApp(state, {
+const init = async () => bootstrap.initApp(state, {
     el,
     constants: { STORAGE_KEY_HELP_SEEN },
     hydrateLocalStorageFromFrontendSettingsDb: () =>
@@ -1827,7 +1506,6 @@ async function init() {
     logError: (...a) => console.error(...a),
     warn: (...a) => console.warn(...a),
   });
-}
 
 window.addEventListener("resize", () => {
   renderWaveformsIn(document);

@@ -4,7 +4,6 @@ import {
   normalizePath,
   trackPathMatchesAnyRoot,
   enabledSourceRoots,
-  filterTracksBySourceRoots,
   scanLibraryButtonLabel
 } from "../components/library/actions.mjs";
 
@@ -121,39 +120,6 @@ test("enabledSourceRoots excludes roots explicitly set to false", () => {
 test("enabledSourceRoots excludes missing roots without changing enabled map", () => {
   const roots = ["/a", "/b", "/c"];
   assert.deepEqual(enabledSourceRoots(roots, { "/b": true }, new Set(["/b"])), ["/a", "/c"]);
-});
-
-// ---------------------------------------------------------------------------
-// filterTracksBySourceRoots
-// ---------------------------------------------------------------------------
-
-test("filterTracksBySourceRoots keeps tracks under enabled roots", () => {
-  const tracks = [
-    { id: "1", filePath: "/music/a/one.mp3" },
-    { id: "2", filePath: "/music/b/two.mp3" },
-    { id: "3", filePath: "/music/c/three.mp3" }
-  ];
-  const roots = ["/music/a", "/music/b", "/music/c"];
-  const filtered = filterTracksBySourceRoots(tracks, roots, { "/music/b": false });
-  assert.deepEqual(filtered.map((t) => t.id), ["1", "3"]);
-});
-
-test("filterTracksBySourceRoots returns empty when no roots are enabled", () => {
-  const tracks = [{ id: "1", filePath: "/music/a/one.mp3" }];
-  const roots = ["/music/a"];
-  const filtered = filterTracksBySourceRoots(tracks, roots, { "/music/a": false });
-  assert.deepEqual(filtered, []);
-});
-
-test("filterTracksBySourceRoots preserves incoming sorted order", () => {
-  const sortedTracks = [
-    { id: "3", filePath: "/music/a/c.mp3", artist: "A" },
-    { id: "1", filePath: "/music/b/a.mp3", artist: "B" },
-    { id: "2", filePath: "/music/a/b.mp3", artist: "C" }
-  ];
-  const roots = ["/music/a", "/music/b"];
-  const filtered = filterTracksBySourceRoots(sortedTracks, roots, { "/music/b": false });
-  assert.deepEqual(filtered.map((t) => t.id), ["3", "2"]);
 });
 
 // ---------------------------------------------------------------------------

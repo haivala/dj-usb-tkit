@@ -1,3 +1,5 @@
+import { formatDurationMs } from "./track_utils.mjs";
+
 export function createTrackRow(track, options, deps) {
   const {
     state,
@@ -157,18 +159,6 @@ function formatTrackDuration(track) {
   const rawMs = Number(track?.durationMs);
   if (!Number.isFinite(rawMs) || rawMs <= 0) return "-";
   return formatDurationMs(rawMs);
-}
-
-function formatDurationMs(value) {
-  const ms = Math.max(0, Math.round(Number(value) || 0));
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  }
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function formatTrackFormatDetail(sampleRate, bitDepth, bitrate) {
