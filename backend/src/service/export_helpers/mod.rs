@@ -455,7 +455,7 @@ pub fn write_edb_playlist(
             let (content_id, maybe_path) = row?;
             previously_linked_ids.insert(content_id);
             if let Some(path) = maybe_path {
-                let key = canonicalize_playlist_name(&path.replace('\\', "/"));
+                let key = canonicalize_track_path_identity(&path);
                 if !key.is_empty() {
                     prev_content_id_by_path.entry(key).or_insert(content_id);
                 }
@@ -4737,6 +4737,92 @@ mod tests {
                 .iter()
                 .map(|track| track.track_file_path.as_str())
                 .collect::<Vec<_>>()
+        );
+
+        // Regression: rewriting file_path/file_name to the corrected alias
+        // often can't be patched into the old row's slot in place (the
+        // encoded string length changes), forcing the additive writer to
+        // relocate the row and tombstone the old slot. That vacated slot
+        // must not be left holding a duplicate of the relocated row's id —
+        // see `mark_track_slot_inactive` in pdb_writer.rs.
+        let tombstoned = crate::service::repair::detect_pdb_tombstoned_playlist_tree_ids(
+            &usb_root
+                .join(USB_VENDOR_ROOT_DIR)
+                .join(USB_VENDOR_DB_DIR)
+                .join("export.pdb"),
+        );
+        assert!(
+            tombstoned.is_empty(),
+            "alias-path rewrite must not leave duplicate-id tombstoned rows behind: {tombstoned:?}"
+        );
+    }
+
+    #[test]
+    fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path();
+        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
+            .unwrap();
+        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
+            .expect("initialize usb skeleton");
+
+        let playlist = ExportPlaylistData {
+            id: "pl-alias-edb".to_string(),
+            name: "Alias EDB".to_string(),
+            tracks: Vec::new(),
+        };
+        let old_path =
+            "/Contents/Example Artist/Example Album/Example Artist - Example Album - .mp3";
+        let corrected_path =
+            "/Contents/Example Artist/Example Album/Example Artist - Example Album -.mp3";
+
+        let mut track = mapping_test_track();
+        track.id = "alias-track".to_string();
+        track.title = "Example Title".to_string();
+        track.artist = "Example Artist".to_string();
+        track.album = Some("Example Album".to_string());
+        track.exported_path = old_path.to_string();
+
+        let mut manifest = ExportManifest {
+            version: 1,
+            generated_at: "2024-01-01".to_string(),
+            playlist_id: playlist.id.clone(),
+            playlist_name: playlist.name.clone(),
+            usb_root: usb_root.to_string_lossy().to_string(),
+            options: crate::models::ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: false,
+                ..Default::default()
+            },
+            exported_tracks: 1,
+            skipped_tracks: 0,
+            warnings: Vec::new(),
+            tracks: vec![track],
+        };
+
+        write_edb_playlist(usb_root, &playlist, &manifest, true)
+            .expect("write initial eDB content path");
+        manifest.tracks[0].exported_path = corrected_path.to_string();
+        write_edb_playlist(usb_root, &playlist, &manifest, true).expect("rewrite eDB content path");
+
+        let mut warnings = Vec::<WarningEntry>::new();
+        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        let paths = {
+            let mut stmt = conn
+                .prepare("SELECT path FROM content ORDER BY content_id")
+                .expect("prepare content path query");
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .expect("query content paths")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("collect content paths")
+        };
+
+        assert_eq!(
+            paths,
+            vec![corrected_path.to_string()],
+            "alias-normalized eDB rewrite should update the previously linked content row \
+             instead of leaving a stale indexed path behind"
         );
     }
 

@@ -285,7 +285,14 @@ fn collect_edb_content_paths_exact(
         .ok()
         .map(|rows| {
             rows.flatten()
-                .map(|p| normalize_pdb_path_for_edb_lookup(&p))
+                // Alias-stripped (trailing space before extension only) to
+                // match the same normalization applied to the on-disk file
+                // set it's compared against below — otherwise a DB row that
+                // still carries a trailing-space alias variant (e.g.
+                // "Track - .mp3") never matches its on-disk file
+                // "Track -.mp3", double-counting the same file as both
+                // "missing" and "unindexed".
+                .map(|p| normalize_path_for_strict_presence_match(&p))
                 .filter(|p| !p.is_empty())
                 .collect()
         })
@@ -345,19 +352,21 @@ pub(crate) fn collect_strict_indexed_paths(
     usb_root: &std::path::Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> HashSet<String> {
-    // All PDB tracks regardless of playlist/history membership
+    // All PDB tracks regardless of playlist/history membership. Alias-stripped
+    // (see `collect_edb_content_paths_exact`) to stay symmetric with the
+    // on-disk file set this is ultimately compared against.
     let pdb_track_paths = parsed
         .tracks
         .iter()
-        .map(|track| normalize_pdb_path_for_edb_lookup(&track.track_file_path))
+        .map(|track| normalize_path_for_strict_presence_match(&track.track_file_path))
         .filter(|path| !path.is_empty());
-    // All eDB content paths without alias stripping — exact filenames needed for disk check
+    // All eDB content paths, alias-stripped
     let edb_all_paths = collect_edb_content_paths_exact(usb_root, warnings).into_iter();
     // eDB playlist paths kept for any track whose path differs from the content table
     let edb_playlist_paths = edb_playlists
         .values()
         .flat_map(|playlist| playlist.tracks.iter())
-        .map(|track| normalize_pdb_path_for_edb_lookup(track.identity_path()))
+        .map(|track| normalize_path_for_strict_presence_match(track.identity_path()))
         .filter(|path| !path.is_empty());
     pdb_track_paths
         .chain(edb_all_paths)
@@ -785,6 +794,8 @@ impl BackendService {
         on_progress(58, 100, "USB: Checking indexed audio file presence");
         let actual_files: HashSet<String> = collect_contents_audio_files(&usb_root)
             .into_iter()
+            .map(|p| normalize_path_for_strict_presence_match(&p))
+            .filter(|p| !p.is_empty())
             .collect();
         let indexed_paths =
             collect_strict_indexed_paths(&parsed, &edb_playlists, &usb_root, &mut raw_warnings);
@@ -3120,6 +3131,41 @@ pub(crate) fn normalize_pdb_path_for_edb_lookup(value: &str) -> String {
     normalize_contents_path(value, false)
 }
 
+/// Trim only the "trailing space before the extension" filename alias (e.g.
+/// "Track .mp3" vs "Track.mp3"). Deliberately narrower than
+/// `normalize_path_for_contents_match`, which also collapses a trailing
+/// `-<digits>` stem suffix — appropriate for that function's alias-grouping
+/// callers, but wrong for a strict indexed-vs-on-disk presence comparison:
+/// it collapses genuinely distinct files whose real filenames happen to end
+/// in a numeric suffix (release years, remix/version numbers, catalog
+/// codes), which are common enough in a large library to produce mass false
+/// "missing"/"unindexed" results instead of fixing the one alias case.
+fn normalize_path_for_strict_presence_match(value: &str) -> String {
+    let normalized = normalize_pdb_path_for_edb_lookup(value);
+    if normalized.is_empty() {
+        return normalized;
+    }
+    let path = std::path::Path::new(&normalized);
+    let parent = path
+        .parent()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let file = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let alias_stripped = if let Some((stem, ext)) = file.rsplit_once('.') {
+        format!("{}.{ext}", stem.trim_end())
+    } else {
+        file.to_string()
+    };
+    if parent.is_empty() {
+        alias_stripped
+    } else {
+        format!("{}/{}", parent.trim_end_matches('/'), alias_stripped)
+    }
+}
+
 pub(crate) fn normalize_path_for_contents_match(value: &str) -> String {
     let normalized = normalize_pdb_path_for_edb_lookup(value);
     if normalized.is_empty() {
@@ -3571,6 +3617,133 @@ mod tests {
         let fail_missing = evaluate_strict_raw_coverage_parity(20, 0, 100);
         assert!(matches!(fail_missing.status, DiagStatus::Fail));
         assert_eq!(fail_missing.missing_count, 20);
+    }
+
+    #[test]
+    fn strict_indexed_paths_match_alias_stripped_on_disk_filename() {
+        // Regression: a PDB track row can retain a trailing-space alias
+        // variant of a filename (e.g. "Track - .mp3") that the rest of this
+        // codebase already treats as identical to "Track -.mp3" (write-time
+        // alias matching, repair.rs's unindexed-audio detector). Before this
+        // fix, `collect_strict_indexed_paths` compared the raw indexed path
+        // against `collect_contents_audio_files`'s alias-stripped on-disk
+        // set, so the single real file was double-counted: once as
+        // "missing" (the aliased indexed path never matches the real file)
+        // and once as "unindexed" (the real file never matches the aliased
+        // indexed path) in the "Indexed audio file presence" strict check.
+        let root = tempdir().expect("tempdir");
+        let track_dir = root.path().join("Contents").join("Artist");
+        fs::create_dir_all(&track_dir).expect("create contents dir");
+        fs::write(track_dir.join("Track -.mp3"), b"fake audio").expect("write audio file");
+
+        let mut parsed = ParsedPdb::default();
+        parsed.tracks.push(make_pdb_track(
+            1,
+            "Track",
+            1,
+            "/Contents/Artist/Track - .mp3",
+        ));
+
+        let mut warnings = Vec::new();
+        let indexed_paths = super::collect_strict_indexed_paths(
+            &parsed,
+            &HashMap::new(),
+            root.path(),
+            &mut warnings,
+        );
+
+        let actual_files: std::collections::HashSet<String> =
+            crate::service::usb_utils::collect_contents_audio_files(root.path())
+                .into_iter()
+                .map(|p| super::normalize_path_for_strict_presence_match(&p))
+                .collect();
+
+        let missing_count = indexed_paths
+            .iter()
+            .filter(|p| !actual_files.contains(*p))
+            .count();
+        let extra_count = actual_files
+            .iter()
+            .filter(|p| !indexed_paths.contains(*p))
+            .count();
+        assert_eq!(
+            missing_count, 0,
+            "the aliased indexed path must match the real on-disk file"
+        );
+        assert_eq!(
+            extra_count, 0,
+            "the real on-disk file must match the aliased indexed path"
+        );
+    }
+
+    #[test]
+    fn strict_indexed_paths_do_not_collapse_distinct_numeric_suffixed_filenames() {
+        // Regression: `normalize_path_for_contents_match` (used elsewhere for
+        // alias *grouping*) also collapses a trailing "-<digits>" filename
+        // stem suffix, e.g. "Best of-2025.mp3" and "Best of.mp3" would both
+        // normalize to "Best of.mp3". That's wrong for the strict
+        // indexed-vs-on-disk presence check: two genuinely different,
+        // correctly-indexed tracks whose real filenames happen to end in a
+        // numeric suffix (release years, remix/version numbers, catalog
+        // codes — common in a large library) must not be reported as
+        // missing/unindexed just because they'd collide under that broader
+        // normalization. `collect_strict_indexed_paths` must use the
+        // narrower `normalize_path_for_strict_presence_match` instead, which
+        // only trims a trailing space before the extension.
+        let root = tempdir().expect("tempdir");
+        let track_dir = root.path().join("Contents").join("Artist");
+        fs::create_dir_all(&track_dir).expect("create contents dir");
+        fs::write(track_dir.join("Best of-2025.mp3"), b"fake audio").expect("write audio file 1");
+        fs::write(track_dir.join("Best of.mp3"), b"fake audio").expect("write audio file 2");
+
+        let mut parsed = ParsedPdb::default();
+        parsed.tracks.push(make_pdb_track(
+            1,
+            "Best of-2025",
+            1,
+            "/Contents/Artist/Best of-2025.mp3",
+        ));
+        parsed.tracks.push(make_pdb_track(
+            2,
+            "Best of",
+            1,
+            "/Contents/Artist/Best of.mp3",
+        ));
+
+        let mut warnings = Vec::new();
+        let indexed_paths = super::collect_strict_indexed_paths(
+            &parsed,
+            &HashMap::new(),
+            root.path(),
+            &mut warnings,
+        );
+        assert_eq!(
+            indexed_paths.len(),
+            2,
+            "two distinct indexed tracks must not collapse into one key: {indexed_paths:?}"
+        );
+
+        let actual_files: std::collections::HashSet<String> =
+            crate::service::usb_utils::collect_contents_audio_files(root.path())
+                .into_iter()
+                .map(|p| super::normalize_path_for_strict_presence_match(&p))
+                .collect();
+        let missing_count = indexed_paths
+            .iter()
+            .filter(|p| !actual_files.contains(*p))
+            .count();
+        let extra_count = actual_files
+            .iter()
+            .filter(|p| !indexed_paths.contains(*p))
+            .count();
+        assert_eq!(
+            missing_count, 0,
+            "both distinctly-named on-disk files must match their own indexed entry"
+        );
+        assert_eq!(
+            extra_count, 0,
+            "both distinctly-named indexed entries must match their own on-disk file"
+        );
     }
 
     #[test]

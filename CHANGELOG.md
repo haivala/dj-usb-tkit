@@ -30,7 +30,7 @@
 
 ## Unreleased
 
-**Severity:** critical
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix:** restore waveform color refresh on USB/history track rows after
   analysis completes. `patchUsbTrackRow` and `patchHistoryTrackRow` were
@@ -45,6 +45,8 @@
 - **Fix:** when an existing USB track is matched by alias-normalized path identity, update the eDB content row in place and rewrite the PDB indexed media path/filename slot from the manifest exactly. This prevents exports from leaving stale `Track - .mp3` DB references behind while the on-disk file is `Track -.mp3`, which showed up as an unindexed audio file in USB diagnostics.
 - **Fix:** stop deleting a USB playlist from corrupting sibling `playlist_tree` (`t07`) page shape. `remove_rows_inplace` applied the `(1, last removed slot)` tombstone footer convention to every table it tombstones, but `t06`/`t07`/`t16`/`t17`/`t18` use a `(trc, 0)` convention instead (see `docs/PDB.md` "Page Footer Conventions") and never change `u5`/`num_rl` on removal — only `t00`/`t01`–`t05`/`t08`/`t13` do. This produced the "PDB structural integrity: playlist_tree page(s) wrong shape" diagnostic whenever a playlist was removed from a USB that had other playlists sharing its `t07` page.
 - **Fix:** stamp `dj_usb_tkit_export_log.v1.json`'s `exportedAt`/`exportDate` fields in local time instead of UTC, matching the timestamp already used for the PDB/eDB backup filenames (`export_2025-04-23_14-32-01.pdb`) written next to it on the USB — the two USB-visible timestamps were previously in different time zones.
+- **Fix (CRITICAL):** stop routine additive exports from leaving duplicate-id tombstones in the PDB. When a track's row couldn't be patched in place during an export (e.g. its rewritten `file_name`/`file_path` no longer fit the original row's byte length) and had to be relocated, `mark_track_slot_inactive` vacated the old slot without zeroing its id field, leaving it as a live duplicate of the relocated row's id — the "PDB structural integrity: tombstoned row(s) non-zero id" diagnostic. Because tracks are shared across playlists, exporting one playlist could corrupt rows belonging to playlists untouched by that export, and the corruption recurred on every subsequent export even after running the repair.
+- **Fix:** stop the "Indexed audio file presence" strict-parity check from double-counting a single on-disk file as both "missing" and "unindexed". It compared DB-indexed paths against real on-disk filenames using unnormalized indexed paths against raw on-disk paths, so any track whose DB row still carried a trailing-space filename alias (`Track - .mp3` vs `Track -.mp3`) was flagged as one missing file and one unindexed file instead of being recognized as the same file. Fixed by normalizing both sides consistently through a new, narrowly-scoped `normalize_path_for_strict_presence_match` that trims only that trailing-space alias — reusing the existing (broader) `normalize_path_for_contents_match`, which also collapses a trailing `-<digits>` filename suffix, was tried first and made things worse: it collapsed genuinely distinct tracks whose real filenames end in a numeric suffix (release years, remix/version numbers, catalog codes) into the same key, turning a 1-file false positive into thousands of false missing/unindexed results on a large library.
 
 ## 0.1.10
 

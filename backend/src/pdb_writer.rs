@@ -4467,6 +4467,20 @@ fn mark_track_slot_inactive(
     let new_tranrf = tranrf | slot.bit_mask;
     bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&new_tranrf.to_le_bytes());
 
+    // Zero the id field (offset 0x48) in the row we're vacating. The
+    // replacement row carries the same track id to a new slot elsewhere in
+    // the chain, so leaving the old id in place here would make this
+    // tombstoned slot a live duplicate of the new row's id — exactly what
+    // `detect_pdb_tombstoned_playlist_tree_ids`/the "Repair Tombstoned Row
+    // IDs" fix in service::repair exists to clean up after the fact. Zero it
+    // at the source instead of relying on that separate repair pass.
+    let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+    if let Some(id_off) = row_abs.checked_add(0x48)
+        && id_off + 4 <= bytes.len()
+    {
+        bytes[id_off..id_off + 4].copy_from_slice(&0u32.to_le_bytes());
+    }
+
     let packed = u32::from(bytes[off + 0x18])
         | (u32::from(bytes[off + 0x19]) << 8)
         | (u32::from(bytes[off + 0x1a]) << 16);
@@ -6382,6 +6396,84 @@ mod additive_tests {
         assert!(
             read_u32_le_at(&bytes, 0x14).unwrap_or(0) >= 50_000,
             "track mutation must not lower seqdb"
+        );
+    }
+
+    fn track_row_loc_by_id(bytes: &[u8], id: u32) -> Option<(u32, usize, usize, PageRowSlot)> {
+        let (_ec, first, last) = table_ptr_fields(bytes, 0)?;
+        let chain = collect_chain_pages(bytes, PAGE_SIZE, first, last)?;
+        for page_idx in chain.into_iter().skip(1) {
+            let off = page_offset(page_idx, PAGE_SIZE)?;
+            let page = bytes.get(off..off + PAGE_SIZE)?;
+            let used_s = read_u16_le_at(page, 0x1e)? as usize;
+            let payload_len = used_s.min(PAGE_SIZE.saturating_sub(PAGE_HEADER_SIZE));
+            for slot in parse_page_row_slots(page, PAGE_SIZE) {
+                if slot.end > payload_len || slot.start >= slot.end {
+                    continue;
+                }
+                let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+                let row_len = slot.end - slot.start;
+                if slot.present
+                    && row_len >= 136
+                    && read_u32_le_at(bytes, row_abs + 0x48) == Some(id)
+                {
+                    return Some((page_idx, row_abs, row_len, slot));
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn mutate_tracks_in_place_zeroes_id_on_relocated_slot() {
+        // Regression: when a track's row can't be patched in place (a
+        // changed string field no longer fits the original slot length),
+        // `mutate_tracks_in_place` relocates it via `mark_track_slot_inactive`
+        // + a freshly appended replacement row. The vacated slot must have
+        // its id field zeroed — otherwise it's a live duplicate of the
+        // relocated row's id, which is exactly what
+        // `detect_pdb_tombstoned_playlist_tree_ids` flags as PDB corruption.
+        let seed = build_seed_pdb_data();
+        let mut bytes = write_pdb(&seed).expect("write seed");
+
+        let (orig_page_idx, orig_row_abs, _orig_row_len, orig_slot) =
+            track_row_loc_by_id(&bytes, 1).expect("original track row loc");
+
+        let mut row = seed.tracks[0].clone();
+        // Long enough that the encoded slot 19 byte length can't possibly
+        // match the original (short) file_name/file_path-derived slot.
+        row.file_name = Some("A".repeat(200));
+        let patched = mutate_tracks_in_place(
+            &mut bytes,
+            &[PdbTrackRowMutation {
+                row,
+                changed_fields: vec!["file_name"],
+            }],
+            PdbLayoutProfile::DEFAULT,
+            PAGE_SIZE,
+        )
+        .expect("mutate track");
+        assert_eq!(patched, 1);
+
+        let off = page_offset(orig_page_idx, PAGE_SIZE).expect("orig page offset");
+        let rowpf = read_u16_le_at(&bytes, off + orig_slot.bits_off).expect("rowpf");
+        assert_eq!(
+            rowpf & orig_slot.bit_mask,
+            0,
+            "original track slot must be tombstoned (relocated, not patched in place)"
+        );
+        assert_eq!(
+            read_u32_le_at(&bytes, orig_row_abs + 0x48),
+            Some(0),
+            "tombstoned slot's id field must be zeroed, not left as a duplicate of the \
+             relocated row's id"
+        );
+
+        let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).expect("parse patched pdb");
+        assert_eq!(
+            parsed.tracks.iter().filter(|t| t.id == 1).count(),
+            1,
+            "exactly one active track row should carry id 1 after relocation"
         );
     }
 
