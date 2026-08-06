@@ -4,13 +4,18 @@
 
 Playlist management follows a local flow: create playlists, add tracks, keep order by stored playlist position, and remove tracks when needed. The same playlist context remains available while moving between library and USB sections.
 
-Playback is backend-driven. For tracks coming from imported USB content, the app first asks the backend to resolve a verified local file match. When the backend returns a verified local match, playback uses the local path to reduce repeated USB reads; otherwise playback can use the USB source path.
+Playback is backend-driven. Playback requests include the originating track id
+when one is available, regardless of whether the user started playback from
+the library, a local playlist, a USB playlist, or USB history. The backend
+uses that id first when it points at a genuine local track; otherwise it falls
+back to verified metadata matching and can still use the USB source path when
+no safe local match exists.
 
 Transport state is pushed through backend events, so the UI reflects start/progress/stop updates without tight polling loops.
 
 ## Deep technical details
 
-Playlist state is modeled as local entities with ordered mapping rows. In practice, this means playlist metadata (`name`, identity, timestamps) is stored separately from ordered membership (`playlistId`, `trackId`, position). Track ordering is therefore explicit and stable, which avoids accidental reshuffling during add/remove operations.
+Playlist state is modeled as local entities with ordered mapping rows. In practice, this means playlist metadata (`name`, identity, timestamps) is stored separately from ordered membership (`playlistId`, `trackId`, position). Track ordering is therefore explicit and stable, which avoids accidental reshuffling during add/remove operations. Adding or removing playlist tracks also clears the playlist's cached USB export status so the UI stops showing stale "exported" state immediately.
 
 The playlist command layer is intentionally CRUD-oriented:
 
@@ -28,11 +33,13 @@ Playback architecture is backend-owned so transport behavior stays consistent ac
 
 Playback resolution is source-aware:
 
-1. For imported USB tracks, the app asks backend `resolve_playback_source` for a local-track match first.
-2. Only a backend-resolved match can substitute local media; the frontend does not guess local files with heuristic search.
-3. If no verified local candidate exists, playback can fall back to USB path playback.
+1. The app passes the originating `trackId` to backend `resolve_playback_source` whenever possible.
+2. If that id belongs to a non-USB-rooted local track, the backend resolves directly to that row.
+3. If the id is missing or points at a stale USB placeholder, the backend falls through to fingerprint/title matching.
+4. USB-rooted candidate rows are excluded from local substitution, so placeholder rows do not masquerade as real local media.
+5. If no verified local candidate exists, playback can fall back to USB path playback.
 
-This prevents the common failure mode of matching the wrong local file by loose metadata while still preserving USB playback for unresolved tracks.
+This prevents the common failure mode of matching the wrong local file by loose metadata while still preserving USB playback for unresolved tracks. It also lets older playlist entries that still reference stale USB placeholder rows self-heal on next playback when a genuine local match exists.
 
 Preflight checks (`playback_preflight_native`) and status queries (`get_playback_status_native`) allow the UI to render actionable state before or during transport actions. Stop behavior is explicit via `stop_playback_native`, which normalizes cleanup in both backend and UI.
 
@@ -40,8 +47,8 @@ Implementation anchors:
 
 - playlist command façade: `backend/src/commands.rs`
 - playback Tauri handlers: `backend/src/tauri_commands.rs`
-- playback event emission: `backend/src/tauri_commands.rs:469`, `backend/src/tauri_commands.rs:864`, `backend/src/tauri_commands.rs:899`
-- invoke registration: `desktop/src-tauri/src/main.rs:593`
+- playback event emission: `backend/src/tauri_commands.rs`
+- invoke registration: `desktop/src-tauri/src/main.rs`
 
 ## Verification links
 

@@ -85,7 +85,7 @@ The current code can propose these repair IDs:
 | --- | --- | --- |
 | `upgrade_export_data_to_strict_parity` | PDB and eDB playlist parity failures | Merges playlists from both databases, preserves membership from both sides, rewrites PDB and eDB through the export writers, removes stale duplicate PDB playlist-entry rows, and syncs eDB `sequenceNo` from PDB `t07.sort_order` |
 | `fix_empty_analysis_files` | empty USB analysis files with resolvable source audio | Regenerates `DAT/EXT/2EX` bundles for the affected analysis directory |
-| `repair_pdb_header_compatibility_field` | PDB header bytes `0x10..0x14` | Writes only that 4-byte field, using the newest compatible local backup value when available or fallback value `5` |
+| `repair_pdb_header_compatibility_field` | PDB header bytes `0x10..0x14` | Writes only that 4-byte field to the built-in compatibility value `5` when the current value is unrecognized; known-compatible values are not repaired just because they differ from a local backup snapshot |
 | `repair_pdb_sentinel_u5_on_data_pages` | data pages whose `u5` is sentinel `0x1FFF` | Rewrites `u5` and, only when needed, `num_rl` to the per-table data-page convention |
 | `repair_pdb_wrong_page_flags` | data pages with invalid `page_flags` | Patches byte `0x1b` to the accepted value for that table family |
 | `repair_pdb_zero_tranrf_on_track_pages` | row-footer groups with active rows and zero `tranrf` | Patches only zero `tranrf` groups; it does not normalize non-zero transaction masks |
@@ -123,8 +123,8 @@ Menu commands are separate from diagnostics repair:
 
 | Command | Behavior |
 | --- | --- |
-| `update_usb_cdj_menu_config` | treats eDB `category` as the Active Category source, keeps required player menu kinds visible, writes eDB category rows, and updates the PDB `t17` category snapshot when the visible set changes |
-| `sync_usb_cdj_menu_edb_to_pdb` | restores PDB `t16` from the full eDB `menuItem` catalog and updates the PDB `t17` category snapshot |
+| `update_usb_player_menu_config` | treats eDB `category` as the Active Category source, keeps required player menu kinds visible, writes eDB category rows, and updates the PDB `t17` category snapshot when the visible set changes |
+| `sync_usb_player_menu_edb_to_pdb` | restores PDB `t16` from the full eDB `menuItem` catalog and updates the PDB `t17` category snapshot |
 
 ## Strict Parity Upgrade
 

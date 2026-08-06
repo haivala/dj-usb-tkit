@@ -39,17 +39,32 @@ Long-running commands emit job lifecycle events:
 
 The desktop host also emits a unified `job:event` channel carrying the same payload shape.
 
+USB-scoped jobs lock the selected USB root in the frontend until the matching
+`job.completed` or `job.failed` event arrives. Locking job types are
+`usb_read`, `usb_write`, `diagnostics`, and `export`; this covers playlist and
+history reads, player-menu reads/writes, initialization, export, parity,
+diagnostics, and repair. The lock prevents a late response from an earlier
+drive selection from being rendered against a newer selected drive.
+
 ## Command groups
 
 ### Library
 
 - `scan_library`
+- `scan_master_db`
 - `search_tracks`
 - `list_tracks`
 - `browse_source_files`
+- `check_source_roots`
 - `materialize_source_track`
 - `remove_tracks_by_source_roots`
+- `relocate_source_root`
 - `get_tracks_by_ids_with_previews`
+
+### Settings
+
+- `get_frontend_settings`
+- `set_frontend_setting`
 
 ### Playlists
 
@@ -63,12 +78,15 @@ The desktop host also emits a unified `job:event` channel carrying the same payl
 
 ### USB import/export
 
-- `set_usb_edb_key`
 - `validate_usb_root`
+- `list_usb_devices`
+- `prune_usb_device`
+- `merge_orphaned_usb_placeholder_tracks`
 - `fetch_usb_playlists`
 - `fetch_usb_histories`
-- `get_usb_cdj_menu_config`
-- `update_usb_cdj_menu_config`
+- `get_usb_player_menu_config`
+- `update_usb_player_menu_config`
+- `sync_usb_player_menu_edb_to_pdb`
 - `remove_usb_playlist`
 - `reorder_usb_playlists`
 - `inspect_usb_track`
@@ -94,6 +112,9 @@ The desktop host also emits a unified `job:event` channel carrying the same payl
 - `analyze_new_tracks`
 - `set_analysis_paused`
 - `cancel_analysis`
+- `download_essentia`
+- `cancel_essentia_download`
+- `remove_essentia`
 
 ### Playback
 

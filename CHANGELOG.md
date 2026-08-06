@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.10
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** stop USB-vs-local playback and materialization from

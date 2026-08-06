@@ -22,6 +22,13 @@ These entities represent USB-side discovered state:
 - imported playlist and history metadata
 - USB track metadata and optional preview payload fields
 
+`UsbDevice` state is backed by the local `usb_devices` table, keyed by a
+normalized root path and carrying mount/first-seen/last-seen state. It
+replaces the old frontend-only recent-roots list for device bookkeeping.
+`track_usb_links` records which local track row corresponds to a given
+USB-device media path, and `usb_device_exports` records per-device playlist
+export history even when that drive is not currently mounted.
+
 ### WarningEntry
 
 Typed non-fatal warning/error payload used in diagnostics, import, export, and repair responses.
@@ -52,6 +59,9 @@ These are intentionally app-owned and persisted locally rather than copied from 
 - `UsbPlaylist.usbDeviceId -> UsbDevice.id`
 - `UsbTrack.usbDeviceId -> UsbDevice.id`
 - `UsbHistory.usbDeviceId -> UsbDevice.id`
+- `TrackUsbLink.trackId -> Track.id`
+- `TrackUsbLink.usbDeviceId -> UsbDevice.id`
+- `UsbDeviceExport.usbDeviceId -> UsbDevice.id`
 
 ## Settings model
 

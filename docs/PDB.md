@@ -131,8 +131,8 @@ Known table families used by this repository:
 | `t08` | playlist_entries | playlist membership and order |
 | `t09` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
 | `t10` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
-| `t11` | history_playlists_alt | not named in the Deep Symmetry table list; left empty by the current writer; reader fallback when `t17` is empty |
-| `t12` | history_entries_alt | not named in the Deep Symmetry table list; left empty by the current writer; reader fallback when `t18` is empty |
+| `t11` | history_playlists_alt | not named in the Deep Symmetry table list; left empty by the current writer; import uses this history family when populated |
+| `t12` | history_entries_alt | not named in the Deep Symmetry table list; left empty by the current writer; import uses this history family when populated |
 | `t13` | artwork | artwork path dictionary rows |
 | `t14` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
 | `t15` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
@@ -148,8 +148,10 @@ decimal `t09`, `t10`, `t11`, `t12`, `t14`, or `t15` in its `export.pdb` table
 list.
 
 The current writer leaves `t09`-`t12` and `t14`-`t15` empty during normal
-export. The reader can parse `t11` and `t12` as legacy history-family fallback
-tables when `t17` and `t18` are empty.
+export. The reader can parse `t11` and `t12` as an alternate runtime
+history-family surface. Runtime history import keeps `t11/t12` separate from
+`t17/t18` and uses `t11/t12` whenever either table is populated; otherwise it
+uses `t17/t18`.
 
 ### t17/t18 blank template rows on fresh/never-played exports
 
@@ -169,12 +171,11 @@ regardless of the export's actual library or track count):
 These are not corruption and not something this app writes; they ship as
 part of rekordbox's own export template and are present even when `t11`/`t12`
 (the hardware-only legacy fallback tables) are completely empty, i.e. on the
-most common case of a freshly exported or never-played drive. Any reader
-that surfaces `t17`/`t18` rows as user-facing history (import, diagnostics)
-must filter on the `"HISTORY "` name prefix first — this is the same rule
-`derive_history_sync_payload` (`repair.rs`, used by the eDB history-sync
-repair) already applied, now also applied by `is_named_history_playlist`
-(`usb_helpers.rs`) at the USB history import and diagnostics read paths.
+most common case of a freshly exported or never-played drive. Any reader that
+surfaces history rows as user-facing history (import, diagnostics, or repair
+payload derivation) must filter on the `"HISTORY "` name prefix first. This
+is the same rule applied by `is_named_history_playlist` (`usb_helpers.rs`)
+and `derive_history_sync_payload` (`repair.rs`).
 
 ## Page Header
 

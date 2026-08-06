@@ -23,6 +23,12 @@ Export is intentionally tied to a quick prep loop:
 
 Export is designed for deterministic re-runs. Re-exporting the same playlist should produce predictable results, and optional cleanup can prune stale export-owned files when enabled.
 
+Each export also records local bookkeeping for the selected USB device. The
+backend updates the `usb_devices` row for the root and appends a
+`usb_device_exports` record with playlist name, export timestamp, track count,
+and track fingerprints. This history is local app state; it does not change
+the player-visible USB database.
+
 ## Backup
 
 Before each export, the app copies PDB and eDB to a backups folder next to them with a timestamp. Backups land in `PIONEER/rekordbox/backups/` on the USB drive with filenames like `export_2025-04-23_14-32-01.pdb` and `exportLibrary_2025-04-23_14-32-01.db`. Files are only copied if they already exist — a first export with no prior databases skips silently.
@@ -191,7 +197,7 @@ The Menu Editor's Save action:
 3. Leaves PDB t16 unchanged.
 4. If the eDB write fails, eDB is restored from its snapshot.
 
-The PDB restore action is separate: `sync_usb_cdj_menu_edb_to_pdb` rebuilds
+The PDB restore action is separate: `sync_usb_player_menu_edb_to_pdb` rebuilds
 PDB t16 from the full eDB `menuItem` catalog when older app code or manual
 editing has removed catalog rows from PDB. See `docs/PDB.md` for the t16 row
 layout and observed kind codes.
@@ -210,9 +216,9 @@ When strict mismatches are found, correction is handled through explicit repair 
 
 Implementation anchors:
 
-- export command façade: `backend/src/commands.rs:215`
-- Tauri export handler: `backend/src/tauri_commands.rs:1070`
-- desktop invoke wiring: `desktop/src-tauri/src/main.rs:622`
+- export command façade: `backend/src/commands.rs`
+- Tauri export handler: `backend/src/tauri_commands.rs`
+- desktop invoke wiring: `desktop/src-tauri/src/main.rs`
 
 ## Verification links
 

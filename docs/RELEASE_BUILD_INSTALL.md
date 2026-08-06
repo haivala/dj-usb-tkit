@@ -7,9 +7,10 @@ Development and release packaging run locally from this repository. Backend and 
 The standard release flow is:
 
 1. Validate dependencies and platform prerequisites.
-2. Run tests.
-3. Build desktop bundles through Tauri.
-4. Publish artifacts from the release bundle output directory.
+2. Set the workspace version and sync package metadata.
+3. Run tests.
+4. Build desktop bundles through Tauri.
+5. Publish artifacts from the release bundle output directory.
 
 ## GitHub Actions release
 
@@ -33,6 +34,7 @@ name. Manual runs can be marked as draft releases or prereleases.
 
 Primary commands:
 
+- Version sync after editing root `Cargo.toml`: `node scripts/sync_versions.mjs`
 - Backend tests: `cargo test -q --manifest-path backend/Cargo.toml`
 - Frontend tests: `npm test --prefix vanilla-ui`
 - Frontend build: `npm run build --prefix vanilla-ui`
@@ -42,6 +44,7 @@ Primary commands:
 
 Release pipeline behavior (`scripts/release.sh`):
 
+- syncs `desktop` and `vanilla-ui` package versions from the root Cargo workspace
 - runs backend and frontend tests when `RUN_TESTS=1`
 - installs the Playwright Chromium browser before frontend tests
 - builds desktop bundles from `desktop/src-tauri/`

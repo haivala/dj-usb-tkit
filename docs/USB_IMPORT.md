@@ -25,7 +25,7 @@ Known DB data surfaces used by import:
   - track rows (title/artist/album/key linkage, tempo, duration, media path, analysis path)
   - playlist tree and playlist-entry tables (playlist structure and order)
   - artwork and dictionary ID references used by track rows
-  - history-family tables (`t17/t18/t19` primary, `t11/t12` fallback)
+  - history-family tables (`t11/t12`, `t17/t18`, and `t19`)
 
 Track metadata resolution for imported playlist entries is multi-source. The importer attempts to resolve each referenced track ID through PDB row data, then eDB content data, then optional master-DB fallback, and skips unresolvable orphan entries instead of failing the whole playlist import.
 
@@ -61,7 +61,12 @@ Parser hardening includes compatibility behavior observed in real exports:
 
 These rules are important for robust import on mixed-vendor or older USB content where strict naive parsing would drop rows.
 
-History source selection is explicit. Import prefers PDB `t17/t18` history tables and only falls back to `t11/t12` when `t17/t18` are empty. This avoids mixing incompatible history-table families and makes history provenance predictable.
+History source selection is explicit. Import keeps the two history-table
+families separate and selects one family for a read: `t11/t12` is used
+whenever either table is populated, otherwise import uses `t17/t18`. This
+avoids mixing incompatible history-table families and prevents seeded
+`t17/t18` template rows from surfacing as real user history on initialized or
+freshly exported drives.
 
 An imported history session can be exported as a plain-text tracklist
 ("Export Tracklist" on the USB History panel), with a choice of which track
@@ -70,7 +75,8 @@ cumulative per-track times, placed before or after each `Artist - Title`
 line. These times are always an estimate — summed from track `durationMs`
 in the session's play order starting from the chosen track — because CDJs
 never record a per-track playback timestamp in the USB at all: neither PDB
-(`t17/t18` entry rows) nor eDB (`history`/`history_content`) carry any
+history entry rows (`t11/t12` or `t17/t18`) nor eDB
+(`history`/`history_content`) carry any
 per-track timestamp field. Even the session-level date shown elsewhere in
 the History panel isn't guaranteed to be a real hardware-recorded value —
 PDB `t19` rows can carry a date per history session when the CDJ wrote one,
@@ -85,9 +91,9 @@ Corruption tolerance is intentional: unreadable optional analysis artifacts shou
 
 Implementation anchors:
 
-- playlist import: `backend/src/service/usb.rs:368`
-- history import: `backend/src/service/usb.rs:667`
-- per-track hydration: `backend/src/service/usb.rs:1257`
+- playlist import: `backend/src/service/usb.rs`
+- history import: `backend/src/service/usb.rs`
+- per-track hydration: `backend/src/service/usb.rs`
 - parser compatibility logic: `backend/src/pdb_reader.rs`
 
 ## Verification links
