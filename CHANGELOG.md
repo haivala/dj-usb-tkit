@@ -30,6 +30,10 @@
 
 ## Unreleased
 
+## 0.1.11
+
+**Severity:** critical
+
 - **Fix:** restore waveform color refresh on USB/history track rows after
   analysis completes. `patchUsbTrackRow` and `patchHistoryTrackRow` were
   missing `setWaveformColorData` from the deps passed to the shared row-patch
