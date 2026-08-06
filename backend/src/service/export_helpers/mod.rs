@@ -1661,16 +1661,8 @@ fn write_pdb_fresh_with_overrides(
                         to_usb_relative_path(usb_root, wp).unwrap_or_else(|| wp.clone());
                 }
                 existing_track.title = track.title.clone();
-                // Only replace file_path when the canonical key changes — i.e. when
-                // the paths refer to genuinely different locations. If the manifest
-                // uses the eDB form of a path (no trailing space) while the USB has
-                // the alias form (trailing space), they canonicalize identically and
-                // the USB path must be kept so the player can still find the file.
-                if canonicalize_track_path_identity(&file_path)
-                    != canonicalize_track_path_identity(&existing_track.file_path)
-                {
-                    existing_track.file_path = file_path.clone();
-                }
+                existing_track.file_name = Some(content_file_name(&file_path));
+                existing_track.file_path = file_path.clone();
             }
             existing
         } else {
@@ -3904,6 +3896,24 @@ mod tests {
                 .any(|t| t.track_file_path.contains("a1.mp3")),
             "t1 should remain"
         );
+
+        // Regression: deleting a playlist tombstones its t07 row, but t07 is
+        // a `(trc, 0)` footer-convention table (docs/PDB.md "Page Footer
+        // Conventions"), not a `(1, trc - 1)` tombstone-convention table like
+        // t00/t08/t13. `remove_rows_inplace` used to apply the `(1, last
+        // removed slot)` shape unconditionally to every table, which flipped
+        // playlist_tree pages (still holding the surviving "Playlist A" row)
+        // into the shape `detect_pdb_wrong_playlist_tree_shape` (and the "PDB
+        // structural integrity: playlist_tree page(s) wrong shape"
+        // diagnostic) flags as broken.
+        let wrong_shape_pages =
+            crate::service::repair::detect_pdb_wrong_playlist_tree_shape(&pdb_path);
+        assert!(
+            wrong_shape_pages.is_empty(),
+            "deleting a playlist must not leave playlist_tree pages in the wrong \
+             (u5, num_rl) footer shape: {wrong_shape_pages:?}"
+        );
+
         assert!(
             parsed_after
                 .tracks
@@ -4646,6 +4656,87 @@ mod tests {
         assert_eq!(
             parsed.artworks.get(&track.artwork_id).map(String::as_str),
             Some("/PIONEER/Artwork/00001/fallback.jpg")
+        );
+    }
+
+    #[test]
+    fn write_pdb_updates_alias_matched_track_to_manifest_filename_exactly() {
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path();
+        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
+            .unwrap();
+        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
+            .expect("initialize usb skeleton");
+
+        let playlist = ExportPlaylistData {
+            id: "pl-alias-path".to_string(),
+            name: "Alias Path".to_string(),
+            tracks: Vec::new(),
+        };
+        let old_path =
+            "/Contents/Example Artist/Example Album/Example Artist - Example Album - .mp3";
+        let corrected_path =
+            "/Contents/Example Artist/Example Album/Example Artist - Example Album -.mp3";
+        let corrected_file_name = "Example Artist - Example Album -.mp3";
+
+        let mut track = mapping_test_track();
+        track.id = "alias-track".to_string();
+        track.title = "Example Title".to_string();
+        track.artist = "Example Artist".to_string();
+        track.album = Some("Example Album".to_string());
+        track.exported_path = old_path.to_string();
+
+        let mut manifest = ExportManifest {
+            version: 1,
+            generated_at: "2024-01-01".to_string(),
+            playlist_id: playlist.id.clone(),
+            playlist_name: playlist.name.clone(),
+            usb_root: usb_root.to_string_lossy().to_string(),
+            options: crate::models::ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: false,
+                ..Default::default()
+            },
+            exported_tracks: 1,
+            skipped_tracks: 0,
+            warnings: Vec::new(),
+            tracks: vec![track],
+        };
+
+        write_pdb(usb_root, &playlist, &manifest, true, None, None)
+            .expect("write initial pdb with old alias path");
+        manifest.tracks[0].exported_path = corrected_path.to_string();
+
+        write_pdb(usb_root, &playlist, &manifest, true, None, None)
+            .expect("rewrite pdb with corrected manifest path");
+
+        let parsed = crate::pdb_reader::parse_pdb(
+            &usb_root
+                .join(USB_VENDOR_ROOT_DIR)
+                .join(USB_VENDOR_DB_DIR)
+                .join("export.pdb"),
+        )
+        .expect("parse rewritten pdb");
+        let track = parsed
+            .tracks
+            .iter()
+            .find(|track| track.title == "Example Title")
+            .expect("rewritten alias track");
+
+        assert_eq!(track.track_file_path, corrected_path);
+        assert_eq!(track.file_name.as_deref(), Some(corrected_file_name));
+        assert!(
+            parsed
+                .tracks
+                .iter()
+                .all(|track| track.track_file_path != old_path),
+            "old alias path must not stay indexed after the corrected export path is written: {:?}",
+            parsed
+                .tracks
+                .iter()
+                .map(|track| track.track_file_path.as_str())
+                .collect::<Vec<_>>()
         );
     }
 

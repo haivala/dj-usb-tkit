@@ -1016,6 +1016,15 @@ pub(crate) fn write_pdb_to_file(path: &Path, data: &PdbData) -> BackendResult<()
 /// data and page count are left unchanged.
 ///
 /// Returns the number of rows actually removed.
+/// Tables whose freshly written page footer uses the `(1, trc - 1)`
+/// tombstone-style convention (see docs/PDB.md "Page Footer Conventions").
+/// `t06`, `t07`, `t16`, `t17`, `t18` use `(trc, 0)` instead, and `trc` (the
+/// row-slot count) never changes when a row is merely tombstoned, so those
+/// tables must keep their existing `u5`/`num_rl`/`tranrf` footer values as-is.
+fn table_uses_tombstone_footer_convention(table_type: u32) -> bool {
+    matches!(table_type, 0 | 1 | 2 | 3 | 4 | 5 | 8 | 13)
+}
+
 pub(crate) fn remove_rows_inplace(
     bytes: &mut [u8],
     table_type: u32,
@@ -1164,7 +1173,14 @@ pub(crate) fn remove_rows_inplace(
 
             // Update u5=1, num_rl=last removed slot. One-row transaction
             // per tombstone operation, num_rl = highest-indexed tombstoned slot.
-            if let Some(slot) = highest_removed_slot {
+            // Only tables in the `(1, trc - 1)` convention group use this
+            // shape; `(trc, 0)`-convention tables (t06/t07/t16/t17/t18) keep
+            // their existing u5/num_rl/tranrf untouched, since trc doesn't
+            // change when a row is merely tombstoned (see
+            // `table_uses_tombstone_footer_convention`).
+            if table_uses_tombstone_footer_convention(table_type)
+                && let Some(slot) = highest_removed_slot
+            {
                 bytes[page_start + 0x20..page_start + 0x22].copy_from_slice(&1u16.to_le_bytes());
                 bytes[page_start + 0x22..page_start + 0x24]
                     .copy_from_slice(&(slot as u16).to_le_bytes());

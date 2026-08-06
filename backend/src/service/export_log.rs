@@ -144,7 +144,16 @@ pub(crate) fn build_export_log_record(
     playlist: &ExportPlaylistData,
     manifest: &ExportManifest,
 ) -> UsbExportLogRecord {
-    let exported_at = manifest.generated_at.clone();
+    // `manifest.generated_at` is UTC (see `now()` in service/mod.rs), which
+    // is the right choice for the app's own internal bookkeeping timestamps.
+    // But this log file lives on the USB next to the PDB/eDB backups, whose
+    // filenames (`export_2025-04-23_14-32-01.pdb`) are stamped with local
+    // time — so re-express the same instant in local time here to keep the
+    // two USB-visible timestamps in the same time zone for a human reading
+    // both.
+    let exported_at = chrono::DateTime::parse_from_rfc3339(&manifest.generated_at)
+        .map(|dt| dt.with_timezone(&chrono::Local).to_rfc3339())
+        .unwrap_or_else(|_| manifest.generated_at.clone());
     let export_date = exported_at
         .split('T')
         .next()
@@ -299,6 +308,17 @@ mod tests {
         }
     }
 
+    /// Expected local calendar date for a UTC RFC3339 instant, computed the
+    /// same way `build_export_log_record` does — kept independent of the
+    /// machine's time zone so the test isn't flaky on CI/other machines.
+    fn expected_local_date(utc_rfc3339: &str) -> String {
+        chrono::DateTime::parse_from_rfc3339(utc_rfc3339)
+            .expect("valid rfc3339")
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+
     #[test]
     fn append_export_log_record_keeps_existing_records() {
         let temp = tempdir().expect("tempdir");
@@ -341,9 +361,54 @@ mod tests {
             .expect("load log")
             .expect("log present");
         assert_eq!(loaded.records.len(), 2);
-        assert_eq!(loaded.records[0].export_date, "2026-04-03");
-        assert_eq!(loaded.records[1].export_date, "2026-04-04");
+        assert_eq!(
+            loaded.records[0].export_date,
+            expected_local_date("2026-04-03T10:00:00Z")
+        );
+        assert_eq!(
+            loaded.records[1].export_date,
+            expected_local_date("2026-04-04T10:00:00Z")
+        );
         assert!(export_log_path(temp.path()).is_file());
+    }
+
+    #[test]
+    fn build_export_log_record_uses_local_offset_not_utc() {
+        // The export log lives on the USB next to the PDB/eDB backup files,
+        // whose filenames are stamped with `chrono::Local::now()`. The log's
+        // `exported_at` must carry that same local UTC offset instead of the
+        // "Z" (UTC) suffix `manifest.generated_at` is stored with, so both
+        // USB-visible timestamps read in the same time zone.
+        let playlist = ExportPlaylistData {
+            id: "pl-1".to_string(),
+            name: "Warmup".to_string(),
+            tracks: Vec::new(),
+        };
+        let record = build_export_log_record(&playlist, &manifest("2026-04-03T10:00:00Z", vec![]));
+
+        let expected_offset = chrono::Local::now().offset().to_string();
+        assert!(
+            record.exported_at.ends_with(&expected_offset),
+            "exported_at {:?} should carry the local UTC offset {expected_offset:?}, not the \
+             source UTC (Z) offset",
+            record.exported_at
+        );
+        assert_eq!(
+            record.export_date,
+            expected_local_date("2026-04-03T10:00:00Z")
+        );
+    }
+
+    #[test]
+    fn build_export_log_record_falls_back_to_raw_value_on_unparseable_generated_at() {
+        let playlist = ExportPlaylistData {
+            id: "pl-1".to_string(),
+            name: "Warmup".to_string(),
+            tracks: Vec::new(),
+        };
+        let record = build_export_log_record(&playlist, &manifest("not-a-timestamp", vec![]));
+        assert_eq!(record.exported_at, "not-a-timestamp");
+        assert_eq!(record.export_date, "not-a-timestamp");
     }
 
     #[test]
