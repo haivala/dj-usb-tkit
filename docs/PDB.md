@@ -403,17 +403,32 @@ sanitizer is not applied to track media paths, analysis paths, or
 key/tonality strings. Slot 20 (media path) is also exempt from this
 sanitizer, but the path it holds is already built from sanitized components.
 
-### Slot 20 must start at a 4-byte aligned row offset
+### Every UTF-16-encoded string slot must start at a 4-byte aligned row offset
 
 Tested legacy hardware uses MIPS processors. MIPS requires natural alignment for
 memory loads — a 4-byte read must be at a 4-byte aligned address. The DeviceSQL
-UTF-16 string header (`0x90 [total_len: u16 LE] 0x00`) is 4 bytes wide. If slot
-20's row-relative offset is not divisible by 4, the MIPS CPU raises an Address
-Error exception and the hardware player can freeze when loading a track.
+UTF-16 string header (`0x90 [total_len: u16 LE] 0x00`) is 4 bytes wide. If a
+UTF-16-encoded slot's row-relative offset is not divisible by 4, the MIPS CPU
+raises an Address Error exception and the hardware player can freeze — while
+loading a track (slot 20), while listing/browsing tracks (slot 17, title), or
+elsewhere, depending on which slot the player happens to read at that moment.
 
-**The writer must pad slot 19 (filename) with zero bytes to ensure slot 20 starts
-at a 4-byte aligned row-relative offset.** Confirmed against reference exports:
-all observed reference-exported slot 20 offsets are divisible by 4.
+This is not unique to slot 20 (media path). Any of the 21 track string slots
+goes UTF-16 whenever its content is non-ASCII (title, filename, comment, etc.),
+and each one needs the same alignment guarantee independently — a slot's
+row-relative offset depends on the cumulative byte length of every slot before
+it, so which offsets end up misaligned varies per track. Confirmed on real
+hardware: a single track with a non-ASCII title (one curly apostrophe was
+enough) produced a title slot at a misaligned offset and a COMM ERROR when the
+CDJ tried to list the containing playlist, even though slot 20 for that same
+row was correctly aligned.
+
+**The writer pads before any slot whose encoded bytes start with the `0x90`
+UTF-16 marker**, uniformly across all 21 slots, plus slot 20 unconditionally
+(kept unconditional for parity with reference exports, which always keep slot
+20 aligned regardless of whether its content is ASCII or UTF-16). ASCII/empty
+slots are untouched — their headers are a single byte, not read as an atomic
+4-byte word, so alignment doesn't matter for them.
 
 The same alignment rule applies to any other row type where a UTF-16 string
 header is read by the hardware decoder with a 4-byte load:
@@ -427,8 +442,6 @@ header is read by the hardware decoder with a 4-byte load:
   album name, the same failure mode as the artist row above. `ofs_name_near`
   (row byte 21) is self-describing — the reader must read it rather than
   assume a fixed offset, since it now varies by content.
-- `tt=0` slot 17 (title): starts at offset 232 (% 4 = 0 ✓) when all tracks have
-  the same structure for slots 0–16.
 
 ## Playlist Rows
 

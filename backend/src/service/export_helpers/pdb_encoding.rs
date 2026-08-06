@@ -267,10 +267,15 @@ pub fn encode_track_row_with_profile(
     let mut offsets = [0u16; 21];
     let mut cursor = string_start;
     for index in 0..21usize {
-        // Slot 20 is a UTF-16 path string (0x90 header + u16 total_len = 4-byte read).
-        // MIPS-based player hardware requires 4-byte aligned reads; misalignment causes Address
-        // Error exception → freeze. Pad to the next 4-byte boundary before this slot.
-        if index == 20 {
+        // Any slot encoded as UTF-16 (0x90 header + u16 total_len = 4-byte read) must start
+        // at a 4-byte aligned row-relative offset. MIPS-based player hardware requires 4-byte
+        // aligned reads; misalignment causes an Address Error exception → freeze/comm error.
+        // This isn't unique to slot 20 (media path) — any string slot goes UTF-16 whenever its
+        // content is non-ASCII (title, filename, comment, etc.), so the padding must also apply
+        // to whichever other slot actually carries the 0x90 marker. Slot 20 keeps its existing
+        // unconditional padding (reference exports always keep it 4-byte aligned regardless of
+        // ASCII/UTF-16 content, and the additive same-size patch path relies on that invariant).
+        if index == 20 || slot_bytes[index].first() == Some(&0x90) {
             let pad = (4 - cursor % 4) % 4;
             row.resize(row.len() + pad, 0u8);
             cursor += pad;

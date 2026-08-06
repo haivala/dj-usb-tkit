@@ -41,8 +41,9 @@ use super::usb_vendor_compat::{backup_usb_databases, vendor_pdb_path};
 const REQUIRED_PLAYER_MENU_KINDS: &[u32] = &[131, 132, 144, 145, 149];
 
 use super::diagnostics::{
-    build_meta_key, collect_edb_indexed_paths, normalize_analysis_path_for_identity,
-    normalize_path_for_contents_match, normalize_pdb_path_for_edb_lookup, track_identity_key,
+    build_meta_key, collect_edb_indexed_paths, contents_path_match_key,
+    normalize_analysis_path_for_identity, normalize_path_for_contents_match,
+    normalize_pdb_path_for_edb_lookup, track_identity_key,
 };
 
 const STRICT_PARITY_UPGRADE_FIX_ID: &str = "upgrade_export_data_to_strict_parity";
@@ -2938,11 +2939,18 @@ impl BackendService {
                 .collect::<HashSet<_>>();
             let edb_indexed_paths = collect_edb_indexed_paths(&usb_root, &mut warnings);
             indexed_paths.extend(edb_indexed_paths);
+            // Case-insensitive containment: FAT32/exFAT resolves paths case-insensitively, so
+            // a folder's on-disk casing can drift from the currently-recorded artist/album
+            // casing without the file actually being missing or unindexed.
+            let indexed_paths_ci: HashSet<String> = indexed_paths
+                .iter()
+                .map(|p| contents_path_match_key(p))
+                .collect();
             unindexed_audio_paths = all_contents_audio
                 .iter()
                 .map(|p| normalize_path_for_contents_match(p))
                 .filter(|p| !p.is_empty())
-                .filter(|p| !indexed_paths.contains(p))
+                .filter(|p| !indexed_paths_ci.contains(&contents_path_match_key(p)))
                 .collect::<Vec<_>>();
             unindexed_audio_paths.sort();
             unindexed_audio_paths.dedup();

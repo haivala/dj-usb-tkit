@@ -1852,6 +1852,85 @@ mod writer_tests {
         assert_eq!(pages[0][0x1b], PAGE_FLAGS_DATA_TRACK);
     }
 
+    fn minimal_track_row(title: &str, file_name: &str, file_path: &str) -> PdbTrackRowData {
+        PdbTrackRowData {
+            header_flags_u32: None,
+            id: 1,
+            artist_id: 0,
+            album_id: 0,
+            artwork_id: 0,
+            key_id: 0,
+            genre_id: 0,
+            title: title.into(),
+            anlz_path: String::new(),
+            file_path: file_path.into(),
+            content_link: None,
+            sample_rate_hz: None,
+            file_size_bytes: None,
+            master_content_id: None,
+            master_db_id: None,
+            bitrate_kbps: None,
+            track_number: None,
+            bpm: None,
+            release_year: None,
+            bit_depth: None,
+            duration_seconds: None,
+            file_type: None,
+            isrc: None,
+            date_added: None,
+            release_date: None,
+            dj_comment: None,
+            file_name: Some(file_name.into()),
+            publish_track_info_on: None,
+            autoload_hotcues_on: None,
+        }
+    }
+
+    #[test]
+    fn test_non_ascii_title_slot_is_4byte_aligned() {
+        // A non-ASCII title (slot 17) is UTF-16 encoded (0x90 header). Only slot 20 used to be
+        // padded to a 4-byte row-relative offset; slot 17 wasn't, which produced a MIPS
+        // unaligned-read freeze on real CDJ hardware while listing tracks (title is what the
+        // browse/list view reads), independent of any load-time slot-20 alignment.
+        let track = minimal_track_row("We\u{2019}re Guilty", "track.mp3", "/track.mp3");
+        let row = encode_track_row_with_profile(&track, PdbLayoutProfile::Current).unwrap();
+        let title_offset = read_u16_le_at(&row, 94 + 17 * 2).unwrap() as usize;
+        assert_eq!(row[title_offset], 0x90, "title must be UTF-16 encoded");
+        assert_eq!(
+            title_offset % 4,
+            0,
+            "non-ASCII title slot must start at a 4-byte aligned row offset, was {title_offset}"
+        );
+    }
+
+    #[test]
+    fn test_non_ascii_filename_slot_is_4byte_aligned() {
+        // Same class of bug as the title case above, but for slot 19 (filename). Also verify
+        // slot 20 (path) — which sits immediately after — keeps its own alignment guarantee.
+        let track = minimal_track_row(
+            "Title",
+            "We\u{2019}re Guilty.mp3",
+            "/Contents/Artist/We\u{2019}re Guilty.mp3",
+        );
+        let row = encode_track_row_with_profile(&track, PdbLayoutProfile::Current).unwrap();
+        let filename_offset = read_u16_le_at(&row, 94 + 19 * 2).unwrap() as usize;
+        assert_eq!(
+            row[filename_offset], 0x90,
+            "filename must be UTF-16 encoded"
+        );
+        assert_eq!(
+            filename_offset % 4,
+            0,
+            "non-ASCII filename slot must start at a 4-byte aligned row offset, was {filename_offset}"
+        );
+        let path_offset = read_u16_le_at(&row, 94 + 20 * 2).unwrap() as usize;
+        assert_eq!(
+            path_offset % 4,
+            0,
+            "slot 20 must still be 4-byte aligned, was {path_offset}"
+        );
+    }
+
     // ── Row encoding tests ──────────────────────────────────────────────
 
     #[test]

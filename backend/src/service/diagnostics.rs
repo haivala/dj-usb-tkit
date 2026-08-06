@@ -799,13 +799,24 @@ impl BackendService {
             .collect();
         let indexed_paths =
             collect_strict_indexed_paths(&parsed, &edb_playlists, &usb_root, &mut raw_warnings);
+        // Case-insensitive containment: FAT32/exFAT resolves paths case-insensitively, and a
+        // folder's on-disk casing can drift from the currently-recorded artist/album casing
+        // without the file actually being missing or unindexed. See `contents_path_match_key`.
+        let actual_files_ci: HashSet<String> = actual_files
+            .iter()
+            .map(|p| contents_path_match_key(p))
+            .collect();
+        let indexed_paths_ci: HashSet<String> = indexed_paths
+            .iter()
+            .map(|p| contents_path_match_key(p))
+            .collect();
         let missing_count = indexed_paths
             .iter()
-            .filter(|p| !actual_files.contains(*p))
+            .filter(|p| !actual_files_ci.contains(&contents_path_match_key(p)))
             .count();
         let mut extra_paths: Vec<String> = actual_files
             .iter()
-            .filter(|p| !indexed_paths.contains(*p))
+            .filter(|p| !indexed_paths_ci.contains(&contents_path_match_key(p)))
             .cloned()
             .collect();
         extra_paths.sort();
@@ -3166,6 +3177,20 @@ fn normalize_path_for_strict_presence_match(value: &str) -> String {
     }
 }
 
+/// Case-insensitive key for a normalized `/Contents/...` path, for HashSet membership
+/// checks only. Exported USB drives are FAT32/exFAT, which resolve paths
+/// case-insensitively — a folder created under an artist tag's original casing keeps that
+/// casing on disk even after the tag is later corrected, since FAT doesn't rename an
+/// existing directory entry just because a later write used different casing for the
+/// "same" (case-insensitively) path. Presence/coverage comparisons between PDB/eDB-recorded
+/// paths and real on-disk paths must not be case-sensitive, or a casing drift like that
+/// produces a false "missing"/"unindexed" pair even though the file is perfectly reachable.
+/// Never apply this to a path used for display or file I/O — only for `.contains()` checks,
+/// so warnings/output still show the real on-disk casing.
+pub(crate) fn contents_path_match_key(normalized: &str) -> String {
+    normalized.to_ascii_lowercase()
+}
+
 pub(crate) fn normalize_path_for_contents_match(value: &str) -> String {
     let normalized = normalize_pdb_path_for_edb_lookup(value);
     if normalized.is_empty() {
@@ -3189,7 +3214,14 @@ pub(crate) fn normalize_path_for_contents_match(value: &str) -> String {
         let next_stem = stem
             .rsplit_once('-')
             .and_then(|(prefix, suffix)| {
-                if !prefix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                // `suffix.chars().all(...)` is vacuously true for an empty suffix, so a
+                // stem ending in a bare "-" (no digits after it, e.g. a truncation cutoff
+                // landing exactly on a hyphen) was previously stripped as if it were a
+                // "-<digits>" dedup suffix, silently dropping a real trailing hyphen.
+                if !prefix.is_empty()
+                    && !suffix.is_empty()
+                    && suffix.chars().all(|c| c.is_ascii_digit())
+                {
                     Some(prefix.to_string())
                 } else {
                     None
@@ -3743,6 +3775,89 @@ mod tests {
         assert_eq!(
             extra_count, 0,
             "both distinctly-named indexed entries must match their own on-disk file"
+        );
+    }
+
+    #[test]
+    fn normalize_path_for_contents_match_preserves_bare_trailing_hyphen() {
+        // Regression: the trailing "-<digits>" dedup-suffix collapse used an empty-suffix
+        // check (`suffix.chars().all(is_ascii_digit)`) that is vacuously true for an empty
+        // string, so a stem ending in a bare "-" with nothing after it (e.g. a 48-char
+        // truncation cutoff landing exactly on a hyphen) was silently stripped as if it were
+        // a "-1"/"-2" dedup suffix, producing a normalized path that doesn't correspond to
+        // any real file.
+        assert_eq!(
+            super::normalize_path_for_contents_match(
+                "/Contents/Artist/Some Album (Free Download)/Artist - Some Album (Free Download) -.mp3"
+            ),
+            "/Contents/Artist/Some Album (Free Download)/Artist - Some Album (Free Download) -.mp3",
+            "a bare trailing hyphen with no digits after it must not be stripped"
+        );
+        // A genuine "-<digits>" dedup suffix must still collapse.
+        assert_eq!(
+            super::normalize_path_for_contents_match("/Contents/Artist/Track-1.mp3"),
+            "/Contents/Artist/Track.mp3",
+        );
+    }
+
+    #[test]
+    fn strict_indexed_paths_match_case_insensitive_on_disk_folder_casing() {
+        // Regression: FAT32/exFAT resolves paths case-insensitively, so a folder created
+        // under an artist tag's original casing keeps that casing on disk even after the
+        // tag is later corrected in the library (FAT doesn't rename an existing directory
+        // entry just because a later write used different casing for the "same"
+        // case-insensitively path). The indexed-vs-on-disk presence comparison must not be
+        // case-sensitive, or this casing drift produces a false missing/unindexed pair even
+        // though the file is perfectly reachable.
+        let root = tempdir().expect("tempdir");
+        let track_dir = root.path().join("Contents").join("SOME ARTIST");
+        fs::create_dir_all(&track_dir).expect("create contents dir");
+        fs::write(track_dir.join("Track.mp3"), b"fake audio").expect("write audio file");
+
+        let mut parsed = ParsedPdb::default();
+        parsed.tracks.push(make_pdb_track(
+            1,
+            "Track",
+            1,
+            "/Contents/Some Artist/Track.mp3",
+        ));
+
+        let mut warnings = Vec::new();
+        let indexed_paths = super::collect_strict_indexed_paths(
+            &parsed,
+            &HashMap::new(),
+            root.path(),
+            &mut warnings,
+        );
+        let actual_files: std::collections::HashSet<String> =
+            crate::service::usb_utils::collect_contents_audio_files(root.path())
+                .into_iter()
+                .map(|p| super::normalize_path_for_strict_presence_match(&p))
+                .collect();
+
+        let actual_files_ci: std::collections::HashSet<String> = actual_files
+            .iter()
+            .map(|p| super::contents_path_match_key(p))
+            .collect();
+        let indexed_paths_ci: std::collections::HashSet<String> = indexed_paths
+            .iter()
+            .map(|p| super::contents_path_match_key(p))
+            .collect();
+        let missing_count = indexed_paths
+            .iter()
+            .filter(|p| !actual_files_ci.contains(&super::contents_path_match_key(p)))
+            .count();
+        let extra_count = actual_files
+            .iter()
+            .filter(|p| !indexed_paths_ci.contains(&super::contents_path_match_key(p)))
+            .count();
+        assert_eq!(
+            missing_count, 0,
+            "the indexed path must match the on-disk file despite differing folder casing"
+        );
+        assert_eq!(
+            extra_count, 0,
+            "the on-disk file must match the indexed path despite differing folder casing"
         );
     }
 
