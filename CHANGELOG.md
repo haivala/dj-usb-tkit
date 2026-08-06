@@ -39,6 +39,8 @@
 - **Chore:** de-duplicate frontend JS boilerplate in `vanilla-ui`
 - **Chore:** trim unit tests that duplicated existing e2e coverage in `vanilla-ui`, consolidate a shared test DOM fixture, add an opt-in e2e coverage report (`npm run test:e2e:coverage`)
 - **Fix:** determine track USB-origin authoritatively on the backend (`Track.isUsbPath`, matched against the full `usb_devices` registry) instead of a frontend heuristic that only checked whichever USB root happened to be selected in the current session
+- **Fix:** stop additive USB export from desyncing every *other* playlist's sibling order. `move_export_playlist_row_to_front` (eDB) bumped every sibling's `sequenceNo` by +1 unconditionally on each export, while the PDB writer always recomputes a fresh contiguous `sort_order` from current relative order. The two matched by luck on a playlist's first export but diverged for any sibling sorting after the exported playlist, then drifted further on every repeat additive export — surfacing as "Playlist ordering parity" failures on every playlist except the one just exported.
+- **Fix:** stop `limit_contents_file_name` from stripping a trailing space off an on-disk export filename when that space legitimately fit inside the character budget (it was popped unconditionally, not only when it was the character truncation actually cut off).
 
 ## 0.1.10
 

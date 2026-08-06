@@ -99,7 +99,13 @@ pub fn limit_contents_file_name(file_name: &str, max_len: usize) -> String {
     let reserved = if reserve_ext { ext_len } else { 0 };
     let keep = max_len.saturating_sub(reserved);
     let mut trimmed_stem = stem.chars().take(keep).collect::<String>();
-    while trimmed_stem.ends_with(' ') || trimmed_stem.ends_with('.') {
+    // A trailing space on the stem is not a trailing space on the final
+    // filename once the extension is appended (e.g. "Title -" + ".mp3" =
+    // "Title -.mp3", which is valid but silently drops a meaningful
+    // character if the real file name is "Title - .mp3"). Only a trailing
+    // dot is unsafe to leave in place, since it would visually run into the
+    // extension's own dot.
+    while trimmed_stem.ends_with('.') {
         trimmed_stem.pop();
     }
     if trimmed_stem.is_empty() {

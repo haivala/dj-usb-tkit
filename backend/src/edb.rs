@@ -912,7 +912,16 @@ fn move_export_playlist_row_to_front(
         return Ok(());
     }
 
-    if columns.iter().any(|c| c == "playlist_id_parent") {
+    let has_parent_col = columns.iter().any(|c| c == "playlist_id_parent");
+
+    // Renumber siblings to a fresh contiguous sequence (target = 0, the rest
+    // keep their existing relative order at 1..N) instead of incrementing
+    // every other sibling's sequenceNo unconditionally. An unconditional +1
+    // diverges from the PDB side (`move_playlist_tree_row_to_front`, which
+    // always recomputes a tight contiguous sort_order) after the very first
+    // run whenever a sibling already sorts after the target, and the two
+    // surfaces drift further apart on every additional additive export.
+    let mut sibling_ids: Vec<i64> = if has_parent_col {
         let parent_id = conn
             .query_row(
                 "SELECT COALESCE(playlist_id_parent, 0) FROM playlist WHERE playlist_id = ?1",
@@ -921,27 +930,35 @@ fn move_export_playlist_row_to_front(
             )
             .optional()?
             .unwrap_or(0);
-        conn.execute(
-            "UPDATE playlist
-             SET sequenceNo = COALESCE(sequenceNo, 0) + 1
+        let mut stmt = conn.prepare(
+            "SELECT playlist_id FROM playlist
              WHERE attribute = 0
                AND COALESCE(playlist_id_parent, 0) = ?1
-               AND playlist_id <> ?2",
-            params![parent_id, playlist_id],
+               AND playlist_id <> ?2
+             ORDER BY COALESCE(sequenceNo, 0) ASC, playlist_id ASC",
         )?;
+        let rows = stmt.query_map(params![parent_id, playlist_id], |row| row.get::<_, i64>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
     } else {
-        conn.execute(
-            "UPDATE playlist
-             SET sequenceNo = COALESCE(sequenceNo, 0) + 1
-             WHERE attribute = 0 AND playlist_id <> ?1",
-            params![playlist_id],
+        let mut stmt = conn.prepare(
+            "SELECT playlist_id FROM playlist
+             WHERE attribute = 0 AND playlist_id <> ?1
+             ORDER BY COALESCE(sequenceNo, 0) ASC, playlist_id ASC",
         )?;
-    }
+        let rows = stmt.query_map(params![playlist_id], |row| row.get::<_, i64>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
 
     conn.execute(
         "UPDATE playlist SET sequenceNo = 0 WHERE playlist_id = ?1 AND attribute = 0",
         params![playlist_id],
     )?;
+    for (idx, sibling_id) in sibling_ids.drain(..).enumerate() {
+        conn.execute(
+            "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 AND attribute = 0",
+            params![(idx as i64) + 1, sibling_id],
+        )?;
+    }
     Ok(())
 }
 
@@ -1897,6 +1914,68 @@ mod tests {
             vec![(1, 1), (2, 0), (3, 0)],
             "target root playlist should move first without shifting other parents"
         );
+    }
+
+    #[test]
+    fn upsert_export_playlist_row_reruns_produce_stable_contiguous_sequence() {
+        // Regression test: a naive "increment every other sibling by 1" front-move
+        // (the old implementation) stays correct for one sibling, but diverges
+        // from the PDB side's fresh contiguous renumbering as soon as a sibling
+        // sorts after the target, and drifts further on every repeated run. The
+        // PDB writer (`move_playlist_tree_row_to_front`) always recomputes a
+        // tight 0..N-1 sequence from current relative order, so eDB must match
+        // that exactly (same values, not just same relative order) or strict
+        // parity's "Playlist ordering parity" check fails for every sibling.
+        let temp = tempdir().expect("tempdir");
+        let db_path = export_db_path(temp.path());
+        let conn = rusqlite::Connection::open(&db_path).expect("create sqlite db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE playlist (
+              playlist_id INTEGER PRIMARY KEY,
+              name TEXT,
+              attribute INTEGER,
+              playlist_id_parent INTEGER,
+              sequenceNo INTEGER
+            );
+            CREATE TABLE playlist_content (playlist_id INTEGER, content_id INTEGER, sequenceNo INTEGER);
+            INSERT INTO playlist (playlist_id, name, attribute, playlist_id_parent, sequenceNo) VALUES
+              (1, 'A0', 0, 0, 0),
+              (2, 'A1', 0, 0, 1),
+              (3, 'Target', 0, 0, 2),
+              (4, 'A2', 0, 0, 3),
+              (5, 'A3', 0, 0, 4);
+            "#,
+        )
+        .expect("seed playlists");
+
+        let playlist = ExportPlaylistData {
+            id: "pl-target".to_string(),
+            name: "Target".to_string(),
+            tracks: Vec::new(),
+        };
+
+        let expected_after_one_run = vec![(1, 1), (2, 2), (3, 0), (4, 3), (5, 4)];
+        for _ in 0..2 {
+            let playlist_id =
+                upsert_export_playlist_row(&conn, &playlist).expect("upsert existing playlist");
+            assert_eq!(playlist_id, 3);
+            let rows = conn
+                .prepare(
+                    "SELECT playlist_id, sequenceNo FROM playlist WHERE attribute = 0 ORDER BY playlist_id",
+                )
+                .expect("prepare query")
+                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+                .expect("query rows")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("collect rows");
+            assert_eq!(
+                rows, expected_after_one_run,
+                "sequenceNo must be a fresh contiguous 0..N-1 sequence (matching PDB's \
+                 recomputed sort_order) on every run, not an unconditional +1 to every \
+                 other sibling"
+            );
+        }
     }
 
     #[test]
