@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.10
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix:** restore waveform color refresh on USB/history track rows after
