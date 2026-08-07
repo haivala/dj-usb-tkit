@@ -640,13 +640,70 @@ impl BackendService {
             .filter(|p| history_only_pdb_paths.contains(*p))
             .count();
         let edb_only_count = edb_indexed_paths.difference(&pdb_indexed_paths).count();
-        let contents_integrity = diagnose_contents_integrity_db_only(
+        let mut contents_integrity = diagnose_contents_integrity_db_only(
             pdb_indexed_paths.len(),
             edb_indexed_paths.len(),
             true_pdb_only_count,
             edb_only_count,
             history_only_count,
         );
+
+        // String alignment: a track/album row whose UTF-16 string slot isn't 4-byte aligned
+        // freezes/comm-errors CDJ hardware while browsing (see `detect_pdb_string_misalignment`
+        // for the full MIPS-alignment explanation). `dump_pdb_anomalies`-style checks only look
+        // at page/table shape, so this is otherwise invisible on read.
+        {
+            let misaligned = super::repair::detect_pdb_string_misalignment(&pdb_path);
+            let status = if misaligned.is_empty() {
+                DiagStatus::Pass
+            } else {
+                DiagStatus::Fail
+            };
+            let detail = if misaligned.is_empty() {
+                "All UTF-16 string slots are 4-byte aligned".to_string()
+            } else {
+                let examples = misaligned
+                    .iter()
+                    .take(3)
+                    .map(|m| {
+                        format!(
+                            "{} #{} ({})",
+                            table_type_label(m.table_type),
+                            m.id,
+                            m.slot_label
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "{} row(s) with a misaligned UTF-16 string slot — freezes/comm-errors CDJ \
+                     hardware while browsing; e.g. {examples}; run repair_pdb_track_string_alignment \
+                     / repair_pdb_album_string_alignment to fix",
+                    misaligned.len()
+                )
+            };
+            if matches!(status, DiagStatus::Fail) {
+                raw_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.pdb-string-misalignment",
+                    detail.clone(),
+                ));
+            }
+            contents_integrity.checks.push(DiagCheck {
+                label: "Track/album string alignment".to_string(),
+                status,
+                detail,
+                link: None,
+            });
+            contents_integrity.status = DiagStatus::worst_of(
+                &contents_integrity
+                    .checks
+                    .iter()
+                    .map(|c| &c.status)
+                    .collect::<Vec<_>>(),
+            );
+        }
         note_stage("contents integrity", &mut raw_warnings);
 
         // --- 4. Analysis Integrity ---
@@ -3091,6 +3148,15 @@ pub(crate) fn build_meta_key(title: &str, artist: &str) -> String {
         canonicalize_playlist_name(title),
         canonicalize_playlist_name(artist)
     )
+}
+
+fn table_type_label(table_type: u32) -> &'static str {
+    match table_type {
+        0 => "track",
+        2 => "artist",
+        3 => "album",
+        _ => "row",
+    }
 }
 
 fn normalize_contents_path(value: &str, lowercase_output: bool) -> String {

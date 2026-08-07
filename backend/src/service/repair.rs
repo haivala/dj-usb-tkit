@@ -26,9 +26,9 @@ use super::BackendService;
 use super::analysis::build_waveform_preview_from_audio;
 use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle};
 use super::export_helpers::{
-    ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbTrackRowData, load_table_columns,
-    remove_track_ids_from_pdb_playlist_entries, replace_export_playlist_row_with_identity,
-    table_exists, write_edb_playlist, write_pdb,
+    ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRowData,
+    encode_album_row, load_table_columns, remove_track_ids_from_pdb_playlist_entries,
+    replace_export_playlist_row_with_identity, table_exists, write_edb_playlist, write_pdb,
 };
 use super::usb_utils::{
     canonicalize_playlist_name, collect_contents_audio_files, resolve_usb_root,
@@ -60,6 +60,8 @@ const PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID: &str = "repair_pdb_wrong_playlist_tr
 const PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID: &str = "repair_pdb_tombstoned_playlist_tree_ids";
 const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_pages";
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
+const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
+const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
 
 #[derive(Debug, Default, Clone)]
 struct StrictParityUpgradeApplyResult {
@@ -501,6 +503,164 @@ pub(super) fn detect_pdb_wrong_track_u5(pdb_path: &Path) -> Vec<WrongTrackU5Page
     out
 }
 
+/// A track/album/artist row whose UTF-16 (`0x90`-marker) string slot starts at a row-relative
+/// offset that isn't 4-byte aligned.
+#[derive(Debug, Clone)]
+pub(super) struct MisalignedStringSlot {
+    /// 0 = tracks (t00), 2 = artists (t02), 3 = albums (t03).
+    pub(super) table_type: u32,
+    pub(super) id: u32,
+    pub(super) slot_label: &'static str,
+}
+
+/// Mirrors `pdb_reader::track_string_slot_label` (private to that module — duplicated here as a
+/// small const lookup rather than widening its visibility just for a label string).
+const TRACK_STRING_SLOT_LABELS: [&str; 21] = [
+    "isrc",
+    "lyricist",
+    "unknown_string_2",
+    "unknown_string_3",
+    "unknown_string_4",
+    "message",
+    "publish_track_info",
+    "autoload_hotcues",
+    "unknown_string_5",
+    "unknown_string_6",
+    "date_added",
+    "release_date",
+    "mix_name",
+    "unknown_string_7",
+    "analysis_path_start",
+    "analysis_path_end",
+    "comment",
+    "title_start",
+    "title_end",
+    "filename",
+    "track_file_path",
+];
+
+/// Detect rows whose UTF-16 string slot isn't 4-byte aligned. MIPS-based player hardware
+/// requires 4-byte aligned reads for the UTF-16 header (`0x90 [len:u16] 0x00`); a misaligned slot
+/// freezes/comm-errors CDJ hardware while browsing. Any exporter that doesn't guarantee this
+/// alignment can produce it. `dump_pdb_anomalies`-style checks only look at page/table shape,
+/// not per-row string alignment.
+///
+/// Artist near-variant rows (`encode_artist_row`) hardcode a 4-byte-aligned name offset (12), so
+/// the current writer can never produce a misaligned artist row — table 2 is still checked
+/// here for diagnostic completeness (e.g. a foreign-origin PDB), but `repair_usb_diagnostics`
+/// offers no automated fix for it, only tracks (t00) and albums (t03).
+pub(super) fn detect_pdb_string_misalignment(pdb_path: &Path) -> Vec<MisalignedStringSlot> {
+    use crate::pdb_writer::parse_page_row_slots;
+    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
+    let Ok(bytes) = std::fs::read(pdb_path) else {
+        return Vec::new();
+    };
+    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+        return Vec::new();
+    };
+    if page_size == 0 || bytes.len() < page_size * 2 {
+        return Vec::new();
+    }
+    let total = bytes.len() / page_size;
+    let mut out = Vec::new();
+    for i in 1..total {
+        let off = i * page_size;
+        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+            continue;
+        };
+        if idx == 0 {
+            continue;
+        }
+        let table_type = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        if !matches!(table_type, 0 | 2 | 3) {
+            continue;
+        }
+        let used_s = read_u16_le_at(&bytes, off + 30).unwrap_or(0) as usize;
+        if used_s == 0 {
+            continue;
+        }
+        let Some(page) = bytes.get(off..off + page_size) else {
+            continue;
+        };
+        let payload_len = used_s.min(page_size.saturating_sub(40));
+        for slot in parse_page_row_slots(page, page_size) {
+            if !slot.present || slot.end > payload_len || slot.start >= slot.end {
+                continue;
+            }
+            let row_abs = off + 40 + slot.start;
+            let row_len = slot.end - slot.start;
+            let Some(row) = bytes.get(row_abs..row_abs + row_len) else {
+                continue;
+            };
+            match table_type {
+                0 => {
+                    if row_len < 136 {
+                        continue;
+                    }
+                    let Some(id) = read_u32_le_at(row, 72) else {
+                        continue;
+                    };
+                    for (index, label) in TRACK_STRING_SLOT_LABELS.iter().enumerate() {
+                        let Some(slot_offset) =
+                            read_u16_le_at(row, 94 + 2 * index).map(|v| v as usize)
+                        else {
+                            continue;
+                        };
+                        if row.get(slot_offset) == Some(&0x90) && slot_offset % 4 != 0 {
+                            out.push(MisalignedStringSlot {
+                                table_type,
+                                id,
+                                slot_label: label,
+                            });
+                        }
+                    }
+                }
+                3 => {
+                    if row_len < 16 {
+                        continue;
+                    }
+                    let Some(id) = read_u32_le_at(row, 12) else {
+                        continue;
+                    };
+                    let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
+                    if row.get(name_offset) == Some(&0x90) && !name_offset.is_multiple_of(4) {
+                        out.push(MisalignedStringSlot {
+                            table_type,
+                            id,
+                            slot_label: "name",
+                        });
+                    }
+                }
+                2 => {
+                    if row_len < 10 {
+                        continue;
+                    }
+                    let Some(id) = read_u32_le_at(row, 4) else {
+                        continue;
+                    };
+                    let typ = read_u16_le_at(row, 0).unwrap_or(0);
+                    let Some(name_offset) = (if typ == 100 {
+                        read_u16_le_at(row, 10).map(|v| v as usize)
+                    } else {
+                        read_u8_at(row, 9).map(|v| v as usize)
+                    }) else {
+                        continue;
+                    };
+                    if row.get(name_offset) == Some(&0x90) && name_offset % 4 != 0 {
+                        out.push(MisalignedStringSlot {
+                            table_type,
+                            id,
+                            slot_label: "name",
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
 /// A tt=0 (tracks) data page with flags=0x34 (ACTV) in a table that has more
 /// than one data page. Reference exports confirm: single-page tt=0 chains use
 /// ACTV (0x34); multi-page chains must use ALL SEAL (0x24). DJ software rejects
@@ -766,6 +926,186 @@ fn apply_pdb_ec_data_page_conflict_repair(
     // Update next_unused_page so future writers don't collide with the new ECs.
     bytes[0x0c..0x10].copy_from_slice(&next_free.to_le_bytes());
 
+    std::fs::write(&pdb_path, &bytes)?;
+    Ok(patched)
+}
+
+/// Round-trip an existing decoded track row into the writer's input struct, unchanged. Used
+/// only to force a re-encode via the current (alignment-fixed) `encode_track_row_with_profile` —
+/// no dictionary lookups needed since nothing semantic changes, unlike `build_merged_pdb_track_row`.
+fn track_row_data_from_reader_row(row: &crate::pdb_reader::PdbTrackRow) -> PdbTrackRowData {
+    PdbTrackRowData {
+        header_flags_u32: None,
+        content_link: row.content_link,
+        sample_rate_hz: row.sample_rate_hz,
+        file_size_bytes: row.file_size_bytes,
+        master_content_id: row.master_content_id,
+        master_db_id: row.master_db_id,
+        id: row.id,
+        artist_id: row.artist_id,
+        album_id: row.album_id,
+        artwork_id: row.artwork_id,
+        key_id: row.key_id,
+        genre_id: row.genre_id,
+        bitrate_kbps: row.bitrate_kbps,
+        track_number: (row.track_number != 0).then_some(row.track_number),
+        bpm: (row.tempo_x100 != 0).then_some(row.tempo_x100 as f64 / 100.0),
+        release_year: row.release_year,
+        bit_depth: row.bit_depth,
+        duration_seconds: row.duration_seconds,
+        file_type: row.file_type,
+        isrc: row.isrc.clone(),
+        date_added: row.date_added.clone(),
+        release_date: row.release_date.clone(),
+        dj_comment: row.dj_comment.clone(),
+        file_name: row.file_name.clone(),
+        publish_track_info_on: Some(row.publish_track_info.as_deref() == Some("ON")),
+        autoload_hotcues_on: Some(row.autoload_hotcues.as_deref() == Some("ON")),
+        title: row.title.clone(),
+        anlz_path: row.anlz_path.clone(),
+        file_path: row.track_file_path.clone(),
+    }
+}
+
+/// Fix track rows whose title/filename/other UTF-16 string slot isn't 4-byte aligned (see
+/// `detect_pdb_string_misalignment`). Re-encodes each row's content unchanged through the
+/// current (already alignment-fixed) `encode_track_row_with_profile` and relocates it via
+/// `mutate_tracks_in_place`, which now refuses to same-size-patch an already-misaligned row (see
+/// `track_row_has_misaligned_utf16_slot` in pdb_writer.rs) and instead always takes the
+/// relocate/append path.
+fn apply_pdb_track_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> BackendResult<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let pdb_path = vendor_pdb_path(usb_root);
+    let mut bytes = std::fs::read(&pdb_path)?;
+    let Some(page_size) = bytes
+        .get(4..8)
+        .and_then(|b| b.try_into().ok())
+        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
+    else {
+        return Err(BackendError::Validation(
+            "PDB too small to read page size".into(),
+        ));
+    };
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
+    let by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
+        parsed.tracks.iter().map(|t| (t.id, t)).collect();
+    let mutations: Vec<crate::pdb_writer::PdbTrackRowMutation> = ids
+        .iter()
+        .filter_map(|id| by_id.get(id))
+        .map(|row| crate::pdb_writer::PdbTrackRowMutation {
+            row: track_row_data_from_reader_row(row),
+            changed_fields: vec!["title", "file_name", "dj_comment", "isrc"],
+        })
+        .collect();
+    if mutations.is_empty() {
+        return Ok(0);
+    }
+    let patched = crate::pdb_writer::mutate_tracks_in_place(
+        &mut bytes,
+        &mutations,
+        PdbLayoutProfile::DEFAULT,
+        page_size,
+    )?;
+    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
+    if !mismatches.is_empty() {
+        let detail = mismatches
+            .iter()
+            .take(8)
+            .map(|m| m.to_string())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        return Err(BackendError::Validation(format!(
+            "Track string alignment repair blocked: page-header convention mismatches ({detail})"
+        )));
+    }
+    std::fs::write(&pdb_path, &bytes)?;
+    Ok(patched)
+}
+
+/// Fix album rows whose UTF-16 name slot isn't 4-byte aligned (see
+/// `detect_pdb_string_misalignment`). Reads each affected row's existing `artist_id`/name
+/// directly off the raw bytes (nothing semantic changes, only the encoding), re-encodes via
+/// `encode_album_row` (already alignment-fixed), and relocates via
+/// `realign_dictionary_rows_in_place`.
+fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> BackendResult<usize> {
+    use crate::utils::{page_offset, read_u8_at, read_u32_le_at};
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let pdb_path = vendor_pdb_path(usb_root);
+    let mut bytes = std::fs::read(&pdb_path)?;
+    let Some(page_size) = bytes
+        .get(4..8)
+        .and_then(|b| b.try_into().ok())
+        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
+    else {
+        return Err(BackendError::Validation(
+            "PDB too small to read page size".into(),
+        ));
+    };
+    let target_ids: HashSet<u32> = ids.iter().copied().collect();
+    let (_ec, first, last) = crate::utils::table_ptr_fields(&bytes, 3).ok_or_else(|| {
+        BackendError::Validation(
+            "Album string alignment repair blocked: t03 pointer missing".into(),
+        )
+    })?;
+    let chain = crate::utils::collect_chain(&bytes, page_size, first, last).ok_or_else(|| {
+        BackendError::Validation("Album string alignment repair blocked: t03 chain invalid".into())
+    })?;
+
+    let mut rows: Vec<(u32, Vec<u8>)> = Vec::new();
+    for page_idx in chain.iter().copied().skip(1) {
+        let Some(off) = page_offset(page_idx, page_size) else {
+            continue;
+        };
+        let Some(page) = bytes.get(off..off + page_size) else {
+            continue;
+        };
+        for slot in crate::pdb_writer::parse_page_row_slots(page, page_size) {
+            if !slot.present || slot.start >= slot.end {
+                continue;
+            }
+            let row_abs = off + 40 + slot.start;
+            let row_len = slot.end - slot.start;
+            let Some(row) = bytes.get(row_abs..row_abs + row_len) else {
+                continue;
+            };
+            if row_len < 16 {
+                continue;
+            }
+            let Some(id) = read_u32_le_at(row, 12) else {
+                continue;
+            };
+            if !target_ids.contains(&id) {
+                continue;
+            }
+            let Some(artist_id) = read_u32_le_at(row, 8) else {
+                continue;
+            };
+            let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
+            let name = crate::pdb_reader::get_string_from_pdb(row, name_offset).unwrap_or_default();
+            rows.push((id, encode_album_row(id, &name, artist_id)));
+        }
+    }
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let patched =
+        crate::pdb_writer::realign_dictionary_rows_in_place(&mut bytes, 3, 12, &rows, page_size)?;
+    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
+    if !mismatches.is_empty() {
+        let detail = mismatches
+            .iter()
+            .take(8)
+            .map(|m| m.to_string())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        return Err(BackendError::Validation(format!(
+            "Album string alignment repair blocked: page-header convention mismatches ({detail})"
+        )));
+    }
     std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
@@ -2643,6 +2983,40 @@ impl BackendService {
         let pdb_wrong_playlist_tree_shape_pages =
             detect_pdb_wrong_playlist_tree_shape(&vendor_pdb_path(&usb_root));
         let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&vendor_pdb_path(&usb_root));
+        let pdb_misaligned_slots = detect_pdb_string_misalignment(&vendor_pdb_path(&usb_root));
+        let pdb_misaligned_track_ids: Vec<u32> = {
+            let mut ids: Vec<u32> = pdb_misaligned_slots
+                .iter()
+                .filter(|m| m.table_type == 0)
+                .map(|m| m.id)
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+            ids.sort_unstable();
+            ids
+        };
+        let pdb_misaligned_album_ids: Vec<u32> = {
+            let mut ids: Vec<u32> = pdb_misaligned_slots
+                .iter()
+                .filter(|m| m.table_type == 3)
+                .map(|m| m.id)
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+            ids.sort_unstable();
+            ids
+        };
+        let pdb_misaligned_artist_ids: Vec<u32> = {
+            let mut ids: Vec<u32> = pdb_misaligned_slots
+                .iter()
+                .filter(|m| m.table_type == 2)
+                .map(|m| m.id)
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+            ids.sort_unstable();
+            ids
+        };
         if !pdb_zero_tranrf_pages.is_empty() {
             detected_issues.push(format!(
                 "{} data page(s) with tranrf=0 and active rows (may be rejected by some DJ software versions)",
@@ -2855,6 +3229,64 @@ impl BackendService {
                 destructive: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
+            });
+        }
+        if !pdb_misaligned_track_ids.is_empty() {
+            detected_issues.push(format!(
+                "{} track row(s) with a misaligned UTF-16 string slot (freezes/comm-errors CDJ hardware while browsing)",
+                pdb_misaligned_track_ids.len()
+            ));
+            estimated_file_writes += 1;
+            proposed_fixes.push(RepairFixProposal {
+                id: PDB_TRACK_STRING_ALIGNMENT_FIX_ID.to_string(),
+                title: "Repair Track String Alignment".to_string(),
+                description: format!(
+                    "Re-encode {} track row(s) whose title/filename/other UTF-16 string slot \
+                     doesn't start at a 4-byte aligned offset. MIPS-based CDJ hardware requires \
+                     4-byte aligned reads for the UTF-16 string header; a misaligned slot \
+                     freezes/comm-errors the player while browsing.",
+                    pdb_misaligned_track_ids.len()
+                ),
+                supported: true,
+                destructive: false,
+                estimated_writes: 1,
+                estimated_deletes: 0,
+            });
+        }
+        if !pdb_misaligned_album_ids.is_empty() {
+            detected_issues.push(format!(
+                "{} album row(s) with a misaligned UTF-16 name slot (freezes/comm-errors CDJ hardware while browsing)",
+                pdb_misaligned_album_ids.len()
+            ));
+            estimated_file_writes += 1;
+            proposed_fixes.push(RepairFixProposal {
+                id: PDB_ALBUM_STRING_ALIGNMENT_FIX_ID.to_string(),
+                title: "Repair Album String Alignment".to_string(),
+                description: format!(
+                    "Re-encode {} album row(s) whose UTF-16 name slot doesn't start at a 4-byte \
+                     aligned offset. Same class of issue as the track string alignment repair.",
+                    pdb_misaligned_album_ids.len()
+                ),
+                supported: true,
+                destructive: false,
+                estimated_writes: 1,
+                estimated_deletes: 0,
+            });
+        }
+        if !pdb_misaligned_artist_ids.is_empty() {
+            detected_issues.push(format!(
+                "{} artist row(s) with a misaligned UTF-16 name slot",
+                pdb_misaligned_artist_ids.len()
+            ));
+            unsupported_items.push(RepairUnsupportedItem {
+                issue: format!(
+                    "{} artist row(s) with a misaligned UTF-16 name slot",
+                    pdb_misaligned_artist_ids.len()
+                ),
+                reason: "This app's own writer always places the artist name at a 4-byte aligned \
+                         offset, so this indicates a foreign-origin PDB. No automated repair is \
+                         offered; re-export the affected playlists to regenerate clean artist rows."
+                    .to_string(),
             });
         }
         let pdb_header_compatibility_repair = detect_pdb_header_compatibility_repair(&usb_root);
@@ -3437,6 +3869,44 @@ impl BackendService {
                 }
             } else if !pdb_ec_conflicts.is_empty() {
                 skipped_fixes.push("Repair Table Write-Pointer Conflict: not selected".to_string());
+            }
+
+            if selected.contains(PDB_TRACK_STRING_ALIGNMENT_FIX_ID) {
+                if pdb_misaligned_track_ids.is_empty() {
+                    skipped_fixes
+                        .push("Repair Track String Alignment: nothing to apply".to_string());
+                } else {
+                    match apply_pdb_track_string_alignment_repair(
+                        &usb_root,
+                        &pdb_misaligned_track_ids,
+                    ) {
+                        Ok(n) => applied_fixes
+                            .push(format!("Repair Track String Alignment: fixed {n} row(s)")),
+                        Err(err) => failed_fixes
+                            .push(format!("Repair Track String Alignment failed: {err}")),
+                    }
+                }
+            } else if !pdb_misaligned_track_ids.is_empty() {
+                skipped_fixes.push("Repair Track String Alignment: not selected".to_string());
+            }
+
+            if selected.contains(PDB_ALBUM_STRING_ALIGNMENT_FIX_ID) {
+                if pdb_misaligned_album_ids.is_empty() {
+                    skipped_fixes
+                        .push("Repair Album String Alignment: nothing to apply".to_string());
+                } else {
+                    match apply_pdb_album_string_alignment_repair(
+                        &usb_root,
+                        &pdb_misaligned_album_ids,
+                    ) {
+                        Ok(n) => applied_fixes
+                            .push(format!("Repair Album String Alignment: fixed {n} row(s)")),
+                        Err(err) => failed_fixes
+                            .push(format!("Repair Album String Alignment failed: {err}")),
+                    }
+                }
+            } else if !pdb_misaligned_album_ids.is_empty() {
+                skipped_fixes.push("Repair Album String Alignment: not selected".to_string());
             }
 
             if selected.contains(PDB_HEADER_COMPATIBILITY_FIX_ID) {
@@ -5120,6 +5590,215 @@ mod tests {
             0
         );
         assert!(detect_pdb_wrong_history_page_shape(&pdb_path).is_empty());
+    }
+
+    /// Build a small realistic PDB (via the real writer) with one track and one album, both
+    /// carrying non-ASCII names, so their string slots are UTF-16 encoded.
+    fn build_seed_pdb_bytes_for_alignment_test() -> Vec<u8> {
+        let mut data = crate::pdb_writer::PdbData::empty();
+        data.artists.push(crate::pdb_writer::PdbArtistRow {
+            id: 1,
+            name: "Existing Artist".into(),
+        });
+        data.albums.push(crate::pdb_writer::PdbAlbumRow {
+            id: 1,
+            name: "Café Album".into(),
+            artist_id: 1,
+        });
+        data.genres.push(crate::pdb_writer::PdbDictRow {
+            id: 1,
+            name: "Existing Genre".into(),
+        });
+        data.keys.push(crate::pdb_writer::PdbKeyRow {
+            id: 1,
+            name: "Am".into(),
+        });
+        data.tracks.push(PdbTrackRowData {
+            header_flags_u32: None,
+            id: 1,
+            artist_id: 1,
+            album_id: 1,
+            artwork_id: 0,
+            key_id: 1,
+            genre_id: 0,
+            title: "Café Track".into(),
+            anlz_path: "/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into(),
+            file_path: "/Contents/existing.flac".into(),
+            content_link: None,
+            sample_rate_hz: None,
+            file_size_bytes: None,
+            master_content_id: None,
+            master_db_id: None,
+            bitrate_kbps: None,
+            track_number: None,
+            bpm: None,
+            release_year: None,
+            bit_depth: None,
+            duration_seconds: Some(180),
+            file_type: None,
+            isrc: None,
+            date_added: None,
+            release_date: None,
+            dj_comment: None,
+            file_name: None,
+            publish_track_info_on: None,
+            autoload_hotcues_on: None,
+        });
+        data.colors = crate::pdb_writer::standard_colors();
+        data.columns_raw_rows = crate::pdb_writer::standard_columns_raw();
+        crate::pdb_writer::write_pdb(&data).expect("write seed")
+    }
+
+    /// Corrupt the on-disk track row (id 1) and album row (id 1) to simulate a misaligned export:
+    /// insert one byte before the UTF-16 string content and bump the recorded offset, breaking
+    /// 4-byte alignment without changing the decoded content.
+    fn corrupt_alignment_in_place(bytes: &mut Vec<u8>) {
+        use crate::pdb_writer::{read_present_page_rows, rewrite_variable_page_rows_in_place};
+        use crate::utils::{
+            collect_chain, page_offset, read_u16_le_at, read_u32_le_at, table_ptr_fields,
+        };
+        const PAGE_SIZE: usize = 4096;
+
+        for (table_type, id_offset) in [(0u32, 72usize), (3u32, 12usize)] {
+            let (_ec, first, last) =
+                table_ptr_fields(bytes, table_type).expect("table pointer present");
+            let chain = collect_chain(bytes, PAGE_SIZE, first, last).expect("chain present");
+            for page_idx in chain.into_iter().skip(1) {
+                let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
+                let Some(page_view) = bytes.get(off..off + PAGE_SIZE) else {
+                    continue;
+                };
+                let used_s = read_u16_le_at(page_view, 30).unwrap_or(0);
+                if used_s == 0 {
+                    continue;
+                }
+                let page = page_view.to_vec();
+                let mut rows = read_present_page_rows(&page, PAGE_SIZE);
+                let mut any_changed = false;
+                for row in rows.iter_mut() {
+                    if read_u32_le_at(row, id_offset) != Some(1) {
+                        continue;
+                    }
+                    if table_type == 0 {
+                        let off17 = read_u16_le_at(row, 94 + 2 * 17).unwrap() as usize;
+                        assert_eq!(row[off17], 0x90);
+                        row.insert(off17, 0u8);
+                        for index in 17..21usize {
+                            let off_pos = 94 + 2 * index;
+                            let cur = read_u16_le_at(row, off_pos).unwrap();
+                            row[off_pos..off_pos + 2].copy_from_slice(&(cur + 1).to_le_bytes());
+                        }
+                    } else {
+                        let name_offset = row[21] as usize;
+                        assert_eq!(row[name_offset], 0x90);
+                        row.insert(name_offset, 0u8);
+                        row[21] = (name_offset + 1) as u8;
+                    }
+                    any_changed = true;
+                }
+                if any_changed {
+                    assert!(rewrite_variable_page_rows_in_place(
+                        bytes, page_idx, &rows, PAGE_SIZE
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn detect_pdb_string_misalignment_finds_corrupted_track_and_album_rows() {
+        let mut bytes = build_seed_pdb_bytes_for_alignment_test();
+        assert!(
+            detect_pdb_string_misalignment_bytes(&bytes).is_empty(),
+            "current writer must produce aligned rows"
+        );
+        corrupt_alignment_in_place(&mut bytes);
+
+        let td = tempdir().expect("tempdir");
+        let usb_root = td.path().to_path_buf();
+        let pdb_path = vendor_pdb_path(&usb_root);
+        std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
+        std::fs::write(&pdb_path, &bytes).expect("write corrupted pdb");
+
+        let found = detect_pdb_string_misalignment(&pdb_path);
+        assert!(
+            found.iter().any(|m| m.table_type == 0 && m.id == 1),
+            "must detect the misaligned track row"
+        );
+        assert!(
+            found.iter().any(|m| m.table_type == 3 && m.id == 1),
+            "must detect the misaligned album row"
+        );
+    }
+
+    /// Test-only helper mirroring `detect_pdb_string_misalignment` but operating on an in-memory
+    /// byte buffer, so the "current writer produces clean output" precondition can be asserted
+    /// without a round-trip through a temp file.
+    fn detect_pdb_string_misalignment_bytes(bytes: &[u8]) -> Vec<MisalignedStringSlot> {
+        let td = tempdir().expect("tempdir");
+        let usb_root = td.path().to_path_buf();
+        let pdb_path = vendor_pdb_path(&usb_root);
+        std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
+        std::fs::write(&pdb_path, bytes).expect("write pdb");
+        detect_pdb_string_misalignment(&pdb_path)
+    }
+
+    #[test]
+    fn repair_usb_diagnostics_proposes_and_applies_string_alignment_fixes() {
+        let mut bytes = build_seed_pdb_bytes_for_alignment_test();
+        corrupt_alignment_in_place(&mut bytes);
+
+        let td = tempdir().expect("tempdir");
+        let usb_root = td.path().to_path_buf();
+        let pdb_path = vendor_pdb_path(&usb_root);
+        std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
+        std::fs::write(&pdb_path, &bytes).expect("write corrupted pdb");
+
+        let found_before = detect_pdb_string_misalignment(&pdb_path);
+        assert!(!found_before.is_empty());
+
+        let track_ids: Vec<u32> = found_before
+            .iter()
+            .filter(|m| m.table_type == 0)
+            .map(|m| m.id)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        let album_ids: Vec<u32> = found_before
+            .iter()
+            .filter(|m| m.table_type == 3)
+            .map(|m| m.id)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        assert_eq!(track_ids, vec![1]);
+        assert_eq!(album_ids, vec![1]);
+
+        let track_patched = apply_pdb_track_string_alignment_repair(&usb_root, &track_ids)
+            .expect("apply track repair");
+        assert_eq!(track_patched, 1);
+        let album_patched = apply_pdb_album_string_alignment_repair(&usb_root, &album_ids)
+            .expect("apply album repair");
+        assert_eq!(album_patched, 1);
+
+        assert!(
+            detect_pdb_string_misalignment(&pdb_path).is_empty(),
+            "no misaligned rows should remain after both repairs"
+        );
+
+        let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse repaired pdb");
+        assert_eq!(
+            parsed
+                .tracks
+                .iter()
+                .find(|t| t.id == 1)
+                .map(|t| t.title.as_str()),
+            Some("Café Track")
+        );
+        assert_eq!(
+            parsed.albums.get(&1).map(String::as_str),
+            Some("Café Album")
+        );
     }
 
     #[test]

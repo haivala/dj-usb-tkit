@@ -30,6 +30,12 @@
 
 ## Unreleased
 
+- **New feature:** detect and repair track/album rows with a misaligned UTF-16 string slot —
+  MIPS-based CDJ hardware requires 4-byte aligned reads for the UTF-16 string header, and a
+  misaligned slot freezes/comm-errors the player while browsing. USB Diagnostics' Contents
+  Integrity section now flags any track title/filename/etc. or album name slot that isn't
+  4-byte aligned, and Repair can re-encode and relocate the affected rows in place.
+
 ## 0.1.10
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

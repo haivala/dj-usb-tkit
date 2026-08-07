@@ -4744,7 +4744,7 @@ mod tests {
         // encoded string length changes), forcing the additive writer to
         // relocate the row and tombstone the old slot. That vacated slot
         // must not be left holding a duplicate of the relocated row's id —
-        // see `mark_track_slot_inactive` in pdb_writer.rs.
+        // see `mark_row_slot_inactive` in pdb_writer.rs.
         let tombstoned = crate::service::repair::detect_pdb_tombstoned_playlist_tree_ids(
             &usb_root
                 .join(USB_VENDOR_ROOT_DIR)

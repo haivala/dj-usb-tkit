@@ -931,7 +931,7 @@ fn parse_history_row(row: &[u8]) -> Option<PdbHistoryRow> {
     Some(PdbHistoryRow { date, num })
 }
 
-fn get_string_from_pdb(row: &[u8], offset: usize) -> Option<String> {
+pub(crate) fn get_string_from_pdb(row: &[u8], offset: usize) -> Option<String> {
     let n = read_u8(row, offset)? as usize;
     if n % 2 == 1 {
         let r = (n - 1) / 2;

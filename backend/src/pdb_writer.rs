@@ -4354,6 +4354,24 @@ fn patch_changed_string_slot(
     patch_track_row_slot_bytes_if_len_matches(row, slot_index, &desired)
 }
 
+/// True if any of the row's 21 string slots is UTF-16 encoded (`0x90` marker) but starts at a
+/// row-relative offset that isn't 4-byte aligned. MIPS-based player hardware requires 4-byte
+/// aligned reads for that header; a misaligned slot froze/comm-errored CDJ hardware while
+/// browsing (see `encode_track_row_with_profile`'s alignment padding, added to fix this at
+/// write time). A same-size in-place patch never touches the offset table, so it can't fix an
+/// already-misaligned slot — it would silently leave the row broken.
+fn track_row_has_misaligned_utf16_slot(row: &[u8]) -> bool {
+    for index in 0..21usize {
+        let Some(offset) = read_u16_le_at(row, 94 + 2 * index).map(|v| v as usize) else {
+            continue;
+        };
+        if row.get(offset) == Some(&0x90) && offset % 4 != 0 {
+            return true;
+        }
+    }
+    false
+}
+
 fn build_same_size_track_row_patch(
     row: &[u8],
     mutation: &PdbTrackRowMutation,
@@ -4364,6 +4382,12 @@ fn build_same_size_track_row_patch(
             mutation.row.id,
             row.len()
         )));
+    }
+
+    if track_row_has_misaligned_utf16_slot(row) {
+        // Force the caller down the relocate path (full re-encode + tombstone + append) instead
+        // of patching content back into the same misaligned slot bounds.
+        return Ok(None);
     }
 
     let mut patched = row.to_vec();
@@ -4519,10 +4543,17 @@ fn build_same_size_track_row_patch(
     }
 }
 
-fn mark_track_slot_inactive(
+/// Tombstone a row's slot within its page (clear it from `rowpf`, mark it in `tranrf`, decrement
+/// the page's active-row count) and zero its id field so the vacated slot isn't left as a live
+/// duplicate of whatever row replaces it elsewhere in the chain.
+///
+/// `id_field_offset` is the row-relative byte offset of the table's id field: `0x48` (72) for
+/// tracks (t00), `4` for artists (t02), `12` for albums (t03).
+fn mark_row_slot_inactive(
     bytes: &mut [u8],
     page_idx: u32,
     slot: PageRowSlot,
+    id_field_offset: usize,
     page_size: usize,
 ) -> BackendResult<()> {
     let off = page_offset(page_idx, page_size).ok_or_else(|| {
@@ -4546,15 +4577,14 @@ fn mark_track_slot_inactive(
     let new_tranrf = tranrf | slot.bit_mask;
     bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&new_tranrf.to_le_bytes());
 
-    // Zero the id field (offset 0x48) in the row we're vacating. The
-    // replacement row carries the same track id to a new slot elsewhere in
-    // the chain, so leaving the old id in place here would make this
+    // Zero the id field in the row we're vacating. The replacement row carries the same id to a
+    // new slot elsewhere in the chain, so leaving the old id in place here would make this
     // tombstoned slot a live duplicate of the new row's id — exactly what
     // `detect_pdb_tombstoned_playlist_tree_ids`/the "Repair Tombstoned Row
     // IDs" fix in service::repair exists to clean up after the fact. Zero it
     // at the source instead of relying on that separate repair pass.
     let row_abs = off + PAGE_HEADER_SIZE + slot.start;
-    if let Some(id_off) = row_abs.checked_add(0x48)
+    if let Some(id_off) = row_abs.checked_add(id_field_offset)
         && id_off + 4 <= bytes.len()
     {
         bytes[id_off..id_off + 4].copy_from_slice(&0u32.to_le_bytes());
@@ -4744,7 +4774,7 @@ pub(crate) fn mutate_tracks_in_place(
                         replacement.len()
                     )));
                 }
-                mark_track_slot_inactive(bytes, page_idx, slot, page_size)?;
+                mark_row_slot_inactive(bytes, page_idx, slot, 0x48, page_size)?;
                 replacement_rows.push(replacement);
             }
             patched_ids.insert(track_id);
@@ -4766,6 +4796,129 @@ pub(crate) fn mutate_tracks_in_place(
 
     if !replacement_rows.is_empty() {
         let outcome = append_rows_to_chain_in_place(bytes, 0, &replacement_rows, page_size)?;
+        if outcome.pages_reused > 0 || outcome.pages_appended > 0 {
+            patched_pages.insert(outcome.new_last_page);
+        }
+    }
+
+    if !patched_pages.is_empty() {
+        let mut next_seq = max_seqpage_in_file(bytes, page_size)
+            .saturating_add(1)
+            .max(2);
+        let mut pages: Vec<u32> = patched_pages.into_iter().collect();
+        pages.sort_unstable();
+        for page_idx in pages {
+            if let Some(off) = page_offset(page_idx, page_size) {
+                let _ = write_u32_le_at(bytes, off + 0x10, next_seq);
+                next_seq = next_seq.saturating_add(1);
+            }
+        }
+        let seqdb = read_u32_le_at(bytes, 0x14)
+            .unwrap_or(0)
+            .max(next_seq)
+            .max(max_seqpage_in_file(bytes, page_size).saturating_add(1));
+        let _ = write_u32_le_at(bytes, 0x14, seqdb);
+    }
+
+    Ok(patched_ids.len())
+}
+
+/// Relocate existing dictionary-table (artists t02, albums t03) rows whose id matches one of
+/// `rows`, replacing each with freshly-encoded bytes of a possibly different length. Unlike
+/// `mutate_tracks_in_place`, there is no same-size in-place patch attempt: every current caller
+/// (the string-alignment repair) always needs a full re-encode, since the row's content hasn't
+/// changed — only its byte layout (the UTF-16 name slot moving to a 4-byte aligned offset).
+///
+/// `id_offset` is the row-relative byte offset of the table's id field (`4` for artists, `12`
+/// for albums).
+pub(crate) fn realign_dictionary_rows_in_place(
+    bytes: &mut Vec<u8>,
+    table_type: u32,
+    id_offset: usize,
+    rows: &[(u32, Vec<u8>)],
+    page_size: usize,
+) -> BackendResult<usize> {
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
+        return Err(BackendError::Validation(
+            "PDB dictionary row realignment blocked: invalid page alignment".to_string(),
+        ));
+    }
+
+    let desired_by_id: std::collections::HashMap<u32, &Vec<u8>> =
+        rows.iter().map(|(id, row)| (*id, row)).collect();
+    let (_ec, first, last) = table_ptr_fields(bytes, table_type).ok_or_else(|| {
+        BackendError::Validation(format!(
+            "PDB dictionary row realignment blocked: table {table_type} pointer missing"
+        ))
+    })?;
+    let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
+        BackendError::Validation(format!(
+            "PDB dictionary row realignment blocked: table {table_type} chain invalid"
+        ))
+    })?;
+
+    let mut patched_ids = std::collections::HashSet::<u32>::new();
+    let mut patched_pages = std::collections::HashSet::<u32>::new();
+    let mut replacement_rows = Vec::<Vec<u8>>::new();
+    for page_idx in chain.iter().copied().skip(1) {
+        let Some(off) = page_offset(page_idx, page_size) else {
+            continue;
+        };
+        let Some(page) = bytes.get(off..off + page_size) else {
+            continue;
+        };
+        let used_s = read_u16_le_at(page, 30).unwrap_or(0) as usize;
+        if used_s == 0 {
+            continue;
+        }
+        let payload_len = used_s.min(page_size.saturating_sub(PAGE_HEADER_SIZE));
+        let slots = parse_page_row_slots(page, page_size);
+        for slot in slots {
+            if !slot.present || slot.end > payload_len || slot.start >= slot.end {
+                continue;
+            }
+            let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+            let row_len = slot.end - slot.start;
+            if row_len < id_offset + 4 {
+                continue;
+            }
+            let Some(id) = read_u32_le_at(bytes, row_abs + id_offset) else {
+                continue;
+            };
+            let Some(replacement) = desired_by_id.get(&id).copied() else {
+                continue;
+            };
+            if replacement.len() > MAX_ROW_LEN {
+                return Err(BackendError::Validation(format!(
+                    "PDB dictionary row realignment blocked: replacement table {table_type} row {id} exceeds page capacity ({} bytes; max {MAX_ROW_LEN})",
+                    replacement.len()
+                )));
+            }
+            mark_row_slot_inactive(bytes, page_idx, slot, id_offset, page_size)?;
+            replacement_rows.push(replacement.clone());
+            patched_ids.insert(id);
+            patched_pages.insert(page_idx);
+        }
+    }
+
+    if patched_ids.len() != desired_by_id.len() {
+        let missing = desired_by_id
+            .keys()
+            .filter(|id| !patched_ids.contains(id))
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(BackendError::Validation(format!(
+            "PDB dictionary row realignment incomplete: missing table {table_type} row(s) {missing}"
+        )));
+    }
+
+    if !replacement_rows.is_empty() {
+        let outcome =
+            append_rows_to_chain_in_place(bytes, table_type, &replacement_rows, page_size)?;
         if outcome.pages_reused > 0 || outcome.pages_appended > 0 {
             patched_pages.insert(outcome.new_last_page);
         }
@@ -6507,7 +6660,7 @@ mod additive_tests {
     fn mutate_tracks_in_place_zeroes_id_on_relocated_slot() {
         // Regression: when a track's row can't be patched in place (a
         // changed string field no longer fits the original slot length),
-        // `mutate_tracks_in_place` relocates it via `mark_track_slot_inactive`
+        // `mutate_tracks_in_place` relocates it via `mark_row_slot_inactive`
         // + a freshly appended replacement row. The vacated slot must have
         // its id field zeroed — otherwise it's a live duplicate of the
         // relocated row's id, which is exactly what
@@ -6553,6 +6706,220 @@ mod additive_tests {
             parsed.tracks.iter().filter(|t| t.id == 1).count(),
             1,
             "exactly one active track row should carry id 1 after relocation"
+        );
+    }
+
+    /// Simulate a row whose UTF-16 slot isn't padded to a 4-byte aligned offset: insert one byte
+    /// right before slot 17's (title) content and bump
+    /// the recorded offsets for slots 17..21 (which all shifted right by that insertion) by 1.
+    /// The row's fixed header/offset table (bytes 0..136) is untouched since the insertion point
+    /// is always >= 136.
+    fn corrupt_track_row_title_alignment(row: &[u8]) -> Vec<u8> {
+        let mut row = row.to_vec();
+        let off17 = read_u16_le_at(&row, 94 + 2 * 17).expect("slot 17 offset present") as usize;
+        assert_eq!(
+            off17 % 4,
+            0,
+            "test precondition: current writer must produce an aligned slot 17"
+        );
+        assert_eq!(
+            row[off17], 0x90,
+            "test precondition: non-ASCII title must be UTF-16 encoded"
+        );
+        row.insert(off17, 0u8);
+        for index in 17..21usize {
+            let off_pos = 94 + 2 * index;
+            let cur = read_u16_le_at(&row, off_pos).expect("slot offset present");
+            row[off_pos..off_pos + 2].copy_from_slice(&(cur + 1).to_le_bytes());
+        }
+        row
+    }
+
+    #[test]
+    fn track_row_has_misaligned_utf16_slot_detects_bad_offset() {
+        let mut seed = build_seed_pdb_data();
+        seed.tracks[0].title = "Café Track".into();
+        let bytes = write_pdb(&seed).expect("write seed");
+        let (_page_idx, row_abs, row_len, _slot) =
+            track_row_loc_by_id(&bytes, 1).expect("track row loc");
+        let row = &bytes[row_abs..row_abs + row_len];
+        assert!(
+            !track_row_has_misaligned_utf16_slot(row),
+            "current writer must produce an aligned row"
+        );
+
+        let corrupted = corrupt_track_row_title_alignment(row);
+        assert!(
+            track_row_has_misaligned_utf16_slot(&corrupted),
+            "corrupted row must be detected as misaligned"
+        );
+    }
+
+    #[test]
+    fn mutate_tracks_in_place_fixes_preexisting_misaligned_title_slot() {
+        // Regression: a track row can already be on disk with a misaligned UTF-16 title slot.
+        // Re-running
+        // `mutate_tracks_in_place` on it — even with the title content itself unchanged — must
+        // actually fix the alignment, not silently same-size-patch content back into the same
+        // broken slot bounds (which is what happened before the `track_row_has_misaligned_utf16_slot`
+        // guard was added: same content -> same encoded length -> "successful" same-size patch
+        // that never touches the offset table).
+        let mut seed = build_seed_pdb_data();
+        seed.tracks[0].title = "Café Track".into();
+        let mut bytes = write_pdb(&seed).expect("write seed");
+
+        let (page_idx, _row_abs, _row_len, _slot) =
+            track_row_loc_by_id(&bytes, 1).expect("track row loc");
+        let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
+        let page = bytes[off..off + PAGE_SIZE].to_vec();
+        let mut page_rows = read_present_page_rows(&page, PAGE_SIZE);
+        for candidate in page_rows.iter_mut() {
+            if read_u32_le_at(candidate, 72) == Some(1) {
+                *candidate = corrupt_track_row_title_alignment(candidate);
+            }
+        }
+        assert!(
+            rewrite_variable_page_rows_in_place(&mut bytes, page_idx, &page_rows, PAGE_SIZE),
+            "repack page with corrupted row"
+        );
+
+        let (_pi, corrupted_row_abs, corrupted_row_len, _slot2) =
+            track_row_loc_by_id(&bytes, 1).expect("corrupted track row loc");
+        assert!(
+            track_row_has_misaligned_utf16_slot(
+                &bytes[corrupted_row_abs..corrupted_row_abs + corrupted_row_len]
+            ),
+            "test setup must actually produce a misaligned row"
+        );
+
+        let mutation_row = seed.tracks[0].clone();
+        let patched = mutate_tracks_in_place(
+            &mut bytes,
+            &[PdbTrackRowMutation {
+                row: mutation_row,
+                changed_fields: vec!["title"],
+            }],
+            PdbLayoutProfile::DEFAULT,
+            PAGE_SIZE,
+        )
+        .expect("mutate track");
+        assert_eq!(patched, 1);
+
+        let (_pi2, fixed_row_abs, fixed_row_len, _slot3) =
+            track_row_loc_by_id(&bytes, 1).expect("fixed track row loc");
+        let fixed_row = &bytes[fixed_row_abs..fixed_row_abs + fixed_row_len];
+        assert!(
+            !track_row_has_misaligned_utf16_slot(fixed_row),
+            "row must be relocated and re-encoded with a correctly aligned slot"
+        );
+
+        let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).expect("parse fixed pdb");
+        assert_eq!(
+            parsed
+                .tracks
+                .iter()
+                .find(|t| t.id == 1)
+                .map(|t| t.title.as_str()),
+            Some("Café Track"),
+            "content must be unchanged, only the encoding"
+        );
+    }
+
+    /// Simulate a misaligned album row: insert one byte before the name's content and bump the
+    /// single-byte `ofs_name_near` field at row offset 21 (see `encode_album_row`).
+    fn corrupt_album_row_name_alignment(row: &[u8]) -> Vec<u8> {
+        let mut row = row.to_vec();
+        let name_offset = row[21] as usize;
+        assert_eq!(
+            name_offset % 4,
+            0,
+            "test precondition: current writer must produce an aligned album name offset"
+        );
+        assert_eq!(
+            row[name_offset], 0x90,
+            "test precondition: non-ASCII album name must be UTF-16 encoded"
+        );
+        row.insert(name_offset, 0u8);
+        row[21] = (name_offset + 1) as u8;
+        row
+    }
+
+    #[test]
+    fn realign_dictionary_rows_in_place_fixes_misaligned_album_name() {
+        let mut seed = build_seed_pdb_data();
+        seed.albums[0].name = "Café Album".into();
+        let mut bytes = write_pdb(&seed).expect("write seed");
+
+        let (_ec, first, last) = table_ptr_fields(&bytes, 3).expect("t03 pointer");
+        let chain = collect_chain_pages(&bytes, PAGE_SIZE, first, last).expect("t03 chain");
+        let page_idx = chain[1];
+        let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
+        let page = bytes[off..off + PAGE_SIZE].to_vec();
+        let mut page_rows = read_present_page_rows(&page, PAGE_SIZE);
+        for candidate in page_rows.iter_mut() {
+            if read_u32_le_at(candidate, 12) == Some(1) {
+                *candidate = corrupt_album_row_name_alignment(candidate);
+            }
+        }
+        assert!(
+            rewrite_variable_page_rows_in_place(&mut bytes, page_idx, &page_rows, PAGE_SIZE),
+            "repack page with corrupted album row"
+        );
+
+        // Confirm the corrupted row is actually misaligned before repairing it.
+        let find_album_row = |bytes: &[u8]| -> (u32, usize, usize) {
+            let (_ec, first, last) = table_ptr_fields(bytes, 3).expect("t03 pointer");
+            let chain = collect_chain_pages(bytes, PAGE_SIZE, first, last).expect("t03 chain");
+            for page_idx in chain.into_iter().skip(1) {
+                let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
+                let page = bytes.get(off..off + PAGE_SIZE).expect("page bytes");
+                let used_s = read_u16_le_at(page, 30).unwrap_or(0) as usize;
+                let payload_len = used_s.min(PAGE_SIZE.saturating_sub(PAGE_HEADER_SIZE));
+                for slot in parse_page_row_slots(page, PAGE_SIZE) {
+                    if !slot.present || slot.end > payload_len || slot.start >= slot.end {
+                        continue;
+                    }
+                    let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+                    let row_len = slot.end - slot.start;
+                    if read_u32_le_at(bytes, row_abs + 12) == Some(1) {
+                        return (page_idx, row_abs, row_len);
+                    }
+                }
+            }
+            panic!("album row 1 not found");
+        };
+
+        let (_pi, corrupted_row_abs, corrupted_row_len) = find_album_row(&bytes);
+        let corrupted_row = &bytes[corrupted_row_abs..corrupted_row_abs + corrupted_row_len];
+        let corrupted_name_offset = corrupted_row[21] as usize;
+        assert_eq!(
+            corrupted_name_offset % 4,
+            1,
+            "test setup must actually produce a misaligned album row"
+        );
+
+        let fresh_row =
+            crate::service::export_helpers::pdb_encoding::encode_album_row(1, "Café Album", 1);
+        let patched =
+            realign_dictionary_rows_in_place(&mut bytes, 3, 12, &[(1u32, fresh_row)], PAGE_SIZE)
+                .expect("realign album row");
+        assert_eq!(patched, 1);
+
+        let (_pi2, fixed_row_abs, fixed_row_len) = find_album_row(&bytes);
+        let fixed_row = &bytes[fixed_row_abs..fixed_row_abs + fixed_row_len];
+        let fixed_name_offset = fixed_row[21] as usize;
+        assert_eq!(
+            fixed_name_offset % 4,
+            0,
+            "album name offset must be 4-byte aligned after repair"
+        );
+        assert_eq!(fixed_row[fixed_name_offset], 0x90);
+
+        let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).expect("parse fixed pdb");
+        assert_eq!(
+            parsed.albums.get(&1).map(String::as_str),
+            Some("Café Album"),
+            "content must be unchanged, only the encoding"
         );
     }
 
