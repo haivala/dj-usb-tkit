@@ -2315,18 +2315,27 @@ pub(crate) fn build_waveform_preview_from_file_bytes(
 mod tests {
     use super::{
         AnalysisEngine, EssentiaResult, build_waveform_data_from_samples,
+        build_waveform_preview_from_audio, build_waveform_preview_from_file_bytes,
         build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
+        count_tracks_missing_core_fields, decode_audio_mono_samples, discover_cover_art_in_dir,
+        discover_cover_art_in_parent, discover_cover_art_path, duration_ms_from_decoded,
         essentia_result_has_detected_values, has_memory_headroom_for_engine,
-        resolve_analysis_bpm_range, resolve_analysis_parallelism_budget_with_cap,
+        local_analysis_bundle_paths, normalize_essentia_result,
+        persist_library_artwork_thumbnail_from_image, resolve_analysis_bpm_range,
+        resolve_analysis_engine, resolve_analysis_parallelism_budget_with_cap,
         resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
         resolve_worker_cap_for_engine, strip_appimage_lib_path, waveform_detail_bins_for_duration,
         waveform_detail_entries_for_duration, waveform_preview_if_persisted,
     };
+    use crate::error::BackendError;
     use crate::service::WAVEFORM_PREVIEW_BINS;
     use crate::service::anlz::WaveformData;
+    use crate::service::export_helpers::stable_u32_hash;
     use rusqlite::Connection;
+    use std::path::Path;
     use std::process::Command;
     use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
 
     fn env_var_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -2828,5 +2837,261 @@ mod tests {
         let requested = vec!["".to_string(), "   ".to_string()];
         let rows = collect_tracks_for_analysis(&conn, &requested).expect("collect tracks");
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn collect_tracks_for_analysis_auto_selects_tracks_missing_core_fields() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        setup_tracks_table(&conn);
+        insert_track(&conn, "t1", "Track 1");
+        conn.execute(
+            "INSERT INTO tracks (id, title, file_path, bpm, tonality, duration_ms, artwork_path, waveform_peaks_path, updated_at)
+             VALUES ('t2', 'Track 2', '/music/t2.mp3', 120.0, '8A', 200000, '/art/t2.jpg', '/wave/t2.dat', '2026-04-02T00:00:00Z')",
+            [],
+        )
+        .expect("insert fully-analyzed track");
+
+        let rows = collect_tracks_for_analysis(&conn, &[]).expect("collect tracks");
+        let ids = rows.into_iter().map(|t| t.id).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["t1".to_string()]);
+    }
+
+    #[test]
+    fn count_tracks_missing_core_fields_counts_incomplete_rows() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        setup_tracks_table(&conn);
+        insert_track(&conn, "t1", "Track 1");
+        conn.execute(
+            "INSERT INTO tracks (id, title, file_path, bpm, tonality, duration_ms, artwork_path, waveform_peaks_path, updated_at)
+             VALUES ('t2', 'Track 2', '/music/t2.mp3', 120.0, '8A', 200000, '/art/t2.jpg', '/wave/t2.dat', '2026-04-02T00:00:00Z')",
+            [],
+        )
+        .expect("insert fully-analyzed track");
+
+        let missing = count_tracks_missing_core_fields(&conn).expect("count missing");
+        assert_eq!(missing, 1);
+    }
+
+    // --- resolve_analysis_engine ---
+
+    #[test]
+    fn resolve_analysis_engine_prefers_explicit_override() {
+        let dir = tempdir().expect("tempdir");
+        let db = crate::db::Db::new(dir.path()).expect("db init");
+        assert_eq!(
+            resolve_analysis_engine(&db, Some("essentia")),
+            AnalysisEngine::Essentia
+        );
+    }
+
+    #[test]
+    fn resolve_analysis_engine_reads_setting_when_no_override() {
+        let dir = tempdir().expect("tempdir");
+        let db = crate::db::Db::new(dir.path()).expect("db init");
+        let conn = db.connect().expect("connect");
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, 'essentia', datetime('now'))",
+            rusqlite::params![crate::service::SETTING_UI_ANALYSIS_ENGINE],
+        )
+        .expect("seed setting");
+        drop(conn);
+
+        assert_eq!(resolve_analysis_engine(&db, None), AnalysisEngine::Essentia);
+    }
+
+    #[test]
+    fn resolve_analysis_engine_defaults_to_stratum_without_setting() {
+        let dir = tempdir().expect("tempdir");
+        let db = crate::db::Db::new(dir.path()).expect("db init");
+        assert_eq!(resolve_analysis_engine(&db, None), AnalysisEngine::Stratum);
+    }
+
+    // --- normalize_essentia_result ---
+
+    #[test]
+    fn normalize_essentia_result_rounds_bpm_and_preserves_key() {
+        let result = EssentiaResult {
+            ok: true,
+            bpm: Some(127.6),
+            key: Some("8A".to_string()),
+            first_beat_ms: None,
+        };
+        let normalized = normalize_essentia_result(result);
+        assert_eq!(normalized.bpm, Some(128.0));
+        assert_eq!(normalized.key.as_deref(), Some("8A"));
+    }
+
+    #[test]
+    fn normalize_essentia_result_leaves_missing_bpm_alone() {
+        let result = EssentiaResult {
+            ok: true,
+            bpm: None,
+            key: Some("8A".to_string()),
+            first_beat_ms: None,
+        };
+        assert_eq!(normalize_essentia_result(result).bpm, None);
+    }
+
+    // --- discover_cover_art_* ---
+
+    #[test]
+    fn discover_cover_art_in_dir_finds_preferred_names_in_priority_order() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("folder.jpg"), b"x").unwrap();
+        std::fs::write(dir.path().join("cover.jpg"), b"x").unwrap();
+        let found = discover_cover_art_in_dir(dir.path()).expect("cover found");
+        assert_eq!(found.file_name().unwrap(), "cover.jpg");
+    }
+
+    #[test]
+    fn discover_cover_art_in_dir_none_when_nothing_matches() {
+        let dir = tempdir().expect("tempdir");
+        assert!(discover_cover_art_in_dir(dir.path()).is_none());
+    }
+
+    #[test]
+    fn discover_cover_art_path_and_in_parent_walk_directory_tree() {
+        let dir = tempdir().expect("tempdir");
+        let album_dir = dir.path().join("Artist/Album");
+        std::fs::create_dir_all(&album_dir).expect("create album dir");
+        std::fs::write(dir.path().join("Artist/cover.jpg"), b"x").expect("write cover");
+        let audio_path = album_dir.join("track.mp3");
+        std::fs::write(&audio_path, b"x").expect("write audio placeholder");
+
+        assert!(
+            discover_cover_art_path(&audio_path).is_none(),
+            "no cover.jpg directly beside the track"
+        );
+        let found = discover_cover_art_in_parent(&audio_path).expect("cover found in parent dir");
+        assert_eq!(found.file_name().unwrap(), "cover.jpg");
+    }
+
+    // --- build_waveform_preview_from_file_bytes ---
+
+    #[test]
+    fn build_waveform_preview_from_file_bytes_returns_empty_for_zero_bins() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("f.bin");
+        std::fs::write(&path, vec![10u8; 100]).unwrap();
+        let result = build_waveform_preview_from_file_bytes(&path, 0, 1000).expect("preview");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn build_waveform_preview_from_file_bytes_returns_zeros_for_empty_file() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("empty.bin");
+        std::fs::write(&path, Vec::<u8>::new()).unwrap();
+        let result = build_waveform_preview_from_file_bytes(&path, 8, 1000).expect("preview");
+        assert_eq!(result, vec![0u8; 8]);
+    }
+
+    #[test]
+    fn build_waveform_preview_from_file_bytes_produces_requested_bin_count() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("data.bin");
+        let bytes: Vec<u8> = (0..255u8).collect();
+        std::fs::write(&path, &bytes).unwrap();
+        let result = build_waveform_preview_from_file_bytes(&path, 16, 4096).expect("preview");
+        assert_eq!(result.len(), 16);
+        assert!(result.iter().all(|&v| v <= 100));
+    }
+
+    #[test]
+    fn build_waveform_preview_from_file_bytes_respects_max_bytes_cap() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("data.bin");
+        std::fs::write(&path, vec![255u8; 10_000]).unwrap();
+        let capped = build_waveform_preview_from_file_bytes(&path, 4, 8).expect("preview");
+        assert_eq!(capped.len(), 4);
+    }
+
+    // --- build_waveform_preview_from_audio ---
+
+    #[test]
+    fn build_waveform_preview_from_audio_empty_for_zero_bins() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("f.mp3");
+        std::fs::write(&path, b"not audio").unwrap();
+        let result = build_waveform_preview_from_audio(&path, 0, 1000).expect("waveform");
+        assert!(result.peaks.is_empty());
+    }
+
+    #[test]
+    fn build_waveform_preview_from_audio_falls_back_to_raw_bytes_when_decode_fails() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("not_audio.mp3");
+        std::fs::write(&path, vec![7u8; 500]).unwrap();
+        let result = build_waveform_preview_from_audio(&path, 8, 1000).expect("waveform");
+        assert_eq!(result.peaks.len(), 8);
+    }
+
+    // --- decode_audio_mono_samples ---
+
+    #[test]
+    fn decode_audio_mono_samples_errors_for_non_audio_file() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("not_audio.mp3");
+        std::fs::write(&path, b"definitely not an audio file").unwrap();
+        let err = decode_audio_mono_samples(&path, 1000).unwrap_err();
+        match err {
+            BackendError::Internal(msg) => {
+                assert!(msg.contains("rodio"));
+                assert!(msg.contains("symphonia"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    // --- duration_ms_from_decoded ---
+
+    #[test]
+    fn duration_ms_from_decoded_computes_ms_and_rejects_zero_inputs() {
+        assert_eq!(duration_ms_from_decoded(44_100, 44_100), Some(1000));
+        assert_eq!(duration_ms_from_decoded(0, 44_100), None);
+        assert_eq!(duration_ms_from_decoded(1000, 0), None);
+    }
+
+    // --- local_analysis_bundle_paths ---
+
+    #[test]
+    fn local_analysis_bundle_paths_uses_track_id_when_source_path_blank() {
+        let dir = tempdir().expect("tempdir");
+        let paths = local_analysis_bundle_paths(dir.path(), "track-123", "   ");
+        let expected_base = format!("{:08X}", stable_u32_hash("track-123"));
+        assert_eq!(
+            paths.dat_path,
+            dir.path().join(format!("{expected_base}.DAT"))
+        );
+    }
+
+    #[test]
+    fn local_analysis_bundle_paths_hashes_normalized_source_path() {
+        let dir = tempdir().expect("tempdir");
+        let a = local_analysis_bundle_paths(dir.path(), "track-123", "/Music/Song.mp3");
+        let b = local_analysis_bundle_paths(dir.path(), "track-123", "/music/song.mp3");
+        assert_eq!(
+            a.dat_path, b.dat_path,
+            "source path hashing is case-insensitive"
+        );
+    }
+
+    // --- persist_library_artwork_thumbnail_from_image ---
+
+    #[test]
+    fn persist_library_artwork_thumbnail_from_image_writes_square_jpeg() {
+        let dir = tempdir().expect("tempdir");
+        let img = image::DynamicImage::new_rgb8(40, 20);
+        let result = persist_library_artwork_thumbnail_from_image(img, dir.path(), "track-1")
+            .expect("thumbnail written");
+        assert!(Path::new(&result).is_file());
+        assert!(result.ends_with("track-1.jpg"));
+    }
+
+    #[test]
+    fn persist_library_artwork_thumbnail_from_image_none_for_zero_sized_image() {
+        let dir = tempdir().expect("tempdir");
+        let img = image::DynamicImage::new_rgb8(0, 10);
+        assert!(persist_library_artwork_thumbnail_from_image(img, dir.path(), "track-1").is_none());
     }
 }

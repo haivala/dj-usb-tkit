@@ -1018,10 +1018,14 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_playlist_tracks_analysis_ready, has_required_analysis, has_required_analysis_fields,
+        BackendService, ensure_playlist_tracks_analysis_ready, existing_usb_relative_if_file,
+        has_required_analysis, has_required_analysis_fields,
     };
     use crate::error::BackendError;
-    use crate::service::export_helpers::{ExportPlaylistData, ExportTrackData};
+    use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest};
+    use crate::service::export_helpers::{
+        ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
+    };
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -1182,5 +1186,388 @@ mod tests {
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
+    }
+
+    // --- existing_usb_relative_if_file ---
+
+    #[test]
+    fn existing_usb_relative_if_file_none_for_blank_path() {
+        let dir = tempdir().expect("tempdir");
+        assert!(existing_usb_relative_if_file(dir.path(), None).is_none());
+        assert!(existing_usb_relative_if_file(dir.path(), Some("   ")).is_none());
+    }
+
+    #[test]
+    fn existing_usb_relative_if_file_none_when_file_missing() {
+        let dir = tempdir().expect("tempdir");
+        assert!(existing_usb_relative_if_file(dir.path(), Some("/Contents/missing.mp3")).is_none());
+    }
+
+    #[test]
+    fn existing_usb_relative_if_file_some_when_file_exists() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("Contents")).expect("create contents dir");
+        let song_path = dir.path().join("Contents/song.mp3");
+        std::fs::write(&song_path, b"data").expect("write file");
+        let result = existing_usb_relative_if_file(dir.path(), Some(&song_path.to_string_lossy()));
+        assert_eq!(result.as_deref(), Some("/Contents/song.mp3"));
+    }
+
+    // --- file_type_from_extension ---
+
+    #[test]
+    fn file_type_from_extension_maps_known_and_unknown_extensions() {
+        assert_eq!(BackendService::file_type_from_extension("mp3"), 1);
+        assert_eq!(BackendService::file_type_from_extension("MP4"), 3);
+        assert_eq!(BackendService::file_type_from_extension("m4a"), 4);
+        assert_eq!(BackendService::file_type_from_extension("aac"), 4);
+        assert_eq!(BackendService::file_type_from_extension("flac"), 5);
+        assert_eq!(BackendService::file_type_from_extension("alac"), 6);
+        assert_eq!(BackendService::file_type_from_extension(" wav "), 11);
+        assert_eq!(BackendService::file_type_from_extension("aiff"), 12);
+        assert_eq!(BackendService::file_type_from_extension("ogg"), 0);
+    }
+
+    // --- ensure_local_u32_setting / ensure_track_master_content_id / resolve_manifest_identity ---
+
+    fn test_service() -> (tempfile::TempDir, BackendService) {
+        let dir = tempdir().expect("service data dir");
+        let service = BackendService::new(dir.path()).expect("backend service");
+        (dir, service)
+    }
+
+    #[test]
+    fn ensure_local_u32_setting_seeds_then_reuses_value() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        let first = BackendService::ensure_local_u32_setting(&conn, "test_setting_key", "seed")
+            .expect("seed setting");
+        assert!(first > 0);
+
+        let second = BackendService::ensure_local_u32_setting(&conn, "test_setting_key", "seed")
+            .expect("reuse setting");
+        assert_eq!(first, second);
+
+        conn.execute(
+            "UPDATE app_settings SET value = '-5' WHERE key = 'test_setting_key'",
+            [],
+        )
+        .expect("corrupt setting");
+        let reseeded = BackendService::ensure_local_u32_setting(&conn, "test_setting_key", "seed")
+            .expect("reseed after invalid value");
+        assert!(reseeded > 0);
+    }
+
+    #[test]
+    fn ensure_track_master_content_id_is_stable_and_unique_per_track() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        BackendService::ensure_track_export_identity_schema(&conn).expect("create schema");
+
+        let id_a1 =
+            BackendService::ensure_track_master_content_id(&conn, "track-a").expect("assign id a");
+        let id_a2 =
+            BackendService::ensure_track_master_content_id(&conn, "track-a").expect("reuse id a");
+        assert_eq!(id_a1, id_a2);
+
+        let id_b =
+            BackendService::ensure_track_master_content_id(&conn, "track-b").expect("assign id b");
+        assert_ne!(id_a1, id_b);
+    }
+
+    #[test]
+    fn resolve_manifest_identity_reuses_existing_identity_verbatim() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        BackendService::ensure_track_export_identity_schema(&conn).expect("create schema");
+
+        let existing: super::UsbTrackIdentity =
+            (Some(11), Some(22), Some(33), Some("/art.jpg".to_string()));
+        let resolved = BackendService::resolve_manifest_identity(
+            &conn,
+            "track-a",
+            Some(&existing),
+            true,
+            999,
+            888,
+        )
+        .expect("resolve identity");
+        assert_eq!(resolved, (Some(11), Some(22), Some(33)));
+    }
+
+    #[test]
+    fn resolve_manifest_identity_assigns_new_identity_when_owns_waveform() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        BackendService::ensure_track_export_identity_schema(&conn).expect("create schema");
+
+        let resolved =
+            BackendService::resolve_manifest_identity(&conn, "track-a", None, true, 999, 888)
+                .expect("resolve identity");
+        assert_eq!(resolved.0, Some(999));
+        assert!(resolved.1.unwrap() > 0);
+        assert_eq!(resolved.2, Some(888));
+    }
+
+    #[test]
+    fn resolve_manifest_identity_none_when_not_owning_waveform_and_no_existing() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        BackendService::ensure_track_export_identity_schema(&conn).expect("create schema");
+
+        let resolved =
+            BackendService::resolve_manifest_identity(&conn, "track-a", None, false, 999, 888)
+                .expect("resolve identity");
+        assert_eq!(resolved, (None, None, None));
+    }
+
+    // --- load_export_owned_files / save_export_owned_files ---
+
+    #[test]
+    fn export_owned_files_roundtrip_and_missing_key_returns_empty() {
+        let (_dir, service) = test_service();
+        let empty = service
+            .load_export_owned_files("owned_files_missing_key")
+            .expect("load missing key");
+        assert!(empty.is_empty());
+
+        let paths: std::collections::HashSet<String> =
+            ["/Contents/a.mp3".to_string(), "/Contents/b.mp3".to_string()]
+                .into_iter()
+                .collect();
+        service
+            .save_export_owned_files("owned_files_key", &paths)
+            .expect("save owned files");
+        let loaded = service
+            .load_export_owned_files("owned_files_key")
+            .expect("load owned files");
+        assert_eq!(loaded, paths);
+    }
+
+    // --- load_playlist_for_export ---
+
+    #[test]
+    fn load_playlist_for_export_returns_not_found_for_unknown_playlist() {
+        let (_dir, service) = test_service();
+        let err = service
+            .load_playlist_for_export("does-not-exist")
+            .unwrap_err();
+        assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn load_playlist_for_export_returns_tracks_in_position_order() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, format_ext, created_at, updated_at)
+             VALUES ('t1', 'Song A', 'Artist', '/music/a.mp3', 'mp3', datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("insert track a");
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, format_ext, created_at, updated_at)
+             VALUES ('t2', 'Song B', 'Artist', '/music/b.flac', 'flac', datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("insert track b");
+        drop(conn);
+
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "Export Me".to_string(),
+            })
+            .expect("create playlist");
+        service
+            .add_tracks_to_playlist(crate::models::AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t2".to_string(), "t1".to_string()],
+                dedupe: crate::models::DedupeMode::Allow,
+            })
+            .expect("add tracks");
+
+        let loaded = service
+            .load_playlist_for_export(&playlist.playlist_id)
+            .expect("load playlist for export");
+        assert_eq!(loaded.name, "Export Me");
+        assert_eq!(
+            loaded
+                .tracks
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["t2".to_string(), "t1".to_string()]
+        );
+        assert_eq!(loaded.tracks[0].file_name, "b.flac");
+        assert_eq!(loaded.tracks[0].file_type, Some(5));
+    }
+
+    // --- verify_export_outputs ---
+
+    fn minimal_manifest(usb_root: &Path, track: ExportManifestTrack) -> ExportManifest {
+        ExportManifest {
+            version: 1,
+            generated_at: "2024-01-01".to_string(),
+            playlist_id: "pl1".to_string(),
+            playlist_name: "Playlist".to_string(),
+            usb_root: usb_root.to_string_lossy().to_string(),
+            options: ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: false,
+                ..Default::default()
+            },
+            exported_tracks: 1,
+            skipped_tracks: 0,
+            warnings: Vec::new(),
+            tracks: vec![track],
+        }
+    }
+
+    fn manifest_track(exported_path: &str) -> ExportManifestTrack {
+        ExportManifestTrack {
+            id: "t1".to_string(),
+            master_db_id: None,
+            master_content_id: None,
+            content_link: None,
+            position: 1,
+            track_number: None,
+            title: "Track".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            bpm: None,
+            key: None,
+            source_path: "/source/track.mp3".to_string(),
+            exported_path: exported_path.to_string(),
+            file_modified_at: None,
+            file_size_bytes: None,
+            sample_rate_hz: None,
+            bit_depth: None,
+            bitrate_kbps: None,
+            disc_number: None,
+            subtitle: None,
+            comment: None,
+            title_for_search: None,
+            kuvo_delivery_comment: None,
+            dj_play_count: None,
+            rating: None,
+            color_id: None,
+            artist_id_lyricist: None,
+            artist_id_original_artist: None,
+            artist_id_remixer: None,
+            artist_id_composer: None,
+            genre_id: None,
+            genre: None,
+            label_id: None,
+            isrc: None,
+            release_year: None,
+            release_date: None,
+            recorded_date: None,
+            file_type: None,
+            owns_exported_media: true,
+            owns_artwork: false,
+            owns_waveform: false,
+            artwork_path: None,
+            waveform_path: None,
+            duration_ms: None,
+        }
+    }
+
+    #[test]
+    fn verify_export_outputs_errors_when_media_file_missing() {
+        let (_dir, service) = test_service();
+        let usb_dir = tempdir().expect("usb dir");
+        let track = manifest_track("/Contents/missing.mp3");
+        let manifest = minimal_manifest(usb_dir.path(), track);
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: Vec::new(),
+        };
+        let err = service
+            .verify_export_outputs(usb_dir.path(), &playlist, &manifest, false, false)
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Internal(_)));
+    }
+
+    #[test]
+    fn verify_export_outputs_warns_on_missing_artwork_and_analysis_but_passes() {
+        let (_dir, service) = test_service();
+        let usb_dir = tempdir().expect("usb dir");
+        std::fs::create_dir_all(usb_dir.path().join("Contents")).expect("create contents dir");
+        std::fs::write(usb_dir.path().join("Contents/track.mp3"), b"data").expect("write media");
+
+        let mut track = manifest_track("/Contents/track.mp3");
+        track.artwork_path = Some("/PIONEER/Artwork/missing.jpg".to_string());
+        track.waveform_path = Some("/PIONEER/USBANLZ/missing/ANLZ0000.DAT".to_string());
+        let manifest = minimal_manifest(usb_dir.path(), track);
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: Vec::new(),
+        };
+
+        let warnings = service
+            .verify_export_outputs(usb_dir.path(), &playlist, &manifest, false, false)
+            .expect("verify outputs");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.code == "export.verify-artwork-missing")
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.code == "export.verify-analysis-missing")
+        );
+        assert!(warnings.iter().any(|w| w.code == "export.verify-passed"));
+    }
+
+    // --- export_to_usb validation paths ---
+
+    #[test]
+    fn export_to_usb_rejects_empty_playlist_id() {
+        let (_dir, service) = test_service();
+        let err = service
+            .export_to_usb(ExportToUsbRequest {
+                usb_root: None,
+                playlist_id: "   ".to_string(),
+                options: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn export_to_usb_rejects_usb_root_that_is_a_file_not_a_directory() {
+        let (_dir, service) = test_service();
+        let file = tempfile::NamedTempFile::new().expect("tempfile");
+        let err = service
+            .export_to_usb(ExportToUsbRequest {
+                usb_root: Some(file.path().to_string_lossy().to_string()),
+                playlist_id: "pl1".to_string(),
+                options: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn export_to_usb_rejects_playlist_with_no_tracks() {
+        let (_dir, service) = test_service();
+        let usb_dir = tempdir().expect("usb dir");
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "Empty".to_string(),
+            })
+            .expect("create playlist");
+        let err = service
+            .export_to_usb(ExportToUsbRequest {
+                usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
+                playlist_id: playlist.playlist_id,
+                options: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
     }
 }

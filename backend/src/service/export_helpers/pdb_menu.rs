@@ -493,3 +493,281 @@ pub fn patch_pdb_t17_category_snapshot(
     std::fs::write(&pdb_path, bytes)?;
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {
+        let td = tempfile::tempdir().expect("tempdir");
+        let usb_root = td.path().join("USB_TEST");
+        std::fs::create_dir_all(&usb_root).expect("create usb root");
+        crate::service::initialize_usb(usb_root.to_str().expect("utf-8 usb root path"))
+            .expect("initialize usb");
+        (td, usb_root)
+    }
+
+    // --- decode_pdb_row_string / encode_pdb_t16_row ---
+
+    #[test]
+    fn decode_pdb_row_string_round_trips_long_utf16_marker() {
+        let row = encode_pdb_t16_row(1, 2, "GENRE");
+        assert_eq!(decode_pdb_row_string(&row, 4).as_deref(), Some("GENRE"));
+    }
+
+    #[test]
+    fn decode_pdb_row_string_rejects_truncated_total_length() {
+        let row = vec![0x90, 0x02, 0x00];
+        assert_eq!(decode_pdb_row_string(&row, 0), None);
+    }
+
+    #[test]
+    fn decode_pdb_row_string_rejects_odd_length_utf16_body() {
+        // total=7 -> body length 3 (odd) for the 0x90 marker.
+        let row = vec![0x90, 7, 0, 0, 0, 0, 0];
+        assert_eq!(decode_pdb_row_string(&row, 0), None);
+    }
+
+    #[test]
+    fn decode_pdb_row_string_decodes_ascii_marker_with_nul_terminator() {
+        let body = b"HELLO\0PAD";
+        let total = 4 + body.len();
+        let mut row = vec![0x40];
+        row.extend_from_slice(&(total as u16).to_le_bytes());
+        row.push(0);
+        row.extend_from_slice(body);
+        assert_eq!(decode_pdb_row_string(&row, 0).as_deref(), Some("HELLO"));
+    }
+
+    #[test]
+    fn decode_pdb_row_string_decodes_short_ascii_marker() {
+        let text = "OK";
+        let marker = (text.len() * 2 + 3) as u8;
+        let mut row = vec![marker];
+        row.extend_from_slice(text.as_bytes());
+        assert_eq!(decode_pdb_row_string(&row, 0).as_deref(), Some("OK"));
+    }
+
+    #[test]
+    fn decode_pdb_row_string_returns_none_for_unrecognized_marker() {
+        let row = vec![0x02, b'A', b'B'];
+        assert_eq!(decode_pdb_row_string(&row, 0), None);
+    }
+
+    #[test]
+    fn encode_pdb_t16_row_returns_empty_for_oversized_name() {
+        let huge_name = "x".repeat(40_000);
+        assert!(encode_pdb_t16_row(1, 2, &huge_name).is_empty());
+    }
+
+    // --- load_pdb_t16_rows_from_bytes / load_pdb_t16_raw / load_pdb_t16_decoded ---
+
+    #[test]
+    fn load_pdb_t16_rows_from_bytes_rejects_non_page_aligned_input() {
+        assert!(load_pdb_t16_rows_from_bytes(&[0u8; 100]).is_none());
+    }
+
+    #[test]
+    fn load_pdb_t16_rows_from_bytes_returns_rows_for_initialized_pdb() {
+        let (_dir, usb_root) = test_usb_root();
+        let pdb_path = usb_root
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb");
+        let bytes = std::fs::read(&pdb_path).expect("read pdb");
+        let rows = load_pdb_t16_rows_from_bytes(&bytes).expect("rows present");
+        assert!(!rows.is_empty());
+    }
+
+    #[test]
+    fn load_pdb_t16_raw_and_decoded_return_empty_when_pdb_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(load_pdb_t16_raw(dir.path()).expect("raw").is_empty());
+        assert!(
+            load_pdb_t16_decoded(dir.path())
+                .expect("decoded")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn load_pdb_t16_decoded_returns_named_rows_for_initialized_usb() {
+        let (_dir, usb_root) = test_usb_root();
+        let rows = load_pdb_t16_decoded(&usb_root).expect("decoded rows");
+        assert!(!rows.is_empty());
+        assert!(rows.iter().any(|r| !r.name.is_empty()));
+    }
+
+    // --- inspect_pdb_columns_playlist_order ---
+
+    #[test]
+    fn inspect_pdb_columns_playlist_order_none_when_pdb_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(
+            inspect_pdb_columns_playlist_order(dir.path())
+                .expect("inspect")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn inspect_pdb_columns_playlist_order_reports_row_count_for_initialized_usb() {
+        let (_dir, usb_root) = test_usb_root();
+        let (_is_first, count) = inspect_pdb_columns_playlist_order(&usb_root)
+            .expect("inspect")
+            .expect("rows present");
+        assert!(count > 0);
+    }
+
+    // --- patch_pdb_columns_menu_order_by_kind / patch_pdb_columns_playlist_first ---
+
+    #[test]
+    fn patch_pdb_columns_playlist_first_moves_playlist_kind_to_front_and_is_idempotent() {
+        let (_dir, usb_root) = test_usb_root();
+        let changed = patch_pdb_columns_playlist_first(&usb_root).expect("patch playlist first");
+        let after = load_pdb_t16_decoded(&usb_root).expect("decoded after");
+        assert_eq!(after[0].kind, 132);
+
+        let no_op = patch_pdb_columns_playlist_first(&usb_root).expect("patch again");
+        assert!(
+            !no_op,
+            "second call should be a no-op once already reordered"
+        );
+        let _ = changed;
+    }
+
+    #[test]
+    fn patch_pdb_columns_menu_order_by_kind_reorders_and_renumbers_ids() {
+        let (_dir, usb_root) = test_usb_root();
+        let before = load_pdb_t16_decoded(&usb_root).expect("decoded before");
+        let kinds: Vec<u16> = before.iter().map(|r| r.kind).collect();
+        assert!(kinds.len() >= 2, "fixture needs at least two columns rows");
+        let mut desired = kinds.clone();
+        desired.reverse();
+
+        let changed =
+            patch_pdb_columns_menu_order_by_kind(&usb_root, &desired).expect("patch order");
+        assert!(changed);
+
+        let after = load_pdb_t16_decoded(&usb_root).expect("decoded after");
+        assert_eq!(
+            after.iter().map(|r| r.kind).collect::<Vec<_>>(),
+            desired,
+            "row order should follow the desired kind order"
+        );
+        assert_eq!(
+            after[0].id, 1,
+            "row ids are renumbered 1..N in the new order"
+        );
+
+        let no_op = patch_pdb_columns_menu_order_by_kind(&usb_root, &desired).expect("patch again");
+        assert!(!no_op);
+    }
+
+    #[test]
+    fn patch_pdb_columns_menu_order_by_kind_errors_on_bad_alignment() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_dir = dir.path().join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("export.pdb"), vec![0u8; 100]).unwrap();
+        let err = patch_pdb_columns_menu_order_by_kind(dir.path(), &[1]).unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    // --- patch_pdb_columns_menu_set_by_kind ---
+
+    #[test]
+    fn patch_pdb_columns_menu_set_by_kind_adds_renames_and_drops_rows() {
+        let (_dir, usb_root) = test_usb_root();
+        let before = load_pdb_t16_decoded(&usb_root).expect("decoded before");
+        assert!(before.len() >= 2, "fixture needs at least two columns rows");
+
+        // Keep the first row's kind+name unchanged (byte-reuse path), rename
+        // the second row's kind (re-encode path), drop the rest, and add a
+        // brand new kind not present in the fixture.
+        let mut desired: Vec<(u16, String)> = vec![
+            (before[0].kind, before[0].name.clone()),
+            (before[1].kind, format!("{} RENAMED", before[1].name)),
+            (9999, "CUSTOM".to_string()),
+        ];
+
+        let changed = patch_pdb_columns_menu_set_by_kind(&usb_root, &desired).expect("patch set");
+        assert!(changed);
+
+        let after = load_pdb_t16_decoded(&usb_root).expect("decoded after");
+        assert_eq!(after.len(), 3);
+        assert_eq!(after[0].name, before[0].name);
+        assert_eq!(after[1].name, format!("{} RENAMED", before[1].name));
+        assert_eq!(after[2].kind, 9999);
+        assert_eq!(after[2].name, "CUSTOM");
+
+        let no_op = patch_pdb_columns_menu_set_by_kind(&usb_root, &desired).expect("patch again");
+        assert!(!no_op);
+
+        // Duplicate kinds in `desired` are deduped, keeping the first occurrence.
+        desired.push((9999, "DUPLICATE".to_string()));
+        let dedup_changed =
+            patch_pdb_columns_menu_set_by_kind(&usb_root, &desired).expect("patch dedup");
+        assert!(!dedup_changed);
+    }
+
+    #[test]
+    fn patch_pdb_columns_menu_set_by_kind_errors_on_bad_alignment() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_dir = dir.path().join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("export.pdb"), vec![0u8; 100]).unwrap();
+        let err =
+            patch_pdb_columns_menu_set_by_kind(dir.path(), &[(1, "X".to_string())]).unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    // --- encode_pdb_t17_cat_row / patch_pdb_t17_category_snapshot ---
+
+    #[test]
+    fn encode_pdb_t17_cat_row_sets_flags_by_visibility_and_kind() {
+        let hidden = encode_pdb_t17_cat_row(1, 2, false, 5, 3);
+        assert_eq!(hidden[5], 1);
+
+        let matching_visible = encode_pdb_t17_cat_row(1, 2, true, 170, 3);
+        assert_eq!(matching_visible[5], 2);
+
+        let normal_visible = encode_pdb_t17_cat_row(1, 2, true, 5, 3);
+        assert_eq!(normal_visible[5], 0);
+
+        assert_eq!(&hidden[0..2], &1u16.to_le_bytes());
+        assert_eq!(&hidden[2..4], &2u16.to_le_bytes());
+        assert_eq!(hidden[4], 0x63);
+        assert_eq!(&hidden[6..8], &3u16.to_le_bytes());
+    }
+
+    #[test]
+    fn patch_pdb_t17_category_snapshot_false_when_pdb_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(!patch_pdb_t17_category_snapshot(dir.path(), &[]).expect("snapshot"));
+    }
+
+    #[test]
+    fn patch_pdb_t17_category_snapshot_false_on_bad_alignment() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_dir = dir.path().join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("export.pdb"), vec![0u8; 100]).unwrap();
+        assert!(!patch_pdb_t17_category_snapshot(dir.path(), &[]).expect("snapshot"));
+    }
+
+    #[test]
+    fn patch_pdb_t17_category_snapshot_writes_rows_and_is_idempotent() {
+        let (_dir, usb_root) = test_usb_root();
+        let rows = vec![
+            encode_pdb_t17_cat_row(1, 10, true, 5, 0),
+            encode_pdb_t17_cat_row(2, 20, false, 6, 1),
+        ];
+        let changed = patch_pdb_t17_category_snapshot(&usb_root, &rows).expect("snapshot patch");
+        assert!(changed);
+
+        let no_op =
+            patch_pdb_t17_category_snapshot(&usb_root, &rows).expect("snapshot patch again");
+        assert!(!no_op);
+    }
+}
