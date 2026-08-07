@@ -77,3 +77,67 @@ macro_rules! backend_log {
         $crate::logging::emit($crate::logging::Level::$level, $source, &__msg);
     }};
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn level_as_str_covers_every_variant() {
+        assert_eq!(Level::Info.as_str(), "info");
+        assert_eq!(Level::Warn.as_str(), "warn");
+        assert_eq!(Level::Error.as_str(), "error");
+    }
+
+    #[test]
+    fn log_builds_warning_entry_and_emits_without_panicking() {
+        // No sink is guaranteed to be installed in this test binary (installation
+        // is process-wide and idempotent -- see `set_sink`), so this also
+        // exercises the stderr fallback path in `emit` whenever it runs first.
+        let entry = log(Level::Warn, "test-source", "test.code", "hello world");
+        assert_eq!(entry.level, "warn");
+        assert_eq!(entry.source, "test-source");
+        assert_eq!(entry.code, "test.code");
+        assert_eq!(entry.message, "hello world");
+    }
+
+    #[test]
+    fn log_accepts_owned_string_and_str_messages() {
+        let from_str = log(Level::Info, "src", "code", "static message");
+        assert_eq!(from_str.message, "static message");
+
+        let owned = format!("dynamic {}", 42);
+        let from_string = log(Level::Error, "src", "code", owned.clone());
+        assert_eq!(from_string.message, owned);
+    }
+
+    #[test]
+    fn set_sink_routes_emit_through_the_installed_sink() {
+        // `SINK` is a process-wide `OnceLock` and `set_sink` is documented as
+        // idempotent (deliberately: exactly one sink for the whole process).
+        // This is the only call to `set_sink` anywhere in this crate's test
+        // suite, so it deterministically wins the race to install it.
+        let captured: Arc<Mutex<Vec<(String, String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured_for_sink = captured.clone();
+        set_sink(Box::new(move |level, source, message| {
+            captured_for_sink.lock().unwrap().push((
+                level.as_str().to_string(),
+                source.to_string(),
+                message.to_string(),
+            ));
+        }));
+
+        emit(Level::Info, "sink-test-source", "sink test message");
+
+        // Other tests may concurrently emit through this same process-wide
+        // sink once it's installed, so assert containment rather than an
+        // exact count.
+        let entries = captured.lock().unwrap();
+        assert!(entries.contains(&(
+            "info".to_string(),
+            "sink-test-source".to_string(),
+            "sink test message".to_string()
+        )));
+    }
+}

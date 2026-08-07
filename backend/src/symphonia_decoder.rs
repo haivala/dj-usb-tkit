@@ -303,3 +303,86 @@ fn skip_back_a_tiny_bit(
     }
     Time { seconds, frac }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wav_fixture_path() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/formats/track_format_wav.wav")
+    }
+
+    fn flac_fixture_path() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/formats/track_format_flac.flac")
+    }
+
+    #[test]
+    fn decoder_error_display_shows_message() {
+        let err = DecoderError("boom".to_string());
+        assert_eq!(err.to_string(), "boom");
+    }
+
+    #[test]
+    fn skip_back_a_tiny_bit_subtracts_small_fraction() {
+        let t = Time {
+            seconds: 10,
+            frac: 0.5,
+        };
+        let result = skip_back_a_tiny_bit(t);
+        assert_eq!(result.seconds, 10);
+        assert!((result.frac - 0.4999).abs() < 1e-9);
+    }
+
+    #[test]
+    fn skip_back_a_tiny_bit_borrows_a_second_when_frac_underflows() {
+        let t = Time {
+            seconds: 5,
+            frac: 0.00005,
+        };
+        let result = skip_back_a_tiny_bit(t);
+        assert_eq!(result.seconds, 4);
+        assert!(result.frac > 1.0);
+    }
+
+    #[test]
+    fn skip_back_a_tiny_bit_saturates_at_zero_seconds() {
+        let t = Time {
+            seconds: 0,
+            frac: 0.00001,
+        };
+        let result = skip_back_a_tiny_bit(t);
+        assert_eq!(result.seconds, 0);
+    }
+
+    #[test]
+    fn seekable_symphonia_source_exposes_stream_metadata() {
+        let decoder =
+            SeekableSymphoniaSource::open(&wav_fixture_path()).expect("should decode wav fixture");
+        assert!(decoder.channels() >= 1);
+        assert!(decoder.sample_rate() > 0);
+        assert!(decoder.current_frame_len().unwrap_or(0) > 0);
+    }
+
+    #[test]
+    fn seekable_symphonia_source_iterates_samples_across_packet_boundaries() {
+        let decoder = SeekableSymphoniaSource::open(&flac_fixture_path())
+            .expect("should decode flac fixture");
+        // Pull far more samples than a single packet holds to force at least
+        // one internal packet refill (Iterator::next's buffer-exhausted branch).
+        let samples: Vec<i16> = decoder.take(200_000).collect();
+        assert!(!samples.is_empty());
+    }
+
+    #[test]
+    fn seekable_symphonia_source_open_errors_for_non_audio_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("not_audio.wav");
+        std::fs::write(&path, b"definitely not audio data").unwrap();
+        let Err(err) = SeekableSymphoniaSource::open(&path) else {
+            panic!("expected an error for a non-audio file");
+        };
+        assert!(!err.0.is_empty());
+    }
+}
