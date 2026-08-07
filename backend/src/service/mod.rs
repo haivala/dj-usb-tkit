@@ -3055,4 +3055,955 @@ mod tests {
             "a path reused as a configured source root should no longer be treated as USB-tainted"
         );
     }
+
+    // --- small pure helpers ---
+
+    #[test]
+    fn sanitize_source_roots_trims_dedupes_and_drops_empty() {
+        let roots = sanitize_source_roots(vec![
+            "  /music  ".to_string(),
+            "/music".to_string(),
+            "   ".to_string(),
+            "/other".to_string(),
+        ]);
+        assert_eq!(roots, vec!["/music".to_string(), "/other".to_string()]);
+    }
+
+    #[test]
+    fn source_root_is_usable_true_for_dir_false_for_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(source_root_is_usable(dir.path().to_str().unwrap()));
+        assert!(!source_root_is_usable(
+            "/definitely/does/not/exist/anywhere"
+        ));
+    }
+
+    #[test]
+    fn source_root_status_reports_exists_and_is_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let status = source_root_status(dir.path().to_str().unwrap());
+        assert!(status.exists);
+        assert!(status.is_dir);
+
+        let missing = source_root_status("/definitely/does/not/exist/anywhere");
+        assert!(!missing.exists);
+        assert!(!missing.is_dir);
+    }
+
+    #[test]
+    fn relative_path_under_source_root_matches_case_insensitively() {
+        assert_eq!(
+            relative_path_under_source_root("/Music/Artist/song.mp3", "/music"),
+            Some("Artist/song.mp3".to_string())
+        );
+        assert_eq!(
+            relative_path_under_source_root("/music", "/music"),
+            Some(String::new())
+        );
+        assert_eq!(
+            relative_path_under_source_root("/other/song.mp3", "/music"),
+            None
+        );
+        assert_eq!(relative_path_under_source_root("/music/song.mp3", ""), None);
+    }
+
+    #[test]
+    fn relocated_source_path_joins_segments_and_handles_root_only() {
+        let root = Path::new("/new/root");
+        assert_eq!(
+            relocated_source_path(root, "Artist/song.mp3"),
+            root.join("Artist").join("song.mp3")
+        );
+        assert_eq!(relocated_source_path(root, ""), root.to_path_buf());
+        assert_eq!(relocated_source_path(root, "///"), root.to_path_buf());
+    }
+
+    #[test]
+    fn track_has_core_analysis_for_source_status_requires_all_three_fields() {
+        let mut track = sample_track("t1", "/music/a.mp3");
+        assert!(!track_has_core_analysis_for_source_status(&track));
+
+        track.waveform_peaks_path = Some("/data/a.dat".to_string());
+        track.bpm = Some(120.0);
+        track.duration_ms = Some(200_000);
+        assert!(track_has_core_analysis_for_source_status(&track));
+
+        track.bpm = Some(0.0);
+        assert!(!track_has_core_analysis_for_source_status(&track));
+    }
+
+    #[test]
+    fn non_empty_db_value_filters_blank_and_trims() {
+        assert_eq!(non_empty_db_value("  hello  "), Some("hello"));
+        assert_eq!(non_empty_db_value("   "), None);
+        assert_eq!(non_empty_db_value(""), None);
+    }
+
+    #[test]
+    fn looks_like_windows_absolute_path_detects_drive_letter() {
+        assert!(looks_like_windows_absolute_path("C:/Users/dj"));
+        assert!(looks_like_windows_absolute_path("D:\\Music"));
+        assert!(!looks_like_windows_absolute_path("/mnt/data"));
+        assert!(!looks_like_windows_absolute_path("relative/path"));
+    }
+
+    #[test]
+    fn is_pioneer_virtual_path_case_insensitive() {
+        assert!(is_pioneer_virtual_path("/PIONEER/USBANLZ/x"));
+        assert!(is_pioneer_virtual_path("pioneer/usbanlz/x"));
+        assert!(!is_pioneer_virtual_path("/Contents/x"));
+    }
+
+    #[test]
+    fn push_unique_path_dedupes_equal_paths() {
+        let mut paths = Vec::new();
+        push_unique_path(&mut paths, PathBuf::from("/a"));
+        push_unique_path(&mut paths, PathBuf::from("/a"));
+        push_unique_path(&mut paths, PathBuf::from("/b"));
+        assert_eq!(paths, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+    }
+
+    #[test]
+    fn resolve_master_db_resource_path_returns_first_existing_candidate() {
+        let master_path = Path::new("/tmp/rekordbox/master.db");
+        let db_path = "/PIONEER/USBANLZ/x/ANLZ0000.DAT";
+        let expected = master_db_resource_candidates(master_path, db_path)
+            .into_iter()
+            .nth(1)
+            .expect("at least two candidates");
+        let expected_for_closure = expected.clone();
+        let resolved =
+            resolve_master_db_resource_path(master_path, db_path, |p| p == expected_for_closure);
+        assert_eq!(resolved, Some(expected));
+    }
+
+    #[test]
+    fn resolve_master_db_resource_path_none_when_nothing_exists() {
+        let master_path = Path::new("/tmp/rekordbox/master.db");
+        let resolved =
+            resolve_master_db_resource_path(master_path, "/PIONEER/x/ANLZ0000.DAT", |_| false);
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn frontend_ui_setting_keys_contains_theme_and_help_seen() {
+        let keys = frontend_ui_setting_keys();
+        assert!(keys.contains(&SETTING_UI_THEME));
+        assert!(keys.contains(&SETTING_UI_HELP_SEEN));
+    }
+
+    #[test]
+    fn source_root_keys_equal_normalizes_case_and_trailing_slash() {
+        assert!(source_root_keys_equal("/Music/", "/music"));
+        assert!(!source_root_keys_equal("/music", "/other"));
+    }
+
+    #[test]
+    fn path_file_name_and_stem_lower_handle_backslashes() {
+        assert_eq!(path_file_name_lower(r"C:\Music\Song.MP3"), "song.mp3");
+        assert_eq!(path_stem_lower(r"C:\Music\Song.MP3"), "song");
+        assert_eq!(path_stem_lower("no-extension"), "no-extension");
+    }
+
+    #[test]
+    fn build_track_cursor_signature_differs_by_input() {
+        let sig_a = build_track_cursor_signature(&["v1", "list_tracks"]);
+        let sig_b = build_track_cursor_signature(&["v1", "search_tracks"]);
+        assert_ne!(sig_a, sig_b);
+        assert_eq!(sig_a, build_track_cursor_signature(&["v1", "list_tracks"]));
+    }
+
+    #[test]
+    fn check_essentia_installed_false_when_files_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(!check_essentia_installed(dir.path()));
+    }
+
+    // --- BackendService CRUD/service-level tests ---
+
+    fn test_service() -> (tempfile::TempDir, BackendService) {
+        let dir = tempfile::tempdir().expect("service data dir");
+        let service = BackendService::new(dir.path()).expect("backend service");
+        (dir, service)
+    }
+
+    fn sample_track(id: &str, file_path: &str) -> Track {
+        Track {
+            id: id.to_string(),
+            title: "Title".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            track_number: None,
+            bpm: None,
+            bpm_analyzer: None,
+            key: None,
+            file_path: file_path.to_string(),
+            file_size_bytes: None,
+            format_ext: None,
+            sample_rate_hz: None,
+            bit_depth: None,
+            bitrate_kbps: None,
+            wav_extensible_kind: None,
+            duration_ms: None,
+            artwork_path: None,
+            artwork_data_url: None,
+            waveform_peaks_path: None,
+            waveform_preview: None,
+            waveform_color_data: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            master_db_source: false,
+            is_usb_path: false,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn insert_full_track(
+        conn: &rusqlite::Connection,
+        id: &str,
+        title: &str,
+        artist: &str,
+        file_path: &str,
+        duration_ms: Option<i64>,
+        file_size_bytes: Option<i64>,
+        master_db_source: bool,
+    ) {
+        let fp = build_track_match_fingerprint(title, artist, None);
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, file_size_bytes, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))",
+            params![id, title, artist, file_path, duration_ms, file_size_bytes, fp, master_db_source as i64],
+        )
+        .expect("insert track");
+    }
+
+    #[test]
+    fn create_playlist_rejects_empty_name() {
+        let (_dir, service) = test_service();
+        let err = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "   ".to_string(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn playlist_create_rename_delete_roundtrip() {
+        let (_dir, service) = test_service();
+        let created = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "  My Playlist  ".to_string(),
+            })
+            .expect("create playlist");
+        assert_eq!(created.name, "My Playlist");
+
+        let listed = service.list_playlists().expect("list playlists");
+        assert_eq!(listed.items.len(), 1);
+        assert_eq!(listed.items[0].id, created.playlist_id);
+
+        let renamed = service
+            .rename_playlist(RenamePlaylistRequest {
+                playlist_id: created.playlist_id.clone(),
+                name: "Renamed".to_string(),
+            })
+            .expect("rename playlist");
+        assert_eq!(renamed.name, "Renamed");
+
+        let deleted = service
+            .delete_playlist(DeletePlaylistRequest {
+                playlist_id: created.playlist_id.clone(),
+            })
+            .expect("delete playlist");
+        assert!(deleted.deleted);
+
+        let err = service
+            .rename_playlist(RenamePlaylistRequest {
+                playlist_id: created.playlist_id,
+                name: "Nope".to_string(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn add_tracks_to_playlist_rejects_empty_ids() {
+        let (_dir, service) = test_service();
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+        let err = service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id,
+                track_ids: Vec::new(),
+                dedupe: DedupeMode::Allow,
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn add_tracks_to_playlist_rejects_unknown_track() {
+        let (_dir, service) = test_service();
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+        let err = service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id,
+                track_ids: vec!["missing-track".to_string()],
+                dedupe: DedupeMode::Allow,
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn add_tracks_to_playlist_dedupe_skip_counts_skipped_and_get_playlist_tracks_orders_by_position()
+     {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song A",
+            "Artist",
+            "/music/a.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t2",
+            "Song B",
+            "Artist",
+            "/music/b.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+
+        let added = service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t1".to_string(), "t2".to_string()],
+                dedupe: DedupeMode::Allow,
+            })
+            .expect("add tracks");
+        assert_eq!(added.added, 2);
+        assert_eq!(added.skipped, 0);
+
+        let skip_result = service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t1".to_string()],
+                dedupe: DedupeMode::Skip,
+            })
+            .expect("add duplicate with skip mode");
+        assert_eq!(skip_result.added, 0);
+        assert_eq!(skip_result.skipped, 1);
+
+        let tracks = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id,
+            })
+            .expect("get playlist tracks");
+        assert_eq!(
+            tracks
+                .items
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["t1".to_string(), "t2".to_string()]
+        );
+    }
+
+    #[test]
+    fn remove_tracks_from_playlist_recompacts_positions() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song A",
+            "Artist",
+            "/music/a.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t2",
+            "Song B",
+            "Artist",
+            "/music/b.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t3",
+            "Song C",
+            "Artist",
+            "/music/c.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+        service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
+                dedupe: DedupeMode::Allow,
+            })
+            .expect("add tracks");
+
+        let removed = service
+            .remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t2".to_string()],
+            })
+            .expect("remove track");
+        assert_eq!(removed.removed, 1);
+
+        let tracks = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id,
+            })
+            .expect("get playlist tracks");
+        assert_eq!(
+            tracks
+                .items
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["t1".to_string(), "t3".to_string()]
+        );
+    }
+
+    #[test]
+    fn frontend_settings_roundtrip_and_reject_unsupported_key() {
+        let (_dir, service) = test_service();
+        let defaults = service.get_frontend_settings().expect("get settings");
+        assert!(defaults.values.is_empty());
+
+        service
+            .set_frontend_setting(SetFrontendSettingRequest {
+                key: SETTING_UI_THEME.to_string(),
+                value: Some("dark".to_string()),
+            })
+            .expect("set theme");
+        let after_set = service.get_frontend_settings().expect("get settings");
+        assert_eq!(
+            after_set.values.get(SETTING_UI_THEME).map(String::as_str),
+            Some("dark")
+        );
+
+        service
+            .set_frontend_setting(SetFrontendSettingRequest {
+                key: SETTING_UI_THEME.to_string(),
+                value: None,
+            })
+            .expect("clear theme");
+        let after_clear = service.get_frontend_settings().expect("get settings");
+        assert!(!after_clear.values.contains_key(SETTING_UI_THEME));
+
+        let err = service
+            .set_frontend_setting(SetFrontendSettingRequest {
+                key: "not_a_real_setting".to_string(),
+                value: Some("x".to_string()),
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn remove_essentia_removes_dir_and_clears_setting() {
+        let (_dir, service) = test_service();
+        let essentia_dir = service.db.data_dir().join("essentia");
+        std::fs::create_dir_all(&essentia_dir).expect("create essentia dir");
+        std::fs::write(essentia_dir.join("marker.txt"), b"x").expect("write marker");
+        service
+            .set_frontend_setting(SetFrontendSettingRequest {
+                key: SETTING_UI_ANALYSIS_ENGINE.to_string(),
+                value: Some("essentia".to_string()),
+            })
+            .expect("set analysis engine");
+
+        service.remove_essentia().expect("remove essentia");
+
+        assert!(!essentia_dir.exists());
+        let settings = service.get_frontend_settings().expect("get settings");
+        assert!(!settings.values.contains_key(SETTING_UI_ANALYSIS_ENGINE));
+    }
+
+    #[test]
+    fn list_tracks_paginates_with_cursor() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        for i in 0..3 {
+            insert_full_track(
+                &conn,
+                &format!("t{i}"),
+                &format!("Song {i}"),
+                "Artist",
+                &format!("/music/{i}.mp3"),
+                None,
+                None,
+                false,
+            );
+        }
+        drop(conn);
+
+        let page1 = service
+            .list_tracks(ListTracksRequest {
+                limit: 2,
+                cursor: None,
+            })
+            .expect("list page 1");
+        assert_eq!(page1.total, 3);
+        assert_eq!(page1.items.len(), 2);
+        assert!(page1.has_more);
+        let cursor = page1.next_cursor.expect("cursor present");
+
+        let page2 = service
+            .list_tracks(ListTracksRequest {
+                limit: 2,
+                cursor: Some(cursor),
+            })
+            .expect("list page 2");
+        assert_eq!(page2.items.len(), 1);
+        assert!(!page2.has_more);
+    }
+
+    #[test]
+    fn search_tracks_filters_by_query() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Aurora",
+            "DJ One",
+            "/music/a.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t2",
+            "Nebula",
+            "DJ Two",
+            "/music/b.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let result = service
+            .search_tracks(SearchTracksRequest {
+                query: "aurora".to_string(),
+                limit: 10,
+                cursor: None,
+            })
+            .expect("search tracks");
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].id, "t1");
+
+        let empty = service
+            .search_tracks(SearchTracksRequest {
+                query: "nonexistent".to_string(),
+                limit: 10,
+                cursor: None,
+            })
+            .expect("search tracks empty");
+        assert_eq!(empty.total, 0);
+    }
+
+    #[test]
+    fn browse_source_files_empty_without_roots_or_master_db() {
+        let (_dir, service) = test_service();
+        let result = service
+            .browse_source_files(BrowseSourceFilesRequest {
+                source_roots: Vec::new(),
+                include_master_db: false,
+                query: String::new(),
+                limit: 100,
+                cursor: None,
+            })
+            .expect("browse source files");
+        assert_eq!(result.total, 0);
+        assert!(result.items.is_empty());
+    }
+
+    #[test]
+    fn browse_source_files_includes_master_db_tracks_when_requested() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Master Song",
+            "Artist",
+            "/master/a.mp3",
+            None,
+            None,
+            true,
+        );
+        drop(conn);
+
+        let result = service
+            .browse_source_files(BrowseSourceFilesRequest {
+                source_roots: Vec::new(),
+                include_master_db: true,
+                query: String::new(),
+                limit: 100,
+                cursor: None,
+            })
+            .expect("browse source files");
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].id, "t1");
+        assert!(result.items[0].master_db_source);
+    }
+
+    #[test]
+    fn check_source_roots_reports_missing_and_existing() {
+        let (_dir, service) = test_service();
+        let existing = tempfile::tempdir().expect("tempdir");
+        let result = service
+            .check_source_roots(CheckSourceRootsRequest {
+                source_roots: vec![
+                    existing.path().to_string_lossy().to_string(),
+                    "/definitely/does/not/exist/anywhere".to_string(),
+                ],
+            })
+            .expect("check source roots");
+        assert_eq!(result.items.len(), 2);
+        assert_eq!(
+            result.missing,
+            vec!["/definitely/does/not/exist/anywhere".to_string()]
+        );
+    }
+
+    #[test]
+    fn relocate_source_root_updates_matching_track_paths() {
+        let (_dir, service) = test_service();
+        let old_root = tempfile::tempdir().expect("old root");
+        let new_root = tempfile::tempdir().expect("new root");
+        std::fs::write(new_root.path().join("song.mp3"), b"data").expect("write new file");
+
+        let old_path = old_root.path().join("song.mp3");
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song",
+            "Artist",
+            old_path.to_str().unwrap(),
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let result = service
+            .relocate_source_root(RelocateSourceRootRequest {
+                old_root: old_root.path().to_string_lossy().to_string(),
+                new_root: new_root.path().to_string_lossy().to_string(),
+            })
+            .expect("relocate source root");
+        assert_eq!(result.matched, 1);
+        assert_eq!(result.updated, 1);
+
+        let conn = service.db.connect().expect("connect");
+        let new_path: String = conn
+            .query_row("SELECT file_path FROM tracks WHERE id = 't1'", [], |r| {
+                r.get(0)
+            })
+            .expect("read updated path");
+        assert_eq!(new_path, new_root.path().join("song.mp3").to_string_lossy());
+    }
+
+    #[test]
+    fn relocate_source_root_rejects_same_root() {
+        let (_dir, service) = test_service();
+        let err = service
+            .relocate_source_root(RelocateSourceRootRequest {
+                old_root: "/music".to_string(),
+                new_root: "/music".to_string(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn materialize_source_track_inserts_new_then_updates_existing() {
+        let (_dir, service) = test_service();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("song.mp3");
+        std::fs::write(&file_path, b"data").expect("write file");
+
+        let inserted = service
+            .materialize_source_track(MaterializeSourceTrackRequest {
+                file_path: file_path.to_string_lossy().to_string(),
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                track_number: None,
+                key: None,
+                file_size_bytes: None,
+                format_ext: None,
+                sample_rate_hz: None,
+                bit_depth: None,
+                bitrate_kbps: None,
+            })
+            .expect("materialize new track");
+
+        let updated = service
+            .materialize_source_track(MaterializeSourceTrackRequest {
+                file_path: file_path.to_string_lossy().to_string(),
+                title: "Song Updated".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                track_number: None,
+                key: None,
+                file_size_bytes: None,
+                format_ext: None,
+                sample_rate_hz: None,
+                bit_depth: None,
+                bitrate_kbps: None,
+            })
+            .expect("materialize existing track");
+        assert_eq!(inserted.track_id, updated.track_id);
+
+        let conn = service.db.connect().expect("connect");
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM tracks WHERE id = ?1",
+                params![updated.track_id],
+                |r| r.get(0),
+            )
+            .expect("read title");
+        assert_eq!(title, "Song Updated");
+    }
+
+    #[test]
+    fn materialize_source_track_rejects_missing_file() {
+        let (_dir, service) = test_service();
+        let err = service
+            .materialize_source_track(MaterializeSourceTrackRequest {
+                file_path: "/definitely/does/not/exist.mp3".to_string(),
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                track_number: None,
+                key: None,
+                file_size_bytes: None,
+                format_ext: None,
+                sample_rate_hz: None,
+                bit_depth: None,
+                bitrate_kbps: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn remove_tracks_by_source_roots_deletes_matching_prefix() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "A",
+            "Artist",
+            "/music/keep/a.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t2",
+            "B",
+            "Artist",
+            "/music/drop/b.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let result = service
+            .remove_tracks_by_source_roots(RemoveTracksBySourceRootsRequest {
+                source_roots: vec!["/music/drop".to_string()],
+            })
+            .expect("remove tracks by source roots");
+        assert_eq!(result.removed, 1);
+
+        let remaining = service
+            .list_tracks(ListTracksRequest {
+                limit: 10,
+                cursor: None,
+            })
+            .expect("list tracks");
+        assert_eq!(remaining.total, 1);
+        assert_eq!(remaining.items[0].id, "t1");
+    }
+
+    #[test]
+    fn get_tracks_by_ids_with_previews_dedupes_and_sorts() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t2",
+            "B",
+            "Artist",
+            "/music/b.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t1",
+            "A",
+            "Artist",
+            "/music/a.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let result = service
+            .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
+                track_ids: vec!["t2".to_string(), "t1".to_string(), "t1".to_string()],
+            })
+            .expect("get tracks by ids");
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["t1".to_string(), "t2".to_string()]
+        );
+    }
+
+    #[test]
+    fn get_tracks_by_ids_with_previews_empty_ids_returns_empty() {
+        let (_dir, service) = test_service();
+        let result = service
+            .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
+                track_ids: Vec::new(),
+            })
+            .expect("get tracks by ids");
+        assert!(result.items.is_empty());
+    }
+
+    #[test]
+    fn resolve_playback_source_fast_path_by_track_id() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song",
+            "Artist",
+            "/music/a.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let result = service
+            .resolve_playback_source(ResolvePlaybackSourceRequest {
+                title: String::new(),
+                artist: String::new(),
+                album: None,
+                bpm: None,
+                file_path: None,
+                file_size_bytes: None,
+                track_id: Some("t1".to_string()),
+            })
+            .expect("resolve playback source");
+        assert_eq!(result.matched_by, "self");
+        assert_eq!(result.resolved_path.as_deref(), Some("/music/a.mp3"));
+        assert_eq!(result.track_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn resolve_playback_source_falls_back_to_fingerprint_hash_match() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song",
+            "Artist",
+            "/music/a.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let result = service
+            .resolve_playback_source(ResolvePlaybackSourceRequest {
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                bpm: None,
+                file_path: None,
+                file_size_bytes: None,
+                track_id: None,
+            })
+            .expect("resolve playback source");
+        assert_eq!(result.matched_by, "hash");
+        assert_eq!(result.track_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn resolve_playback_source_returns_none_for_blank_title_or_artist() {
+        let (_dir, service) = test_service();
+        let result = service
+            .resolve_playback_source(ResolvePlaybackSourceRequest {
+                title: "   ".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                bpm: None,
+                file_path: None,
+                file_size_bytes: None,
+                track_id: None,
+            })
+            .expect("resolve playback source");
+        assert_eq!(result.matched_by, "none");
+        assert!(result.resolved_path.is_none());
+    }
 }

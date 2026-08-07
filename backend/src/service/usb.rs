@@ -1797,8 +1797,10 @@ impl BackendService {
 mod tests {
     use super::{
         SLOW_USB_STAGE_MS, apply_history_dates_from_track_date_created,
-        build_history_track_date_index, filter_named_history_playlists, normalize_date_created,
-        select_history_rows, slow_stage_threshold_ms,
+        build_history_track_date_index, build_track_match_fingerprint, build_usb_track_index,
+        cleanup_empty_dirs_recursive, edb_track_index_from_playlist_tracks,
+        filter_named_history_playlists, normalize_date_created, now, push_usb_stage_timing,
+        push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
@@ -2174,5 +2176,760 @@ mod tests {
         assert!(at_1000 > baseline, "threshold should grow with item count");
         // Linear: doubling the item count should double the allowance added on top of baseline.
         assert_eq!((at_2000 - baseline), (at_1000 - baseline) * 2);
+    }
+
+    // --- build_usb_track_index / edb_track_index_from_playlist_tracks ---
+
+    #[allow(clippy::too_many_arguments)]
+    fn make_indexed_pdb_track(
+        id: u32,
+        title: &str,
+        artist_id: u32,
+        album_id: u32,
+        key_id: u32,
+        artwork_id: u32,
+        track_number: u32,
+        tempo_x100: u32,
+        track_file_path: &str,
+        anlz_path: &str,
+    ) -> PdbTrackRow {
+        PdbTrackRow {
+            content_link: None,
+            sample_rate_hz: None,
+            file_size_bytes: Some(4096),
+            master_content_id: None,
+            master_db_id: None,
+            id,
+            artist_id,
+            album_id,
+            artwork_id,
+            key_id,
+            genre_id: 0,
+            bitrate_kbps: None,
+            track_number,
+            tempo_x100,
+            release_year: None,
+            bit_depth: None,
+            duration_seconds: Some(200),
+            file_type: None,
+            isrc: None,
+            date_added: None,
+            release_date: None,
+            dj_comment: None,
+            file_name: None,
+            publish_track_info: None,
+            autoload_hotcues: None,
+            title: title.to_string(),
+            anlz_path: anlz_path.to_string(),
+            track_file_path: track_file_path.to_string(),
+        }
+    }
+
+    #[test]
+    fn build_usb_track_index_resolves_metadata_and_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let usb_root = tmp.path();
+        let parsed = crate::pdb_reader::ParsedPdb {
+            tracks: vec![make_indexed_pdb_track(
+                1,
+                "Song One",
+                10,
+                20,
+                30,
+                40,
+                5,
+                12500,
+                "/Contents/Artist/Song One.mp3",
+                "/PIONEER/USBANLZ/P001/ANLZ0000.DAT",
+            )],
+            artists: HashMap::from([(10u32, "DJ Test".to_string())]),
+            albums: HashMap::from([(20u32, "Test Album".to_string())]),
+            keys: HashMap::from([(30u32, "8A".to_string())]),
+            artworks: HashMap::from([(40u32, "/PIONEER/Artwork/a.jpg".to_string())]),
+            ..Default::default()
+        };
+
+        let index = build_usb_track_index(&parsed, usb_root);
+        let track = index.get(&1).expect("track present");
+        assert_eq!(track.title, "Song One");
+        assert_eq!(track.artist, "DJ Test");
+        assert_eq!(track.album.as_deref(), Some("Test Album"));
+        assert_eq!(track.key.as_deref(), Some("8A"));
+        assert_eq!(track.track_number, Some(5));
+        assert_eq!(track.bpm, Some(125.0));
+        assert!(track.artwork_path.is_some());
+        assert!(track.file_path.ends_with("Song One.mp3"));
+        assert!(track.usb_analysis_path.is_some());
+        assert_eq!(
+            track.usb_analysis_path_raw.as_deref(),
+            Some("/PIONEER/USBANLZ/P001/ANLZ0000.DAT")
+        );
+        assert_eq!(track.duration_ms, Some(200_000));
+    }
+
+    #[test]
+    fn build_usb_track_index_falls_back_when_title_artist_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let usb_root = tmp.path();
+        let parsed = crate::pdb_reader::ParsedPdb {
+            tracks: vec![make_indexed_pdb_track(
+                2,
+                "",
+                999,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "relative/song.mp3",
+                "",
+            )],
+            ..Default::default()
+        };
+
+        let index = build_usb_track_index(&parsed, usb_root);
+        let track = index.get(&2).expect("track present");
+        assert_eq!(track.title, "Unknown Title");
+        assert_eq!(track.artist, "Unknown Artist");
+        assert_eq!(track.album, None);
+        assert_eq!(track.track_number, None);
+        assert_eq!(track.bpm, None);
+        assert!(track.usb_analysis_path.is_none());
+    }
+
+    #[test]
+    fn edb_track_index_from_playlist_tracks_none_returns_empty() {
+        assert!(edb_track_index_from_playlist_tracks(None).is_empty());
+    }
+
+    #[test]
+    fn edb_track_index_from_playlist_tracks_dedupes_by_parsed_id() {
+        let map = HashMap::from([
+            (
+                "Playlist A".to_string(),
+                vec![make_track("7", "/a.mp3"), make_track("7", "/dup.mp3")],
+            ),
+            ("Playlist B".to_string(), vec![make_track("9", "/b.mp3")]),
+        ]);
+        let index = edb_track_index_from_playlist_tracks(Some(&map));
+        assert_eq!(index.len(), 2);
+        assert!(index.contains_key(&7));
+        assert!(index.contains_key(&9));
+    }
+
+    // --- cleanup_empty_dirs_recursive ---
+
+    #[test]
+    fn cleanup_empty_dirs_recursive_removes_empty_but_keeps_non_empty() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("empty/nested")).unwrap();
+        std::fs::create_dir_all(root.join("kept")).unwrap();
+        std::fs::write(root.join("kept/file.txt"), b"data").unwrap();
+
+        cleanup_empty_dirs_recursive(root);
+
+        assert!(!root.join("empty").exists());
+        assert!(root.join("kept").exists());
+        assert!(root.join("kept/file.txt").exists());
+    }
+
+    // --- push_usb_stage_timing / push_usb_stage_timing_with_threshold ---
+
+    #[test]
+    fn push_usb_stage_timing_with_threshold_flags_slow_stage_at_zero_threshold() {
+        let mut warnings = Vec::new();
+        let mut started = std::time::Instant::now();
+        push_usb_stage_timing_with_threshold(&mut warnings, "test-stage", &mut started, 0);
+        assert!(
+            warnings.iter().any(|w| w.code == "usb.import.slow-media"),
+            "elapsed time always exceeds a zero threshold"
+        );
+        assert!(warnings.iter().any(|w| w.code == "usb.import.stage-timing"));
+    }
+
+    #[test]
+    fn push_usb_stage_timing_with_threshold_no_warning_below_threshold() {
+        let mut warnings = Vec::new();
+        let mut started = std::time::Instant::now();
+        push_usb_stage_timing_with_threshold(&mut warnings, "test-stage", &mut started, 60_000);
+        assert!(!warnings.iter().any(|w| w.code == "usb.import.slow-media"));
+        assert!(warnings.iter().any(|w| w.code == "usb.import.stage-timing"));
+    }
+
+    #[test]
+    fn push_usb_stage_timing_uses_default_threshold() {
+        let mut warnings = Vec::new();
+        let mut started = std::time::Instant::now();
+        push_usb_stage_timing(&mut warnings, "quick-stage", &mut started);
+        assert!(!warnings.iter().any(|w| w.code == "usb.import.slow-media"));
+    }
+
+    // --- BackendService USB integration tests ---
+
+    fn test_service() -> (tempfile::TempDir, crate::service::BackendService) {
+        let dir = tempfile::tempdir().expect("service data dir");
+        let service = crate::service::BackendService::new(dir.path()).expect("backend service");
+        (dir, service)
+    }
+
+    fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {
+        let td = tempfile::tempdir().expect("tempdir");
+        let usb_root = td.path().join("USB_TEST");
+        std::fs::create_dir_all(&usb_root).expect("create usb root");
+        crate::service::initialize_usb(usb_root.to_str().expect("utf-8 usb root path"))
+            .expect("initialize usb");
+        (td, usb_root)
+    }
+
+    fn make_export_track(id: &str, title: &str, filename: &str) -> crate::edb::ExportTrackData {
+        crate::edb::ExportTrackData {
+            id: id.to_string(),
+            title: title.to_string(),
+            artist: "Artist".to_string(),
+            album: Some("Album".to_string()),
+            track_number: Some(1),
+            bpm: Some(120.0),
+            key: Some("8A".to_string()),
+            file_path: format!("/source/{filename}"),
+            file_name: filename.to_string(),
+            file_modified_at: None,
+            file_size_bytes: Some(4_000_000),
+            sample_rate_hz: None,
+            bit_depth: None,
+            bitrate_kbps: None,
+            disc_number: None,
+            subtitle: None,
+            comment: None,
+            title_for_search: None,
+            kuvo_delivery_comment: None,
+            dj_play_count: None,
+            rating: None,
+            color_id: None,
+            artist_id_lyricist: None,
+            artist_id_original_artist: None,
+            artist_id_remixer: None,
+            artist_id_composer: None,
+            genre_id: None,
+            genre: None,
+            label_id: None,
+            isrc: None,
+            release_year: None,
+            release_date: None,
+            recorded_date: None,
+            file_type: None,
+            artwork_path: None,
+            waveform_peaks_path: None,
+            duration_ms: Some(200_000),
+            first_beat_ms: None,
+            position: 0,
+        }
+    }
+
+    fn make_export_manifest(
+        playlist_id: &str,
+        playlist_name: &str,
+        usb_root: &std::path::Path,
+        tracks: &[(&str, &str, &str)],
+    ) -> crate::service::export_helpers::ExportManifest {
+        crate::service::export_helpers::ExportManifest {
+            version: 1,
+            generated_at: "2024-01-01".to_string(),
+            playlist_id: playlist_id.to_string(),
+            playlist_name: playlist_name.to_string(),
+            usb_root: usb_root.to_string_lossy().to_string(),
+            options: crate::models::ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: false,
+                ..Default::default()
+            },
+            exported_tracks: tracks.len(),
+            skipped_tracks: 0,
+            warnings: Vec::new(),
+            tracks: tracks
+                .iter()
+                .enumerate()
+                .map(
+                    |(i, (id, title, filename))| crate::edb::ExportManifestTrack {
+                        id: id.to_string(),
+                        master_db_id: None,
+                        master_content_id: None,
+                        content_link: None,
+                        position: i + 1,
+                        track_number: Some(1),
+                        title: title.to_string(),
+                        artist: "Artist".to_string(),
+                        album: Some("Album".to_string()),
+                        bpm: Some(120.0),
+                        key: Some("8A".to_string()),
+                        source_path: format!("/source/{filename}"),
+                        exported_path: format!("/Contents/Artist/Album/{filename}"),
+                        file_modified_at: None,
+                        file_size_bytes: Some(4_000_000),
+                        sample_rate_hz: None,
+                        bit_depth: None,
+                        bitrate_kbps: None,
+                        disc_number: None,
+                        subtitle: None,
+                        comment: None,
+                        title_for_search: None,
+                        kuvo_delivery_comment: None,
+                        dj_play_count: None,
+                        rating: None,
+                        color_id: None,
+                        artist_id_lyricist: None,
+                        artist_id_original_artist: None,
+                        artist_id_remixer: None,
+                        artist_id_composer: None,
+                        genre_id: None,
+                        genre: None,
+                        label_id: None,
+                        isrc: None,
+                        release_year: None,
+                        release_date: None,
+                        recorded_date: None,
+                        file_type: None,
+                        owns_exported_media: true,
+                        owns_artwork: false,
+                        owns_waveform: false,
+                        artwork_path: None,
+                        waveform_path: None,
+                        duration_ms: Some(200_000),
+                    },
+                )
+                .collect(),
+        }
+    }
+
+    fn seeded_playlist_usb() -> (tempfile::TempDir, std::path::PathBuf) {
+        let (dir, usb_root) = test_usb_root();
+        let playlist = crate::edb::ExportPlaylistData {
+            id: "pl-1".to_string(),
+            name: "My Playlist".to_string(),
+            tracks: vec![make_export_track("t1", "Song A", "a.mp3")],
+        };
+        let manifest = make_export_manifest(
+            "pl-1",
+            "My Playlist",
+            &usb_root,
+            &[("t1", "Song A", "a.mp3")],
+        );
+        crate::service::export_helpers::write_pdb(
+            &usb_root, &playlist, &manifest, true, None, None,
+        )
+        .expect("write pdb");
+        (dir, usb_root)
+    }
+
+    #[test]
+    fn validate_usb_root_empty_path_is_invalid() {
+        let (_dir, service) = test_service();
+        let result = service
+            .validate_usb_root(crate::models::ValidateUsbRootRequest {
+                path: "   ".to_string(),
+            })
+            .expect("validate");
+        assert!(!result.valid);
+        assert!(!result.has_write_access);
+        assert!(result.normalized_root.is_none());
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "usb.import.path-empty")
+        );
+    }
+
+    #[test]
+    fn validate_usb_root_missing_path_is_invalid() {
+        let (_dir, service) = test_service();
+        let missing = std::env::temp_dir().join(format!("does-not-exist-{}", uuid::Uuid::now_v7()));
+        let result = service
+            .validate_usb_root(crate::models::ValidateUsbRootRequest {
+                path: missing.to_string_lossy().to_string(),
+            })
+            .expect("validate");
+        assert!(!result.valid);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "usb.import.path-not-found")
+        );
+    }
+
+    #[test]
+    fn validate_usb_root_bare_directory_reports_missing_pieces() {
+        let (_dir, service) = test_service();
+        let usb_dir = tempfile::tempdir().expect("usb dir");
+        let result = service
+            .validate_usb_root(crate::models::ValidateUsbRootRequest {
+                path: usb_dir.path().to_string_lossy().to_string(),
+            })
+            .expect("validate");
+        assert!(!result.valid);
+        assert!(!result.has_vendor_root);
+        assert!(!result.has_contents);
+        assert!(!result.has_pdb);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "usb.import.missing-vendor-root")
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "usb.import.missing-contents")
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "usb.import.missing-pdb")
+        );
+    }
+
+    #[test]
+    fn validate_usb_root_initialized_usb_is_valid_and_registers_device() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let result = service
+            .validate_usb_root(crate::models::ValidateUsbRootRequest {
+                path: usb_root.to_string_lossy().to_string(),
+            })
+            .expect("validate");
+        assert!(result.valid);
+        assert!(result.has_vendor_root);
+        assert!(result.has_contents);
+        assert!(result.has_pdb);
+        assert!(result.has_edb);
+        assert!(result.normalized_root.is_some());
+
+        let devices = service.list_usb_devices().expect("list devices");
+        assert_eq!(devices.items.len(), 1);
+        assert!(devices.items[0].mounted);
+    }
+
+    #[test]
+    fn prune_usb_device_soft_deletes_and_removes_from_listing() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        service
+            .validate_usb_root(crate::models::ValidateUsbRootRequest {
+                path: usb_root.to_string_lossy().to_string(),
+            })
+            .expect("validate");
+        let devices = service.list_usb_devices().expect("list devices");
+        let id = devices.items[0].id.clone();
+
+        let pruned = service
+            .prune_usb_device(crate::models::PruneUsbDeviceRequest { id: id.clone() })
+            .expect("prune");
+        assert!(pruned.pruned);
+
+        let after = service
+            .list_usb_devices()
+            .expect("list devices after prune");
+        assert!(after.items.is_empty());
+
+        let pruned_again = service
+            .prune_usb_device(crate::models::PruneUsbDeviceRequest { id })
+            .expect("prune again");
+        assert!(
+            !pruned_again.pruned,
+            "already-pruned device should be a no-op"
+        );
+    }
+
+    #[test]
+    fn fetch_usb_playlists_returns_playlist_with_track() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = seeded_playlist_usb();
+
+        let result = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+            })
+            .expect("fetch usb playlists");
+
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].name, "My Playlist");
+        assert_eq!(result.items[0].track_count, 1);
+        assert_eq!(result.items[0].tracks[0].title, "Song A");
+        assert_eq!(result.stats.indexed_tracks, 1);
+    }
+
+    #[test]
+    fn reorder_usb_playlists_updates_pdb_sort_order() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let playlist_a = crate::edb::ExportPlaylistData {
+            id: "pl-a".to_string(),
+            name: "Playlist A".to_string(),
+            tracks: vec![make_export_track("t1", "Song A", "a.mp3")],
+        };
+        let manifest_a = make_export_manifest(
+            "pl-a",
+            "Playlist A",
+            &usb_root,
+            &[("t1", "Song A", "a.mp3")],
+        );
+        crate::service::export_helpers::write_pdb(
+            &usb_root,
+            &playlist_a,
+            &manifest_a,
+            true,
+            None,
+            None,
+        )
+        .expect("write playlist a");
+
+        let playlist_b = crate::edb::ExportPlaylistData {
+            id: "pl-b".to_string(),
+            name: "Playlist B".to_string(),
+            tracks: vec![make_export_track("t2", "Song B", "b.mp3")],
+        };
+        let manifest_b = make_export_manifest(
+            "pl-b",
+            "Playlist B",
+            &usb_root,
+            &[("t2", "Song B", "b.mp3")],
+        );
+        crate::service::export_helpers::write_pdb(
+            &usb_root,
+            &playlist_b,
+            &manifest_b,
+            true,
+            None,
+            None,
+        )
+        .expect("write playlist b");
+
+        let fetched = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+            })
+            .expect("fetch before reorder");
+        let mut ids: Vec<String> = fetched.items.iter().map(|p| p.id.clone()).collect();
+        ids.reverse();
+
+        let result = service
+            .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                ordered_playlist_ids: ids,
+            })
+            .expect("reorder playlists");
+        assert!(result.reordered > 0);
+    }
+
+    #[test]
+    fn reorder_usb_playlists_rejects_ids_with_no_pdb_backed_entries() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let err = service
+            .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                ordered_playlist_ids: vec!["usb-pl-name-only".to_string()],
+            })
+            .unwrap_err();
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn remove_usb_playlist_removes_from_pdb_and_edb() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = seeded_playlist_usb();
+
+        let result = service
+            .remove_usb_playlist(crate::models::RemoveUsbPlaylistRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                playlist_id: None,
+                playlist_name: "My Playlist".to_string(),
+            })
+            .expect("remove usb playlist");
+
+        assert_eq!(result.removed_from_pdb, 1);
+
+        let after = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+            })
+            .expect("fetch after remove");
+        assert!(after.items.iter().all(|p| p.name != "My Playlist"));
+    }
+
+    #[test]
+    fn remove_usb_playlist_rejects_empty_name() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let err = service
+            .remove_usb_playlist(crate::models::RemoveUsbPlaylistRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                playlist_id: None,
+                playlist_name: "   ".to_string(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn remove_usb_playlist_not_found_returns_error() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let err = service
+            .remove_usb_playlist(crate::models::RemoveUsbPlaylistRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                playlist_id: None,
+                playlist_name: "Does Not Exist".to_string(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, crate::error::BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn inspect_usb_track_finds_by_id_from_pdb() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = seeded_playlist_usb();
+
+        let fetched = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+            })
+            .expect("fetch playlists");
+        let track_id = fetched.items[0].tracks[0].id.clone();
+
+        let inspected = service
+            .inspect_usb_track(crate::models::InspectUsbTrackRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                track_id,
+                file_path: None,
+                title: None,
+                artist: None,
+            })
+            .expect("inspect usb track");
+        assert_eq!(inspected.track.title, "Song A");
+    }
+
+    #[test]
+    fn inspect_usb_track_errors_for_unknown_id() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = seeded_playlist_usb();
+
+        let err = service
+            .inspect_usb_track(crate::models::InspectUsbTrackRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                track_id: "999999".to_string(),
+                file_path: None,
+                title: None,
+                artist: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn inspect_usb_track_rejects_non_numeric_id() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let err = service
+            .inspect_usb_track(crate::models::InspectUsbTrackRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                track_id: "not-a-number".to_string(),
+                file_path: None,
+                title: None,
+                artist: None,
+            })
+            .unwrap_err();
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn fetch_usb_histories_returns_empty_when_pdb_missing() {
+        let (_dir, service) = test_service();
+        let usb_dir = tempfile::tempdir().expect("usb dir");
+
+        let result = service
+            .fetch_usb_histories(crate::models::FetchUsbHistoriesRequest {
+                usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
+            })
+            .expect("fetch usb histories");
+
+        assert!(result.items.is_empty());
+        assert_eq!(result.counts.imported_playlists, 0);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "usb.histories.pdb-not-found")
+        );
+    }
+
+    #[test]
+    fn merge_orphaned_usb_placeholder_tracks_reassigns_playlist_and_links() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        let usb_root_path = "/mnt/usb-device";
+        crate::service::usb_utils::upsert_usb_device(
+            &conn,
+            std::path::Path::new(usb_root_path),
+            false,
+            &now(),
+        )
+        .expect("seed usb device");
+
+        let fingerprint = build_track_match_fingerprint("Song", "Artist", None);
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, file_size_bytes, match_fingerprint, created_at, updated_at)
+             VALUES ('local-1', 'Song', 'Artist', '/library/song.mp3', 200000, 5000, ?1, datetime('now'), datetime('now'))",
+            rusqlite::params![fingerprint],
+        )
+        .expect("insert local track");
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, file_size_bytes, match_fingerprint, created_at, updated_at)
+             VALUES ('placeholder-1', 'Song', 'Artist', '/mnt/usb-device/Contents/song.mp3', 200000, 5000, ?1, datetime('now'), datetime('now'))",
+            rusqlite::params![fingerprint],
+        )
+        .expect("insert placeholder track");
+        drop(conn);
+
+        let playlist = service
+            .create_playlist(crate::models::CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+        let conn = service.db.connect().expect("connect");
+        conn.execute(
+            "INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at)
+             VALUES ('pt-1', ?1, 'placeholder-1', 0, datetime('now'))",
+            rusqlite::params![playlist.playlist_id],
+        )
+        .expect("link playlist track");
+        drop(conn);
+
+        let result = service
+            .merge_orphaned_usb_placeholder_tracks()
+            .expect("merge placeholders");
+        assert_eq!(result.merged, 1);
+
+        let conn = service.db.connect().expect("connect");
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tracks WHERE id = 'placeholder-1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count placeholder");
+        assert_eq!(remaining, 0);
+        let playlist_track_id: String = conn
+            .query_row(
+                "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?1",
+                rusqlite::params![playlist.playlist_id],
+                |r| r.get(0),
+            )
+            .expect("playlist track id");
+        assert_eq!(playlist_track_id, "local-1");
     }
 }
