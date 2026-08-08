@@ -5652,7 +5652,7 @@ mod tests {
     /// Corrupt the on-disk track row (id 1) and album row (id 1) to simulate a misaligned export:
     /// insert one byte before the UTF-16 string content and bump the recorded offset, breaking
     /// 4-byte alignment without changing the decoded content.
-    fn corrupt_alignment_in_place(bytes: &mut Vec<u8>) {
+    fn corrupt_alignment_in_place(bytes: &mut [u8]) {
         use crate::pdb_writer::{read_present_page_rows, rewrite_variable_page_rows_in_place};
         use crate::utils::{
             collect_chain, page_offset, read_u16_le_at, read_u32_le_at, table_ptr_fields,

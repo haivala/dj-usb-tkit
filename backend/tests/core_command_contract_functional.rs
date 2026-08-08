@@ -1,13 +1,23 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::path::Path;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, FetchUsbPlaylistsRequest,
-    GetPlaylistTracksRequest, InitializeUsbRequest, RemoveTracksFromPlaylistRequest,
-    RunUsbDiagnosticsRequest, ScanLibraryRequest, SearchTracksRequest,
+    AddTracksToPlaylistRequest, CheckSourceRootsRequest, CreatePlaylistRequest, DedupeMode,
+    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
+    GetPlaylistTracksRequest, InitializeUsbRequest, ListTracksRequest, PlayTrackRequest,
+    PlaybackPreflightRequest, PruneUsbDeviceRequest, RemoveTracksFromPlaylistRequest,
+    RemoveUsbPlaylistRequest, RenamePlaylistRequest, ReorderUsbPlaylistsRequest,
+    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest, ScanMasterDbRequest,
+    SearchTracksRequest, ValidateUsbRootRequest,
 };
+use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
+
+fn vendor_db_dir(root: &Path) -> std::path::PathBuf {
+    root.join("PIONEER").join("rekordbox")
+}
 
 #[test]
 fn search_tracks_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {
@@ -275,4 +285,401 @@ fn run_usb_diagnostics_with_progress_returns_api_failure_for_missing_root() {
         "expected non-empty error message"
     );
     let _ = progress_events;
+}
+
+#[test]
+fn take_playback_transitions_hands_off_the_receiver_exactly_once() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    assert!(
+        backend.take_playback_transitions().is_some(),
+        "first caller should receive the transition channel"
+    );
+    assert!(
+        backend.take_playback_transitions().is_none(),
+        "second caller should find the channel already taken"
+    );
+}
+
+#[test]
+fn scan_master_db_reports_validation_error_for_missing_path() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let missing_path = root.path().join("does-not-exist/master.db");
+    let response = backend.scan_master_db(ScanMasterDbRequest {
+        path: Some(missing_path.to_string_lossy().to_string()),
+    });
+
+    assert!(!response.ok, "missing master.db should fail");
+    let error = response.error.expect("error payload");
+    assert!(error.message.contains("master.db not found"));
+}
+
+#[test]
+fn list_tracks_paginates_the_full_library() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    for name in ["Artist - 01.mp3", "Artist - 02.mp3", "Artist - 03.mp3"] {
+        fs::write(media.join(name), b"audio").expect("write fixture track");
+    }
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let page = backend.list_tracks(ListTracksRequest {
+        limit: 2,
+        cursor: None,
+    });
+    assert!(page.ok, "list_tracks failed: {page:?}");
+    let page_data = page.data.expect("page data");
+    assert_eq!(page_data.total, 3);
+    assert_eq!(page_data.items.len(), 2);
+    assert!(page_data.has_more);
+
+    let next_cursor = page_data.next_cursor.expect("next cursor");
+    let page2 = backend.list_tracks(ListTracksRequest {
+        limit: 2,
+        cursor: Some(next_cursor),
+    });
+    assert!(page2.ok, "second page failed: {page2:?}");
+    let page2_data = page2.data.expect("page2 data");
+    assert_eq!(page2_data.items.len(), 1);
+    assert!(!page2_data.has_more);
+}
+
+#[test]
+fn check_source_roots_reports_missing_and_existing_roots() {
+    let root = tempdir().expect("temp root");
+    let existing = root.path().join("existing");
+    fs::create_dir_all(&existing).expect("create existing root");
+    let missing = root.path().join("missing");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let response = backend.check_source_roots(CheckSourceRootsRequest {
+        source_roots: vec![
+            existing.to_string_lossy().to_string(),
+            missing.to_string_lossy().to_string(),
+        ],
+    });
+    assert!(response.ok, "check_source_roots failed: {response:?}");
+    let data = response.data.expect("check_source_roots data");
+    assert_eq!(data.items.len(), 2);
+    assert_eq!(data.missing, vec![missing.to_string_lossy().to_string()]);
+}
+
+#[test]
+fn rename_playlist_updates_the_stored_name() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Original Name".to_string(),
+    });
+    assert!(created.ok, "create playlist failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+
+    let renamed = backend.rename_playlist(RenamePlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        name: "New Name".to_string(),
+    });
+    assert!(renamed.ok, "rename failed: {renamed:?}");
+    assert_eq!(renamed.data.expect("rename data").name, "New Name");
+
+    let listed = backend.list_playlists();
+    assert!(listed.ok, "list_playlists failed: {listed:?}");
+    let found = listed
+        .data
+        .expect("list data")
+        .items
+        .into_iter()
+        .find(|p| p.id == playlist_id)
+        .expect("renamed playlist should still be present");
+    assert_eq!(found.name, "New Name");
+}
+
+#[test]
+fn list_usb_devices_and_prune_usb_device_roundtrip() {
+    let root = tempdir().expect("temp root");
+    let usb_root = root.path().join("USB_TEST");
+    fs::create_dir_all(&usb_root).expect("create usb root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let init = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb_root.to_string_lossy().to_string(),
+    });
+    assert!(init.ok, "initialize usb failed: {init:?}");
+
+    let validated = backend.validate_usb_root(ValidateUsbRootRequest {
+        path: usb_root.to_string_lossy().to_string(),
+    });
+    assert!(validated.ok, "validate usb root failed: {validated:?}");
+
+    let listed = backend.list_usb_devices();
+    assert!(listed.ok, "list_usb_devices failed: {listed:?}");
+    let devices = listed.data.expect("device list data").items;
+    assert_eq!(devices.len(), 1, "expected exactly one registered device");
+    let device_id = devices[0].id.clone();
+
+    let pruned = backend.prune_usb_device(PruneUsbDeviceRequest {
+        id: device_id.clone(),
+    });
+    assert!(pruned.ok, "prune failed: {pruned:?}");
+    assert!(pruned.data.expect("prune data").pruned);
+
+    let listed_after = backend.list_usb_devices();
+    assert!(listed_after.ok, "list_usb_devices after prune failed");
+    assert!(listed_after.data.expect("after prune data").items.is_empty());
+}
+
+#[test]
+fn merge_orphaned_usb_placeholder_tracks_is_a_noop_on_an_empty_library() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let response = backend.merge_orphaned_usb_placeholder_tracks();
+    assert!(response.ok, "merge failed: {response:?}");
+    assert_eq!(response.data.expect("merge data").merged, 0);
+}
+
+#[test]
+fn fetch_usb_histories_with_progress_returns_api_failure_for_missing_root() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let missing_usb = root.path().join("missing-usb");
+
+    let mut progress_events = 0usize;
+    let response = backend.fetch_usb_histories_with_progress(
+        FetchUsbHistoriesRequest {
+            usb_root: Some(missing_usb.to_string_lossy().to_string()),
+        },
+        |_, _, _| {
+            progress_events += 1;
+        },
+    );
+
+    assert!(!response.ok, "missing root should fail: {response:?}");
+    let _ = progress_events;
+}
+
+#[test]
+fn remove_usb_playlist_with_progress_removes_playlist_from_edb() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(vendor_db_dir(&usb)).expect("create usb dirs");
+    let db_path = vendor_db_dir(&usb).join("exportLibrary.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).expect("create export db");
+        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
+            .expect("set SQLCipher key");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE playlist (
+              playlist_id INTEGER PRIMARY KEY,
+              name TEXT,
+              attribute INTEGER,
+              sequenceNo INTEGER
+            );
+            CREATE TABLE playlist_content (
+              playlist_id INTEGER,
+              content_id INTEGER,
+              sequenceNo INTEGER
+            );
+            INSERT INTO playlist (playlist_id, name, attribute, sequenceNo)
+              VALUES (1, 'Progress Playlist', 0, 1);
+            INSERT INTO playlist_content (playlist_id, content_id, sequenceNo)
+              VALUES (1, 10, 1);
+            "#,
+        )
+        .expect("seed export db");
+    }
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let mut progress_messages = Vec::<String>::new();
+    let response = backend.remove_usb_playlist_with_progress(
+        RemoveUsbPlaylistRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: None,
+            playlist_name: "Progress Playlist".to_string(),
+        },
+        |_, _, message| progress_messages.push(message.to_string()),
+    );
+
+    assert!(response.ok, "remove failed: {response:?}");
+    assert_eq!(response.data.expect("remove data").removed_from_edb, 1);
+    assert!(
+        !progress_messages.is_empty(),
+        "expected at least one progress callback"
+    );
+}
+
+#[test]
+fn reorder_usb_playlists_with_progress_rejects_ids_without_pdb_prefix() {
+    let root = tempdir().expect("temp root");
+    let usb_root = root.path().join("usb");
+    fs::create_dir_all(&usb_root).expect("create usb root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let init = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb_root.to_string_lossy().to_string(),
+    });
+    assert!(init.ok, "initialize usb failed: {init:?}");
+
+    let mut progress_events = 0usize;
+    let response = backend.reorder_usb_playlists_with_progress(
+        ReorderUsbPlaylistsRequest {
+            usb_root: Some(usb_root.to_string_lossy().to_string()),
+            ordered_playlist_ids: vec!["usb-pl-name-not-pdb-backed".to_string()],
+        },
+        |_, _, _| {
+            progress_events += 1;
+        },
+    );
+
+    assert!(
+        !response.ok,
+        "ids without a bare-u32 PDB suffix should fail validation"
+    );
+    let error = response.error.expect("error payload");
+    assert!(error.message.contains("no PDB-backed playlist ids"));
+    let _ = progress_events;
+}
+
+#[test]
+fn set_analysis_paused_and_cancel_analysis_report_success() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let paused = backend.set_analysis_paused(true);
+    assert!(paused.ok, "pause failed: {paused:?}");
+    assert!(paused.data.expect("pause data").paused);
+
+    let resumed = backend.set_analysis_paused(false);
+    assert!(resumed.ok, "resume failed: {resumed:?}");
+    assert!(!resumed.data.expect("resume data").paused);
+
+    let cancelled = backend.cancel_analysis();
+    assert!(cancelled.ok, "cancel failed: {cancelled:?}");
+}
+
+#[test]
+fn export_to_usb_with_progress_reports_validation_error_for_empty_playlist_id() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let mut progress_events = 0usize;
+    let response = backend.export_to_usb_with_progress(
+        ExportToUsbRequest {
+            usb_root: None,
+            playlist_id: String::new(),
+            options: None,
+        },
+        |_, _, _| {
+            progress_events += 1;
+        },
+    );
+
+    assert!(!response.ok, "empty playlist id should fail validation");
+    let error = response.error.expect("error payload");
+    assert!(error.message.contains("playlistId must not be empty"));
+    let _ = progress_events;
+}
+
+#[test]
+fn play_track_native_rejects_missing_file_before_touching_audio_hardware() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let response = backend.play_track_native(PlayTrackRequest {
+        path: "/nonexistent/path/to/track.mp3".to_string(),
+        start_offset_ms: None,
+        start_ratio: None,
+    });
+
+    assert!(!response.ok, "missing file should be rejected");
+}
+
+#[test]
+fn stop_and_status_playback_native_report_idle_state_without_hardware() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let stopped = backend.stop_playback_native();
+    assert!(stopped.ok, "stop failed: {stopped:?}");
+    assert!(stopped.data.expect("stop data").stopped);
+
+    let status = backend.get_playback_status_native();
+    assert!(status.ok, "status failed: {status:?}");
+    assert!(!status.data.expect("status data").playing);
+}
+
+#[test]
+fn playback_preflight_native_reports_readable_fixture() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/audio/formats/track_format_flac.flac");
+    let response = backend.playback_preflight_native(PlaybackPreflightRequest {
+        path: fixture.to_string_lossy().to_string(),
+    });
+
+    assert!(response.ok, "preflight failed: {response:?}");
+    let data = response.data.expect("preflight data");
+    assert!(data.file_exists);
+    assert!(data.file_readable);
+}
+
+#[test]
+fn run_usb_parity_report_with_progress_returns_api_failure_for_missing_root() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let missing_usb = root.path().join("missing-usb");
+
+    let mut progress_events = 0usize;
+    let response = backend.run_usb_parity_report_with_progress(
+        RunUsbParityReportRequest {
+            usb_root: Some(missing_usb.to_string_lossy().to_string()),
+        },
+        |_, _, _| {
+            progress_events += 1;
+        },
+    );
+
+    assert!(!response.ok, "missing root should fail: {response:?}");
+    let _ = progress_events;
+}
+
+#[test]
+fn detect_external_master_db_returns_a_response() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let response = backend.detect_external_master_db();
+    assert!(response.ok, "detect failed: {response:?}");
 }
