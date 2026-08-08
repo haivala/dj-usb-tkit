@@ -60,6 +60,7 @@ const PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID: &str = "repair_pdb_wrong_playlist_tr
 const PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID: &str = "repair_pdb_tombstoned_playlist_tree_ids";
 const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_pages";
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
+const PDB_TORN_GROWTH_PAGES_FIX_ID: &str = "repair_pdb_torn_growth_pages";
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
 
@@ -925,6 +926,175 @@ fn apply_pdb_ec_data_page_conflict_repair(
 
     // Update next_unused_page so future writers don't collide with the new ECs.
     bytes[0x0c..0x10].copy_from_slice(&next_free.to_le_bytes());
+
+    std::fs::write(&pdb_path, &bytes)?;
+    Ok(patched)
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct PdbTornGrowthReport {
+    /// Table `empty_candidate` pages that sit within a page no other table
+    /// owns, but aren't the all-zero blank page the additive writer expects
+    /// before it will reuse them (`pdb_writer.rs`'s `append_rows_to_chain_in_place`).
+    pub(super) garbage_ec_pages: Vec<u32>,
+    /// When set, the file should be truncated to this many pages: the header's
+    /// own `next_unused_page` claims nothing beyond it is allocated, yet the
+    /// physical file extends further with non-zero content.
+    pub(super) truncate_to_pages: Option<u32>,
+}
+
+impl PdbTornGrowthReport {
+    pub(super) fn is_empty(&self) -> bool {
+        self.garbage_ec_pages.is_empty() && self.truncate_to_pages.is_none()
+    }
+}
+
+/// Detect a torn additive-growth write left behind by a USB disconnect mid-export.
+///
+/// A rekordbox additive-growth write first extends `export.pdb` (and/or
+/// earmarks existing `empty_candidate` pages as the next slot for one or
+/// more tables), then writes the new page contents. If the drive is
+/// disconnected between those two steps, the pages that were about to be
+/// (re)written are left as whatever bytes previously occupied that disk
+/// region — never zeroed, never structured — while every page actually
+/// reachable through a table's `first_page`/`next_page` chain remains
+/// untouched and valid.
+///
+/// Two independent signals of this:
+/// - a table's `empty_candidate` points at a page that is not live data for
+///   any table (so overwriting it can't corrupt another table's rows) but is
+///   not all-zero either, meaning it failed to become the blank page the
+///   additive writer requires before reuse;
+/// - the physical file is longer than the header's own `next_unused_page`
+///   claims, and that unreferenced tail is non-zero.
+///
+/// Only pages outside every table's live-data set are ever proposed here;
+/// this never touches a page that is part of a real chain.
+pub(super) fn detect_pdb_torn_growth_pages(pdb_path: &Path) -> PdbTornGrowthReport {
+    use crate::utils::{page_offset, read_u8_at, read_u16_le_at, read_u32_le_at};
+    let Ok(bytes) = std::fs::read(pdb_path) else {
+        return PdbTornGrowthReport::default();
+    };
+    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+        return PdbTornGrowthReport::default();
+    };
+    if page_size == 0 || bytes.len() < page_size * 2 {
+        return PdbTornGrowthReport::default();
+    }
+    let total_pages = (bytes.len() / page_size) as u32;
+    let num_tables = read_u32_le_at(&bytes, 8).unwrap_or(0) as usize;
+    let next_unused = read_u32_le_at(&bytes, 0x0c).unwrap_or(total_pages);
+
+    // Same page-ownership scan detect_pdb_ec_data_page_conflicts uses: a page
+    // is "live" only if it is a non-sentinel, non-empty data page actually
+    // claimed by some table. Anything else is fair game to be a torn blank.
+    let mut live_data_pages: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for p in 1..total_pages as usize {
+        let off = p * page_size;
+        let stored_idx = read_u32_le_at(&bytes, off + 4).unwrap_or(0);
+        if stored_idx == 0 {
+            continue;
+        }
+        let pf = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        if pf == 0x64 {
+            continue; // sentinel page
+        }
+        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        if used_s == 0 {
+            continue;
+        }
+        live_data_pages.insert(stored_idx);
+    }
+
+    let mut garbage_ec_pages = Vec::new();
+    for i in 0..num_tables {
+        let toff = 0x1c + i * 16;
+        if toff + 16 > bytes.len() {
+            break;
+        }
+        let ec = read_u32_le_at(&bytes, toff + 4).unwrap_or(0);
+        if ec == 0 || live_data_pages.contains(&ec) {
+            continue;
+        }
+        let Some(off) = page_offset(ec, page_size) else {
+            continue;
+        };
+        let Some(page) = bytes.get(off..off + page_size) else {
+            continue;
+        };
+        if !page.iter().all(|b| *b == 0) {
+            garbage_ec_pages.push(ec);
+        }
+    }
+    garbage_ec_pages.sort_unstable();
+    garbage_ec_pages.dedup();
+
+    let truncate_to_pages = if total_pages > next_unused && next_unused > 0 {
+        let tail_off = next_unused as usize * page_size;
+        let tail_is_dirty = bytes
+            .get(tail_off..)
+            .map(|tail| tail.iter().any(|b| *b != 0))
+            .unwrap_or(false);
+        tail_is_dirty.then_some(next_unused)
+    } else {
+        None
+    };
+
+    PdbTornGrowthReport {
+        garbage_ec_pages,
+        truncate_to_pages,
+    }
+}
+
+/// Zero the garbage `empty_candidate` pages and drop the never-populated
+/// tail identified by [`detect_pdb_torn_growth_pages`]. Page indices used by
+/// any table are never touched or renumbered — this only restores pages the
+/// header itself says are blank/unallocated back to that state.
+fn apply_pdb_torn_growth_pages_repair(
+    usb_root: &Path,
+    report: &PdbTornGrowthReport,
+) -> BackendResult<usize> {
+    use crate::utils::{page_offset, read_u32_le_at};
+    if report.is_empty() {
+        return Ok(0);
+    }
+    let pdb_path = vendor_pdb_path(usb_root);
+    let mut bytes = std::fs::read(&pdb_path)?;
+    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+        return Err(BackendError::Validation(
+            "PDB too small to read page size".into(),
+        ));
+    };
+    if page_size == 0 {
+        return Err(BackendError::Validation("PDB has zero page size".into()));
+    }
+
+    let mut patched = 0usize;
+    for &ec in &report.garbage_ec_pages {
+        let Some(off) = page_offset(ec, page_size) else {
+            continue;
+        };
+        if off + page_size > bytes.len() {
+            continue;
+        }
+        bytes[off..off + page_size].fill(0);
+        patched += 1;
+    }
+
+    if let Some(truncate_to) = report.truncate_to_pages {
+        let new_len = truncate_to as usize * page_size;
+        if new_len < bytes.len() {
+            bytes.truncate(new_len);
+        }
+    }
+
+    // seqdb must stay strictly greater than every remaining seqpage. The
+    // garbage pages could have carried bogus huge seqpage values; recompute
+    // now that they're zeroed/truncated away.
+    let max_seq = crate::pdb_writer::max_seqpage_in_file(&bytes, page_size);
+    let cur = read_u32_le_at(&bytes, 0x14).unwrap_or(0);
+    let seqdb = cur.max(max_seq.saturating_add(1));
+    bytes[0x14..0x18].copy_from_slice(&seqdb.to_le_bytes());
 
     std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
@@ -2983,6 +3153,7 @@ impl BackendService {
         let pdb_wrong_playlist_tree_shape_pages =
             detect_pdb_wrong_playlist_tree_shape(&vendor_pdb_path(&usb_root));
         let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&vendor_pdb_path(&usb_root));
+        let pdb_torn_growth = detect_pdb_torn_growth_pages(&vendor_pdb_path(&usb_root));
         let pdb_misaligned_slots = detect_pdb_string_misalignment(&vendor_pdb_path(&usb_root));
         let pdb_misaligned_track_ids: Vec<u32> = {
             let mut ids: Vec<u32> = pdb_misaligned_slots
@@ -3224,6 +3395,46 @@ impl BackendService {
                      reassigns each conflicting empty_candidate to a free page beyond the \
                      physical file and updates next_unused_page in the header.",
                     pdb_ec_conflicts.len()
+                ),
+                supported: true,
+                destructive: false,
+                estimated_writes: 1,
+                estimated_deletes: 0,
+            });
+        }
+        if !pdb_torn_growth.is_empty() {
+            detected_issues.push(format!(
+                "PDB shows signs of a torn additive-growth write (mid-export USB disconnect): \
+                 {} empty_candidate page(s) hold non-zero garbage instead of a blank reusable page{}",
+                pdb_torn_growth.garbage_ec_pages.len(),
+                if pdb_torn_growth.truncate_to_pages.is_some() {
+                    ", plus a never-populated file tail beyond next_unused_page"
+                } else {
+                    ""
+                }
+            ));
+            estimated_file_writes += 1;
+            proposed_fixes.push(RepairFixProposal {
+                id: PDB_TORN_GROWTH_PAGES_FIX_ID.to_string(),
+                title: "Repair Torn Growth Pages (Interrupted Export)".to_string(),
+                description: format!(
+                    "The export was interrupted (e.g. USB disconnected) while rekordbox was \
+                     growing the PDB: {} table empty_candidate page(s) were earmarked as the \
+                     next slot to write but never received data, leaving non-zero garbage \
+                     instead of the blank page the writer requires before reuse{}. This zeroes \
+                     those page(s){} and recomputes seqdb. No table chain, page index, or \
+                     transaction history is touched.",
+                    pdb_torn_growth.garbage_ec_pages.len(),
+                    if pdb_torn_growth.truncate_to_pages.is_some() {
+                        " and left the file extended past next_unused_page with unpopulated content"
+                    } else {
+                        ""
+                    },
+                    if pdb_torn_growth.truncate_to_pages.is_some() {
+                        " and truncates the never-populated tail"
+                    } else {
+                        ""
+                    },
                 ),
                 supported: true,
                 destructive: false,
@@ -3869,6 +4080,28 @@ impl BackendService {
                 }
             } else if !pdb_ec_conflicts.is_empty() {
                 skipped_fixes.push("Repair Table Write-Pointer Conflict: not selected".to_string());
+            }
+
+            if selected.contains(PDB_TORN_GROWTH_PAGES_FIX_ID) {
+                if pdb_torn_growth.is_empty() {
+                    skipped_fixes.push("Repair Torn Growth Pages: nothing to apply".to_string());
+                } else {
+                    match apply_pdb_torn_growth_pages_repair(&usb_root, &pdb_torn_growth) {
+                        Ok(n) => applied_fixes.push(format!(
+                            "Repair Torn Growth Pages: zeroed {n} page(s){}",
+                            if pdb_torn_growth.truncate_to_pages.is_some() {
+                                ", truncated unpopulated tail"
+                            } else {
+                                ""
+                            }
+                        )),
+                        Err(err) => {
+                            failed_fixes.push(format!("Repair Torn Growth Pages failed: {err}"))
+                        }
+                    }
+                }
+            } else if !pdb_torn_growth.is_empty() {
+                skipped_fixes.push("Repair Torn Growth Pages: not selected".to_string());
             }
 
             if selected.contains(PDB_TRACK_STRING_ALIGNMENT_FIX_ID) {
@@ -6042,6 +6275,70 @@ mod tests {
         );
         assert_eq!(p1_next, new_ec);
         assert!(detect_pdb_ec_data_page_conflicts(&pdb_path).is_empty());
+    }
+
+    #[test]
+    fn torn_growth_repair_zeroes_garbage_ec_page_and_truncates_tail() {
+        // Mirrors a USB disconnected mid-additive-growth-write: table tt=9's
+        // empty_candidate (page 2) was earmarked as the next blank slot but
+        // never got zeroed/written, and the file was already extended past
+        // next_unused_page (3) with an unpopulated, non-zero tail (page 3).
+        let mut header = header_page();
+        header[8..12].copy_from_slice(&1u32.to_le_bytes()); // num_tables = 1
+        header[0x0c..0x10].copy_from_slice(&3u32.to_le_bytes()); // next_unused_page = 3
+        let toff = 0x1c;
+        header[toff..toff + 4].copy_from_slice(&9u32.to_le_bytes()); // tt = 9
+        header[toff + 4..toff + 8].copy_from_slice(&2u32.to_le_bytes()); // ec = page 2 (garbage)
+        header[toff + 8..toff + 12].copy_from_slice(&1u32.to_le_bytes()); // fp = 1
+        header[toff + 12..toff + 16].copy_from_slice(&1u32.to_le_bytes()); // lp = 1
+
+        let mut p1 = data_page(1, 9); // table tt=9's only real data page
+        set_flags(&mut p1, 0x34);
+        let garbage_ec = vec![0xABu8; TEST_PAGE_SIZE]; // page 2: torn ec target
+        let garbage_tail = vec![0xCDu8; TEST_PAGE_SIZE]; // page 3: never-populated tail
+
+        let (_td, usb_root) =
+            write_pdb_pages_as_usb_root(vec![header, p1, garbage_ec, garbage_tail]);
+        let pdb_path = vendor_pdb_path(&usb_root);
+
+        let report = detect_pdb_torn_growth_pages(&pdb_path);
+        assert_eq!(report.garbage_ec_pages, vec![2]);
+        assert_eq!(report.truncate_to_pages, Some(3));
+
+        assert_eq!(
+            apply_pdb_torn_growth_pages_repair(&usb_root, &PdbTornGrowthReport::default()).unwrap(),
+            0
+        );
+        let patched = apply_pdb_torn_growth_pages_repair(&usb_root, &report).unwrap();
+        assert_eq!(patched, 1, "one garbage ec page zeroed");
+
+        let bytes = std::fs::read(&pdb_path).unwrap();
+        assert_eq!(
+            bytes.len(),
+            3 * TEST_PAGE_SIZE,
+            "never-populated tail must be truncated away"
+        );
+        let ec_off = 2 * TEST_PAGE_SIZE;
+        assert!(
+            bytes[ec_off..ec_off + TEST_PAGE_SIZE]
+                .iter()
+                .all(|b| *b == 0),
+            "the reclaimed ec page must be all-zero"
+        );
+        let seqdb = u32::from_le_bytes(bytes[0x14..0x18].try_into().unwrap());
+        let max_seq = crate::pdb_writer::max_seqpage_in_file(&bytes, TEST_PAGE_SIZE);
+        assert!(
+            seqdb > max_seq,
+            "seqdb must stay strictly greater than max seqpage"
+        );
+        assert!(detect_pdb_torn_growth_pages(&pdb_path).is_empty());
+
+        // The reclaimed ec page must now satisfy the additive writer's own
+        // "all zero" reuse precondition (pdb_writer.rs's
+        // append_rows_to_chain_in_place), proving a follow-up rekordbox
+        // export would succeed instead of hitting the same rejection again.
+        let page = &bytes[ec_off..ec_off + TEST_PAGE_SIZE];
+        assert!(page.iter().all(|b| *b == 0));
     }
 
     #[test]

@@ -116,6 +116,33 @@ physical file instead of the conflicting value. Desktop library software rejects
 USBs where any table's `empty_candidate` points into a data page owned by
 another table.
 
+**Torn additive-growth write (interrupted export, e.g. USB disconnected
+mid-write)**: An additive-growth write first extends the file and/or
+earmarks existing `empty_candidate` pages as the next slot for one or more
+tables, then writes the new page contents. If the drive is disconnected
+between those two steps, the signature observed (verified against a
+real-world interrupted export) is:
+
+- one or more table `empty_candidate` pages, though still within the header's
+  own allocated range (`< next_unused_page`), contain non-zero garbage
+  instead of the all-zero blank page the additive writer requires before
+  reusing them (`pdb_writer.rs`'s `append_rows_to_chain_in_place` only
+  reuses an existing `empty_candidate` when every byte on that page is
+  zero — see `backend/src/pdb_writer.rs:3411-3418`);
+- the physical file can also extend past the header's `next_unused_page`
+  with non-zero content — capacity that had already been grown into the
+  file but never populated. Per the header's own bookkeeping this region is
+  unallocated and unreferenced by any table's chain or `empty_candidate`.
+- every page reachable through a table's `first_page`/`next_page` chain
+  remains untouched and valid; only unreferenced pages carry garbage.
+
+This is not evidence of PDB rebuild/relocation damage — no chain moved. It
+is safely repaired by zeroing the garbage `empty_candidate` page(s) (restoring
+exactly the pre-interruption "not yet used" state) and truncating any
+never-populated tail beyond `next_unused_page`, then recomputing `seqdb` so
+it stays greater than every remaining `seqpage`. See
+`repair_pdb_torn_growth_pages` in `docs/DIAGNOSTICS_REPAIRS.md`.
+
 Known table families used by this repository:
 
 | Table | Name | Current use |

@@ -1096,6 +1096,7 @@ pub(crate) fn diagnose_pdb_integrity(
         let wrong_history = super::repair::detect_pdb_wrong_history_page_shape(pdb_path);
         let t00_multipage_active = super::repair::detect_pdb_t00_multipage_active_pages(pdb_path);
         let ec_conflicts = super::repair::detect_pdb_ec_data_page_conflicts(pdb_path);
+        let torn_growth = super::repair::detect_pdb_torn_growth_pages(pdb_path);
 
         // Hard failures: conditions that cause player or DJ software rejection.
         let mut fail_parts = Vec::new();
@@ -1206,6 +1207,33 @@ pub(crate) fn diagnose_pdb_integrity(
                 "{} table(s) write-pointer conflict",
                 ec_conflicts.len()
             ));
+        }
+        if !torn_growth.is_empty() {
+            let ec_count = torn_growth.garbage_ec_pages.len();
+            let ec_desc = if ec_count > 0 {
+                format!("{ec_count} empty_candidate page(s) hold garbage instead of a blank page")
+            } else {
+                "the file has a never-populated tail".to_string()
+            };
+            let tail_suffix = if ec_count > 0 && torn_growth.truncate_to_pages.is_some() {
+                " and the file has a never-populated tail"
+            } else {
+                ""
+            };
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-torn-growth",
+                format!(
+                    "PDB shows signs of an interrupted export (e.g. USB disconnected mid-write): \
+                     {ec_desc}{tail_suffix}; run repair_pdb_torn_growth_pages to fix."
+                ),
+            ));
+            fail_parts.push(if ec_count > 0 {
+                format!("{ec_count} empty_candidate page(s) torn from interrupted export")
+            } else {
+                "PDB tail torn from interrupted export".to_string()
+            });
         }
         let integrity_status = if !fail_parts.is_empty() {
             DiagStatus::Fail

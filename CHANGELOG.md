@@ -30,6 +30,16 @@
 
 ## Unreleased
 
+- **New feature:** detect and repair a PDB left mid-write by an interrupted export (e.g. the
+  USB was disconnected while rekordbox was growing the database). One or more tables'
+  `empty_candidate` page — the pre-reserved slot for the next batch of rows — was left holding
+  leftover disk content instead of the blank page the writer requires before reusing it, so the
+  database never self-healed on a later export and could be rejected as corrupted. USB
+  Diagnostics now flags this distinctly (rather than as generic PDB corruption), and Repair
+  zeroes the affected page(s), truncates any never-populated file tail left past the header's
+  allocation boundary, and recomputes the transaction sequence counter — without touching any
+  table's page chain or transaction history.
+
 ## 0.1.12
 
 - **New feature:** detect and repair track/album rows with a misaligned UTF-16 string slot —
