@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.13
+
 - **New feature:** detect and repair a PDB left mid-write by an interrupted export (e.g. the
   USB was disconnected while rekordbox was growing the database). One or more tables'
   `empty_candidate` page — the pre-reserved slot for the next batch of rows — was left holding
