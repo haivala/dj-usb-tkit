@@ -30,6 +30,16 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** stop the Windows build from failing to start with a missing
+  `libcrypto-3-x64.dll`. SQLCipher (used to decrypt `exportLibrary.db`) was built with
+  `rusqlite`'s `bundled-sqlcipher` feature, which links against a dynamically-found system
+  OpenSSL instead of bundling one — on Windows this meant the installed app needed
+  `libcrypto-3-x64.dll` present alongside it, which the installer never shipped. Switched to
+  `bundled-sqlcipher-vendored-openssl`, which compiles OpenSSL from source and statically links
+  it into the binary, so no external OpenSSL DLL is required on any platform.
+
 ## 0.1.13
 
 - **New feature:** detect and repair a PDB left mid-write by an interrupted export (e.g. the
