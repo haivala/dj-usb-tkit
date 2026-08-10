@@ -1096,6 +1096,7 @@ pub(crate) fn diagnose_pdb_integrity(
         let wrong_history = super::repair::detect_pdb_wrong_history_page_shape(pdb_path);
         let t00_multipage_active = super::repair::detect_pdb_t00_multipage_active_pages(pdb_path);
         let ec_conflicts = super::repair::detect_pdb_ec_data_page_conflicts(pdb_path);
+        let truncated_chains = super::repair::detect_pdb_truncated_table_chains(pdb_path);
         let torn_growth = super::repair::detect_pdb_torn_growth_pages(pdb_path);
 
         // Hard failures: conditions that cause player or DJ software rejection.
@@ -1206,6 +1207,22 @@ pub(crate) fn diagnose_pdb_integrity(
             fail_parts.push(format!(
                 "{} table(s) write-pointer conflict",
                 ec_conflicts.len()
+            ));
+        }
+        if !truncated_chains.is_empty() {
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-truncated-table-chain",
+                format!(
+                    "{} table(s) declare a last page beyond the physical end of the file \
+                     (interrupted export); run repair_pdb_truncated_table_chain to fix.",
+                    truncated_chains.len()
+                ),
+            ));
+            fail_parts.push(format!(
+                "{} table(s) with declared last page beyond physical file end",
+                truncated_chains.len()
             ));
         }
         if !torn_growth.is_empty() {

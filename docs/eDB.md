@@ -262,6 +262,24 @@ Most shared fields are `must_match`. Current allowed-difference fields are
 `analysisDataFilePath`, `contentLink`, `masterContentId`, `masterDbId`, and
 `key.name`.
 
+**`playlist_id` collision avoidance must consider all rows, not just
+`attribute = 0`.** `replace_export_playlist_row_with_identity`
+(`backend/src/edb.rs:1028`) reassigns a colliding existing row before
+inserting a playlist at a specific target `playlist_id`. The `playlist_id`
+UNIQUE constraint applies across the whole `playlist` table regardless of
+`attribute` — folders (`attribute != 0`) share the same id space as
+playlists (`attribute = 0`). Scoping the collision *check* or the
+reassignment *update* to `attribute = 0` lets a same-id folder row go
+undetected (or detected but left unmoved), so the subsequent `INSERT` fails
+with `UNIQUE constraint failed: playlist.playlist_id`. This surfaced on a
+real corrupted export (`USB_ANOTHER_FIX`) where several playlists that only
+existed in eDB (needing a fresh PDB-side id allocated via the
+`allocate_unique_playlist_id` closure in `apply_strict_parity_upgrade`,
+`backend/src/service/repair.rs:4587`, which only avoids collisions against
+PDB-side folder ids) landed on ids already occupied by an eDB-side folder
+row. Regression test: `replace_export_playlist_row_with_identity_relocates_folder_collider`
+in `backend/src/edb.rs`'s own test module.
+
 ## Known Unknowns
 
 These eDB areas are intentionally handled conservatively:

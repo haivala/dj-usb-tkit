@@ -24,6 +24,36 @@ Operational diagnostics and strict parity are not the same thing. A USB can be
 usable on hardware while strict parity still reports differences between PDB
 and eDB.
 
+## What Strict Parity Means
+
+A USB export is really two separate databases that both have to be trusted:
+`export.pdb` (legacy binary, read as the primary database by older CDJ
+hardware) and `exportLibrary.db`/eDB (encrypted SQLite, read as the primary
+database by the CDJ-3000; desktop DJ software validates both). See
+`docs/PDB.md` "How PDB Works" and `docs/eDB.md` "How eDB Works" for why the
+app keeps both instead of one.
+
+Operational diagnostics (`run_usb_diagnostics`) only asks whether *each*
+database, taken on its own, looks structurally sound and playable. Strict
+parity (`run_usb_parity_report`) asks a stricter, narrower question: does
+eDB's view of the library — playlists, membership, order, per-track
+metadata, media/analysis paths, dictionary-id resolution — match PDB's view,
+field for field. See `## Diagnostic Scope` below for exactly what each report
+checks.
+
+These can disagree. A USB can play back correctly on the exact hardware you
+tested (passing operational diagnostics) while still failing strict parity —
+for example, eDB has a playlist entry PDB doesn't, or a track's BPM differs
+between the two files. That gap might not visibly break playback on the one
+player you tried, but it is a real divergence: since different players treat
+different files as authoritative, the same USB can behave differently
+depending on which one it lands on. Strict parity exists to catch that class
+of problem before it surfaces as a hardware-specific bug report.
+
+Strict parity is read-only as a report. `upgrade_export_data_to_strict_parity`
+is the separate, explicit repair action that reconciles differences by
+merging and rewriting both databases to match — see "Repair Flow" below.
+
 ## Diagnostic Scope
 
 `run_usb_diagnostics` checks these areas:
@@ -71,7 +101,10 @@ When `apply=true`:
 - selected fixes are applied if `selectedFixIds` is non-empty;
 - if `selectedFixIds` is empty, all supported non-optional fixes are selected;
 - `sync_edb_history_from_pdb` is optional and is not selected by default;
-- strict parity upgrade runs before structural PDB page repairs;
+- `repair_pdb_truncated_table_chain` runs *before* strict parity upgrade (it is
+  a structural prerequisite: additive track appends hard-fail while a table's
+  chain is unreachable, so it must be fixed first); all other structural PDB
+  page repairs run *after* strict parity upgrade;
 - report commands still remain read-only.
 
 Repair results are returned as applied fixes, skipped fixes, failed fixes,
@@ -97,6 +130,7 @@ The current code can propose these repair IDs:
 | `repair_pdb_t00_multipage_active_pages` | predecessor `t00` pages marked active in a multi-page chain | Sets those pages to sealed flag `0x24` and `(1, nrs-1)` |
 | `repair_pdb_ec_data_page_conflict` | table `empty_candidate` pointer aliasing another table's data page | Assigns each conflicting table a new empty candidate beyond the current file tail and updates `next_unused_page` |
 | `repair_pdb_torn_growth_pages` | torn additive-growth write left by an interrupted export (e.g. USB disconnected mid-write) | Zeroes `empty_candidate` page(s) that hold garbage instead of a blank reusable page, truncates any never-populated file tail beyond `next_unused_page`, and recomputes `seqdb` |
+| `repair_pdb_truncated_table_chain` | a table's declared last page is beyond the physical end of the file (interrupted export left growth pointers ahead of the actual written data) | Points the table's `last`/`empty_candidate` fields back at the real last written page (found by walking the chain); does not touch page content. Applied before strict parity, since additive track appends hard-fail while the chain is unreachable |
 | `manual_reimport_unindexed_audio` | audio files under `Contents/` not indexed by PDB/eDB | Guidance-only proposal; no automatic deletion |
 | `remove_missing_audio_references` | DB references to audio files missing from USB | Removes eDB content/playlist links and PDB playlist entries only when no unindexed audio drift is present |
 | `sync_edb_history_from_pdb` | eDB history counts differ from PDB-derived history payload | Replaces eDB `history` and `history_content` rows from current PDB history data |
@@ -164,5 +198,6 @@ Relevant test areas:
 - `backend/tests/export_shape_parity_functional.rs`
 - `backend/src/service/diagnostics.rs` unit tests
 - `backend/src/service/repair.rs` unit tests
+- `backend/src/edb.rs` unit tests
 - `vanilla-ui/tests/diagnostics_ui_behavior.test.mjs`
 - `vanilla-ui/tests/usb_parity_detail.test.mjs`

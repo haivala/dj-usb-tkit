@@ -53,11 +53,29 @@ fn main() {
         })
     });
 
+    fn section_json(s: &backend::models::DiagSection) -> serde_json::Value {
+        json!({
+            "status": s.status,
+            "checks": s.checks.iter().map(|c| json!({
+                "label": c.label,
+                "status": c.status,
+                "detail": c.detail,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
     let payload = json!({
         "overallStatus": data.overall_status,
         "warnings": data.warnings,
         "cdjCounterSnapshot": snapshot,
         "playlistDetailCount": data.playlist_details.len(),
+        "sections": {
+            "pdbIntegrity": section_json(&data.pdb_integrity),
+            "edbAccess": section_json(&data.edb_access),
+            "contentsIntegrity": section_json(&data.contents_integrity),
+            "analysisIntegrity": section_json(&data.analysis_integrity),
+            "playlistResolution": section_json(&data.playlist_resolution),
+        },
     });
     println!("{}", serde_json::to_string_pretty(&payload).unwrap());
 }

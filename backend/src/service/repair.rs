@@ -61,6 +61,7 @@ const PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID: &str = "repair_pdb_tombstoned_play
 const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_pages";
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
 const PDB_TORN_GROWTH_PAGES_FIX_ID: &str = "repair_pdb_torn_growth_pages";
+const PDB_TRUNCATED_TABLE_CHAIN_FIX_ID: &str = "repair_pdb_truncated_table_chain";
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
 
@@ -926,6 +927,168 @@ fn apply_pdb_ec_data_page_conflict_repair(
 
     // Update next_unused_page so future writers don't collide with the new ECs.
     bytes[0x0c..0x10].copy_from_slice(&next_free.to_le_bytes());
+
+    std::fs::write(&pdb_path, &bytes)?;
+    Ok(patched)
+}
+
+/// A table whose declared `last` page is a physically nonexistent page index
+/// (beyond the end of the file). This happens when an additive-growth write
+/// is interrupted after the table pointer was advanced to claim new pages
+/// but before those pages were actually flushed to disk: the real last
+/// written page still has a valid, live row, but the header believes growth
+/// continued further than it did.
+///
+/// Unlike `empty_candidate`, which healthy rekordbox exports routinely set
+/// beyond the file's current physical length (reserved headroom for future
+/// growth — confirmed against `USB_REKORDBOX6` and `USB_LOTS_OF_TRACKS_RB`),
+/// a table's `last` page must always physically exist: it is not a future
+/// candidate, it is the table's real current tail.
+#[derive(Debug, Clone)]
+pub(super) struct TruncatedTableChain {
+    pub(super) table_type: u32,
+    /// The real last page, found by walking the chain from `first` and
+    /// stopping at the last page that physically exists and holds live data.
+    pub(super) corrected_last: u32,
+    /// The corrected `empty_candidate`, taken from the real last page's own
+    /// `next` field (the documented `empty_candidate == last_page.next`
+    /// invariant, verified against reference exports) when that value looks
+    /// like a sane forward pointer, else the physical end of the file.
+    pub(super) corrected_ec: u32,
+}
+
+/// Detect tables whose declared `last` page index does not physically exist
+/// in the file, and compute the metadata correction that restores
+/// `empty_candidate == last_page.next` without touching any page content.
+pub(super) fn detect_pdb_truncated_table_chains(pdb_path: &Path) -> Vec<TruncatedTableChain> {
+    use crate::utils::{collect_chain, page_offset, read_u16_le_at, read_u32_le_at};
+    let Ok(bytes) = std::fs::read(pdb_path) else {
+        return Vec::new();
+    };
+    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+        return Vec::new();
+    };
+    if page_size == 0 || bytes.len() < page_size * 2 {
+        return Vec::new();
+    }
+    let total_pages = (bytes.len() / page_size) as u32;
+    let num_tables = read_u32_le_at(&bytes, 8).unwrap_or(0) as usize;
+
+    let mut fixes = Vec::new();
+    for i in 0..num_tables {
+        let toff = 0x1c + i * 16;
+        if toff + 16 > bytes.len() {
+            break;
+        }
+        let tt = read_u32_le_at(&bytes, toff).unwrap_or(0);
+        let first = read_u32_le_at(&bytes, toff + 8).unwrap_or(0);
+        let last = read_u32_le_at(&bytes, toff + 12).unwrap_or(0);
+        if first == 0 || last < total_pages {
+            continue; // empty table, or declared last already physically exists
+        }
+        if collect_chain(&bytes, page_size, first, last).is_some() {
+            continue; // shouldn't happen (last >= total_pages), but stay safe
+        }
+        // Walk from `first` following `next` pointers, stopping at the last
+        // page that is still within the physical file. Bounded by
+        // total_pages so a cycle can't spin forever.
+        let mut seen = HashSet::<u32>::new();
+        let mut real_last = None;
+        let mut cur = first;
+        for _ in 0..=total_pages {
+            if cur >= total_pages || !seen.insert(cur) {
+                break;
+            }
+            real_last = Some(cur);
+            if cur == last {
+                break;
+            }
+            let Some(off) = page_offset(cur, page_size) else {
+                break;
+            };
+            let Some(next) = read_u32_le_at(&bytes, off + 0x0c) else {
+                break;
+            };
+            if next == 0 {
+                break;
+            }
+            cur = next;
+        }
+        let Some(real_last) = real_last else { continue };
+        if real_last == last {
+            continue;
+        }
+        let Some(off) = page_offset(real_last, page_size) else {
+            continue;
+        };
+        let Some(page) = bytes.get(off..off + page_size) else {
+            continue;
+        };
+        let used_s = read_u16_le_at(page, 0x1e).unwrap_or(0);
+        if used_s == 0 {
+            continue; // don't anchor a repair on a blank/garbage page
+        }
+        let real_next = read_u32_le_at(&bytes, off + 0x0c).unwrap_or(total_pages);
+        let corrected_ec = if real_next > real_last {
+            real_next
+        } else {
+            total_pages
+        };
+        fixes.push(TruncatedTableChain {
+            table_type: tt,
+            corrected_last: real_last,
+            corrected_ec,
+        });
+    }
+    fixes
+}
+
+/// Patch each affected table's `last`/`empty_candidate` pointer fields to
+/// match physical reality. No page content is modified — the real last page
+/// found by [`detect_pdb_truncated_table_chains`] is already valid, live
+/// data, and its own `next` field already anticipated the corrected `ec`.
+fn apply_pdb_truncated_table_chain_repair(
+    usb_root: &Path,
+    fixes: &[TruncatedTableChain],
+) -> BackendResult<usize> {
+    if fixes.is_empty() {
+        return Ok(0);
+    }
+    let pdb_path = vendor_pdb_path(usb_root);
+    let mut bytes = std::fs::read(&pdb_path)?;
+    let num_tables = bytes
+        .get(8..12)
+        .and_then(|b| b.try_into().ok())
+        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
+        .unwrap_or(0);
+
+    let mut patched = 0usize;
+    for fix in fixes {
+        let mut found_toff = None;
+        for i in 0..num_tables {
+            let off = 0x1c + i * 16;
+            if off + 16 > bytes.len() {
+                break;
+            }
+            if bytes
+                .get(off..off + 4)
+                .and_then(|b| b.try_into().ok())
+                .map(|b: [u8; 4]| u32::from_le_bytes(b))
+                .unwrap_or(9999)
+                == fix.table_type
+            {
+                found_toff = Some(off);
+                break;
+            }
+        }
+        let Some(toff) = found_toff else { continue };
+        if toff + 16 > bytes.len() {
+            continue;
+        }
+        bytes[toff + 4..toff + 8].copy_from_slice(&fix.corrected_ec.to_le_bytes());
+        bytes[toff + 12..toff + 16].copy_from_slice(&fix.corrected_last.to_le_bytes());
+        patched += 1;
+    }
 
     std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
@@ -3153,6 +3316,7 @@ impl BackendService {
         let pdb_wrong_playlist_tree_shape_pages =
             detect_pdb_wrong_playlist_tree_shape(&vendor_pdb_path(&usb_root));
         let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&vendor_pdb_path(&usb_root));
+        let pdb_truncated_chains = detect_pdb_truncated_table_chains(&vendor_pdb_path(&usb_root));
         let pdb_torn_growth = detect_pdb_torn_growth_pages(&vendor_pdb_path(&usb_root));
         let pdb_misaligned_slots = detect_pdb_string_misalignment(&vendor_pdb_path(&usb_root));
         let pdb_misaligned_track_ids: Vec<u32> = {
@@ -3395,6 +3559,30 @@ impl BackendService {
                      reassigns each conflicting empty_candidate to a free page beyond the \
                      physical file and updates next_unused_page in the header.",
                     pdb_ec_conflicts.len()
+                ),
+                supported: true,
+                destructive: false,
+                estimated_writes: 1,
+                estimated_deletes: 0,
+            });
+        }
+        if !pdb_truncated_chains.is_empty() {
+            detected_issues.push(format!(
+                "{} table(s) with a declared last page beyond the physical end of the file \
+                 (interrupted export left growth pointers ahead of the actual written data)",
+                pdb_truncated_chains.len()
+            ));
+            estimated_file_writes += 1;
+            proposed_fixes.push(RepairFixProposal {
+                id: PDB_TRUNCATED_TABLE_CHAIN_FIX_ID.to_string(),
+                title: "Repair Truncated Table Chain".to_string(),
+                description: format!(
+                    "{} table(s) declare a last page that does not physically exist in the file \
+                     (an additive-growth write was interrupted after the table pointer was \
+                     advanced but before the new pages were flushed to disk). The repair points \
+                     the table's last/empty_candidate fields back at the real last written page; \
+                     no page content is changed.",
+                    pdb_truncated_chains.len()
                 ),
                 supported: true,
                 destructive: false,
@@ -3827,6 +4015,32 @@ impl BackendService {
                 }
             } else {
                 skipped_fixes.push("Fix Empty Analysis Files: not selected".to_string());
+            }
+
+            // Unlike the other structural repairs (which are safe to run after
+            // strict parity, since write_pdb's own additive writes establish
+            // correct page structure), a truncated table chain must be fixed
+            // *before* strict parity: write_pdb's additive track-append path
+            // hard-fails on a table whose declared last page doesn't physically
+            // exist, so every strict-parity mutation that needs a new/changed
+            // track row would otherwise fail (or only succeed once enough other
+            // playlists happen to have organically grown the chain past it).
+            if selected.contains(PDB_TRUNCATED_TABLE_CHAIN_FIX_ID) {
+                if pdb_truncated_chains.is_empty() {
+                    skipped_fixes
+                        .push("Repair Truncated Table Chain: nothing to apply".to_string());
+                } else {
+                    match apply_pdb_truncated_table_chain_repair(&usb_root, &pdb_truncated_chains)
+                    {
+                        Ok(n) => applied_fixes
+                            .push(format!("Repair Truncated Table Chain: fixed {n} table(s)")),
+                        Err(err) => {
+                            failed_fixes.push(format!("Repair Truncated Table Chain failed: {err}"))
+                        }
+                    }
+                }
+            } else if !pdb_truncated_chains.is_empty() {
+                skipped_fixes.push("Repair Truncated Table Chain: not selected".to_string());
             }
 
             // Strict parity runs first so that write_pdb establishes correct page
@@ -6275,6 +6489,60 @@ mod tests {
         );
         assert_eq!(p1_next, new_ec);
         assert!(detect_pdb_ec_data_page_conflicts(&pdb_path).is_empty());
+    }
+
+    #[test]
+    fn truncated_table_chain_repair_restores_last_and_ec_to_physical_reality() {
+        // Mirrors an additive-growth write interrupted after the table
+        // pointer was advanced to claim page 3 as the new last page, but
+        // before page 3 was ever flushed to disk: the real last page (2)
+        // already has its `next` field pointing at 3, anticipating the
+        // growth that never landed.
+        let mut header = header_page();
+        header[8..12].copy_from_slice(&1u32.to_le_bytes()); // num_tables = 1
+        let toff = 0x1c;
+        header[toff..toff + 4].copy_from_slice(&9u32.to_le_bytes()); // tt = 9
+        header[toff + 4..toff + 8].copy_from_slice(&4u32.to_le_bytes()); // ec = 4 (nonexistent)
+        header[toff + 8..toff + 12].copy_from_slice(&1u32.to_le_bytes()); // fp = 1
+        header[toff + 12..toff + 16].copy_from_slice(&3u32.to_le_bytes()); // lp = 3 (nonexistent)
+
+        let mut p1 = data_page(1, 9);
+        set_flags(&mut p1, 0x34);
+        set_next_page(&mut p1, 2);
+        let mut p2 = data_page(2, 9); // real last page; already points at the growth that never landed
+        set_flags(&mut p2, 0x34);
+        set_next_page(&mut p2, 3);
+
+        let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header, p1, p2]);
+        let pdb_path = vendor_pdb_path(&usb_root);
+
+        let fixes = detect_pdb_truncated_table_chains(&pdb_path);
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0].table_type, 9);
+        assert_eq!(fixes[0].corrected_last, 2);
+        assert_eq!(fixes[0].corrected_ec, 3);
+
+        assert_eq!(
+            apply_pdb_truncated_table_chain_repair(&usb_root, &[]).unwrap(),
+            0
+        );
+        let patched = apply_pdb_truncated_table_chain_repair(&usb_root, &fixes).unwrap();
+        assert_eq!(patched, 1);
+
+        let bytes = std::fs::read(&pdb_path).unwrap();
+        let new_ec = u32::from_le_bytes(bytes[toff + 4..toff + 8].try_into().unwrap());
+        let new_last = u32::from_le_bytes(bytes[toff + 12..toff + 16].try_into().unwrap());
+        assert_eq!(new_ec, 3);
+        assert_eq!(new_last, 2);
+        // Page 2's own content is untouched — its `next` already matched.
+        let p2_next =
+            u32::from_le_bytes(bytes[2 * TEST_PAGE_SIZE + 0x0c..2 * TEST_PAGE_SIZE + 0x10].try_into().unwrap());
+        assert_eq!(p2_next, 3);
+        assert!(
+            crate::utils::collect_chain(&bytes, TEST_PAGE_SIZE, 1, 2).is_some(),
+            "chain must now walk cleanly to the corrected last page"
+        );
+        assert!(detect_pdb_truncated_table_chains(&pdb_path).is_empty());
     }
 
     #[test]

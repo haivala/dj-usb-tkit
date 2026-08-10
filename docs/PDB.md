@@ -143,6 +143,39 @@ never-populated tail beyond `next_unused_page`, then recomputing `seqdb` so
 it stays greater than every remaining `seqpage`. See
 `repair_pdb_torn_growth_pages` in `docs/DIAGNOSTICS_REPAIRS.md`.
 
+**Truncated table chain (a more severe interrupted-export variant): declared
+`last_page` beyond the physical file.** Unlike `empty_candidate` — which
+healthy exports routinely set beyond the file's current physical length as
+reserved headroom for future growth (confirmed on both `USB_REKORDBOX6` and
+`USB_LOTS_OF_TRACKS_RB`, where several tables' `empty_candidate`/
+`next_unused_page` exceed `total_pages` in an otherwise clean, accepted
+export) — a table's `last_page` must always reference a page that physically
+exists in the file. It is not a future candidate; it is the table's real,
+already-written tail.
+
+One corrupted reference export (`USB_ANOTHER_FIX`, tracks table) had:
+
+- physical file: 510 pages (valid indices `0..509`);
+- `t00` table pointer: `empty_candidate=512`, `last_page=511` — both beyond
+  the physical file;
+- the real last physical `t00` page (509) already had `next_page=510`,
+  correctly anticipating the growth that never landed, confirming
+  `empty_candidate == last_page.next_page` still held for the *true* last
+  page — only the header's `last_page`/`empty_candidate` fields had been
+  advanced past what was actually flushed to disk.
+
+The repair only ever needs to correct these two header fields — no page
+content changes, since the true last page's own `next_page` already
+anticipated the corrected `empty_candidate`. See
+`repair_pdb_truncated_table_chain` in `docs/DIAGNOSTICS_REPAIRS.md`. This
+repair must run *before* the strict-parity upgrade fix, not after like the
+other structural repairs: `pdb_writer.rs`'s additive track-append path
+(`mutate_tracks_in_place`, `backend/src/pdb_writer.rs:4711`) hard-fails
+immediately when a table's chain is unreachable
+(`backend/src/pdb_writer.rs:4732`), which otherwise blocks (or makes
+order-dependent) every strict-parity playlist mutation that needs a new or
+changed track row.
+
 Known table families used by this repository:
 
 | Table | Name | Current use |
@@ -605,6 +638,11 @@ The per-table append order is:
 13. runtime history rows when needed
 
 ## Strict Parity
+
+See `docs/DIAGNOSTICS_REPAIRS.md` "What Strict Parity Means" for why this
+check exists (PDB and eDB are two independently-read databases that must
+agree, not just each be individually valid) and how it differs from
+operational diagnostics.
 
 PDB participates in strict parity validation with eDB. Core checks include:
 

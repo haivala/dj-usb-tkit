@@ -32,6 +32,29 @@
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
+- **New feature:** detect and repair a PDB table whose declared last page is beyond the
+  physical end of the file — a more severe variant of the interrupted-export ("USB
+  disconnected mid-write") signature, where the table pointer's `last_page`/`empty_candidate`
+  were advanced to claim new pages that never actually got flushed to disk. Unlike
+  `empty_candidate` (which healthy exports routinely set beyond the current file length as
+  reserved growth headroom), a table's `last_page` must always physically exist; when it
+  doesn't, every additive track append needed by strict parity hard-fails, and USB Diagnostics
+  previously only reported this indirectly as missing playlists and generic strict-parity
+  failures. Repair points the table's `last`/`empty_candidate` fields back at the real last
+  written page — no page content changes — and runs before the strict-parity upgrade fix,
+  since strict parity's additive writes depend on the chain already being walkable.
+- **Fix:** stop the strict-parity upgrade's playlist write from failing with `UNIQUE
+  constraint failed: playlist.playlist_id` when a target playlist id happened to already be
+  occupied by a folder row in eDB. `replace_export_playlist_row_with_identity`'s collision
+  check and its reassignment update were both scoped to `attribute = 0` (playlist rows), but
+  the `playlist_id` UNIQUE constraint applies to the whole `playlist` table regardless of
+  `attribute` — folders share the same id space. This let a same-id folder go undetected (and
+  even when detected, left unmoved), aborting the entire strict-parity upgrade on the first
+  playlist that needed a fresh PDB-side id landing on an already-occupied eDB folder id.
+- **Chore:** `run_usb_diagnostics` dev CLI (`backend/src/bin/run_usb_diagnostics.rs`) now
+  prints each diagnostics section's individual status/checks, not just the overall status and
+  flattened warning log — needed to tell which section was failing when the overall status and
+  warning log alone didn't make it obvious.
 - **Fix (CRITICAL):** stop the Windows build from failing to start with a missing
   `libcrypto-3-x64.dll`. SQLCipher (used to decrypt `exportLibrary.db`) was built with
   `rusqlite`'s `bundled-sqlcipher` feature, which links against a dynamically-found system

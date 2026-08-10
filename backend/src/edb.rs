@@ -1049,11 +1049,17 @@ pub fn replace_export_playlist_row_with_identity(
         "DELETE FROM playlist WHERE name = ?1 AND attribute = 0",
         params![playlist_name.as_str()],
     )?;
-    // If the target playlist_id collides with a different existing playlist,
-    // reassign that playlist to a new free ID instead of deleting it.
+    // If the target playlist_id collides with a different existing row,
+    // reassign that row to a new free ID instead of deleting it. The
+    // `playlist_id` UNIQUE constraint applies across all rows regardless of
+    // `attribute` (folders share the same id space as playlists), so the
+    // collision check and the reassignment must not be scoped to
+    // `attribute = 0` — doing so let a same-id folder row go undetected (and
+    // even when detected, left unmoved), causing the INSERT below to fail
+    // with "UNIQUE constraint failed: playlist.playlist_id".
     let collider_name: Option<String> = conn
         .query_row(
-            "SELECT name FROM playlist WHERE playlist_id = ?1 AND attribute = 0",
+            "SELECT name FROM playlist WHERE playlist_id = ?1",
             params![playlist_id],
             |row| row.get(0),
         )
@@ -1071,7 +1077,7 @@ pub fn replace_export_playlist_row_with_identity(
             params![new_id, playlist_id],
         )?;
         conn.execute(
-            "UPDATE playlist SET playlist_id = ?1 WHERE playlist_id = ?2 AND attribute = 0",
+            "UPDATE playlist SET playlist_id = ?1 WHERE playlist_id = ?2",
             params![new_id, playlist_id],
         )?;
     }
@@ -1792,7 +1798,8 @@ pub fn dynamic_insert(
 mod tests {
     use super::{
         ExportPlaylistData, open_edb, open_edb_from_usb_root, open_edb_rw,
-        try_read_content_date_created_index_from_edb, try_read_playlists_with_metadata_from_edb,
+        replace_export_playlist_row_with_identity, try_read_content_date_created_index_from_edb,
+        try_read_playlists_with_metadata_from_edb,
         try_read_playlists_with_metadata_from_edb_db_only, try_read_track_index_from_edb,
         upsert_export_playlist_row,
     };
@@ -1914,6 +1921,61 @@ mod tests {
             vec![(1, 1), (2, 0), (3, 0)],
             "target root playlist should move first without shifting other parents"
         );
+    }
+
+    #[test]
+    fn replace_export_playlist_row_with_identity_relocates_folder_collider() {
+        // Regression test: a target playlist_id that happens to already be
+        // occupied by a FOLDER row (attribute != 0) must still be detected
+        // and relocated. The old query/update pair scoped both the collision
+        // check and the reassignment to `attribute = 0`, so a folder sitting
+        // on the target id went completely undetected — the subsequent
+        // INSERT then hit "UNIQUE constraint failed: playlist.playlist_id".
+        let temp = tempdir().expect("tempdir");
+        let db_path = export_db_path(temp.path());
+        let conn = rusqlite::Connection::open(&db_path).expect("create sqlite db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE playlist (
+              playlist_id INTEGER PRIMARY KEY,
+              name TEXT,
+              attribute INTEGER,
+              playlist_id_parent INTEGER,
+              sequenceNo INTEGER
+            );
+            CREATE TABLE playlist_content (playlist_id INTEGER, content_id INTEGER, sequenceNo INTEGER);
+            INSERT INTO playlist (playlist_id, name, attribute, playlist_id_parent, sequenceNo) VALUES
+              (5, 'Some Folder', 1, 0, 0);
+            "#,
+        )
+        .expect("seed a folder occupying the target id");
+
+        let playlist = ExportPlaylistData {
+            id: "pl-new".to_string(),
+            name: "Top40".to_string(),
+            tracks: Vec::new(),
+        };
+        let playlist_id = replace_export_playlist_row_with_identity(&conn, &playlist, 5, 0)
+            .expect("must relocate the folder collider instead of failing the UNIQUE constraint");
+        assert_eq!(playlist_id, 5);
+
+        let new_row: (String, i64) = conn
+            .query_row(
+                "SELECT name, attribute FROM playlist WHERE playlist_id = 5",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("target id now holds the new playlist row");
+        assert_eq!(new_row, ("Top40".to_string(), 0));
+
+        let folder_row: (String, i64) = conn
+            .query_row(
+                "SELECT name, attribute FROM playlist WHERE name = 'Some Folder'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("folder must have been relocated, not lost");
+        assert_eq!(folder_row.1, 1, "relocated row must keep its folder attribute");
     }
 
     #[test]
