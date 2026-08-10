@@ -49,6 +49,11 @@
 - **Improvement:** the truncated-table-chain and torn-growth-pages fix checkboxes in the repair
   preview are now locked checked and cannot be deselected while they're proposed, since leaving
   either unchecked while strict parity runs has no safe outcome.
+- **Chore:** cache Rust build artifacts (`Swatinem/rust-cache` for macOS/Windows, a host-mounted
+  Cargo registry/git cache for the Docker-based Linux build) and the Linux build image's Docker
+  layers (`docker/build-push-action` with the GitHub Actions cache backend) in the release
+  workflow, so `cargo build --release` and the Linux toolchain image don't rebuild from scratch
+  on every tagged release.
 
 ## 0.1.14
 

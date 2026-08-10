@@ -10,6 +10,11 @@
 #   BUNDLES=appimage ./scripts/linux-release-docker.sh
 #   RUN_TESTS=1 ./scripts/linux-release-docker.sh
 #   REBUILD_IMAGE=1 ./scripts/linux-release-docker.sh   # force image rebuild
+#
+# Cargo registry/git and npm caches persist under .docker-cache/ at the repo
+# root by default (across both local runs and CI, where that directory is
+# restored/saved via actions/cache) — override with CARGO_REGISTRY_CACHE_DIR,
+# CARGO_GIT_CACHE_DIR, NPM_CACHE_DIR.
 
 set -euo pipefail
 
@@ -58,12 +63,23 @@ fi
 mkdir -p "$HOST_LOG_DIR"
 rm -f "$HOST_LOG_DIR"/container-build.log "$HOST_LOG_DIR"/tauri-appdir-inspection.log
 
+# Persisted on the host so repeated builds (local or CI-cached) reuse
+# downloaded crates/packages instead of refetching and recompiling
+# everything from scratch every run.
+CARGO_REGISTRY_CACHE_DIR="${CARGO_REGISTRY_CACHE_DIR:-$ROOT_DIR/.docker-cache/cargo-registry}"
+CARGO_GIT_CACHE_DIR="${CARGO_GIT_CACHE_DIR:-$ROOT_DIR/.docker-cache/cargo-git}"
+NPM_CACHE_DIR="${NPM_CACHE_DIR:-$ROOT_DIR/.docker-cache/npm}"
+mkdir -p "$CARGO_REGISTRY_CACHE_DIR" "$CARGO_GIT_CACHE_DIR" "$NPM_CACHE_DIR"
+
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 
 docker run --rm \
   -v "$ROOT_DIR:/project" \
   -v "$HOST_LOG_DIR:/host-logs" \
+  -v "$CARGO_REGISTRY_CACHE_DIR:/root/.cargo/registry" \
+  -v "$CARGO_GIT_CACHE_DIR:/root/.cargo/git" \
+  -v "$NPM_CACHE_DIR:/root/.npm" \
   --privileged \
   -w /project \
   -e BUNDLES="$BUNDLES" \
@@ -254,6 +270,9 @@ docker run --rm \
       /project/target \
       /project/desktop/src-tauri/target \
       /project/vanilla-ui/dist \
+      /root/.cargo/registry \
+      /root/.cargo/git \
+      /root/.npm \
       2>/dev/null || true
   '
 

@@ -114,6 +114,10 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Cache Rust build artifacts
+        if: runner.os != 'Linux'
+        uses: Swatinem/rust-cache@v2
+
       - name: Configure Windows OpenSSL
         if: runner.os == 'Windows'
         shell: pwsh
@@ -169,6 +173,34 @@ jobs:
           # Cargo feature is enabled.
           Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_NO_VENDOR=1"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_STATIC=1"
+
+      - name: Cache Linux Docker-build Rust/npm artifacts
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: |
+            target
+            .docker-cache/cargo-registry
+            .docker-cache/cargo-git
+            .docker-cache/npm
+          key: linux-docker-build-${{ hashFiles('Cargo.lock', 'vanilla-ui/package-lock.json', 'desktop/package-lock.json') }}
+          restore-keys: |
+            linux-docker-build-
+
+      - name: Set up Docker Buildx
+        if: runner.os == 'Linux'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Linux Docker build image (cached)
+        if: runner.os == 'Linux'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scripts/Dockerfile.linux-build
+          tags: djtkit-linux-build:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build Linux release bundles
         if: runner.os == 'Linux'
