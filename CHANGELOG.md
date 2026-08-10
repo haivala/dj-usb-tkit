@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.15
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** stop the torn-growth-pages repair (added in 0.1.13) from silently
