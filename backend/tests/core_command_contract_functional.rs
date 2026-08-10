@@ -442,7 +442,13 @@ fn list_usb_devices_and_prune_usb_device_roundtrip() {
 
     let listed_after = backend.list_usb_devices();
     assert!(listed_after.ok, "list_usb_devices after prune failed");
-    assert!(listed_after.data.expect("after prune data").items.is_empty());
+    assert!(
+        listed_after
+            .data
+            .expect("after prune data")
+            .items
+            .is_empty()
+    );
 }
 
 #[test]

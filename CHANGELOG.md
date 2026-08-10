@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.14
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **New feature:** detect and repair a PDB table whose declared last page is beyond the
@@ -62,6 +64,7 @@
   `libcrypto-3-x64.dll` present alongside it, which the installer never shipped. Switched to
   `bundled-sqlcipher-vendored-openssl`, which compiles OpenSSL from source and statically links
   it into the binary, so no external OpenSSL DLL is required on any platform.
+- **Chore:** update deps
 
 ## 0.1.13
 

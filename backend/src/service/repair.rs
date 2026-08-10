@@ -4030,8 +4030,7 @@ impl BackendService {
                     skipped_fixes
                         .push("Repair Truncated Table Chain: nothing to apply".to_string());
                 } else {
-                    match apply_pdb_truncated_table_chain_repair(&usb_root, &pdb_truncated_chains)
-                    {
+                    match apply_pdb_truncated_table_chain_repair(&usb_root, &pdb_truncated_chains) {
                         Ok(n) => applied_fixes
                             .push(format!("Repair Truncated Table Chain: fixed {n} table(s)")),
                         Err(err) => {
@@ -6535,8 +6534,11 @@ mod tests {
         assert_eq!(new_ec, 3);
         assert_eq!(new_last, 2);
         // Page 2's own content is untouched — its `next` already matched.
-        let p2_next =
-            u32::from_le_bytes(bytes[2 * TEST_PAGE_SIZE + 0x0c..2 * TEST_PAGE_SIZE + 0x10].try_into().unwrap());
+        let p2_next = u32::from_le_bytes(
+            bytes[2 * TEST_PAGE_SIZE + 0x0c..2 * TEST_PAGE_SIZE + 0x10]
+                .try_into()
+                .unwrap(),
+        );
         assert_eq!(p2_next, 3);
         assert!(
             crate::utils::collect_chain(&bytes, TEST_PAGE_SIZE, 1, 2).is_some(),

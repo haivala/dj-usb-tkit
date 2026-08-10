@@ -1975,7 +1975,10 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("folder must have been relocated, not lost");
-        assert_eq!(folder_row.1, 1, "relocated row must keep its folder attribute");
+        assert_eq!(
+            folder_row.1, 1,
+            "relocated row must keep its folder attribute"
+        );
     }
 
     #[test]
