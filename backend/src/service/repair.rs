@@ -70,6 +70,14 @@ const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignme
 /// be kept in sync with that block by hand: truncated-table-chain and
 /// torn-growth-pages are structural prerequisites that always run before
 /// strict parity, so they must also always be displayed first.
+///
+/// If a future fix is likewise a structural prerequisite for strict parity
+/// (must physically run before it, not just "happens to run early"), three
+/// places need updating together: its position in the apply block below,
+/// its position in this array, and `ALWAYS_APPLIED_FIX_IDS` in
+/// `vanilla-ui/components/usb/actions.mjs` — the frontend locks that fix's
+/// checkbox checked so a user can't deselect a prerequisite while leaving
+/// strict parity selected.
 const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     "fix_empty_analysis_files",
     PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,

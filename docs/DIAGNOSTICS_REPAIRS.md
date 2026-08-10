@@ -101,10 +101,16 @@ When `apply=true`:
 - selected fixes are applied if `selectedFixIds` is non-empty;
 - if `selectedFixIds` is empty, all supported non-optional fixes are selected;
 - `sync_edb_history_from_pdb` is optional and is not selected by default;
-- `repair_pdb_truncated_table_chain` runs *before* strict parity upgrade (it is
-  a structural prerequisite: additive track appends hard-fail while a table's
-  chain is unreachable, so it must be fixed first); all other structural PDB
-  page repairs run *after* strict parity upgrade;
+- `repair_pdb_truncated_table_chain` and `repair_pdb_torn_growth_pages` both run
+  *before* strict parity upgrade — `repair_pdb_truncated_table_chain` because
+  additive track appends hard-fail while a table's chain is unreachable, and
+  `repair_pdb_torn_growth_pages` because its dirty-tail truncation boundary is
+  computed once, up front, and would otherwise go stale and cut off
+  tracks/playlists that strict parity had just written; all other structural
+  PDB page repairs run *after* strict parity upgrade;
+- the desktop UI's repair preview locks these two fixes' checkboxes checked
+  whenever they're proposed — they cannot be deselected while leaving strict
+  parity selected, since there is no safe outcome from skipping either one;
 - report commands still remain read-only.
 
 Repair results are returned as applied fixes, skipped fixes, failed fixes,

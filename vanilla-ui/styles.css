@@ -2598,6 +2598,11 @@ td button[data-action]:disabled,
   align-self: center;
 }
 
+.diag-repair-fix-check:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .diag-repair-fix-content {
   display: flex;
   flex-direction: column;

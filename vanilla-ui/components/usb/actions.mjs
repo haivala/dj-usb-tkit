@@ -16,6 +16,15 @@ export function normalizePlaylistNameForCompare(value) {
 // belonged to the new one.
 export const USB_ROOT_LOCKING_JOB_TYPES = new Set(["usb_read", "usb_write", "diagnostics", "export"]);
 
+// Structural prerequisites that must always run before a strict-parity upgrade in the same
+// repair batch (see backend/src/service/repair.rs's REPAIR_FIX_DISPLAY_ORDER doc-comment for
+// why). Deselecting these while strict parity stays selected has no safe outcome, so the repair
+// preview locks their checkboxes checked instead of letting the user turn them off.
+const ALWAYS_APPLIED_FIX_IDS = new Set([
+  "repair_pdb_truncated_table_chain",
+  "repair_pdb_torn_growth_pages"
+]);
+
 export function isUsbRootChangeBlocked(state) {
   return !!state.activeJobId && USB_ROOT_LOCKING_JOB_TYPES.has(state.activeJobType);
 }
@@ -443,14 +452,21 @@ export function renderRepairPreview(el, data, deps = {}) {
       content.className = "diag-repair-fix-content";
 
       if (fix.supported) {
+        const fixId = String(fix.id || "");
+        const alwaysApplied = ALWAYS_APPLIED_FIX_IDS.has(fixId);
         const checkbox = documentObj.createElement("input");
         checkbox.type = "checkbox";
         checkbox.className = "diag-repair-fix-check";
-        checkbox.checked = selectedFixIds.has(String(fix.id || ""));
-        checkbox.dataset.fixId = String(fix.id || "");
-        checkbox.addEventListener("change", (event) => {
-          onToggleFixSelection(String(fix.id || ""), !!event?.target?.checked);
-        });
+        checkbox.checked = alwaysApplied || selectedFixIds.has(fixId);
+        checkbox.dataset.fixId = fixId;
+        if (alwaysApplied) {
+          checkbox.disabled = true;
+          checkbox.title = "Always applied — required for other repairs to complete safely";
+        } else {
+          checkbox.addEventListener("change", (event) => {
+            onToggleFixSelection(fixId, !!event?.target?.checked);
+          });
+        }
         li.appendChild(checkbox);
 
         const titleWrap = documentObj.createElement("div");
@@ -480,6 +496,7 @@ export function renderRepairPreview(el, data, deps = {}) {
       const metaParts = [support, mode];
       if (fix.estimatedWrites) metaParts.push(`${fix.estimatedWrites} writes`);
       if (fix.estimatedDeletes) metaParts.push(`${fix.estimatedDeletes} deletes`);
+      if (ALWAYS_APPLIED_FIX_IDS.has(String(fix.id || ""))) metaParts.push("always applied");
       meta.textContent = metaParts.join(" \u00b7 ");
       content.appendChild(meta);
 

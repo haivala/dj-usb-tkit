@@ -46,6 +46,9 @@
   prerequisites first, then the strict-parity upgrade, then the remaining structural repairs —
   instead of strict parity always being pinned to the top of the list regardless of apply
   order.
+- **Improvement:** the truncated-table-chain and torn-growth-pages fix checkboxes in the repair
+  preview are now locked checked and cannot be deselected while they're proposed, since leaving
+  either unchecked while strict parity runs has no safe outcome.
 
 ## 0.1.14
 

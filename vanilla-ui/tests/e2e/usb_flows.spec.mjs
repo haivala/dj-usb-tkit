@@ -167,6 +167,51 @@ function installTauriMock(page, mode) {
               }
             };
           }
+          if (command === "repair_usb_diagnostics") {
+            return {
+              ok: true,
+              data: {
+                detectedIssues: [
+                  "1 table(s) with a declared last page beyond the physical end of the file",
+                  "PDB shows signs of a torn additive-growth write",
+                  "1 data page(s) have invalid page_flags"
+                ],
+                proposedFixes: [
+                  {
+                    id: "repair_pdb_truncated_table_chain",
+                    title: "Repair Truncated Table Chain",
+                    description: "Structural prerequisite fix.",
+                    supported: true,
+                    destructive: false,
+                    estimatedWrites: 1,
+                    estimatedDeletes: 0
+                  },
+                  {
+                    id: "repair_pdb_torn_growth_pages",
+                    title: "Repair Torn Growth Pages (Interrupted Export)",
+                    description: "Structural prerequisite fix.",
+                    supported: true,
+                    destructive: false,
+                    estimatedWrites: 1,
+                    estimatedDeletes: 0
+                  },
+                  {
+                    id: "repair_pdb_wrong_page_flags",
+                    title: "Repair PDB Data Page Flags",
+                    description: "Ordinary structural fix, not a prerequisite.",
+                    supported: true,
+                    destructive: false,
+                    estimatedWrites: 1,
+                    estimatedDeletes: 0
+                  }
+                ],
+                unsupportedItems: [],
+                estimatedFileWrites: 3,
+                estimatedFileDeletes: 0,
+                warnings: []
+              }
+            };
+          }
           if (command === "validate_usb_root") {
             const path = String(payload?.request?.path || "");
             if (!path) {
@@ -509,6 +554,41 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagPlaylistTableBody")).toContainText("dict issues 1");
   await expect(page.locator("#diagPlaylistTableBody")).toContainText("PDB gaps 1");
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
+});
+
+test("Repair preview locks structural-prerequisite fix checkboxes", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  const usbHealthCard = page.locator("#usbHealthCard");
+  await usbHealthCard.evaluate((node) => {
+    node.open = true;
+  });
+  await page.locator("#reDiagnoseBtn").click();
+  await page.locator("#previewRepairsBtn").click();
+
+  const truncatedChainCheckbox = page
+    .locator("#diagRepairFixes li", { hasText: "Repair Truncated Table Chain" })
+    .locator(".diag-repair-fix-check");
+  const tornGrowthCheckbox = page
+    .locator("#diagRepairFixes li", { hasText: "Repair Torn Growth Pages" })
+    .locator(".diag-repair-fix-check");
+  const controlCheckbox = page
+    .locator("#diagRepairFixes li", { hasText: "Repair PDB Data Page Flags" })
+    .locator(".diag-repair-fix-check");
+
+  await expect(truncatedChainCheckbox).toBeChecked();
+  await expect(truncatedChainCheckbox).toBeDisabled();
+  await expect(tornGrowthCheckbox).toBeChecked();
+  await expect(tornGrowthCheckbox).toBeDisabled();
+
+  // Control: an ordinary (non-prerequisite) fix stays interactive.
+  await expect(controlCheckbox).toBeChecked();
+  await expect(controlCheckbox).toBeEnabled();
+  await controlCheckbox.uncheck();
+  await expect(controlCheckbox).not.toBeChecked();
 });
 
 async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTop) {
