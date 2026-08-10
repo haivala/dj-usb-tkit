@@ -131,9 +131,29 @@ jobs:
           # linking against them needs no libcrypto/libssl DLL at runtime.
           $opensslRoot = "${env:ProgramFiles}\OpenSSL-Win64"
           if (-not (Test-Path "$opensslRoot\lib\VC\x64\MD\libcrypto.lib")) {
+            # Resolve the current Win64 OpenSSL full (non-Light) installer from
+            # slproweb's own hash manifest instead of hardcoding a version —
+            # slproweb periodically retires old installer URLs (e.g. 3_6_1 404s
+            # once 4_0_1 ships), so pinning a version here just goes stale.
+            Write-Host "Resolving latest Win64 OpenSSL release..."
+            $hashesUrl = "https://raw.githubusercontent.com/slproweb/opensslhashes/master/win32_openssl_hashes.json"
+            $hashes = Invoke-RestMethod -Uri $hashesUrl
+            $latest = $hashes.files.PSObject.Properties.Value |
+              Where-Object { $_.bits -eq 64 -and $_.arch -eq 'INTEL' -and -not $_.light -and $_.installer -eq 'exe' } |
+              Sort-Object -Property @{ Expression = { [version]$_.basever } } -Descending |
+              Select-Object -First 1
+            if (-not $latest) {
+              throw "Could not resolve the latest Win64 OpenSSL installer from $hashesUrl"
+            }
+            Write-Host "Latest: OpenSSL $($latest.basever)$($latest.subver) ($($latest.url))"
+
             Write-Host "Installing full OpenSSL (slproweb) to $opensslRoot..."
             $opensslExe = "$env:TEMP\Win64OpenSSL.exe"
-            Invoke-WebRequest -Uri "https://slproweb.com/download/Win64OpenSSL-3_6_1.exe" -OutFile $opensslExe
+            Invoke-WebRequest -Uri $latest.url -OutFile $opensslExe
+            $actualHash = (Get-FileHash -Path $opensslExe -Algorithm SHA256).Hash
+            if ($actualHash -ne $latest.sha256.ToUpper()) {
+              throw "Downloaded OpenSSL installer hash mismatch: expected $($latest.sha256), got $actualHash"
+            }
             Start-Process $opensslExe -ArgumentList '/SILENT', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$opensslRoot`"" -Wait
           }
 
