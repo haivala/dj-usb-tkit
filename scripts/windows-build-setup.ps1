@@ -142,16 +142,27 @@ if (Test-Path "$opensslDir\include\openssl\ssl.h") {
     Write-Host "  Done." -ForegroundColor Green
 }
 $env:OPENSSL_DIR = $opensslDir
-# slproweb layout: lib\VC\x64\{MD,MDd,MT,MTd} — Rust uses MD (dynamic release)
+# slproweb layout: lib\VC\x64\{MD,MDd,MT,MTd} — Rust uses MD (dynamic release).
+# These are genuine static libraries (not DLL import libs), so linking against
+# them does not require shipping libcrypto-3-x64.dll/libssl-3-x64.dll alongside
+# the app.
 $opensslLibDir = "$opensslDir\lib\VC\x64\MD"
 if (-not (Test-Path $opensslLibDir)) { $opensslLibDir = "$opensslDir\lib\VC\x64" }
 if (-not (Test-Path $opensslLibDir)) { $opensslLibDir = "$opensslDir\lib\VC" }
 if (-not (Test-Path $opensslLibDir)) { $opensslLibDir = "$opensslDir\lib" }
 $env:OPENSSL_LIB_DIR = $opensslLibDir
 $env:OPENSSL_INCLUDE_DIR = "$opensslDir\include"
+# rusqlite's bundled-sqlcipher-vendored-openssl feature enables openssl-sys's
+# "vendored" Cargo feature, which by default compiles OpenSSL from source via
+# Perl regardless of OPENSSL_DIR. OPENSSL_NO_VENDOR=1 makes it use the
+# prebuilt static libs above instead — no Perl/Configure step at all.
+$env:OPENSSL_NO_VENDOR = "1"
+$env:OPENSSL_STATIC = "1"
 Write-Host "  OPENSSL_DIR=$env:OPENSSL_DIR" -ForegroundColor DarkGray
 Write-Host "  OPENSSL_LIB_DIR=$env:OPENSSL_LIB_DIR" -ForegroundColor DarkGray
 Write-Host "  OPENSSL_INCLUDE_DIR=$env:OPENSSL_INCLUDE_DIR" -ForegroundColor DarkGray
+Write-Host "  OPENSSL_NO_VENDOR=$env:OPENSSL_NO_VENDOR" -ForegroundColor DarkGray
+Write-Host "  OPENSSL_STATIC=$env:OPENSSL_STATIC" -ForegroundColor DarkGray
 
 # ─── 5. WebView2 Runtime ────────────────────────────────────────────────────
 Write-Host "`n[5/6] Checking WebView2 Runtime..." -ForegroundColor Yellow
@@ -194,9 +205,12 @@ $runtimeModulesDir = "$ProjectRoot\desktop\runtime\node_modules"
 if (Test-Path $runtimeBinDir) { Remove-Item $runtimeBinDir -Recurse -Force }
 if (Test-Path $runtimeModulesDir) { Remove-Item $runtimeModulesDir -Recurse -Force }
 
-# Install Tauri CLI
-Write-Host "  Installing Tauri CLI..."
-cargo install tauri-cli --version '^2' --locked
+# Tauri CLI comes from npm's @tauri-apps/cli (prebuilt binary, already
+# installed by `npm ci` above) — no `cargo install tauri-cli` compile needed.
+$tauriBin = "$ProjectRoot\desktop\node_modules\.bin\tauri.cmd"
+if (-not (Test-Path $tauriBin)) {
+    throw "Tauri CLI not found at $tauriBin — 'npm ci' in desktop\ should have installed @tauri-apps/cli."
+}
 
 # Clean cached build scripts so they pick up OpenSSL env vars
 $buildDir = "$ProjectRoot\target\release\build"
@@ -208,7 +222,7 @@ if (Test-Path $buildDir) {
 Set-Location "$ProjectRoot\desktop\src-tauri"
 $releaseConf = "$ProjectRoot\scripts\tauri.release.conf.json"
 Write-Host "  Building release..."
-cargo tauri build --config "$releaseConf" --bundles nsis,msi
+& $tauriBin build --config "$releaseConf" --bundles nsis,msi
 
 # ─── Done ────────────────────────────────────────────────────────────────────
 $bundleDir = "$ProjectRoot\target\release\bundle"

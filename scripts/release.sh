@@ -9,6 +9,7 @@ ROOT_DIR="$(
 )"
 BACKEND_DIR="$ROOT_DIR/backend"
 UI_DIR="$ROOT_DIR/vanilla-ui"
+DESKTOP_DIR="$ROOT_DIR/desktop"
 TAURI_DIR="$ROOT_DIR/desktop/src-tauri"
 FRONTEND_DIST_DIR="$UI_DIR/dist"
 TAURI_RELEASE_CONFIG="$ROOT_DIR/scripts/tauri.release.conf.json"
@@ -17,7 +18,6 @@ FRONTEND_DIST_READY=0
 RUN_TESTS="${RUN_TESTS:-1}"
 TARGETS="${TARGETS:-}"
 EXTRA_TAURI_ARGS="${EXTRA_TAURI_ARGS:-}"
-AUTO_INSTALL_TAURI="${AUTO_INSTALL_TAURI:-1}"
 BUNDLES="${BUNDLES:-}"
 LINUXDEPLOY_NO_STRIP="${LINUXDEPLOY_NO_STRIP:-1}"
 RUNTIME_BIN_DIR="$ROOT_DIR/desktop/runtime/bin"
@@ -26,40 +26,6 @@ RUNTIME_NODE_MODULES_DIR="$ROOT_DIR/desktop/runtime/node_modules"
 echo "==> Host: $(uname -s)"
 echo "==> Script: $SCRIPT_PATH"
 echo "==> Project root: $ROOT_DIR"
-
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*)
-    # openssl-src (pulled in by rusqlite's bundled-sqlcipher-vendored-openssl
-    # feature) shells out to "perl" to run OpenSSL's Configure script. Under
-    # Git Bash, Git's own minimal MSYS perl (usr/bin/perl) is placed ahead of
-    # the full Strawberry Perl on PATH, and that minimal perl is missing
-    # modules (e.g. Locale::Maketext::Simple) Configure needs, so the build
-    # fails. Find a perl on PATH that actually has the module and prefer it.
-    if command -v perl >/dev/null 2>&1 \
-      && ! perl -MLocale::Maketext::Simple -e 1 >/dev/null 2>&1; then
-      echo "==> Default perl ($(command -v perl)) is missing Locale::Maketext::Simple; searching PATH for a usable one"
-      IFS=':' read -r -a _path_dirs <<< "$PATH"
-      for _dir in "${_path_dirs[@]}"; do
-        for _candidate in "$_dir/perl" "$_dir/perl.exe"; do
-          if [[ -x "$_candidate" ]] \
-            && "$_candidate" -MLocale::Maketext::Simple -e 1 >/dev/null 2>&1; then
-            echo "==> Prepending usable perl to PATH: $_dir"
-            export PATH="$_dir:$PATH"
-            break 2
-          fi
-        done
-      done
-      unset _path_dirs _dir _candidate
-      if ! perl -MLocale::Maketext::Simple -e 1 >/dev/null 2>&1; then
-        echo "warning: could not find a perl on PATH with Locale::Maketext::Simple." >&2
-        echo "         OpenSSL's vendored build (via rusqlite's" >&2
-        echo "         bundled-sqlcipher-vendored-openssl feature) will likely fail." >&2
-        echo "         Install a full Perl distribution (e.g. Strawberry Perl) and" >&2
-        echo "         ensure it precedes Git's perl on PATH." >&2
-      fi
-    fi
-    ;;
-esac
 
 if [[ ! -d "$BACKEND_DIR" || ! -d "$UI_DIR" || ! -d "$TAURI_DIR" ]]; then
   echo "error: expected project directories were not found under: $ROOT_DIR" >&2
@@ -82,68 +48,32 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 export PATH="$HOME/.cargo/bin:$PATH"
+# The Tauri CLI comes from npm's @tauri-apps/cli, which ships prebuilt native
+# binaries per platform (no Rust/Perl/OpenSSL compilation required — unlike
+# `cargo install tauri-cli`, which used to be built from source here and was
+# both slow and fragile on Windows CI).
+echo "==> Installing desktop JS dependencies (needed for the Tauri CLI)"
+(
+  cd "$DESKTOP_DIR"
+  npm ci
+)
+
 TAURI_CMD=()
 TAURI_BIN=""
 resolve_tauri_cmd() {
-  local tauri_cli_path=""
-
-  if [[ -n "${CARGO_HOME:-}" && -x "$CARGO_HOME/bin/cargo-tauri" ]]; then
-    tauri_cli_path="$CARGO_HOME/bin/cargo-tauri"
-  elif [[ -x "$HOME/.cargo/bin/cargo-tauri" ]]; then
-    tauri_cli_path="$HOME/.cargo/bin/cargo-tauri"
-  elif [[ -x "$BACKEND_DIR/.cargo/bin/cargo-tauri" ]]; then
-    tauri_cli_path="$BACKEND_DIR/.cargo/bin/cargo-tauri"
-  elif [[ -x "$BACKEND_DIR/bin/cargo-tauri" ]]; then
-    tauri_cli_path="$BACKEND_DIR/bin/cargo-tauri"
-  fi
-
-  if [[ -n "$tauri_cli_path" ]]; then
-    TAURI_BIN="$tauri_cli_path"
-    TAURI_CMD=(cargo tauri)
+  local tauri_bin_path="$DESKTOP_DIR/node_modules/.bin/tauri"
+  if [[ -x "$tauri_bin_path" ]]; then
+    TAURI_BIN="$tauri_bin_path"
+    TAURI_CMD=("$tauri_bin_path")
     return 0
   fi
-
-  if cargo tauri --help >/dev/null 2>&1; then
-    TAURI_BIN="$(command -v cargo)"
-    TAURI_CMD=(cargo tauri)
-    return 0
-  fi
-
-  if command -v cargo-tauri >/dev/null 2>&1; then
-    tauri_cli_path="$(command -v cargo-tauri)"
-    case "$tauri_cli_path" in
-      /usr/bin/*|/usr/local/bin/*)
-        echo "warning: ignoring cargo-tauri on PATH at $tauri_cli_path" >&2
-        echo "         it may be an incompatible standalone binary for this runner." >&2
-        ;;
-      *)
-        TAURI_BIN="$tauri_cli_path"
-        TAURI_CMD=(cargo tauri)
-        return 0
-        ;;
-    esac
-  fi
-
   return 1
 }
 
 if ! resolve_tauri_cmd; then
-  if [[ "$AUTO_INSTALL_TAURI" == "1" ]]; then
-    echo "==> Tauri CLI not found, installing tauri-cli v2"
-    cargo install tauri-cli --version '^2' --locked --force
-    resolve_tauri_cmd || {
-      echo "error: tauri-cli install completed but CLI still unavailable." >&2
-      echo "       ensure ~/.cargo/bin is on PATH or rerun with explicit CARGO_HOME." >&2
-      exit 1
-    }
-  else
-    echo "error: tauri CLI is not installed or not on PATH." >&2
-    echo "       looked in: $BACKEND_DIR/.cargo/bin, $BACKEND_DIR/bin, ~/.cargo/bin, \$CARGO_HOME/bin" >&2
-    echo "       install with: cargo install tauri-cli --version '^2'" >&2
-    echo "       and ensure ~/.cargo/bin is on PATH" >&2
-    echo "       or run script with AUTO_INSTALL_TAURI=1" >&2
-    exit 1
-  fi
+  echo "error: Tauri CLI not found at $DESKTOP_DIR/node_modules/.bin/tauri" >&2
+  echo "       expected 'npm ci' in $DESKTOP_DIR to install @tauri-apps/cli." >&2
+  exit 1
 fi
 
 echo "==> Tauri command: ${TAURI_CMD[*]}"

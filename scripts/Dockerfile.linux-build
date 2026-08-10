@@ -19,10 +19,12 @@ ARG NODE_VER=v24.14.1
 RUN curl -fsSL "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-linux-x64.tar.xz" \
     | tar -xJ -C /usr/local --strip-components=1
 
-# Rust stable toolchain + Tauri CLI
+# Rust stable toolchain. The Tauri CLI comes from npm's @tauri-apps/cli
+# (prebuilt binary, installed at container-run time via `npm ci` in
+# desktop/) rather than being compiled here — faster image builds, and no
+# Rust/openssl-sys compile just to get the CLI.
 RUN rustup toolchain install stable --profile minimal \
-    && rustup default stable \
-    && cargo install tauri-cli --version "^2" --locked
+    && rustup default stable
 
 # Pre-download linuxdeploy tools into Tauri's cache directory.
 # Keep real AppImage binaries in cache — Tauri uses --appimage-extract-and-run

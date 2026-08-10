@@ -2,5 +2,8 @@
   "name": "dj-usb-tkit-desktop-runtime",
   "private": true,
   "version": "0.1.14",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
 }

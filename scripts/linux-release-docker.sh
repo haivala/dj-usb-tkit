@@ -122,11 +122,6 @@ docker run --rm \
       exit 1
     fi
 
-    if ! command -v cargo-tauri >/dev/null 2>&1 && ! cargo tauri --help >/dev/null 2>&1; then
-      echo "error: Tauri CLI is not available inside the container" >&2
-      exit 1
-    fi
-
     if [[ "$RUN_TESTS" == "1" ]]; then
       echo "==> Running backend tests"
       (
@@ -146,6 +141,15 @@ docker run --rm \
       cd "$DESKTOP_DIR"
       npm ci
     )
+
+    # Tauri CLI comes from npm'\''s @tauri-apps/cli (prebuilt binary, just
+    # installed above) — no `cargo install tauri-cli` compile needed.
+    TAURI_BIN="$DESKTOP_DIR/node_modules/.bin/tauri"
+    if [[ ! -x "$TAURI_BIN" ]]; then
+      echo "error: Tauri CLI not found at $TAURI_BIN" >&2
+      echo "       '\''npm ci'\'' in $DESKTOP_DIR should have installed @tauri-apps/cli." >&2
+      exit 1
+    fi
 
     echo "==> Building frontend dist"
     (
@@ -224,13 +228,8 @@ docker run --rm \
     (
       cd "$TAURI_DIR"
       set +e
-      if command -v cargo-tauri >/dev/null 2>&1; then
-        cargo-tauri build --config "$TAURI_BUILD_CONFIG" --bundles "$BUNDLES" -v 2>&1 | tee "$HOST_LOG_DIR/container-build.log"
-        build_status=${PIPESTATUS[0]}
-      else
-        cargo tauri build --config "$TAURI_BUILD_CONFIG" --bundles "$BUNDLES" -v 2>&1 | tee "$HOST_LOG_DIR/container-build.log"
-        build_status=${PIPESTATUS[0]}
-      fi
+      "$TAURI_BIN" build --config "$TAURI_BUILD_CONFIG" --bundles "$BUNDLES" -v 2>&1 | tee "$HOST_LOG_DIR/container-build.log"
+      build_status=${PIPESTATUS[0]}
       set -e
       if [[ "$build_status" -ne 0 ]]; then
         if [[ ",$BUNDLES," == *",appimage,"* ]]; then

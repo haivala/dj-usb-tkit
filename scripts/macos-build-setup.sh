@@ -118,15 +118,18 @@ echo "  Building frontend dist..."
 echo "  Ensuring no bundled Node runtime is staged..."
 rm -rf "$PROJECT_ROOT/desktop/runtime/bin" "$PROJECT_ROOT/desktop/runtime/node_modules"
 
-# Install Tauri CLI if needed
-if ! command -v cargo-tauri &>/dev/null; then
-    echo "  Installing Tauri CLI..."
-    cargo install tauri-cli --version '^2' --locked
+# Tauri CLI comes from npm's @tauri-apps/cli (prebuilt binary, already
+# installed by `npm ci` above) — no `cargo install tauri-cli` compile needed.
+TAURI_BIN="$PROJECT_ROOT/desktop/node_modules/.bin/tauri"
+if [ ! -x "$TAURI_BIN" ]; then
+    echo "  ERROR: Tauri CLI not found at $TAURI_BIN" >&2
+    echo "         'npm ci' in desktop/ should have installed @tauri-apps/cli." >&2
+    exit 1
 fi
 
 echo "  Building (this will take a while on first run)..."
 cd "$PROJECT_ROOT/desktop/src-tauri"
-cargo tauri build --config "$PROJECT_ROOT/scripts/tauri.release.conf.json" --bundles app,dmg
+"$TAURI_BIN" build --config "$PROJECT_ROOT/scripts/tauri.release.conf.json" --bundles app,dmg
 
 # ─── Done ────────────────────────────────────────────────────────────────────
 BUNDLE_DIR="$PROJECT_ROOT/desktop/src-tauri/target/release/bundle"

@@ -114,6 +114,42 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Configure Windows OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # rusqlite's bundled-sqlcipher-vendored-openssl feature enables
+          # openssl-sys's "vendored" Cargo feature, which by default compiles
+          # OpenSSL from source via Perl's Configure script. GitHub's Windows
+          # runner image and Chocolatey's openssl package only ship the
+          # "Light" (DLL-only, no static libs) OpenSSL variant, so neither is
+          # usable here. Instead, install the full slproweb Win64 OpenSSL
+          # package (same one scripts/windows-build-setup.ps1 uses for local
+          # dev) — it ships genuine static libraries under lib\VC\x64\MD, so
+          # linking against them needs no libcrypto/libssl DLL at runtime.
+          $opensslRoot = "${env:ProgramFiles}\OpenSSL-Win64"
+          if (-not (Test-Path "$opensslRoot\lib\VC\x64\MD\libcrypto.lib")) {
+            Write-Host "Installing full OpenSSL (slproweb) to $opensslRoot..."
+            $opensslExe = "$env:TEMP\Win64OpenSSL.exe"
+            Invoke-WebRequest -Uri "https://slproweb.com/download/Win64OpenSSL-3_6_1.exe" -OutFile $opensslExe
+            Start-Process $opensslExe -ArgumentList '/SILENT', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$opensslRoot`"" -Wait
+          }
+
+          if (-not (Test-Path "$opensslRoot\lib\VC\x64\MD\libcrypto.lib")) {
+            throw "OpenSSL static libraries were not found under $opensslRoot\lib\VC\x64\MD after installation."
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_DIR=$opensslRoot"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_INCLUDE_DIR=$opensslRoot\include"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_LIB_DIR=$opensslRoot\lib\VC\x64\MD"
+          # Makes openssl-sys use the static libs above via a normal find,
+          # instead of compiling from source, even though the "vendored"
+          # Cargo feature is enabled.
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_NO_VENDOR=1"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_STATIC=1"
+
       - name: Build Linux release bundles
         if: runner.os == 'Linux'
         shell: bash

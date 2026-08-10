@@ -58,12 +58,19 @@
   flattened warning log — needed to tell which section was failing when the overall status and
   warning log alone didn't make it obvious.
 - **Fix (CRITICAL):** stop the Windows build from failing to start with a missing
-  `libcrypto-3-x64.dll`. SQLCipher (used to decrypt `exportLibrary.db`) was built with
-  `rusqlite`'s `bundled-sqlcipher` feature, which links against a dynamically-found system
-  OpenSSL instead of bundling one — on Windows this meant the installed app needed
-  `libcrypto-3-x64.dll` present alongside it, which the installer never shipped. Switched to
-  `bundled-sqlcipher-vendored-openssl`, which compiles OpenSSL from source and statically links
-  it into the binary, so no external OpenSSL DLL is required on any platform.
+  `libcrypto-3-x64.dll`, and from failing to build at all on CI. SQLCipher (used to decrypt
+  `exportLibrary.db`) was built with `rusqlite`'s `bundled-sqlcipher` feature, which links
+  against a dynamically-found system OpenSSL instead of bundling one — on Windows this meant
+  the installed app needed `libcrypto-3-x64.dll` present alongside it, which the installer
+  never shipped. Statically linking against a vendored, from-source OpenSSL build
+  (`bundled-sqlcipher-vendored-openssl`) fixed that but broke Windows CI itself, since building
+  OpenSSL from source shells out to Perl's `Configure` script, which failed on the Windows
+  runner (`Locale::Maketext::Simple` missing from Git Bash's bundled Perl). Settled on
+  `OPENSSL_NO_VENDOR=1` pointing at the full slproweb Win64 OpenSSL package's static libraries
+  instead — same static-linked, no-DLL-at-runtime result, without compiling OpenSSL at all.
+  Also switched the Tauri CLI (`cargo install tauri-cli`, which hit the same
+  `openssl-sys`/Perl problem building itself) to npm's `@tauri-apps/cli`, which ships prebuilt
+  native binaries per platform.
 - **Chore:** update deps
 
 ## 0.1.13
