@@ -114,43 +114,6 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
-      - name: Configure Windows OpenSSL
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $roots = @(
-            "${env:ProgramFiles}\OpenSSL-Win64",
-            "${env:ProgramFiles}\OpenSSL",
-            "${env:ProgramFiles(x86)}\OpenSSL-Win32"
-          )
-
-          $opensslRoot = $roots | Where-Object { Test-Path "$_\include\openssl\ssl.h" } | Select-Object -First 1
-          if (-not $opensslRoot) {
-            choco install openssl --yes --no-progress
-            $opensslRoot = $roots | Where-Object { Test-Path "$_\include\openssl\ssl.h" } | Select-Object -First 1
-          }
-
-          if (-not $opensslRoot) {
-            throw "OpenSSL headers were not found after installation."
-          }
-
-          $libCandidates = @(
-            "$opensslRoot\lib\VC\x64\MD",
-            "$opensslRoot\lib\VC\x64",
-            "$opensslRoot\lib\VC",
-            "$opensslRoot\lib"
-          )
-          $opensslLib = $libCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $opensslLib) {
-            throw "OpenSSL library directory was not found under $opensslRoot."
-          }
-
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_DIR=$opensslRoot"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_INCLUDE_DIR=$opensslRoot\include"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_LIB_DIR=$opensslLib"
-
       - name: Build Linux release bundles
         if: runner.os == 'Linux'
         shell: bash

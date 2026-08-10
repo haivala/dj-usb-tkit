@@ -27,6 +27,40 @@ echo "==> Host: $(uname -s)"
 echo "==> Script: $SCRIPT_PATH"
 echo "==> Project root: $ROOT_DIR"
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # openssl-src (pulled in by rusqlite's bundled-sqlcipher-vendored-openssl
+    # feature) shells out to "perl" to run OpenSSL's Configure script. Under
+    # Git Bash, Git's own minimal MSYS perl (usr/bin/perl) is placed ahead of
+    # the full Strawberry Perl on PATH, and that minimal perl is missing
+    # modules (e.g. Locale::Maketext::Simple) Configure needs, so the build
+    # fails. Find a perl on PATH that actually has the module and prefer it.
+    if command -v perl >/dev/null 2>&1 \
+      && ! perl -MLocale::Maketext::Simple -e 1 >/dev/null 2>&1; then
+      echo "==> Default perl ($(command -v perl)) is missing Locale::Maketext::Simple; searching PATH for a usable one"
+      IFS=':' read -r -a _path_dirs <<< "$PATH"
+      for _dir in "${_path_dirs[@]}"; do
+        for _candidate in "$_dir/perl" "$_dir/perl.exe"; do
+          if [[ -x "$_candidate" ]] \
+            && "$_candidate" -MLocale::Maketext::Simple -e 1 >/dev/null 2>&1; then
+            echo "==> Prepending usable perl to PATH: $_dir"
+            export PATH="$_dir:$PATH"
+            break 2
+          fi
+        done
+      done
+      unset _path_dirs _dir _candidate
+      if ! perl -MLocale::Maketext::Simple -e 1 >/dev/null 2>&1; then
+        echo "warning: could not find a perl on PATH with Locale::Maketext::Simple." >&2
+        echo "         OpenSSL's vendored build (via rusqlite's" >&2
+        echo "         bundled-sqlcipher-vendored-openssl feature) will likely fail." >&2
+        echo "         Install a full Perl distribution (e.g. Strawberry Perl) and" >&2
+        echo "         ensure it precedes Git's perl on PATH." >&2
+      fi
+    fi
+    ;;
+esac
+
 if [[ ! -d "$BACKEND_DIR" || ! -d "$UI_DIR" || ! -d "$TAURI_DIR" ]]; then
   echo "error: expected project directories were not found under: $ROOT_DIR" >&2
   exit 1
