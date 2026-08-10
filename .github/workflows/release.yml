@@ -194,6 +194,12 @@ jobs:
       - name: Build Linux Docker build image (cached)
         if: runner.os == 'Linux'
         uses: docker/build-push-action@v6
+        env:
+          # Without this, buildx uploads a `*.dockerbuild` build-record
+          # artifact that the publish job's unfiltered download-artifact step
+          # then tries to fetch alongside the real platform bundles.
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: scripts/Dockerfile.linux-build
@@ -256,6 +262,12 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+          # Excludes buildx's `*.dockerbuild` build-record artifact (see the
+          # env vars on the "Build Linux Docker build image" step, which
+          # should already stop it from being uploaded at all — this is a
+          # backstop per Docker's own guidance) and any other stray
+          # artifacts, leaving only the djtkit-* platform bundles.
+          pattern: djtkit-*
 
       - name: Publish release
         shell: bash
