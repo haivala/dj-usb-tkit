@@ -30,6 +30,23 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** stop the torn-growth-pages repair (added in 0.1.13) from silently
+  dropping tracks/playlists that a strict-parity upgrade had just written in the same repair
+  run. That repair truncates the PDB back to a "never-populated file tail" boundary computed
+  once, up front, before any other repair writes; strict parity's additive writer legitimately
+  grows the file past that boundary while merging playlists and tracks, so running the
+  truncation afterward (the previous apply order) cut off everything strict parity had just
+  added. Torn-growth-pages now runs before strict parity, alongside the truncated-table-chain
+  repair, so its truncation boundary is always computed and applied before anything grows the
+  file.
+- **Improvement:** the USB Diagnostics repair preview now lists proposed fixes in the order
+  they're actually applied — the truncated-table-chain and torn-growth-pages structural
+  prerequisites first, then the strict-parity upgrade, then the remaining structural repairs —
+  instead of strict parity always being pinned to the top of the list regardless of apply
+  order.
+
 ## 0.1.14
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

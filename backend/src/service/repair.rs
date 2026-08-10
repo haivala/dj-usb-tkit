@@ -65,6 +65,34 @@ const PDB_TRUNCATED_TABLE_CHAIN_FIX_ID: &str = "repair_pdb_truncated_table_chain
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
 
+/// The order proposed fixes are shown in (and, for the first four entries,
+/// the order they're actually applied in — see the apply block below). Must
+/// be kept in sync with that block by hand: truncated-table-chain and
+/// torn-growth-pages are structural prerequisites that always run before
+/// strict parity, so they must also always be displayed first.
+const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
+    "fix_empty_analysis_files",
+    PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,
+    PDB_TORN_GROWTH_PAGES_FIX_ID,
+    STRICT_PARITY_UPGRADE_FIX_ID,
+    PDB_ZERO_TRANRF_FIX_ID,
+    PDB_WRONG_PAGE_FLAGS_FIX_ID,
+    PDB_SENTINEL_U5_FIX_ID,
+    PDB_WRONG_HISTORY_SHAPE_FIX_ID,
+    PDB_WRONG_TRACK_U5_FIX_ID,
+    PDB_T00_MULTIPAGE_ACTIVE_FIX_ID,
+    PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID,
+    PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID,
+    PDB_STALE_SENTINEL_BTREE_FIX_ID,
+    PDB_EC_CONFLICT_FIX_ID,
+    PDB_TRACK_STRING_ALIGNMENT_FIX_ID,
+    PDB_ALBUM_STRING_ALIGNMENT_FIX_ID,
+    PDB_HEADER_COMPATIBILITY_FIX_ID,
+    "manual_reimport_unindexed_audio",
+    "remove_missing_audio_references",
+    SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
+];
+
 #[derive(Debug, Default, Clone)]
 struct StrictParityUpgradeApplyResult {
     merged_playlists: usize,
@@ -3581,7 +3609,8 @@ impl BackendService {
                      (an additive-growth write was interrupted after the table pointer was \
                      advanced but before the new pages were flushed to disk). The repair points \
                      the table's last/empty_candidate fields back at the real last written page; \
-                     no page content is changed.",
+                     no page content is changed. This is a structural prerequisite and always \
+                     runs before other repairs, including the strict-parity upgrade.",
                     pdb_truncated_chains.len()
                 ),
                 supported: true,
@@ -3623,7 +3652,10 @@ impl BackendService {
                     } else {
                         ""
                     },
-                ),
+                ) + " This is a structural prerequisite and always runs before other repairs, \
+                     including the strict-parity upgrade: parity's additive writes can grow the \
+                     file, and this repair's tail-truncation boundary would otherwise go stale \
+                     and cut off tracks/playlists parity had just written.",
                 supported: true,
                 destructive: false,
                 estimated_writes: 1,
@@ -3953,7 +3985,7 @@ impl BackendService {
                     .collect();
                 if strict_count > 0 {
                     detected_issues.push(format!("{strict_count} playlist(s) fail strict parity"));
-                    proposed_fixes.insert(0, RepairFixProposal {
+                    proposed_fixes.push(RepairFixProposal {
                         id: STRICT_PARITY_UPGRADE_FIX_ID.to_string(),
                         title: "Upgrade Export Data To Strict Parity".to_string(),
                         description: "Collect all playlists from both eDB and PDB, merge metadata from both sides, and rewrite both databases once.".to_string(),
@@ -3974,6 +4006,16 @@ impl BackendService {
                 ));
             }
         }
+
+        // Display order should match the actual apply order below (see
+        // REPAIR_FIX_DISPLAY_ORDER), not the incidental order each fix
+        // happened to be detected in.
+        proposed_fixes.sort_by_key(|f| {
+            REPAIR_FIX_DISPLAY_ORDER
+                .iter()
+                .position(|id| *id == f.id)
+                .unwrap_or(usize::MAX)
+        });
 
         let selected = if req.selected_fix_ids.is_empty() {
             proposed_fixes
@@ -4042,8 +4084,42 @@ impl BackendService {
                 skipped_fixes.push("Repair Truncated Table Chain: not selected".to_string());
             }
 
-            // Strict parity runs first so that write_pdb establishes correct page
-            // structure before structural repairs (especially stale B-tree) run over
+            // Also unlike the other structural repairs, torn-growth-pages must be
+            // fixed *before* strict parity, for a different reason: its
+            // `truncate_to_pages` boundary was computed once, up front, against
+            // the pre-repair file. Strict parity's additive writer legitimately
+            // grows the file past that boundary while merging playlists/tracks
+            // (`append_rows_to_chain_in_place`); if this repair ran afterward
+            // using the now-stale boundary, it would truncate the file back down
+            // and silently drop everything strict parity had just written.
+            // Neither `fix_empty_analysis_files` nor the truncated-table-chain
+            // repair above grow the PDB file, so running this immediately after
+            // them (and still before strict parity) keeps the boundary accurate.
+            if selected.contains(PDB_TORN_GROWTH_PAGES_FIX_ID) {
+                if pdb_torn_growth.is_empty() {
+                    skipped_fixes.push("Repair Torn Growth Pages: nothing to apply".to_string());
+                } else {
+                    match apply_pdb_torn_growth_pages_repair(&usb_root, &pdb_torn_growth) {
+                        Ok(n) => applied_fixes.push(format!(
+                            "Repair Torn Growth Pages: zeroed {n} page(s){}",
+                            if pdb_torn_growth.truncate_to_pages.is_some() {
+                                ", truncated unpopulated tail"
+                            } else {
+                                ""
+                            }
+                        )),
+                        Err(err) => {
+                            failed_fixes.push(format!("Repair Torn Growth Pages failed: {err}"))
+                        }
+                    }
+                }
+            } else if !pdb_torn_growth.is_empty() {
+                skipped_fixes.push("Repair Torn Growth Pages: not selected".to_string());
+            }
+
+            // Strict parity runs after the two structural prerequisites above so
+            // that write_pdb establishes correct page structure before the
+            // remaining structural repairs (especially stale B-tree) run over
             // the final result in one clean pass.
             if selected.contains(STRICT_PARITY_UPGRADE_FIX_ID) {
                 let force_all = strict_repair_force_all_enabled();
@@ -4293,28 +4369,6 @@ impl BackendService {
                 }
             } else if !pdb_ec_conflicts.is_empty() {
                 skipped_fixes.push("Repair Table Write-Pointer Conflict: not selected".to_string());
-            }
-
-            if selected.contains(PDB_TORN_GROWTH_PAGES_FIX_ID) {
-                if pdb_torn_growth.is_empty() {
-                    skipped_fixes.push("Repair Torn Growth Pages: nothing to apply".to_string());
-                } else {
-                    match apply_pdb_torn_growth_pages_repair(&usb_root, &pdb_torn_growth) {
-                        Ok(n) => applied_fixes.push(format!(
-                            "Repair Torn Growth Pages: zeroed {n} page(s){}",
-                            if pdb_torn_growth.truncate_to_pages.is_some() {
-                                ", truncated unpopulated tail"
-                            } else {
-                                ""
-                            }
-                        )),
-                        Err(err) => {
-                            failed_fixes.push(format!("Repair Torn Growth Pages failed: {err}"))
-                        }
-                    }
-                }
-            } else if !pdb_torn_growth.is_empty() {
-                skipped_fixes.push("Repair Torn Growth Pages: not selected".to_string());
             }
 
             if selected.contains(PDB_TRACK_STRING_ALIGNMENT_FIX_ID) {
