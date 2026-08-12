@@ -10,6 +10,7 @@ mod export_log;
 mod repair;
 mod usb;
 pub(crate) mod usb_helpers;
+pub mod usb_staging;
 pub(crate) mod usb_utils;
 pub mod usb_vendor_compat;
 
@@ -296,6 +297,20 @@ impl BackendService {
             analysis_paused: Arc::new(AtomicBool::new(false)),
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
         };
+        // Deliberately NOT called here (see `usb_staging::init_cache_root`'s
+        // doc comment): `BackendService::new`/`BackendCommands::new` are the
+        // same constructor `cargo test --lib`'s unit tests, `backend/tests/*`
+        // integration tests, AND the real desktop app all call, and `CACHE_ROOT`
+        // is a process-wide static. `#[cfg(test)]` can't distinguish these
+        // cases -- it's false once `backend` is compiled as a normal library
+        // dependency for an external integration-test binary, not just for
+        // the real app -- so gating on it here previously left staging
+        // silently enabled (and racing across concurrently-constructed
+        // instances) in `backend/tests/*.rs`. Only the real desktop app,
+        // which is the sole context where exactly one `BackendService`
+        // lives for the whole process, calls `usb_staging::init_cache_root`
+        // -- from `desktop/src-tauri/src/main.rs`, right after constructing
+        // its one `BackendCommands`.
         svc.reset_mounted_usb_devices()?;
         svc.backfill_usb_devices_from_legacy_settings()?;
         svc.backfill_track_fingerprints()?;

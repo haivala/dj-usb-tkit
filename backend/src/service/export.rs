@@ -23,14 +23,14 @@ use super::export_helpers::{
     verify_pdb_content, write_edb_playlist, write_pdb,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
+use super::usb_staging;
 use super::usb_utils::{
     self, analysis_bundle_exists, canonicalize_playlist_name,
     load_existing_analysis_paths_by_content_path, load_existing_analysis_paths_by_pdb_track_path,
     resolve_usb_root, resolve_usb_side_path,
 };
-use super::usb_vendor_compat::{backup_usb_databases, vendor_pdb_path};
+use super::usb_vendor_compat::backup_usb_databases;
 use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, now};
-use crate::pdb_reader::parse_pdb;
 use uuid::Uuid;
 
 fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<String> {
@@ -178,9 +178,8 @@ impl BackendService {
         }
         // Build identity lookup from existing USB PDB: identity fields + artwork path per track
         let existing_usb_identity_by_path = {
-            let pdb_path = vendor_pdb_path(&usb_root);
             let mut map = HashMap::<String, UsbTrackIdentity>::new();
-            if let Ok(parsed) = parse_pdb(&pdb_path) {
+            if let Ok(parsed) = usb_utils::parse_staged_pdb(&usb_root) {
                 for track in &parsed.tracks {
                     let path_key = canonicalize_playlist_name(&track.track_file_path);
                     let art = parsed.artworks.get(&track.artwork_id).cloned();
@@ -498,6 +497,7 @@ impl BackendService {
                 }) => {
                     edb_playlist_id = u32::try_from(playlist_id).ok();
                     edb_sort_order = u32::try_from(sort_order).ok();
+                    usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)?;
                     // Always keep exportExt.pdb byte-stable in normal export.
                     // Strict integrity checks can fail when exportExt header/count
                     // bytes are rewritten from eDB-derived values.

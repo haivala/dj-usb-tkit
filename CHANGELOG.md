@@ -30,6 +30,18 @@
 
 ## Unreleased
 
+- **Improvement:** the USB-resident `export.pdb` and `exportLibrary.db` are now staged to a
+  local HDD working copy the first time each is read, instead of being re-read from the USB
+  mount on every call. The local copy is reused until the USB file's size/mtime changes, so
+  browsing playlists, running diagnostics, and repair scans hit local disk instead of the
+  (slower, more failure-prone) USB mount after the first touch. Writes go to the local copy
+  first and are only committed back to the USB drive — atomically, via a temp-file rename — if
+  the local copy actually changed; an unchanged write no longer touches the drive at all. This
+  only applies to the desktop app, which is the only context that enables staging (see
+  `usb_staging::init_cache_root`); CLI dev tools and the test suite keep reading/writing the USB
+  path directly, unchanged. USB repair's own PDB reads/writes are not yet staged (tracked as a
+  follow-up) — repair still reads/writes the USB mount directly, which stays correct (any staged
+  reader elsewhere detects the change and re-syncs) but doesn't get the speed/atomicity benefit.
 - **Improvement:** selecting a USB playlist or history session now hydrates all of its
   tracks' waveform/BPM/key/artwork metadata through a handful of batched backend calls
   instead of one call per track. Each `inspect_usb_track` call used to re-parse the PDB

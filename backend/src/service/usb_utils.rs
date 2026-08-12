@@ -224,6 +224,15 @@ pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<st
     ))
 }
 
+/// Parse `export.pdb` through the local HDD staging layer instead of
+/// reading it fresh off the USB mount every call. Falls back to reading the
+/// USB path directly when staging hasn't been initialized (CLI tools,
+/// tests that don't construct a `BackendService`).
+pub(crate) fn parse_staged_pdb(usb_root: &Path) -> BackendResult<crate::pdb_reader::ParsedPdb> {
+    let path = super::usb_staging::stage_pdb(usb_root)?;
+    parse_pdb(&path)
+}
+
 pub(crate) fn resolve_usb_side_path(usb_root: &std::path::Path, raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

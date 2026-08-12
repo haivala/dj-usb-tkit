@@ -504,7 +504,7 @@ impl BackendService {
         ));
         note_stage("resolve usb root", &mut raw_warnings);
 
-        let pdb_path = vendor_pdb_path(&usb_root);
+        let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
 
         // --- 1. PDB Integrity ---
         on_progress(10, 100, "USB: Checking PDB integrity");
@@ -825,7 +825,7 @@ impl BackendService {
         note_stage("resolve usb root", &mut raw_warnings);
 
         on_progress(20, 100, "USB: Parsing PDB");
-        let pdb_path = vendor_pdb_path(&usb_root);
+        let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         let parsed = parse_pdb(&pdb_path)?;
         raw_warnings.extend(parsed.warnings.iter().map(|message| {
             logging::log(

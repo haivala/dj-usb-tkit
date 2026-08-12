@@ -9,7 +9,7 @@ use super::super::usb_helpers::sanitize_text;
 use super::super::usb_utils::{canonicalize_playlist_name, resolve_usb_side_path};
 use super::super::usb_vendor_compat::{
     USB_ANALYSIS_PREFIX, USB_ARTWORK_DIR, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX,
-    USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
+    USB_VENDOR_ROOT_DIR,
 };
 use super::{ExportManifest, ExportTrackData};
 use crate::edb::{open_edb_rw, table_exists};
@@ -621,10 +621,7 @@ pub fn filter_prunable_stale_paths_for_playlist(
         warnings.extend(unlock_warnings);
     }
 
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = super::super::usb_staging::stage_pdb(usb_root)?;
     if pdb_path.is_file() {
         let parsed = parse_pdb(&pdb_path)?;
         let current_playlist_ids = parsed

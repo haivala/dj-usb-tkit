@@ -264,6 +264,11 @@ fn safe_reset_requested() -> bool {
 }
 
 fn init_backend_commands_with_recovery(data_dir: &Path) -> Result<BackendCommands, String> {
+    // Enables local HDD staging of the USB-resident PDB/eDB files for the
+    // one long-lived `BackendCommands` this desktop app process constructs.
+    // See `usb_staging::init_cache_root`'s doc comment for why this call
+    // lives here rather than inside `BackendCommands::new` itself.
+    backend::service::usb_staging::init_cache_root(data_dir);
     match BackendCommands::new(data_dir) {
         Ok(commands) => Ok(commands),
         Err(first_err) => {

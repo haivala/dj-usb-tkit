@@ -2747,7 +2747,7 @@ pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
     usb_root: &std::path::Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
-    let parsed = parse_pdb(&vendor_pdb_path(usb_root))?;
+    let parsed = parse_pdb(&super::usb_staging::stage_pdb(usb_root)?)?;
     let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
         warnings.push(logging::log(
             Level::Error,
@@ -3335,26 +3335,27 @@ impl BackendService {
             });
         }
 
-        let parsed_pdb = parse_pdb(&vendor_pdb_path(&usb_root)).ok();
-        let pdb_sentinel_u5_pages =
-            detect_pdb_sentinel_u5_on_data_pages(&vendor_pdb_path(&usb_root));
-        let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&vendor_pdb_path(&usb_root));
-        let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&vendor_pdb_path(&usb_root));
+        // Staged once and reused below: these ~15 detectors otherwise each
+        // re-read the same PDB file fresh from the USB mount.
+        let staged_pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
+        let parsed_pdb = parse_pdb(&staged_pdb_path).ok();
+        let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_path);
+        let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_path);
+        let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&staged_pdb_path);
         let pdb_wrong_history_shape_pages =
-            detect_pdb_wrong_history_page_shape(&vendor_pdb_path(&usb_root));
+            detect_pdb_wrong_history_page_shape(&staged_pdb_path);
         let pdb_tombstoned_playlist_ids =
-            detect_pdb_tombstoned_playlist_tree_ids(&vendor_pdb_path(&usb_root));
-        let pdb_wrong_track_u5_pages = detect_pdb_wrong_track_u5(&vendor_pdb_path(&usb_root));
+            detect_pdb_tombstoned_playlist_tree_ids(&staged_pdb_path);
+        let pdb_wrong_track_u5_pages = detect_pdb_wrong_track_u5(&staged_pdb_path);
         let pdb_t00_multipage_active_pages =
-            detect_pdb_t00_multipage_active_pages(&vendor_pdb_path(&usb_root));
-        let pdb_stale_sentinel_btree_pages =
-            detect_pdb_stale_sentinel_btree(&vendor_pdb_path(&usb_root));
+            detect_pdb_t00_multipage_active_pages(&staged_pdb_path);
+        let pdb_stale_sentinel_btree_pages = detect_pdb_stale_sentinel_btree(&staged_pdb_path);
         let pdb_wrong_playlist_tree_shape_pages =
-            detect_pdb_wrong_playlist_tree_shape(&vendor_pdb_path(&usb_root));
-        let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&vendor_pdb_path(&usb_root));
-        let pdb_truncated_chains = detect_pdb_truncated_table_chains(&vendor_pdb_path(&usb_root));
-        let pdb_torn_growth = detect_pdb_torn_growth_pages(&vendor_pdb_path(&usb_root));
-        let pdb_misaligned_slots = detect_pdb_string_misalignment(&vendor_pdb_path(&usb_root));
+            detect_pdb_wrong_playlist_tree_shape(&staged_pdb_path);
+        let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&staged_pdb_path);
+        let pdb_truncated_chains = detect_pdb_truncated_table_chains(&staged_pdb_path);
+        let pdb_torn_growth = detect_pdb_torn_growth_pages(&staged_pdb_path);
+        let pdb_misaligned_slots = detect_pdb_string_misalignment(&staged_pdb_path);
         let pdb_misaligned_track_ids: Vec<u32> = {
             let mut ids: Vec<u32> = pdb_misaligned_slots
                 .iter()
@@ -4525,7 +4526,7 @@ impl BackendService {
         warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<StrictParityUpgradeApplyResult> {
         let mut result = StrictParityUpgradeApplyResult::default();
-        let pdb_path = vendor_pdb_path(usb_root);
+        let pdb_path = super::usb_staging::stage_pdb(usb_root)?;
 
         // ── Phase 1: Collect ──────────────────────────────────────────
         let parsed = parse_pdb(&pdb_path)?;
@@ -5198,10 +5199,7 @@ impl BackendService {
         // Re-read written PDB identities so eDB uses the exact playlist id/sort
         // that ended up in the device-facing PDB after rewrite.
         let pdb_identity_by_name: HashMap<String, (u32, u32)> = {
-            let pdb_path = usb_root
-                .join("PIONEER")
-                .join("rekordbox")
-                .join("export.pdb");
+            let pdb_path = super::usb_staging::stage_pdb(usb_root)?;
             if pdb_path.is_file() {
                 if let Ok(parsed_after_write) = parse_pdb(&pdb_path) {
                     let mut map = HashMap::<String, (u32, u32, usize)>::new();
@@ -5342,7 +5340,9 @@ impl BackendService {
 
         let mut map_by_file = std::collections::HashMap::<String, AnalysisRepairTarget>::new();
         let mut map_by_dir = std::collections::HashMap::<String, AnalysisRepairTarget>::new();
-        if let Ok(parsed) = parse_pdb(&vendor_pdb_path(usb_root)) {
+        if let Ok(staged_pdb_path) = super::usb_staging::stage_pdb(usb_root)
+            && let Ok(parsed) = parse_pdb(&staged_pdb_path)
+        {
             for t in parsed.tracks {
                 if let (Some(a), Some(s)) = (
                     resolve_usb_side_path(usb_root, &t.anlz_path),

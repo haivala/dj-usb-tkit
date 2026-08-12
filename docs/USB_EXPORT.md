@@ -33,9 +33,44 @@ the player-visible USB database.
 
 Before each export, the app copies PDB and eDB to a backups folder next to them with a timestamp. Backups land in `PIONEER/rekordbox/backups/` on the USB drive with filenames like `export_2025-04-23_14-32-01.pdb` and `exportLibrary_2025-04-23_14-32-01.db`. Files are only copied if they already exist — a first export with no prior databases skips silently.
 
-This behavior is on by default and can be disabled in Settings → Export Settings.
+This behavior is on by default and can be disabled in Settings → Export Settings. Backup always
+runs before any database write is attempted, regardless of whether local staging (below) is
+active, so it captures the drive's actual pre-write state either way.
 
 Strict parity validation is handled as a separate diagnostics surface so users can distinguish between operationally usable media and strict database parity.
+
+## Local HDD staging
+
+`export.pdb` and `exportLibrary.db` are staged to a local working copy under the desktop app's
+data directory (`usb_cache/<device-key>/PIONEER/rekordbox/...`, keyed by a hash of the USB root
+path) instead of being read directly off the USB mount on every call. The first read of either
+file after a device is plugged in (or after either file changes size/mtime on the drive) copies
+it locally; subsequent reads within the same session reuse that local copy without touching the
+USB mount again. Writes go to the local copy first and are committed back to the drive only if
+the local copy actually changed, via an atomic temp-file-plus-rename so a crash or drive removal
+mid-write can't leave a half-written database on the USB.
+
+This is the desktop app's behavior specifically — it's the only context that enables staging, at
+startup, right after the backend is constructed (`usb_staging::init_cache_root` in
+`desktop/src-tauri/src/main.rs`). CLI dev tools (`backend/src/bin/*.rs`) and the automated test
+suite never enable it, so they keep reading/writing the given path directly, matching behavior
+from before staging existed.
+
+USB repair's own PDB reads and writes are not yet staged — that flow still reads/writes the USB
+mount directly for both its diagnostic scans and its fixers. This isn't a staleness bug (any
+other staged reader that touches the same file afterward detects the drive's new size/mtime and
+re-syncs its local copy automatically), just a missed opportunity to get the same speed/atomicity
+benefit for repair specifically; wiring it up is tracked as a follow-up.
+
+If the drive's copy of a file changes between when it was staged and when a write-back is about
+to commit — e.g. Rekordbox itself wrote to the drive in between — the write-back is aborted with
+an error instead of silently overwriting that external change; re-opening the USB re-syncs the
+local copy and the operation can be retried.
+
+Implementation: `backend/src/service/usb_staging.rs` (staging/write-back core),
+`backend/src/edb.rs` (`open_edb_from_usb_root`/`open_edb_rw` route eDB access through it
+transparently), `backend/src/service/usb_utils.rs` (`parse_staged_pdb` wraps `pdb_reader::parse_pdb`
+for PDB reads).
 
 ## Deep technical details
 

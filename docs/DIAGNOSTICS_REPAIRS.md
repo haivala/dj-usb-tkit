@@ -196,6 +196,14 @@ membership that exists on only one side.
 | repair catalog and apply flow | `backend/src/service/repair.rs` |
 | PDB/eDB field context | `docs/PDB.md`, `docs/eDB.md` |
 
+`diagnostics.rs`'s PDB reads (integrity checks, parity report) go through the local HDD staging
+layer described in `docs/USB_EXPORT.md`'s "Local HDD staging" section, same as export. eDB access
+is always staged transparently regardless of caller (`edb::open_edb_from_usb_root`/`open_edb_rw`).
+`repair.rs`'s own PDB reads and writes are **not yet staged** — its diagnostic scanners
+(`detect_pdb_*`) and fix-applying functions still read/write the USB mount directly. This is
+correctness-neutral (staged readers elsewhere self-heal on the next stat mismatch) but repair
+doesn't get the local-disk speed or atomic-write benefit; wiring it up is tracked as a follow-up.
+
 ## Verification
 
 Relevant test areas:

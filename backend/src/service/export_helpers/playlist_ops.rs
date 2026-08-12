@@ -144,10 +144,7 @@ pub fn remove_playlist_and_tracks_from_pdb(
         exclusive_tracks: Vec::new(),
         shared_track_count: 0,
     };
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     if !pdb_path.is_file() {
         warnings.push(logging::log(
             Level::Warn,
@@ -277,7 +274,11 @@ pub fn remove_playlist_and_tracks_from_pdb(
     // B-tree causes DJ software to reject the database as corrupted.
     rebuild_sentinel_btrees_inplace(&mut pdb_bytes);
 
-    std::fs::write(&pdb_path, &pdb_bytes)?;
+    crate::service::usb_staging::commit_and_write_back(
+        usb_root,
+        crate::service::usb_staging::DbKind::Pdb,
+        &pdb_bytes,
+    )?;
 
     Ok(PlaylistRemovalPdbResult {
         removed_playlist_count: remove_ids.len(),
@@ -401,10 +402,7 @@ pub fn verify_pdb_content(
     playlist: &ExportPlaylistData,
     manifest: &ExportManifest,
 ) -> BackendResult<()> {
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     let parsed = parse_pdb(&pdb_path)?;
 
     let playlist_ids = parsed

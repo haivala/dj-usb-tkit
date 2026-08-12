@@ -471,7 +471,7 @@ impl BackendService {
         on_progress(10, 100, "USB: Parsing PDB");
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
-        let pdb_path = vendor_pdb_path(&usb_root);
+        let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         let parsed = if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
             warnings.extend(parsed.warnings.iter().map(|message| {
@@ -914,10 +914,7 @@ impl BackendService {
             .collect();
         // Read artwork paths from parsed PDB artworks map
         if !exclusive_artwork_ids.is_empty() {
-            let pdb_path = usb_root
-                .join(USB_VENDOR_ROOT_DIR)
-                .join("rekordbox")
-                .join("export.pdb");
+            let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
             if pdb_path.is_file()
                 && let Ok(parsed) = parse_pdb(&pdb_path)
             {
@@ -1030,7 +1027,7 @@ impl BackendService {
         on_progress(10, 100, "USB: Parsing PDB");
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing(&mut stage_warnings, "resolve usb root", &mut stage_started);
-        let pdb_path = vendor_pdb_path(&usb_root);
+        let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         if !pdb_path.exists() {
             return Ok(FetchUsbHistoriesData {
                 items: Vec::new(),
@@ -1715,7 +1712,7 @@ impl BackendService {
             });
         }
 
-        let pdb_path = vendor_pdb_path(&usb_root);
+        let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         let parsed = if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
             warnings.extend(parsed.warnings.iter().map(|message| {

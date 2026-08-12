@@ -221,11 +221,29 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlit
     None
 }
 
+fn staged_edb_path(
+    usb_root: &Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> Option<std::path::PathBuf> {
+    match crate::service::usb_staging::stage_edb(usb_root) {
+        Ok(path) => Some(path),
+        Err(err) => {
+            warnings.push(logging::log(
+                Level::Warn,
+                "edb",
+                "edb.stage.failed",
+                format!("failed to stage eDB locally, falling back to USB path: {err}"),
+            ));
+            Some(edb_path_from_usb_root(usb_root))
+        }
+    }
+}
+
 pub fn open_edb_from_usb_root(
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> Option<rusqlite::Connection> {
-    let path = edb_path_from_usb_root(usb_root);
+    let path = staged_edb_path(usb_root, warnings)?;
     open_edb(&path, warnings)
 }
 
@@ -233,10 +251,7 @@ pub fn open_edb_rw(
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> Option<rusqlite::Connection> {
-    let db_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("exportLibrary.db");
+    let db_path = staged_edb_path(usb_root, warnings)?;
     if !db_path.exists() {
         return None;
     }
@@ -1871,6 +1886,143 @@ mod tests {
                 .iter()
                 .any(|w| w.message.starts_with("eDB unreadable after trying")),
             "expected unreadable warning: {warnings:?}"
+        );
+    }
+
+    fn export_db_with_schema(root: &std::path::Path) -> std::path::PathBuf {
+        let db_path = export_db_path(root);
+        let conn = rusqlite::Connection::open(&db_path).expect("create sqlite db");
+        conn.execute(
+            "CREATE TABLE playlist (playlist_id INTEGER PRIMARY KEY)",
+            [],
+        )
+        .expect("create schema");
+        db_path
+    }
+
+    // These three tests specifically verify that `open_edb_rw`/
+    // `open_edb_from_usb_root` route through `usb_staging`'s process-global
+    // `CACHE_ROOT` (the actual wiring production code relies on) rather than
+    // through `usb_staging`'s own `_with_root` test entry points (which take
+    // an explicit root and are covered by `usb_staging`'s own test module).
+    // That means they must toggle the real global -- `TEST_LOCK` serializes
+    // them against each other, and the cache dir is intentionally leaked
+    // (`into_path`, never deleted) rather than dropped at scope end, so an
+    // unrelated test on another thread that happens to observe `Some(..)`
+    // during the toggled window can never hit a "directory disappeared
+    // mid-operation" race; at worst it creates a harmless, uniquely-keyed
+    // stray subdirectory under the leaked root.
+    #[test]
+    fn open_edb_rw_with_staging_enabled_creates_local_cache_copy() {
+        let _lock = crate::service::usb_staging::lock_for_test();
+        let cache_dir = tempdir().expect("cache dir").keep();
+        crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let temp = tempdir().expect("tempdir");
+        let db_path = export_db_with_schema(temp.path());
+
+        let mut warnings = Vec::new();
+        let conn = open_edb_rw(temp.path(), &mut warnings);
+        assert!(conn.is_some(), "staged db should still open");
+        drop(conn);
+
+        let staged_path = crate::service::usb_staging::stage_edb(temp.path()).expect("stage");
+        assert!(
+            staged_path.is_file(),
+            "expected local cache copy at {staged_path:?}"
+        );
+        assert_ne!(
+            staged_path, db_path,
+            "staged path must differ from the real USB path"
+        );
+
+        crate::service::usb_staging::set_cache_root_for_test(None);
+    }
+
+    #[test]
+    fn open_edb_from_usb_root_with_staging_skips_recopy_when_usb_source_unchanged() {
+        let _lock = crate::service::usb_staging::lock_for_test();
+        let cache_dir = tempdir().expect("cache dir").keep();
+        crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let temp = tempdir().expect("tempdir");
+        export_db_with_schema(temp.path());
+
+        let mut warnings = Vec::new();
+        let _conn1 = open_edb_from_usb_root(temp.path(), &mut warnings);
+        let staged_path = crate::service::usb_staging::stage_edb(temp.path()).expect("stage");
+        let mtime_before = std::fs::metadata(&staged_path)
+            .expect("stat staged copy")
+            .modified()
+            .expect("mtime");
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut warnings2 = Vec::new();
+        let _conn2 = open_edb_from_usb_root(temp.path(), &mut warnings2);
+        let mtime_after = std::fs::metadata(&staged_path)
+            .expect("stat staged copy")
+            .modified()
+            .expect("mtime");
+        assert_eq!(
+            mtime_before, mtime_after,
+            "unchanged USB source should not trigger a re-copy on repeated opens"
+        );
+
+        crate::service::usb_staging::set_cache_root_for_test(None);
+    }
+
+    #[test]
+    fn open_edb_from_usb_root_with_staging_recopies_after_usb_side_change() {
+        let _lock = crate::service::usb_staging::lock_for_test();
+        let cache_dir = tempdir().expect("cache dir").keep();
+        crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let temp = tempdir().expect("tempdir");
+        let db_path = export_db_with_schema(temp.path());
+
+        let mut warnings = Vec::new();
+        let _conn1 = open_edb_from_usb_root(temp.path(), &mut warnings);
+
+        // Simulate an external change landing directly on the USB file
+        // (e.g. Rekordbox itself writing to the drive).
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let conn = rusqlite::Connection::open(&db_path).expect("reopen usb db");
+        conn.execute("CREATE TABLE extra (id INTEGER PRIMARY KEY)", [])
+            .expect("add table directly on usb");
+        drop(conn);
+
+        let mut warnings2 = Vec::new();
+        let _conn2 = open_edb_from_usb_root(temp.path(), &mut warnings2);
+        let staged_path = crate::service::usb_staging::stage_edb(temp.path()).expect("stage");
+        let staged_conn = rusqlite::Connection::open(&staged_path).expect("open staged copy");
+        let has_extra: i64 = staged_conn
+            .query_row(
+                "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='extra'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query sqlite_master");
+        assert_eq!(
+            has_extra, 1,
+            "local cache should reflect the USB-side change after reopening"
+        );
+
+        crate::service::usb_staging::set_cache_root_for_test(None);
+    }
+
+    #[test]
+    fn open_edb_rw_with_staging_disabled_preserves_direct_usb_behavior() {
+        let _lock = crate::service::usb_staging::lock_for_test();
+        crate::service::usb_staging::set_cache_root_for_test(None);
+
+        let temp = tempdir().expect("tempdir");
+        export_db_with_schema(temp.path());
+
+        let mut warnings = Vec::new();
+        let conn = open_edb_rw(temp.path(), &mut warnings);
+        assert!(
+            conn.is_some(),
+            "with staging disabled, connection should still open directly against the USB path"
         );
     }
 

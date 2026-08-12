@@ -1106,10 +1106,7 @@ fn write_pdb_fresh_with_overrides(
         PdbPlaylistTreeRow,
     };
 
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
 
     if std::env::var("PDB_WRITE_MODE")
         .ok()
@@ -1996,7 +1993,11 @@ fn write_pdb_fresh_with_overrides(
             Some((additive_bytes, summary)) => {
                 validate_topology_locked_export_bytes(before, &additive_bytes)?;
                 if commit_write {
-                    std::fs::write(&pdb_path, &additive_bytes)?;
+                    crate::service::usb_staging::commit_and_write_back(
+                        usb_root,
+                        crate::service::usb_staging::DbKind::Pdb,
+                        &additive_bytes,
+                    )?;
                 }
                 return Ok(WriteExportPdbResult {
                     inserted_tracks: summary.new_tracks,
