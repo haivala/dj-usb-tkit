@@ -1649,6 +1649,53 @@ export async function hydrateUsbTrackMetadata(state, track, deps = {}) {
   return track;
 }
 
+// Batched counterpart to hydrateUsbTrackMetadata: resolves metadata for many
+// tracks in a single "inspect_usb_tracks" call instead of one call per track,
+// so the backend parses the PDB and opens the eDB connection once for the
+// whole batch rather than once per track.
+export async function hydrateUsbTrackMetadataBatch(state, tracks, deps = {}) {
+  const {
+    usbTrackNeedsHydration = () => false,
+    command = async () => ({}),
+    normalizeTrack = (t) => t
+  } = deps;
+  const candidates = (tracks || []).filter((track) => {
+    if (!track || !usbTrackNeedsHydration(track)) return false;
+    return /^\d+$/.test(String(track.id || "").trim());
+  });
+  if (!candidates.length) return tracks;
+
+  const items = candidates.map((track) => ({
+    trackId: String(track.id).trim(),
+    filePath: track.filePath || "",
+    title: track.title || "",
+    artist: track.artist || ""
+  }));
+
+  try {
+    const inspected = await command("inspect_usb_tracks", {
+      usbRoot: state.usbRoot,
+      items
+    });
+    const resultsById = new Map(
+      (inspected?.items || []).map((item) => [String(item?.trackId || ""), item])
+    );
+    for (const track of candidates) {
+      const trackId = String(track.id).trim();
+      const item = resultsById.get(trackId);
+      const normalized = normalizeTrack(item?.track || {}, "usb");
+      if (!normalized.localTrackId && track.localTrackId) {
+        normalized.localTrackId = track.localTrackId;
+      }
+      normalized.artworkChecked = true;
+      Object.assign(track, normalized);
+    }
+  } catch (err) {
+    console.warn(`inspect_usb_tracks failed for ${candidates.length} track(s):`, err);
+  }
+  return tracks;
+}
+
 export function rebuildKnownUsbPlaylistNames(state) {
   state.usbKnownPlaylistNames = knownUsbPlaylistNamesFromPlaylists(state.usbPlaylists);
 }

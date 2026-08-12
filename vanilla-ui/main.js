@@ -1007,6 +1007,11 @@ const hydrateUsbTrackMetadata = (track) => usb.hydrateUsbTrackMetadata(state, tr
     command,
     normalizeTrack,
   });
+const hydrateUsbTrackMetadataBatch = (tracks) => usb.hydrateUsbTrackMetadataBatch(state, tracks, {
+    usbTrackNeedsHydration,
+    command,
+    normalizeTrack,
+  });
 
 function loadUsbRootFromStorage() {
   usb.loadUsbRootFromStorage(state, el, {
@@ -1438,6 +1443,7 @@ function bindEvents() {
     moveArrayItem: usb.moveArrayItem,
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
+    hydrateUsbTrackMetadataBatch,
     setActiveListItem: shell.setActiveListItem,
     getHistoryDateDisplay,
     getCurrentPlaylist,

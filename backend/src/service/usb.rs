@@ -15,12 +15,13 @@ use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
     FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, InspectUsbTrackData, InspectUsbTrackRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, UsbHistory,
-    UsbHistoryCounts, UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData,
-    ValidateUsbRootRequest, WarningEntry,
+    FetchUsbPlaylistsRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTrackResult,
+    InspectUsbTracksData, InspectUsbTracksRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
+    ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts,
+    UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest,
+    WarningEntry,
 };
-use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, parse_pdb};
+use crate::pdb_reader::{ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, parse_pdb};
 
 use super::analysis::normalize_text;
 use super::export_helpers::{
@@ -1648,7 +1649,7 @@ impl BackendService {
             .map(normalize_text)
             .unwrap_or_default();
 
-        if pdb_path.exists() {
+        let parsed = if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
             warnings.extend(parsed.warnings.iter().map(|message| {
                 logging::log(
@@ -1658,100 +1659,7 @@ impl BackendService {
                     message.clone(),
                 )
             }));
-            let mut best: Option<(&crate::pdb_reader::PdbTrackRow, i32)> = None;
-            for t in parsed.tracks.iter().filter(|t| t.id == track_id) {
-                let artist = parsed
-                    .artists
-                    .get(&t.artist_id)
-                    .cloned()
-                    .unwrap_or_else(|| "Unknown Artist".to_string());
-                let resolved_file_path = resolve_usb_side_path(&usb_root, &t.track_file_path)
-                    .unwrap_or_else(|| t.track_file_path.clone());
-                let mut score = 0i32;
-                if !file_hint.is_empty() {
-                    let candidate = normalize_text(&resolved_file_path);
-                    if candidate.contains(&file_hint) || file_hint.contains(&candidate) {
-                        score += 8;
-                    }
-                }
-                if !title_hint.is_empty() {
-                    let candidate = normalize_text(&t.title);
-                    if candidate.contains(&title_hint) || title_hint.contains(&candidate) {
-                        score += 4;
-                    }
-                }
-                if !artist_hint.is_empty() {
-                    let candidate = normalize_text(&artist);
-                    if candidate.contains(&artist_hint) || artist_hint.contains(&candidate) {
-                        score += 3;
-                    }
-                }
-                match best {
-                    Some((_, best_score)) if best_score >= score => {}
-                    _ => best = Some((t, score)),
-                }
-            }
-            if let Some((t, score)) = best {
-                let has_hints =
-                    !file_hint.is_empty() || !title_hint.is_empty() || !artist_hint.is_empty();
-                if has_hints && score <= 0 {
-                    // Keep searching via DB fallback when ID collides and hints don't match PDB row.
-                } else {
-                    let artist = parsed
-                        .artists
-                        .get(&t.artist_id)
-                        .cloned()
-                        .unwrap_or_else(|| "Unknown Artist".to_string());
-                    let album = parsed.albums.get(&t.album_id).cloned();
-                    let key = parsed.keys.get(&t.key_id).cloned();
-                    let artwork_path = parsed
-                        .artworks
-                        .get(&t.artwork_id)
-                        .and_then(|p| resolve_usb_side_path(&usb_root, p));
-                    let resolved_file_path = resolve_usb_side_path(&usb_root, &t.track_file_path)
-                        .unwrap_or_else(|| t.track_file_path.clone());
-                    let usb_analysis_path = resolve_usb_side_path(&usb_root, &t.anlz_path);
-                    let waveform_preview = usb_analysis_path
-                        .as_deref()
-                        .and_then(load_waveform_preview_from_analysis_path);
-                    return Ok(InspectUsbTrackData {
-                        source: "pdb".to_string(),
-                        track: UsbTrack {
-                            id: track_id.to_string(),
-                            local_track_id: None,
-                            title: if t.title.is_empty() {
-                                "Unknown Title".to_string()
-                            } else {
-                                t.title.clone()
-                            },
-                            artist,
-                            album,
-                            track_number: (t.track_number > 0).then_some(t.track_number),
-                            bpm: if t.tempo_x100 > 0 {
-                                Some(t.tempo_x100 as f64 / 100.0)
-                            } else {
-                                None
-                            },
-                            key,
-                            file_path: resolved_file_path,
-                            usb_media_path: Some(t.track_file_path.clone()),
-                            artwork_data_url: artwork_path
-                                .as_deref()
-                                .and_then(artwork_path_to_data_url),
-                            artwork_path,
-                            waveform_peaks_path: usb_analysis_path.clone(),
-                            usb_analysis_path,
-                            usb_analysis_path_raw: Some(t.anlz_path.clone()),
-                            waveform_preview,
-                            duration_ms: t
-                                .duration_seconds
-                                .map(|seconds| u64::from(seconds) * 1000),
-                            file_size_bytes: t.file_size_bytes.map(i64::from),
-                        },
-                        warnings,
-                    });
-                }
-            }
+            Some(parsed)
         } else {
             warnings.push(logging::log(
                 Level::Warn,
@@ -1762,35 +1670,268 @@ impl BackendService {
                     usb_root.display()
                 ),
             ));
-        }
+            None
+        };
 
-        if let Some(index) = try_read_track_index_from_edb(&usb_root, &mut warnings)
-            && let Some(mut track) = index.get(&track_id).cloned()
-        {
-            let mut file_hint_match = true;
-            if !file_hint.is_empty() {
-                let candidate = normalize_text(&track.file_path);
-                file_hint_match = candidate.contains(&file_hint) || file_hint.contains(&candidate);
-            }
-            if file_hint_match {
-                if track.waveform_preview.is_none() {
-                    track.waveform_preview = track
-                        .usb_analysis_path
-                        .as_deref()
-                        .and_then(load_waveform_preview_from_analysis_path);
-                }
-                return Ok(InspectUsbTrackData {
-                    source: "eDB".to_string(),
-                    track,
-                    warnings,
-                });
-            }
-        }
+        let edb_index = try_read_track_index_from_edb(&usb_root, &mut warnings);
 
-        Err(BackendError::Validation(format!(
-            "trackId {track_id} not found on USB metadata sources"
-        )))
+        match resolve_usb_track_from_sources(
+            track_id,
+            &file_hint,
+            &title_hint,
+            &artist_hint,
+            &usb_root,
+            parsed.as_ref(),
+            edb_index.as_ref(),
+        ) {
+            Some((source, track)) => Ok(InspectUsbTrackData {
+                source,
+                track,
+                warnings,
+            }),
+            None => Err(BackendError::Validation(format!(
+                "trackId {track_id} not found on USB metadata sources"
+            ))),
+        }
     }
+
+    /// Batch counterpart to `inspect_usb_track`. Parses the PDB and opens/
+    /// queries the eDB connection once for the whole batch instead of once
+    /// per track -- selecting a USB playlist used to call `inspect_usb_track`
+    /// once per track, which re-opened and re-keyed the SQLCipher eDB
+    /// connection (see `try_read_track_index_from_edb_with_conn`'s doc
+    /// comment) and re-parsed the PDB on every single call.
+    pub fn inspect_usb_tracks(
+        &self,
+        req: InspectUsbTracksRequest,
+    ) -> BackendResult<InspectUsbTracksData> {
+        let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
+        let mut warnings = Vec::<WarningEntry>::new();
+
+        if req.items.is_empty() {
+            return Ok(InspectUsbTracksData {
+                items: Vec::new(),
+                warnings,
+            });
+        }
+
+        let pdb_path = vendor_pdb_path(&usb_root);
+        let parsed = if pdb_path.exists() {
+            let parsed = parse_pdb(&pdb_path)?;
+            warnings.extend(parsed.warnings.iter().map(|message| {
+                logging::log(
+                    Level::Warn,
+                    "usb-import",
+                    "usb.import.pdb-parse",
+                    message.clone(),
+                )
+            }));
+            Some(parsed)
+        } else {
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.pdb-not-found",
+                format!(
+                    "PDB not found under {}; using DB fallback only",
+                    usb_root.display()
+                ),
+            ));
+            None
+        };
+
+        // Open the eDB once and reuse it for every item below -- see
+        // `try_read_track_index_from_edb_with_conn`'s doc comment.
+        let edb_conn = open_edb_from_usb_root(&usb_root, &mut warnings);
+        let edb_index = edb_conn.as_ref().and_then(|conn| {
+            try_read_track_index_from_edb_with_conn(conn, &usb_root, &mut warnings)
+        });
+
+        let items = req
+            .items
+            .into_iter()
+            .map(|item| {
+                let track_id = match item.track_id.trim().parse::<u32>() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        return InspectUsbTrackResult {
+                            track_id: item.track_id,
+                            source: None,
+                            track: None,
+                        };
+                    }
+                };
+                let file_hint = item
+                    .file_path
+                    .as_deref()
+                    .map(normalize_text)
+                    .unwrap_or_default();
+                let title_hint = item
+                    .title
+                    .as_deref()
+                    .map(normalize_text)
+                    .unwrap_or_default();
+                let artist_hint = item
+                    .artist
+                    .as_deref()
+                    .map(normalize_text)
+                    .unwrap_or_default();
+                match resolve_usb_track_from_sources(
+                    track_id,
+                    &file_hint,
+                    &title_hint,
+                    &artist_hint,
+                    &usb_root,
+                    parsed.as_ref(),
+                    edb_index.as_ref(),
+                ) {
+                    Some((source, track)) => InspectUsbTrackResult {
+                        track_id: item.track_id,
+                        source: Some(source),
+                        track: Some(track),
+                    },
+                    None => InspectUsbTrackResult {
+                        track_id: item.track_id,
+                        source: None,
+                        track: None,
+                    },
+                }
+            })
+            .collect();
+
+        Ok(InspectUsbTracksData { items, warnings })
+    }
+}
+
+/// Matches a single USB track id against an already-parsed PDB and/or an
+/// already-built eDB track index, preferring the PDB best-match scored
+/// against the supplied hints and falling back to the eDB index. Callers are
+/// responsible for parsing the PDB and opening/querying the eDB exactly
+/// once and passing the results in here, so this can be called once per
+/// track in a batch without repeating that work.
+fn resolve_usb_track_from_sources(
+    track_id: u32,
+    file_hint: &str,
+    title_hint: &str,
+    artist_hint: &str,
+    usb_root: &std::path::Path,
+    parsed: Option<&ParsedPdb>,
+    edb_index: Option<&HashMap<u32, UsbTrack>>,
+) -> Option<(String, UsbTrack)> {
+    if let Some(parsed) = parsed {
+        let mut best: Option<(&crate::pdb_reader::PdbTrackRow, i32)> = None;
+        for t in parsed.tracks.iter().filter(|t| t.id == track_id) {
+            let artist = parsed
+                .artists
+                .get(&t.artist_id)
+                .cloned()
+                .unwrap_or_else(|| "Unknown Artist".to_string());
+            let resolved_file_path = resolve_usb_side_path(usb_root, &t.track_file_path)
+                .unwrap_or_else(|| t.track_file_path.clone());
+            let mut score = 0i32;
+            if !file_hint.is_empty() {
+                let candidate = normalize_text(&resolved_file_path);
+                if candidate.contains(file_hint) || file_hint.contains(&candidate) {
+                    score += 8;
+                }
+            }
+            if !title_hint.is_empty() {
+                let candidate = normalize_text(&t.title);
+                if candidate.contains(title_hint) || title_hint.contains(&candidate) {
+                    score += 4;
+                }
+            }
+            if !artist_hint.is_empty() {
+                let candidate = normalize_text(&artist);
+                if candidate.contains(artist_hint) || artist_hint.contains(&candidate) {
+                    score += 3;
+                }
+            }
+            match best {
+                Some((_, best_score)) if best_score >= score => {}
+                _ => best = Some((t, score)),
+            }
+        }
+        if let Some((t, score)) = best {
+            let has_hints =
+                !file_hint.is_empty() || !title_hint.is_empty() || !artist_hint.is_empty();
+            if has_hints && score <= 0 {
+                // Keep searching via DB fallback when ID collides and hints don't match PDB row.
+            } else {
+                let artist = parsed
+                    .artists
+                    .get(&t.artist_id)
+                    .cloned()
+                    .unwrap_or_else(|| "Unknown Artist".to_string());
+                let album = parsed.albums.get(&t.album_id).cloned();
+                let key = parsed.keys.get(&t.key_id).cloned();
+                let artwork_path = parsed
+                    .artworks
+                    .get(&t.artwork_id)
+                    .and_then(|p| resolve_usb_side_path(usb_root, p));
+                let resolved_file_path = resolve_usb_side_path(usb_root, &t.track_file_path)
+                    .unwrap_or_else(|| t.track_file_path.clone());
+                let usb_analysis_path = resolve_usb_side_path(usb_root, &t.anlz_path);
+                let waveform_preview = usb_analysis_path
+                    .as_deref()
+                    .and_then(load_waveform_preview_from_analysis_path);
+                return Some((
+                    "pdb".to_string(),
+                    UsbTrack {
+                        id: track_id.to_string(),
+                        local_track_id: None,
+                        title: if t.title.is_empty() {
+                            "Unknown Title".to_string()
+                        } else {
+                            t.title.clone()
+                        },
+                        artist,
+                        album,
+                        track_number: (t.track_number > 0).then_some(t.track_number),
+                        bpm: if t.tempo_x100 > 0 {
+                            Some(t.tempo_x100 as f64 / 100.0)
+                        } else {
+                            None
+                        },
+                        key,
+                        file_path: resolved_file_path,
+                        usb_media_path: Some(t.track_file_path.clone()),
+                        artwork_data_url: artwork_path
+                            .as_deref()
+                            .and_then(artwork_path_to_data_url),
+                        artwork_path,
+                        waveform_peaks_path: usb_analysis_path.clone(),
+                        usb_analysis_path,
+                        usb_analysis_path_raw: Some(t.anlz_path.clone()),
+                        waveform_preview,
+                        duration_ms: t.duration_seconds.map(|seconds| u64::from(seconds) * 1000),
+                        file_size_bytes: t.file_size_bytes.map(i64::from),
+                    },
+                ));
+            }
+        }
+    }
+
+    if let Some(index) = edb_index
+        && let Some(mut track) = index.get(&track_id).cloned()
+    {
+        let mut file_hint_match = true;
+        if !file_hint.is_empty() {
+            let candidate = normalize_text(&track.file_path);
+            file_hint_match = candidate.contains(file_hint) || file_hint.contains(&candidate);
+        }
+        if file_hint_match {
+            if track.waveform_preview.is_none() {
+                track.waveform_preview = track
+                    .usb_analysis_path
+                    .as_deref()
+                    .and_then(load_waveform_preview_from_analysis_path);
+            }
+            return Some(("eDB".to_string(), track));
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -2502,24 +2643,28 @@ mod tests {
         }
     }
 
-    fn seeded_playlist_usb() -> (tempfile::TempDir, std::path::PathBuf) {
+    fn seeded_playlist_usb_with_tracks(
+        tracks: &[(&str, &str, &str)],
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
         let (dir, usb_root) = test_usb_root();
         let playlist = crate::edb::ExportPlaylistData {
             id: "pl-1".to_string(),
             name: "My Playlist".to_string(),
-            tracks: vec![make_export_track("t1", "Song A", "a.mp3")],
+            tracks: tracks
+                .iter()
+                .map(|(id, title, filename)| make_export_track(id, title, filename))
+                .collect(),
         };
-        let manifest = make_export_manifest(
-            "pl-1",
-            "My Playlist",
-            &usb_root,
-            &[("t1", "Song A", "a.mp3")],
-        );
+        let manifest = make_export_manifest("pl-1", "My Playlist", &usb_root, tracks);
         crate::service::export_helpers::write_pdb(
             &usb_root, &playlist, &manifest, true, None, None,
         )
         .expect("write pdb");
         (dir, usb_root)
+    }
+
+    fn seeded_playlist_usb() -> (tempfile::TempDir, std::path::PathBuf) {
+        seeded_playlist_usb_with_tracks(&[("t1", "Song A", "a.mp3")])
     }
 
     #[test]
@@ -2844,6 +2989,270 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, crate::error::BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn inspect_usb_tracks_resolves_multiple_ids_matching_single_calls() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = seeded_playlist_usb_with_tracks(&[
+            ("t1", "Song A", "a.mp3"),
+            ("t2", "Song B", "b.mp3"),
+        ]);
+        let usb_root_str = usb_root.to_string_lossy().to_string();
+
+        let fetched = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root_str.clone()),
+            })
+            .expect("fetch playlists");
+        let track_ids: Vec<String> = fetched.items[0]
+            .tracks
+            .iter()
+            .map(|t| t.id.clone())
+            .collect();
+        assert_eq!(track_ids.len(), 2);
+
+        let batch = service
+            .inspect_usb_tracks(crate::models::InspectUsbTracksRequest {
+                usb_root: Some(usb_root_str.clone()),
+                items: track_ids
+                    .iter()
+                    .map(|id| crate::models::InspectUsbTrackItem {
+                        track_id: id.clone(),
+                        file_path: None,
+                        title: None,
+                        artist: None,
+                    })
+                    .collect(),
+            })
+            .expect("inspect usb tracks");
+        assert_eq!(batch.items.len(), 2);
+
+        // Every batched result must agree with what a per-track
+        // `inspect_usb_track` call would have returned -- the batch path is
+        // a refactor of the same matching logic, not a different one.
+        for id in &track_ids {
+            let single = service
+                .inspect_usb_track(crate::models::InspectUsbTrackRequest {
+                    usb_root: Some(usb_root_str.clone()),
+                    track_id: id.clone(),
+                    file_path: None,
+                    title: None,
+                    artist: None,
+                })
+                .expect("inspect single usb track");
+            let batched = batch
+                .items
+                .iter()
+                .find(|item| &item.track_id == id)
+                .expect("expected batch result for id");
+            assert_eq!(batched.source.as_deref(), Some(single.source.as_str()));
+            let batched_track = batched.track.as_ref().expect("expected resolved track");
+            assert_eq!(batched_track.title, single.track.title);
+            assert_eq!(batched_track.artist, single.track.artist);
+        }
+    }
+
+    #[test]
+    fn inspect_usb_tracks_returns_none_for_unknown_id_without_failing_batch() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = seeded_playlist_usb();
+        let usb_root_str = usb_root.to_string_lossy().to_string();
+
+        let fetched = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root_str.clone()),
+            })
+            .expect("fetch playlists");
+        let valid_id = fetched.items[0].tracks[0].id.clone();
+
+        let batch = service
+            .inspect_usb_tracks(crate::models::InspectUsbTracksRequest {
+                usb_root: Some(usb_root_str),
+                items: vec![
+                    crate::models::InspectUsbTrackItem {
+                        track_id: valid_id.clone(),
+                        file_path: None,
+                        title: None,
+                        artist: None,
+                    },
+                    crate::models::InspectUsbTrackItem {
+                        track_id: "999999".to_string(),
+                        file_path: None,
+                        title: None,
+                        artist: None,
+                    },
+                ],
+            })
+            .expect("inspect usb tracks");
+        // Unlike `inspect_usb_track`, one unresolved id must not fail the
+        // whole batch -- the caller still gets every other result back.
+        assert_eq!(batch.items.len(), 2);
+        let valid = batch
+            .items
+            .iter()
+            .find(|i| i.track_id == valid_id)
+            .expect("valid result");
+        assert!(valid.track.is_some());
+        assert_eq!(valid.source.as_deref(), Some("pdb"));
+        let unknown = batch
+            .items
+            .iter()
+            .find(|i| i.track_id == "999999")
+            .expect("unknown result");
+        assert!(unknown.track.is_none());
+        assert!(unknown.source.is_none());
+    }
+
+    #[test]
+    fn inspect_usb_tracks_treats_non_numeric_id_as_unresolved_item() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = seeded_playlist_usb();
+        let usb_root_str = usb_root.to_string_lossy().to_string();
+
+        let fetched = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root_str.clone()),
+            })
+            .expect("fetch playlists");
+        let valid_id = fetched.items[0].tracks[0].id.clone();
+
+        let batch = service
+            .inspect_usb_tracks(crate::models::InspectUsbTracksRequest {
+                usb_root: Some(usb_root_str),
+                items: vec![
+                    crate::models::InspectUsbTrackItem {
+                        track_id: "not-a-number".to_string(),
+                        file_path: None,
+                        title: None,
+                        artist: None,
+                    },
+                    crate::models::InspectUsbTrackItem {
+                        track_id: valid_id.clone(),
+                        file_path: None,
+                        title: None,
+                        artist: None,
+                    },
+                ],
+            })
+            .expect("inspect usb tracks");
+        assert_eq!(batch.items.len(), 2);
+        let bad = batch
+            .items
+            .iter()
+            .find(|i| i.track_id == "not-a-number")
+            .expect("bad id result");
+        assert!(bad.track.is_none());
+        assert!(bad.source.is_none());
+        let good = batch
+            .items
+            .iter()
+            .find(|i| i.track_id == valid_id)
+            .expect("valid result");
+        assert!(good.track.is_some());
+    }
+
+    #[test]
+    fn inspect_usb_tracks_returns_empty_items_for_empty_batch_without_reading_disk() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+
+        let result = service
+            .inspect_usb_tracks(crate::models::InspectUsbTracksRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                items: Vec::new(),
+            })
+            .expect("inspect usb tracks with empty items");
+        assert!(result.items.is_empty());
+        // An empty batch must short-circuit before parsing the PDB or
+        // opening the eDB -- if it didn't, the freshly-initialized fixture
+        // root (which has a full-shape PDB+eDB) would still produce zero
+        // warnings here anyway, so this only proves the *shape* of the
+        // response, not the short-circuit; the short-circuit itself is
+        // covered by `inspect_usb_tracks_opens_edb_connection_once_for_whole_batch`
+        // asserting exactly one eDB open for a non-empty batch.
+        assert!(
+            result.warnings.is_empty(),
+            "expected no warnings for empty batch: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn inspect_usb_tracks_opens_edb_connection_once_for_whole_batch() {
+        let (_dir, service) = test_service();
+        let usb_root_dir = tempfile::tempdir().expect("usb root dir");
+        let usb_root = usb_root_dir.path().to_path_buf();
+        let edb_path = super::vendor_edb_path(&usb_root);
+        std::fs::create_dir_all(edb_path.parent().expect("edb parent dir"))
+            .expect("create vendor db dir");
+        let conn = rusqlite::Connection::open(&edb_path).expect("create eDB fixture");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE content (
+              content_id INTEGER PRIMARY KEY,
+              title TEXT,
+              artist_id_artist INTEGER,
+              album_id INTEGER,
+              bpmx100 INTEGER,
+              key_id INTEGER,
+              path TEXT,
+              image_id INTEGER,
+              analysisDataFilePath TEXT
+            );
+            CREATE TABLE artist (artist_id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE album (album_id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE "key" (key_id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE image (image_id INTEGER PRIMARY KEY, path TEXT);
+            INSERT INTO artist (artist_id, name) VALUES (1, 'eDB Artist');
+            INSERT INTO content (content_id, title, artist_id_artist, path) VALUES
+              (101, 'eDB Song A', 1, '/Contents/a.mp3'),
+              (102, 'eDB Song B', 1, '/Contents/b.mp3'),
+              (103, 'eDB Song C', 1, '/Contents/c.mp3');
+            "#,
+        )
+        .expect("seed eDB fixture schema");
+        drop(conn);
+
+        // No PDB on disk at all -- forces every item through the eDB
+        // fallback path, exercising `edb_index` reuse across the batch.
+        let batch = service
+            .inspect_usb_tracks(crate::models::InspectUsbTracksRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                items: ["101", "102", "103"]
+                    .into_iter()
+                    .map(|id| crate::models::InspectUsbTrackItem {
+                        track_id: id.to_string(),
+                        file_path: None,
+                        title: None,
+                        artist: None,
+                    })
+                    .collect(),
+            })
+            .expect("inspect usb tracks (edb-only)");
+
+        assert_eq!(batch.items.len(), 3);
+        for item in &batch.items {
+            assert_eq!(item.source.as_deref(), Some("eDB"));
+            assert_eq!(
+                item.track.as_ref().expect("resolved track").artist,
+                "eDB Artist"
+            );
+        }
+        // The actual regression this batch command exists to prevent: one
+        // `edb.open.no-key` warning per open. Before batching, selecting a
+        // playlist opened the eDB once per track; this must stay at 1 for
+        // the whole batch regardless of how many items it contains.
+        let edb_opens = batch
+            .warnings
+            .iter()
+            .filter(|w| w.code == "edb.open.no-key")
+            .count();
+        assert_eq!(
+            edb_opens, 1,
+            "expected exactly one eDB open for the whole batch, got {edb_opens}: {:?}",
+            batch.warnings
+        );
     }
 
     #[test]

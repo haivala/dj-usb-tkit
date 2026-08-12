@@ -19,13 +19,13 @@ use crate::models::{
     FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
-    ListPlaylistsData, ListTracksData, ListTracksRequest, ListUsbDevicesData,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData,
-    PlayTrackData, PlayTrackRequest, PlaybackEventPayload, PlaybackPreflightData,
-    PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
-    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
+    InspectUsbTracksRequest, JobEventPayload, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
+    MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
@@ -999,6 +999,18 @@ pub async fn inspect_usb_track(
     let commands = state.inner().clone();
     Ok(run_blocking_command("inspect_usb_track", move || {
         commands.inspect_usb_track(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn inspect_usb_tracks(
+    state: State<'_, BackendCommands>,
+    request: InspectUsbTracksRequest,
+) -> Result<ApiResponse<InspectUsbTracksData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("inspect_usb_tracks", move || {
+        commands.inspect_usb_tracks(request)
     })
     .await)
 }

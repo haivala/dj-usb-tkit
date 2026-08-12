@@ -31,6 +31,7 @@ export function bindUsbEvents(ctx) {
     moveArrayItem,
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
+    hydrateUsbTrackMetadataBatch,
     setActiveListItem,
     getHistoryDateDisplay,
     addTracksToCurrentPlaylist,
@@ -52,20 +53,29 @@ export function bindUsbEvents(ctx) {
   let usbSelectionHydrationToken = 0;
   let historySelectionHydrationToken = 0;
 
+  // Chunk size for batched hydration: selecting a playlist used to call
+  // inspect_usb_track once per track, each re-parsing the PDB and re-opening
+  // the SQLCipher eDB connection. Batching in fixed-size chunks (instead of
+  // one call for the whole playlist) keeps that per-call overhead down to
+  // once per chunk while still bounding how much backend work can be
+  // in flight -- and thus wasted -- if the user navigates to a different
+  // playlist/history before hydration finishes.
+  const HYDRATION_CHUNK_SIZE = 40;
+
   const hydrateSelectionTracks = async (tracks, isSelectionCurrent, patchRow, renderFallback) => {
+    const pending = (tracks || []).filter(Boolean);
     let missedPatch = false;
-    for (let i = 0; i < (tracks || []).length; i += 1) {
+    for (let i = 0; i < pending.length; i += HYDRATION_CHUNK_SIZE) {
       if (!isSelectionCurrent()) return;
-      const track = tracks[i];
-      const before = trackMetaFingerprint(track);
-      await hydrateUsbTrackMetadata(track);
-      const after = trackMetaFingerprint(track);
-      if (after !== before) {
-        const patched = patchRow(track);
-        if (!patched) missedPatch = true;
-      }
-      if ((i + 1) % 8 === 0) {
-        await Promise.resolve();
+      const chunk = pending.slice(i, i + HYDRATION_CHUNK_SIZE);
+      const before = new Map(chunk.map((track) => [track, trackMetaFingerprint(track)]));
+      await hydrateUsbTrackMetadataBatch(chunk);
+      if (!isSelectionCurrent()) return;
+      for (const track of chunk) {
+        if (trackMetaFingerprint(track) !== before.get(track)) {
+          const patched = patchRow(track);
+          if (!patched) missedPatch = true;
+        }
       }
     }
     if (missedPatch) renderFallback();

@@ -10,8 +10,9 @@ use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
     AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
-    ExportToUsbRequest, FetchUsbHistoriesRequest, InitializeUsbRequest, InspectUsbTrackRequest,
-    ScanLibraryRequest, SearchTracksRequest, ValidateUsbRootRequest,
+    ExportToUsbRequest, FetchUsbHistoriesRequest, InitializeUsbRequest, InspectUsbTrackItem,
+    InspectUsbTrackRequest, InspectUsbTracksRequest, ScanLibraryRequest, SearchTracksRequest,
+    ValidateUsbRootRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
@@ -136,6 +137,83 @@ fn scan_and_export_single_track(
     assert_eq!(exported.data.expect("export data").exported_tracks, 1);
 
     (track_id, title, artist)
+}
+
+/// Scans several fixture tracks into their own source dir, adds them all to
+/// one fresh playlist (in the order given), and exports that playlist to
+/// `usb` in a single export call. Returns (track_id, title, artist) per
+/// track, in the same order as `files`.
+fn scan_and_export_tracks(
+    backend: &BackendCommands,
+    data_dir: &Path,
+    media: &Path,
+    usb: &Path,
+    files: &[(&str, &str)],
+    playlist_name: &str,
+) -> Vec<(String, String, String)> {
+    fs::create_dir_all(media).expect("create media dir");
+    for (fixture_relative, target_name) in files {
+        copy_audio_fixture(media, fixture_relative, target_name);
+    }
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let scanned = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 50,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+
+    let mut track_ids = Vec::with_capacity(files.len());
+    let mut result = Vec::with_capacity(files.len());
+    for (_, target_name) in files {
+        let track = scanned
+            .iter()
+            .find(|t| t.file_path.contains(target_name))
+            .unwrap_or_else(|| panic!("expected scanned track for {target_name}"));
+        track_ids.push(track.id.clone());
+        result.push((track.id.clone(), track.title.clone(), track.artist.clone()));
+    }
+    seed_tracks_as_analyzed(data_dir, &track_ids);
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: playlist_name.to_string(),
+    });
+    assert!(created.ok, "create playlist failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+
+    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: track_ids.clone(),
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added.ok, "add tracks failed: {added:?}");
+
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+    assert_eq!(
+        exported.data.expect("export data").exported_tracks,
+        files.len()
+    );
+
+    result
 }
 
 // --- validate_usb_root -------------------------------------------------
@@ -343,6 +421,57 @@ fn inspect_usb_track_matches_via_title_and_artist_hints() {
 }
 
 #[test]
+fn inspect_usb_track_falls_back_to_edb_when_title_and_artist_hints_reject_the_pdb_row() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let (_local_id, title, artist) = scan_and_export_single_track(
+        &backend,
+        &data_dir,
+        &media,
+        &usb,
+        "formats/track_format_flac.flac",
+        "Fallback Artist - Fallback Title.flac",
+        "Fallback Playlist",
+    );
+
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse exported pdb");
+    let usb_track_id = parsed
+        .tracks
+        .first()
+        .expect("expected exported track in pdb")
+        .id;
+
+    // Title/artist hints disagree with the PDB row (score <= 0), but no
+    // file_path hint is supplied -- the eDB fallback only checks file_hint,
+    // so the lookup should still resolve the id via the eDB and return the
+    // *real* title/artist rather than failing outright.
+    let inspected = backend.inspect_usb_track(InspectUsbTrackRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        track_id: usb_track_id.to_string(),
+        file_path: None,
+        title: Some("Completely Different Title".to_string()),
+        artist: Some("Completely Different Artist".to_string()),
+    });
+    assert!(
+        inspected.ok,
+        "expected eDB fallback to resolve despite mismatched PDB hints: {inspected:?}"
+    );
+    let data = inspected.data.expect("inspect data");
+    assert_eq!(data.source, "eDB");
+    assert_eq!(data.track.title, title);
+    assert_eq!(data.track.artist, artist);
+}
+
+#[test]
 fn inspect_usb_track_reports_not_found_when_hints_dont_match_pdb_or_edb() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
@@ -435,6 +564,176 @@ fn inspect_usb_track_reports_not_found_for_unknown_id() {
     let error = inspected.error.expect("inspect error");
     assert!(matches!(error.code, ErrorCode::ValidationError));
     assert!(error.message.contains("not found on USB metadata sources"));
+}
+
+// --- inspect_usb_tracks (batch) -------------------------------------------
+
+#[test]
+fn inspect_usb_tracks_resolves_multiple_real_exported_tracks_in_one_call() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let exported = scan_and_export_tracks(
+        &backend,
+        &data_dir,
+        &media,
+        &usb,
+        &[
+            (
+                "formats/track_format_flac.flac",
+                "Batch Artist A - Song A.flac",
+            ),
+            ("noart/track_no_art.mp3", "Batch Artist B - Song B.mp3"),
+            (
+                "formats/track_format_wav.wav",
+                "Batch Artist C - Song C.wav",
+            ),
+        ],
+        "Batch Inspect Playlist",
+    );
+
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse exported pdb");
+    let mut items = Vec::new();
+    let mut expected_by_id = std::collections::HashMap::new();
+    for (target_name_hint, (_track_id, title, artist)) in [
+        "Batch Artist A - Song A.flac",
+        "Batch Artist B - Song B.mp3",
+        "Batch Artist C - Song C.wav",
+    ]
+    .into_iter()
+    .zip(exported.iter())
+    {
+        let pdb_track = parsed
+            .tracks
+            .iter()
+            .find(|t| t.track_file_path.contains(target_name_hint))
+            .unwrap_or_else(|| panic!("expected exported pdb row for {target_name_hint}"));
+        let usb_track_id = pdb_track.id.to_string();
+        expected_by_id.insert(usb_track_id.clone(), (title.clone(), artist.clone()));
+        items.push(InspectUsbTrackItem {
+            track_id: usb_track_id,
+            file_path: None,
+            title: None,
+            artist: None,
+        });
+    }
+
+    let batch = backend.inspect_usb_tracks(InspectUsbTracksRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        items,
+    });
+    assert!(batch.ok, "inspect usb tracks failed: {batch:?}");
+    let data = batch.data.expect("inspect usb tracks data");
+    assert_eq!(data.items.len(), 3);
+    for result in &data.items {
+        let (title, artist) = expected_by_id
+            .get(&result.track_id)
+            .unwrap_or_else(|| panic!("unexpected track id in batch result: {}", result.track_id));
+        assert_eq!(result.source.as_deref(), Some("pdb"));
+        let track = result
+            .track
+            .as_ref()
+            .unwrap_or_else(|| panic!("expected resolved track for {}", result.track_id));
+        assert_eq!(&track.title, title);
+        assert_eq!(&track.artist, artist);
+    }
+}
+
+#[test]
+fn inspect_usb_tracks_mixes_resolved_and_unresolved_items_in_one_batch() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    scan_and_export_tracks(
+        &backend,
+        &data_dir,
+        &media,
+        &usb,
+        &[(
+            "formats/track_format_flac.flac",
+            "Mixed Batch Artist - Mixed Batch Song.flac",
+        )],
+        "Mixed Batch Playlist",
+    );
+
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse exported pdb");
+    let valid_id = parsed
+        .tracks
+        .first()
+        .expect("expected exported track in pdb")
+        .id
+        .to_string();
+
+    let batch = backend.inspect_usb_tracks(InspectUsbTracksRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        items: vec![
+            InspectUsbTrackItem {
+                track_id: "not-a-number".to_string(),
+                file_path: None,
+                title: None,
+                artist: None,
+            },
+            InspectUsbTrackItem {
+                track_id: valid_id.clone(),
+                file_path: None,
+                title: None,
+                artist: None,
+            },
+            InspectUsbTrackItem {
+                track_id: "999999".to_string(),
+                file_path: None,
+                title: None,
+                artist: None,
+            },
+        ],
+    });
+    assert!(batch.ok, "inspect usb tracks failed: {batch:?}");
+    let data = batch.data.expect("inspect usb tracks data");
+    assert_eq!(
+        data.items.len(),
+        3,
+        "expected one result per requested item"
+    );
+
+    let bad = data
+        .items
+        .iter()
+        .find(|i| i.track_id == "not-a-number")
+        .expect("non-numeric id result");
+    assert!(bad.track.is_none());
+    assert!(bad.source.is_none());
+
+    let unknown = data
+        .items
+        .iter()
+        .find(|i| i.track_id == "999999")
+        .expect("unknown id result");
+    assert!(unknown.track.is_none());
+    assert!(unknown.source.is_none());
+
+    let good = data
+        .items
+        .iter()
+        .find(|i| i.track_id == valid_id)
+        .expect("valid id result");
+    assert!(good.track.is_some());
+    assert_eq!(good.source.as_deref(), Some("pdb"));
 }
 
 // --- fetch_usb_histories --------------------------------------------------

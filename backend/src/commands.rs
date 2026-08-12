@@ -12,12 +12,13 @@ use crate::models::{
     FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, ListPlaylistsData,
-    ListTracksData, ListTracksRequest, ListUsbDevicesData, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
-    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
-    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
+    InspectUsbTracksRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
+    MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
+    PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
+    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
+    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
@@ -314,6 +315,13 @@ impl BackendCommands {
         req: InspectUsbTrackRequest,
     ) -> ApiResponse<InspectUsbTrackData> {
         wrap(self.service.inspect_usb_track(req))
+    }
+
+    pub fn inspect_usb_tracks(
+        &self,
+        req: InspectUsbTracksRequest,
+    ) -> ApiResponse<InspectUsbTracksData> {
+        wrap(self.service.inspect_usb_tracks(req))
     }
 
     pub fn analyze_new_tracks(

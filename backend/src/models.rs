@@ -774,6 +774,42 @@ pub struct InspectUsbTrackData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InspectUsbTrackItem {
+    pub track_id: String,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub artist: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectUsbTracksRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    #[serde(default)]
+    pub items: Vec<InspectUsbTrackItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectUsbTrackResult {
+    pub track_id: String,
+    pub source: Option<String>,
+    pub track: Option<UsbTrack>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectUsbTracksData {
+    pub items: Vec<InspectUsbTrackResult>,
+    pub warnings: Vec<WarningEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AnalyzeNewTracksRequest {
     #[serde(default)]
     pub track_ids: Vec<String>,

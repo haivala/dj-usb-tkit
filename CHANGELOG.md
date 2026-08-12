@@ -30,6 +30,15 @@
 
 ## Unreleased
 
+- **Improvement:** selecting a USB playlist or history session now hydrates all of its
+  tracks' waveform/BPM/key/artwork metadata through a handful of batched backend calls
+  instead of one call per track. Each `inspect_usb_track` call used to re-parse the PDB
+  and re-open/re-key the SQLCipher eDB connection from scratch, so large playlists opened
+  dozens of fresh database connections in a row; the new `inspect_usb_tracks` batch command
+  parses the PDB and opens the eDB once per chunk of tracks. Hydration still stops issuing
+  further chunks and patching rows the moment the user selects a different playlist/history,
+  so switching away mid-load no longer wastes backend work on a stale selection.
+
 ## 0.1.15
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

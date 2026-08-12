@@ -456,6 +456,7 @@ test("bindEvents wires confirm buttons and sidebar collapse/expand", () => {
     removeUsbPlaylist: async () => {},
     stopPlaybackIfActive: async () => {},
     hydrateUsbTrackMetadata: async () => {},
+    hydrateUsbTrackMetadataBatch: async () => {},
     setActiveListItem() {},
     getHistoryDateDisplay: () => "",
     getCurrentPlaylist: () => null,

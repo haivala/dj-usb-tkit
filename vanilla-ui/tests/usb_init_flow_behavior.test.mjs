@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hydrateUsbTrackMetadata, validateAndSetUsbRoot } from "../components/usb/actions.mjs";
+import { hydrateUsbTrackMetadata, hydrateUsbTrackMetadataBatch, validateAndSetUsbRoot } from "../components/usb/actions.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
 
 test("validateAndSetUsbRoot exposes one-click init state for writable missing-structure USB", async () => {
@@ -268,4 +268,77 @@ test("hydrateUsbTrackMetadata marks inspected no-artwork tracks as checked", asy
   assert.equal(track.artworkChecked, true);
   assert.equal(track.artworkPath, "");
   assert.equal(track.artworkUrl, "");
+});
+
+test("hydrateUsbTrackMetadataBatch sends one inspect_usb_tracks call for multiple tracks and applies results by id", async () => {
+  const state = { usbRoot: "/tmp/usb" };
+  const trackA = { id: "1", filePath: "/a.mp3", title: "A", artist: "Artist A" };
+  const trackB = { id: "2", filePath: "/b.mp3", title: "B", artist: "Artist B" };
+  let commandCalls = 0;
+
+  await hydrateUsbTrackMetadataBatch(state, [trackA, trackB], {
+    usbTrackNeedsHydration: () => true,
+    command: async (name, payload) => {
+      commandCalls += 1;
+      assert.equal(name, "inspect_usb_tracks");
+      assert.equal(payload.usbRoot, "/tmp/usb");
+      assert.deepEqual(
+        payload.items.map((item) => item.trackId),
+        ["1", "2"]
+      );
+      return {
+        items: [
+          { trackId: "1", source: "pdb", track: { id: "1", title: "A", artist: "Artist A", bpm: 120 } },
+          { trackId: "2", source: "eDB", track: { id: "2", title: "B", artist: "Artist B", bpm: 128 } }
+        ]
+      };
+    },
+    normalizeTrack: (candidate) => ({ ...candidate })
+  });
+
+  assert.equal(commandCalls, 1, "should batch both tracks into a single command call");
+  assert.equal(trackA.bpm, 120);
+  assert.equal(trackA.artworkChecked, true);
+  assert.equal(trackB.bpm, 128);
+  assert.equal(trackB.artworkChecked, true);
+});
+
+test("hydrateUsbTrackMetadataBatch skips tracks that don't need hydration and never calls command for an empty candidate set", async () => {
+  const state = { usbRoot: "/tmp/usb" };
+  const track = { id: "1", title: "A", artist: "Artist A" };
+  let commandCalls = 0;
+
+  const tracks = await hydrateUsbTrackMetadataBatch(state, [track], {
+    usbTrackNeedsHydration: () => false,
+    command: async () => {
+      commandCalls += 1;
+      return { items: [] };
+    },
+    normalizeTrack: (candidate) => ({ ...candidate })
+  });
+
+  assert.equal(commandCalls, 0, "no candidates need hydration, so no IPC call should be made");
+  assert.equal(tracks[0], track);
+  assert.equal(track.artworkChecked, undefined);
+});
+
+test("hydrateUsbTrackMetadataBatch marks tracks missing from the response as checked without throwing", async () => {
+  const state = { usbRoot: "/tmp/usb" };
+  const trackA = { id: "1", title: "A", artist: "Artist A" };
+  const trackB = { id: "999999", title: "Unknown", artist: "" };
+
+  await hydrateUsbTrackMetadataBatch(state, [trackA, trackB], {
+    usbTrackNeedsHydration: () => true,
+    command: async () => ({
+      items: [
+        { trackId: "1", source: "pdb", track: { id: "1", title: "A", artist: "Artist A", bpm: 120 } },
+        { trackId: "999999", source: null, track: null }
+      ]
+    }),
+    normalizeTrack: (candidate) => ({ ...candidate })
+  });
+
+  assert.equal(trackA.bpm, 120);
+  assert.equal(trackA.artworkChecked, true);
+  assert.equal(trackB.artworkChecked, true, "unresolved tracks should still be marked checked so they aren't retried forever");
 });
