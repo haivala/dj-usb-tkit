@@ -14,7 +14,6 @@ use crate::logging::{self, Level};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
 use crate::service::usb_utils::canonicalize_playlist_name;
-use crate::service::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
 
 fn parse_usb_playlist_numeric_id(raw: Option<&str>) -> Option<u32> {
     let id_part = raw?.trim().strip_prefix("usb-pl-")?;
@@ -297,10 +296,7 @@ pub fn remove_track_ids_from_pdb_playlist_entries(
         return Ok(0);
     }
 
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     if !pdb_path.is_file() {
         return Ok(0);
     }

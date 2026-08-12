@@ -236,10 +236,7 @@ pub fn load_pdb_t16_raw(usb_root: &Path) -> BackendResult<Vec<Vec<u8>>> {
 /// Load decoded PDB t16 rows for a USB root. PDB is the source older players
 /// use for the browse menu.
 pub fn load_pdb_t16_decoded(usb_root: &Path) -> BackendResult<Vec<PdbT16Row>> {
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     if !pdb_path.is_file() {
         return Ok(Vec::new());
     }
@@ -360,10 +357,7 @@ pub fn patch_pdb_columns_menu_set_by_kind(
     usb_root: &Path,
     desired: &[(u16, String)],
 ) -> BackendResult<bool> {
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let page_size = 4096usize;
     if bytes.len() < page_size || bytes.len() % page_size != 0 {
@@ -462,10 +456,7 @@ pub fn patch_pdb_t17_category_snapshot(
     usb_root: &Path,
     encoded_rows: &[[u8; 8]],
 ) -> BackendResult<bool> {
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     if !pdb_path.is_file() {
         return Ok(false);
     }

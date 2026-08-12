@@ -56,11 +56,15 @@ startup, right after the backend is constructed (`usb_staging::init_cache_root` 
 suite never enable it, so they keep reading/writing the given path directly, matching behavior
 from before staging existed.
 
-USB repair's own PDB reads and writes are not yet staged — that flow still reads/writes the USB
-mount directly for both its diagnostic scans and its fixers. This isn't a staleness bug (any
-other staged reader that touches the same file afterward detects the drive's new size/mtime and
-re-syncs its local copy automatically), just a missed opportunity to get the same speed/atomicity
-benefit for repair specifically; wiring it up is tracked as a follow-up.
+USB repair reads and writes through the same staging layer (see `docs/DIAGNOSTICS_REPAIRS.md`).
+Every fix selected in one apply request is written to the local copy first; the batch is flushed
+back to the USB drive once, at the end of the apply, rather than once per fix. The player-menu
+editor (`update_usb_player_menu_config`/`sync_usb_player_menu_edb_to_pdb`) is staged the same way,
+each as its own standalone backup-then-write-then-flush.
+
+The Event Log records the local staging folder path the first time it's created for a device,
+plus each individual stage-copy and write-back, so it's easy to find the working folder if you
+want to inspect it directly.
 
 If the drive's copy of a file changes between when it was staged and when a write-back is about
 to commit — e.g. Rekordbox itself wrote to the drive in between — the write-back is aborted with

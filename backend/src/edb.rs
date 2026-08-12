@@ -1901,22 +1901,22 @@ mod tests {
     }
 
     // These three tests specifically verify that `open_edb_rw`/
-    // `open_edb_from_usb_root` route through `usb_staging`'s process-global
-    // `CACHE_ROOT` (the actual wiring production code relies on) rather than
-    // through `usb_staging`'s own `_with_root` test entry points (which take
-    // an explicit root and are covered by `usb_staging`'s own test module).
-    // That means they must toggle the real global -- `TEST_LOCK` serializes
-    // them against each other, and the cache dir is intentionally leaked
-    // (`into_path`, never deleted) rather than dropped at scope end, so an
-    // unrelated test on another thread that happens to observe `Some(..)`
-    // during the toggled window can never hit a "directory disappeared
-    // mid-operation" race; at worst it creates a harmless, uniquely-keyed
-    // stray subdirectory under the leaked root.
+    // `open_edb_from_usb_root` route through `usb_staging::stage_edb` (the
+    // global-reading wrapper production code relies on) rather than through
+    // `usb_staging`'s own `_with_root` test entry points (which take an
+    // explicit root and are covered by `usb_staging`'s own test module).
+    // `set_cache_root_for_test` only overrides `cache_root()` for the
+    // *calling thread* (see its doc comment in usb_staging.rs) -- since
+    // `cargo test` never runs two tests concurrently on the same thread,
+    // this needs no lock and can't race with unrelated tests running on
+    // other threads. The returned guard resets the override on drop
+    // (including on panic), so nothing here leaks to a later test the
+    // harness schedules on the same reused thread. The cache dir is still
+    // leaked (`.keep()`, never deleted) as harmless extra insurance.
     #[test]
     fn open_edb_rw_with_staging_enabled_creates_local_cache_copy() {
-        let _lock = crate::service::usb_staging::lock_for_test();
         let cache_dir = tempdir().expect("cache dir").keep();
-        crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
 
         let temp = tempdir().expect("tempdir");
         let db_path = export_db_with_schema(temp.path());
@@ -1935,15 +1935,12 @@ mod tests {
             staged_path, db_path,
             "staged path must differ from the real USB path"
         );
-
-        crate::service::usb_staging::set_cache_root_for_test(None);
     }
 
     #[test]
     fn open_edb_from_usb_root_with_staging_skips_recopy_when_usb_source_unchanged() {
-        let _lock = crate::service::usb_staging::lock_for_test();
         let cache_dir = tempdir().expect("cache dir").keep();
-        crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
 
         let temp = tempdir().expect("tempdir");
         export_db_with_schema(temp.path());
@@ -1967,15 +1964,12 @@ mod tests {
             mtime_before, mtime_after,
             "unchanged USB source should not trigger a re-copy on repeated opens"
         );
-
-        crate::service::usb_staging::set_cache_root_for_test(None);
     }
 
     #[test]
     fn open_edb_from_usb_root_with_staging_recopies_after_usb_side_change() {
-        let _lock = crate::service::usb_staging::lock_for_test();
         let cache_dir = tempdir().expect("cache dir").keep();
-        crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
 
         let temp = tempdir().expect("tempdir");
         let db_path = export_db_with_schema(temp.path());
@@ -2006,14 +2000,11 @@ mod tests {
             has_extra, 1,
             "local cache should reflect the USB-side change after reopening"
         );
-
-        crate::service::usb_staging::set_cache_root_for_test(None);
     }
 
     #[test]
     fn open_edb_rw_with_staging_disabled_preserves_direct_usb_behavior() {
-        let _lock = crate::service::usb_staging::lock_for_test();
-        crate::service::usb_staging::set_cache_root_for_test(None);
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(None);
 
         let temp = tempdir().expect("tempdir");
         export_db_with_schema(temp.path());

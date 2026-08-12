@@ -72,25 +72,49 @@ pub fn init_cache_root(data_dir: &Path) {
     *CACHE_ROOT.lock().unwrap() = Some(data_dir.join("usb_cache"));
 }
 
+// `cargo test`'s default harness runs each test on a worker thread from a
+// pool, potentially reusing a thread across multiple tests over the run, but
+// never runs two tests *concurrently* on the same thread. A per-thread
+// override therefore gives a test exclusive, contention-free control over
+// what `cache_root()` reports *for that thread* -- unrelated tests running
+// concurrently on other threads are structurally unaffected, no locking
+// needed. `CacheRootOverrideGuard`'s `Drop` clears the override
+// unconditionally (including on panic/early-return), so a leftover override
+// can never bleed into whatever test the harness schedules next on the same
+// reused thread.
 #[cfg(test)]
-pub(crate) fn set_cache_root_for_test(dir: Option<PathBuf>) {
-    *CACHE_ROOT.lock().unwrap() = dir;
+thread_local! {
+    static CACHE_ROOT_OVERRIDE: std::cell::RefCell<Option<Option<PathBuf>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
-/// `CACHE_ROOT` is process-wide, but `cargo test` runs tests in parallel
-/// threads within one process -- any test that calls
-/// `set_cache_root_for_test` must hold this lock for its whole body so it
-/// can't interleave with another such test (here or in other modules, e.g.
-/// `edb.rs`'s staging tests).
 #[cfg(test)]
-pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) struct CacheRootOverrideGuard {
+    _private: (),
+}
 
 #[cfg(test)]
-pub(crate) fn lock_for_test() -> std::sync::MutexGuard<'static, ()> {
-    TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+impl Drop for CacheRootOverrideGuard {
+    fn drop(&mut self) {
+        CACHE_ROOT_OVERRIDE.with(|cell| *cell.borrow_mut() = None);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_cache_root_for_test(dir: Option<PathBuf>) -> CacheRootOverrideGuard {
+    CACHE_ROOT_OVERRIDE.with(|cell| *cell.borrow_mut() = Some(dir));
+    CacheRootOverrideGuard { _private: () }
 }
 
 fn cache_root() -> Option<PathBuf> {
+    #[cfg(test)]
+    {
+        if let Some(override_value) =
+            CACHE_ROOT_OVERRIDE.with(|cell| cell.borrow().clone())
+        {
+            return override_value;
+        }
+    }
     CACHE_ROOT.lock().unwrap().clone()
 }
 
@@ -186,7 +210,15 @@ fn stage_file_with_root(
     }
 
     let _guard = STATE_LOCK.lock().unwrap();
+    let device_dir_is_new = !device_dir.is_dir();
     std::fs::create_dir_all(&local_dir)?;
+    if device_dir_is_new {
+        crate::logging::emit(
+            crate::logging::Level::Info,
+            "usb-staging",
+            &format!("USB local staging folder: {}", device_dir.display()),
+        );
+    }
 
     let source_stat = stat(source)?;
     let state = load_state(&device_dir);
@@ -201,6 +233,11 @@ fn stage_file_with_root(
     }
 
     std::fs::copy(source, &local_path)?;
+    crate::logging::emit(
+        crate::logging::Level::Info,
+        "usb-staging",
+        &format!("Staged {} locally: {}", kind.filename(), local_path.display()),
+    );
     let local_stat = stat(&local_path)?;
     let mut state = state;
     state.files.insert(
@@ -292,6 +329,11 @@ fn commit_local_to_usb(
     let tmp = dest.with_extension(format!("tmp-{}", std::process::id()));
     std::fs::copy(local_path, &tmp)?;
     std::fs::rename(&tmp, &dest)?;
+    crate::logging::emit(
+        crate::logging::Level::Info,
+        "usb-staging",
+        &format!("Wrote {} back to USB: {}", kind.filename(), dest.display()),
+    );
 
     let local_stat = stat(local_path)?;
     let dest_stat = stat(&dest)?;

@@ -199,10 +199,14 @@ membership that exists on only one side.
 `diagnostics.rs`'s PDB reads (integrity checks, parity report) go through the local HDD staging
 layer described in `docs/USB_EXPORT.md`'s "Local HDD staging" section, same as export. eDB access
 is always staged transparently regardless of caller (`edb::open_edb_from_usb_root`/`open_edb_rw`).
-`repair.rs`'s own PDB reads and writes are **not yet staged** — its diagnostic scanners
-(`detect_pdb_*`) and fix-applying functions still read/write the USB mount directly. This is
-correctness-neutral (staged readers elsewhere self-heal on the next stat mismatch) but repair
-doesn't get the local-disk speed or atomic-write benefit; wiring it up is tracked as a follow-up.
+
+`repair.rs`'s PDB/eDB reads and writes go through the same staging layer: its diagnostic scanners
+(`detect_pdb_*`) share one staged read per diagnostics pass, and every `apply_*`/`apply_fix_*`
+writer selected in a `repair_usb_diagnostics` apply request writes to the local staged copy only —
+`repair_usb_diagnostics_with_progress` flushes both databases back to the real USB drive exactly
+once, at the end of the whole apply block, after every selected fix has run (not once per fix).
+`update_usb_player_menu_config` and `sync_usb_player_menu_edb_to_pdb` are staged the same way but
+are standalone operations outside the apply-batch flow, so each backs up and flushes on its own.
 
 ## Verification
 

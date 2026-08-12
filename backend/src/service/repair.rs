@@ -30,11 +30,14 @@ use super::export_helpers::{
     encode_album_row, load_table_columns, remove_track_ids_from_pdb_playlist_entries,
     replace_export_playlist_row_with_identity, table_exists, write_edb_playlist, write_pdb,
 };
+use super::usb_staging;
 use super::usb_utils::{
     canonicalize_playlist_name, collect_contents_audio_files, resolve_usb_root,
     resolve_usb_side_path, scan_anlz_warnings,
 };
-use super::usb_vendor_compat::{backup_usb_databases, vendor_pdb_path};
+use super::usb_vendor_compat::backup_usb_databases;
+#[cfg(test)]
+use super::usb_vendor_compat::vendor_pdb_path;
 
 /// Player menu kinds that cannot be removed once present in the current menu.
 /// TRACK=131, PLAYLIST=132, FOLDER=144, SEARCH=145, HISTORY=149.
@@ -141,8 +144,10 @@ fn is_known_pdb_header_compatibility_value(value: u32) -> bool {
 /// `1`) immediately re-flags "drift" back toward `1`, and applying it again
 /// just sets up the next export to flag drift back toward `5`. Only an
 /// actually-unknown value is worth repairing.
-fn detect_pdb_header_compatibility_repair(usb_root: &Path) -> Option<PdbHeaderCompatibilityRepair> {
-    let current_value = read_pdb_header_compatibility_value(&vendor_pdb_path(usb_root))?;
+fn detect_pdb_header_compatibility_repair(
+    staged_pdb_path: &Path,
+) -> Option<PdbHeaderCompatibilityRepair> {
+    let current_value = read_pdb_header_compatibility_value(staged_pdb_path)?;
     if is_known_pdb_header_compatibility_value(current_value) {
         return None;
     }
@@ -156,7 +161,7 @@ fn apply_pdb_header_compatibility_repair(
     usb_root: &Path,
     repair: &PdbHeaderCompatibilityRepair,
 ) -> BackendResult<bool> {
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let bytes = std::fs::read(&pdb_path)?;
     let Some(current_value) = pdb_header_compatibility_value_from_bytes(&bytes) else {
         return Err(BackendError::Validation(format!(
@@ -245,7 +250,7 @@ fn apply_pdb_sentinel_u5_repair(usb_root: &Path, pages: &[SentinelU5Page]) -> Ba
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -342,7 +347,7 @@ fn apply_pdb_wrong_page_flags_repair(
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -453,7 +458,7 @@ fn apply_pdb_wrong_history_page_shape_repair(
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -782,7 +787,7 @@ fn apply_pdb_t00_multipage_active_repair(
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -895,7 +900,7 @@ fn apply_pdb_ec_data_page_conflict_repair(
     if conflicts.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -1090,7 +1095,7 @@ fn apply_pdb_truncated_table_chain_repair(
     if fixes.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let num_tables = bytes
         .get(8..12)
@@ -1257,7 +1262,7 @@ fn apply_pdb_torn_growth_pages_repair(
     if report.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
         return Err(BackendError::Validation(
@@ -1346,7 +1351,7 @@ fn apply_pdb_track_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
     if ids.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -1403,7 +1408,7 @@ fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
     if ids.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -1486,7 +1491,7 @@ fn apply_pdb_wrong_track_u5_repair(
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -1730,7 +1735,7 @@ fn apply_pdb_wrong_playlist_tree_shape_repair(
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -1896,7 +1901,7 @@ fn apply_pdb_stale_sentinel_btree_repair(
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -1981,7 +1986,7 @@ fn apply_pdb_tombstoned_playlist_tree_id_repair(
     if items.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -2117,7 +2122,7 @@ fn apply_pdb_zero_tranrf_repair(usb_root: &Path, pages: &[ZeroTranrfPage]) -> Ba
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let Some(page_size) = bytes
         .get(4..8)
@@ -2714,7 +2719,7 @@ pub(crate) fn restore_pdb_playlist_sort_orders(
     if desired_sort_by_id.is_empty() {
         return Ok(0);
     }
-    let pdb_path = vendor_pdb_path(usb_root);
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
     if !pdb_path.is_file() {
         return Ok(0);
     }
@@ -2747,7 +2752,7 @@ pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
     usb_root: &std::path::Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
-    let parsed = parse_pdb(&super::usb_staging::stage_pdb(usb_root)?)?;
+    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
     let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
         warnings.push(logging::log(
             Level::Error,
@@ -3012,6 +3017,9 @@ impl BackendService {
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
+        warnings.extend(backup_usb_databases(&usb_root).into_iter().map(|message| {
+            logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
+        }));
 
         let mut edb_rows = load_edb_menu_rows(&usb_root, &mut warnings)?;
         edb_rows.sort_by_key(|r| r.menu_item_id);
@@ -3057,6 +3065,15 @@ impl BackendService {
             _ => {}
         }
 
+        if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb) {
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-player-menu",
+                "usb.player-menu.pdb-write-back-failed",
+                format!("PDB write-back to USB failed: {err}"),
+            ));
+        }
+
         let (current_items, available_items, divergence) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
 
@@ -3075,6 +3092,9 @@ impl BackendService {
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
+        warnings.extend(backup_usb_databases(&usb_root).into_iter().map(|message| {
+            logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
+        }));
 
         let (before_current, before_available, _before_divergence) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
@@ -3143,8 +3163,12 @@ impl BackendService {
             final_kinds.push(*kind);
         }
 
-        // Snapshot eDB for rollback if the write fails.
-        let edb_path = super::usb_vendor_compat::vendor_edb_path(&usb_root);
+        // Snapshot eDB for rollback if the write fails. Staged path: this must
+        // match whatever path `mirror_edb_category_from_pdb_kinds`'s
+        // `open_edb_rw` actually mutates (the local staged copy when staging
+        // is active), or the snapshot/restore would operate on a file the
+        // write never touched.
+        let edb_path = usb_staging::stage_edb(&usb_root)?;
         let edb_snapshot = if edb_path.is_file() {
             std::fs::read(&edb_path).ok()
         } else {
@@ -3162,7 +3186,18 @@ impl BackendService {
             if let Some(snapshot) = edb_snapshot.as_ref() {
                 let _ = std::fs::write(&edb_path, snapshot);
             }
+            // Deliberately no write_back_if_changed here: the local copy was
+            // just restored to its pre-attempt state, so the real USB drive
+            // must never see this failed attempt.
             return Err(err);
+        }
+        if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb) {
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-player-menu",
+                "usb.player-menu.edb-write-back-failed",
+                format!("eDB write-back to USB failed: {err}"),
+            ));
         }
 
         let (current_items, available_items, divergence) =
@@ -3203,6 +3238,15 @@ impl BackendService {
                     }
                 }
                 _ => {}
+            }
+            if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
+            {
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-player-menu",
+                    "usb.player-menu.pdb-write-back-failed",
+                    format!("PDB write-back to USB failed: {err}"),
+                ));
             }
         }
 
@@ -3337,7 +3381,7 @@ impl BackendService {
 
         // Staged once and reused below: these ~15 detectors otherwise each
         // re-read the same PDB file fresh from the USB mount.
-        let staged_pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
+        let staged_pdb_path = usb_staging::stage_pdb(&usb_root)?;
         let parsed_pdb = parse_pdb(&staged_pdb_path).ok();
         let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_path);
         let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_path);
@@ -3729,7 +3773,8 @@ impl BackendService {
                     .to_string(),
             });
         }
-        let pdb_header_compatibility_repair = detect_pdb_header_compatibility_repair(&usb_root);
+        let pdb_header_compatibility_repair =
+            detect_pdb_header_compatibility_repair(&staged_pdb_path);
         if let Some(repair) = pdb_header_compatibility_repair.as_ref() {
             detected_issues.push(format!(
                 "PDB header compatibility field 0x10..0x14 is {}",
@@ -4047,22 +4092,29 @@ impl BackendService {
             }));
 
             if selected.contains("fix_empty_analysis_files") {
-                let (fixed, skipped, failed, write_count) = self.apply_fix_empty_analysis_files(
+                match self.apply_fix_empty_analysis_files(
                     &usb_root,
                     &empty_analysis_paths,
                     &mut warnings,
-                )?;
-                estimated_file_writes = estimated_file_writes.max(write_count);
-                if failed > 0 {
-                    failed_fixes.push(format!(
-                        "Fix Empty Analysis Files: fixed {fixed}, skipped {skipped}, failed {failed}"
-                    ));
-                } else if fixed > 0 {
-                    applied_fixes.push(format!(
-                        "Fix Empty Analysis Files: fixed {fixed}, skipped {skipped}"
-                    ));
-                } else {
-                    skipped_fixes.push("Fix Empty Analysis Files: nothing to apply".to_string());
+                ) {
+                    Ok((fixed, skipped, failed, write_count)) => {
+                        estimated_file_writes = estimated_file_writes.max(write_count);
+                        if failed > 0 {
+                            failed_fixes.push(format!(
+                                "Fix Empty Analysis Files: fixed {fixed}, skipped {skipped}, failed {failed}"
+                            ));
+                        } else if fixed > 0 {
+                            applied_fixes.push(format!(
+                                "Fix Empty Analysis Files: fixed {fixed}, skipped {skipped}"
+                            ));
+                        } else {
+                            skipped_fixes
+                                .push("Fix Empty Analysis Files: nothing to apply".to_string());
+                        }
+                    }
+                    Err(err) => {
+                        failed_fixes.push(format!("Fix Empty Analysis Files failed: {err}"))
+                    }
                 }
             } else {
                 skipped_fixes.push("Fix Empty Analysis Files: not selected".to_string());
@@ -4449,23 +4501,28 @@ impl BackendService {
                             .to_string(),
                     );
                 } else {
-                    let (removed_db_content, removed_db_playlist_links, removed_pdb_entries) = self
-                        .apply_fix_remove_missing_audio_references(
-                            &usb_root,
-                            &missing_audio_track_ids,
-                            &missing_audio_paths,
-                            &mut warnings,
-                        )?;
-                    if removed_db_content > 0
-                        || removed_db_playlist_links > 0
-                        || removed_pdb_entries > 0
-                    {
-                        applied_fixes.push(format!(
-                        "Remove Missing Audio References: removed content rows {removed_db_content}, playlist_content rows {removed_db_playlist_links}, PDB playlist entries {removed_pdb_entries}"
-                    ));
-                    } else {
-                        skipped_fixes
-                            .push("Remove Missing Audio References: nothing to apply".to_string());
+                    match self.apply_fix_remove_missing_audio_references(
+                        &usb_root,
+                        &missing_audio_track_ids,
+                        &missing_audio_paths,
+                        &mut warnings,
+                    ) {
+                        Ok((removed_db_content, removed_db_playlist_links, removed_pdb_entries)) => {
+                            if removed_db_content > 0
+                                || removed_db_playlist_links > 0
+                                || removed_pdb_entries > 0
+                            {
+                                applied_fixes.push(format!(
+                                    "Remove Missing Audio References: removed content rows {removed_db_content}, playlist_content rows {removed_db_playlist_links}, PDB playlist entries {removed_pdb_entries}"
+                                ));
+                            } else {
+                                skipped_fixes.push(
+                                    "Remove Missing Audio References: nothing to apply".to_string(),
+                                );
+                            }
+                        }
+                        Err(err) => failed_fixes
+                            .push(format!("Remove Missing Audio References failed: {err}")),
                     }
                 }
             } else {
@@ -4493,6 +4550,29 @@ impl BackendService {
                 }
             } else if sync_edb_history_needed {
                 skipped_fixes.push("Sync eDB History Tables From PDB: not selected".to_string());
+            }
+
+            // All selected fixes above write to their local staged copies only
+            // (see usb_staging.rs) -- flush the accumulated local changes back
+            // to the USB drive here, once per database, instead of once per
+            // fix.
+            if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
+            {
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-repair",
+                    "usb.repair.pdb-write-back-failed",
+                    format!("PDB write-back to USB failed: {err}"),
+                ));
+            }
+            if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)
+            {
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-repair",
+                    "usb.repair.edb-write-back-failed",
+                    format!("eDB write-back to USB failed: {err}"),
+                ));
             }
         }
 
@@ -4526,7 +4606,7 @@ impl BackendService {
         warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<StrictParityUpgradeApplyResult> {
         let mut result = StrictParityUpgradeApplyResult::default();
-        let pdb_path = super::usb_staging::stage_pdb(usb_root)?;
+        let pdb_path = usb_staging::stage_pdb(usb_root)?;
 
         // ── Phase 1: Collect ──────────────────────────────────────────
         let parsed = parse_pdb(&pdb_path)?;
@@ -5162,7 +5242,7 @@ impl BackendService {
         // (playlist_id, track_id) pair with more than one active row and
         // tombstone all but the earliest.
         if result.merged_playlists > 0 {
-            let pdb_path = vendor_pdb_path(usb_root);
+            let pdb_path = usb_staging::stage_pdb(usb_root)?;
             match std::fs::read(&pdb_path) {
                 Ok(mut pdb_bytes) => {
                     let removed = crate::pdb_writer::remove_duplicate_playlist_entries_inplace(
@@ -5199,7 +5279,7 @@ impl BackendService {
         // Re-read written PDB identities so eDB uses the exact playlist id/sort
         // that ended up in the device-facing PDB after rewrite.
         let pdb_identity_by_name: HashMap<String, (u32, u32)> = {
-            let pdb_path = super::usb_staging::stage_pdb(usb_root)?;
+            let pdb_path = usb_staging::stage_pdb(usb_root)?;
             if pdb_path.is_file() {
                 if let Ok(parsed_after_write) = parse_pdb(&pdb_path) {
                     let mut map = HashMap::<String, (u32, u32, usize)>::new();
@@ -5340,7 +5420,7 @@ impl BackendService {
 
         let mut map_by_file = std::collections::HashMap::<String, AnalysisRepairTarget>::new();
         let mut map_by_dir = std::collections::HashMap::<String, AnalysisRepairTarget>::new();
-        if let Ok(staged_pdb_path) = super::usb_staging::stage_pdb(usb_root)
+        if let Ok(staged_pdb_path) = usb_staging::stage_pdb(usb_root)
             && let Ok(parsed) = parse_pdb(&staged_pdb_path)
         {
             for t in parsed.tracks {
@@ -5887,6 +5967,180 @@ mod tests {
             &[17, 2, 3, 24],
             "menu order must persist across a re-read"
         );
+    }
+
+    // ── Local HDD staging integration ─────────────────────────────────
+    //
+    // These follow the same pattern edb.rs's staging tests already
+    // established: `set_cache_root_for_test` overrides `cache_root()` only
+    // for the calling thread, and `cargo test` never runs two tests
+    // concurrently on the same thread, so this needs no lock and can't
+    // race with unrelated tests on other threads. The returned guard resets
+    // the override on drop (including on panic), and the cache tempdir is
+    // leaked via `.keep()` as harmless extra insurance.
+
+    #[test]
+    fn apply_pdb_sentinel_u5_repair_writes_to_staged_local_copy_when_enabled() {
+        let cache_dir = tempdir().expect("cache dir").keep();
+        let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let mut p1 = data_page(1, 7);
+        set_nrs(&mut p1, 3);
+        set_u5_num_rl(&mut p1, 0x1FFF, 0x1FFF);
+        let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
+        let raw_pdb_path = vendor_pdb_path(&usb_root);
+        let raw_bytes_before = std::fs::read(&raw_pdb_path).unwrap();
+
+        let staged_path = usb_staging::stage_pdb(&usb_root).expect("stage pdb");
+        assert_ne!(
+            staged_path, raw_pdb_path,
+            "staging must route through a local path distinct from the USB mount"
+        );
+        let pages = detect_pdb_sentinel_u5_on_data_pages(&staged_path);
+        assert_eq!(pages.len(), 1, "expected one sentinel-u5 page detected");
+
+        let patched = apply_pdb_sentinel_u5_repair(&usb_root, &pages).unwrap();
+        assert_eq!(patched, 1);
+
+        // The raw USB file must be completely untouched -- the write landed
+        // in the local staged copy only, per the batching decision (no
+        // individual writer self-commits).
+        let raw_bytes_after = std::fs::read(&raw_pdb_path).unwrap();
+        assert_eq!(
+            raw_bytes_before, raw_bytes_after,
+            "write must not reach the raw USB path directly"
+        );
+
+        // The local staged copy must reflect the patch.
+        let staged_bytes = std::fs::read(&staged_path).unwrap();
+        assert_ne!(
+            raw_bytes_before, staged_bytes,
+            "local staged copy should reflect the patch"
+        );
+        assert!(
+            detect_pdb_sentinel_u5_on_data_pages(&staged_path).is_empty(),
+            "repair should be idempotent against the staged copy"
+        );
+    }
+
+    #[test]
+    fn repair_apply_batches_local_writes_and_flushes_pdb_to_usb_once() {
+        let cache_dir = tempdir().expect("cache dir").keep();
+        let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let (_td, usb_root) = test_usb_root();
+        let service_data_dir = tempdir().expect("service data dir");
+        let service = BackendService::new(service_data_dir.path()).expect("backend service");
+
+        // Corrupt the header-compatibility field (offset 0x10) on the real,
+        // initialized USB's export.pdb to an unknown value, so the repair
+        // detects and proposes fixing it.
+        let raw_pdb_path = vendor_pdb_path(&usb_root);
+        {
+            let mut bytes = std::fs::read(&raw_pdb_path).expect("read seed pdb");
+            bytes[0x10..0x14].copy_from_slice(&99u32.to_le_bytes());
+            std::fs::write(&raw_pdb_path, &bytes).expect("write corrupted header value");
+        }
+        let raw_bytes_before_apply = std::fs::read(&raw_pdb_path).unwrap();
+
+        let result = service
+            .repair_usb_diagnostics_with_progress(
+                RepairUsbDiagnosticsRequest {
+                    usb_root: Some(usb_root.to_string_lossy().to_string()),
+                    apply: true,
+                    selected_fix_ids: vec![PDB_HEADER_COMPATIBILITY_FIX_ID.to_string()],
+                },
+                |_, _, _| {},
+            )
+            .expect("repair apply");
+
+        assert!(
+            !result.applied_fixes.is_empty() && result.failed_fixes.is_empty(),
+            "expected header-compatibility fix to apply cleanly: {result:?}"
+        );
+
+        // The batched end-of-apply write-back must have reached the *raw*
+        // USB path, not just the local cache -- this is what the
+        // `?`-early-return fix and the write-back call placement exist to
+        // guarantee.
+        let raw_bytes_after_apply = std::fs::read(&raw_pdb_path).unwrap();
+        assert_ne!(
+            raw_bytes_before_apply, raw_bytes_after_apply,
+            "USB file must reflect the fix after the batched write-back"
+        );
+        let value_after = u32::from_le_bytes(raw_bytes_after_apply[0x10..0x14].try_into().unwrap());
+        assert_eq!(value_after, PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE);
+    }
+
+    #[test]
+    fn apply_fix_sync_edb_history_from_pdb_flushes_to_usb_when_staging_enabled() {
+        let cache_dir = tempdir().expect("cache dir").keep();
+        let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let (_td, usb_root) = test_usb_root();
+        let service_data_dir = tempdir().expect("service data dir");
+        let service = BackendService::new(service_data_dir.path()).expect("backend service");
+
+        let parsed = ParsedPdb {
+            history_playlists: vec![PdbHistoryPlaylistRow {
+                id: 10,
+                name: "HISTORY 001".to_string(),
+                source_table: 17,
+            }],
+            history_entries: vec![PdbHistoryEntryRow {
+                track_id: Some(101),
+                playlist_id: 10,
+                entry_index: 1,
+                source_table: 18,
+            }],
+            ..ParsedPdb::default()
+        };
+
+        let mut warnings = Vec::new();
+        let (history_written, _history_content_written) = service
+            .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, &mut warnings)
+            .expect("sync edb history");
+        assert_eq!(history_written, 1);
+
+        // Before any write-back: the write went through `open_edb_rw`, which
+        // is staging-transparent, so it must have landed in the local
+        // staged copy only -- the raw USB eDB file must not have the new
+        // row yet. This is the eDB flush gap this whole change exists to
+        // close: proving it *doesn't* reach USB here is as important as
+        // proving it *does* after the flush below.
+        // The real initialize_usb-seeded eDB is SQLCipher-encrypted, so
+        // `crate::edb::open_edb` (which tries the known keys) is used
+        // instead of a plain `rusqlite::Connection::open` -- applied
+        // directly to the raw path to bypass staging entirely.
+        let raw_edb_path = super::super::usb_vendor_compat::vendor_edb_path(&usb_root);
+        {
+            let mut open_warnings = Vec::new();
+            let conn =
+                crate::edb::open_edb(&raw_edb_path, &mut open_warnings).expect("open raw usb edb");
+            let count: i64 = conn
+                .query_row("SELECT COUNT(1) FROM history WHERE name = 'HISTORY 001'", [], |r| {
+                    r.get(0)
+                })
+                .expect("query raw usb edb before write-back");
+            assert_eq!(
+                count, 0,
+                "raw USB eDB must not see the change before write-back"
+            );
+        }
+
+        let committed =
+            usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb).unwrap();
+        assert!(committed, "expected the eDB write-back to actually commit");
+
+        let mut open_warnings = Vec::new();
+        let conn = crate::edb::open_edb(&raw_edb_path, &mut open_warnings).expect("re-open raw usb edb");
+        let (hid, name): (i64, String) = conn
+            .query_row("SELECT history_id, name FROM history", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("query raw usb edb after write-back");
+        assert_eq!(hid, 10);
+        assert_eq!(name, "HISTORY 001");
     }
 
     // ── Hand-built minimal PDB fixtures for the byte-level repair pairs ──
