@@ -325,7 +325,7 @@ test("hydrateUsbTrackMetadataBatch skips tracks that don't need hydration and ne
 test("hydrateUsbTrackMetadataBatch marks tracks missing from the response as checked without throwing", async () => {
   const state = { usbRoot: "/tmp/usb" };
   const trackA = { id: "1", title: "A", artist: "Artist A" };
-  const trackB = { id: "999999", title: "Unknown", artist: "" };
+  const trackB = { id: "999999", title: "Unresolved Title", artist: "Unresolved Artist" };
 
   await hydrateUsbTrackMetadataBatch(state, [trackA, trackB], {
     usbTrackNeedsHydration: () => true,
@@ -335,10 +335,42 @@ test("hydrateUsbTrackMetadataBatch marks tracks missing from the response as che
         { trackId: "999999", source: null, track: null }
       ]
     }),
-    normalizeTrack: (candidate) => ({ ...candidate })
+    normalizeTrack: (candidate) => ({
+      ...candidate,
+      title: candidate.title || "Unknown Title",
+      artist: candidate.artist || "Unknown Artist"
+    })
   });
 
   assert.equal(trackA.bpm, 120);
   assert.equal(trackA.artworkChecked, true);
   assert.equal(trackB.artworkChecked, true, "unresolved tracks should still be marked checked so they aren't retried forever");
+  assert.equal(trackB.title, "Unresolved Title");
+  assert.equal(trackB.artist, "Unresolved Artist");
+});
+
+test("hydrateUsbTrackMetadataBatch preserves existing labels when inspection returns partial metadata", async () => {
+  const state = { usbRoot: "/tmp/usb" };
+  const track = { id: "1", title: "Existing Title", artist: "Existing Artist", durationMs: 180000 };
+
+  await hydrateUsbTrackMetadataBatch(state, [track], {
+    usbTrackNeedsHydration: () => true,
+    command: async () => ({
+      items: [
+        { trackId: "1", source: "pdb", track: { id: "1", bpm: 120 } }
+      ]
+    }),
+    normalizeTrack: (candidate) => ({
+      ...candidate,
+      title: candidate.title || "Unknown Title",
+      artist: candidate.artist || "Unknown Artist",
+      durationMs: candidate.durationMs ?? null
+    })
+  });
+
+  assert.equal(track.title, "Existing Title");
+  assert.equal(track.artist, "Existing Artist");
+  assert.equal(track.durationMs, 180000);
+  assert.equal(track.bpm, 120);
+  assert.equal(track.artworkChecked, true);
 });

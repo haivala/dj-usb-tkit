@@ -1637,16 +1637,24 @@ export async function hydrateUsbTrackMetadata(state, track, deps = {}) {
       title: track.title || "",
       artist: track.artist || ""
     });
-    const normalized = normalizeTrack(inspected?.track || {}, "usb");
-    if (!normalized.localTrackId && track.localTrackId) {
-      normalized.localTrackId = track.localTrackId;
-    }
-    normalized.artworkChecked = true;
-    Object.assign(track, normalized);
+    applyHydratedTrackResult(track, inspected?.track, normalizeTrack);
   } catch (err) {
     console.warn(`inspect_usb_track failed for ${trackId}:`, err);
   }
   return track;
+}
+
+function applyHydratedTrackResult(track, inspectedTrack, normalizeTrack) {
+  if (!inspectedTrack || typeof inspectedTrack !== "object") {
+    track.artworkChecked = true;
+    return;
+  }
+  const normalized = normalizeTrack({ ...track, ...inspectedTrack }, "usb") || {};
+  if (!normalized.localTrackId && track.localTrackId) {
+    normalized.localTrackId = track.localTrackId;
+  }
+  normalized.artworkChecked = true;
+  Object.assign(track, normalized);
 }
 
 // Batched counterpart to hydrateUsbTrackMetadata: resolves metadata for many
@@ -1683,12 +1691,7 @@ export async function hydrateUsbTrackMetadataBatch(state, tracks, deps = {}) {
     for (const track of candidates) {
       const trackId = String(track.id).trim();
       const item = resultsById.get(trackId);
-      const normalized = normalizeTrack(item?.track || {}, "usb");
-      if (!normalized.localTrackId && track.localTrackId) {
-        normalized.localTrackId = track.localTrackId;
-      }
-      normalized.artworkChecked = true;
-      Object.assign(track, normalized);
+      applyHydratedTrackResult(track, item?.track, normalizeTrack);
     }
   } catch (err) {
     console.warn(`inspect_usb_tracks failed for ${candidates.length} track(s):`, err);
