@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+- **Fix:** dragging to reorder USB playlists now actually writes the new order back to the USB
+  drive. The reorder command patched the sort order in the local staging cache only and never
+  flushed it to the drive, so a reorder looked like it worked in the app but was silently lost —
+  the drive kept its old order, and even the local cache copy could be discarded and re-derived
+  from the (unchanged) drive on the next read. Reordering now backs up the USB databases first
+  and writes the updated PDB/eDB sort order back to the drive, matching every other USB-mutating
+  operation.
 - **Improvement:** the USB-resident `export.pdb` and `exportLibrary.db` are now staged to a
   local HDD working copy the first time each is read, instead of being re-read from the USB
   mount on every call. The local copy is reused until the USB file's size/mtime changes, so
