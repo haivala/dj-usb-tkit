@@ -30,6 +30,12 @@
 
 ## Unreleased
 
+- **Fix:** removing a USB playlist now actually writes the eDB deletion back to the USB drive.
+  Like the reorder bug below, the removal patched `exportLibrary.db` in the local staging cache
+  only and never flushed it to the drive, so a removed playlist could reappear — the physical
+  drive still had the old playlist/content rows even though the app reported it as deleted.
+  Removing a playlist now backs up the USB databases first (matching every other USB-mutating
+  operation) and writes the eDB change back to the drive.
 - **Fix:** dragging to reorder USB playlists now actually writes the new order back to the USB
   drive. The reorder command patched the sort order in the local staging cache only and never
   flushed it to the drive, so a reorder looked like it worked in the app but was silently lost —

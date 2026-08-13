@@ -870,6 +870,16 @@ impl BackendService {
         on_progress(0, 100, "USB: Resolving USB root");
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
+
+        warnings.extend(
+            super::usb_vendor_compat::backup_usb_databases(&usb_root)
+                .into_iter()
+                .map(|message| {
+                    logging::log(Level::Info, "usb-import", "usb.remove.backup", message)
+                }),
+        );
+        push_usb_stage_timing(&mut warnings, "backup usb databases", &mut stage_started);
+
         on_progress(5, 100, "USB: Resolving playlist identifiers");
         let mut name_candidates = vec![name.clone()];
         if let Some((_, leaf)) = name.rsplit_once(" / ") {
@@ -997,6 +1007,16 @@ impl BackendService {
             &exclusive_track_file_paths,
             &mut warnings,
         )?;
+        if let Err(err) =
+            super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)
+        {
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-import",
+                "usb.remove.edb-write-back-failed",
+                format!("eDB write-back to USB failed: {err}"),
+            ));
+        }
         push_usb_stage_timing(
             &mut warnings,
             "remove playlist from eDB",
@@ -3022,6 +3042,61 @@ mod tests {
             })
             .expect("fetch after remove");
         assert!(after.items.iter().all(|p| p.name != "My Playlist"));
+    }
+
+    #[test]
+    fn remove_usb_playlist_writes_back_edb_to_usb_when_staging_enabled() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = seeded_playlist_usb();
+
+        // Seed the eDB counterpart directly, before staging is enabled, so
+        // it lands on the raw USB path (not a staged cache copy).
+        let tracks: [(&str, &str, &str); 1] = [("t1", "Song A", "a.mp3")];
+        let playlist = crate::edb::ExportPlaylistData {
+            id: "pl-1".to_string(),
+            name: "My Playlist".to_string(),
+            tracks: tracks
+                .iter()
+                .map(|(id, title, filename)| make_export_track(id, title, filename))
+                .collect(),
+        };
+        let manifest = make_export_manifest("pl-1", "My Playlist", &usb_root, &tracks);
+        crate::service::export_helpers::write_edb_playlist(&usb_root, &playlist, &manifest, true)
+            .expect("seed edb playlist");
+
+        // Enable staging now: remove_usb_playlist will operate on a local
+        // HDD cache copy of the eDB, not the USB-mounted file directly.
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let result = service
+            .remove_usb_playlist(crate::models::RemoveUsbPlaylistRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                playlist_id: None,
+                playlist_name: "My Playlist".to_string(),
+            })
+            .expect("remove usb playlist");
+        assert_eq!(result.removed_from_edb, 1);
+
+        // Bypass staging entirely and open the raw USB-mounted eDB file --
+        // the file the physical drive actually holds. Before the write-back
+        // fix, the eDB deletion only ever landed in the local staged cache
+        // copy and never reached this path.
+        let raw_edb_path = crate::service::usb_vendor_compat::vendor_edb_path(&usb_root);
+        let mut open_warnings = Vec::new();
+        let conn = crate::edb::open_edb(&raw_edb_path, &mut open_warnings)
+            .expect("open raw usb edb");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playlist WHERE name = ?1",
+                rusqlite::params!["My Playlist"],
+                |row| row.get(0),
+            )
+            .expect("count playlists");
+        assert_eq!(
+            count, 0,
+            "removed playlist must be written back to the raw USB eDB, not just the staged cache copy"
+        );
     }
 
     #[test]
