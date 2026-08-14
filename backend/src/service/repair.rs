@@ -35,7 +35,6 @@ use super::usb_utils::{
     canonicalize_playlist_name, collect_contents_audio_files, resolve_usb_root,
     resolve_usb_side_path, scan_anlz_warnings,
 };
-use super::usb_vendor_compat::backup_usb_databases;
 #[cfg(test)]
 use super::usb_vendor_compat::vendor_pdb_path;
 
@@ -3017,9 +3016,13 @@ impl BackendService {
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
-        warnings.extend(backup_usb_databases(&usb_root).into_iter().map(|message| {
-            logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
-        }));
+        warnings.extend(
+            self.backup_usb_databases_with_retention(&usb_root)
+                .into_iter()
+                .map(|message| {
+                    logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
+                }),
+        );
 
         let mut edb_rows = load_edb_menu_rows(&usb_root, &mut warnings)?;
         edb_rows.sort_by_key(|r| r.menu_item_id);
@@ -3092,9 +3095,13 @@ impl BackendService {
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
-        warnings.extend(backup_usb_databases(&usb_root).into_iter().map(|message| {
-            logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
-        }));
+        warnings.extend(
+            self.backup_usb_databases_with_retention(&usb_root)
+                .into_iter()
+                .map(|message| {
+                    logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
+                }),
+        );
 
         let (before_current, before_available, _before_divergence) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
@@ -4082,7 +4089,7 @@ impl BackendService {
         };
 
         if req.apply {
-            warnings.extend(backup_usb_databases(&usb_root).into_iter().map(|message| {
+            warnings.extend(self.backup_usb_databases_with_retention(&usb_root).into_iter().map(|message| {
                 logging::log(
                     Level::Info,
                     "usb-diagnostics",

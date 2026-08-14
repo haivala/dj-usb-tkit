@@ -143,6 +143,46 @@ pub(crate) fn upsert_usb_device(
     Ok(id)
 }
 
+/// Root path of an existing, non-deleted device whose `label` already equals
+/// `label`, other than the device identified by `exclude_root_path_key`.
+/// Used to reject a drive name that's already taken -- names double as
+/// cache/backup-archive keys, so collisions must be prevented before they
+/// happen (see `usb_identity`).
+pub(crate) fn find_device_root_by_label(
+    conn: &rusqlite::Connection,
+    label: &str,
+    exclude_root_path_key: &str,
+) -> BackendResult<Option<String>> {
+    let row: Option<String> = conn
+        .query_row(
+            "SELECT root_path FROM usb_devices WHERE label = ?1 AND root_path_key != ?2 AND deleted_at IS NULL",
+            rusqlite::params![label, exclude_root_path_key],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(row)
+}
+
+/// Persist `label` onto the `usb_devices` row for `root`, upserting a row
+/// first if none exists yet (e.g. naming a drive before it's ever been
+/// through `validate_usb_root`). The on-drive marker file
+/// (`usb_identity::write_drive_name`) is the source of truth; this is a fast
+/// local cache/uniqueness index, kept in sync by the caller.
+pub(crate) fn set_device_label(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    label: &str,
+    now_ts: &str,
+) -> BackendResult<()> {
+    upsert_usb_device(conn, root, false, now_ts)?;
+    let root_path_key = super::normalize_source_root_for_matching(&root.to_string_lossy());
+    conn.execute(
+        "UPDATE usb_devices SET label = ?1, updated_at = ?2 WHERE root_path_key = ?3",
+        rusqlite::params![label, now_ts, root_path_key],
+    )?;
+    Ok(())
+}
+
 /// All known device root paths (display form), ANY mount state, ANY age,
 /// INCLUDING soft-deleted devices. Used only for the "is this path
 /// untrustworthy as durable local storage" check (materialize matching,

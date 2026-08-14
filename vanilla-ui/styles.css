@@ -309,45 +309,67 @@ body.library-onboarding {
   box-shadow: 0 0 8px var(--accent-glow);
 }
 
-/* ── active playlist badge ──────────────────────────── */
+/* ── header export stack (active playlist over connected USB) ── */
+/* Two compact single-line rows stacked in one narrow column -- no taller
+   than the logo governing the topbar's height. Each row's dot sits next
+   to its fixed-length label (not the arbitrary-length value) so it never
+   shifts position depending on the playlist/drive name. */
 
-.playlist-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-family: 'Outfit', sans-serif;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  transition: all 200ms ease;
+.header-export-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 16px;
+  border-left: 1px solid var(--line);
 }
 
-.playlist-badge.inactive {
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
+.playlist-badge,
+.usb-name-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Outfit', sans-serif;
+  white-space: nowrap;
+  transition: color 200ms ease;
+}
+
+.header-stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--muted);
 }
 
-.playlist-badge.active {
-  background: var(--badge-active-bg);
-  border: 1px solid var(--accent-hot);
-  color: var(--accent-hot);
-  box-shadow: 0 0 12px var(--accent-glow);
-  animation: badge-pulse 2.5s ease-in-out infinite;
+.usb-name-badge .usb-health-dot {
+  width: 7px;
+  height: 7px;
 }
 
-.playlist-badge .badge-dot {
-  width: 6px;
-  height: 6px;
+.playlist-header-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: currentColor;
+  background: var(--muted);
+  flex-shrink: 0;
 }
 
-@keyframes badge-pulse {
-  0%, 100% { box-shadow: 0 0 12px var(--accent-glow); }
-  50%      { box-shadow: 0 0 20px var(--accent-glow); }
+.playlist-badge.active .playlist-header-dot {
+  background: var(--accent-hot);
+}
+
+.header-stat-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playlist-badge.active .header-stat-value {
+  color: var(--accent-hot);
 }
 
 @keyframes donate-glow {
@@ -2882,6 +2904,17 @@ td button[data-action]:disabled,
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--ink-secondary);
+}
+
+.backups-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.backups-row-actions button {
+  font-size: 11px;
+  padding: 2px 8px;
 }
 
 .accent-preview-row {

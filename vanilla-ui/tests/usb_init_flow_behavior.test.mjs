@@ -222,6 +222,427 @@ test("validateAndSetUsbRoot hides stale diagnostics before reading a different U
   assert.equal(commandSawDiagnosticsHidden, true);
 });
 
+// The recent-USB pills (usb/events.mjs's usbRecentList click handler) and
+// the folder picker (pickUsbFolder) both funnel through this same
+// validateAndSetUsbRoot function with an identical signature -- there's no
+// "came from a recent pill" flag for it to branch on. So a single test
+// exercising validateAndSetUsbRoot's naming behavior covers both entry
+// points; there's nothing recent-pill-specific left to wire up.
+function makeFakeInteractiveElement(overrides = {}) {
+  const listeners = new Map();
+  return {
+    value: "",
+    hidden: true,
+    focus() {},
+    select() {},
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const fns = listeners.get(type);
+      if (!fns) return;
+      const idx = fns.indexOf(fn);
+      if (idx !== -1) fns.splice(idx, 1);
+    },
+    emit(type, event = {}) {
+      for (const fn of listeners.get(type) || []) fn(event);
+    },
+    ...overrides
+  };
+}
+
+async function waitFor(predicate, { timeoutMs = 1000 } = {}) {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("waitFor: condition never became true");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function makeValidateUsbRootDeps(command) {
+  return {
+    command,
+    documentObj: makeFakeInteractiveElement(),
+    persistUsbRoot: () => {},
+    updateUsbRootText: () => {},
+    resetUsbStateViews: () => {},
+    updateUsbConfigControlsVisibility: () => {},
+    updateUsbSubNavDisabledState: () => {},
+    updatePlaylistExportButtons: () => {},
+    setStatus: () => {},
+    runUsbDiagnostics: async () => {},
+    warn: () => {},
+    scheduler: (fn) => { fn(); }
+  };
+}
+
+test("validateAndSetUsbRoot opens the drive-naming prompt for a valid, unnamed USB (recent pill or fresh pick alike) and saves the chosen name", async () => {
+  const state = { usbRoot: null, usbRootValid: false, usbNeedsInit: false, usbWritable: false };
+  const setNameCalls = [];
+  const el = {
+    driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+    driveNameInput: makeFakeInteractiveElement(),
+    driveNameOkBtn: makeFakeInteractiveElement(),
+    driveNameError: { hidden: true, textContent: "" }
+  };
+
+  const command = async (name, payload) => {
+    if (name === "validate_usb_root") {
+      return {
+        valid: true,
+        hasWriteAccess: true,
+        normalizedRoot: "/media/user/CLUBSTICK",
+        hasVendorRoot: true,
+        hasContents: true,
+        hasPdb: true,
+        warnings: []
+      };
+    }
+    if (name === "get_usb_device_name") {
+      return { name: null, suggestedName: null };
+    }
+    if (name === "set_usb_device_name") {
+      setNameCalls.push(payload);
+      return { saved: true };
+    }
+    throw new Error(`unexpected command: ${name}`);
+  };
+
+  const resultPromise = validateAndSetUsbRoot(
+    state,
+    el,
+    "/media/user/CLUBSTICK",
+    false,
+    makeValidateUsbRootDeps(command)
+  );
+
+  await waitFor(() => el.driveNameOverlay.hidden === false);
+  el.driveNameInput.value = "Club Stick";
+  el.driveNameOkBtn.emit("click");
+
+  const valid = await resultPromise;
+
+  assert.equal(valid, true);
+  assert.equal(el.driveNameOverlay.hidden, true, "prompt must close after saving");
+  assert.equal(setNameCalls.length, 1);
+  assert.deepEqual(setNameCalls[0], {
+    usbRoot: "/media/user/CLUBSTICK",
+    name: "Club Stick"
+  });
+});
+
+test("validateAndSetUsbRoot does not open the drive-naming prompt when the drive is already named", async () => {
+  const state = { usbRoot: null, usbRootValid: false, usbNeedsInit: false, usbWritable: false };
+  const el = {
+    driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+    driveNameInput: makeFakeInteractiveElement(),
+    driveNameOkBtn: makeFakeInteractiveElement(),
+    driveNameError: { hidden: true, textContent: "" }
+  };
+
+  const command = async (name) => {
+    if (name === "validate_usb_root") {
+      return {
+        valid: true,
+        hasWriteAccess: true,
+        normalizedRoot: "/media/user/CLUBSTICK",
+        hasVendorRoot: true,
+        hasContents: true,
+        hasPdb: true,
+        warnings: []
+      };
+    }
+    if (name === "get_usb_device_name") {
+      return { name: "Club Stick", suggestedName: null };
+    }
+    throw new Error(`unexpected command: ${name}`);
+  };
+
+  const valid = await validateAndSetUsbRoot(
+    state,
+    el,
+    "/media/user/CLUBSTICK",
+    false,
+    makeValidateUsbRootDeps(command)
+  );
+
+  assert.equal(valid, true);
+  assert.equal(el.driveNameOverlay.hidden, true, "already-named drive must not prompt");
+  assert.equal(
+    state.usbDeviceName,
+    "Club Stick",
+    "the resolved name must be recorded on state for the status-line USB badge, even when no prompt was needed"
+  );
+});
+
+test("validateAndSetUsbRoot updates the USB name badge as the drive connects, gets named, and disconnects", async () => {
+  const state = { usbRoot: null, usbRootValid: false, usbNeedsInit: false, usbWritable: false };
+  const el = {
+    driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+    driveNameInput: makeFakeInteractiveElement(),
+    driveNameOkBtn: makeFakeInteractiveElement(),
+    driveNameSkipBtn: makeFakeInteractiveElement(),
+    usbInitRow: { classList: makeClassList() }
+  };
+
+  const setNameCalls = [];
+  const command = async (name, payload) => {
+    if (name === "validate_usb_root") {
+      return {
+        valid: true,
+        hasWriteAccess: true,
+        normalizedRoot: "/media/user/CLUBSTICK",
+        hasVendorRoot: true,
+        hasContents: true,
+        hasPdb: true,
+        warnings: []
+      };
+    }
+    if (name === "get_usb_device_name") {
+      return { name: null, suggestedName: null };
+    }
+    if (name === "set_usb_device_name") {
+      setNameCalls.push(payload);
+      return { saved: true };
+    }
+    throw new Error(`unexpected command: ${name}`);
+  };
+
+  let badgeUpdateCount = 0;
+  const deps = makeValidateUsbRootDeps(command);
+  deps.updateUsbNameBadge = () => { badgeUpdateCount += 1; };
+
+  const resultPromise = validateAndSetUsbRoot(state, el, "/media/user/CLUBSTICK", false, deps);
+  await waitFor(() => el.driveNameOverlay.hidden === false);
+  assert.equal(state.usbDeviceName, null, "must not show a name while the prompt is still open");
+  el.driveNameInput.value = "Club Stick";
+  el.driveNameOkBtn.emit("click");
+  await resultPromise;
+
+  assert.equal(state.usbDeviceName, "Club Stick");
+  assert.ok(badgeUpdateCount > 0, "the badge must be refreshed after the name is saved");
+
+  await validateAndSetUsbRoot(state, el, "", false, deps);
+  assert.equal(state.usbDeviceName, null, "disconnecting the USB must clear the name badge");
+});
+
+test("validateAndSetUsbRoot pre-fills the drive-naming prompt with the backend's suggested name", async () => {
+  const state = { usbRoot: null, usbRootValid: false, usbNeedsInit: false, usbWritable: false };
+  const el = {
+    driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+    driveNameInput: makeFakeInteractiveElement(),
+    driveNameOkBtn: makeFakeInteractiveElement(),
+    driveNameError: { hidden: true, textContent: "" }
+  };
+
+  const command = async (name) => {
+    if (name === "validate_usb_root") {
+      return {
+        valid: true,
+        hasWriteAccess: true,
+        normalizedRoot: "/media/user/CLUBSTICK",
+        hasVendorRoot: true,
+        hasContents: true,
+        hasPdb: true,
+        warnings: []
+      };
+    }
+    if (name === "get_usb_device_name") {
+      return { name: null, suggestedName: "CLUBSTICK" };
+    }
+    if (name === "set_usb_device_name") {
+      return { saved: true };
+    }
+    throw new Error(`unexpected command: ${name}`);
+  };
+
+  const resultPromise = validateAndSetUsbRoot(
+    state,
+    el,
+    "/media/user/CLUBSTICK",
+    false,
+    makeValidateUsbRootDeps(command)
+  );
+
+  await waitFor(() => el.driveNameOverlay.hidden === false);
+  assert.equal(el.driveNameInput.value, "CLUBSTICK");
+  el.driveNameOkBtn.emit("click");
+  await resultPromise;
+});
+
+test("validateAndSetUsbRoot surfaces a visible status message (not just a console warning) when checking the drive name fails, instead of silently skipping the prompt", async () => {
+  const state = { usbRoot: null, usbRootValid: false, usbNeedsInit: false, usbWritable: false };
+  const el = {
+    driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+    driveNameInput: makeFakeInteractiveElement(),
+    driveNameOkBtn: makeFakeInteractiveElement(),
+    driveNameError: { hidden: true, textContent: "" }
+  };
+
+  const statuses = [];
+  const command = async (name) => {
+    if (name === "validate_usb_root") {
+      return {
+        valid: true,
+        hasWriteAccess: true,
+        normalizedRoot: "/media/user/CLUBSTICK",
+        hasVendorRoot: true,
+        hasContents: true,
+        hasPdb: true,
+        warnings: []
+      };
+    }
+    if (name === "get_usb_device_name") {
+      throw new Error("usb root not found");
+    }
+    throw new Error(`unexpected command: ${name}`);
+  };
+
+  const deps = makeValidateUsbRootDeps(command);
+  deps.setStatus = (text) => statuses.push(text);
+
+  const valid = await validateAndSetUsbRoot(state, el, "/media/user/CLUBSTICK", false, deps);
+
+  assert.equal(valid, true, "validation itself still succeeds even if the naming check fails");
+  assert.equal(el.driveNameOverlay.hidden, true, "prompt cannot open without knowing the current name");
+  assert.ok(
+    statuses.some((s) => s.includes("Could not check this drive's name")),
+    `expected a visible status message explaining the naming check failed, got: ${JSON.stringify(statuses)}`
+  );
+});
+
+test("validateAndSetUsbRoot does not open the naming prompt when get_usb_device_name returns a shape without a 'name' field (fails closed on an unexpected/mocked response instead of guessing 'unnamed')", async () => {
+  // Regression test: a permissive test double or a future API change could
+  // resolve with e.g. {} instead of a real GetUsbDeviceNameData. Reading a
+  // missing field as falsy ("not named") used to pop the naming prompt --
+  // which blocks every click in the app until resolved -- based on a guess
+  // rather than a real answer.
+  const state = { usbRoot: null, usbRootValid: false, usbNeedsInit: false, usbWritable: false };
+  const el = {
+    driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+    driveNameInput: makeFakeInteractiveElement(),
+    driveNameOkBtn: makeFakeInteractiveElement(),
+    driveNameSkipBtn: makeFakeInteractiveElement(),
+    driveNameError: { hidden: true, textContent: "" }
+  };
+
+  const command = async (name) => {
+    if (name === "validate_usb_root") {
+      return {
+        valid: true,
+        hasWriteAccess: true,
+        normalizedRoot: "/media/user/CLUBSTICK",
+        hasVendorRoot: true,
+        hasContents: true,
+        hasPdb: true,
+        warnings: []
+      };
+    }
+    if (name === "get_usb_device_name") {
+      return {}; // no "name" field at all -- not a real answer.
+    }
+    throw new Error(`unexpected command: ${name}`);
+  };
+
+  const valid = await validateAndSetUsbRoot(
+    state,
+    el,
+    "/media/user/CLUBSTICK",
+    false,
+    makeValidateUsbRootDeps(command)
+  );
+
+  assert.equal(valid, true);
+  assert.equal(el.driveNameOverlay.hidden, true, "an ambiguous response must never open the prompt");
+});
+
+test("the drive-naming prompt can always be dismissed without saving (Escape, backdrop click, and a 'Not now' button), never permanently blocking the UI", async () => {
+  const state = { usbRoot: null, usbRootValid: false, usbNeedsInit: false, usbWritable: false };
+
+  const command = async (name) => {
+    if (name === "validate_usb_root") {
+      return {
+        valid: true,
+        hasWriteAccess: true,
+        normalizedRoot: "/media/user/CLUBSTICK",
+        hasVendorRoot: true,
+        hasContents: true,
+        hasPdb: true,
+        warnings: []
+      };
+    }
+    if (name === "get_usb_device_name") {
+      return { name: null, suggestedName: null };
+    }
+    if (name === "set_usb_device_name") {
+      throw new Error("set_usb_device_name must not be called when the prompt is dismissed without saving");
+    }
+    throw new Error(`unexpected command: ${name}`);
+  };
+
+  // 1. Escape key (dispatched on the document, matching a real keydown that
+  // can land while focus is anywhere in the dialog, not just the input).
+  {
+    const el = {
+      driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+      driveNameInput: makeFakeInteractiveElement(),
+      driveNameOkBtn: makeFakeInteractiveElement(),
+      driveNameSkipBtn: makeFakeInteractiveElement()
+    };
+    const deps = makeValidateUsbRootDeps(command);
+    const resultPromise = validateAndSetUsbRoot(state, el, "/media/user/CLUBSTICK", false, deps);
+    await waitFor(() => el.driveNameOverlay.hidden === false);
+    deps.documentObj.emit("keydown", { key: "Escape" });
+    await resultPromise;
+    assert.equal(el.driveNameOverlay.hidden, true);
+  }
+
+  // 2. Clicking the backdrop itself (not the dialog box inside it).
+  {
+    const el = {
+      driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+      driveNameInput: makeFakeInteractiveElement(),
+      driveNameOkBtn: makeFakeInteractiveElement(),
+      driveNameSkipBtn: makeFakeInteractiveElement()
+    };
+    const resultPromise = validateAndSetUsbRoot(
+      state,
+      el,
+      "/media/user/CLUBSTICK",
+      false,
+      makeValidateUsbRootDeps(command)
+    );
+    await waitFor(() => el.driveNameOverlay.hidden === false);
+    el.driveNameOverlay.emit("click", { target: el.driveNameOverlay });
+    await resultPromise;
+    assert.equal(el.driveNameOverlay.hidden, true);
+  }
+
+  // 3. The explicit "Not now" button.
+  {
+    const el = {
+      driveNameOverlay: makeFakeInteractiveElement({ hidden: true }),
+      driveNameInput: makeFakeInteractiveElement(),
+      driveNameOkBtn: makeFakeInteractiveElement(),
+      driveNameSkipBtn: makeFakeInteractiveElement()
+    };
+    const resultPromise = validateAndSetUsbRoot(
+      state,
+      el,
+      "/media/user/CLUBSTICK",
+      false,
+      makeValidateUsbRootDeps(command)
+    );
+    await waitFor(() => el.driveNameOverlay.hidden === false);
+    el.driveNameSkipBtn.emit("click");
+    await resultPromise;
+    assert.equal(el.driveNameOverlay.hidden, true);
+  }
+});
+
 test("hydrateUsbTrackMetadata marks inspected no-artwork tracks as checked", async () => {
   const state = { usbRoot: "/tmp/usb" };
   const track = {

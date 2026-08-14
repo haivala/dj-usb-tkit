@@ -11,6 +11,7 @@ import * as playback from "./components/playback/actions.mjs";
 import * as playlist from "./components/playlist/actions.mjs";
 import * as usb from "./components/usb/actions.mjs";
 import * as eventLog from "./components/event-log/actions.mjs";
+import * as backupsUi from "./components/backups/actions.mjs";
 import * as library from "./components/library/actions.mjs";
 import * as settings from "./components/settings/actions.mjs";
 import * as shell from "./components/shell/actions.mjs";
@@ -26,6 +27,7 @@ import {
   STORAGE_KEY_USB_ROOT,
   STORAGE_KEY_EXPORT_PRUNE_STALE,
   STORAGE_KEY_EXPORT_BACKUP,
+  STORAGE_KEY_BACKUP_RETENTION_COUNT,
   STORAGE_KEY_ANALYSIS_BPM_RANGE,
   STORAGE_KEY_ANALYSIS_ENGINE,
   STORAGE_KEY_SIDEBAR_COLLAPSED,
@@ -34,6 +36,7 @@ import {
   FRONTEND_DB_KEY_ACCENT_HUE,
   FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
   FRONTEND_DB_KEY_EXPORT_BACKUP,
+  FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT,
   FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
   FRONTEND_DB_KEY_ANALYSIS_ENGINE,
   FRONTEND_DB_KEY_SIDEBAR_COLLAPSED,
@@ -95,7 +98,7 @@ const { invoke, command, isTauriRuntime, getTauriEventListen } =
 let ThemeManager, AccentManager;
 
 const ELEMENT_IDS = [
-  "statusText", "playlistBadge", "badgeLabel", "navSidebar",
+  "statusText", "playlistBadge", "badgeLabel", "usbNameBadge", "usbNameBadgeLabel", "usbHeaderHealthDot", "navSidebar",
   "sidebarCollapseBtn", "donateBtn", "navPlaylistList", "addPlaylistBtn",
   "playlistPanelTitle", "playlistSearchInput", "playlistTracksBody", "playlistTableWrap",
   "playlistEmptyState", "playlistTotalDuration", "playlistExportStatus", "analyzePlaylistMissingBtn",
@@ -114,7 +117,9 @@ const ELEMENT_IDS = [
   "usbPlayerMenuDivergence", "usbPlayerMenuDivergenceMessage", "usbPlayerMenuSyncBtn", "usbPlayerMenuRestoreBtn",
   "libraryTotalDuration", "scanLibraryBtn", "addSelectedBtn", "refreshUsbBtn",
   "refreshHistoryBtn", "exportHistoryTracklistBtn", "runUsbParityBtn", "exportSyncModeGroup",
-  "exportSyncModeMirror", "exportSyncModeAdditive", "exportBackupCheckbox", "analysisBpmRangeSelect",
+  "exportSyncModeMirror", "exportSyncModeAdditive", "exportBackupCheckbox", "backupRetentionCountInput",
+  "openBackupsBtn", "backupsList", "backupsSummary", "backupsRefreshBtn",
+  "driveNameOverlay", "driveNameInput", "driveNameError", "driveNameOkBtn", "driveNameSkipBtn", "analysisBpmRangeSelect",
   "analysisEngineSelect", "analysisEngineStatus", "essentiaInstallRow", "essentiaNodeStatus",
   "essentiaDownloadBtn", "essentiaCancelBtn", "essentiaRemoveBtn", "selectUsbFolderBtn",
   "usbRecentRow", "usbRecentList", "usbRootPathText", "externalMasterDbToggle",
@@ -141,6 +146,7 @@ const el = {
     "usb-history": document.getElementById("panel-usb-history"),
     "usb-player-menu": document.getElementById("panel-usb-player-menu"),
     "event-log": document.getElementById("panel-event-log"),
+    backups: document.getElementById("panel-backups"),
     playlist: document.getElementById("panel-playlist"),
   },
 };
@@ -185,6 +191,10 @@ function renderEventLog() {
       eventLog.ensureEventLogSourceOptions(state, el, document),
     escapeHtml,
   });
+}
+
+async function renderBackups() {
+  await backupsUi.renderBackups(state, el, document, { command, escapeHtml });
 }
 
 function setProgress(active, percent = 0, text = "", opts = {}) {
@@ -346,6 +356,9 @@ function updateModeText() {
 }
 function updateActivePlaylistIndicators() {
   uiCtrl.updateActivePlaylistIndicators(state, el);
+}
+function updateUsbNameBadge() {
+  uiCtrl.updateUsbNameBadge(state, el);
 }
 function updateAddToPlaylistButtons() {
   uiCtrl.updateAddToPlaylistButtons(state, document);
@@ -1034,6 +1047,7 @@ async function validateAndSetUsbRoot(path, silent = false) {
     setStatus,
     emitStatus,
     runUsbDiagnostics,
+    updateUsbNameBadge,
     warn: (...a) => console.warn(...a),
     scheduler: (fn, ms) => window.setTimeout(fn, ms),
   });
@@ -1245,6 +1259,7 @@ async function switchView(viewId) {
     populatePlaylistPanel,
     refreshCurrentPlaylistTracks,
     renderEventLog,
+    renderBackups,
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     documentObj: document,
     renderWaveformsIn,
@@ -1263,6 +1278,7 @@ const switchTab = async (tab) => bootstrap.switchTab(state, el, tab, {
     populatePlaylistPanel,
     refreshCurrentPlaylistTracks,
     renderEventLog,
+    renderBackups,
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     documentObj: document,
     renderWaveformsIn,
@@ -1300,6 +1316,7 @@ function restoreStoredUiPrefs() {
     constants: {
       STORAGE_KEY_EXPORT_PRUNE_STALE,
       STORAGE_KEY_EXPORT_BACKUP,
+      STORAGE_KEY_BACKUP_RETENTION_COUNT,
       STORAGE_KEY_ANALYSIS_BPM_RANGE,
       STORAGE_KEY_ANALYSIS_ENGINE,
       STORAGE_KEY_SIDEBAR_COLLAPSED,
@@ -1362,6 +1379,8 @@ function bindEvents() {
       FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
       STORAGE_KEY_EXPORT_BACKUP,
       FRONTEND_DB_KEY_EXPORT_BACKUP,
+      STORAGE_KEY_BACKUP_RETENTION_COUNT,
+      FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT,
       STORAGE_KEY_ANALYSIS_BPM_RANGE,
       FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
       STORAGE_KEY_ANALYSIS_ENGINE,
@@ -1372,6 +1391,7 @@ function bindEvents() {
     emitStatus,
     closeSettingsDrawer,
     renderEventLog,
+    renderBackups,
     switchView,
     deletePlaylist,
     startPlaylistRename,

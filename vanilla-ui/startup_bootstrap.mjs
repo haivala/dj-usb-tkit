@@ -75,6 +75,17 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
   }
 
   try {
+    const stored = localStorageObj?.getItem?.(constants.STORAGE_KEY_BACKUP_RETENTION_COUNT);
+    const parsed = stored === null ? NaN : Number.parseInt(stored, 10);
+    state.backupRetentionCount = Number.isFinite(parsed) && parsed >= 1 ? parsed : 10;
+  } catch {
+    state.backupRetentionCount = 10;
+  }
+  if (el.backupRetentionCountInput) {
+    el.backupRetentionCountInput.value = String(state.backupRetentionCount);
+  }
+
+  try {
     const stored = localStorageObj?.getItem?.(constants.STORAGE_KEY_ANALYSIS_BPM_RANGE);
     state.analysisBpmRange = normalizeAnalysisBpmRange(stored || defaultAnalysisBpmRange);
   } catch {
@@ -336,6 +347,7 @@ export async function switchView(state, el, viewId, deps = {}) {
     populatePlaylistPanel = () => {},
     refreshCurrentPlaylistTracks = async () => {},
     renderEventLog = () => {},
+    renderBackups = async () => {},
     requestAnimationFrameFn = (cb) => cb(),
     documentObj = typeof document !== "undefined" ? document : null,
     renderWaveformsIn = () => {}
@@ -378,6 +390,8 @@ export async function switchView(state, el, viewId, deps = {}) {
     }
   } else if (viewId === "event-log") {
     renderEventLog();
+  } else if (viewId === "backups") {
+    await renderBackups();
   }
 
   requestAnimationFrameFn(() => {

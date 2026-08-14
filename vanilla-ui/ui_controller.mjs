@@ -4,6 +4,7 @@ import { bindPlaylistEvents } from "./components/playlist/events.mjs";
 import { bindUsbEvents } from "./components/usb/events.mjs";
 import { bindSettingsEvents } from "./components/settings/events.mjs";
 import { bindEventLogEvents } from "./components/event-log/events.mjs";
+import { bindBackupsEvents } from "./components/backups/events.mjs";
 import { bindShellEvents } from "./components/shell/events.mjs";
 import { initTooltips } from "./tooltip.mjs";
 
@@ -62,6 +63,12 @@ export function updateModeText(state, el, deps) {
   el.badgeLabel.textContent = current.name;
   updateAddToPlaylistButtons();
   updateActivePlaylistIndicators();
+}
+
+export function updateUsbNameBadge(state, el) {
+  if (!el?.usbNameBadge || !el?.usbNameBadgeLabel) return;
+  const name = String(state.usbDeviceName || "").trim();
+  el.usbNameBadgeLabel.textContent = name || "Not connected";
 }
 
 export function updateSelectionCount(state, el) {
@@ -123,24 +130,24 @@ export function closeSettingsDrawer(el) {
 }
 
 export function updateUsbHealthDot(el, status) {
-  if (!el.usbHealthDot) return;
-  el.usbHealthDot.classList.remove("health-pass", "health-warn", "health-fail");
-  const setTooltip = (text) => {
-    el.usbHealthDot.dataset.tooltip = text;
-    el.usbHealthDot.setAttribute("aria-label", text);
-  };
-  if (status === "PASS") {
-    el.usbHealthDot.classList.add("health-pass");
-    setTooltip("USB health: good");
-  } else if (status === "WARN") {
-    el.usbHealthDot.classList.add("health-warn");
-    setTooltip("USB health: warnings");
-  } else if (status === "FAIL") {
-    el.usbHealthDot.classList.add("health-fail");
-    setTooltip("USB health: issues found");
-  } else {
-    setTooltip("USB health: unknown");
-  }
+  const dots = [el.usbHealthDot, el.usbHeaderHealthDot].filter(Boolean);
+  if (!dots.length) return;
+  const className =
+    status === "PASS" ? "health-pass" :
+    status === "WARN" ? "health-warn" :
+    status === "FAIL" ? "health-fail" :
+    null;
+  const tooltip =
+    status === "PASS" ? "USB health: good" :
+    status === "WARN" ? "USB health: warnings" :
+    status === "FAIL" ? "USB health: issues found" :
+    "USB health: unknown";
+  dots.forEach((dot) => {
+    dot.classList.remove("health-pass", "health-warn", "health-fail");
+    if (className) dot.classList.add(className);
+    dot.dataset.tooltip = tooltip;
+    dot.setAttribute("aria-label", tooltip);
+  });
 }
 
 export function syncLibraryOnboardingMode(state, document) {
@@ -257,6 +264,7 @@ export function bindEvents(ctx) {
   bindShellEvents(ctx);
   bindSettingsEvents(ctx);
   bindEventLogEvents(ctx);
+  bindBackupsEvents(ctx);
   bindLibraryEvents(ctx);
   bindUsbEvents(ctx);
   bindPlaylistEvents(ctx);

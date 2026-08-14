@@ -68,5 +68,5 @@ test("createEventLogState uses configured max entries", () => {
 });
 
 test("STATIC_TABS lists the static navigation ids", () => {
-  assert.deepEqual(STATIC_TABS, ["library", "usb", "usb-playlists", "usb-history", "usb-player-menu", "event-log"]);
+  assert.deepEqual(STATIC_TABS, ["library", "usb", "usb-playlists", "usb-history", "usb-player-menu", "event-log", "backups"]);
 });

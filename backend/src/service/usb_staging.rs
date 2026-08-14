@@ -118,12 +118,21 @@ fn cache_root() -> Option<PathBuf> {
     CACHE_ROOT.lock().unwrap().clone()
 }
 
+/// A named drive's cache key is its slugged name, so the same physical drive
+/// reuses the same cache dir regardless of which port/mount path the OS
+/// assigns it this time. Unnamed drives (not yet through the naming prompt,
+/// or a test's arbitrary temp dir) fall back to the old mount-path hash,
+/// prefixed so the two key spaces can never collide.
 fn cache_key_for_root(usb_root: &Path) -> String {
+    if let Some(name) = super::usb_identity::read_drive_name(usb_root) {
+        return super::usb_identity::slug(&name);
+    }
+
     use std::hash::{Hash, Hasher};
     let normalized = normalize_source_root_for_matching(&usb_root.to_string_lossy());
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     normalized.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    format!("unnamed-{:016x}", hasher.finish())
 }
 
 fn device_dir_for(cache_root: Option<&Path>, usb_root: &Path) -> Option<PathBuf> {
@@ -132,6 +141,23 @@ fn device_dir_for(cache_root: Option<&Path>, usb_root: &Path) -> Option<PathBuf>
 
 fn local_vendor_db_dir(device_dir: &Path) -> PathBuf {
     device_dir.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
+}
+
+/// The HDD-cache-side `backups/` dir for `usb_root`'s device (mirrors the
+/// USB-side `PIONEER/rekordbox/backups/` layout), or `None` when staging is
+/// disabled (no cache root configured) or the drive has no stable cache
+/// directory yet (see `cache_key_for_root`'s unnamed-drive fallback --
+/// archiving into a key that will change once the drive is later named
+/// would just orphan the archive, so callers should treat `None` here as
+/// "don't archive yet").
+pub(crate) fn backups_dir_for(usb_root: &Path) -> Option<PathBuf> {
+    // Require a name, not just a configured cache root: an unnamed drive's
+    // cache key is the unstable mount-path hash (see `cache_key_for_root`),
+    // so archiving into it now would just orphan the archive once the drive
+    // is later named and its cache key changes.
+    super::usb_identity::read_drive_name(usb_root)?;
+    device_dir_for(cache_root().as_deref(), usb_root)
+        .map(|device_dir| local_vendor_db_dir(&device_dir).join("backups"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -457,6 +483,35 @@ mod tests {
         std::fs::create_dir_all(&db_dir).unwrap();
         std::fs::write(db_dir.join("exportLibrary.db"), bytes).unwrap();
         dir.to_path_buf()
+    }
+
+    #[test]
+    fn cache_key_for_root_uses_drive_name_when_named() {
+        let usb = tempdir().unwrap();
+        crate::service::usb_identity::write_drive_name(usb.path(), "Club Stick").unwrap();
+        assert_eq!(cache_key_for_root(usb.path()), "club-stick");
+    }
+
+    #[test]
+    fn cache_key_for_root_falls_back_to_unnamed_hash() {
+        let usb = tempdir().unwrap();
+        assert!(cache_key_for_root(usb.path()).starts_with("unnamed-"));
+    }
+
+    #[test]
+    fn cache_key_for_root_is_stable_across_different_mount_paths_when_named() {
+        // Two different "mount paths" (temp dirs) sharing a name must yield
+        // the same cache key -- this is the whole point of naming: identity
+        // survives a mount path the OS can reassign, unlike the unnamed hash
+        // fallback which is keyed on that very path.
+        let usb_a = tempdir().unwrap();
+        let usb_b = tempdir().unwrap();
+        crate::service::usb_identity::write_drive_name(usb_a.path(), "Club Stick").unwrap();
+        crate::service::usb_identity::write_drive_name(usb_b.path(), "Club Stick").unwrap();
+        assert_eq!(
+            cache_key_for_root(usb_a.path()),
+            cache_key_for_root(usb_b.path())
+        );
     }
 
     // These tests exercise "staging enabled" behavior entirely through the

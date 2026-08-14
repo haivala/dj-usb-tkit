@@ -538,6 +538,88 @@ pub struct PruneUsbDeviceData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GetUsbDeviceNameRequest {
+    pub usb_root: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsbDeviceNameData {
+    pub name: Option<String>,
+    /// Best-effort guess at a name, drawn from the OS's own filesystem label
+    /// when the root is on a real removable USB device. Only populated when
+    /// `name` is `None` -- purely a prefill suggestion for the naming
+    /// prompt, never applied automatically.
+    #[serde(default)]
+    pub suggested_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetUsbDeviceNameRequest {
+    pub usb_root: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetUsbDeviceNameData {
+    pub saved: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUsbBackupsRequest {
+    pub usb_root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbBackupEntry {
+    pub stem: String,
+    pub filename: String,
+    pub timestamp: String,
+    pub size_bytes: u64,
+    /// "usb" or "cache"
+    pub location: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUsbBackupsData {
+    pub items: Vec<UsbBackupEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreUsbBackupRequest {
+    pub usb_root: String,
+    pub stem: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreUsbBackupData {
+    pub restored: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteUsbBackupRequest {
+    pub usb_root: String,
+    pub stem: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteUsbBackupData {
+    pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsbTrack {
     pub id: String,
     #[serde(default)]

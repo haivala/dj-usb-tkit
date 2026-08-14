@@ -29,7 +29,6 @@ use super::usb_utils::{
     load_existing_analysis_paths_by_content_path, load_existing_analysis_paths_by_pdb_track_path,
     resolve_usb_root, resolve_usb_side_path,
 };
-use super::usb_vendor_compat::backup_usb_databases;
 use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, now};
 use uuid::Uuid;
 
@@ -482,9 +481,9 @@ impl BackendService {
         } else {
             if options.backup_before_export {
                 warnings.extend(
-                    backup_usb_databases(&usb_root).into_iter().map(|message| {
-                        logging::log(Level::Info, "export", "export.backup", message)
-                    }),
+                    self.backup_usb_databases_with_retention(&usb_root)
+                        .into_iter()
+                        .map(|message| logging::log(Level::Info, "export", "export.backup", message)),
                 );
             }
             // Write eDB first (master), then sync PDB to match eDB playlist IDs

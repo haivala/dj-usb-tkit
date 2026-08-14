@@ -44,9 +44,17 @@
       <div class="status" id="statusText">Idle</div>
       <button class="help-btn" id="helpBtn" data-tooltip="Help" aria-label="Help">?</button>
       <button class="settings-btn" id="settingsBtn" data-tooltip="Settings" aria-label="Settings">&#9881;</button>
-      <div class="playlist-badge inactive" id="playlistBadge">
-        <span class="badge-dot"></span>
-        <span id="badgeLabel">No active playlist</span>
+      <div class="header-export-stack">
+        <div class="playlist-badge inactive" id="playlistBadge">
+          <span class="playlist-header-dot"></span>
+          <span class="header-stat-label">Playlist</span>
+          <span class="header-stat-value" id="badgeLabel">No active playlist</span>
+        </div>
+        <div class="usb-name-badge" id="usbNameBadge">
+          <span class="usb-health-dot" id="usbHeaderHealthDot" data-tooltip="USB health unknown" aria-label="USB health unknown"></span>
+          <span class="header-stat-label">USB</span>
+          <span class="header-stat-value" id="usbNameBadgeLabel">Not connected</span>
+        </div>
       </div>
     </div>
   </header>
@@ -394,6 +402,15 @@
         <p class="muted" id="eventLogSummary">No entries</p>
         <div class="event-log-list" id="eventLogList" role="log" aria-live="polite"></div>
       </section>
+
+      <section class="panel" id="panel-backups" role="tabpanel" aria-hidden="true">
+        <h2>Backups</h2>
+        <div class="event-log-toolbar">
+          <button id="backupsRefreshBtn">Refresh</button>
+        </div>
+        <p class="muted" id="backupsSummary">No entries</p>
+        <div class="event-log-list" id="backupsList" role="log" aria-live="polite"></div>
+      </section>
     </main>
   </div>
 
@@ -474,10 +491,16 @@
           <span>Back up PDB and eDB before export</span>
           <span class="muted usb-cfg-toggle-hint">Copies PDB and eDB to backups folder next to them with a timestamp before each export.</span>
         </label>
+        <label class="usb-cfg-toggle-row" for="backupRetentionCountInput">
+          <input type="number" id="backupRetentionCountInput" min="1" max="999" value="10" />
+          <span>Backups to keep per file</span>
+          <span class="muted usb-cfg-toggle-hint">The newest backup always stays on the USB; older ones are archived on this computer up to this count, then pruned.</span>
+        </label>
       </div>
       <div class="settings-section">
         <div class="settings-section-label">Tools</div>
         <button id="openEventLogBtn">Open Event Log</button>
+        <button id="openBackupsBtn">Open Backups</button>
       </div>
       <div class="settings-footer">
         <span class="settings-version" id="settingsVersionText">Version 0.1.0-RC3</span>
@@ -498,6 +521,19 @@
       <div class="progress-fill" id="progressFill"></div>
     </div>
   </footer>
+
+  <div class="confirm-overlay" id="driveNameOverlay" hidden>
+    <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="driveNameTitle">
+      <h3 id="driveNameTitle">Name This Drive</h3>
+      <p class="muted">Give this USB a name so backups and local caching can reliably follow it, even on a different computer. If this is a real USB drive with a volume label, it's pre-filled below — edit it or replace it with your own.</p>
+      <input type="text" id="driveNameInput" maxlength="80" placeholder="e.g. Club Stick" />
+      <p class="muted" id="driveNameError" hidden></p>
+      <div class="row confirm-actions">
+        <button id="driveNameSkipBtn">Not now</button>
+        <button id="driveNameOkBtn" data-primary>Save</button>
+      </div>
+    </div>
+  </div>
 
   <div class="confirm-overlay" id="confirmOverlay" hidden>
     <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">

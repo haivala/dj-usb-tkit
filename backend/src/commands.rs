@@ -7,25 +7,27 @@ use crate::models::{
     AddTracksToPlaylistData, AddTracksToPlaylistRequest, AnalyzeNewTracksData,
     AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
     CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
-    DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData, ExportToUsbData,
-    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData, DeleteUsbBackupRequest,
+    DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
+    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
+    GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
     InspectUsbTracksRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
-    PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
-    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
-    SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
+    ResolvePlaybackSourceRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
+    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
+    RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
+    SearchTracksData, SearchTracksRequest, SetAnalysisPausedData, SetFrontendSettingData,
+    SetFrontendSettingRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
     ValidateUsbRootRequest,
 };
@@ -197,6 +199,38 @@ impl BackendCommands {
 
     pub fn prune_usb_device(&self, req: PruneUsbDeviceRequest) -> ApiResponse<PruneUsbDeviceData> {
         wrap(self.service.prune_usb_device(req))
+    }
+
+    pub fn get_usb_device_name(
+        &self,
+        req: GetUsbDeviceNameRequest,
+    ) -> ApiResponse<GetUsbDeviceNameData> {
+        wrap(self.service.get_usb_device_name(req))
+    }
+
+    pub fn set_usb_device_name(
+        &self,
+        req: SetUsbDeviceNameRequest,
+    ) -> ApiResponse<SetUsbDeviceNameData> {
+        wrap(self.service.set_usb_device_name(req))
+    }
+
+    pub fn list_usb_backups(&self, req: ListUsbBackupsRequest) -> ApiResponse<ListUsbBackupsData> {
+        wrap(self.service.list_usb_backups(req))
+    }
+
+    pub fn restore_usb_backup(
+        &self,
+        req: RestoreUsbBackupRequest,
+    ) -> ApiResponse<RestoreUsbBackupData> {
+        wrap(self.service.restore_usb_backup(req))
+    }
+
+    pub fn delete_usb_backup(
+        &self,
+        req: DeleteUsbBackupRequest,
+    ) -> ApiResponse<DeleteUsbBackupData> {
+        wrap(self.service.delete_usb_backup(req))
     }
 
     pub fn merge_orphaned_usb_placeholder_tracks(

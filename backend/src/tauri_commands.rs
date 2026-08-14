@@ -14,27 +14,29 @@ use crate::models::{
     AddTracksToPlaylistData, AddTracksToPlaylistRequest, AnalyzeNewTracksData,
     AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
     CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
-    DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData, ExportToUsbData,
-    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData, DeleteUsbBackupRequest,
+    DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
+    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
+    GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
     InspectUsbTracksRequest, JobEventPayload, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
-    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest,
+    PlaybackEventPayload, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
+    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
-    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest, StopPlaybackData,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
-    ValidateUsbRootRequest,
+    ResolvePlaybackSourceRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
+    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
+    RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
+    SearchTracksData, SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetUsbDeviceNameData,
+    SetUsbDeviceNameRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -730,6 +732,46 @@ pub fn prune_usb_device(
     request: PruneUsbDeviceRequest,
 ) -> ApiResponse<PruneUsbDeviceData> {
     state.prune_usb_device(request)
+}
+
+#[tauri::command]
+pub fn get_usb_device_name(
+    state: State<'_, BackendCommands>,
+    request: GetUsbDeviceNameRequest,
+) -> ApiResponse<GetUsbDeviceNameData> {
+    state.get_usb_device_name(request)
+}
+
+#[tauri::command]
+pub fn set_usb_device_name(
+    state: State<'_, BackendCommands>,
+    request: SetUsbDeviceNameRequest,
+) -> ApiResponse<SetUsbDeviceNameData> {
+    state.set_usb_device_name(request)
+}
+
+#[tauri::command]
+pub fn list_usb_backups(
+    state: State<'_, BackendCommands>,
+    request: ListUsbBackupsRequest,
+) -> ApiResponse<ListUsbBackupsData> {
+    state.list_usb_backups(request)
+}
+
+#[tauri::command]
+pub fn restore_usb_backup(
+    state: State<'_, BackendCommands>,
+    request: RestoreUsbBackupRequest,
+) -> ApiResponse<RestoreUsbBackupData> {
+    state.restore_usb_backup(request)
+}
+
+#[tauri::command]
+pub fn delete_usb_backup(
+    state: State<'_, BackendCommands>,
+    request: DeleteUsbBackupRequest,
+) -> ApiResponse<DeleteUsbBackupData> {
+    state.delete_usb_backup(request)
 }
 
 #[tauri::command]

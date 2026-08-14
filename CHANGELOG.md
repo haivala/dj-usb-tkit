@@ -30,6 +30,39 @@
 
 ## Unreleased
 
+- **New feature:** the top status line now shows the active playlist and the connected USB drive's
+  name stacked together, each with a status dot (accent-colored when a playlist is active; health-
+  colored — pass/warn/fail — for the USB drive, from the last diagnostics run). Both are always
+  visible, showing "No active playlist" / "Not connected" as placeholders rather than disappearing
+  when there's nothing to show.
+- **New feature:** USB DB backups (`export.pdb`/`exportLibrary.db` snapshots, taken before every
+  export/reorder/remove-playlist/repair/menu-config change) now have a dedicated **Backups** panel
+  (Settings → Open Backups) to list, restore, and delete individual snapshots. The newest backup
+  per file always stays on the USB stick, so it travels with the drive to any computer; older
+  backups are moved to the local HDD staging cache instead of accumulating forever on the (often
+  space-constrained) USB drive. How many backups to keep in total is configurable in Settings
+  (default 10) instead of growing unbounded.
+- **New feature:** USB drives can now be given a name (prompted once, the first time a valid,
+  unnamed drive is connected). The name is stored both in a small marker file on the drive itself
+  and locally, so the same physical drive keeps its identity across replugs, different USB ports,
+  and even different computers — something the previous mount-path-based identity couldn't do.
+  Naming also fixes a pre-existing bug where the local HDD staging cache could pick a new,
+  unrelated folder for the same drive after a replug (its cache key was derived from the OS-assigned
+  mount path, which isn't guaranteed to stay the same). If the selected folder is on an actual
+  removable USB device, the drive's own filesystem volume label is read (via `GetVolumeInformationW`
+  on Windows, DiskArbitration on macOS, `/dev/disk/by-label` on Linux) and pre-filled into the
+  naming prompt as a suggestion — the user can still edit or replace it before saving.
+- **Fix:** the "Name this drive" prompt could get stuck open with no way to dismiss it, silently
+  blocking every click in the app (it's a full-viewport overlay) until a name was entered and
+  saved. It's now dismissible via Escape, a backdrop click, or an explicit "Not now" button. It
+  also no longer opens on an ambiguous/unexpected response from the backend's name lookup — only
+  an explicit "this drive has no name" answer triggers it, rather than treating any response
+  without a `name` field as "unnamed".
+- **Fix:** the drive-naming prompt (see above) never actually appeared for any USB
+  already known from a normal connect (i.e. every real-world case except a device the app had
+  truly never seen before) -- `get_usb_device_name` read the `usb_devices.label` column as a plain
+  string instead of an optional one, so an unnamed device's `NULL` label errored out of the lookup
+  entirely instead of being read as "no name yet".
 - **Chore:** removed the dead `patch_pdb_columns_menu_order_by_kind` / `patch_pdb_columns_playlist_first`
   helpers from `pdb_menu.rs`. They had no callers and bypassed the staging cache, unlike the rest of
   the PDB write path.

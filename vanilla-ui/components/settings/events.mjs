@@ -83,6 +83,8 @@ export function bindSettingsEvents(ctx) {
     FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
     STORAGE_KEY_EXPORT_BACKUP,
     FRONTEND_DB_KEY_EXPORT_BACKUP,
+    STORAGE_KEY_BACKUP_RETENTION_COUNT,
+    FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT,
     STORAGE_KEY_ANALYSIS_BPM_RANGE,
     FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
     STORAGE_KEY_ANALYSIS_ENGINE,
@@ -149,6 +151,25 @@ export function bindSettingsEvents(ctx) {
       state.exportBackup ? "1" : "0"
     );
     setStatus(state.exportBackup ? "Export backup: enabled" : "Export backup: disabled");
+  });
+
+  el.backupRetentionCountInput?.addEventListener("change", (event) => {
+    const parsed = Number.parseInt(event?.target?.value, 10);
+    const count = Number.isFinite(parsed) && parsed >= 1 ? Math.min(parsed, 999) : 10;
+    state.backupRetentionCount = count;
+    if (el.backupRetentionCountInput.value !== String(count)) {
+      el.backupRetentionCountInput.value = String(count);
+    }
+    persistSetting(STORAGE_KEY_BACKUP_RETENTION_COUNT, FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT, String(count));
+    setStatus(`Backups to keep per file: ${count}`);
+  });
+
+  el.openBackupsBtn?.addEventListener("click", () => {
+    closeSettingsDrawer();
+    switchView("backups").catch((err) => {
+      console.error(err);
+      setStatus(err.message || String(err));
+    });
   });
 
   el.analysisBpmRangeSelect?.addEventListener("change", (event) => {

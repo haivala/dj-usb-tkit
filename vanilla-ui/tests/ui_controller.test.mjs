@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import {
   setStatusText,
   updateModeText,
+  updateUsbNameBadge,
   updateActivePlaylistIndicators,
   updateAddToPlaylistButtons,
   updateSelectionCount,
@@ -27,6 +28,8 @@ function makeDom() {
       <div id="statusText"></div>
       <div id="playlistBadge" class="playlist-badge inactive"></div>
       <div id="badgeLabel"></div>
+      <div id="usbNameBadge" class="usb-name-badge"></div>
+      <div id="usbNameBadgeLabel"></div>
       <ul id="navPlaylistList">
         <li><button class="nav-playlist-item" data-playlist-id="p1"></button></li>
         <li><button class="nav-playlist-item" data-playlist-id="p2"></button></li>
@@ -50,6 +53,7 @@ function makeDom() {
       <div id="settingsDrawer"></div>
       <div id="settingsBackdrop"></div>
       <div id="usbHealthDot"></div>
+      <div id="usbHeaderHealthDot"></div>
     </body>
   `);
 }
@@ -87,6 +91,23 @@ test("updateModeText reflects current playlist and delegates indicator updates",
   assert.equal(el.badgeLabel.textContent, "House");
   assert.equal(addCalls, 1);
   assert.equal(indicatorCalls, 1);
+});
+
+test("updateUsbNameBadge always shows the block, falling back to placeholder text when unset", () => {
+  const dom = makeDom();
+  const document = dom.window.document;
+  const el = {
+    usbNameBadge: document.getElementById("usbNameBadge"),
+    usbNameBadgeLabel: document.getElementById("usbNameBadgeLabel")
+  };
+
+  updateUsbNameBadge({ usbDeviceName: "Club Stick" }, el);
+  assert.equal(el.usbNameBadge.classList.contains("hidden"), false);
+  assert.equal(el.usbNameBadgeLabel.textContent, "Club Stick");
+
+  updateUsbNameBadge({ usbDeviceName: null }, el);
+  assert.equal(el.usbNameBadge.classList.contains("hidden"), false);
+  assert.equal(el.usbNameBadgeLabel.textContent, "Not connected");
 });
 
 test("updateActivePlaylistIndicators marks the active playlist button", () => {
@@ -185,7 +206,8 @@ test("updateSourceFilterIndicator, updateScanLibraryButtonLabel, closeSettingsDr
     scanLibraryBtn: document.getElementById("scanLibraryBtn"),
     settingsDrawer: document.getElementById("settingsDrawer"),
     settingsBackdrop: document.getElementById("settingsBackdrop"),
-    usbHealthDot: document.getElementById("usbHealthDot")
+    usbHealthDot: document.getElementById("usbHealthDot"),
+    usbHeaderHealthDot: document.getElementById("usbHeaderHealthDot")
   };
 
   updateSourceFilterIndicator({ sourceRoots: ["/a"], sourceRootEnabled: { "/a": false } }, el);
@@ -203,6 +225,9 @@ test("updateSourceFilterIndicator, updateScanLibraryButtonLabel, closeSettingsDr
   assert.equal(el.usbHealthDot.classList.contains("health-warn"), true);
   assert.equal(el.usbHealthDot.dataset.tooltip, "USB health: warnings");
   assert.equal(el.usbHealthDot.getAttribute("aria-label"), "USB health: warnings");
+  assert.equal(el.usbHeaderHealthDot.classList.contains("health-warn"), true);
+  assert.equal(el.usbHeaderHealthDot.dataset.tooltip, "USB health: warnings");
+  assert.equal(el.usbHeaderHealthDot.getAttribute("aria-label"), "USB health: warnings");
   assert.equal(document.body.classList.contains("library-onboarding"), true);
 });
 

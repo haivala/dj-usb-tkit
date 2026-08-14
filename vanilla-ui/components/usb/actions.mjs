@@ -318,6 +318,11 @@ export function showDiagRepairView(el) {
 }
 
 export function hideUsbDiagnostics(el) {
+  [el.usbHealthDot, el.usbHeaderHealthDot].filter(Boolean).forEach((dot) => {
+    dot.classList.remove("health-pass", "health-warn", "health-fail");
+    dot.dataset.tooltip = "USB health: unknown";
+    dot.setAttribute("aria-label", "USB health: unknown");
+  });
   if (el.usbDiagnosticsCard) {
     el.usbDiagnosticsCard.classList.add("hidden");
   }
@@ -640,6 +645,123 @@ export async function detectExternalMasterDb(state, el, deps) {
   renderSourceChips?.();
 }
 
+// Prompts for (and saves) a name for `state.usbRoot` if it doesn't have one
+// yet. A name is this app's only notion of stable drive identity (see
+// `usb_identity` on the backend) -- it's what lets backups and local
+// staging caching correctly recognize "this is the same drive" again after
+// a replug or a different computer, where the OS-assigned mount path can't.
+// Best-effort: any failure to even check/show the prompt just lets the user
+// continue unnamed rather than blocking USB use entirely.
+async function promptDriveNameIfUnset(state, el, deps = {}) {
+  const { command, documentObj, updateUsbNameBadge = () => {} } = deps;
+  const emitStatus = resolveEmitStatus(deps);
+  // Reset first: a stale name from whatever drive was connected before must
+  // never linger on screen while this one's actual name is still unknown.
+  state.usbDeviceName = null;
+  updateUsbNameBadge();
+  if (!state.usbRoot || typeof command !== "function") return;
+
+  let existingName;
+  let suggestedName = "";
+  try {
+    const data = await command("get_usb_device_name", { usbRoot: state.usbRoot });
+    // Fail closed: only trust an explicit "name" field as the real answer.
+    // A response that doesn't even look like GetUsbDeviceNameData (e.g. an
+    // unmocked test double, or a future API change) must never be read as
+    // "definitely unnamed" -- that would pop a prompt that blocks the whole
+    // UI (see below) based on a guess instead of a real answer.
+    if (!data || typeof data !== "object" || !("name" in data)) {
+      console.warn("[usb] get_usb_device_name returned an unexpected shape, skipping naming prompt:", data);
+      return;
+    }
+    existingName = data.name;
+    suggestedName = String(data.suggestedName || "").trim();
+  } catch (err) {
+    console.warn("[usb] get_usb_device_name failed, skipping naming prompt:", err);
+    emitStatus(`Could not check this drive's name: ${err?.message || err}`);
+    return;
+  }
+  if (existingName) {
+    state.usbDeviceName = existingName;
+    updateUsbNameBadge();
+    return;
+  }
+
+  const doc = documentObj ?? (typeof document !== "undefined" ? document : null);
+  const overlay = el.driveNameOverlay;
+  if (!doc || !overlay || !el.driveNameInput || !el.driveNameOkBtn) {
+    console.warn("[usb] drive-naming prompt DOM elements missing, skipping prompt", {
+      hasDoc: !!doc,
+      hasOverlay: !!overlay,
+      hasInput: !!el.driveNameInput,
+      hasOkBtn: !!el.driveNameOkBtn
+    });
+    return;
+  }
+
+  // This overlay is full-viewport and intercepts every click while open, so
+  // it must never be able to get stuck there -- Escape, a backdrop click,
+  // and an explicit "Not now" button all close it without a name, in
+  // addition to Save. A prompt with no way out would silently freeze the
+  // entire app if anything about it ever misbehaves.
+  await new Promise((resolve) => {
+    el.driveNameInput.value = suggestedName;
+    if (el.driveNameError) el.driveNameError.hidden = true;
+    overlay.hidden = false;
+    el.driveNameInput.focus();
+    el.driveNameInput.select();
+
+    const cleanup = () => {
+      overlay.hidden = true;
+      el.driveNameOkBtn.removeEventListener("click", onSave);
+      el.driveNameSkipBtn?.removeEventListener("click", onSkip);
+      el.driveNameInput.removeEventListener("keydown", onEnter);
+      doc.removeEventListener("keydown", onEscape);
+      overlay.removeEventListener("click", onOverlayClick);
+    };
+    const onSave = async () => {
+      const name = String(el.driveNameInput.value || "").trim();
+      if (!name) {
+        if (el.driveNameError) {
+          el.driveNameError.textContent = "Enter a name for this drive.";
+          el.driveNameError.hidden = false;
+        }
+        return;
+      }
+      try {
+        await command("set_usb_device_name", { usbRoot: state.usbRoot, name });
+        state.usbDeviceName = name;
+        updateUsbNameBadge();
+        cleanup();
+        resolve();
+      } catch (err) {
+        if (el.driveNameError) {
+          el.driveNameError.textContent = err?.message || String(err);
+          el.driveNameError.hidden = false;
+        }
+      }
+    };
+    const onSkip = () => {
+      cleanup();
+      resolve();
+    };
+    const onEnter = (event) => {
+      if (event.key === "Enter") onSave();
+    };
+    const onEscape = (event) => {
+      if (event.key === "Escape") onSkip();
+    };
+    const onOverlayClick = (event) => {
+      if (event.target === overlay) onSkip();
+    };
+    el.driveNameOkBtn.addEventListener("click", onSave);
+    el.driveNameSkipBtn?.addEventListener("click", onSkip);
+    el.driveNameInput.addEventListener("keydown", onEnter);
+    doc.addEventListener("keydown", onEscape);
+    overlay.addEventListener("click", onOverlayClick);
+  });
+}
+
 export async function validateAndSetUsbRoot(state, el, path, silent = false, deps) {
   const {
     command,
@@ -670,6 +792,8 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
     state.usbRoot = null;
     state.usbRootValid = false;
     state.usbNeedsInit = false;
+    state.usbDeviceName = null;
+    deps.updateUsbNameBadge?.();
     persistUsbRoot(null);
     updateUsbRootText(null, false);
     el.usbInitRow.classList.add("hidden");
@@ -714,6 +838,14 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
   updateUsbConfigControlsVisibility();
   updateUsbSubNavDisabledState();
   updatePlaylistExportButtons();
+  if (valid) {
+    await promptDriveNameIfUnset(state, el, deps);
+  } else {
+    // Invalid/uninitialized root: clear any name badge left over from
+    // whatever drive was previously connected -- it no longer applies.
+    state.usbDeviceName = null;
+    deps.updateUsbNameBadge?.();
+  }
   if (!silent) {
     if (valid) {
       const selectedWarningText = joinWarningTexts(result?.warnings);
