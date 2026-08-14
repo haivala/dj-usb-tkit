@@ -30,6 +30,9 @@
 
 ## Unreleased
 
+- **Chore:** removed the dead `patch_pdb_columns_menu_order_by_kind` / `patch_pdb_columns_playlist_first`
+  helpers from `pdb_menu.rs`. They had no callers and bypassed the staging cache, unlike the rest of
+  the PDB write path.
 - **Fix:** removing a USB playlist now actually writes the eDB deletion back to the USB drive.
   Like the reorder bug below, the removal patched `exportLibrary.db` in the local staging cache
   only and never flushed it to the drive, so a removed playlist could reappear — the physical

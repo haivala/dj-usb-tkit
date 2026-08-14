@@ -284,61 +284,6 @@ pub fn inspect_pdb_columns_playlist_order(usb_root: &Path) -> BackendResult<Opti
     Ok(Some((playlist_idx != 0, rows.len())))
 }
 
-pub fn patch_pdb_columns_menu_order_by_kind(
-    usb_root: &Path,
-    desired_kinds: &[u16],
-) -> BackendResult<bool> {
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = 4096usize;
-    if bytes.len() < page_size || bytes.len() % page_size != 0 {
-        return Err(BackendError::Validation(
-            "PDB columns patch failed: invalid page alignment".to_string(),
-        ));
-    }
-
-    let (data_pages, rows) = load_pdb_t16_rows(&bytes, page_size)?;
-    if data_pages.is_empty() || rows.is_empty() {
-        return Ok(false);
-    }
-    let original_rows = rows.clone();
-    let mut remaining = rows;
-    let mut reordered = Vec::<Vec<u8>>::new();
-    let mut desired_left = desired_kinds.to_vec();
-    desired_left.dedup();
-    for kind in desired_left {
-        if let Some(idx) = remaining
-            .iter()
-            .position(|row| row_kind_u16(row) == Some(kind))
-        {
-            reordered.push(remaining.remove(idx));
-        }
-    }
-    reordered.extend(remaining);
-
-    for (idx, row) in reordered.iter_mut().enumerate() {
-        if row.len() >= 2 {
-            let row_id = u16::try_from(idx + 1).unwrap_or(u16::MAX);
-            row[0..2].copy_from_slice(&row_id.to_le_bytes());
-        }
-    }
-
-    if reordered == original_rows {
-        return Ok(false);
-    }
-
-    rewrite_pdb_t16_rows(&mut bytes, page_size, &data_pages, &reordered)?;
-    std::fs::write(&pdb_path, bytes)?;
-    Ok(true)
-}
-
-pub fn patch_pdb_columns_playlist_first(usb_root: &Path) -> BackendResult<bool> {
-    patch_pdb_columns_menu_order_by_kind(usb_root, &[132])
-}
-
 /// Rewrite the PDB `columns` table (t16) to exactly match `desired`, which is
 /// the ordered list of `(kind, display_name)` pairs that should appear on the
 /// player. Adds rows for kinds not currently in PDB, drops rows for kinds not in
@@ -608,61 +553,6 @@ mod tests {
             .expect("inspect")
             .expect("rows present");
         assert!(count > 0);
-    }
-
-    // --- patch_pdb_columns_menu_order_by_kind / patch_pdb_columns_playlist_first ---
-
-    #[test]
-    fn patch_pdb_columns_playlist_first_moves_playlist_kind_to_front_and_is_idempotent() {
-        let (_dir, usb_root) = test_usb_root();
-        let changed = patch_pdb_columns_playlist_first(&usb_root).expect("patch playlist first");
-        let after = load_pdb_t16_decoded(&usb_root).expect("decoded after");
-        assert_eq!(after[0].kind, 132);
-
-        let no_op = patch_pdb_columns_playlist_first(&usb_root).expect("patch again");
-        assert!(
-            !no_op,
-            "second call should be a no-op once already reordered"
-        );
-        let _ = changed;
-    }
-
-    #[test]
-    fn patch_pdb_columns_menu_order_by_kind_reorders_and_renumbers_ids() {
-        let (_dir, usb_root) = test_usb_root();
-        let before = load_pdb_t16_decoded(&usb_root).expect("decoded before");
-        let kinds: Vec<u16> = before.iter().map(|r| r.kind).collect();
-        assert!(kinds.len() >= 2, "fixture needs at least two columns rows");
-        let mut desired = kinds.clone();
-        desired.reverse();
-
-        let changed =
-            patch_pdb_columns_menu_order_by_kind(&usb_root, &desired).expect("patch order");
-        assert!(changed);
-
-        let after = load_pdb_t16_decoded(&usb_root).expect("decoded after");
-        assert_eq!(
-            after.iter().map(|r| r.kind).collect::<Vec<_>>(),
-            desired,
-            "row order should follow the desired kind order"
-        );
-        assert_eq!(
-            after[0].id, 1,
-            "row ids are renumbered 1..N in the new order"
-        );
-
-        let no_op = patch_pdb_columns_menu_order_by_kind(&usb_root, &desired).expect("patch again");
-        assert!(!no_op);
-    }
-
-    #[test]
-    fn patch_pdb_columns_menu_order_by_kind_errors_on_bad_alignment() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_dir = dir.path().join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
-        std::fs::create_dir_all(&db_dir).unwrap();
-        std::fs::write(db_dir.join("export.pdb"), vec![0u8; 100]).unwrap();
-        let err = patch_pdb_columns_menu_order_by_kind(dir.path(), &[1]).unwrap_err();
-        assert!(matches!(err, BackendError::Validation(_)));
     }
 
     // --- patch_pdb_columns_menu_set_by_kind ---
