@@ -103,6 +103,7 @@
   parses the PDB and opens the eDB once per chunk of tracks. Hydration still stops issuing
   further chunks and patching rows the moment the user selects a different playlist/history,
   so switching away mid-load no longer wastes backend work on a stale selection.
+- **Chore:** update deps
 
 ## 0.1.15
 
