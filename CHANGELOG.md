@@ -30,6 +30,15 @@
 
 ## Unreleased
 
+- **Fix:** the album string-alignment repair (`repair_pdb_album_string_alignment`) could silently
+  fail to fix rows that USB diagnostics flagged, when the affected album's original data page had
+  since been orphaned from the live PDB table chain (e.g. a track exported by an older,
+  pre-alignment-fix build was played on a CDJ — recording it into a PDB history playlist — and its
+  regular playlist was later removed). The repair only walked the live chain, while detection scans
+  every page in the file, so it could report success without touching the flagged row and USB
+  diagnostics would keep reporting the same misaligned album row after every repair attempt. The
+  repair now scans the same page range diagnostics does.
+
 ## 0.1.16
 
 - **New feature:** the top status line now shows the active playlist and the connected USB drive's

@@ -1424,18 +1424,30 @@ fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
             "Album string alignment repair blocked: t03 pointer missing".into(),
         )
     })?;
-    let chain = crate::utils::collect_chain(&bytes, page_size, first, last).ok_or_else(|| {
+    crate::utils::collect_chain(&bytes, page_size, first, last).ok_or_else(|| {
         BackendError::Validation("Album string alignment repair blocked: t03 chain invalid".into())
     })?;
 
+    // Scan every physical page stamped table_type=3, not just pages reachable by walking the
+    // first/last chain pointers -- matching `detect_pdb_string_misalignment`'s scope exactly.
+    // `ids` came from that same raw scan, so a chain-only walk here could silently fail to find
+    // (and thus never fix) a row `ids` named: e.g. a stale row left present on a page that an
+    // earlier rewrite orphaned from the live chain without touching its content.
     let mut rows: Vec<(u32, Vec<u8>)> = Vec::new();
-    for page_idx in chain.iter().copied().skip(1) {
+    let total_pages = bytes.len() / page_size;
+    for page_idx in 1..total_pages as u32 {
         let Some(off) = page_offset(page_idx, page_size) else {
             continue;
         };
         let Some(page) = bytes.get(off..off + page_size) else {
             continue;
         };
+        if read_u32_le_at(page, 4).unwrap_or(0) == 0 {
+            continue;
+        }
+        if read_u32_le_at(page, 8) != Some(3) {
+            continue;
+        }
         for slot in crate::pdb_writer::parse_page_row_slots(page, page_size) {
             if !slot.present || slot.start >= slot.end {
                 continue;
@@ -6567,6 +6579,67 @@ mod tests {
         assert_eq!(
             parsed.albums.get(&1).map(String::as_str),
             Some("Café Album")
+        );
+    }
+
+    /// Reproduces a real-world report: a track exported by an old (pre-alignment-fix) build was
+    /// played on a CDJ, which recorded it into a PDB history playlist; the user then removed the
+    /// track's regular playlist. A later library rewrite orphaned the album's original data page
+    /// from the live t03 chain (the table's first/last pointers moved on, e.g. because a fresh
+    /// growth page took over) without touching that page's still-`present` misaligned row.
+    /// `detect_pdb_string_misalignment` still finds it (it scans every physical page, not just
+    /// the live chain) and CDJ hardware can still choke on it, but the repair used to walk only
+    /// the live chain and would silently report success without ever touching the orphaned row.
+    #[test]
+    fn album_string_alignment_repair_fixes_row_orphaned_from_live_t03_chain() {
+        let mut bytes = build_seed_pdb_bytes_for_alignment_test();
+        corrupt_alignment_in_place(&mut bytes);
+        const PAGE_SIZE: usize = 4096;
+
+        // Orphan the t03 data page (still holding the misaligned album id=1 row) from the live
+        // chain by repointing the table's first/last pointers at a freshly-appended, empty page
+        // instead -- simulating a later rewrite that grew the table onto a new page without
+        // revisiting the old page's content.
+        let (ec, first, last) =
+            crate::utils::table_ptr_fields(&bytes, 3).expect("t03 pointer present");
+        let new_page = (bytes.len() / PAGE_SIZE) as u32;
+        bytes.extend(std::iter::repeat_n(0u8, PAGE_SIZE));
+        assert!(
+            crate::utils::set_table_ptr_fields(&mut bytes, 3, ec, new_page, new_page),
+            "repoint t03 first/last at the fresh empty page"
+        );
+        // Sanity: the orphaned page is unreachable from the new chain, but the row is still on
+        // disk and still flagged by the raw scan.
+        assert!(crate::utils::collect_chain(&bytes, PAGE_SIZE, new_page, new_page).is_some());
+        assert_ne!(first, new_page);
+        assert_ne!(last, new_page);
+
+        let td = tempdir().expect("tempdir");
+        let usb_root = td.path().to_path_buf();
+        let pdb_path = vendor_pdb_path(&usb_root);
+        std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
+        std::fs::write(&pdb_path, &bytes).expect("write corrupted pdb");
+
+        let found_before = detect_pdb_string_misalignment(&pdb_path);
+        assert!(
+            found_before.iter().any(|m| m.table_type == 3 && m.id == 1),
+            "raw scan must still find the orphaned misaligned album row"
+        );
+
+        let album_patched = apply_pdb_album_string_alignment_repair(&usb_root, &[1])
+            .expect("apply album repair");
+        assert_eq!(
+            album_patched, 1,
+            "repair must find and fix the orphaned row, not silently report 0"
+        );
+
+        assert!(
+            !detect_pdb_string_misalignment(&pdb_path)
+                .iter()
+                .any(|m| m.table_type == 3),
+            "no misaligned album rows should remain after repair, including orphaned ones \
+             (the seed's track row was left deliberately uncorrected -- only album alignment \
+             is under test here)"
         );
     }
 

@@ -4854,7 +4854,15 @@ pub(crate) fn realign_dictionary_rows_in_place(
             "PDB dictionary row realignment blocked: table {table_type} pointer missing"
         ))
     })?;
-    let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
+    // Chain validity is still required below to append the relocated rows, but the *search* for
+    // rows to relocate deliberately scans every physical page stamped with this table type,
+    // exactly like `detect_pdb_string_misalignment` does -- not just pages reachable by walking
+    // the first/last chain pointers. A page can hold a stale row that's still `present` (e.g.
+    // left behind, orphaned from the live chain, by an earlier rewrite that only touched
+    // currently-referenced rows) while `detect_pdb_string_misalignment`'s raw scan still finds
+    // it; walking only the chain here would silently leave such rows unfixed while this function
+    // still reports success.
+    collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
         BackendError::Validation(format!(
             "PDB dictionary row realignment blocked: table {table_type} chain invalid"
         ))
@@ -4863,13 +4871,20 @@ pub(crate) fn realign_dictionary_rows_in_place(
     let mut patched_ids = std::collections::HashSet::<u32>::new();
     let mut patched_pages = std::collections::HashSet::<u32>::new();
     let mut replacement_rows = Vec::<Vec<u8>>::new();
-    for page_idx in chain.iter().copied().skip(1) {
+    let total_pages = (bytes.len() / page_size) as u32;
+    for page_idx in 1..total_pages {
         let Some(off) = page_offset(page_idx, page_size) else {
             continue;
         };
         let Some(page) = bytes.get(off..off + page_size) else {
             continue;
         };
+        if read_u32_le_at(page, 4).unwrap_or(0) == 0 {
+            continue;
+        }
+        if read_u32_le_at(page, 8) != Some(table_type) {
+            continue;
+        }
         let used_s = read_u16_le_at(page, 30).unwrap_or(0) as usize;
         if used_s == 0 {
             continue;
