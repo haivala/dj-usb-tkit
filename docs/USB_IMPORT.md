@@ -50,9 +50,18 @@ The import service deliberately favors responsiveness over eager payload loading
 Hydration is explicitly split into two surfaces:
 
 - list commands return track rows with path metadata and optional preview fields often unset
-- `inspect_usb_track` performs per-track hydration when UI needs detailed preview data
+- `inspect_usb_track`/`inspect_usb_tracks` perform detailed hydration (waveform/BPM/key/artwork)
+  when the UI needs it
 
 This split also keeps table scrolling and batch rendering predictable because the UI can hydrate only visible rows rather than all imported rows.
+
+Selecting a playlist or history session hydrates its tracks through `inspect_usb_tracks`, the
+batched form of `inspect_usb_track`: instead of one backend call per track — each re-parsing the
+PDB and re-opening/re-keying the SQLCipher eDB connection from scratch — it hydrates a chunk of
+tracks per call, parsing the PDB and opening the eDB once per chunk. The frontend issues chunks
+sequentially and stops issuing further chunks (and patching already-fetched rows into the UI) the
+moment the user selects a different playlist/history, so switching away mid-load doesn't waste
+backend work on a stale selection.
 
 Parser hardening includes compatibility behavior observed in real exports:
 
@@ -93,7 +102,7 @@ Implementation anchors:
 
 - playlist import: `backend/src/service/usb.rs`
 - history import: `backend/src/service/usb.rs`
-- per-track hydration: `backend/src/service/usb.rs`
+- per-track/batched hydration: `backend/src/service/usb.rs`
 - parser compatibility logic: `backend/src/pdb_reader.rs`
 
 ## Verification links

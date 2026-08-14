@@ -31,24 +31,58 @@ the player-visible USB database.
 
 ## Backup
 
-Before each export, the app copies PDB and eDB to a backups folder next to them with a timestamp. Backups land in `PIONEER/rekordbox/backups/` on the USB drive with filenames like `export_2025-04-23_14-32-01.pdb` and `exportLibrary_2025-04-23_14-32-01.db`. Files are only copied if they already exist — a first export with no prior databases skips silently.
+Before every USB-mutating operation — export, playlist reorder, playlist removal, repair apply,
+and player-menu config changes, not just export — the app copies the live PDB and eDB to a
+backups folder next to them with a shared timestamp, e.g. `export_2025-04-23_14-32-01.pdb` and
+`exportLibrary_2025-04-23_14-32-01.db`. Files are only copied if they already exist — a first
+export with no prior databases skips silently. For export specifically, this behavior is on by
+default and can be disabled in Settings → Export Settings (`backupBeforeExport`); the other
+operations always back up first, unconditionally. Backup always runs before any database write is
+attempted, regardless of whether local staging (below) is active, so it captures the drive's
+actual pre-write state either way.
 
-This behavior is on by default and can be disabled in Settings → Export Settings. Backup always
-runs before any database write is attempted, regardless of whether local staging (below) is
-active, so it captures the drive's actual pre-write state either way.
+Since PDB and eDB are always backed up together under one shared timestamp, each backup event is
+one logical snapshot covering both files.
+
+Only the newest snapshot per file stays in `PIONEER/rekordbox/backups/` on the USB drive itself —
+that single restore point travels with the physical drive to any computer. Older snapshots are
+moved to the local HDD staging cache (`usb_staging::backups_dir_for`, under the same
+per-device cache directory described below) instead of accumulating forever on the (often
+space-constrained) USB stick. This archiving requires a named drive: an unnamed drive has no
+stable cache directory yet, so everything is left on the USB until it's named. Total snapshots
+kept (USB + cache, combined) is capped by a user-configurable retention count in Settings
+(default 10; oldest cache-side snapshots are pruned first once the cap is exceeded).
+
+Backups are managed through a dedicated **Backups** panel (Settings → Open Backups): it lists
+every snapshot (bundling each timestamp's PDB+eDB pair into one "eDB and PDB" row, tagged with
+whether it currently lives on the USB or in the local cache), and lets the user restore or delete
+a snapshot. Restoring or deleting acts on both files in the pair at once. Restoring first backs up
+the current live state (protected from that same reconcile pass so it can't prune the very
+snapshot being restored from), then copies the snapshot's files over the live PDB/eDB.
+
+Implementation: `backend/src/service/usb_backups.rs` (list/restore/delete + retention/archival
+policy), `backend/src/service/usb_vendor_compat.rs` (`backup_usb_databases`, the raw timestamped
+copy every mutating operation calls through `backup_usb_databases_with_retention`).
 
 Strict parity validation is handled as a separate diagnostics surface so users can distinguish between operationally usable media and strict database parity.
 
 ## Local HDD staging
 
 `export.pdb` and `exportLibrary.db` are staged to a local working copy under the desktop app's
-data directory (`usb_cache/<device-key>/PIONEER/rekordbox/...`, keyed by a hash of the USB root
-path) instead of being read directly off the USB mount on every call. The first read of either
-file after a device is plugged in (or after either file changes size/mtime on the drive) copies
-it locally; subsequent reads within the same session reuse that local copy without touching the
-USB mount again. Writes go to the local copy first and are committed back to the drive only if
-the local copy actually changed, via an atomic temp-file-plus-rename so a crash or drive removal
-mid-write can't leave a half-written database on the USB.
+data directory (`usb_cache/<device-key>/PIONEER/rekordbox/...`) instead of being read directly off
+the USB mount on every call. The first read of either file after a device is plugged in (or after
+either file changes size/mtime on the drive) copies it locally; subsequent reads within the same
+session reuse that local copy without touching the USB mount again. Writes go to the local copy
+first and are committed back to the drive only if the local copy actually changed, via an atomic
+temp-file-plus-rename so a crash or drive removal mid-write can't leave a half-written database on
+the USB.
+
+`<device-key>` is the slugged form of the drive's user-assigned name (see "USB drive naming"
+below) when the drive has one, so the same physical drive reuses the same cache directory
+regardless of which port or computer's mount path the OS assigns it this time. An unnamed drive
+falls back to a hash of its (unstable) mount path, prefixed `unnamed-` so the two key spaces can
+never collide; that fallback is also why backup archiving (above) and naming-dependent features
+require a named drive.
 
 This is the desktop app's behavior specifically — it's the only context that enables staging, at
 startup, right after the backend is constructed (`usb_staging::init_cache_root` in
@@ -75,6 +109,29 @@ Implementation: `backend/src/service/usb_staging.rs` (staging/write-back core),
 `backend/src/edb.rs` (`open_edb_from_usb_root`/`open_edb_rw` route eDB access through it
 transparently), `backend/src/service/usb_utils.rs` (`parse_staged_pdb` wraps `pdb_reader::parse_pdb`
 for PDB reads).
+
+## USB drive naming
+
+Drives have no app-visible hardware serial/UUID — `resolve_usb_root` accepts any directory, not
+just a real removable device — so identity is instead a name the user assigns. The app prompts
+for a name once, the first time a valid, unnamed drive is connected. The name is stored two ways:
+in a small marker file (`.dj-usb-tkit/drive.json`) written next to `PIONEER/` on the drive itself
+(untouched by Rekordbox and by this app's own validation/repair scans), and mirrored into the
+local `usb_devices.label` column as a fast local cache/uniqueness index. Because the marker file
+travels with the drive, the same physical stick keeps its identity across replugs, different USB
+ports, and even different computers — something the previous mount-path-based identity couldn't
+do, and what the local HDD staging cache key (above) and backup archiving (above) both depend on
+for stability.
+
+If the folder the user selected is on an actual removable USB device, the drive's own filesystem
+volume label is read and pre-filled into the naming prompt as a suggestion (`GetVolumeInformationW`
+on Windows, DiskArbitration via the `sysinfo` crate on macOS, `/dev/disk/by-label` on Linux,
+matched by walking `/proc/mounts` for the longest mount-point prefix and confirming the underlying
+device has a `usb-*` entry under `/dev/disk/by-id/`). The user can still edit or replace the
+suggestion before saving; an arbitrary local directory that isn't backed by a removable device
+gets no suggestion.
+
+Implementation: `backend/src/service/usb_identity.rs`.
 
 ## Deep technical details
 

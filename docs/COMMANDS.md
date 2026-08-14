@@ -81,6 +81,11 @@ drive selection from being rendered against a newer selected drive.
 - `validate_usb_root`
 - `list_usb_devices`
 - `prune_usb_device`
+- `get_usb_device_name`
+- `set_usb_device_name`
+- `list_usb_backups`
+- `restore_usb_backup`
+- `delete_usb_backup`
 - `merge_orphaned_usb_placeholder_tracks`
 - `fetch_usb_playlists`
 - `fetch_usb_histories`
@@ -90,6 +95,7 @@ drive selection from being rendered against a newer selected drive.
 - `remove_usb_playlist`
 - `reorder_usb_playlists`
 - `inspect_usb_track`
+- `inspect_usb_tracks`
 - `initialize_usb`
 - `export_to_usb`
 - `detect_external_master_db`
@@ -98,8 +104,20 @@ drive selection from being rendered against a newer selected drive.
 
 - `pruneStale = true` -> mirror mode (target playlist membership rewritten from current manifest)
 - `pruneStale = false` -> additive mode (new members added, existing members preserved)
-- `backupBeforeExport = true` (default) -> copies PDB and eDB to backups folder next to them with a timestamp before each export; no-op if the files do not yet exist
+- `backupBeforeExport = true` (default) -> copies PDB and eDB to a backups folder next to them with a timestamp before each export; no-op if the files do not yet exist
 - `backupBeforeExport = false` -> skips backup step
+
+`get_usb_device_name`/`set_usb_device_name` read/write the user-assigned drive identity (see
+`docs/USB_EXPORT.md`'s "USB drive naming" section); `get_usb_device_name` also returns a
+best-effort `suggestedName` drawn from the OS filesystem label when the drive is unnamed.
+
+`inspect_usb_tracks` is the batched form of `inspect_usb_track`: it hydrates waveform/BPM/
+key/artwork metadata for a chunk of USB tracks in one call (parsing the PDB and opening the eDB
+once per chunk) instead of one backend call per track.
+
+`list_usb_backups`/`restore_usb_backup`/`delete_usb_backup` back the Backups panel described in
+`docs/USB_EXPORT.md`'s "Backup" section — listing, restoring, and deleting the timestamped
+PDB+eDB snapshot pairs taken before every USB-mutating operation.
 
 ### Diagnostics and repairs
 
