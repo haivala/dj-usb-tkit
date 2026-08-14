@@ -15,6 +15,16 @@ function formatBackupSize(bytes) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// PDB and eDB are always backed up together under one timestamp, so a
+// bundle's label lists whichever of the two files it actually contains.
+const STEM_LABELS = { exportLibrary: "eDB", export: "PDB" };
+const STEM_LABEL_ORDER = ["exportLibrary", "export"];
+
+function labelForFiles(files) {
+  const present = STEM_LABEL_ORDER.filter((stem) => (files || []).some((f) => f.stem === stem));
+  return present.length ? present.map((stem) => STEM_LABELS[stem]).join(" and ") : "Backup";
+}
+
 export async function renderBackups(state, el, document, deps = {}) {
   const { command, escapeHtml = (s) => String(s) } = deps;
   if (!el.backupsList || !el.backupsSummary) return;
@@ -43,59 +53,62 @@ export async function renderBackups(state, el, document, deps = {}) {
   }
 
   el.backupsList.innerHTML = items.map((item) => {
-    const stem = escapeHtml(item.stem);
-    const filename = escapeHtml(item.filename);
+    const label = escapeHtml(labelForFiles(item.files));
+    const rawTimestamp = escapeHtml(item.timestamp);
     const timestamp = escapeHtml(formatBackupTimestamp(item.timestamp));
     const size = escapeHtml(formatBackupSize(item.sizeBytes));
     const location = item.location === "usb" ? "On USB" : "On this computer";
-    return `<div class="event-log-row" data-stem="${stem}" data-filename="${filename}">
+    return `<div class="event-log-row" data-timestamp="${rawTimestamp}">
       <div class="event-log-time">${timestamp}</div>
-      <div class="event-log-source">${stem}</div>
+      <div class="event-log-source">${label}</div>
       <div class="event-log-message">${size} · ${escapeHtml(location)}</div>
       <div class="backups-row-actions">
-        <button type="button" class="backups-restore-btn" data-stem="${stem}" data-filename="${filename}">Restore</button>
-        <button type="button" class="backups-delete-btn" data-stem="${stem}" data-filename="${filename}">Delete</button>
+        <button type="button" class="backups-restore-btn" data-timestamp="${rawTimestamp}">Restore</button>
+        <button type="button" class="backups-delete-btn" data-timestamp="${rawTimestamp}">Delete</button>
       </div>
     </div>`;
   }).join("");
 }
 
-export async function restoreUsbBackup(state, stem, filename, deps = {}) {
+export async function restoreUsbBackup(state, timestamp, deps = {}) {
   const { command, openConfirmDialog = async () => true, setStatus = () => {}, reload = async () => {} } = deps;
   if (!state.usbRoot) return;
 
-  const known = (state.usbBackups || []).find((b) => b.stem === stem && b.filename === filename);
-  const whenText = known ? formatBackupTimestamp(known.timestamp) : filename;
+  const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
+  const label = known ? labelForFiles(known.files) : "backup";
+  const whenText = formatBackupTimestamp(timestamp);
   const confirmed = await openConfirmDialog({
     title: "Restore Backup",
-    message: `Restore ${stem} from the backup taken at ${whenText}? The current file will itself be backed up first.`,
+    message: `Restore ${label} from the backup taken at ${whenText}? The current files will themselves be backed up first.`,
     confirmLabel: "Restore"
   });
   if (!confirmed) return;
 
   try {
-    await command("restore_usb_backup", { usbRoot: state.usbRoot, stem, filename });
-    setStatus(`Restored ${stem} from backup`);
+    await command("restore_usb_backup", { usbRoot: state.usbRoot, timestamp });
+    setStatus(`Restored ${label} from backup`);
   } catch (err) {
     setStatus(`Restore failed: ${err?.message || err}`);
   }
   await reload();
 }
 
-export async function deleteUsbBackup(state, stem, filename, deps = {}) {
+export async function deleteUsbBackup(state, timestamp, deps = {}) {
   const { command, openConfirmDialog = async () => true, setStatus = () => {}, reload = async () => {} } = deps;
   if (!state.usbRoot) return;
 
+  const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
+  const label = known ? labelForFiles(known.files) : "backup";
   const confirmed = await openConfirmDialog({
     title: "Delete Backup",
-    message: `Delete this ${stem} backup permanently?`,
+    message: `Delete this ${label} backup permanently?`,
     confirmLabel: "Delete"
   });
   if (!confirmed) return;
 
   try {
-    await command("delete_usb_backup", { usbRoot: state.usbRoot, stem, filename });
-    setStatus(`Deleted ${stem} backup`);
+    await command("delete_usb_backup", { usbRoot: state.usbRoot, timestamp });
+    setStatus(`Deleted ${label} backup`);
   } catch (err) {
     setStatus(`Delete failed: ${err?.message || err}`);
   }

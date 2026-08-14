@@ -575,13 +575,23 @@ pub struct ListUsbBackupsRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UsbBackupEntry {
+pub struct UsbBackupFile {
     pub stem: String,
     pub filename: String,
-    pub timestamp: String,
     pub size_bytes: u64,
+}
+
+/// One backup "event": the PDB and eDB snapshots taken together in a single
+/// `backup_usb_databases` call, sharing a timestamp. Always presented and
+/// acted on (restore/delete) as a unit, never as separate PDB/eDB rows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbBackupEntry {
+    pub timestamp: String,
     /// "usb" or "cache"
     pub location: String,
+    pub size_bytes: u64,
+    pub files: Vec<UsbBackupFile>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -594,8 +604,7 @@ pub struct ListUsbBackupsData {
 #[serde(rename_all = "camelCase")]
 pub struct RestoreUsbBackupRequest {
     pub usb_root: String,
-    pub stem: String,
-    pub filename: String,
+    pub timestamp: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -608,8 +617,7 @@ pub struct RestoreUsbBackupData {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteUsbBackupRequest {
     pub usb_root: String,
-    pub stem: String,
-    pub filename: String,
+    pub timestamp: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -406,7 +406,7 @@
       <section class="panel" id="panel-backups" role="tabpanel" aria-hidden="true">
         <h2>Backups</h2>
         <div class="event-log-toolbar">
-          <button id="backupsRefreshBtn">Refresh</button>
+          <button id="backupsRefreshBtn" disabled>Refresh</button>
         </div>
         <p class="muted" id="backupsSummary">No entries</p>
         <div class="event-log-list" id="backupsList" role="log" aria-live="polite"></div>
@@ -486,21 +486,24 @@
             <span class="muted usb-cfg-toggle-hint">Adds missing tracks to same-name USB playlists, but keeps existing USB tracks.</span>
           </label>
         </fieldset>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-label">Backups</div>
         <label class="usb-cfg-toggle-row" for="exportBackupCheckbox">
           <input type="checkbox" id="exportBackupCheckbox" checked />
           <span>Back up PDB and eDB before export</span>
-          <span class="muted usb-cfg-toggle-hint">Copies PDB and eDB to backups folder next to them with a timestamp before each export.</span>
+          <span class="muted usb-cfg-toggle-hint">Before each export, copies the PDB and eDB into a timestamped backups folder alongside the originals.</span>
         </label>
         <label class="usb-cfg-toggle-row" for="backupRetentionCountInput">
-          <input type="number" id="backupRetentionCountInput" min="1" max="999" value="10" />
           <span>Backups to keep per file</span>
+          <input type="number" id="backupRetentionCountInput" min="1" max="999" value="10" />
           <span class="muted usb-cfg-toggle-hint">The newest backup always stays on the USB; older ones are archived on this computer up to this count, then pruned.</span>
         </label>
       </div>
       <div class="settings-section">
         <div class="settings-section-label">Tools</div>
         <button id="openEventLogBtn">Open Event Log</button>
-        <button id="openBackupsBtn">Open Backups</button>
+        <button id="openBackupsBtn" disabled>Open Backups</button>
       </div>
       <div class="settings-footer">
         <span class="settings-version" id="settingsVersionText">Version 0.1.0-RC3</span>

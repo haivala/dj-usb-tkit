@@ -12,7 +12,7 @@ export function bindBackupsEvents(ctx) {
 
     const restoreBtn = target.closest(".backups-restore-btn");
     if (restoreBtn) {
-      await restoreUsbBackup(state, restoreBtn.dataset.stem, restoreBtn.dataset.filename, {
+      await restoreUsbBackup(state, restoreBtn.dataset.timestamp, {
         command,
         openConfirmDialog,
         setStatus,
@@ -23,7 +23,7 @@ export function bindBackupsEvents(ctx) {
 
     const deleteBtn = target.closest(".backups-delete-btn");
     if (deleteBtn) {
-      await deleteUsbBackup(state, deleteBtn.dataset.stem, deleteBtn.dataset.filename, {
+      await deleteUsbBackup(state, deleteBtn.dataset.timestamp, {
         command,
         openConfirmDialog,
         setStatus,

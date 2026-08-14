@@ -86,6 +86,8 @@ export function updateUsbSubNavDisabledState(state, el, deps) {
   });
   if (el.refreshUsbBtn) el.refreshUsbBtn.disabled = !hasRoot;
   if (el.refreshHistoryBtn) el.refreshHistoryBtn.disabled = !hasRoot;
+  if (el.backupsRefreshBtn) el.backupsRefreshBtn.disabled = !hasRoot;
+  if (el.openBackupsBtn) el.openBackupsBtn.disabled = !hasRoot;
   if (!hasRoot && (state.activeTab === "usb-playlists" || state.activeTab === "usb-history" || state.activeTab === "usb-player-menu")) {
     switchView("usb").catch(() => {});
   }

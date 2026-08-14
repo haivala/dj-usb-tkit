@@ -2420,6 +2420,13 @@ td button[data-action]:disabled,
   cursor: pointer;
 }
 
+.usb-cfg-toggle-row input[type="number"] {
+  width: 64px;
+  min-width: 64px;
+  height: 28px;
+  padding: 0 8px;
+}
+
 .analysis-engine-status {
   display: block;
   font-size: 11px;

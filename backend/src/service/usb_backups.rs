@@ -13,6 +13,7 @@
 //!
 //! Also backs the "Backups" UI panel: list / restore / delete.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{OptionalExtension, params};
@@ -20,7 +21,7 @@ use rusqlite::{OptionalExtension, params};
 use crate::error::{BackendError, BackendResult};
 use crate::models::{
     DeleteUsbBackupData, DeleteUsbBackupRequest, ListUsbBackupsData, ListUsbBackupsRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, UsbBackupEntry,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, UsbBackupEntry, UsbBackupFile,
 };
 
 use super::usb_utils::resolve_usb_root;
@@ -149,45 +150,63 @@ fn read_backup_retention_count(conn: &rusqlite::Connection) -> u32 {
     .unwrap_or(DEFAULT_BACKUP_RETENTION_COUNT)
 }
 
-fn entries_in(dir: &Path, location: &str) -> Vec<UsbBackupEntry> {
+/// PDB and eDB are always backed up together under one shared timestamp (see
+/// `usb_vendor_compat::backup_usb_databases`), so entries are grouped by
+/// timestamp into a single bundle covering both files rather than one row
+/// per stem. `reconcile_backups` prunes/archives each stem independently,
+/// but since both stems are created (and thus retained/archived) on the same
+/// timestamp schedule, a pair's files normally share a location; a bundle is
+/// labeled "usb" if either half is still USB-side, "cache" otherwise.
+fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
+    let mut by_timestamp: BTreeMap<String, Vec<(UsbBackupFile, &str)>> = BTreeMap::new();
+    for (dir, location) in dirs {
+        for (stem, ext) in STEMS {
+            for path in list_stem_files(dir, stem, ext) {
+                let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let timestamp = filename
+                    .strip_prefix(&format!("{stem}_"))
+                    .and_then(|s| s.strip_suffix(&format!(".{ext}")))
+                    .unwrap_or(&filename)
+                    .to_string();
+                let size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                by_timestamp.entry(timestamp).or_default().push((
+                    UsbBackupFile { stem: stem.to_string(), filename, size_bytes },
+                    location,
+                ));
+            }
+        }
+    }
+
+    let mut items: Vec<UsbBackupEntry> = by_timestamp
+        .into_iter()
+        .map(|(timestamp, entries)| {
+            let size_bytes = entries.iter().map(|(f, _)| f.size_bytes).sum();
+            let location = if entries.iter().any(|(_, loc)| *loc == "usb") { "usb" } else { "cache" };
+            let files = entries.into_iter().map(|(f, _)| f).collect();
+            UsbBackupEntry { timestamp, location: location.to_string(), size_bytes, files }
+        })
+        .collect();
+    items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    items
+}
+
+/// Finds every backup file (PDB and/or eDB) sharing `timestamp`, checking
+/// the USB backups dir first, then the HDD cache backups dir, since a pair's
+/// two files aren't guaranteed to share a location after retention pruning.
+fn files_for_timestamp(usb_root: &Path, timestamp: &str) -> Vec<(String, PathBuf)> {
+    let mut dirs = vec![usb_backups_dir(usb_root)];
+    dirs.extend(cache_backups_dir(usb_root));
+
     let mut out = Vec::new();
-    for (stem, ext) in STEMS {
-        for path in list_stem_files(dir, stem, ext) {
-            let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-            let timestamp = filename
-                .strip_prefix(&format!("{stem}_"))
-                .and_then(|s| s.strip_suffix(&format!(".{ext}")))
-                .unwrap_or(&filename)
-                .to_string();
-            let size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            out.push(UsbBackupEntry {
-                stem: stem.to_string(),
-                filename,
-                timestamp,
-                size_bytes,
-                location: location.to_string(),
-            });
+    for dir in dirs {
+        for (stem, ext) in STEMS {
+            let candidate = dir.join(format!("{stem}_{timestamp}.{ext}"));
+            if candidate.is_file() {
+                out.push((stem.to_string(), candidate));
+            }
         }
     }
     out
-}
-
-/// Finds a backup snapshot by stem+filename, checking the USB backups dir
-/// first, then the HDD cache backups dir.
-fn find_backup(usb_root: &Path, stem: &str, filename: &str) -> BackendResult<PathBuf> {
-    let candidate = usb_backups_dir(usb_root).join(filename);
-    if candidate.is_file() {
-        return Ok(candidate);
-    }
-    if let Some(cache_dir) = cache_backups_dir(usb_root) {
-        let candidate = cache_dir.join(filename);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    Err(BackendError::NotFound(format!(
-        "backup not found: {stem}/{filename}"
-    )))
 }
 
 fn live_path_for_stem(usb_root: &Path, stem: &str) -> Option<PathBuf> {
@@ -218,11 +237,11 @@ impl BackendService {
 
     pub fn list_usb_backups(&self, req: ListUsbBackupsRequest) -> BackendResult<ListUsbBackupsData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
-        let mut items = entries_in(&usb_backups_dir(&usb_root), "usb");
+        let mut dirs = vec![(usb_backups_dir(&usb_root), "usb")];
         if let Some(cache_dir) = cache_backups_dir(&usb_root) {
-            items.extend(entries_in(&cache_dir, "cache"));
+            dirs.push((cache_dir, "cache"));
         }
-        items.sort_by(|a, b| a.stem.cmp(&b.stem).then(b.timestamp.cmp(&a.timestamp)));
+        let items = entries_by_timestamp(&dirs);
         Ok(ListUsbBackupsData { items })
     }
 
@@ -231,23 +250,38 @@ impl BackendService {
         req: RestoreUsbBackupRequest,
     ) -> BackendResult<RestoreUsbBackupData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
-        let snapshot = find_backup(&usb_root, &req.stem, &req.filename)?;
-        let live_path = live_path_for_stem(&usb_root, &req.stem).ok_or_else(|| {
-            BackendError::Validation(format!("unknown backup stem: {}", req.stem))
-        })?;
+        let files = files_for_timestamp(&usb_root, &req.timestamp);
+        if files.is_empty() {
+            return Err(BackendError::NotFound(format!(
+                "backup not found: {}",
+                req.timestamp
+            )));
+        }
 
         // Preserve the current live state as its own backup before
         // overwriting it, same as every other mutating USB command.
         self.backup_usb_databases_with_retention(&usb_root);
 
-        std::fs::copy(&snapshot, &live_path)?;
+        for (stem, snapshot) in &files {
+            if let Some(live_path) = live_path_for_stem(&usb_root, stem) {
+                std::fs::copy(snapshot, &live_path)?;
+            }
+        }
         Ok(RestoreUsbBackupData { restored: true })
     }
 
     pub fn delete_usb_backup(&self, req: DeleteUsbBackupRequest) -> BackendResult<DeleteUsbBackupData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
-        let snapshot = find_backup(&usb_root, &req.stem, &req.filename)?;
-        std::fs::remove_file(&snapshot)?;
+        let files = files_for_timestamp(&usb_root, &req.timestamp);
+        if files.is_empty() {
+            return Err(BackendError::NotFound(format!(
+                "backup not found: {}",
+                req.timestamp
+            )));
+        }
+        for (_, snapshot) in &files {
+            std::fs::remove_file(snapshot)?;
+        }
         Ok(DeleteUsbBackupData { deleted: true })
     }
 }
@@ -387,46 +421,93 @@ mod tests {
             result
                 .items
                 .iter()
-                .any(|i| i.location == "usb" && i.filename.contains("2020-01-02"))
+                .any(|i| i.location == "usb"
+                    && i.files.iter().any(|f| f.filename.contains("2020-01-02")))
         );
         assert!(
             result
                 .items
                 .iter()
-                .any(|i| i.location == "cache" && i.filename.contains("2020-01-01"))
+                .any(|i| i.location == "cache"
+                    && i.files.iter().any(|f| f.filename.contains("2020-01-01")))
         );
     }
 
     #[test]
-    fn restore_usb_backup_overwrites_live_file_and_backs_up_current_state_first() {
+    fn list_usb_backups_bundles_pdb_and_edb_sharing_a_timestamp() {
+        let (_dir, service) = test_service();
+        let usb = tempdir().unwrap();
+        let usb_root = usb.path();
+        let backups_dir = usb_backups_dir(usb_root);
+        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb");
+        touch_backup(
+            &backups_dir,
+            "exportLibrary",
+            "db",
+            "2020-01-01_00-00-00",
+            b"edb",
+        );
+
+        let result = service
+            .list_usb_backups(ListUsbBackupsRequest {
+                usb_root: usb_root.to_string_lossy().to_string(),
+            })
+            .expect("list backups");
+
+        assert_eq!(result.items.len(), 1, "PDB+eDB from one event must bundle into a single entry");
+        let entry = &result.items[0];
+        assert_eq!(entry.timestamp, "2020-01-01_00-00-00");
+        assert_eq!(entry.size_bytes, 6);
+        assert_eq!(entry.files.len(), 2);
+        assert!(entry.files.iter().any(|f| f.stem == "export"));
+        assert!(entry.files.iter().any(|f| f.stem == "exportLibrary"));
+    }
+
+    #[test]
+    fn restore_usb_backup_overwrites_both_live_files_and_backs_up_current_state_first() {
         let (_dir, service) = test_service();
         let usb = tempdir().unwrap();
         let usb_root = usb.path();
         let live_pdb = vendor_pdb_path(usb_root);
+        let live_edb = vendor_edb_path(usb_root);
         std::fs::create_dir_all(live_pdb.parent().unwrap()).unwrap();
-        std::fs::write(&live_pdb, b"live-v2").unwrap();
+        std::fs::write(&live_pdb, b"pdb-live-v2").unwrap();
+        std::fs::write(&live_edb, b"edb-live-v2").unwrap();
 
         let backups_dir = usb_backups_dir(usb_root);
-        let snapshot = touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"live-v1");
-        let filename = snapshot.file_name().unwrap().to_string_lossy().to_string();
+        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb-live-v1");
+        touch_backup(
+            &backups_dir,
+            "exportLibrary",
+            "db",
+            "2020-01-01_00-00-00",
+            b"edb-live-v1",
+        );
 
         let result = service
             .restore_usb_backup(RestoreUsbBackupRequest {
                 usb_root: usb_root.to_string_lossy().to_string(),
-                stem: "export".to_string(),
-                filename: filename.clone(),
+                timestamp: "2020-01-01_00-00-00".to_string(),
             })
             .expect("restore");
         assert!(result.restored);
-        assert_eq!(std::fs::read(&live_pdb).unwrap(), b"live-v1");
+        assert_eq!(std::fs::read(&live_pdb).unwrap(), b"pdb-live-v1");
+        assert_eq!(std::fs::read(&live_edb).unwrap(), b"edb-live-v1");
 
-        // The pre-restore live state ("live-v2") must itself have been backed up.
-        let remaining = list_stem_files(&backups_dir, "export", "pdb");
+        // The pre-restore live state must itself have been backed up, for both files.
+        let remaining_pdb = list_stem_files(&backups_dir, "export", "pdb");
         assert!(
-            remaining
+            remaining_pdb
                 .iter()
-                .any(|p| std::fs::read(p).map(|b| b == b"live-v2").unwrap_or(false)),
-            "restore must back up the current live state before overwriting it"
+                .any(|p| std::fs::read(p).map(|b| b == b"pdb-live-v2").unwrap_or(false)),
+            "restore must back up the current live PDB before overwriting it"
+        );
+        let remaining_edb = list_stem_files(&backups_dir, "exportLibrary", "db");
+        assert!(
+            remaining_edb
+                .iter()
+                .any(|p| std::fs::read(p).map(|b| b == b"edb-live-v2").unwrap_or(false)),
+            "restore must back up the current live eDB before overwriting it"
         );
     }
 
@@ -437,37 +518,42 @@ mod tests {
         let err = service
             .restore_usb_backup(RestoreUsbBackupRequest {
                 usb_root: usb.path().to_string_lossy().to_string(),
-                stem: "export".to_string(),
-                filename: "export_1999-01-01_00-00-00.pdb".to_string(),
+                timestamp: "1999-01-01_00-00-00".to_string(),
             })
             .expect_err("missing snapshot must error");
         assert!(matches!(err, BackendError::NotFound(_)));
     }
 
     #[test]
-    fn delete_usb_backup_removes_the_file() {
+    fn delete_usb_backup_removes_both_files() {
         let (_dir, service) = test_service();
         let usb = tempdir().unwrap();
         let usb_root = usb.path();
         let backups_dir = usb_backups_dir(usb_root);
-        let snapshot = touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"snap");
-        let filename = snapshot.file_name().unwrap().to_string_lossy().to_string();
+        let pdb_snapshot =
+            touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb");
+        let edb_snapshot = touch_backup(
+            &backups_dir,
+            "exportLibrary",
+            "db",
+            "2020-01-01_00-00-00",
+            b"edb",
+        );
 
         let result = service
             .delete_usb_backup(DeleteUsbBackupRequest {
                 usb_root: usb_root.to_string_lossy().to_string(),
-                stem: "export".to_string(),
-                filename: filename.clone(),
+                timestamp: "2020-01-01_00-00-00".to_string(),
             })
             .expect("delete");
         assert!(result.deleted);
-        assert!(!snapshot.is_file());
+        assert!(!pdb_snapshot.is_file());
+        assert!(!edb_snapshot.is_file());
 
         let err = service
             .delete_usb_backup(DeleteUsbBackupRequest {
                 usb_root: usb_root.to_string_lossy().to_string(),
-                stem: "export".to_string(),
-                filename,
+                timestamp: "2020-01-01_00-00-00".to_string(),
             })
             .expect_err("deleting again must error");
         assert!(matches!(err, BackendError::NotFound(_)));

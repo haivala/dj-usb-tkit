@@ -37,11 +37,13 @@
   when there's nothing to show.
 - **New feature:** USB DB backups (`export.pdb`/`exportLibrary.db` snapshots, taken before every
   export/reorder/remove-playlist/repair/menu-config change) now have a dedicated **Backups** panel
-  (Settings → Open Backups) to list, restore, and delete individual snapshots. The newest backup
-  per file always stays on the USB stick, so it travels with the drive to any computer; older
-  backups are moved to the local HDD staging cache instead of accumulating forever on the (often
-  space-constrained) USB drive. How many backups to keep in total is configurable in Settings
-  (default 10) instead of growing unbounded.
+  (Settings → Open Backups) to list, restore, and delete snapshots. Since the PDB and eDB are
+  always backed up together as a pair, each backup event is listed as a single "eDB and PDB" entry
+  rather than two separate rows, and restoring or deleting one acts on both files at once. The
+  newest backup per file always stays on the USB stick, so it travels with the drive to any
+  computer; older backups are moved to the local HDD staging cache instead of accumulating forever
+  on the (often space-constrained) USB drive. How many backups to keep in total is configurable in
+  Settings (default 10) instead of growing unbounded.
 - **New feature:** USB drives can now be given a name (prompted once, the first time a valid,
   unnamed drive is connected). The name is stored both in a small marker file on the drive itself
   and locally, so the same physical drive keeps its identity across replugs, different USB ports,
