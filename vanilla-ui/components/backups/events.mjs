@@ -1,7 +1,7 @@
 import { restoreUsbBackup, deleteUsbBackup } from "./actions.mjs";
 
 export function bindBackupsEvents(ctx) {
-  const { state, el, command, openConfirmDialog, setStatus, renderBackups } = ctx;
+  const { state, el, command, openConfirmDialog, setStatus, renderBackups, hideUsbDiagnostics } = ctx;
 
   el.backupsRefreshBtn?.addEventListener("click", () => renderBackups());
 
@@ -16,7 +16,8 @@ export function bindBackupsEvents(ctx) {
         command,
         openConfirmDialog,
         setStatus,
-        reload
+        reload,
+        hideUsbDiagnostics: () => hideUsbDiagnostics?.(el)
       });
       return;
     }

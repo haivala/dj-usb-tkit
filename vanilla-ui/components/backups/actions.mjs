@@ -71,7 +71,13 @@ export async function renderBackups(state, el, document, deps = {}) {
 }
 
 export async function restoreUsbBackup(state, timestamp, deps = {}) {
-  const { command, openConfirmDialog = async () => true, setStatus = () => {}, reload = async () => {} } = deps;
+  const {
+    command,
+    openConfirmDialog = async () => true,
+    setStatus = () => {},
+    reload = async () => {},
+    hideUsbDiagnostics = () => {}
+  } = deps;
   if (!state.usbRoot) return;
 
   const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
@@ -87,6 +93,10 @@ export async function restoreUsbBackup(state, timestamp, deps = {}) {
   try {
     await command("restore_usb_backup", { usbRoot: state.usbRoot, timestamp });
     setStatus(`Restored ${label} from backup`);
+    // The restored files may no longer match whatever diagnostics report is
+    // on screen -- discard it rather than show a stale result; the user can
+    // re-run diagnostics if they want a fresh one.
+    hideUsbDiagnostics();
   } catch (err) {
     setStatus(`Restore failed: ${err?.message || err}`);
   }

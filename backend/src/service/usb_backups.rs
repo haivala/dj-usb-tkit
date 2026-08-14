@@ -78,7 +78,7 @@ fn move_file(src: &Path, dest: &Path) -> std::io::Result<()> {
 /// throughout: a stat/move/delete failure is noted, never propagated as a
 /// hard error -- this runs after the backup copy itself already succeeded
 /// or failed, and must never turn a successful backup into a failed one.
-fn reconcile_backups(usb_root: &Path, retention_count: u32) -> Vec<String> {
+fn reconcile_backups(usb_root: &Path, retention_count: u32, protect_timestamp: Option<&str>) -> Vec<String> {
     let retention_count = retention_count.max(1) as usize;
     let usb_dir = usb_backups_dir(usb_root);
     let cache_dir = cache_backups_dir(usb_root);
@@ -117,8 +117,17 @@ fn reconcile_backups(usb_root: &Path, retention_count: u32) -> Vec<String> {
         if total > retention_count {
             let overflow = total - retention_count;
             combined.sort();
+            // Never prune the snapshot a restore is currently reading from --
+            // if it's among the oldest, skip it and prune the next-oldest
+            // instead, even if that leaves the drive one entry over
+            // `retention_count` until the next reconcile.
+            let prunable = combined.into_iter().filter(|path| {
+                protect_timestamp
+                    .map(|ts| !path.file_name().is_some_and(|n| n.to_string_lossy().contains(ts)))
+                    .unwrap_or(true)
+            });
             let mut pruned = 0usize;
-            for path in combined.into_iter().take(overflow) {
+            for path in prunable.take(overflow) {
                 match std::fs::remove_file(&path) {
                     Ok(()) => pruned += 1,
                     Err(e) => notes.push(format!(
@@ -224,6 +233,19 @@ impl BackendService {
     /// the function every mutating USB command should call instead of
     /// `usb_vendor_compat::backup_usb_databases` directly.
     pub(crate) fn backup_usb_databases_with_retention(&self, usb_root: &Path) -> Vec<String> {
+        self.backup_usb_databases_with_retention_protecting(usb_root, None)
+    }
+
+    /// Same as `backup_usb_databases_with_retention`, but `protect_timestamp`
+    /// (a backup's snapshot timestamp) is exempted from this reconcile's
+    /// pruning pass. Used by `restore_usb_backup` so the very snapshot being
+    /// restored from can't be deleted out from under it by the pre-restore
+    /// backup of the current live state.
+    fn backup_usb_databases_with_retention_protecting(
+        &self,
+        usb_root: &Path,
+        protect_timestamp: Option<&str>,
+    ) -> Vec<String> {
         let mut notes = super::usb_vendor_compat::backup_usb_databases(usb_root);
         let retention_count = self
             .db
@@ -231,7 +253,7 @@ impl BackendService {
             .ok()
             .map(|conn| read_backup_retention_count(&conn))
             .unwrap_or(DEFAULT_BACKUP_RETENTION_COUNT);
-        notes.extend(reconcile_backups(usb_root, retention_count));
+        notes.extend(reconcile_backups(usb_root, retention_count, protect_timestamp));
         notes
     }
 
@@ -259,8 +281,10 @@ impl BackendService {
         }
 
         // Preserve the current live state as its own backup before
-        // overwriting it, same as every other mutating USB command.
-        self.backup_usb_databases_with_retention(&usb_root);
+        // overwriting it, same as every other mutating USB command. The
+        // snapshot we're restoring from is protected from this reconcile's
+        // pruning pass so it can't be deleted before the copy below reads it.
+        self.backup_usb_databases_with_retention_protecting(&usb_root, Some(&req.timestamp));
 
         for (stem, snapshot) in &files {
             if let Some(live_path) = live_path_for_stem(&usb_root, stem) {
@@ -322,7 +346,7 @@ mod tests {
         touch_backup(&backups_dir, "export", "pdb", "2020-01-02_00-00-00", b"old2");
         touch_backup(&backups_dir, "export", "pdb", "2020-01-03_00-00-00", b"newest");
 
-        reconcile_backups(usb_root, 10);
+        reconcile_backups(usb_root, 10, None);
 
         let remaining_usb = list_stem_files(&backups_dir, "export", "pdb");
         assert_eq!(remaining_usb.len(), 1);
@@ -345,7 +369,7 @@ mod tests {
         touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"old1");
         touch_backup(&backups_dir, "export", "pdb", "2020-01-02_00-00-00", b"newest");
 
-        reconcile_backups(usb_root, 10);
+        reconcile_backups(usb_root, 10, None);
 
         let remaining = list_stem_files(&backups_dir, "export", "pdb");
         assert_eq!(remaining.len(), 2, "unnamed drive must not archive anything");
@@ -371,7 +395,7 @@ mod tests {
             );
         }
 
-        reconcile_backups(usb_root, 2);
+        reconcile_backups(usb_root, 2, None);
 
         let remaining_usb = list_stem_files(&backups_dir, "export", "pdb");
         assert_eq!(remaining_usb.len(), 1);
@@ -509,6 +533,52 @@ mod tests {
                 .any(|p| std::fs::read(p).map(|b| b == b"edb-live-v2").unwrap_or(false)),
             "restore must back up the current live eDB before overwriting it"
         );
+    }
+
+    /// Regression test: at retention_count=1, the pre-restore backup of the
+    /// current live state used to be able to bump the restore target's own
+    /// snapshot out of the retention window and prune it, right before the
+    /// copy step tried to read it. The target must survive its own restore.
+    #[test]
+    fn restore_usb_backup_survives_pruning_its_own_snapshot_at_low_retention() {
+        let (_dir, service) = test_service();
+        let usb = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let usb_root = usb.path();
+        name_drive(usb_root, "Club Stick");
+        let _guard =
+            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+
+        service
+            .set_frontend_setting(crate::models::SetFrontendSettingRequest {
+                key: SETTING_UI_BACKUP_RETENTION_COUNT.to_string(),
+                value: Some("1".to_string()),
+            })
+            .expect("set retention count");
+
+        let live_pdb = vendor_pdb_path(usb_root);
+        let live_edb = vendor_edb_path(usb_root);
+        std::fs::create_dir_all(live_pdb.parent().unwrap()).unwrap();
+        std::fs::write(&live_pdb, b"pdb-live").unwrap();
+        std::fs::write(&live_edb, b"edb-live").unwrap();
+
+        // The restore target already sits alone in the cache (e.g. archived
+        // by an earlier reconcile), so it's the oldest -- and only -- entry
+        // pruning would consider once the fresh pre-restore backup displaces
+        // it as "newest".
+        let cache_dir = cache_backups_dir(usb_root).expect("cache dir for named drive");
+        touch_backup(&cache_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb-target");
+        touch_backup(&cache_dir, "exportLibrary", "db", "2020-01-01_00-00-00", b"edb-target");
+
+        let result = service
+            .restore_usb_backup(RestoreUsbBackupRequest {
+                usb_root: usb_root.to_string_lossy().to_string(),
+                timestamp: "2020-01-01_00-00-00".to_string(),
+            })
+            .expect("restore must not fail even though it would otherwise prune its own source");
+        assert!(result.restored);
+        assert_eq!(std::fs::read(&live_pdb).unwrap(), b"pdb-target");
+        assert_eq!(std::fs::read(&live_edb).unwrap(), b"edb-target");
     }
 
     #[test]

@@ -1392,6 +1392,7 @@ function bindEvents() {
     closeSettingsDrawer,
     renderEventLog,
     renderBackups,
+    hideUsbDiagnostics: usb.hideUsbDiagnostics,
     switchView,
     deletePlaylist,
     startPlaylistRename,
