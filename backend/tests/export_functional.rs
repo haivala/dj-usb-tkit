@@ -2995,14 +2995,18 @@ fn export_backup_creates_timestamped_files_when_enabled() {
         .collect();
     assert_eq!(
         backup_entries.len(),
-        2,
-        "expected exactly two backup files (PDB and eDB)"
+        3,
+        "expected exactly three backup files (PDB, eDB, and the reason sidecar)"
     );
 
     let names: std::collections::HashSet<String> = backup_entries
         .iter()
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect();
+    assert!(
+        names.iter().any(|n| n.ends_with(".reason.json")),
+        "expected a backup reason sidecar file, got: {names:?}"
+    );
     assert!(
         names
             .iter()
