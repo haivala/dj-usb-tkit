@@ -4303,6 +4303,235 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
     }
 }
 
+/// Exports the same library to two independent USB roots and asserts the
+/// eDB content rows and PDB track rows are byte-for-byte identical between
+/// them. This is not a substitute for
+/// `export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks`
+/// above (which validates against genuine Rekordbox-produced reference
+/// data and requires real hardware) -- two app-generated exports of the
+/// same input can never catch a systematic bug where our exporter is
+/// self-consistently wrong. What it does catch, and what nothing else in
+/// this suite checks at the row-value level, is non-determinism in the
+/// export pipeline itself: dictionary ID assignment, artist/album/key
+/// resolution, or content-column values differing between two runs over
+/// identical input.
+#[test]
+fn export_to_usb_produces_identical_content_and_pdb_rows_across_two_runs() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb_a = root.path().join("usb_a");
+    let usb_b = root.path().join("usb_b");
+    fs::create_dir_all(&media).expect("create media dir");
+
+    let fixture_track = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("audio")
+        .join("formats")
+        .join("track_format_wav.wav");
+    assert!(
+        fixture_track.is_file(),
+        "fixture audio track missing: {}",
+        fixture_track.display()
+    );
+    fs::copy(&fixture_track, media.join("Determinism Fixture Track.wav"))
+        .expect("copy fixture audio");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let search = backend.search_tracks(SearchTracksRequest {
+        query: String::new(),
+        limit: 10,
+        cursor: None,
+    });
+    assert!(search.ok, "search failed: {search:?}");
+    let tracks = search.data.expect("search data").items;
+    assert!(!tracks.is_empty(), "no tracks found after fixture scan");
+    let track_titles = tracks.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
+
+    for track in &tracks {
+        seed_track_analysis_fields(&data_dir, &track.id);
+    }
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "DeterminismCheck".to_string(),
+    });
+    assert!(created.ok, "create playlist failed: {created:?}");
+    let playlist_id = created.data.expect("create playlist data").playlist_id;
+
+    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added.ok, "add tracks failed: {added:?}");
+
+    for usb_root in [&usb_a, &usb_b] {
+        fs::create_dir_all(usb_root).expect("create usb root");
+        let init = backend.initialize_usb(InitializeUsbRequest {
+            usb_root: usb_root.to_string_lossy().to_string(),
+        });
+        assert!(init.ok, "initialize usb failed: {init:?}");
+
+        let exported = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb_root.to_string_lossy().to_string()),
+            playlist_id: playlist_id.clone(),
+            options: Some(ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: true,
+                prune_stale: false,
+                ..Default::default()
+            }),
+        });
+        assert!(exported.ok, "export to {usb_root:?} failed: {exported:?}");
+    }
+
+    // ── eDB content row comparison ──────────────────────────────────
+    let conn_a = open_export_db(&vendor_db_dir(&usb_a).join("exportLibrary.db"));
+    let conn_b = open_export_db(&vendor_db_dir(&usb_b).join("exportLibrary.db"));
+
+    let load_columns = |conn: &rusqlite::Connection| -> BTreeSet<String> {
+        let mut out = BTreeSet::<String>::new();
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(content)")
+            .expect("prepare pragma table_info(content)");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table_info(content)");
+        for row in rows {
+            out.insert(row.expect("column name"));
+        }
+        out
+    };
+    // App-owned identity values are intentionally per-export specific
+    // (row ids, timestamps, per-run file paths) and must not be compared.
+    let ignored_cols = [
+        "content_id",
+        "created_at",
+        "updated_at",
+        "rb_data_status",
+        "rb_local_created",
+        "rb_local_updated",
+        "rb_local_deleted",
+        "UUID",
+        "ID",
+        "analysisDataFilePath",
+        "contentLink",
+        "masterContentId",
+        "masterDbId",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect::<BTreeSet<_>>();
+    let compare_cols = load_columns(&conn_a)
+        .intersection(&load_columns(&conn_b))
+        .filter(|c| !ignored_cols.contains(*c))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        !compare_cols.is_empty(),
+        "no comparable content columns between the two exports"
+    );
+    assert!(
+        compare_cols.iter().any(|c| c == "length"),
+        "content.length must exist for determinism check"
+    );
+
+    let load_row = |conn: &rusqlite::Connection,
+                    title: &str,
+                    selected_cols: &[String]|
+     -> HashMap<String, String> {
+        let select_cols = selected_cols
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT {select_cols} FROM content
+             WHERE lower(title) = lower(?1)
+             ORDER BY content_id ASC
+             LIMIT 1"
+        );
+        let mut stmt = conn.prepare(&sql).expect("prepare content select");
+        stmt.query_row([title], |row| {
+            let mut out = HashMap::<String, String>::new();
+            for (idx, col) in selected_cols.iter().enumerate() {
+                let v: rusqlite::types::Value = row.get(idx)?;
+                out.insert(col.clone(), format!("{v:?}"));
+            }
+            Ok(out)
+        })
+        .unwrap_or_else(|_| panic!("content row missing for title '{title}'"))
+    };
+
+    for title in &track_titles {
+        let row_a = load_row(&conn_a, title, &compare_cols);
+        let row_b = load_row(&conn_b, title, &compare_cols);
+        assert_eq!(row_a, row_b, "eDB content row diverged for title '{title}'");
+    }
+
+    // ── PDB track row comparison ────────────────────────────────────
+    let pdb_a = parse_pdb(&vendor_db_dir(&usb_a).join("export.pdb")).expect("parse PDB a");
+    let pdb_b = parse_pdb(&vendor_db_dir(&usb_b).join("export.pdb")).expect("parse PDB b");
+
+    let by_title_a: HashMap<String, &backend::pdb_reader::PdbTrackRow> = pdb_a
+        .tracks
+        .iter()
+        .map(|t| (t.title.to_lowercase(), t))
+        .collect();
+    let by_title_b: HashMap<String, &backend::pdb_reader::PdbTrackRow> = pdb_b
+        .tracks
+        .iter()
+        .map(|t| (t.title.to_lowercase(), t))
+        .collect();
+
+    for title in &track_titles {
+        let key = title.to_lowercase();
+        let track_a = by_title_a
+            .get(&key)
+            .unwrap_or_else(|| panic!("PDB export a missing track '{title}'"));
+        let track_b = by_title_b
+            .get(&key)
+            .unwrap_or_else(|| panic!("PDB export b missing track '{title}'"));
+
+        assert_eq!(track_a.title, track_b.title, "PDB title mismatch for '{title}'");
+        assert_eq!(
+            pdb_a.artists.get(&track_a.artist_id),
+            pdb_b.artists.get(&track_b.artist_id),
+            "PDB artist mismatch for '{title}'"
+        );
+        assert_eq!(
+            pdb_a.albums.get(&track_a.album_id),
+            pdb_b.albums.get(&track_b.album_id),
+            "PDB album mismatch for '{title}'"
+        );
+        assert_eq!(
+            pdb_a.keys.get(&track_a.key_id),
+            pdb_b.keys.get(&track_b.key_id),
+            "PDB key mismatch for '{title}'"
+        );
+        assert_eq!(
+            track_a.duration_seconds, track_b.duration_seconds,
+            "PDB duration mismatch for '{title}'"
+        );
+        assert_eq!(
+            track_a.tempo_x100, track_b.tempo_x100,
+            "PDB tempo mismatch for '{title}'"
+        );
+        assert_eq!(
+            track_a.track_number, track_b.track_number,
+            "PDB track_number mismatch for '{title}'"
+        );
+    }
+}
+
 /// Replaces a formerly-broken test of the same behavior that only ever ran
 /// if a literal `./USB` directory happened to exist in the current working
 /// directory (so it silently no-op'd in every real CI/dev run). This
