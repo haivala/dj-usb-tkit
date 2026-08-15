@@ -30,6 +30,29 @@ static CACHE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// sidecar update) so concurrent staging/write-back calls -- even across
 /// different USB devices -- can't interleave and corrupt a sidecar file.
 static STATE_LOCK: Mutex<()> = Mutex::new(());
+/// Cache keys (see `cache_key_for_root`) of devices whose local staging copy
+/// has already been verified fresh for the current connect. While a
+/// device's key is present here, `stage_file_with_root` skips its per-call
+/// USB `stat()` entirely and trusts the local copy -- staging is meant to
+/// happen once per USB connect (`validate_usb_root`, which force-rechecks),
+/// not on every read. A plain `Vec` is fine: at most a handful of devices
+/// are ever seen per process.
+static VERIFIED_THIS_CONNECT: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn is_verified_this_connect(cache_key: &str) -> bool {
+    VERIFIED_THIS_CONNECT
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|k| k == cache_key)
+}
+
+fn mark_verified_this_connect(cache_key: &str) {
+    let mut verified = VERIFIED_THIS_CONNECT.lock().unwrap();
+    if !verified.iter().any(|k| k == cache_key) {
+        verified.push(cache_key.to_string());
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DbKind {
@@ -217,17 +240,33 @@ fn save_state(device_dir: &Path, state: &StagingState) -> std::io::Result<()> {
 /// per-test root -- never mutating global state, so they're safe to run
 /// concurrently with the rest of the suite. [`stage_pdb`]/[`stage_edb`] are
 /// the thin global-reading wrappers production code actually calls.
+///
+/// `force_recheck` distinguishes a connect-time call
+/// ([`stage_pdb_on_connect`]/[`stage_edb_on_connect`], `true`) from every
+/// other, passive read/write call site (`false`): only a `true` call is
+/// allowed to *establish* the "verified this connect" fast path
+/// (`VERIFIED_THIS_CONNECT`) on success, and only a `false` call is allowed
+/// to *use* it (skip the `stat()` below entirely). A passive call that
+/// hasn't been preceded by a connect-time call always does the full
+/// stat/compare/copy check itself, exactly as before this fast path
+/// existed -- it just never earns the shortcut for later calls on its own.
 fn stage_file_with_root(
     cache_root: Option<&Path>,
     usb_root: &Path,
     source: &Path,
     kind: DbKind,
+    force_recheck: bool,
 ) -> BackendResult<PathBuf> {
     let Some(device_dir) = device_dir_for(cache_root, usb_root) else {
         return Ok(source.to_path_buf());
     };
     let local_dir = local_vendor_db_dir(&device_dir);
     let local_path = local_dir.join(kind.filename());
+    let cache_key = cache_key_for_root(usb_root);
+
+    if !force_recheck && local_path.is_file() && is_verified_this_connect(&cache_key) {
+        return Ok(local_path);
+    }
 
     if !source.exists() {
         // Nothing to stage yet (e.g. fresh USB, PDB not created). Callers
@@ -255,6 +294,9 @@ fn stage_file_with_root(
             .is_some_and(|s| s.source == source_stat);
 
     if reuse {
+        if force_recheck {
+            mark_verified_this_connect(&cache_key);
+        }
         return Ok(local_path);
     }
 
@@ -276,6 +318,9 @@ fn stage_file_with_root(
     // Best-effort: if we can't persist the sidecar, the next call will just
     // treat this as a fresh miss and re-copy -- never a hard failure.
     let _ = save_state(&device_dir, &state);
+    if force_recheck {
+        mark_verified_this_connect(&cache_key);
+    }
 
     Ok(local_path)
 }
@@ -286,6 +331,7 @@ pub(crate) fn stage_pdb(usb_root: &Path) -> BackendResult<PathBuf> {
         usb_root,
         &super::usb_vendor_compat::vendor_pdb_path(usb_root),
         DbKind::Pdb,
+        false,
     )
 }
 
@@ -295,6 +341,32 @@ pub(crate) fn stage_edb(usb_root: &Path) -> BackendResult<PathBuf> {
         usb_root,
         &super::usb_vendor_compat::vendor_edb_path(usb_root),
         DbKind::Edb,
+        false,
+    )
+}
+
+/// Force-recheck variants used to (re-)stage exactly once per USB connect
+/// (see `BackendService::validate_usb_root`), regardless of whether this
+/// device was already marked verified earlier in the process -- unlike
+/// `stage_pdb`/`stage_edb`, which trust an existing verified mark and skip
+/// the USB `stat()` entirely.
+pub(crate) fn stage_pdb_on_connect(usb_root: &Path) -> BackendResult<PathBuf> {
+    stage_file_with_root(
+        cache_root().as_deref(),
+        usb_root,
+        &super::usb_vendor_compat::vendor_pdb_path(usb_root),
+        DbKind::Pdb,
+        true,
+    )
+}
+
+pub(crate) fn stage_edb_on_connect(usb_root: &Path) -> BackendResult<PathBuf> {
+    stage_file_with_root(
+        cache_root().as_deref(),
+        usb_root,
+        &super::usb_vendor_compat::vendor_edb_path(usb_root),
+        DbKind::Edb,
+        true,
     )
 }
 
@@ -305,6 +377,21 @@ pub(crate) fn stage_edb_with_root(cache_root: Option<&Path>, usb_root: &Path) ->
         usb_root,
         &super::usb_vendor_compat::vendor_edb_path(usb_root),
         DbKind::Edb,
+        false,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn stage_edb_on_connect_with_root(
+    cache_root: Option<&Path>,
+    usb_root: &Path,
+) -> BackendResult<PathBuf> {
+    stage_file_with_root(
+        cache_root,
+        usb_root,
+        &super::usb_vendor_compat::vendor_edb_path(usb_root),
+        DbKind::Edb,
+        true,
     )
 }
 
@@ -578,6 +665,61 @@ mod tests {
         let staged2 = stage_edb_with_root(Some(cache.path()), &usb_root).unwrap();
         assert_eq!(staged1, staged2);
         assert_eq!(std::fs::read(&staged2).unwrap(), b"hello world, now longer");
+    }
+
+    #[test]
+    fn stage_edb_skips_recheck_after_verified_on_connect() {
+        let cache = tempdir().unwrap();
+        let usb = tempdir().unwrap();
+        let usb_root = usb_root_with_edb(usb.path(), b"hello");
+
+        // Connect-time staging: marks this device verified for the session.
+        let staged1 = stage_edb_on_connect_with_root(Some(cache.path()), &usb_root).unwrap();
+        assert_eq!(std::fs::read(&staged1).unwrap(), b"hello");
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(
+            super::super::usb_vendor_compat::vendor_edb_path(&usb_root),
+            b"changed after connect",
+        )
+        .unwrap();
+
+        // A passive call after the device was verified must trust the local
+        // copy and skip its own stat() -- the USB-side change must not be
+        // picked up until the next connect-time (force-recheck) call.
+        let staged2 = stage_edb_with_root(Some(cache.path()), &usb_root).unwrap();
+        assert_eq!(staged1, staged2);
+        assert_eq!(
+            std::fs::read(&staged2).unwrap(),
+            b"hello",
+            "a passive call must not re-stat once verified this connect"
+        );
+    }
+
+    #[test]
+    fn stage_edb_on_connect_always_resyncs_even_when_already_verified() {
+        let cache = tempdir().unwrap();
+        let usb = tempdir().unwrap();
+        let usb_root = usb_root_with_edb(usb.path(), b"hello");
+
+        stage_edb_on_connect_with_root(Some(cache.path()), &usb_root).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(
+            super::super::usb_vendor_compat::vendor_edb_path(&usb_root),
+            b"changed externally, reconnected",
+        )
+        .unwrap();
+
+        // A second connect-time call must force a real recheck regardless of
+        // the existing verified mark (e.g. drive was replugged/modified
+        // externally and the user re-picked it).
+        let staged = stage_edb_on_connect_with_root(Some(cache.path()), &usb_root).unwrap();
+        assert_eq!(
+            std::fs::read(&staged).unwrap(),
+            b"changed externally, reconnected",
+            "connect-time staging must always re-verify, never trust a stale mark"
+        );
     }
 
     #[test]

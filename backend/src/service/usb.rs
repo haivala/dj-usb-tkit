@@ -390,6 +390,33 @@ impl BackendService {
             ));
         }
 
+        // Stage the local HDD working copy of the PDB/eDB exactly once, here
+        // at connect time, so every read for the rest of this connected
+        // session (diagnostics, playlist fetch, track inspect, export, ...)
+        // can trust the local copy and skip its own USB stat() -- see
+        // `usb_staging::stage_file_with_root`'s verified-this-connect fast
+        // path. Best-effort: a staging hiccup shouldn't fail validation.
+        if has_pdb
+            && let Err(err) = super::usb_staging::stage_pdb_on_connect(&normalized)
+        {
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.stage-pdb-failed",
+                format!("Failed to stage PDB locally: {err}"),
+            ));
+        }
+        if has_edb
+            && let Err(err) = super::usb_staging::stage_edb_on_connect(&normalized)
+        {
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-import",
+                "usb.import.stage-edb-failed",
+                format!("Failed to stage eDB locally: {err}"),
+            ));
+        }
+
         let has_write_access = has_write_access(&normalized);
         if !has_write_access {
             warnings.push(logging::log(
@@ -2881,6 +2908,39 @@ mod tests {
         let devices = service.list_usb_devices().expect("list devices");
         assert_eq!(devices.items.len(), 1);
         assert!(devices.items[0].mounted);
+    }
+
+    #[test]
+    fn validate_usb_root_stages_edb_and_verifies_it_for_the_connect() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let result = service
+            .validate_usb_root(crate::models::ValidateUsbRootRequest {
+                path: usb_root.to_string_lossy().to_string(),
+            })
+            .expect("validate");
+        assert!(result.valid);
+
+        // Mutate the eDB directly on the "USB" after connecting. A later
+        // passive `stage_edb` call must trust the connect-time staging
+        // `validate_usb_root` already did and not pick up the change --
+        // proving staging happened once, at connect, rather than being
+        // deferred to (and re-checked by) the next read.
+        let edb_path = crate::service::usb_vendor_compat::vendor_edb_path(&usb_root);
+        let original = std::fs::read(&edb_path).expect("read seeded edb");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&edb_path, b"changed after connect").expect("mutate edb");
+
+        let staged = crate::service::usb_staging::stage_edb(&usb_root).expect("stage edb");
+        assert_eq!(
+            std::fs::read(&staged).expect("read staged edb"),
+            original,
+            "validate_usb_root should already have staged/verified the eDB, so a later \
+             passive stage call must not pick up an out-of-band USB change"
+        );
     }
 
     #[test]

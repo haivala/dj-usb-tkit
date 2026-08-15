@@ -58,6 +58,14 @@
   once per internal read instead of once per run, so every extra read paid its own USB stat/copy and
   SQLCipher key-negotiation cost. Diagnostics, the parity report, and repair now each open the eDB
   and stage the PDB exactly once and reuse that connection/path for every read in the same run.
+- **Improvement:** the local HDD staging cache for the PDB/eDB (introduced in 0.1.16) checked
+  whether its copy was still fresh against the USB device on every single read/write throughout a
+  connected session — playlist fetch, track inspect, diagnostics, export, every repair step — each
+  paying its own USB stat cost even when nothing had changed since the last check. That freshness
+  check now happens once, when the USB is connected (`validate_usb_root`), and every read for the
+  rest of that session trusts the already-verified local copy instead of re-checking the device.
+  Re-validating the same drive (re-picking it, or reconnecting after it was modified elsewhere)
+  still forces a fresh check.
 
 ## 0.1.16
 
