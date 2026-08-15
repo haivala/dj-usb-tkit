@@ -594,6 +594,17 @@ pub fn try_read_playlists_with_metadata_from_edb_db_only(
     try_read_playlists_with_metadata_from_edb_internal_with_conn(&conn, usb_root, warnings, false)
 }
 
+/// Same as `try_read_playlists_with_metadata_from_edb_db_only`, but reuses an
+/// already-open eDB connection. See `try_read_track_index_from_edb_with_conn`
+/// for why this exists.
+pub fn try_read_playlists_with_metadata_from_edb_db_only_with_conn(
+    conn: &rusqlite::Connection,
+    usb_root: &Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> Option<HashMap<String, ExportDbPlaylist>> {
+    try_read_playlists_with_metadata_from_edb_internal_with_conn(conn, usb_root, warnings, false)
+}
+
 /// Same as `try_read_playlists_with_metadata_from_edb`, but reuses an
 /// already-open eDB connection. See `try_read_track_index_from_edb_with_conn`
 /// for why this exists.

@@ -3296,11 +3296,22 @@ impl BackendService {
         let start = std::time::Instant::now();
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
 
+        // Open the eDB and stage the PDB exactly once for this whole repair run,
+        // then hand the same connection/path to the diagnostics and parity
+        // baselines below (and to this function's own eDB reads further down)
+        // instead of each independently re-staging/re-opening from the USB
+        // device -- see `run_usb_diagnostics_with_progress_impl`.
+        let mut edb_open_warnings = Vec::<WarningEntry>::new();
+        let edb_conn = open_edb_from_usb_root(&usb_root, &mut edb_open_warnings);
+        let staged_pdb_path = usb_staging::stage_pdb(&usb_root)?;
+
         on_progress(5, 100, "USB: Running diagnostics baseline");
-        let diagnostics = self.run_usb_diagnostics_with_progress(
+        let diagnostics = self.run_usb_diagnostics_with_progress_impl(
             RunUsbDiagnosticsRequest {
                 usb_root: Some(usb_root.to_string_lossy().to_string()),
             },
+            edb_conn.as_ref(),
+            Some(&staged_pdb_path),
             |c, t, m| {
                 let pct = 5 + ((c * 50) / t.max(1)).min(50);
                 on_progress(pct, 100, m);
@@ -3308,10 +3319,12 @@ impl BackendService {
         )?;
 
         on_progress(60, 100, "USB: Building parity guidance");
-        let parity = self.run_usb_parity_report_with_progress(
+        let parity = self.run_usb_parity_report_with_progress_impl(
             RunUsbParityReportRequest {
                 usb_root: Some(usb_root.to_string_lossy().to_string()),
             },
+            edb_conn.as_ref(),
+            Some(&staged_pdb_path),
             |c, t, m| {
                 let pct = 60 + ((c * 20) / t.max(1)).min(20);
                 on_progress(pct, 100, m);
@@ -3326,6 +3339,7 @@ impl BackendService {
         let mut skipped_fixes = Vec::<String>::new();
         let mut failed_fixes = Vec::<String>::new();
         let mut warnings = diagnostics.warnings.clone();
+        warnings.append(&mut edb_open_warnings);
         let mut estimated_file_writes = 0usize;
         let estimated_file_deletes = 0usize;
         let mut missing_audio_track_ids = HashSet::<u32>::new();
@@ -3873,7 +3887,10 @@ impl BackendService {
                 .map(|t| normalize_path_for_contents_match(&t.track_file_path))
                 .filter(|p| !p.is_empty())
                 .collect::<HashSet<_>>();
-            let edb_indexed_paths = collect_edb_indexed_paths(&usb_root, &mut warnings);
+            let edb_indexed_paths = edb_conn
+                .as_ref()
+                .map(|conn| collect_edb_indexed_paths(conn, &mut warnings))
+                .unwrap_or_default();
             indexed_paths.extend(edb_indexed_paths);
             // Case-insensitive containment: FAT32/exFAT resolves paths case-insensitively, so
             // a folder's on-disk casing can drift from the currently-recorded artist/album
@@ -3989,9 +4006,9 @@ impl BackendService {
         if let Some(parsed) = parsed_pdb.as_ref() {
             let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
             if !history_rows.is_empty()
-                && let Some(conn) = open_edb_from_usb_root(&usb_root, &mut warnings)
-                && table_exists(&conn, "history")
-                && table_exists(&conn, "history_content")
+                && let Some(conn) = edb_conn.as_ref()
+                && table_exists(conn, "history")
+                && table_exists(conn, "history_content")
             {
                 let current_history_count = conn
                     .query_row("SELECT COUNT(*) FROM history", [], |row| {

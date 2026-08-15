@@ -52,6 +52,12 @@
   every page in the file, so it could report success without touching the flagged row and USB
   diagnostics would keep reporting the same misaligned album row after every repair attempt. The
   repair now scans the same page range diagnostics does.
+- **Fix:** running USB diagnostics, the parity report, or repair diagnostics could hang or take much
+  longer than necessary on slow/misbehaving USB media. Each of these independently re-opened the
+  encrypted eDB (`exportLibrary.db`) — and, in the repair flow, re-staged the PDB (`export.pdb`) —
+  once per internal read instead of once per run, so every extra read paid its own USB stat/copy and
+  SQLCipher key-negotiation cost. Diagnostics, the parity report, and repair now each open the eDB
+  and stage the PDB exactly once and reuse that connection/path for every read in the same run.
 
 ## 0.1.16
 

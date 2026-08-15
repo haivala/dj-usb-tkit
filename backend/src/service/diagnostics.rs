@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::edb::{
-    ExportDbPlaylist, open_edb_from_usb_root, try_read_playlists_with_metadata_from_edb,
-    try_read_playlists_with_metadata_from_edb_db_only,
+    ExportDbPlaylist, open_edb_from_usb_root, try_read_playlists_with_metadata_from_edb_db_only_with_conn,
+    try_read_playlists_with_metadata_from_edb_with_conn,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
@@ -28,7 +28,7 @@ use super::usb_utils::{
     canonicalize_playlist_name, collect_contents_audio_files, repair_utf8_mojibake,
     resolve_usb_root,
 };
-use super::usb_vendor_compat::{vendor_edb_path, vendor_pdb_path};
+use super::usb_vendor_compat::vendor_edb_path;
 
 fn first_data_page_signal(
     bytes: &[u8],
@@ -78,11 +78,10 @@ fn read_pdb_header_compatibility_value(path: &std::path::Path) -> Option<u32> {
 }
 
 fn compute_player_counter_snapshot(
-    usb_root: &std::path::Path,
+    pdb_path: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
 ) -> Option<PlayerCounterSnapshot> {
-    let pdb_path = vendor_pdb_path(usb_root);
-    let bytes = std::fs::read(&pdb_path).ok()?;
+    let bytes = std::fs::read(pdb_path).ok()?;
     let page_size = read_u32_le_at(&bytes, 4)? as usize;
     if page_size == 0 {
         return None;
@@ -163,16 +162,13 @@ fn compute_player_counter_snapshot(
 }
 
 pub(crate) fn collect_edb_indexed_paths(
-    usb_root: &std::path::Path,
+    conn: &rusqlite::Connection,
     warnings: &mut Vec<WarningEntry>,
 ) -> HashSet<String> {
-    let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
-        return HashSet::new();
-    };
-    if !table_exists(&conn, "content") {
+    if !table_exists(conn, "content") {
         return HashSet::new();
     }
-    let Ok(content_columns) = load_table_columns(&conn, "content") else {
+    let Ok(content_columns) = load_table_columns(conn, "content") else {
         warnings.push(logging::log(
             Level::Error,
             "usb-diagnostics",
@@ -266,14 +262,8 @@ pub(crate) fn collect_edb_indexed_paths(
     out
 }
 
-fn collect_edb_content_paths_exact(
-    usb_root: &std::path::Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> HashSet<String> {
-    let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
-        return HashSet::new();
-    };
-    if !table_exists(&conn, "content") {
+fn collect_edb_content_paths_exact(conn: &rusqlite::Connection) -> HashSet<String> {
+    if !table_exists(conn, "content") {
         return HashSet::new();
     }
     let Ok(mut stmt) = conn.prepare(
@@ -349,8 +339,7 @@ pub(crate) fn evaluate_strict_raw_coverage_parity(
 pub(crate) fn collect_strict_indexed_paths(
     parsed: &crate::pdb_reader::ParsedPdb,
     edb_playlists: &HashMap<String, ExportDbPlaylist>,
-    usb_root: &std::path::Path,
-    warnings: &mut Vec<WarningEntry>,
+    conn: &rusqlite::Connection,
 ) -> HashSet<String> {
     // All PDB tracks regardless of playlist/history membership. Alias-stripped
     // (see `collect_edb_content_paths_exact`) to stay symmetric with the
@@ -361,7 +350,7 @@ pub(crate) fn collect_strict_indexed_paths(
         .map(|track| normalize_path_for_strict_presence_match(&track.track_file_path))
         .filter(|path| !path.is_empty());
     // All eDB content paths, alias-stripped
-    let edb_all_paths = collect_edb_content_paths_exact(usb_root, warnings).into_iter();
+    let edb_all_paths = collect_edb_content_paths_exact(conn).into_iter();
     // eDB playlist paths kept for any track whose path differs from the content table
     let edb_playlist_paths = edb_playlists
         .values()
@@ -390,17 +379,11 @@ pub(crate) struct ReferenceOnlyEdbFieldUsage {
     populated_fields: Vec<String>,
 }
 
-fn scan_reference_only_edb_field_usage(
-    usb_root: &std::path::Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> ReferenceOnlyEdbFieldUsage {
-    let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
-        return ReferenceOnlyEdbFieldUsage::default();
-    };
-    if !table_exists(&conn, "content") || !table_exists(&conn, "playlist_content") {
+fn scan_reference_only_edb_field_usage(conn: &rusqlite::Connection) -> ReferenceOnlyEdbFieldUsage {
+    if !table_exists(conn, "content") || !table_exists(conn, "playlist_content") {
         return ReferenceOnlyEdbFieldUsage::default();
     }
-    let Ok(columns) = load_table_columns(&conn, "content") else {
+    let Ok(columns) = load_table_columns(conn, "content") else {
         return ReferenceOnlyEdbFieldUsage::default();
     };
 
@@ -467,6 +450,25 @@ impl BackendService {
     pub fn run_usb_diagnostics_with_progress<F>(
         &self,
         req: RunUsbDiagnosticsRequest,
+        on_progress: F,
+    ) -> BackendResult<RunUsbDiagnosticsData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        self.run_usb_diagnostics_with_progress_impl(req, None, None, on_progress)
+    }
+
+    /// Same as `run_usb_diagnostics_with_progress`, but lets a caller that
+    /// already has an open eDB connection and/or a locally-staged PDB path
+    /// (e.g. `repair_usb_diagnostics_with_progress`, which runs this as a
+    /// baseline alongside its own eDB/PDB reads) share them instead of each
+    /// paying the USB stat/copy/key-negotiation cost separately. Passing
+    /// `None` for either opens/stages it internally exactly as before.
+    pub(crate) fn run_usb_diagnostics_with_progress_impl<F>(
+        &self,
+        req: RunUsbDiagnosticsRequest,
+        edb_conn: Option<&rusqlite::Connection>,
+        staged_pdb_path: Option<&std::path::Path>,
         mut on_progress: F,
     ) -> BackendResult<RunUsbDiagnosticsData>
     where
@@ -504,7 +506,10 @@ impl BackendService {
         ));
         note_stage("resolve usb root", &mut raw_warnings);
 
-        let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
+        let pdb_path = match staged_pdb_path {
+            Some(p) => p.to_path_buf(),
+            None => super::usb_staging::stage_pdb(&usb_root)?,
+        };
 
         // --- 1. PDB Integrity ---
         on_progress(10, 100, "USB: Checking PDB integrity");
@@ -513,9 +518,21 @@ impl BackendService {
 
         // --- 2. DB Access ---
         on_progress(30, 100, "USB: Checking database access");
-        let mut edb_access = diagnose_edb_access(&usb_root, &mut raw_warnings);
-        let edb_playlists =
-            try_read_playlists_with_metadata_from_edb_db_only(&usb_root, &mut raw_warnings);
+        let edb_path = vendor_edb_path(&usb_root);
+        let mut edb_open_warnings = Vec::<WarningEntry>::new();
+        let owned_edb_conn: Option<rusqlite::Connection> = if edb_conn.is_some() {
+            None
+        } else if edb_path.exists() {
+            open_edb_from_usb_root(&usb_root, &mut edb_open_warnings)
+        } else {
+            None
+        };
+        let conn: Option<&rusqlite::Connection> = edb_conn.or(owned_edb_conn.as_ref());
+        let mut edb_access = diagnose_edb_access(&edb_path, conn, &edb_open_warnings);
+        raw_warnings.append(&mut edb_open_warnings);
+        let edb_playlists = conn.and_then(|c| {
+            try_read_playlists_with_metadata_from_edb_db_only_with_conn(c, &usb_root, &mut raw_warnings)
+        });
         let edb_playlist_tracks = edb_playlists.as_ref().map(|m| {
             m.iter()
                 .map(|(name, playlist)| (name.clone(), playlist.tracks.clone()))
@@ -524,9 +541,7 @@ impl BackendService {
 
         // eDB history counts
         {
-            let mut edb_warnings = Vec::<WarningEntry>::new();
-            let edb_conn = open_edb_from_usb_root(&usb_root, &mut edb_warnings);
-            let (edb_h, edb_hc) = if let Some(conn) = edb_conn.as_ref() {
+            let (edb_h, edb_hc) = if let Some(conn) = conn {
                 let h = if table_exists(conn, "history") {
                     conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get::<_, i64>(0))
                         .unwrap_or(0)
@@ -580,7 +595,9 @@ impl BackendService {
                     .collect::<HashSet<_>>()
             })
             .unwrap_or_default();
-        let edb_indexed_paths = collect_edb_indexed_paths(&usb_root, &mut raw_warnings);
+        let edb_indexed_paths = conn
+            .map(|c| collect_edb_indexed_paths(c, &mut raw_warnings))
+            .unwrap_or_default();
 
         // Identify tracks that exist in PDB history playlists but not in any regular playlist.
         // These are written by players during playback and are expected to be absent from eDB.
@@ -772,7 +789,7 @@ impl BackendService {
             playlist_details,
             cdj_counter_snapshot: parsed_opt
                 .as_ref()
-                .and_then(|(parsed, _)| compute_player_counter_snapshot(&usb_root, parsed)),
+                .and_then(|(parsed, _)| compute_player_counter_snapshot(&pdb_path, parsed)),
             warnings: raw_warnings,
             duration_ms: start.elapsed().as_millis() as u64,
         })
@@ -788,6 +805,23 @@ impl BackendService {
     pub fn run_usb_parity_report_with_progress<F>(
         &self,
         req: RunUsbParityReportRequest,
+        on_progress: F,
+    ) -> BackendResult<RunUsbParityReportData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        self.run_usb_parity_report_with_progress_impl(req, None, None, on_progress)
+    }
+
+    /// Same as `run_usb_parity_report_with_progress`, but lets a caller that
+    /// already has an open eDB connection and/or a locally-staged PDB path
+    /// share them instead of each paying the USB stat/copy/key-negotiation
+    /// cost separately. See `run_usb_diagnostics_with_progress_impl`.
+    pub(crate) fn run_usb_parity_report_with_progress_impl<F>(
+        &self,
+        req: RunUsbParityReportRequest,
+        edb_conn: Option<&rusqlite::Connection>,
+        staged_pdb_path: Option<&std::path::Path>,
         mut on_progress: F,
     ) -> BackendResult<RunUsbParityReportData>
     where
@@ -825,7 +859,10 @@ impl BackendService {
         note_stage("resolve usb root", &mut raw_warnings);
 
         on_progress(20, 100, "USB: Parsing PDB");
-        let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
+        let pdb_path = match staged_pdb_path {
+            Some(p) => p.to_path_buf(),
+            None => super::usb_staging::stage_pdb(&usb_root)?,
+        };
         let parsed = parse_pdb(&pdb_path)?;
         raw_warnings.extend(parsed.warnings.iter().map(|message| {
             logging::log(
@@ -838,14 +875,25 @@ impl BackendService {
         note_stage("parse PDB", &mut raw_warnings);
 
         on_progress(45, 100, "USB: Reading eDB");
-        let edb_playlists = try_read_playlists_with_metadata_from_edb(&usb_root, &mut raw_warnings)
-            .ok_or_else(|| {
-                BackendError::Internal(
-                    "parity report requires readable eDB playlist data".to_string(),
-                )
-            })?;
-        let reference_only_edb_fields =
-            scan_reference_only_edb_field_usage(&usb_root, &mut raw_warnings);
+        let owned_edb_conn: Option<rusqlite::Connection> = if edb_conn.is_some() {
+            None
+        } else {
+            open_edb_from_usb_root(&usb_root, &mut raw_warnings)
+        };
+        let conn: Option<&rusqlite::Connection> = edb_conn.or(owned_edb_conn.as_ref());
+        let Some(conn) = conn else {
+            return Err(BackendError::Internal(
+                "parity report requires readable eDB playlist data".to_string(),
+            ));
+        };
+        let edb_playlists =
+            try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root, &mut raw_warnings)
+                .ok_or_else(|| {
+                    BackendError::Internal(
+                        "parity report requires readable eDB playlist data".to_string(),
+                    )
+                })?;
+        let reference_only_edb_fields = scan_reference_only_edb_field_usage(conn);
         note_stage("read eDB", &mut raw_warnings);
 
         on_progress(58, 100, "USB: Checking indexed audio file presence");
@@ -854,8 +902,7 @@ impl BackendService {
             .map(|p| normalize_path_for_strict_presence_match(&p))
             .filter(|p| !p.is_empty())
             .collect();
-        let indexed_paths =
-            collect_strict_indexed_paths(&parsed, &edb_playlists, &usb_root, &mut raw_warnings);
+        let indexed_paths = collect_strict_indexed_paths(&parsed, &edb_playlists, conn);
         // Case-insensitive containment: FAT32/exFAT resolves paths case-insensitively, and a
         // folder's on-disk casing can drift from the currently-recorded artist/album casing
         // without the file actually being missing or unindexed. See `contents_path_match_key`.
@@ -1402,12 +1449,12 @@ pub(crate) fn diagnose_pdb_integrity(
 }
 
 pub(crate) fn diagnose_edb_access(
-    usb_root: &std::path::Path,
-    raw_warnings: &mut Vec<WarningEntry>,
+    edb_path: &std::path::Path,
+    conn: Option<&rusqlite::Connection>,
+    edb_warnings: &[WarningEntry],
 ) -> DiagSection {
     let mut checks = Vec::new();
 
-    let edb_path = vendor_edb_path(usb_root);
     if !edb_path.exists() {
         checks.push(DiagCheck {
             label: "eDB".to_string(),
@@ -1416,8 +1463,6 @@ pub(crate) fn diagnose_edb_access(
             link: None,
         });
     } else {
-        let mut edb_warnings = Vec::<WarningEntry>::new();
-        let conn = open_edb_from_usb_root(usb_root, &mut edb_warnings);
         let (status, detail) = if conn.is_some() {
             let key_msg = edb_warnings
                 .last()
@@ -1431,7 +1476,6 @@ pub(crate) fn diagnose_edb_access(
                 .unwrap_or_else(|| "Unable to open".to_string());
             (DiagStatus::Fail, msg)
         };
-        raw_warnings.extend(edb_warnings);
         checks.push(DiagCheck {
             label: "eDB".to_string(),
             status,
@@ -3606,7 +3650,9 @@ mod tests {
             drop(conn);
 
             let mut warnings = Vec::new();
-            let usage = super::scan_reference_only_edb_field_usage(root.path(), &mut warnings);
+            let conn = crate::edb::open_edb_from_usb_root(root.path(), &mut warnings)
+                .expect("reopen export db");
+            let usage = super::scan_reference_only_edb_field_usage(&conn);
             assert_eq!(
                 usage.playlist_linked_tracks, expected_tracks,
                 "column {column}"
@@ -3787,13 +3833,9 @@ mod tests {
             "/Contents/Artist/Track - .mp3",
         ));
 
-        let mut warnings = Vec::new();
-        let indexed_paths = super::collect_strict_indexed_paths(
-            &parsed,
-            &HashMap::new(),
-            root.path(),
-            &mut warnings,
-        );
+        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
+        let indexed_paths =
+            super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
 
         let actual_files: std::collections::HashSet<String> =
             crate::service::usb_utils::collect_contents_audio_files(root.path())
@@ -3853,13 +3895,9 @@ mod tests {
             "/Contents/Artist/Best of.mp3",
         ));
 
-        let mut warnings = Vec::new();
-        let indexed_paths = super::collect_strict_indexed_paths(
-            &parsed,
-            &HashMap::new(),
-            root.path(),
-            &mut warnings,
-        );
+        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
+        let indexed_paths =
+            super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
         assert_eq!(
             indexed_paths.len(),
             2,
@@ -3933,13 +3971,9 @@ mod tests {
             "/Contents/Some Artist/Track.mp3",
         ));
 
-        let mut warnings = Vec::new();
-        let indexed_paths = super::collect_strict_indexed_paths(
-            &parsed,
-            &HashMap::new(),
-            root.path(),
-            &mut warnings,
-        );
+        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
+        let indexed_paths =
+            super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
         let actual_files: std::collections::HashSet<String> =
             crate::service::usb_utils::collect_contents_audio_files(root.path())
                 .into_iter()
