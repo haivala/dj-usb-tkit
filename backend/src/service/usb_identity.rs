@@ -24,8 +24,17 @@ struct DriveMarker {
     name: String,
 }
 
+/// The app's own `.dj-usb-tkit/` directory at the root of a USB drive --
+/// untouched by rekordbox and by this app's own validation/repair scans,
+/// same reasoning as the drive-name marker file below. Shared with other
+/// modules that want to store their own app-owned metadata on the drive
+/// (e.g. `export_log`).
+pub(crate) fn app_marker_dir(root: &Path) -> PathBuf {
+    root.join(MARKER_DIR)
+}
+
 fn marker_path(root: &Path) -> PathBuf {
-    root.join(MARKER_DIR).join(MARKER_FILE)
+    app_marker_dir(root).join(MARKER_FILE)
 }
 
 /// Read the user-assigned name from the marker file at `root`, if any.

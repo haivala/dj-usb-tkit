@@ -567,7 +567,7 @@ impl BackendService {
         } else {
             if options.backup_before_export {
                 warnings.extend(
-                    self.backup_usb_databases_with_retention(&usb_root)
+                    self.backup_usb_databases_with_retention(&usb_root, "Before export")
                         .into_iter()
                         .map(|message| logging::log(Level::Info, "export", "export.backup", message)),
                 );

@@ -592,6 +592,9 @@ pub struct UsbBackupEntry {
     pub location: String,
     pub size_bytes: u64,
     pub files: Vec<UsbBackupFile>,
+    /// Why this backup was taken (e.g. "Before export"), or `None` for
+    /// backups made before this field existed.
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

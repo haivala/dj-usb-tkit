@@ -3029,7 +3029,7 @@ impl BackendService {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
         warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root)
+            self.backup_usb_databases_with_retention(&usb_root, "Before repair")
                 .into_iter()
                 .map(|message| {
                     logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
@@ -3108,7 +3108,7 @@ impl BackendService {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
         warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root)
+            self.backup_usb_databases_with_retention(&usb_root, "Before menu update")
                 .into_iter()
                 .map(|message| {
                     logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
@@ -4118,7 +4118,7 @@ impl BackendService {
         };
 
         if req.apply {
-            warnings.extend(self.backup_usb_databases_with_retention(&usb_root).into_iter().map(|message| {
+            warnings.extend(self.backup_usb_databases_with_retention(&usb_root, "Before repair").into_iter().map(|message| {
                 logging::log(
                     Level::Info,
                     "usb-diagnostics",

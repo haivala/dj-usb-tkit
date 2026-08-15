@@ -53,14 +53,14 @@ export async function renderBackups(state, el, document, deps = {}) {
   }
 
   el.backupsList.innerHTML = items.map((item) => {
-    const label = escapeHtml(labelForFiles(item.files));
+    const reason = escapeHtml(item.reason || "—");
     const rawTimestamp = escapeHtml(item.timestamp);
     const timestamp = escapeHtml(formatBackupTimestamp(item.timestamp));
     const size = escapeHtml(formatBackupSize(item.sizeBytes));
     const location = item.location === "usb" ? "On USB" : "On this computer";
     return `<div class="event-log-row" data-timestamp="${rawTimestamp}">
       <div class="event-log-time">${timestamp}</div>
-      <div class="event-log-source">${label}</div>
+      <div class="event-log-source">${reason}</div>
       <div class="event-log-message">${size} · ${escapeHtml(location)}</div>
       <div class="backups-row-actions">
         <button type="button" class="backups-restore-btn" data-timestamp="${rawTimestamp}">Restore</button>

@@ -30,6 +30,16 @@
 
 ## Unreleased
 
+- **New feature:** the Backups list now shows why each backup was taken (e.g. "Before export",
+  "Before playlist reorder", "Before repair", "Before restore") instead of no context at all.
+  Backups made before this change show "—" since the reason wasn't recorded yet.
+- **Improvement:** the Backups panel now states once, under the heading, that every backup
+  includes both the PDB and eDB, instead of repeating "eDB and PDB" on every row.
+- **Improvement:** the USB export log (used to backfill playlist export history dates) now lives
+  at `.dj-usb-tkit/dj_usb_tkit_export_log.v1.json` on the drive instead of inside rekordbox's own
+  `PIONEER/rekordbox/` folder. Existing logs at the old location are picked up and moved forward
+  automatically the next time they're read.
+
 ## 0.1.17
 
 - **Fix:** the on-screen USB diagnostics report was left showing stale pass/warn/fail results

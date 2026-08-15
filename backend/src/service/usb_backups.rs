@@ -25,7 +25,9 @@ use crate::models::{
 };
 
 use super::usb_utils::resolve_usb_root;
-use super::usb_vendor_compat::{vendor_db_dir, vendor_edb_path, vendor_pdb_path};
+use super::usb_vendor_compat::{
+    BackupReason, backup_reason_path, vendor_db_dir, vendor_edb_path, vendor_pdb_path,
+};
 use super::{BackendService, DEFAULT_BACKUP_RETENTION_COUNT, SETTING_UI_BACKUP_RETENTION_COUNT};
 
 const STEMS: [(&str, &str); 2] = [("export", "pdb"), ("exportLibrary", "db")];
@@ -56,6 +58,40 @@ fn list_stem_files(dir: &Path, stem: &str, ext: &str) -> Vec<PathBuf> {
         .collect::<Vec<_>>();
     files.sort();
     files
+}
+
+/// Timestamps with a `{timestamp}.reason.json` sidecar present in `dir`.
+fn list_reason_timestamps(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.strip_suffix(".reason.json").map(|s| s.to_string())
+        })
+        .collect()
+}
+
+/// Whether any PDB/eDB snapshot for `timestamp` still exists in `dir`.
+fn any_stem_file_for_timestamp(dir: &Path, timestamp: &str) -> bool {
+    STEMS
+        .iter()
+        .any(|(stem, ext)| dir.join(format!("{stem}_{timestamp}.{ext}")).is_file())
+}
+
+/// Reads the reason recorded for `timestamp`, checking the USB dir first,
+/// then the cache dir. Missing or unparsable sidecars (backups made before
+/// this feature existed, or on a best-effort write failure) yield `None`
+/// rather than an error.
+fn read_backup_reason(dirs: &[(PathBuf, &str)], timestamp: &str) -> Option<String> {
+    dirs.iter().find_map(|(dir, _)| {
+        let bytes = std::fs::read(backup_reason_path(dir, timestamp)).ok()?;
+        serde_json::from_slice::<BackupReason>(&bytes)
+            .ok()
+            .map(|marker| marker.reason)
+    })
 }
 
 fn move_file(src: &Path, dest: &Path) -> std::io::Result<()> {
@@ -142,6 +178,29 @@ fn reconcile_backups(usb_root: &Path, retention_count: u32, protect_timestamp: O
         }
     }
 
+    // Reason sidecars are timestamp-keyed (covering the whole PDB+eDB pair),
+    // not stem-keyed, so they're reconciled in their own pass once both
+    // stems above have settled into their final locations: a sidecar
+    // follows its pair to the cache dir once neither stem file is left on
+    // the USB, and is deleted once no stem file for its timestamp remains
+    // anywhere at all.
+    if let Some(cache_dir) = &cache_dir {
+        for timestamp in list_reason_timestamps(&usb_dir) {
+            if !any_stem_file_for_timestamp(&usb_dir, &timestamp) {
+                let src = backup_reason_path(&usb_dir, &timestamp);
+                let dest = backup_reason_path(cache_dir, &timestamp);
+                let _ = move_file(&src, &dest);
+            }
+        }
+        for timestamp in list_reason_timestamps(cache_dir) {
+            if !any_stem_file_for_timestamp(&usb_dir, &timestamp)
+                && !any_stem_file_for_timestamp(cache_dir, &timestamp)
+            {
+                let _ = std::fs::remove_file(backup_reason_path(cache_dir, &timestamp));
+            }
+        }
+    }
+
     notes
 }
 
@@ -191,8 +250,9 @@ fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
         .map(|(timestamp, entries)| {
             let size_bytes = entries.iter().map(|(f, _)| f.size_bytes).sum();
             let location = if entries.iter().any(|(_, loc)| *loc == "usb") { "usb" } else { "cache" };
+            let reason = read_backup_reason(dirs, &timestamp);
             let files = entries.into_iter().map(|(f, _)| f).collect();
-            UsbBackupEntry { timestamp, location: location.to_string(), size_bytes, files }
+            UsbBackupEntry { timestamp, location: location.to_string(), size_bytes, files, reason }
         })
         .collect();
     items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -232,8 +292,8 @@ impl BackendService {
     /// reconciles storage per this module's split/retention policy. This is
     /// the function every mutating USB command should call instead of
     /// `usb_vendor_compat::backup_usb_databases` directly.
-    pub(crate) fn backup_usb_databases_with_retention(&self, usb_root: &Path) -> Vec<String> {
-        self.backup_usb_databases_with_retention_protecting(usb_root, None)
+    pub(crate) fn backup_usb_databases_with_retention(&self, usb_root: &Path, reason: &str) -> Vec<String> {
+        self.backup_usb_databases_with_retention_protecting(usb_root, reason, None)
     }
 
     /// Same as `backup_usb_databases_with_retention`, but `protect_timestamp`
@@ -244,9 +304,10 @@ impl BackendService {
     fn backup_usb_databases_with_retention_protecting(
         &self,
         usb_root: &Path,
+        reason: &str,
         protect_timestamp: Option<&str>,
     ) -> Vec<String> {
-        let mut notes = super::usb_vendor_compat::backup_usb_databases(usb_root);
+        let mut notes = super::usb_vendor_compat::backup_usb_databases(usb_root, reason);
         let retention_count = self
             .db
             .connect()
@@ -284,7 +345,11 @@ impl BackendService {
         // overwriting it, same as every other mutating USB command. The
         // snapshot we're restoring from is protected from this reconcile's
         // pruning pass so it can't be deleted before the copy below reads it.
-        self.backup_usb_databases_with_retention_protecting(&usb_root, Some(&req.timestamp));
+        self.backup_usb_databases_with_retention_protecting(
+            &usb_root,
+            "Before restore",
+            Some(&req.timestamp),
+        );
 
         for (stem, snapshot) in &files {
             if let Some(live_path) = live_path_for_stem(&usb_root, stem) {
@@ -306,6 +371,12 @@ impl BackendService {
         for (_, snapshot) in &files {
             std::fs::remove_file(snapshot)?;
         }
+        // Best-effort: the reason sidecar may live in either dir (or not
+        // exist at all for backups predating this feature).
+        let _ = std::fs::remove_file(backup_reason_path(&usb_backups_dir(&usb_root), &req.timestamp));
+        if let Some(cache_dir) = cache_backups_dir(&usb_root) {
+            let _ = std::fs::remove_file(backup_reason_path(&cache_dir, &req.timestamp));
+        }
         Ok(DeleteUsbBackupData { deleted: true })
     }
 }
@@ -325,6 +396,14 @@ mod tests {
         std::fs::create_dir_all(dir).unwrap();
         let path = dir.join(format!("{stem}_{ts}.{ext}"));
         std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    fn touch_reason(dir: &Path, ts: &str, reason: &str) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = backup_reason_path(dir, ts);
+        let encoded = serde_json::to_string(&BackupReason { reason: reason.to_string() }).unwrap();
+        std::fs::write(&path, encoded).unwrap();
         path
     }
 
@@ -485,6 +564,26 @@ mod tests {
         assert_eq!(entry.files.len(), 2);
         assert!(entry.files.iter().any(|f| f.stem == "export"));
         assert!(entry.files.iter().any(|f| f.stem == "exportLibrary"));
+        assert_eq!(entry.reason, None, "no sidecar written -- legacy backup has no recorded reason");
+    }
+
+    #[test]
+    fn list_usb_backups_surfaces_reason_from_sidecar() {
+        let (_dir, service) = test_service();
+        let usb = tempdir().unwrap();
+        let usb_root = usb.path();
+        let backups_dir = usb_backups_dir(usb_root);
+        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb");
+        touch_backup(&backups_dir, "exportLibrary", "db", "2020-01-01_00-00-00", b"edb");
+        touch_reason(&backups_dir, "2020-01-01_00-00-00", "Before export");
+
+        let result = service
+            .list_usb_backups(ListUsbBackupsRequest {
+                usb_root: usb_root.to_string_lossy().to_string(),
+            })
+            .expect("list backups");
+
+        assert_eq!(result.items[0].reason.as_deref(), Some("Before export"));
     }
 
     #[test]
@@ -627,5 +726,85 @@ mod tests {
             })
             .expect_err("deleting again must error");
         assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn delete_usb_backup_removes_reason_sidecar() {
+        let (_dir, service) = test_service();
+        let usb = tempdir().unwrap();
+        let usb_root = usb.path();
+        let backups_dir = usb_backups_dir(usb_root);
+        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb");
+        let sidecar = touch_reason(&backups_dir, "2020-01-01_00-00-00", "Before export");
+
+        service
+            .delete_usb_backup(DeleteUsbBackupRequest {
+                usb_root: usb_root.to_string_lossy().to_string(),
+                timestamp: "2020-01-01_00-00-00".to_string(),
+            })
+            .expect("delete");
+
+        assert!(!sidecar.is_file());
+    }
+
+    #[test]
+    fn reconcile_moves_reason_sidecar_alongside_archived_pair() {
+        let usb = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let usb_root = usb.path();
+        name_drive(usb_root, "Club Stick");
+        let _guard =
+            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+
+        let backups_dir = usb_backups_dir(usb_root);
+        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"old");
+        touch_reason(&backups_dir, "2020-01-01_00-00-00", "Before export");
+        touch_backup(&backups_dir, "export", "pdb", "2020-01-02_00-00-00", b"newest");
+        touch_reason(&backups_dir, "2020-01-02_00-00-00", "Before playlist reorder");
+
+        reconcile_backups(usb_root, 10, None);
+
+        let cache_dir = cache_backups_dir(usb_root).expect("cache dir for named drive");
+        assert!(
+            backup_reason_path(&cache_dir, "2020-01-01_00-00-00").is_file(),
+            "sidecar for the archived (older) pair must follow it to the cache dir"
+        );
+        assert!(
+            !backup_reason_path(&backups_dir, "2020-01-01_00-00-00").is_file(),
+            "sidecar must not be left behind on the USB once its pair has fully moved"
+        );
+        assert!(
+            backup_reason_path(&backups_dir, "2020-01-02_00-00-00").is_file(),
+            "sidecar for the pair kept on the USB (newest) must stay put"
+        );
+    }
+
+    #[test]
+    fn reconcile_prunes_reason_sidecar_when_pair_fully_pruned() {
+        let usb = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let usb_root = usb.path();
+        name_drive(usb_root, "Club Stick");
+        let _guard =
+            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+
+        let backups_dir = usb_backups_dir(usb_root);
+        for i in 1..=3 {
+            let ts = format!("2020-01-0{i}_00-00-00");
+            touch_backup(&backups_dir, "export", "pdb", &ts, format!("v{i}").as_bytes());
+            touch_reason(&backups_dir, &ts, "Before export");
+        }
+
+        reconcile_backups(usb_root, 1, None);
+
+        let cache_dir = cache_backups_dir(usb_root).expect("cache dir for named drive");
+        assert!(
+            !backup_reason_path(&cache_dir, "2020-01-01_00-00-00").is_file(),
+            "sidecar for a fully-pruned pair must be deleted, not orphaned in the cache dir"
+        );
+        assert!(
+            backup_reason_path(&backups_dir, "2020-01-03_00-00-00").is_file(),
+            "sidecar for the surviving newest pair must remain"
+        );
     }
 }

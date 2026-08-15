@@ -8,6 +8,7 @@ use crate::models::{UsbHistory, UsbTrack};
 
 use super::diagnostics::track_identity_key;
 use super::export_helpers::{ExportManifest, ExportPlaylistData};
+use super::usb_identity::app_marker_dir;
 use super::usb_vendor_compat::vendor_db_dir;
 
 const EXPORT_LOG_FILE_NAME: &str = "dj_usb_tkit_export_log.v1.json";
@@ -40,7 +41,30 @@ impl Default for UsbExportLog {
 }
 
 pub(crate) fn export_log_path(usb_root: &Path) -> PathBuf {
+    app_marker_dir(usb_root).join(EXPORT_LOG_FILE_NAME)
+}
+
+/// Where the export log used to live, before it moved into the app's own
+/// `.dj-usb-tkit/` marker dir -- it originally piggybacked on rekordbox's
+/// vendor directory only because that was convenient, not because it
+/// belongs there. Kept only so `load_export_log` can migrate old files
+/// forward; nothing writes here anymore.
+fn legacy_export_log_path(usb_root: &Path) -> PathBuf {
     vendor_db_dir(usb_root).join(EXPORT_LOG_FILE_NAME)
+}
+
+/// Best-effort rename, falling back to copy+remove when the source and
+/// destination are on different filesystems (e.g. USB -> internal HDD
+/// staging cache), same fallback `usb_backups::move_file` uses.
+fn migrate_file(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if std::fs::rename(src, dest).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(src, dest)?;
+    std::fs::remove_file(src)
 }
 
 pub(crate) fn append_export_log_record(
@@ -55,9 +79,21 @@ pub(crate) fn append_export_log_record(
 }
 
 pub(crate) fn load_export_log(usb_root: &Path) -> BackendResult<Option<UsbExportLog>> {
-    let path = export_log_path(usb_root);
+    let mut path = export_log_path(usb_root);
     if !path.is_file() {
-        return Ok(None);
+        let legacy_path = legacy_export_log_path(usb_root);
+        if !legacy_path.is_file() {
+            return Ok(None);
+        }
+        // Migrate forward: a file at the old PIONEER/rekordbox location
+        // means an older version of the app wrote it there. Move it into
+        // place so it only lives in one spot from here on, and future
+        // saves land at the new path. If the move itself fails (e.g. a
+        // read-only drive), fall back to reading the legacy file in place
+        // rather than losing the log entirely.
+        if migrate_file(&legacy_path, &path).is_err() {
+            path = legacy_path;
+        }
     }
     let raw = std::fs::read_to_string(&path)?;
     let parsed = serde_json::from_str::<UsbExportLog>(&raw).map_err(|err| {
@@ -205,7 +241,7 @@ mod tests {
     use super::{
         UsbExportLog, UsbExportLogRecord, append_export_log_record,
         apply_history_dates_from_export_log, build_export_log_record, export_log_path,
-        load_export_log,
+        legacy_export_log_path, load_export_log,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::service::export_helpers::{ExportManifest, ExportManifestTrack, ExportPlaylistData};
@@ -492,5 +528,47 @@ mod tests {
 
         apply_history_dates_from_export_log(&mut histories, Some(&log));
         assert_eq!(histories[0].created_at.as_deref(), Some("2026-04-04"));
+    }
+
+    #[test]
+    fn load_export_log_migrates_legacy_path_forward() {
+        let temp = tempdir().expect("tempdir");
+        let legacy_path = legacy_export_log_path(temp.path());
+        std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+        let log = UsbExportLog {
+            schema_version: 1,
+            records: vec![UsbExportLogRecord {
+                playlist_id: "pl-1".to_string(),
+                playlist_name: "Warmup".to_string(),
+                exported_at: "2026-04-03T10:00:00+00:00".to_string(),
+                export_date: "2026-04-03".to_string(),
+                track_fingerprints: vec!["fp-1".to_string()],
+            }],
+        };
+        std::fs::write(&legacy_path, serde_json::to_string_pretty(&log).unwrap()).unwrap();
+
+        let loaded = load_export_log(temp.path())
+            .expect("load")
+            .expect("log present via legacy fallback");
+        assert_eq!(loaded.records.len(), 1);
+        assert!(
+            export_log_path(temp.path()).is_file(),
+            "reading a legacy log must relocate it to the new .dj-usb-tkit/ path"
+        );
+        assert!(
+            !legacy_path.is_file(),
+            "old PIONEER/rekordbox file must not be left behind after migration"
+        );
+
+        // A subsequent append must write only to the new path, never
+        // recreating the legacy one.
+        let playlist = ExportPlaylistData {
+            id: "pl-2".to_string(),
+            name: "Another".to_string(),
+            tracks: Vec::new(),
+        };
+        append_export_log_record(temp.path(), &playlist, &manifest("2026-04-05T10:00:00Z", vec![]))
+            .expect("append after migration");
+        assert!(!legacy_path.is_file());
     }
 }

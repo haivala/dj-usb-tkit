@@ -2913,6 +2913,13 @@ td button[data-action]:disabled,
   color: var(--ink-secondary);
 }
 
+/* Backups rows show a reason ("Before playlist reorder") in the shared
+   .event-log-source column instead of the short eDB/PDB label the Event
+   Log panel puts there, so it needs more room. */
+#backupsList .event-log-row {
+  grid-template-columns: 92px 160px minmax(0, 1fr) auto;
+}
+
 .backups-row-actions {
   display: flex;
   gap: 6px;

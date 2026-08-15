@@ -872,7 +872,7 @@ impl BackendService {
 
         on_progress(5, 100, "USB: Backing up USB databases");
         warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root)
+            self.backup_usb_databases_with_retention(&usb_root, "Before playlist reorder")
                 .into_iter()
                 .map(|message| {
                     logging::log(Level::Info, "usb-import", "usb.reorder.backup", message)
@@ -980,7 +980,7 @@ impl BackendService {
         push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
 
         warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root)
+            self.backup_usb_databases_with_retention(&usb_root, "Before playlist removal")
                 .into_iter()
                 .map(|message| {
                     logging::log(Level::Info, "usb-import", "usb.remove.backup", message)
