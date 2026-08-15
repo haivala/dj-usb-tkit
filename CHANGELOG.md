@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.17
+
 - **Fix:** the on-screen USB diagnostics report was left showing stale pass/warn/fail results
   after restoring a DB backup, removing/reordering a USB playlist, syncing or editing the player
   menu, or exporting a playlist — none of these re-ran diagnostics, so the report kept describing
