@@ -287,6 +287,43 @@ test("exportPlaylistToUsb blocks playlists affected by missing source roots", as
   assert.match(status, /Export blocked: source folder is missing/);
 });
 
+test("exportPlaylistToUsb clears the diagnostics report after a successful export", async () => {
+  const state = {
+    playlists: [{ id: "p1", name: "Set", tracks: [{ id: "t1" }] }],
+    usbRoot: "/USB",
+    usbRootValid: true,
+    usbWritable: true,
+    exportPruneStale: true,
+    activeJobId: null,
+    currentPlaylistId: null,
+    usbPlaylists: [],
+    usbPlaylistTracks: []
+  };
+  const el = { usbSelectedPlaylistText: { textContent: "" } };
+  let clearCalls = 0;
+
+  await exportPlaylistToUsb(state, el, "p1", {
+    setStatus: () => {},
+    setProgress: () => {},
+    startProgressHeartbeat: () => {},
+    nextPaint: async () => {},
+    command: async () => ({ exportedTracks: 1, skippedTracks: 0, warnings: [] }),
+    stopProgressHeartbeat: () => {},
+    countWarningsForStatus: () => 0,
+    warningEntryLevel: () => "info",
+    logWarnings: () => {},
+    pushEventLog: () => {},
+    loadPlaylists: async () => {},
+    updateModeText: () => {},
+    switchView: async () => {},
+    renderUsbPlaylists: () => {},
+    renderUsbPlaylistTracks: () => {},
+    clearUsbDiagnostics: () => { clearCalls += 1; }
+  });
+
+  assert.equal(clearCalls, 1);
+});
+
 test("player menu single-select clears opposite list and enables proper actions", () => {
   const dom = new JSDOM(`<!doctype html><body>
     <button id="refresh"></button>

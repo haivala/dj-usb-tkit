@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+- **Fix:** the on-screen USB diagnostics report was left showing stale pass/warn/fail results
+  after restoring a DB backup, removing/reordering a USB playlist, syncing or editing the player
+  menu, or exporting a playlist — none of these re-ran diagnostics, so the report kept describing
+  a PDB/eDB state that no longer existed. Backup restore additionally *hid* the whole diagnostics
+  panel outright rather than just clearing its content. All of these now clear the report (health
+  dot back to "unknown", no stale rows) instead of leaving it stale or hiding the panel; the user
+  can re-run diagnostics to get a fresh report for the current state.
 - **Fix:** additive USB export could create a duplicate track — a second PDB row, a second
   copy of the audio file, and a second playlist entry — when re-exporting a track that was
   already physically present on the USB under a path this app hadn't itself written (e.g.

@@ -3,42 +3,42 @@ import assert from "node:assert/strict";
 
 import { restoreUsbBackup, deleteUsbBackup } from "../components/backups/actions.mjs";
 
-test("restoreUsbBackup discards the on-screen diagnostics report after a successful restore", async () => {
+test("restoreUsbBackup clears the on-screen diagnostics report after a successful restore", async () => {
   const state = { usbRoot: "/usb", usbBackups: [] };
-  let hideCalls = 0;
+  let clearCalls = 0;
   await restoreUsbBackup(state, "2020-01-01_00-00-00", {
     command: async () => ({}),
     openConfirmDialog: async () => true,
-    hideUsbDiagnostics: () => { hideCalls += 1; },
+    clearUsbDiagnostics: () => { clearCalls += 1; },
     reload: async () => {}
   });
-  assert.equal(hideCalls, 1, "a successful restore must discard the stale diagnostics report");
+  assert.equal(clearCalls, 1, "a successful restore must clear the stale diagnostics report");
 });
 
-test("restoreUsbBackup does not discard diagnostics when the restore command fails", async () => {
+test("restoreUsbBackup does not clear diagnostics when the restore command fails", async () => {
   const state = { usbRoot: "/usb", usbBackups: [] };
-  let hideCalls = 0;
+  let clearCalls = 0;
   await restoreUsbBackup(state, "2020-01-01_00-00-00", {
     command: async () => { throw new Error("boom"); },
     openConfirmDialog: async () => true,
-    hideUsbDiagnostics: () => { hideCalls += 1; },
+    clearUsbDiagnostics: () => { clearCalls += 1; },
     reload: async () => {}
   });
-  assert.equal(hideCalls, 0, "a failed restore left the live files untouched, so the report is still valid");
+  assert.equal(clearCalls, 0, "a failed restore left the live files untouched, so the report is still valid");
 });
 
 test("restoreUsbBackup does nothing when the user cancels the confirm dialog", async () => {
   const state = { usbRoot: "/usb", usbBackups: [] };
   let commandCalls = 0;
-  let hideCalls = 0;
+  let clearCalls = 0;
   await restoreUsbBackup(state, "2020-01-01_00-00-00", {
     command: async () => { commandCalls += 1; return {}; },
     openConfirmDialog: async () => false,
-    hideUsbDiagnostics: () => { hideCalls += 1; },
+    clearUsbDiagnostics: () => { clearCalls += 1; },
     reload: async () => {}
   });
   assert.equal(commandCalls, 0);
-  assert.equal(hideCalls, 0);
+  assert.equal(clearCalls, 0);
 });
 
 test("deleteUsbBackup removes the entry without touching the diagnostics report", async () => {

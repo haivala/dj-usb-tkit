@@ -1131,12 +1131,14 @@ const removeUsbPlaylist = async (p) => usb.removeUsbPlaylist(state, p, {
     command,
     refreshUsb,
     countWarningsForStatus: eventLog.countWarningsForStatus,
+    clearUsbDiagnostics: () => usb.clearUsbDiagnostics(el),
   });
 const reorderUsbPlaylists = async () => usb.reorderUsbPlaylists(state, el, {
     setStatus,
     emitStatus,
     command,
     refreshUsb,
+    clearUsbDiagnostics: () => usb.clearUsbDiagnostics(el),
   });
 const usbJobBaseDeps = {
   setStatus,
@@ -1188,6 +1190,7 @@ const usbPlayerMenuDeps = {
   emitStatus,
   command,
   documentObj: document,
+  clearUsbDiagnostics: () => usb.clearUsbDiagnostics(el),
 };
 
 const loadUsbPlayerMenuConfig = async () => usb.loadUsbPlayerMenuConfig(state, el, usbPlayerMenuDeps);
@@ -1214,6 +1217,7 @@ const exportPlaylistToUsb = async (playlistId) => usb.exportPlaylistToUsb(state,
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
     refreshMissingSourceRoots: checkSourceRoots,
+    clearUsbDiagnostics: () => usb.clearUsbDiagnostics(el),
   });
 
 // --- Bootstrap closures ---
@@ -1393,6 +1397,7 @@ function bindEvents() {
     renderEventLog,
     renderBackups,
     hideUsbDiagnostics: usb.hideUsbDiagnostics,
+    clearUsbDiagnostics: usb.clearUsbDiagnostics,
     switchView,
     deletePlaylist,
     startPlaylistRename,

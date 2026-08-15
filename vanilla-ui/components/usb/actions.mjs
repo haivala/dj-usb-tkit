@@ -317,15 +317,17 @@ export function showDiagRepairView(el) {
   el.diagRepairPanel.classList.remove("hidden");
 }
 
-export function hideUsbDiagnostics(el) {
+// Blanks the diagnostics report content back to an empty/unknown state
+// without touching whether the panel itself is shown or collapsed. Use this
+// when the USB DBs changed underneath an on-screen report (repair, playlist
+// edit, export, backup restore, ...) but the same drive is still selected --
+// the stale report should disappear, not the whole panel.
+function resetDiagnosticsContent(el) {
   [el.usbHealthDot, el.usbHeaderHealthDot].filter(Boolean).forEach((dot) => {
     dot.classList.remove("health-pass", "health-warn", "health-fail");
     dot.dataset.tooltip = "USB health: unknown";
     dot.setAttribute("aria-label", "USB health: unknown");
   });
-  if (el.usbDiagnosticsCard) {
-    el.usbDiagnosticsCard.classList.add("hidden");
-  }
   if (el.diagSections) {
     el.diagSections.innerHTML = "";
   }
@@ -357,6 +359,22 @@ export function hideUsbDiagnostics(el) {
   }
   if (el.diagReportView && el.diagRepairPanel) {
     showDiagReportView(el);
+  }
+}
+
+// Clears a stale diagnostics report in place -- the DBs changed but the same
+// USB drive is still selected, so leave the panel's open/closed state alone.
+export function clearUsbDiagnostics(el) {
+  resetDiagnosticsContent(el);
+}
+
+// Full hide: the diagnostics report no longer applies to anything on screen
+// (USB root cleared or switched to a different drive), so collapse the panel
+// too, not just its content.
+export function hideUsbDiagnostics(el) {
+  resetDiagnosticsContent(el);
+  if (el.usbDiagnosticsCard) {
+    el.usbDiagnosticsCard.classList.add("hidden");
   }
   const healthCard = el.usbDiagnosticsCard?.closest?.("#usbHealthCard");
   if (healthCard) {
@@ -879,7 +897,8 @@ export async function removeUsbPlaylist(state, playlist, deps) {
     openConfirmDialog,
     command,
     refreshUsb,
-    countWarningsForStatus
+    countWarningsForStatus,
+    clearUsbDiagnostics = () => {}
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
 
@@ -904,6 +923,7 @@ export async function removeUsbPlaylist(state, playlist, deps) {
     playlistId: playlist.id,
     playlistName: playlist.name
   });
+  clearUsbDiagnostics();
   await refreshUsb();
   const warningCount = typeof countWarningsForStatus === "function"
     ? countWarningsForStatus(data.warnings)
@@ -923,7 +943,7 @@ export function moveArrayItem(list, fromIndex, toIndex) {
 }
 
 export async function reorderUsbPlaylists(state, el, deps) {
-  const { command, refreshUsb } = deps;
+  const { command, refreshUsb, clearUsbDiagnostics = () => {} } = deps;
   const emitStatus = resolveEmitStatus(deps);
 
   if (!state.usbRoot || !state.usbRootValid) {
@@ -936,6 +956,7 @@ export async function reorderUsbPlaylists(state, el, deps) {
       usbRoot: state.usbRoot,
       orderedPlaylistIds: state.usbPlaylists.map((p) => p.id)
     });
+    clearUsbDiagnostics();
     emitStatus("Playlist order saved");
   } catch (err) {
     emitStatus(`Failed to save playlist order: ${err.message || err}`);
@@ -1346,7 +1367,7 @@ function renderUsbPlayerMenuDivergence(state, el) {
 }
 
 export async function syncUsbPlayerMenusEdbToPdb(state, el, deps) {
-  const { command } = deps;
+  const { command, clearUsbDiagnostics = () => {} } = deps;
   const emitStatus = resolveEmitStatus(deps);
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
@@ -1360,6 +1381,7 @@ export async function syncUsbPlayerMenusEdbToPdb(state, el, deps) {
   state.usbPlayerMenuCurrentSelectedKind = null;
   state.usbPlayerMenuAvailableSelectedKind = null;
   renderUsbPlayerMenuEditor(state, el, deps);
+  if (data?.updated) clearUsbDiagnostics();
   emitStatus(data?.updated ? "PDB categories restored" : "PDB already complete");
 }
 
@@ -1418,7 +1440,7 @@ export async function loadUsbPlayerMenuConfig(state, el, deps) {
 }
 
 export async function updateUsbPlayerMenuConfig(state, el, deps, currentKinds, preferredSelection = null) {
-  const { command } = deps;
+  const { command, clearUsbDiagnostics = () => {} } = deps;
   const emitStatus = resolveEmitStatus(deps);
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
@@ -1428,6 +1450,7 @@ export async function updateUsbPlayerMenuConfig(state, el, deps, currentKinds, p
     usbRoot: state.usbRoot,
     currentKinds,
   });
+  if (data?.updated) clearUsbDiagnostics();
   state.usbPlayerMenuCurrent = Array.isArray(data?.currentItems) ? data.currentItems : [];
   state.usbPlayerMenuAvailable = Array.isArray(data?.availableItems) ? data.availableItems : [];
   state.usbPlayerMenuDivergence = normalizeDivergence(data?.divergence);
@@ -1515,7 +1538,8 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
     switchView,
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
-    refreshMissingSourceRoots = async () => []
+    refreshMissingSourceRoots = async () => [],
+    clearUsbDiagnostics = () => {}
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
   const emitErrorEvent = (text, details = null, coalesceKey = "export.failure") => {
@@ -1597,6 +1621,7 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
       stopProgressHeartbeat();
     }
   }
+  clearUsbDiagnostics();
   const warningCount = countWarningsForStatus(data.warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   const warningList = Array.isArray(data.warnings) ? data.warnings : [];

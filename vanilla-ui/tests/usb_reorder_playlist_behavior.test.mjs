@@ -61,3 +61,39 @@ test("reorderUsbPlaylists surfaces an error status and still refreshes", async (
   assert.match(status, /Failed to save playlist order: write failed/);
   assert.equal(refreshed, 1);
 });
+
+test("reorderUsbPlaylists clears the diagnostics report after a successful reorder", async () => {
+  const state = {
+    usbRoot: "/tmp/usb",
+    usbRootValid: true,
+    usbPlaylists: [{ id: "usb-pl-1" }, { id: "usb-pl-2" }]
+  };
+  let clearCalls = 0;
+
+  await reorderUsbPlaylists(state, {}, {
+    setStatus: () => {},
+    command: async () => ({}),
+    refreshUsb: async () => {},
+    clearUsbDiagnostics: () => { clearCalls += 1; }
+  });
+
+  assert.equal(clearCalls, 1);
+});
+
+test("reorderUsbPlaylists does not clear diagnostics when the command fails", async () => {
+  const state = {
+    usbRoot: "/tmp/usb",
+    usbRootValid: true,
+    usbPlaylists: [{ id: "usb-pl-1" }, { id: "usb-pl-2" }]
+  };
+  let clearCalls = 0;
+
+  await reorderUsbPlaylists(state, {}, {
+    setStatus: () => {},
+    command: async () => { throw new Error("write failed"); },
+    refreshUsb: async () => {},
+    clearUsbDiagnostics: () => { clearCalls += 1; }
+  });
+
+  assert.equal(clearCalls, 0);
+});

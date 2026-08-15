@@ -5,8 +5,8 @@
 export function makeClassList() {
   const classes = new Set();
   return {
-    add(name) { classes.add(name); },
-    remove(name) { classes.delete(name); },
+    add(...names) { for (const name of names) classes.add(name); },
+    remove(...names) { for (const name of names) classes.delete(name); },
     contains(name) { return classes.has(name); },
     toggle(name, force) {
       if (typeof force === "boolean") {

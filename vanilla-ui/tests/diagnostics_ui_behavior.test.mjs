@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   showDiagReportView, showDiagRepairView, renderRepairPreview,
-  diagStatusIcon, renderDiagnosticsReport, renderParityReport
+  diagStatusIcon, renderDiagnosticsReport, renderParityReport,
+  hideUsbDiagnostics, clearUsbDiagnostics
 } from "../components/usb/actions.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
 
@@ -453,4 +454,77 @@ test("renderParityReport handles missing summaryRows gracefully", () => {
 
   assert.equal(el.diagOverallStatus.textContent, "PASS");
   assert.equal(el.diagSections.children.length, 1);
+});
+
+// --- Coverage: clearUsbDiagnostics vs hideUsbDiagnostics ---
+
+function makeHealthDot() {
+  return {
+    classList: makeClassList(),
+    dataset: {},
+    ariaLabel: "",
+    setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; }
+  };
+}
+
+function makeHideClearTestEl() {
+  const el = makeDiagEl();
+  el.usbHealthDot = makeHealthDot();
+  el.usbHeaderHealthDot = makeHealthDot();
+  el.diagRepairSummary = { textContent: "stale summary", className: "diag-repair-summary is-bad" };
+  el.diagRepairFixes = { innerHTML: "<div>stale fix</div>" };
+  el.applyRepairsBtn = { disabled: false };
+  el.diagSections.innerHTML = "<div>stale</div>";
+  el.diagOverallStatus.textContent = "WARN";
+  el.diagDuration.textContent = "Completed in 1ms";
+  el.diagPlaylistTableBody.innerHTML = "<tr></tr>";
+  el.usbHealthDot.classList.add("health-warn");
+
+  const healthCard = {
+    classList: makeClassList(),
+    open: true,
+    removeAttribute(name) { if (name === "open") this.open = false; }
+  };
+  healthCard.classList.add("is-loading");
+  el.usbDiagnosticsCard.closest = (sel) => (sel === "#usbHealthCard" ? healthCard : null);
+  el._healthCard = healthCard;
+  return el;
+}
+
+function assertContentCleared(el) {
+  assert.equal(el.diagSections.innerHTML, "");
+  assert.equal(el.diagOverallStatus.textContent, "");
+  assert.equal(el.diagDuration.textContent, "");
+  assert.equal(el.diagPlaylistTableBody.innerHTML, "");
+  assert.ok(el.diagPlaylistDetails.classList.contains("hidden"));
+  assert.equal(el.diagRepairSummary.textContent, "");
+  assert.equal(el.diagRepairFixes.innerHTML, "");
+  assert.equal(el.previewRepairsBtn.disabled, true);
+  assert.equal(el.applyRepairsBtn.disabled, true);
+  assert.ok(!el.diagReportView.classList.contains("hidden"));
+  assert.ok(el.diagRepairPanel.classList.contains("hidden"));
+  assert.ok(!el.usbHealthDot.classList.contains("health-warn"));
+  assert.equal(el.usbHealthDot.dataset.tooltip, "USB health: unknown");
+}
+
+test("clearUsbDiagnostics blanks the report but leaves the panel and health card open state alone", () => {
+  const el = makeHideClearTestEl();
+
+  clearUsbDiagnostics(el);
+
+  assertContentCleared(el);
+  assert.ok(!el.usbDiagnosticsCard.classList.contains("hidden"), "panel must stay visible on a clear");
+  assert.equal(el._healthCard.open, true, "health card's open state must be left alone on a clear");
+  assert.ok(el._healthCard.classList.contains("is-loading"), "clear must not touch is-loading state");
+});
+
+test("hideUsbDiagnostics blanks the report and also collapses the panel and health card", () => {
+  const el = makeHideClearTestEl();
+
+  hideUsbDiagnostics(el);
+
+  assertContentCleared(el);
+  assert.ok(el.usbDiagnosticsCard.classList.contains("hidden"), "hide must collapse the panel");
+  assert.equal(el._healthCard.open, false, "hide must close the health card");
+  assert.ok(!el._healthCard.classList.contains("is-loading"));
 });
