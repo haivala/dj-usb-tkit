@@ -1000,13 +1000,14 @@ function handleUsbPlayerMenuListClick(side, event) {
 function rebuildKnownUsbPlaylistNames() {
   usb.rebuildKnownUsbPlaylistNames(state);
 }
-function resetUsbStateViews() {
+function resetUsbStateViews({ hideDiagnostics = true } = {}) {
   usb.resetUsbStateViews(state, el, {
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
     renderHistoryList,
     renderHistoryTracks,
     renderUsbPlayerMenuEditor,
+    hideDiagnostics,
   });
 }
 function showDiagReportView() {
@@ -1167,6 +1168,7 @@ const previewUsbRepairs = async () => usb.previewUsbRepairs(state, {
 const applyUsbRepairs = async () => usb.applyUsbRepairs(state, {
     ...usbJobBaseDeps,
     runUsbDiagnostics,
+    resetUsbStateViews,
   });
 const refreshHistory = async () => usb.refreshHistory(state, el, {
     setStatus,
@@ -1398,6 +1400,7 @@ function bindEvents() {
     renderBackups,
     hideUsbDiagnostics: usb.hideUsbDiagnostics,
     clearUsbDiagnostics: usb.clearUsbDiagnostics,
+    resetUsbStateViews,
     switchView,
     deletePlaylist,
     startPlaylistRename,

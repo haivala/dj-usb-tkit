@@ -567,7 +567,8 @@ export function resetUsbStateViews(state, el, deps = {}) {
     renderUsbPlaylistTracks = () => {},
     renderHistoryList = () => {},
     renderHistoryTracks = () => {},
-    renderUsbPlayerMenuEditor = () => {}
+    renderUsbPlayerMenuEditor = () => {},
+    hideDiagnostics = true
   } = deps;
 
   state.usbPlaylists = [];
@@ -586,7 +587,10 @@ export function resetUsbStateViews(state, el, deps = {}) {
   el.usbCountsText.textContent = "";
   el.historyCountsText.textContent = "";
   if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
-  hideUsbDiagnostics(el);
+  // The USB may still be connected and selected (e.g. after a backup
+  // restore or a repair apply) -- only a full disconnect/switch-drive
+  // should collapse the diagnostics panel itself, not just blank its report.
+  if (hideDiagnostics) hideUsbDiagnostics(el);
 
   renderUsbPlaylists();
   renderUsbPlaylistTracks();
@@ -1119,7 +1123,8 @@ export async function applyUsbRepairs(state, deps) {
     setStatus,
     command,
     logWarnings,
-    runUsbDiagnostics
+    runUsbDiagnostics,
+    resetUsbStateViews = () => {}
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
   if (!state.usbRoot) {
@@ -1140,6 +1145,11 @@ export async function applyUsbRepairs(state, deps) {
   });
   const applied = Array.isArray(data.appliedFixes) ? data.appliedFixes.length : 0;
   const failed = Array.isArray(data.failedFixes) ? data.failedFixes.length : 0;
+  // Some repair fixes rewrite the PDB playlist tree -- rather than track
+  // which specific fix IDs touch playlists, treat any successful apply as
+  // potentially invalidating whatever's loaded, same coarse-grained
+  // "DB changed, clear it" reasoning diagnostics-clearing already uses.
+  if (applied > 0) resetUsbStateViews({ hideDiagnostics: false });
   logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
   emitStatus(`Repair apply complete: ${applied} applied, ${failed} failed (${data.durationMs}ms). Re-diagnosing...`);
   try {

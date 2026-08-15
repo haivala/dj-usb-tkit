@@ -333,8 +333,7 @@ impl BackendService {
         req: RestoreUsbBackupRequest,
     ) -> BackendResult<RestoreUsbBackupData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
-        let files = files_for_timestamp(&usb_root, &req.timestamp);
-        if files.is_empty() {
+        if files_for_timestamp(&usb_root, &req.timestamp).is_empty() {
             return Err(BackendError::NotFound(format!(
                 "backup not found: {}",
                 req.timestamp
@@ -351,11 +350,48 @@ impl BackendService {
             Some(&req.timestamp),
         );
 
+        // Re-resolve the restore target's file locations *after* the
+        // reconcile above: taking the pre-restore backup can itself archive
+        // the very snapshot being restored from (usb -> cache, if it's no
+        // longer the newest for its stem), so paths captured before
+        // reconcile could point at files that just moved out from under
+        // this call.
+        let files = files_for_timestamp(&usb_root, &req.timestamp);
+        if files.is_empty() {
+            return Err(BackendError::NotFound(format!(
+                "backup not found: {}",
+                req.timestamp
+            )));
+        }
+
         for (stem, snapshot) in &files {
             if let Some(live_path) = live_path_for_stem(&usb_root, stem) {
                 std::fs::copy(snapshot, &live_path)?;
             }
         }
+
+        // The copy above wrote straight to the live USB path, bypassing
+        // `usb_staging` entirely -- without this, the local HDD staging
+        // cache (and its "verified this connect" fast path, see
+        // `usb_staging::stage_file_with_root`) would keep serving every read
+        // for the rest of the session the pre-restore content. Force a
+        // fresh re-stage per restored file, same as a fresh USB connect does
+        // (`validate_usb_root`).
+        for (stem, _) in &files {
+            let result = match stem.as_str() {
+                "export" => super::usb_staging::stage_pdb_on_connect(&usb_root),
+                "exportLibrary" => super::usb_staging::stage_edb_on_connect(&usb_root),
+                _ => continue,
+            };
+            if let Err(err) = result {
+                crate::logging::emit(
+                    crate::logging::Level::Warn,
+                    "usb-backups",
+                    &format!("Failed to re-stage {stem} after restore: {err}"),
+                );
+            }
+        }
+
         Ok(RestoreUsbBackupData { restored: true })
     }
 
@@ -631,6 +667,52 @@ mod tests {
                 .iter()
                 .any(|p| std::fs::read(p).map(|b| b == b"edb-live-v2").unwrap_or(false)),
             "restore must back up the current live eDB before overwriting it"
+        );
+    }
+
+    /// Regression test: `restore_usb_backup` used to write straight to the
+    /// live USB path without touching the local HDD staging cache, so a
+    /// drive already `VERIFIED_THIS_CONNECT` (from a normal connect earlier
+    /// in the session) kept serving the *pre-restore* staged copy to every
+    /// passive read afterwards, no matter how many times the caller retried.
+    #[test]
+    fn restore_usb_backup_re_stages_local_cache_so_reads_see_restored_content() {
+        let (_dir, service) = test_service();
+        let usb = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let usb_root = usb.path();
+        name_drive(usb_root, "Restore Stage Test");
+        let _guard =
+            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+
+        let live_pdb = vendor_pdb_path(usb_root);
+        std::fs::create_dir_all(live_pdb.parent().unwrap()).unwrap();
+        std::fs::write(&live_pdb, b"pre-restore-content").unwrap();
+
+        // Simulate a normal connect: stages the pre-restore content locally
+        // and marks the drive verified, exactly like `validate_usb_root`
+        // does for a real session.
+        crate::service::usb_staging::stage_pdb_on_connect(usb_root).expect("stage on connect");
+
+        let backups_dir = usb_backups_dir(usb_root);
+        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"restored-content");
+
+        let result = service
+            .restore_usb_backup(RestoreUsbBackupRequest {
+                usb_root: usb_root.to_string_lossy().to_string(),
+                timestamp: "2020-01-01_00-00-00".to_string(),
+            })
+            .expect("restore");
+        assert!(result.restored);
+
+        // A passive read (what `fetch_usb_playlists` actually calls) must
+        // see the restored content, not whatever was staged before restore.
+        let staged_path =
+            crate::service::usb_staging::stage_pdb(usb_root).expect("stage after restore");
+        assert_eq!(
+            std::fs::read(&staged_path).unwrap(),
+            b"restored-content",
+            "passive reads must see the restored content, not the stale pre-restore staged copy"
         );
     }
 

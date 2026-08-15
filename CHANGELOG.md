@@ -39,6 +39,17 @@
   at `.dj-usb-tkit/dj_usb_tkit_export_log.v1.json` on the drive instead of inside rekordbox's own
   `PIONEER/rekordbox/` folder. Existing logs at the old location are picked up and moved forward
   automatically the next time they're read.
+- **Fix:** restoring a USB DB backup had no visible effect — playlists (and anything else read from
+  the drive) kept showing pre-restore data no matter how many times they were reloaded. The restore
+  wrote the backup straight to the USB file but never refreshed the local staging cache most reads
+  are actually served from, so every read kept trusting the stale cached copy. Restoring now forces
+  that cache to refresh, the same way a fresh USB connect does.
+- **Fix:** restoring a backup that wasn't the most recent one could fail outright with an I/O error,
+  because taking the required pre-restore safety backup could itself relocate the very snapshot
+  being restored from out from under the restore.
+- **Improvement:** loaded playlists, histories, and player-menu editor state now clear from the UI
+  after a backup restore or an applied repair fix, since either can change what's on the drive —
+  matching how the diagnostics report already gets cleared on any DB-changing action.
 
 ## 0.1.17
 

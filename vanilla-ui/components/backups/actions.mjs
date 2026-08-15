@@ -76,7 +76,8 @@ export async function restoreUsbBackup(state, timestamp, deps = {}) {
     openConfirmDialog = async () => true,
     setStatus = () => {},
     reload = async () => {},
-    clearUsbDiagnostics = () => {}
+    clearUsbDiagnostics = () => {},
+    resetUsbStateViews = () => {}
   } = deps;
   if (!state.usbRoot) return;
 
@@ -93,11 +94,13 @@ export async function restoreUsbBackup(state, timestamp, deps = {}) {
   try {
     await command("restore_usb_backup", { usbRoot: state.usbRoot, timestamp });
     setStatus(`Restored ${label} from backup`);
-    // The restored files may no longer match whatever diagnostics report is
-    // on screen -- clear it rather than show a stale result; the user can
-    // re-run diagnostics if they want a fresh one. The same drive is still
-    // selected, so only the report is cleared, not the whole panel.
+    // The restored files may no longer match whatever diagnostics report,
+    // playlists, histories, or player-menu state are on screen -- clear
+    // them rather than show stale results; the user can reload if they
+    // want fresh ones. The same drive is still selected, so only the
+    // diagnostics report is cleared, not the whole panel.
     clearUsbDiagnostics();
+    resetUsbStateViews({ hideDiagnostics: false });
   } catch (err) {
     setStatus(`Restore failed: ${err?.message || err}`);
   }
