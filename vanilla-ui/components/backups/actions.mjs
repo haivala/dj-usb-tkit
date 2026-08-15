@@ -58,10 +58,13 @@ export async function renderBackups(state, el, document, deps = {}) {
     const timestamp = escapeHtml(formatBackupTimestamp(item.timestamp));
     const size = escapeHtml(formatBackupSize(item.sizeBytes));
     const location = item.location === "usb" ? "On USB" : "On this computer";
+    const playlistCount = Number.isFinite(item.playlistCount)
+      ? ` · ${item.playlistCount} playlist${item.playlistCount === 1 ? "" : "s"}`
+      : "";
     return `<div class="event-log-row" data-timestamp="${rawTimestamp}">
       <div class="event-log-time">${timestamp}</div>
       <div class="event-log-source">${reason}</div>
-      <div class="event-log-message">${size} · ${escapeHtml(location)}</div>
+      <div class="event-log-message">${size} · ${escapeHtml(location)}${escapeHtml(playlistCount)}</div>
       <div class="backups-row-actions">
         <button type="button" class="backups-restore-btn" data-timestamp="${rawTimestamp}">Restore</button>
         <button type="button" class="backups-delete-btn" data-timestamp="${rawTimestamp}">Delete</button>

@@ -172,6 +172,14 @@ pub fn parse_pdb(path: &Path) -> BackendResult<ParsedPdb> {
     parse_pdb_bytes(&bytes)
 }
 
+/// Playlist count from the PDB alone (excludes folder nodes), best-effort --
+/// `None` on any read/parse failure, never a hard error.
+pub fn count_pdb_playlists(path: &Path) -> Option<usize> {
+    parse_pdb(path)
+        .ok()
+        .map(|p| p.playlist_tree.iter().filter(|row| !row.row_is_folder).count())
+}
+
 /// Mismatch between an observed page's `(u5, num_rl)` and the per-table
 /// convention player firmware expects.
 #[derive(Debug, Clone)]

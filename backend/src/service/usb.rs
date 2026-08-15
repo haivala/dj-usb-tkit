@@ -21,7 +21,9 @@ use crate::models::{
     UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest,
     WarningEntry,
 };
-use crate::pdb_reader::{ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, parse_pdb};
+use crate::pdb_reader::{
+    ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, count_pdb_playlists, parse_pdb,
+};
 
 use super::analysis::normalize_text;
 use super::export_helpers::{
@@ -872,7 +874,7 @@ impl BackendService {
 
         on_progress(5, 100, "USB: Backing up USB databases");
         warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root, "Before playlist reorder")
+            self.backup_usb_databases_with_retention(&usb_root, "Before playlist reorder", None)
                 .into_iter()
                 .map(|message| {
                     logging::log(Level::Info, "usb-import", "usb.reorder.backup", message)
@@ -980,7 +982,16 @@ impl BackendService {
         push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
 
         warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root, "Before playlist removal")
+            self.backup_usb_databases_with_retention(
+                &usb_root,
+                "Before playlist removal",
+                // Removal can change the count, so it's worth a fresh
+                // (best-effort) parse rather than carrying the previous
+                // backup's count forward.
+                super::usb_staging::stage_pdb(&usb_root)
+                    .ok()
+                    .and_then(|p| count_pdb_playlists(&p)),
+            )
                 .into_iter()
                 .map(|message| {
                     logging::log(Level::Info, "usb-import", "usb.remove.backup", message)

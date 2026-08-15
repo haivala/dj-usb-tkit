@@ -49,13 +49,22 @@ pub(crate) fn vendor_edb_path(usb_root: &Path) -> PathBuf {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BackupReason {
     pub reason: String,
+    /// Playlist count on the drive at backup time, or `None` for backups
+    /// predating this field. See `usb_backups::backup_usb_databases_with_retention`
+    /// for how this is resolved (fresh parse vs. carried forward).
+    #[serde(default)]
+    pub playlist_count: Option<usize>,
 }
 
 pub(crate) fn backup_reason_path(backup_dir: &Path, timestamp: &str) -> PathBuf {
     backup_dir.join(format!("{timestamp}.reason.json"))
 }
 
-pub(crate) fn backup_usb_databases(usb_root: &Path, reason: &str) -> Vec<String> {
+pub(crate) fn backup_usb_databases(
+    usb_root: &Path,
+    reason: &str,
+    playlist_count: Option<usize>,
+) -> Vec<String> {
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let backup_dir = vendor_db_dir(usb_root).join("backups");
     let mut notes = Vec::new();
@@ -87,7 +96,7 @@ pub(crate) fn backup_usb_databases(usb_root: &Path, reason: &str) -> Vec<String>
     }
 
     if any_copied {
-        let marker = BackupReason { reason: reason.to_string() };
+        let marker = BackupReason { reason: reason.to_string(), playlist_count };
         if let Ok(encoded) = serde_json::to_string(&marker)
             && let Err(e) = std::fs::write(backup_reason_path(&backup_dir, &timestamp), encoded)
         {
@@ -110,7 +119,7 @@ mod tests {
         std::fs::write(vendor_pdb_path(usb_root), b"pdb").unwrap();
         std::fs::write(vendor_edb_path(usb_root), b"edb").unwrap();
 
-        backup_usb_databases(usb_root, "Before export");
+        backup_usb_databases(usb_root, "Before export", Some(7));
 
         let backup_dir = vendor_db_dir(usb_root).join("backups");
         let sidecars: Vec<_> = std::fs::read_dir(&backup_dir)
@@ -123,6 +132,34 @@ mod tests {
         let bytes = std::fs::read(sidecars[0].path()).unwrap();
         let marker: BackupReason = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(marker.reason, "Before export");
+        assert_eq!(marker.playlist_count, Some(7));
+    }
+
+    #[test]
+    fn backup_usb_databases_reads_back_a_missing_playlist_count_as_none() {
+        let usb = tempdir().unwrap();
+        let usb_root = usb.path();
+        std::fs::create_dir_all(vendor_db_dir(usb_root)).unwrap();
+        std::fs::write(vendor_pdb_path(usb_root), b"pdb").unwrap();
+
+        backup_usb_databases(usb_root, "Before playlist reorder", None);
+
+        let backup_dir = vendor_db_dir(usb_root).join("backups");
+        let sidecar = std::fs::read_dir(&backup_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| e.file_name().to_string_lossy().ends_with(".reason.json"))
+            .expect("sidecar written");
+        let bytes = std::fs::read(sidecar.path()).unwrap();
+        let marker: BackupReason = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(marker.playlist_count, None);
+    }
+
+    #[test]
+    fn backup_reason_deserializes_a_legacy_sidecar_missing_the_playlist_count_field() {
+        let marker: BackupReason = serde_json::from_str(r#"{"reason":"Before export"}"#).unwrap();
+        assert_eq!(marker.reason, "Before export");
+        assert_eq!(marker.playlist_count, None);
     }
 
     #[test]
@@ -130,7 +167,7 @@ mod tests {
         let usb = tempdir().unwrap();
         let usb_root = usb.path();
         // No live PDB/eDB present -- nothing to back up, so no sidecar either.
-        backup_usb_databases(usb_root, "Before export");
+        backup_usb_databases(usb_root, "Before export", Some(3));
 
         let backup_dir = vendor_db_dir(usb_root).join("backups");
         let sidecar_count = std::fs::read_dir(&backup_dir)

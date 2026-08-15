@@ -50,6 +50,10 @@
 - **Improvement:** loaded playlists, histories, and player-menu editor state now clear from the UI
   after a backup restore or an applied repair fix, since either can change what's on the drive —
   matching how the diagnostics report already gets cleared on any DB-changing action.
+- **New feature:** the Backups list now shows how many playlists were on the drive at backup time.
+  Export and playlist removal (the only actions that can change that count) get a fresh count;
+  every other backup reason carries the count forward from the previous backup instead of
+  re-parsing the PDB for no reason. Backups made before this change show no count.
 
 ## 0.1.17
 

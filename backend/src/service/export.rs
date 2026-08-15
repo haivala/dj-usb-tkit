@@ -566,8 +566,14 @@ impl BackendService {
             }
         } else {
             if options.backup_before_export {
+                // Export can add/replace a playlist, so the count is worth a
+                // fresh (best-effort) parse rather than carrying forward
+                // whatever the last backup recorded.
+                let playlist_count = usb_staging::stage_pdb(&usb_root)
+                    .ok()
+                    .and_then(|p| crate::pdb_reader::count_pdb_playlists(&p));
                 warnings.extend(
-                    self.backup_usb_databases_with_retention(&usb_root, "Before export")
+                    self.backup_usb_databases_with_retention(&usb_root, "Before export", playlist_count)
                         .into_iter()
                         .map(|message| logging::log(Level::Info, "export", "export.backup", message)),
                 );

@@ -595,6 +595,9 @@ pub struct UsbBackupEntry {
     /// Why this backup was taken (e.g. "Before export"), or `None` for
     /// backups made before this field existed.
     pub reason: Option<String>,
+    /// Playlist count on the drive at backup time, or `None` for backups
+    /// made before this field existed.
+    pub playlist_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
