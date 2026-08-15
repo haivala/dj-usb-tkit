@@ -13,6 +13,12 @@ use crate::models::{ExportToUsbData, ExportToUsbRequest, WarningEntry};
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
 type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
 
+/// (file size in bytes, canonicalized title, canonicalized artist) — a coarse
+/// content fingerprint used to recognize a track that's already physically on
+/// the USB under a path this app didn't write (e.g. a Rekordbox-managed
+/// layout, or an older export run that used a different naming scheme).
+type ContentFingerprint = (u32, String, String);
+
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
     WriteExportLibraryDbResult, WriteExportPdbResult, collect_manifest_owned_paths,
@@ -41,6 +47,42 @@ fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<
     let abs = resolve_usb_side_path(usb_root, &rel)?;
     if Path::new(&abs).is_file() {
         Some(rel)
+    } else {
+        None
+    }
+}
+
+/// Build a content fingerprint from a size/title/artist triple, or `None` when
+/// the inputs are too weak to fingerprint safely (missing/non-positive size,
+/// or a title that canonicalizes to nothing).
+fn content_fingerprint_key(
+    file_size_bytes: Option<i64>,
+    title: &str,
+    artist: &str,
+) -> Option<ContentFingerprint> {
+    let size = u32::try_from(file_size_bytes?).ok().filter(|&s| s > 0)?;
+    let title_key = canonicalize_playlist_name(title);
+    if title_key.is_empty() {
+        return None;
+    }
+    Some((size, title_key, canonicalize_playlist_name(artist)))
+}
+
+/// Verify a USB-PDB-relative path (e.g. `/Contents/Artist/Album/Song.mp3`)
+/// still points at a real file on this USB. Unlike `existing_usb_relative_if_file`,
+/// `relative` is already in PDB-relative form, so it must resolve via
+/// `resolve_usb_side_path` directly rather than `to_usb_relative_path` first:
+/// on Unix, `to_usb_relative_path` treats a leading `/` as filesystem-absolute
+/// and would try to strip `usb_root`'s own prefix from it, which fails for an
+/// already-relative `/Contents/...` string.
+fn existing_usb_relative_if_present(usb_root: &Path, relative: &str) -> Option<String> {
+    let trimmed = relative.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let abs = resolve_usb_side_path(usb_root, trimmed)?;
+    if Path::new(&abs).is_file() {
+        Some(trimmed.to_string())
     } else {
         None
     }
@@ -175,26 +217,46 @@ impl BackendService {
                 .entry(path_key)
                 .or_insert(analysis_path);
         }
-        // Build identity lookup from existing USB PDB: identity fields + artwork path per track
-        let existing_usb_identity_by_path = {
-            let mut map = HashMap::<String, UsbTrackIdentity>::new();
-            if let Ok(parsed) = usb_utils::parse_staged_pdb(&usb_root) {
-                for track in &parsed.tracks {
-                    let path_key = canonicalize_playlist_name(&track.track_file_path);
-                    let art = parsed.artworks.get(&track.artwork_id).cloned();
-                    map.insert(
-                        path_key,
-                        (
-                            track.master_db_id,
-                            track.master_content_id,
-                            track.content_link,
-                            art,
-                        ),
-                    );
+        // Build identity lookup from existing USB PDB: identity fields + artwork path per
+        // track, plus a coarse content-fingerprint lookup (file size + normalized
+        // title/artist) used as a fallback when a track's source file isn't itself
+        // already inside this USB's Contents tree, but the same content already is —
+        // under a path this app didn't write. See `content_fingerprint_key`.
+        let mut existing_usb_identity_by_path = HashMap::<String, UsbTrackIdentity>::new();
+        let mut existing_usb_path_by_fingerprint = HashMap::<ContentFingerprint, String>::new();
+        if let Ok(parsed) = usb_utils::parse_staged_pdb(&usb_root) {
+            for track in &parsed.tracks {
+                let path_key = canonicalize_playlist_name(&track.track_file_path);
+                let art = parsed.artworks.get(&track.artwork_id).cloned();
+                existing_usb_identity_by_path.insert(
+                    path_key,
+                    (
+                        track.master_db_id,
+                        track.master_content_id,
+                        track.content_link,
+                        art,
+                    ),
+                );
+                let artist_name = parsed
+                    .artists
+                    .get(&track.artist_id)
+                    .map(String::as_str)
+                    .unwrap_or("");
+                if let Some(fingerprint) = content_fingerprint_key(
+                    track.file_size_bytes.map(i64::from),
+                    &track.title,
+                    artist_name,
+                ) {
+                    // First match wins: if the USB already has more than one file
+                    // sharing this fingerprint (e.g. an earlier, still-unresolved
+                    // duplicate pair), don't thrash between them on repeated
+                    // additive exports — just stop making it worse.
+                    existing_usb_path_by_fingerprint
+                        .entry(fingerprint)
+                        .or_insert_with(|| track.track_file_path.clone());
                 }
             }
-            map
-        };
+        }
 
         let mut exported_tracks = 0usize;
         let mut skipped_tracks = 0usize;
@@ -241,9 +303,35 @@ impl BackendService {
                 &extension,
             );
             let target = target_base;
-            let existing_exported_path =
-                existing_usb_relative_if_file(&usb_root, Some(&source.to_string_lossy()))
-                    .filter(|rel| rel.starts_with("/Contents/"));
+            let computed_target_relative =
+                to_usb_relative_path(&usb_root, &target.to_string_lossy());
+            let existing_exported_path = existing_usb_relative_if_file(
+                &usb_root,
+                Some(&source.to_string_lossy()),
+            )
+            .filter(|rel| rel.starts_with("/Contents/"))
+            .or_else(|| {
+                // The source file itself isn't inside this USB's Contents tree, but
+                // the same track may already be physically present under a path we
+                // didn't write. Match on content fingerprint so re-exporting it reuses
+                // the existing row/media/artwork instead of minting a duplicate. Skip
+                // this when the candidate is the same path this run would compute
+                // anyway (e.g. a stable re-export of a track this app itself placed
+                // there before) — that's not a foreign path, and treating it as one
+                // would wrongly mark the file as not-owned and make it look stale to
+                // prune_stale on the next export.
+                let fingerprint =
+                    content_fingerprint_key(track.file_size_bytes, &track.title, &track.artist)?;
+                let candidate = existing_usb_path_by_fingerprint.get(&fingerprint)?;
+                if computed_target_relative
+                    .as_deref()
+                    .map(canonicalize_playlist_name)
+                    == Some(canonicalize_playlist_name(candidate))
+                {
+                    return None;
+                }
+                existing_usb_relative_if_present(&usb_root, candidate)
+            });
             let owns_exported_media = existing_exported_path.is_none();
             if !export_dry_run && owns_exported_media {
                 if extension == "wav" || extension == "wave" {
@@ -265,6 +353,13 @@ impl BackendService {
                     existing_usb_relative_if_file(&usb_root, track.artwork_path.as_deref())
                 {
                     artwork_relative = Some(existing_artwork);
+                } else if let Some((_, _, _, Some(art_path))) = existing_usb_identity_by_path
+                    .get(&canonicalize_playlist_name(&exported_path))
+                {
+                    // Fallback: pick up artwork already indexed on the USB PDB for this
+                    // exported_path (e.g. a fingerprint-matched track already on this
+                    // USB under a foreign naming scheme) before minting a new asset.
+                    artwork_relative = Some(art_path.clone());
                 } else if !export_dry_run
                     && let Some(path) = track.artwork_path.as_deref()
                     && let Some(asset_path) =
@@ -274,15 +369,6 @@ impl BackendService {
                         to_usb_relative_path(&usb_root, &asset_path).or(Some(asset_path));
                     exported_artworks += 1;
                     owns_artwork = true;
-                }
-            }
-            // Fallback: pick up artwork from existing USB PDB if we didn't resolve it
-            if artwork_relative.is_none() {
-                let exported_key = canonicalize_playlist_name(&exported_path);
-                if let Some((_, _, _, Some(art_path))) =
-                    existing_usb_identity_by_path.get(&exported_key)
-                {
-                    artwork_relative = Some(art_path.clone());
                 }
             }
 
@@ -1017,8 +1103,9 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendService, ensure_playlist_tracks_analysis_ready, existing_usb_relative_if_file,
-        has_required_analysis, has_required_analysis_fields,
+        BackendService, content_fingerprint_key, ensure_playlist_tracks_analysis_ready,
+        existing_usb_relative_if_file, existing_usb_relative_if_present, has_required_analysis,
+        has_required_analysis_fields,
     };
     use crate::error::BackendError;
     use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest};
@@ -1210,6 +1297,70 @@ mod tests {
         std::fs::write(&song_path, b"data").expect("write file");
         let result = existing_usb_relative_if_file(dir.path(), Some(&song_path.to_string_lossy()));
         assert_eq!(result.as_deref(), Some("/Contents/song.mp3"));
+    }
+
+    // --- content_fingerprint_key ---
+
+    #[test]
+    fn content_fingerprint_key_requires_positive_size_and_nonblank_title() {
+        assert!(content_fingerprint_key(None, "Title", "Artist").is_none());
+        assert!(content_fingerprint_key(Some(0), "Title", "Artist").is_none());
+        assert!(content_fingerprint_key(Some(-5), "Title", "Artist").is_none());
+        assert!(content_fingerprint_key(Some(1234), "   ", "Artist").is_none());
+    }
+
+    #[test]
+    fn content_fingerprint_key_normalizes_case_and_punctuation() {
+        let a = content_fingerprint_key(Some(1234), "Unflinching", "KURO 黒").unwrap();
+        let b = content_fingerprint_key(Some(1234), " unflinching ", "kuro 黒").unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn content_fingerprint_key_differs_on_size_title_or_artist() {
+        let base = content_fingerprint_key(Some(1234), "Title", "Artist").unwrap();
+        assert_ne!(
+            base,
+            content_fingerprint_key(Some(9999), "Title", "Artist").unwrap()
+        );
+        assert_ne!(
+            base,
+            content_fingerprint_key(Some(1234), "Other", "Artist").unwrap()
+        );
+        assert_ne!(
+            base,
+            content_fingerprint_key(Some(1234), "Title", "Other").unwrap()
+        );
+    }
+
+    // --- existing_usb_relative_if_present ---
+
+    #[test]
+    fn existing_usb_relative_if_present_matches_existing_foreign_scheme_path() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("Contents/Foreign Scheme"))
+            .expect("create contents dir");
+        std::fs::write(
+            dir.path().join("Contents/Foreign Scheme/Unflinching-1.mp3"),
+            b"data",
+        )
+        .expect("write file");
+
+        let result = existing_usb_relative_if_present(
+            dir.path(),
+            "/Contents/Foreign Scheme/Unflinching-1.mp3",
+        );
+        assert_eq!(
+            result.as_deref(),
+            Some("/Contents/Foreign Scheme/Unflinching-1.mp3")
+        );
+    }
+
+    #[test]
+    fn existing_usb_relative_if_present_none_when_file_missing_or_blank() {
+        let dir = tempdir().expect("tempdir");
+        assert!(existing_usb_relative_if_present(dir.path(), "/Contents/gone.mp3").is_none());
+        assert!(existing_usb_relative_if_present(dir.path(), "   ").is_none());
     }
 
     // --- file_type_from_extension ---

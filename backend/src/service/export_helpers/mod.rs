@@ -4759,6 +4759,96 @@ mod tests {
     }
 
     #[test]
+    fn write_pdb_reuses_existing_row_when_a_different_manifest_track_id_targets_the_same_foreign_scheme_path()
+     {
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path();
+        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
+            .unwrap();
+        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
+            .expect("initialize usb skeleton");
+
+        let playlist = ExportPlaylistData {
+            id: "pl-fingerprint-fallback".to_string(),
+            name: "Fingerprint Fallback".to_string(),
+            tracks: Vec::new(),
+        };
+        // A path this app did not write itself (simulates Rekordbox's own layout,
+        // or an older export run's naming scheme) — this is what export.rs's
+        // content-fingerprint fallback resolves `exported_path` to when it
+        // matches an existing on-USB track by file size + normalized title/artist.
+        let foreign_path = "/Contents/Foreign Scheme/Unflinching-1.mp3";
+
+        let mut track_a = mapping_test_track();
+        track_a.id = "local-track-a".to_string();
+        track_a.title = "Unflinching".to_string();
+        track_a.artist = "Kuro".to_string();
+        track_a.exported_path = foreign_path.to_string();
+
+        let mut manifest = ExportManifest {
+            version: 1,
+            generated_at: "2024-01-01".to_string(),
+            playlist_id: playlist.id.clone(),
+            playlist_name: playlist.name.clone(),
+            usb_root: usb_root.to_string_lossy().to_string(),
+            options: crate::models::ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: false,
+                ..Default::default()
+            },
+            exported_tracks: 1,
+            skipped_tracks: 0,
+            warnings: Vec::new(),
+            tracks: vec![track_a],
+        };
+
+        write_pdb(usb_root, &playlist, &manifest, true, None, None)
+            .expect("write initial pdb with foreign-scheme path");
+
+        let pdb_path = usb_root
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb");
+        let first_parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse first pdb");
+        assert_eq!(first_parsed.tracks.len(), 1);
+        let original_pdb_id = first_parsed.tracks[0].id;
+
+        // Second additive export: a DIFFERENT local-library track id, but
+        // export.rs's content-fingerprint fallback resolved its exported_path
+        // to the SAME foreign path (same content, different app-level track id
+        // — exactly what happens when a still-duplicated pair on a real USB
+        // gets re-exported after the fix).
+        let mut track_b = mapping_test_track();
+        track_b.id = "local-track-b".to_string();
+        track_b.title = "Unflinching".to_string();
+        track_b.artist = "Kuro".to_string();
+        track_b.exported_path = foreign_path.to_string();
+        manifest.tracks = vec![track_b];
+
+        write_pdb(usb_root, &playlist, &manifest, true, None, None)
+            .expect("rewrite pdb for fingerprint-matched track b");
+
+        let second_parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse second pdb");
+        assert_eq!(
+            second_parsed.tracks.len(),
+            1,
+            "a second manifest track id resolving to the same on-USB path must not mint a \
+             duplicate PDB row: {:?}",
+            second_parsed
+                .tracks
+                .iter()
+                .map(|t| (t.id, t.track_file_path.as_str()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            second_parsed.tracks[0].id, original_pdb_id,
+            "the existing row's numeric PDB track id must be reused, not replaced"
+        );
+        assert_eq!(second_parsed.tracks[0].track_file_path, foreign_path);
+    }
+
+    #[test]
     fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
         let dir = tempdir().unwrap();
         let usb_root = dir.path();

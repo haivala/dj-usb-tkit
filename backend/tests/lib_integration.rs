@@ -14,10 +14,10 @@ use backend::models::{
     AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode,
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
     GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
-    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest,
-    WarningEntry,
+    MaterializeSourceTrackRequest, RemoveTracksBySourceRootsRequest,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
+    ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::BackendService;
@@ -4881,4 +4881,215 @@ fn get_frontend_settings_essentia_installed_field() {
         resp2.data.unwrap().essentia_installed,
         "should be true when essentia and node-wav are present"
     );
+}
+
+#[test]
+fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_duplicating() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    // Seed a track already on the USB under a path this app's own
+    // exported_media_target_path() would never generate — simulating a
+    // Rekordbox-managed layout, or an older export run's naming scheme.
+    let foreign_relative = "/Contents/Foreign Scheme/Unflinching-1.mp3";
+    let foreign_abs = usb.join("Contents/Foreign Scheme/Unflinching-1.mp3");
+    fs::create_dir_all(foreign_abs.parent().expect("foreign parent"))
+        .expect("create foreign dir");
+    let audio_bytes = b"fake-mp3-bytes-for-fingerprint-fallback-regression-test";
+    fs::write(&foreign_abs, audio_bytes).expect("write foreign audio");
+    let file_size = audio_bytes.len() as i64;
+
+    let playlist = ExportPlaylistData {
+        id: "pl-foreign-seed".to_string(),
+        name: "Foreign Seed".to_string(),
+        tracks: Vec::new(),
+    };
+    let manifest = ExportManifest {
+        version: 1,
+        generated_at: "1970-01-01T00:00:00Z".to_string(),
+        playlist_id: "pl-foreign-seed".to_string(),
+        playlist_name: "Foreign Seed".to_string(),
+        usb_root: usb.to_string_lossy().to_string(),
+        options: ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        },
+        exported_tracks: 1,
+        skipped_tracks: 0,
+        warnings: Vec::new(),
+        tracks: vec![ExportManifestTrack {
+            id: "t-foreign".to_string(),
+            master_db_id: None,
+            master_content_id: None,
+            content_link: None,
+            position: 1,
+            track_number: Some(1),
+            title: "Unflinching".to_string(),
+            artist: "Kuro".to_string(),
+            album: Some("KURO".to_string()),
+            bpm: Some(86.0),
+            key: Some("8A".to_string()),
+            source_path: "/tmp/does-not-matter.mp3".to_string(),
+            exported_path: foreign_relative.to_string(),
+            file_modified_at: None,
+            file_size_bytes: Some(file_size),
+            sample_rate_hz: None,
+            bit_depth: None,
+            bitrate_kbps: None,
+            disc_number: None,
+            subtitle: None,
+            comment: None,
+            title_for_search: None,
+            kuvo_delivery_comment: None,
+            dj_play_count: None,
+            rating: None,
+            color_id: None,
+            artist_id_lyricist: None,
+            artist_id_original_artist: None,
+            artist_id_remixer: None,
+            artist_id_composer: None,
+            genre_id: None,
+            genre: None,
+            label_id: None,
+            isrc: None,
+            release_year: None,
+            release_date: None,
+            recorded_date: None,
+            file_type: None,
+            owns_exported_media: true,
+            owns_artwork: false,
+            owns_waveform: false,
+            artwork_path: None,
+            waveform_path: None,
+            duration_ms: Some(163_000),
+        }],
+    };
+    write_pdb(&usb, &playlist, &manifest, true, None, None)
+        .expect("seed foreign-scheme pdb row");
+
+    let before = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse seeded pdb");
+    assert_eq!(before.tracks.len(), 1);
+    let seeded_track_id = before.tracks[0].id;
+
+    // Materialize a LOCAL library track with matching size/title/artist but a
+    // source file located OUTSIDE the USB, under a path this app's own naming
+    // scheme would compute differently from the foreign scheme above.
+    let source_dir = root.path().join("library-source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let source_path = source_dir.join("Unflinching.mp3");
+    fs::write(&source_path, audio_bytes).expect("write local source audio");
+
+    let materialized = backend.materialize_source_track(MaterializeSourceTrackRequest {
+        file_path: source_path.to_string_lossy().to_string(),
+        title: "Unflinching".to_string(),
+        artist: "Kuro".to_string(),
+        album: Some("KURO".to_string()),
+        track_number: None,
+        key: None,
+        file_size_bytes: None,
+        format_ext: Some("mp3".to_string()),
+        sample_rate_hz: None,
+        bit_depth: None,
+        bitrate_kbps: None,
+    });
+    assert!(materialized.ok, "materialize failed: {materialized:?}");
+    let track_id = materialized.data.expect("materialize data").track_id;
+
+    // Analysis is required for export regardless of include_analysis, so seed a
+    // minimal (dummy-content) DAT/EXT/2EX bundle and point the local track at it.
+    let local_analysis_dir = root.path().join("local-analysis");
+    fs::create_dir_all(&local_analysis_dir).expect("create local analysis dir");
+    let waveform_dat = local_analysis_dir.join("ANLZ0000.DAT");
+    fs::write(&waveform_dat, b"dat").expect("write DAT");
+    fs::write(local_analysis_dir.join("ANLZ0000.EXT"), b"ext").expect("write EXT");
+    fs::write(local_analysis_dir.join("ANLZ0000.2EX"), b"2ex").expect("write 2EX");
+
+    let conn = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open backend db");
+    conn.execute(
+        r#"
+        UPDATE tracks
+        SET bpm = 86.0,
+            duration_ms = 163000,
+            waveform_peaks_path = ?1
+        WHERE id = ?2
+        "#,
+        rusqlite::params![waveform_dat.to_string_lossy().to_string(), track_id],
+    )
+    .expect("seed local track analysis fields");
+    drop(conn);
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Fingerprint Fallback".to_string(),
+    });
+    assert!(created.ok, "create failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+
+    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![track_id],
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added.ok, "add failed: {added:?}");
+
+    let contents_before = WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .count();
+
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+
+    let contents_after = WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .count();
+    assert_eq!(
+        contents_after, contents_before,
+        "re-exporting a track already on the USB under a foreign naming scheme must not copy a second audio file"
+    );
+
+    let after =
+        parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb after export");
+    let unflinching_rows: Vec<_> = after
+        .tracks
+        .iter()
+        .filter(|t| t.title == "Unflinching")
+        .collect();
+    assert_eq!(
+        unflinching_rows.len(),
+        1,
+        "expected exactly one PDB row for the fingerprint-matched track, found: {:?}",
+        after
+            .tracks
+            .iter()
+            .map(|t| (t.id, t.track_file_path.as_str()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        unflinching_rows[0].id, seeded_track_id,
+        "the existing seeded row's PDB track id must be reused, not replaced by a new one"
+    );
+    assert_eq!(unflinching_rows[0].track_file_path, foreign_relative);
 }

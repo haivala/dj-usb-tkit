@@ -632,6 +632,24 @@ fn setup_two_playlist_strict_parity_fixture() -> (TempDir, BackendCommands, Path
         .collect::<Vec<_>>();
     seed_tracks_as_analyzed(&data_dir, &track_ids);
 
+    // Both tracks were copied from the same audio fixture, so they share
+    // identical embedded ID3 title/artist tags and file size. Give each a
+    // distinct title so they don't collide under export's content-fingerprint
+    // (size + title + artist) match for tracks already on the USB — this
+    // fixture wants two genuinely independent exported tracks, not one track
+    // exported twice under different filenames.
+    {
+        let db_path = data_dir.join("backend.db");
+        let conn = rusqlite::Connection::open(&db_path).expect("open backend db");
+        for (idx, track_id) in track_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE tracks SET title = ?1 WHERE id = ?2",
+                rusqlite::params![format!("Fixture No Art {idx}"), track_id],
+            )
+            .expect("seed distinct track title");
+        }
+    }
+
     let playlist_names = ["Repair Target".to_string(), "Repair Control".to_string()];
     for (playlist_name, track_id) in playlist_names.iter().zip(track_ids) {
         let created = backend.create_playlist(CreatePlaylistRequest {

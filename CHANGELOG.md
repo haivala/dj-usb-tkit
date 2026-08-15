@@ -30,6 +30,20 @@
 
 ## Unreleased
 
+- **Fix:** additive USB export could create a duplicate track — a second PDB row, a second
+  copy of the audio file, and a second playlist entry — when re-exporting a track that was
+  already physically present on the USB under a path this app hadn't itself written (e.g.
+  copied there originally by rekordbox, or by an earlier export run using a different
+  file-naming scheme). The "is this track already on the USB" check only recognized a match
+  when the freshly computed destination path exactly matched an existing PDB row's path;
+  anything already on the stick under a different layout was invisible to it, so the
+  additive-export resolver minted a brand-new track id, copied the audio again, and appended
+  a duplicate playlist entry instead of reusing the existing one. Additive export now also
+  matches against a content fingerprint (file size plus normalized title and artist) built
+  from the USB's existing PDB, and reuses the matched row's identity, media, artwork, and
+  analysis bundle instead of duplicating them. This does not retroactively clean up
+  duplicates a USB already accumulated before this fix — only diagnostics/repair tooling can
+  do that — it only stops additive export from creating new ones going forward.
 - **Fix:** the album string-alignment repair (`repair_pdb_album_string_alignment`) could silently
   fail to fix rows that USB diagnostics flagged, when the affected album's original data page had
   since been orphaned from the live PDB table chain (e.g. a track exported by an older,
