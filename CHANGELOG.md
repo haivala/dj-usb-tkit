@@ -61,11 +61,16 @@
 - **Improvement:** the local HDD staging cache for the PDB/eDB (introduced in 0.1.16) checked
   whether its copy was still fresh against the USB device on every single read/write throughout a
   connected session — playlist fetch, track inspect, diagnostics, export, every repair step — each
-  paying its own USB stat cost even when nothing had changed since the last check. That freshness
-  check now happens once, when the USB is connected (`validate_usb_root`), and every read for the
-  rest of that session trusts the already-verified local copy instead of re-checking the device.
-  Re-validating the same drive (re-picking it, or reconnecting after it was modified elsewhere)
-  still forces a fresh check.
+  paying its own USB stat cost even when nothing had changed since the last check (plus, separately,
+  a small drive-name-marker read on the device to identify which cache belonged to it). That
+  freshness check now happens once, when the USB is connected (`validate_usb_root`), and every read
+  for the rest of that session trusts the already-verified local copy and its already-resolved
+  device identity instead of touching the device again. Re-validating the same drive (re-picking it,
+  or reconnecting after it was modified elsewhere) still forces a fresh check; naming or renaming a
+  drive still takes effect immediately for every read that follows. Also fixed two remaining spots
+  that read the PDB straight off the USB device instead of through the staging cache at all
+  (`inspect_usb_track`'s single-track path, and the analysis-path lookup export runs before writing)
+  — both now go through the same staged copy as everything else.
 
 ## 0.1.16
 

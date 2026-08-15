@@ -764,10 +764,9 @@ pub(crate) fn load_existing_analysis_paths_by_content_path(
 pub(crate) fn load_existing_analysis_paths_by_pdb_track_path(
     usb_root: &Path,
 ) -> HashMap<String, String> {
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let Ok(pdb_path) = super::usb_staging::stage_pdb(usb_root) else {
+        return HashMap::new();
+    };
     let Ok(parsed) = parse_pdb(&pdb_path) else {
         return HashMap::new();
     };

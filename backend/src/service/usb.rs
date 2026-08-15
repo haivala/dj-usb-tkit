@@ -513,6 +513,7 @@ impl BackendService {
             .flatten();
         if let Some(name) = label.as_ref().filter(|n| !n.trim().is_empty()) {
             let _ = super::usb_identity::write_drive_name(&usb_root, name);
+            super::usb_staging::forget_cache_key_for_root(&usb_root);
             return Ok(crate::models::GetUsbDeviceNameData {
                 name: label,
                 suggested_name: None,
@@ -551,6 +552,7 @@ impl BackendService {
         super::usb_identity::write_drive_name(&usb_root, &name).map_err(|e| {
             BackendError::Internal(format!("failed to write drive name marker: {e}"))
         })?;
+        super::usb_staging::forget_cache_key_for_root(&usb_root);
         usb_utils::set_device_label(&conn, &usb_root, &name, &now())?;
 
         Ok(crate::models::SetUsbDeviceNameData { saved: true })
@@ -1788,7 +1790,7 @@ impl BackendService {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
 
-        let pdb_path = vendor_pdb_path(&usb_root);
+        let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         let file_hint = req
             .file_path
             .as_deref()

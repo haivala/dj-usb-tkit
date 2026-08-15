@@ -54,6 +54,46 @@ fn mark_verified_this_connect(cache_key: &str) {
     }
 }
 
+/// Resolved `cache_key_for_root` results, keyed by the same normalized root
+/// string used for device-identity matching elsewhere (`root_path_key` in
+/// `usb.rs`), so a hot passive call never has to read the drive-name marker
+/// off the USB device just to know which device it's talking to -- only the
+/// first call for a given root (of any kind, passive or connect) pays that
+/// cost. Invalidated by `forget_cache_key_for_root` whenever the marker is
+/// (re)written (naming/renaming a drive), since that changes what
+/// `cache_key_for_root` would compute.
+static RESOLVED_CACHE_KEYS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+fn resolve_cache_key(usb_root: &Path) -> String {
+    let root_key = normalize_source_root_for_matching(&usb_root.to_string_lossy());
+    if let Some((_, cache_key)) = RESOLVED_CACHE_KEYS
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(root, _)| *root == root_key)
+    {
+        return cache_key.clone();
+    }
+    let cache_key = cache_key_for_root(usb_root);
+    let mut resolved = RESOLVED_CACHE_KEYS.lock().unwrap();
+    if !resolved.iter().any(|(root, _)| *root == root_key) {
+        resolved.push((root_key, cache_key.clone()));
+    }
+    cache_key
+}
+
+/// Must be called whenever a drive's name marker is written (initial naming
+/// or rename) so the next `resolve_cache_key` call re-derives the cache key
+/// instead of serving a now-stale cached value from before the drive had
+/// (or had a different) name.
+pub(crate) fn forget_cache_key_for_root(usb_root: &Path) {
+    let root_key = normalize_source_root_for_matching(&usb_root.to_string_lossy());
+    RESOLVED_CACHE_KEYS
+        .lock()
+        .unwrap()
+        .retain(|(root, _)| *root != root_key);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DbKind {
     Pdb,
@@ -257,12 +297,20 @@ fn stage_file_with_root(
     kind: DbKind,
     force_recheck: bool,
 ) -> BackendResult<PathBuf> {
-    let Some(device_dir) = device_dir_for(cache_root, usb_root) else {
+    let Some(cache_root) = cache_root else {
         return Ok(source.to_path_buf());
     };
+    // Computed once via the cached resolver and reused below (for
+    // `device_dir` and the verified-marker lookup) rather than via
+    // `device_dir_for`, which would call the uncached `cache_key_for_root`
+    // again -- that reads a small marker file directly off the USB device
+    // for named drives, so recomputing it on every call (including on the
+    // fast path below, meant to avoid touching the device at all) would
+    // defeat the point.
+    let cache_key = resolve_cache_key(usb_root);
+    let device_dir = cache_root.join(&cache_key);
     let local_dir = local_vendor_db_dir(&device_dir);
     let local_path = local_dir.join(kind.filename());
-    let cache_key = cache_key_for_root(usb_root);
 
     if !force_recheck && local_path.is_file() && is_verified_this_connect(&cache_key) {
         return Ok(local_path);
@@ -487,7 +535,7 @@ fn commit_and_write_back_with_root(
     kind: DbKind,
     local_bytes: &[u8],
 ) -> BackendResult<bool> {
-    let Some(device_dir) = device_dir_for(cache_root, usb_root) else {
+    let Some(device_dir) = cache_root.map(|root| root.join(resolve_cache_key(usb_root))) else {
         std::fs::write(vendor_path(usb_root, kind), local_bytes)?;
         return Ok(true);
     };
@@ -518,7 +566,7 @@ fn write_back_if_changed_with_root(
     usb_root: &Path,
     kind: DbKind,
 ) -> BackendResult<bool> {
-    let Some(device_dir) = device_dir_for(cache_root, usb_root) else {
+    let Some(device_dir) = cache_root.map(|root| root.join(resolve_cache_key(usb_root))) else {
         return Ok(false);
     };
     let local_path = local_vendor_db_dir(&device_dir).join(kind.filename());
@@ -598,6 +646,32 @@ mod tests {
         assert_eq!(
             cache_key_for_root(usb_a.path()),
             cache_key_for_root(usb_b.path())
+        );
+    }
+
+    #[test]
+    fn resolve_cache_key_is_cached_until_forgotten() {
+        let usb = tempdir().unwrap();
+        let usb_root = usb.path().to_path_buf();
+
+        let key1 = resolve_cache_key(&usb_root);
+        assert!(key1.starts_with("unnamed-"));
+
+        // Naming the drive without invalidating the resolver's cache must
+        // still serve the stale (pre-name) key -- this is what makes the
+        // resolver actually skip the marker-file read on repeat calls.
+        crate::service::usb_identity::write_drive_name(&usb_root, "Club Stick").unwrap();
+        let key2 = resolve_cache_key(&usb_root);
+        assert_eq!(
+            key1, key2,
+            "resolve_cache_key must reuse its cached value until explicitly forgotten"
+        );
+
+        forget_cache_key_for_root(&usb_root);
+        let key3 = resolve_cache_key(&usb_root);
+        assert_eq!(
+            key3, "club-stick",
+            "after forget_cache_key_for_root, resolve_cache_key must reflect the new name"
         );
     }
 
