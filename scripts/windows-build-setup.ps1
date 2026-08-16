@@ -162,12 +162,17 @@ if (Test-Path "$opensslDir\include\openssl\ssl.h") {
     Write-Host "  Done." -ForegroundColor Green
 }
 $env:OPENSSL_DIR = $opensslDir
-# slproweb layout: lib\VC\x64\{MD,MDd,MT,MTd} — Rust uses MD (dynamic release).
-# These are genuine static libraries (not DLL import libs), so linking against
-# them does not require shipping libcrypto-3-x64.dll/libssl-3-x64.dll alongside
-# the app.
-$opensslLibDir = "$opensslDir\lib\VC\x64\MD"
-if (-not (Test-Path $opensslLibDir)) { $opensslLibDir = "$opensslDir\lib\VC\x64" }
+# slproweb layout: lib\VC\x64\{MD,MDd,MT,MTd}. MD/MDd are import libraries for
+# the libcrypto/libssl DLLs (built against the dynamic CRT) — linking against
+# them still requires shipping libcrypto-<major>-x64.dll/libssl-<major>-x64.dll
+# alongside the app. MT is the genuine, self-contained static library (built
+# against the static CRT) with no DLL dependency at all, so that's what we
+# want here — the app links OpenSSL statically with no separate DLL to ship.
+$opensslLibDir = "$opensslDir\lib\VC\x64\MT"
+if (-not (Test-Path $opensslLibDir)) {
+    Write-Host "  WARNING: $opensslDir\lib\VC\x64\MT not found — falling back to a path that may pull in a DLL dependency" -ForegroundColor Red
+    $opensslLibDir = "$opensslDir\lib\VC\x64"
+}
 if (-not (Test-Path $opensslLibDir)) { $opensslLibDir = "$opensslDir\lib\VC" }
 if (-not (Test-Path $opensslLibDir)) { $opensslLibDir = "$opensslDir\lib" }
 $env:OPENSSL_LIB_DIR = $opensslLibDir

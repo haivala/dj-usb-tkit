@@ -131,10 +131,13 @@ jobs:
           # "Light" (DLL-only, no static libs) OpenSSL variant, so neither is
           # usable here. Instead, install the full slproweb Win64 OpenSSL
           # package (same one scripts/windows-build-setup.ps1 uses for local
-          # dev) — it ships genuine static libraries under lib\VC\x64\MD, so
-          # linking against them needs no libcrypto/libssl DLL at runtime.
+          # dev). Its lib\VC\x64\MD libs are import libraries for the
+          # libcrypto/libssl DLLs (dynamic CRT) — linking those still needs
+          # the DLL shipped alongside the app. lib\VC\x64\MT holds the
+          # genuine, self-contained static libraries (static CRT), so use
+          # those: no libcrypto/libssl DLL needed at runtime.
           $opensslRoot = "${env:ProgramFiles}\OpenSSL-Win64"
-          if (-not (Test-Path "$opensslRoot\lib\VC\x64\MD\libcrypto.lib")) {
+          if (-not (Test-Path "$opensslRoot\lib\VC\x64\MT\libcrypto.lib")) {
             # Resolve the current Win64 OpenSSL full (non-Light) installer from
             # slproweb's own hash manifest instead of hardcoding a version —
             # slproweb periodically retires old installer URLs (e.g. 3_6_1 404s
@@ -161,13 +164,13 @@ jobs:
             Start-Process $opensslExe -ArgumentList '/SILENT', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$opensslRoot`"" -Wait
           }
 
-          if (-not (Test-Path "$opensslRoot\lib\VC\x64\MD\libcrypto.lib")) {
-            throw "OpenSSL static libraries were not found under $opensslRoot\lib\VC\x64\MD after installation."
+          if (-not (Test-Path "$opensslRoot\lib\VC\x64\MT\libcrypto.lib")) {
+            throw "OpenSSL static libraries were not found under $opensslRoot\lib\VC\x64\MT after installation."
           }
 
           Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_DIR=$opensslRoot"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_INCLUDE_DIR=$opensslRoot\include"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_LIB_DIR=$opensslRoot\lib\VC\x64\MD"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_LIB_DIR=$opensslRoot\lib\VC\x64\MT"
           # Makes openssl-sys use the static libs above via a normal find,
           # instead of compiling from source, even though the "vendored"
           # Cargo feature is enabled.

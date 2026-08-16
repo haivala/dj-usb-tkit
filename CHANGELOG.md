@@ -30,6 +30,15 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** the Windows build was linking against OpenSSL's DLL-import
+  stubs instead of its true static libraries, so every Windows install of
+  0.1.18 failed to launch with "libcrypto-4-x64.dll was not found" (an earlier
+  packaging change had also silently required libcrypto-3-x64.dll, which the
+  installer never shipped either). The app now links OpenSSL fully statically
+  on Windows, with no libcrypto/libssl DLL dependency at all.
+
 ## 0.1.18
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
