@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.19
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** the Windows build was linking against OpenSSL's DLL-import
