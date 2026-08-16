@@ -7,7 +7,7 @@
 #   - Visual Studio Build Tools (system-wide, required by Rust)
 #   - Rust via rustup (~/.cargo, modifies user PATH)
 #   - Node.js portable (%LOCALAPPDATA%\nodejs, session PATH only)
-#   - OpenSSL (%LOCALAPPDATA%\openssl, needed by SQLCipher)
+#   - Strawberry Perl (C:\Strawberry, needed to compile OpenSSL from source for SQLCipher)
 #   - WebView2 runtime (usually pre-installed on Windows 10/11)
 #
 # Usage: Open PowerShell as Administrator, then run:
@@ -128,66 +128,49 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
     Write-Host "  NOTE: To use node outside this script, add to your PATH: $nodePath" -ForegroundColor DarkGray
 }
 
-# ─── 4. OpenSSL (required by SQLCipher) ──────────────────────────────────────
-Write-Host "`n[4/6] Checking OpenSSL..." -ForegroundColor Yellow
-$opensslDir = "$env:ProgramFiles\OpenSSL-Win64"
-if (Test-Path "$opensslDir\include\openssl\ssl.h") {
-    Write-Host "  Already installed at: $opensslDir" -ForegroundColor Green
-} else {
-    # Resolve the current Win64 OpenSSL full (non-Light) installer from
-    # slproweb's own hash manifest instead of hardcoding a version — slproweb
-    # periodically retires old installer URLs, so pinning a version here just
-    # goes stale.
-    Write-Host "  Resolving latest Win64 OpenSSL release..."
-    $hashesUrl = "https://raw.githubusercontent.com/slproweb/opensslhashes/master/win32_openssl_hashes.json"
-    $hashes = Invoke-RestMethod -Uri $hashesUrl
-    $latest = $hashes.files.PSObject.Properties.Value |
-      Where-Object { $_.bits -eq 64 -and $_.arch -eq 'INTEL' -and -not $_.light -and $_.installer -eq 'exe' } |
-      Sort-Object -Property @{ Expression = { [version]$_.basever } } -Descending |
-      Select-Object -First 1
-    if (-not $latest) {
-        throw "Could not resolve the latest Win64 OpenSSL installer from $hashesUrl"
+# ─── 4. Perl (needed to compile OpenSSL from source for SQLCipher) ──────────
+# rusqlite's bundled-sqlcipher-vendored-openssl feature enables openssl-sys's
+# "vendored" Cargo feature: it compiles OpenSSL from source (via the
+# openssl-src crate, which shells out to Perl for OpenSSL's own Configure
+# script) and links the result in as a genuine, self-contained static
+# library — no libcrypto/libssl DLL is ever produced, so none is needed at
+# runtime, and no prebuilt OpenSSL package needs to be installed at all.
+#
+# This used to instead point OPENSSL_LIB_DIR at a prebuilt OpenSSL package's
+# supposedly-static libs to avoid needing Perl. Those libs turned out to
+# still be DLL import libraries regardless of which folder they came from, so
+# the shipped app kept needing libcrypto-<major>-x64.dll at runtime. Do not
+# set OPENSSL_DIR / OPENSSL_LIB_DIR / OPENSSL_NO_VENDOR here — any of those
+# disables (or bypasses) the from-source, genuinely-static build.
+Write-Host "`n[4/6] Checking Perl..." -ForegroundColor Yellow
+$strawberryPerl = "C:\Strawberry\perl\bin\perl.exe"
+$perlOk = $false
+if (Test-Path $strawberryPerl) {
+    Write-Host "  Already installed at: $strawberryPerl" -ForegroundColor Green
+    $perlOk = $true
+} elseif (Get-Command perl -ErrorAction SilentlyContinue) {
+    # A perl already on PATH (e.g. Git for Windows' bundled one) may be a
+    # minimal build missing modules OpenSSL's Configure needs.
+    & perl -MLocale::Maketext::Simple -e 1 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $strawberryPerl = (Get-Command perl).Source
+        Write-Host "  Already installed (usable): $strawberryPerl" -ForegroundColor Green
+        $perlOk = $true
     }
-    Write-Host "  Latest: OpenSSL $($latest.basever)$($latest.subver) ($($latest.url))"
-
-    Write-Host "  Downloading OpenSSL installer (slproweb.com)..."
-    $opensslExe = "$env:TEMP\Win64OpenSSL.exe"
-    Invoke-WebRequest -Uri $latest.url -OutFile $opensslExe
-    $actualHash = (Get-FileHash -Path $opensslExe -Algorithm SHA256).Hash
-    if ($actualHash -ne $latest.sha256.ToUpper()) {
-        throw "Downloaded OpenSSL installer hash mismatch: expected $($latest.sha256), got $actualHash"
+}
+if (-not $perlOk) {
+    Write-Host "  Downloading Strawberry Perl..."
+    $perlMsi = "$env:TEMP\strawberry-perl.msi"
+    Invoke-WebRequest -Uri "https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54041_64bit/strawberry-perl-5.40.4.1-64bit.msi" -OutFile $perlMsi
+    Write-Host "  Installing..."
+    Start-Process msiexec.exe -ArgumentList '/i', "`"$perlMsi`"", '/quiet', '/norestart' -Wait
+    if (-not (Test-Path $strawberryPerl)) {
+        throw "Strawberry Perl installation did not produce $strawberryPerl"
     }
-    Write-Host "  Installing to $opensslDir..."
-    Start-Process $opensslExe -ArgumentList '/SILENT', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$opensslDir`"" -Wait
     Write-Host "  Done." -ForegroundColor Green
 }
-$env:OPENSSL_DIR = $opensslDir
-# slproweb layout: lib\VC\x64\{MD,MDd,MT,MTd}. MD/MDd are import libraries for
-# the libcrypto/libssl DLLs (built against the dynamic CRT) — linking against
-# them still requires shipping libcrypto-<major>-x64.dll/libssl-<major>-x64.dll
-# alongside the app. MT is the genuine, self-contained static library (built
-# against the static CRT) with no DLL dependency at all, so that's what we
-# want here — the app links OpenSSL statically with no separate DLL to ship.
-$opensslLibDir = "$opensslDir\lib\VC\x64\MT"
-if (-not (Test-Path $opensslLibDir)) {
-    Write-Host "  WARNING: $opensslDir\lib\VC\x64\MT not found — falling back to a path that may pull in a DLL dependency" -ForegroundColor Red
-    $opensslLibDir = "$opensslDir\lib\VC\x64"
-}
-if (-not (Test-Path $opensslLibDir)) { $opensslLibDir = "$opensslDir\lib\VC" }
-if (-not (Test-Path $opensslLibDir)) { $opensslLibDir = "$opensslDir\lib" }
-$env:OPENSSL_LIB_DIR = $opensslLibDir
-$env:OPENSSL_INCLUDE_DIR = "$opensslDir\include"
-# rusqlite's bundled-sqlcipher-vendored-openssl feature enables openssl-sys's
-# "vendored" Cargo feature, which by default compiles OpenSSL from source via
-# Perl regardless of OPENSSL_DIR. OPENSSL_NO_VENDOR=1 makes it use the
-# prebuilt static libs above instead — no Perl/Configure step at all.
-$env:OPENSSL_NO_VENDOR = "1"
-$env:OPENSSL_STATIC = "1"
-Write-Host "  OPENSSL_DIR=$env:OPENSSL_DIR" -ForegroundColor DarkGray
-Write-Host "  OPENSSL_LIB_DIR=$env:OPENSSL_LIB_DIR" -ForegroundColor DarkGray
-Write-Host "  OPENSSL_INCLUDE_DIR=$env:OPENSSL_INCLUDE_DIR" -ForegroundColor DarkGray
-Write-Host "  OPENSSL_NO_VENDOR=$env:OPENSSL_NO_VENDOR" -ForegroundColor DarkGray
-Write-Host "  OPENSSL_STATIC=$env:OPENSSL_STATIC" -ForegroundColor DarkGray
+$env:PERL = $strawberryPerl
+Write-Host "  PERL=$env:PERL" -ForegroundColor DarkGray
 
 # ─── 5. WebView2 Runtime ────────────────────────────────────────────────────
 Write-Host "`n[5/6] Checking WebView2 Runtime..." -ForegroundColor Yellow

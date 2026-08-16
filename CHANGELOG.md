@@ -30,6 +30,17 @@
 
 ## Unreleased
 
+## 0.1.20
+
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** 0.1.19's libcrypto fix didn't actually fix it — the Windows build still
+  linked against a DLL import stub (the specific DLL name it needed just moved from
+  libcrypto-3-x64.dll to libcrypto-4-x64.dll), so installs still failed to launch. OpenSSL is now
+  compiled from source and linked in as a genuine static library on Windows, with no
+  libcrypto/libssl DLL involved at any point — the release build now also fails outright if the
+  resulting exe ends up depending on one, so this can't silently ship broken again.
+
 ## 0.1.19
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

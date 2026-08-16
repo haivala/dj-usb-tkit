@@ -118,64 +118,50 @@ jobs:
         if: runner.os != 'Linux'
         uses: Swatinem/rust-cache@v2
 
-      - name: Configure Windows OpenSSL
+      - name: Configure Windows OpenSSL build
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           # rusqlite's bundled-sqlcipher-vendored-openssl feature enables
-          # openssl-sys's "vendored" Cargo feature, which by default compiles
-          # OpenSSL from source via Perl's Configure script. GitHub's Windows
-          # runner image and Chocolatey's openssl package only ship the
-          # "Light" (DLL-only, no static libs) OpenSSL variant, so neither is
-          # usable here. Instead, install the full slproweb Win64 OpenSSL
-          # package (same one scripts/windows-build-setup.ps1 uses for local
-          # dev). Its lib\VC\x64\MD libs are import libraries for the
-          # libcrypto/libssl DLLs (dynamic CRT) — linking those still needs
-          # the DLL shipped alongside the app. lib\VC\x64\MT holds the
-          # genuine, self-contained static libraries (static CRT), so use
-          # those: no libcrypto/libssl DLL needed at runtime.
-          $opensslRoot = "${env:ProgramFiles}\OpenSSL-Win64"
-          if (-not (Test-Path "$opensslRoot\lib\VC\x64\MT\libcrypto.lib")) {
-            # Resolve the current Win64 OpenSSL full (non-Light) installer from
-            # slproweb's own hash manifest instead of hardcoding a version —
-            # slproweb periodically retires old installer URLs (e.g. 3_6_1 404s
-            # once 4_0_1 ships), so pinning a version here just goes stale.
-            Write-Host "Resolving latest Win64 OpenSSL release..."
-            $hashesUrl = "https://raw.githubusercontent.com/slproweb/opensslhashes/master/win32_openssl_hashes.json"
-            $hashes = Invoke-RestMethod -Uri $hashesUrl
-            $latest = $hashes.files.PSObject.Properties.Value |
-              Where-Object { $_.bits -eq 64 -and $_.arch -eq 'INTEL' -and -not $_.light -and $_.installer -eq 'exe' } |
-              Sort-Object -Property @{ Expression = { [version]$_.basever } } -Descending |
-              Select-Object -First 1
-            if (-not $latest) {
-              throw "Could not resolve the latest Win64 OpenSSL installer from $hashesUrl"
-            }
-            Write-Host "Latest: OpenSSL $($latest.basever)$($latest.subver) ($($latest.url))"
-
-            Write-Host "Installing full OpenSSL (slproweb) to $opensslRoot..."
-            $opensslExe = "$env:TEMP\Win64OpenSSL.exe"
-            Invoke-WebRequest -Uri $latest.url -OutFile $opensslExe
-            $actualHash = (Get-FileHash -Path $opensslExe -Algorithm SHA256).Hash
-            if ($actualHash -ne $latest.sha256.ToUpper()) {
-              throw "Downloaded OpenSSL installer hash mismatch: expected $($latest.sha256), got $actualHash"
-            }
-            Start-Process $opensslExe -ArgumentList '/SILENT', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$opensslRoot`"" -Wait
+          # openssl-sys's "vendored" Cargo feature: it compiles OpenSSL from
+          # source (via openssl-src, which shells out to Perl for OpenSSL's
+          # own Configure script) and links the result in as a genuine,
+          # self-contained static library — no libcrypto/libssl DLL is ever
+          # produced, so none is needed at runtime.
+          #
+          # This used to instead point OPENSSL_LIB_DIR at a prebuilt OpenSSL
+          # package's supposedly-static libs, to avoid the Perl/Configure
+          # step. Those libs turned out to still be DLL import libraries
+          # regardless of which folder they came from, so the shipped app
+          # kept needing libcrypto-<major>-x64.dll at runtime. Do not set
+          # OPENSSL_DIR / OPENSSL_LIB_DIR / OPENSSL_NO_VENDOR here — any of
+          # those disables (or bypasses) the from-source, genuinely-static
+          # build.
+          #
+          # "Build native release bundles" runs under `shell: bash` (Git
+          # Bash on this runner), where Git's own bundled minimal Perl can
+          # shadow the full one on PATH and fail with missing modules (e.g.
+          # Locale::Maketext::Simple) that OpenSSL's Configure needs. Point
+          # PERL explicitly at the runner image's Strawberry Perl so that
+          # can't happen.
+          $strawberryPerl = "C:\Strawberry\perl\bin\perl.exe"
+          if (-not (Test-Path $strawberryPerl)) {
+            throw "Expected Strawberry Perl at $strawberryPerl (should be preinstalled on this runner image)."
           }
+          Add-Content -Path $env:GITHUB_ENV -Value "PERL=$strawberryPerl"
 
-          if (-not (Test-Path "$opensslRoot\lib\VC\x64\MT\libcrypto.lib")) {
-            throw "OpenSSL static libraries were not found under $opensslRoot\lib\VC\x64\MT after installation."
+          # NASM speeds up the build (assembly-optimized OpenSSL routines);
+          # openssl-src automatically falls back to a plain-C build without
+          # it, so this is a nice-to-have, not required for correctness.
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm --yes --no-progress | Out-Null
           }
-
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_DIR=$opensslRoot"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_INCLUDE_DIR=$opensslRoot\include"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_LIB_DIR=$opensslRoot\lib\VC\x64\MT"
-          # Makes openssl-sys use the static libs above via a normal find,
-          # instead of compiling from source, even though the "vendored"
-          # Cargo feature is enabled.
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_NO_VENDOR=1"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENSSL_STATIC=1"
+          $nasmDir = Get-ChildItem "${env:ProgramFiles}\NASM" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($nasmDir) {
+            Add-Content -Path $env:GITHUB_PATH -Value $nasmDir.FullName
+          }
 
       - name: Cache Linux Docker-build Rust/npm artifacts
         if: runner.os == 'Linux'
@@ -230,6 +216,31 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/release.sh
+
+      - name: Verify Windows build has no libcrypto/libssl DLL dependency
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exePath = "target\release\dj_usb_tkit_desktop.exe"
+          if (-not (Test-Path $exePath)) {
+            throw "$exePath not found — expected the native build step to have produced it."
+          }
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $dumpbin = Get-ChildItem -Path "$vsInstall\VC\Tools\MSVC" -Filter dumpbin.exe -Recurse |
+            Where-Object { $_.FullName -like "*Hostx64\x64*" } | Select-Object -First 1
+          if (-not $dumpbin) {
+            throw "Could not locate dumpbin.exe under $vsInstall"
+          }
+
+          $deps = & $dumpbin.FullName /dependents $exePath | Out-String
+          Write-Host $deps
+          if ($deps -match "libcrypto|libssl") {
+            throw "dj_usb_tkit_desktop.exe depends on a libcrypto/libssl DLL — OpenSSL is not being linked statically. See dependents output above."
+          }
+          Write-Host "OK: no libcrypto/libssl DLL dependency." -ForegroundColor Green
 
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4
