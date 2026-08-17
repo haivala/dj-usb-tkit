@@ -172,9 +172,7 @@ pub(crate) fn set_cache_root_for_test(dir: Option<PathBuf>) -> CacheRootOverride
 fn cache_root() -> Option<PathBuf> {
     #[cfg(test)]
     {
-        if let Some(override_value) =
-            CACHE_ROOT_OVERRIDE.with(|cell| cell.borrow().clone())
-        {
+        if let Some(override_value) = CACHE_ROOT_OVERRIDE.with(|cell| cell.borrow().clone()) {
             return override_value;
         }
     }
@@ -352,7 +350,11 @@ fn stage_file_with_root(
     crate::logging::emit(
         crate::logging::Level::Info,
         "usb-staging",
-        &format!("Staged {} locally: {}", kind.filename(), local_path.display()),
+        &format!(
+            "Staged {} locally: {}",
+            kind.filename(),
+            local_path.display()
+        ),
     );
     let local_stat = stat(&local_path)?;
     let mut state = state;
@@ -419,7 +421,10 @@ pub(crate) fn stage_edb_on_connect(usb_root: &Path) -> BackendResult<PathBuf> {
 }
 
 #[cfg(test)]
-pub(crate) fn stage_edb_with_root(cache_root: Option<&Path>, usb_root: &Path) -> BackendResult<PathBuf> {
+pub(crate) fn stage_edb_with_root(
+    cache_root: Option<&Path>,
+    usb_root: &Path,
+) -> BackendResult<PathBuf> {
     stage_file_with_root(
         cache_root,
         usb_root,
@@ -696,7 +701,10 @@ mod tests {
         let usb = tempdir().unwrap();
         let usb_root = usb_root_with_edb(usb.path(), b"hello");
         let staged = stage_edb_with_root(None, &usb_root).unwrap();
-        assert_eq!(staged, super::super::usb_vendor_compat::vendor_edb_path(&usb_root));
+        assert_eq!(
+            staged,
+            super::super::usb_vendor_compat::vendor_edb_path(&usb_root)
+        );
     }
 
     #[test]
@@ -706,7 +714,10 @@ mod tests {
         let usb_root = usb_root_with_edb(usb.path(), b"hello");
 
         let staged1 = stage_edb_with_root(Some(cache.path()), &usb_root).unwrap();
-        assert_ne!(staged1, super::super::usb_vendor_compat::vendor_edb_path(&usb_root));
+        assert_ne!(
+            staged1,
+            super::super::usb_vendor_compat::vendor_edb_path(&usb_root)
+        );
         assert_eq!(std::fs::read(&staged1).unwrap(), b"hello");
 
         let mtime_before = std::fs::metadata(&staged1).unwrap().modified().unwrap();
@@ -834,7 +845,10 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .any(|e| e.file_name().to_string_lossy().contains("tmp-"));
-        assert!(!leftover_tmp, "atomic rename must not leave a temp file behind");
+        assert!(
+            !leftover_tmp,
+            "atomic rename must not leave a temp file behind"
+        );
     }
 
     #[test]
@@ -870,8 +884,8 @@ mod tests {
         // Our local edit, made against the now-stale staged copy.
         std::fs::write(&staged, b"our local edit").unwrap();
 
-        let err = write_back_if_changed_for_test(Some(cache.path()), &usb_root, DbKind::Edb)
-            .unwrap_err();
+        let err =
+            write_back_if_changed_for_test(Some(cache.path()), &usb_root, DbKind::Edb).unwrap_err();
         assert!(matches!(err, BackendError::Internal(_)));
         assert_eq!(
             std::fs::read(super::super::usb_vendor_compat::vendor_edb_path(&usb_root)).unwrap(),

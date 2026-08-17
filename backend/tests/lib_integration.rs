@@ -4501,7 +4501,10 @@ fn export_to_usb_produces_identical_content_and_pdb_rows_across_two_runs() {
             .get(&key)
             .unwrap_or_else(|| panic!("PDB export b missing track '{title}'"));
 
-        assert_eq!(track_a.title, track_b.title, "PDB title mismatch for '{title}'");
+        assert_eq!(
+            track_a.title, track_b.title,
+            "PDB title mismatch for '{title}'"
+        );
         assert_eq!(
             pdb_a.artists.get(&track_a.artist_id),
             pdb_b.artists.get(&track_b.artist_id),
@@ -5131,8 +5134,7 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     // Rekordbox-managed layout, or an older export run's naming scheme.
     let foreign_relative = "/Contents/Foreign Scheme/Unflinching-1.mp3";
     let foreign_abs = usb.join("Contents/Foreign Scheme/Unflinching-1.mp3");
-    fs::create_dir_all(foreign_abs.parent().expect("foreign parent"))
-        .expect("create foreign dir");
+    fs::create_dir_all(foreign_abs.parent().expect("foreign parent")).expect("create foreign dir");
     let audio_bytes = b"fake-mp3-bytes-for-fingerprint-fallback-regression-test";
     fs::write(&foreign_abs, audio_bytes).expect("write foreign audio");
     let file_size = audio_bytes.len() as i64;
@@ -5204,8 +5206,7 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
             duration_ms: Some(163_000),
         }],
     };
-    write_pdb(&usb, &playlist, &manifest, true, None, None)
-        .expect("seed foreign-scheme pdb row");
+    write_pdb(&usb, &playlist, &manifest, true, None, None).expect("seed foreign-scheme pdb row");
 
     let before = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse seeded pdb");
     assert_eq!(before.tracks.len(), 1);
@@ -5299,8 +5300,7 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
         "re-exporting a track already on the USB under a foreign naming scheme must not copy a second audio file"
     );
 
-    let after =
-        parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb after export");
+    let after = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb after export");
     let unflinching_rows: Vec<_> = after
         .tracks
         .iter()

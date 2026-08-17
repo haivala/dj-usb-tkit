@@ -37,6 +37,8 @@
   run also used to parse the USB's PDB three separate times (once for the diagnostics baseline,
   once for the parity report, once more for the fix-detection pass) even though the file never
   changes between those steps; it's now parsed once and reused.
+- **Chore:** ran `cargo fmt` across the backend crate to clear accumulated formatting drift
+  (no `rustfmt.toml`/CI fmt check previously enforced consistency). No behavior change.
 
 ## 0.1.20
 

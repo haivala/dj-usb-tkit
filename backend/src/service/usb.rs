@@ -398,9 +398,7 @@ impl BackendService {
         // can trust the local copy and skip its own USB stat() -- see
         // `usb_staging::stage_file_with_root`'s verified-this-connect fast
         // path. Best-effort: a staging hiccup shouldn't fail validation.
-        if has_pdb
-            && let Err(err) = super::usb_staging::stage_pdb_on_connect(&normalized)
-        {
+        if has_pdb && let Err(err) = super::usb_staging::stage_pdb_on_connect(&normalized) {
             warnings.push(logging::log(
                 Level::Warn,
                 "usb-import",
@@ -408,9 +406,7 @@ impl BackendService {
                 format!("Failed to stage PDB locally: {err}"),
             ));
         }
-        if has_edb
-            && let Err(err) = super::usb_staging::stage_edb_on_connect(&normalized)
-        {
+        if has_edb && let Err(err) = super::usb_staging::stage_edb_on_connect(&normalized) {
             warnings.push(logging::log(
                 Level::Warn,
                 "usb-import",
@@ -497,8 +493,7 @@ impl BackendService {
         }
 
         let conn = self.db.connect()?;
-        let root_path_key =
-            super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
+        let root_path_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
         // `.optional()` on a `Result<Option<String>>` needs the closure to
         // actually return `Option<String>` (row.get::<_, String>(0) would
         // otherwise be inferred and error on a NULL label -- which every
@@ -538,13 +533,12 @@ impl BackendService {
         req: crate::models::SetUsbDeviceNameRequest,
     ) -> BackendResult<crate::models::SetUsbDeviceNameData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
-        let name = super::usb_identity::validate_name(&req.name).map_err(BackendError::Validation)?;
+        let name =
+            super::usb_identity::validate_name(&req.name).map_err(BackendError::Validation)?;
 
         let conn = self.db.connect()?;
-        let root_path_key =
-            super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
-        if let Some(taken_by) =
-            usb_utils::find_device_root_by_label(&conn, &name, &root_path_key)?
+        let root_path_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
+        if let Some(taken_by) = usb_utils::find_device_root_by_label(&conn, &name, &root_path_key)?
         {
             return Err(BackendError::Validation(format!(
                 "Drive name '{name}' is already used by another known drive ({taken_by})"
@@ -993,10 +987,8 @@ impl BackendService {
                     .ok()
                     .and_then(|p| count_pdb_playlists(&p)),
             )
-                .into_iter()
-                .map(|message| {
-                    logging::log(Level::Info, "usb-import", "usb.remove.backup", message)
-                }),
+            .into_iter()
+            .map(|message| logging::log(Level::Info, "usb-import", "usb.remove.backup", message)),
         );
         push_usb_stage_timing(&mut warnings, "backup usb databases", &mut stage_started);
 
@@ -3036,7 +3028,10 @@ mod tests {
             .expect("validate creates the usb_devices row");
         let devices = service.list_usb_devices().expect("list devices");
         assert_eq!(devices.items.len(), 1);
-        assert_eq!(devices.items[0].label, None, "freshly seen device must be unnamed");
+        assert_eq!(
+            devices.items[0].label, None,
+            "freshly seen device must be unnamed"
+        );
 
         let result = service
             .get_usb_device_name(crate::models::GetUsbDeviceNameRequest { usb_root: path })
@@ -3336,8 +3331,8 @@ mod tests {
         // copy and never reached this path.
         let raw_edb_path = crate::service::usb_vendor_compat::vendor_edb_path(&usb_root);
         let mut open_warnings = Vec::new();
-        let conn = crate::edb::open_edb(&raw_edb_path, &mut open_warnings)
-            .expect("open raw usb edb");
+        let conn =
+            crate::edb::open_edb(&raw_edb_path, &mut open_warnings).expect("open raw usb edb");
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM playlist WHERE name = ?1",

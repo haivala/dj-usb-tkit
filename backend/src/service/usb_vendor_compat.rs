@@ -96,7 +96,10 @@ pub(crate) fn backup_usb_databases(
     }
 
     if any_copied {
-        let marker = BackupReason { reason: reason.to_string(), playlist_count };
+        let marker = BackupReason {
+            reason: reason.to_string(),
+            playlist_count,
+        };
         if let Ok(encoded) = serde_json::to_string(&marker)
             && let Err(e) = std::fs::write(backup_reason_path(&backup_dir, &timestamp), encoded)
         {
@@ -127,7 +130,11 @@ mod tests {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().ends_with(".reason.json"))
             .collect();
-        assert_eq!(sidecars.len(), 1, "exactly one reason sidecar per backup event");
+        assert_eq!(
+            sidecars.len(),
+            1,
+            "exactly one reason sidecar per backup event"
+        );
 
         let bytes = std::fs::read(sidecars[0].path()).unwrap();
         let marker: BackupReason = serde_json::from_slice(&bytes).unwrap();

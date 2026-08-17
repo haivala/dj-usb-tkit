@@ -567,8 +567,12 @@ mod tests {
             name: "Another".to_string(),
             tracks: Vec::new(),
         };
-        append_export_log_record(temp.path(), &playlist, &manifest("2026-04-05T10:00:00Z", vec![]))
-            .expect("append after migration");
+        append_export_log_record(
+            temp.path(),
+            &playlist,
+            &manifest("2026-04-05T10:00:00Z", vec![]),
+        )
+        .expect("append after migration");
         assert!(!legacy_path.is_file());
     }
 }

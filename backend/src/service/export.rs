@@ -34,7 +34,8 @@ use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
 use super::usb_utils::{
     self, analysis_bundle_exists, canonicalize_playlist_name,
-    load_existing_analysis_paths_by_content_path, load_existing_analysis_paths_by_content_path_with_conn,
+    load_existing_analysis_paths_by_content_path,
+    load_existing_analysis_paths_by_content_path_with_conn,
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
 use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, now};
@@ -313,33 +314,34 @@ impl BackendService {
             let target = target_base;
             let computed_target_relative =
                 to_usb_relative_path(&usb_root, &target.to_string_lossy());
-            let existing_exported_path = existing_usb_relative_if_file(
-                &usb_root,
-                Some(&source.to_string_lossy()),
-            )
-            .filter(|rel| rel.starts_with("/Contents/"))
-            .or_else(|| {
-                // The source file itself isn't inside this USB's Contents tree, but
-                // the same track may already be physically present under a path we
-                // didn't write. Match on content fingerprint so re-exporting it reuses
-                // the existing row/media/artwork instead of minting a duplicate. Skip
-                // this when the candidate is the same path this run would compute
-                // anyway (e.g. a stable re-export of a track this app itself placed
-                // there before) — that's not a foreign path, and treating it as one
-                // would wrongly mark the file as not-owned and make it look stale to
-                // prune_stale on the next export.
-                let fingerprint =
-                    content_fingerprint_key(track.file_size_bytes, &track.title, &track.artist)?;
-                let candidate = existing_usb_path_by_fingerprint.get(&fingerprint)?;
-                if computed_target_relative
-                    .as_deref()
-                    .map(canonicalize_playlist_name)
-                    == Some(canonicalize_playlist_name(candidate))
-                {
-                    return None;
-                }
-                existing_usb_relative_if_present(&usb_root, candidate)
-            });
+            let existing_exported_path =
+                existing_usb_relative_if_file(&usb_root, Some(&source.to_string_lossy()))
+                    .filter(|rel| rel.starts_with("/Contents/"))
+                    .or_else(|| {
+                        // The source file itself isn't inside this USB's Contents tree, but
+                        // the same track may already be physically present under a path we
+                        // didn't write. Match on content fingerprint so re-exporting it reuses
+                        // the existing row/media/artwork instead of minting a duplicate. Skip
+                        // this when the candidate is the same path this run would compute
+                        // anyway (e.g. a stable re-export of a track this app itself placed
+                        // there before) — that's not a foreign path, and treating it as one
+                        // would wrongly mark the file as not-owned and make it look stale to
+                        // prune_stale on the next export.
+                        let fingerprint = content_fingerprint_key(
+                            track.file_size_bytes,
+                            &track.title,
+                            &track.artist,
+                        )?;
+                        let candidate = existing_usb_path_by_fingerprint.get(&fingerprint)?;
+                        if computed_target_relative
+                            .as_deref()
+                            .map(canonicalize_playlist_name)
+                            == Some(canonicalize_playlist_name(candidate))
+                        {
+                            return None;
+                        }
+                        existing_usb_relative_if_present(&usb_root, candidate)
+                    });
             let owns_exported_media = existing_exported_path.is_none();
             if !export_dry_run && owns_exported_media {
                 if extension == "wav" || extension == "wave" {
@@ -361,8 +363,8 @@ impl BackendService {
                     existing_usb_relative_if_file(&usb_root, track.artwork_path.as_deref())
                 {
                     artwork_relative = Some(existing_artwork);
-                } else if let Some((_, _, _, Some(art_path))) = existing_usb_identity_by_path
-                    .get(&canonicalize_playlist_name(&exported_path))
+                } else if let Some((_, _, _, Some(art_path))) =
+                    existing_usb_identity_by_path.get(&canonicalize_playlist_name(&exported_path))
                 {
                     // Fallback: pick up artwork already indexed on the USB PDB for this
                     // exported_path (e.g. a fingerprint-matched track already on this
@@ -581,9 +583,13 @@ impl BackendService {
                     .ok()
                     .and_then(|p| crate::pdb_reader::count_pdb_playlists(&p));
                 warnings.extend(
-                    self.backup_usb_databases_with_retention(&usb_root, "Before export", playlist_count)
-                        .into_iter()
-                        .map(|message| logging::log(Level::Info, "export", "export.backup", message)),
+                    self.backup_usb_databases_with_retention(
+                        &usb_root,
+                        "Before export",
+                        playlist_count,
+                    )
+                    .into_iter()
+                    .map(|message| logging::log(Level::Info, "export", "export.backup", message)),
                 );
             }
             // Write eDB first (master), then sync PDB to match eDB playlist IDs.
@@ -591,10 +597,15 @@ impl BackendService {
             // post-write verification read below, instead of reopening.
             let mut edb_write_conn = open_edb_rw(&usb_root, &mut warnings);
             let write_result = match edb_write_conn.as_mut() {
-                Some(conn) => {
-                    write_edb_playlist_with_conn(conn, &playlist, &manifest, mirror_playlist_entries)
+                Some(conn) => write_edb_playlist_with_conn(
+                    conn,
+                    &playlist,
+                    &manifest,
+                    mirror_playlist_entries,
+                ),
+                None => {
+                    write_edb_playlist(&usb_root, &playlist, &manifest, mirror_playlist_entries)
                 }
-                None => write_edb_playlist(&usb_root, &playlist, &manifest, mirror_playlist_entries),
             };
             match write_result {
                 Ok(WriteExportLibraryDbResult {

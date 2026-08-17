@@ -131,16 +131,19 @@ pub(crate) fn suggest_drive_name(usb_root: &Path) -> Option<String> {
     let disks = sysinfo::Disks::new_with_refreshed_list();
 
     // Same "longest matching mount point wins" rule as the Linux path.
-    let disk = disks.list().iter().fold(None, |best: Option<&sysinfo::Disk>, disk| {
-        let mount = disk.mount_point();
-        if !canon.starts_with(mount) {
-            return best;
-        }
-        match best {
-            Some(b) if b.mount_point().as_os_str().len() >= mount.as_os_str().len() => best,
-            _ => Some(disk),
-        }
-    })?;
+    let disk = disks
+        .list()
+        .iter()
+        .fold(None, |best: Option<&sysinfo::Disk>, disk| {
+            let mount = disk.mount_point();
+            if !canon.starts_with(mount) {
+                return best;
+            }
+            match best {
+                Some(b) if b.mount_point().as_os_str().len() >= mount.as_os_str().len() => best,
+                _ => Some(disk),
+            }
+        })?;
 
     if !disk.is_removable() {
         return None;
@@ -184,7 +187,10 @@ fn linux_mount_source_from_mounts_content(content: &str, path: &Path) -> Option<
             .as_ref()
             .is_none_or(|(mp, _)| mount_point.as_os_str().len() > mp.as_os_str().len());
         if is_longer {
-            best = Some((mount_point, PathBuf::from(linux_unescape_mount_field(fs_spec))));
+            best = Some((
+                mount_point,
+                PathBuf::from(linux_unescape_mount_field(fs_spec)),
+            ));
         }
     }
     best.map(|(_, dev)| dev)
@@ -208,10 +214,7 @@ fn linux_device_is_usb(device: &Path) -> bool {
             .file_name()
             .to_str()
             .is_some_and(|name| name.starts_with("usb-"))
-            && entry
-                .path()
-                .canonicalize()
-                .is_ok_and(|p| p == device_canon)
+            && entry.path().canonicalize().is_ok_and(|p| p == device_canon)
     })
 }
 

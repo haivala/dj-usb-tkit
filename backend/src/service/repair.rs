@@ -3067,7 +3067,12 @@ impl BackendService {
             self.backup_usb_databases_with_retention(&usb_root, "Before repair", None)
                 .into_iter()
                 .map(|message| {
-                    logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
+                    logging::log(
+                        Level::Info,
+                        "usb-player-menu",
+                        "usb.player-menu.backup",
+                        message,
+                    )
                 }),
         );
 
@@ -3146,7 +3151,12 @@ impl BackendService {
             self.backup_usb_databases_with_retention(&usb_root, "Before menu update", None)
                 .into_iter()
                 .map(|message| {
-                    logging::log(Level::Info, "usb-player-menu", "usb.player-menu.backup", message)
+                    logging::log(
+                        Level::Info,
+                        "usb-player-menu",
+                        "usb.player-menu.backup",
+                        message,
+                    )
                 }),
         );
 
@@ -3293,7 +3303,8 @@ impl BackendService {
                 }
                 _ => {}
             }
-            if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
+            if let Err(err) =
+                usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
             {
                 warnings.push(logging::log(
                     Level::Error,
@@ -3460,10 +3471,8 @@ impl BackendService {
         let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_path);
         let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_path);
         let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&staged_pdb_path);
-        let pdb_wrong_history_shape_pages =
-            detect_pdb_wrong_history_page_shape(&staged_pdb_path);
-        let pdb_tombstoned_playlist_ids =
-            detect_pdb_tombstoned_playlist_tree_ids(&staged_pdb_path);
+        let pdb_wrong_history_shape_pages = detect_pdb_wrong_history_page_shape(&staged_pdb_path);
+        let pdb_tombstoned_playlist_ids = detect_pdb_tombstoned_playlist_tree_ids(&staged_pdb_path);
         let pdb_wrong_track_u5_pages = detect_pdb_wrong_track_u5(&staged_pdb_path);
         let pdb_t00_multipage_active_pages =
             detect_pdb_t00_multipage_active_pages(&staged_pdb_path);
@@ -4668,7 +4677,8 @@ impl BackendService {
             // (see usb_staging.rs) -- flush the accumulated local changes back
             // to the USB drive here, once per database, instead of once per
             // fix.
-            if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
+            if let Err(err) =
+                usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
             {
                 warnings.push(logging::log(
                     Level::Error,
@@ -4677,7 +4687,8 @@ impl BackendService {
                     format!("PDB write-back to USB failed: {err}"),
                 ));
             }
-            if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)
+            if let Err(err) =
+                usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)
             {
                 warnings.push(logging::log(
                     Level::Error,
@@ -6270,9 +6281,11 @@ mod tests {
             let conn =
                 crate::edb::open_edb(&raw_edb_path, &mut open_warnings).expect("open raw usb edb");
             let count: i64 = conn
-                .query_row("SELECT COUNT(1) FROM history WHERE name = 'HISTORY 001'", [], |r| {
-                    r.get(0)
-                })
+                .query_row(
+                    "SELECT COUNT(1) FROM history WHERE name = 'HISTORY 001'",
+                    [],
+                    |r| r.get(0),
+                )
                 .expect("query raw usb edb before write-back");
             assert_eq!(
                 count, 0,
@@ -6285,7 +6298,8 @@ mod tests {
         assert!(committed, "expected the eDB write-back to actually commit");
 
         let mut open_warnings = Vec::new();
-        let conn = crate::edb::open_edb(&raw_edb_path, &mut open_warnings).expect("re-open raw usb edb");
+        let conn =
+            crate::edb::open_edb(&raw_edb_path, &mut open_warnings).expect("re-open raw usb edb");
         let (hid, name): (i64, String) = conn
             .query_row("SELECT history_id, name FROM history", [], |r| {
                 Ok((r.get(0)?, r.get(1)?))
@@ -6759,8 +6773,8 @@ mod tests {
             "raw scan must still find the orphaned misaligned album row"
         );
 
-        let album_patched = apply_pdb_album_string_alignment_repair(&usb_root, &[1])
-            .expect("apply album repair");
+        let album_patched =
+            apply_pdb_album_string_alignment_repair(&usb_root, &[1]).expect("apply album repair");
         assert_eq!(
             album_patched, 1,
             "repair must find and fix the orphaned row, not silently report 0"

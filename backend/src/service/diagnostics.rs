@@ -3,7 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::edb::{
-    ExportDbPlaylist, open_edb_from_usb_root, try_read_playlists_with_metadata_from_edb_db_only_with_conn,
+    ExportDbPlaylist, open_edb_from_usb_root,
+    try_read_playlists_with_metadata_from_edb_db_only_with_conn,
     try_read_playlists_with_metadata_from_edb_with_conn,
 };
 use crate::error::{BackendError, BackendResult};
@@ -537,7 +538,11 @@ impl BackendService {
         let mut edb_access = diagnose_edb_access(&edb_path, conn, &edb_open_warnings);
         raw_warnings.append(&mut edb_open_warnings);
         let edb_playlists = conn.and_then(|c| {
-            try_read_playlists_with_metadata_from_edb_db_only_with_conn(c, &usb_root, &mut raw_warnings)
+            try_read_playlists_with_metadata_from_edb_db_only_with_conn(
+                c,
+                &usb_root,
+                &mut raw_warnings,
+            )
         });
         let edb_playlist_tracks = edb_playlists.as_ref().map(|m| {
             m.iter()
@@ -3851,8 +3856,7 @@ mod tests {
         ));
 
         let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-        let indexed_paths =
-            super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
+        let indexed_paths = super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
 
         let actual_files: std::collections::HashSet<String> =
             crate::service::usb_utils::collect_contents_audio_files(root.path())
@@ -3913,8 +3917,7 @@ mod tests {
         ));
 
         let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-        let indexed_paths =
-            super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
+        let indexed_paths = super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
         assert_eq!(
             indexed_paths.len(),
             2,
@@ -3989,8 +3992,7 @@ mod tests {
         ));
 
         let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-        let indexed_paths =
-            super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
+        let indexed_paths = super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
         let actual_files: std::collections::HashSet<String> =
             crate::service::usb_utils::collect_contents_audio_files(root.path())
                 .into_iter()

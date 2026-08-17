@@ -104,8 +104,10 @@ fn most_recent_backup_playlist_count(usb_root: &Path) -> Option<usize> {
         dirs.push((cache_dir, "cache"));
     }
 
-    let mut timestamps: Vec<String> =
-        dirs.iter().flat_map(|(dir, _)| list_reason_timestamps(dir)).collect();
+    let mut timestamps: Vec<String> = dirs
+        .iter()
+        .flat_map(|(dir, _)| list_reason_timestamps(dir))
+        .collect();
     timestamps.sort();
     timestamps.dedup();
 
@@ -135,7 +137,11 @@ fn move_file(src: &Path, dest: &Path) -> std::io::Result<()> {
 /// throughout: a stat/move/delete failure is noted, never propagated as a
 /// hard error -- this runs after the backup copy itself already succeeded
 /// or failed, and must never turn a successful backup into a failed one.
-fn reconcile_backups(usb_root: &Path, retention_count: u32, protect_timestamp: Option<&str>) -> Vec<String> {
+fn reconcile_backups(
+    usb_root: &Path,
+    retention_count: u32,
+    protect_timestamp: Option<&str>,
+) -> Vec<String> {
     let retention_count = retention_count.max(1) as usize;
     let usb_dir = usb_backups_dir(usb_root);
     let cache_dir = cache_backups_dir(usb_root);
@@ -158,7 +164,9 @@ fn reconcile_backups(usb_root: &Path, retention_count: u32, protect_timestamp: O
                 }
             }
             if archived > 0 {
-                notes.push(format!("Archived {archived} older {stem} backup(s) to local cache"));
+                notes.push(format!(
+                    "Archived {archived} older {stem} backup(s) to local cache"
+                ));
             }
         }
         // No cache dir (drive not yet named): leave older USB snapshots in
@@ -180,7 +188,11 @@ fn reconcile_backups(usb_root: &Path, retention_count: u32, protect_timestamp: O
             // `retention_count` until the next reconcile.
             let prunable = combined.into_iter().filter(|path| {
                 protect_timestamp
-                    .map(|ts| !path.file_name().is_some_and(|n| n.to_string_lossy().contains(ts)))
+                    .map(|ts| {
+                        !path
+                            .file_name()
+                            .is_some_and(|n| n.to_string_lossy().contains(ts))
+                    })
                     .unwrap_or(true)
             });
             let mut pruned = 0usize;
@@ -194,7 +206,9 @@ fn reconcile_backups(usb_root: &Path, retention_count: u32, protect_timestamp: O
                 }
             }
             if pruned > 0 {
-                notes.push(format!("Pruned {pruned} old {stem} backup(s) beyond retention limit"));
+                notes.push(format!(
+                    "Pruned {pruned} old {stem} backup(s) beyond retention limit"
+                ));
             }
         }
     }
@@ -251,7 +265,11 @@ fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
     for (dir, location) in dirs {
         for (stem, ext) in STEMS {
             for path in list_stem_files(dir, stem, ext) {
-                let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let filename = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 let timestamp = filename
                     .strip_prefix(&format!("{stem}_"))
                     .and_then(|s| s.strip_suffix(&format!(".{ext}")))
@@ -259,7 +277,11 @@ fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
                     .to_string();
                 let size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 by_timestamp.entry(timestamp).or_default().push((
-                    UsbBackupFile { stem: stem.to_string(), filename, size_bytes },
+                    UsbBackupFile {
+                        stem: stem.to_string(),
+                        filename,
+                        size_bytes,
+                    },
                     location,
                 ));
             }
@@ -270,7 +292,11 @@ fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
         .into_iter()
         .map(|(timestamp, entries)| {
             let size_bytes = entries.iter().map(|(f, _)| f.size_bytes).sum();
-            let location = if entries.iter().any(|(_, loc)| *loc == "usb") { "usb" } else { "cache" };
+            let location = if entries.iter().any(|(_, loc)| *loc == "usb") {
+                "usb"
+            } else {
+                "cache"
+            };
             let marker = read_backup_marker(dirs, &timestamp);
             let reason = marker.as_ref().map(|m| m.reason.clone());
             let playlist_count = marker.and_then(|m| m.playlist_count);
@@ -349,18 +375,26 @@ impl BackendService {
         protect_timestamp: Option<&str>,
     ) -> Vec<String> {
         let playlist_count = playlist_count.or_else(|| most_recent_backup_playlist_count(usb_root));
-        let mut notes = super::usb_vendor_compat::backup_usb_databases(usb_root, reason, playlist_count);
+        let mut notes =
+            super::usb_vendor_compat::backup_usb_databases(usb_root, reason, playlist_count);
         let retention_count = self
             .db
             .connect()
             .ok()
             .map(|conn| read_backup_retention_count(&conn))
             .unwrap_or(DEFAULT_BACKUP_RETENTION_COUNT);
-        notes.extend(reconcile_backups(usb_root, retention_count, protect_timestamp));
+        notes.extend(reconcile_backups(
+            usb_root,
+            retention_count,
+            protect_timestamp,
+        ));
         notes
     }
 
-    pub fn list_usb_backups(&self, req: ListUsbBackupsRequest) -> BackendResult<ListUsbBackupsData> {
+    pub fn list_usb_backups(
+        &self,
+        req: ListUsbBackupsRequest,
+    ) -> BackendResult<ListUsbBackupsData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         let mut dirs = vec![(usb_backups_dir(&usb_root), "usb")];
         if let Some(cache_dir) = cache_backups_dir(&usb_root) {
@@ -438,7 +472,10 @@ impl BackendService {
         Ok(RestoreUsbBackupData { restored: true })
     }
 
-    pub fn delete_usb_backup(&self, req: DeleteUsbBackupRequest) -> BackendResult<DeleteUsbBackupData> {
+    pub fn delete_usb_backup(
+        &self,
+        req: DeleteUsbBackupRequest,
+    ) -> BackendResult<DeleteUsbBackupData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         let files = files_for_timestamp(&usb_root, &req.timestamp);
         if files.is_empty() {
@@ -452,7 +489,10 @@ impl BackendService {
         }
         // Best-effort: the reason sidecar may live in either dir (or not
         // exist at all for backups predating this feature).
-        let _ = std::fs::remove_file(backup_reason_path(&usb_backups_dir(&usb_root), &req.timestamp));
+        let _ = std::fs::remove_file(backup_reason_path(
+            &usb_backups_dir(&usb_root),
+            &req.timestamp,
+        ));
         if let Some(cache_dir) = cache_backups_dir(&usb_root) {
             let _ = std::fs::remove_file(backup_reason_path(&cache_dir, &req.timestamp));
         }
@@ -481,9 +521,11 @@ mod tests {
     fn touch_reason(dir: &Path, ts: &str, reason: &str, playlist_count: Option<usize>) -> PathBuf {
         std::fs::create_dir_all(dir).unwrap();
         let path = backup_reason_path(dir, ts);
-        let encoded =
-            serde_json::to_string(&BackupReason { reason: reason.to_string(), playlist_count })
-                .unwrap();
+        let encoded = serde_json::to_string(&BackupReason {
+            reason: reason.to_string(),
+            playlist_count,
+        })
+        .unwrap();
         std::fs::write(&path, encoded).unwrap();
         path
     }
@@ -502,9 +544,27 @@ mod tests {
             crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let backups_dir = usb_backups_dir(usb_root);
-        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"old1");
-        touch_backup(&backups_dir, "export", "pdb", "2020-01-02_00-00-00", b"old2");
-        touch_backup(&backups_dir, "export", "pdb", "2020-01-03_00-00-00", b"newest");
+        touch_backup(
+            &backups_dir,
+            "export",
+            "pdb",
+            "2020-01-01_00-00-00",
+            b"old1",
+        );
+        touch_backup(
+            &backups_dir,
+            "export",
+            "pdb",
+            "2020-01-02_00-00-00",
+            b"old2",
+        );
+        touch_backup(
+            &backups_dir,
+            "export",
+            "pdb",
+            "2020-01-03_00-00-00",
+            b"newest",
+        );
 
         reconcile_backups(usb_root, 10, None);
 
@@ -526,13 +586,29 @@ mod tests {
             crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let backups_dir = usb_backups_dir(usb_root);
-        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"old1");
-        touch_backup(&backups_dir, "export", "pdb", "2020-01-02_00-00-00", b"newest");
+        touch_backup(
+            &backups_dir,
+            "export",
+            "pdb",
+            "2020-01-01_00-00-00",
+            b"old1",
+        );
+        touch_backup(
+            &backups_dir,
+            "export",
+            "pdb",
+            "2020-01-02_00-00-00",
+            b"newest",
+        );
 
         reconcile_backups(usb_root, 10, None);
 
         let remaining = list_stem_files(&backups_dir, "export", "pdb");
-        assert_eq!(remaining.len(), 2, "unnamed drive must not archive anything");
+        assert_eq!(
+            remaining.len(),
+            2,
+            "unnamed drive must not archive anything"
+        );
     }
 
     #[test]
@@ -602,18 +678,12 @@ mod tests {
             .expect("list backups");
         assert_eq!(result.items.len(), 2);
         assert!(
-            result
-                .items
-                .iter()
-                .any(|i| i.location == "usb"
-                    && i.files.iter().any(|f| f.filename.contains("2020-01-02")))
+            result.items.iter().any(|i| i.location == "usb"
+                && i.files.iter().any(|f| f.filename.contains("2020-01-02")))
         );
         assert!(
-            result
-                .items
-                .iter()
-                .any(|i| i.location == "cache"
-                    && i.files.iter().any(|f| f.filename.contains("2020-01-01")))
+            result.items.iter().any(|i| i.location == "cache"
+                && i.files.iter().any(|f| f.filename.contains("2020-01-01")))
         );
     }
 
@@ -638,14 +708,21 @@ mod tests {
             })
             .expect("list backups");
 
-        assert_eq!(result.items.len(), 1, "PDB+eDB from one event must bundle into a single entry");
+        assert_eq!(
+            result.items.len(),
+            1,
+            "PDB+eDB from one event must bundle into a single entry"
+        );
         let entry = &result.items[0];
         assert_eq!(entry.timestamp, "2020-01-01_00-00-00");
         assert_eq!(entry.size_bytes, 6);
         assert_eq!(entry.files.len(), 2);
         assert!(entry.files.iter().any(|f| f.stem == "export"));
         assert!(entry.files.iter().any(|f| f.stem == "exportLibrary"));
-        assert_eq!(entry.reason, None, "no sidecar written -- legacy backup has no recorded reason");
+        assert_eq!(
+            entry.reason, None,
+            "no sidecar written -- legacy backup has no recorded reason"
+        );
     }
 
     #[test]
@@ -655,7 +732,13 @@ mod tests {
         let usb_root = usb.path();
         let backups_dir = usb_backups_dir(usb_root);
         touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb");
-        touch_backup(&backups_dir, "exportLibrary", "db", "2020-01-01_00-00-00", b"edb");
+        touch_backup(
+            &backups_dir,
+            "exportLibrary",
+            "db",
+            "2020-01-01_00-00-00",
+            b"edb",
+        );
         touch_reason(&backups_dir, "2020-01-01_00-00-00", "Before export", None);
 
         let result = service
@@ -674,7 +757,12 @@ mod tests {
         let usb_root = usb.path();
         let backups_dir = usb_backups_dir(usb_root);
         touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb");
-        touch_reason(&backups_dir, "2020-01-01_00-00-00", "Before export", Some(12));
+        touch_reason(
+            &backups_dir,
+            "2020-01-01_00-00-00",
+            "Before export",
+            Some(12),
+        );
 
         let result = service
             .list_usb_backups(ListUsbBackupsRequest {
@@ -696,8 +784,18 @@ mod tests {
         let usb = tempdir().unwrap();
         let usb_root = usb.path();
         let backups_dir = usb_backups_dir(usb_root);
-        touch_reason(&backups_dir, "2020-01-01_00-00-00", "Before export", Some(3));
-        touch_reason(&backups_dir, "2020-01-02_00-00-00", "Before playlist removal", Some(5));
+        touch_reason(
+            &backups_dir,
+            "2020-01-01_00-00-00",
+            "Before export",
+            Some(3),
+        );
+        touch_reason(
+            &backups_dir,
+            "2020-01-02_00-00-00",
+            "Before playlist removal",
+            Some(5),
+        );
 
         assert_eq!(
             most_recent_backup_playlist_count(usb_root),
@@ -716,13 +814,19 @@ mod tests {
             crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let cache_dir = cache_backups_dir(usb_root).expect("cache dir for named drive");
-        touch_reason(&cache_dir, "2020-01-01_00-00-00", "Before playlist reorder", Some(9));
+        touch_reason(
+            &cache_dir,
+            "2020-01-01_00-00-00",
+            "Before playlist reorder",
+            Some(9),
+        );
 
         assert_eq!(most_recent_backup_playlist_count(usb_root), Some(9));
     }
 
     #[test]
-    fn backup_usb_databases_with_retention_carries_forward_previous_playlist_count_when_none_given() {
+    fn backup_usb_databases_with_retention_carries_forward_previous_playlist_count_when_none_given()
+    {
         let (_dir, service) = test_service();
         let usb = tempdir().unwrap();
         let usb_root = usb.path();
@@ -731,7 +835,12 @@ mod tests {
         std::fs::write(&live_pdb, b"pdb-live").unwrap();
 
         let backups_dir = usb_backups_dir(usb_root);
-        touch_reason(&backups_dir, "2020-01-01_00-00-00", "Before export", Some(4));
+        touch_reason(
+            &backups_dir,
+            "2020-01-01_00-00-00",
+            "Before export",
+            Some(4),
+        );
 
         service.backup_usb_databases_with_retention(usb_root, "Before playlist reorder", None);
 
@@ -764,7 +873,13 @@ mod tests {
         std::fs::write(&live_edb, b"edb-live-v2").unwrap();
 
         let backups_dir = usb_backups_dir(usb_root);
-        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb-live-v1");
+        touch_backup(
+            &backups_dir,
+            "export",
+            "pdb",
+            "2020-01-01_00-00-00",
+            b"pdb-live-v1",
+        );
         touch_backup(
             &backups_dir,
             "exportLibrary",
@@ -786,16 +901,16 @@ mod tests {
         // The pre-restore live state must itself have been backed up, for both files.
         let remaining_pdb = list_stem_files(&backups_dir, "export", "pdb");
         assert!(
-            remaining_pdb
-                .iter()
-                .any(|p| std::fs::read(p).map(|b| b == b"pdb-live-v2").unwrap_or(false)),
+            remaining_pdb.iter().any(|p| std::fs::read(p)
+                .map(|b| b == b"pdb-live-v2")
+                .unwrap_or(false)),
             "restore must back up the current live PDB before overwriting it"
         );
         let remaining_edb = list_stem_files(&backups_dir, "exportLibrary", "db");
         assert!(
-            remaining_edb
-                .iter()
-                .any(|p| std::fs::read(p).map(|b| b == b"edb-live-v2").unwrap_or(false)),
+            remaining_edb.iter().any(|p| std::fs::read(p)
+                .map(|b| b == b"edb-live-v2")
+                .unwrap_or(false)),
             "restore must back up the current live eDB before overwriting it"
         );
     }
@@ -825,7 +940,13 @@ mod tests {
         crate::service::usb_staging::stage_pdb_on_connect(usb_root).expect("stage on connect");
 
         let backups_dir = usb_backups_dir(usb_root);
-        touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"restored-content");
+        touch_backup(
+            &backups_dir,
+            "export",
+            "pdb",
+            "2020-01-01_00-00-00",
+            b"restored-content",
+        );
 
         let result = service
             .restore_usb_backup(RestoreUsbBackupRequest {
@@ -878,8 +999,20 @@ mod tests {
         // pruning would consider once the fresh pre-restore backup displaces
         // it as "newest".
         let cache_dir = cache_backups_dir(usb_root).expect("cache dir for named drive");
-        touch_backup(&cache_dir, "export", "pdb", "2020-01-01_00-00-00", b"pdb-target");
-        touch_backup(&cache_dir, "exportLibrary", "db", "2020-01-01_00-00-00", b"edb-target");
+        touch_backup(
+            &cache_dir,
+            "export",
+            "pdb",
+            "2020-01-01_00-00-00",
+            b"pdb-target",
+        );
+        touch_backup(
+            &cache_dir,
+            "exportLibrary",
+            "db",
+            "2020-01-01_00-00-00",
+            b"edb-target",
+        );
 
         let result = service
             .restore_usb_backup(RestoreUsbBackupRequest {
@@ -971,8 +1104,19 @@ mod tests {
         let backups_dir = usb_backups_dir(usb_root);
         touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"old");
         touch_reason(&backups_dir, "2020-01-01_00-00-00", "Before export", None);
-        touch_backup(&backups_dir, "export", "pdb", "2020-01-02_00-00-00", b"newest");
-        touch_reason(&backups_dir, "2020-01-02_00-00-00", "Before playlist reorder", None);
+        touch_backup(
+            &backups_dir,
+            "export",
+            "pdb",
+            "2020-01-02_00-00-00",
+            b"newest",
+        );
+        touch_reason(
+            &backups_dir,
+            "2020-01-02_00-00-00",
+            "Before playlist reorder",
+            None,
+        );
 
         reconcile_backups(usb_root, 10, None);
 
@@ -1003,7 +1147,13 @@ mod tests {
         let backups_dir = usb_backups_dir(usb_root);
         for i in 1..=3 {
             let ts = format!("2020-01-0{i}_00-00-00");
-            touch_backup(&backups_dir, "export", "pdb", &ts, format!("v{i}").as_bytes());
+            touch_backup(
+                &backups_dir,
+                "export",
+                "pdb",
+                &ts,
+                format!("v{i}").as_bytes(),
+            );
             touch_reason(&backups_dir, &ts, "Before export", None);
         }
 
