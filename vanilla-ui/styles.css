@@ -309,6 +309,14 @@ body.library-onboarding {
   box-shadow: 0 0 8px var(--accent-glow);
 }
 
+.header-utility-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+
 /* ── header export stack (active playlist over connected USB) ── */
 /* Two compact single-line rows stacked in one narrow column -- no taller
    than the logo governing the topbar's height. Each row's dot sits next
