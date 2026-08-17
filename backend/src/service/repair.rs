@@ -3341,17 +3341,18 @@ impl BackendService {
         let staged_pdb_path = usb_staging::stage_pdb(&usb_root)?;
 
         on_progress(5, 100, "USB: Running diagnostics baseline");
-        let diagnostics = self.run_usb_diagnostics_with_progress_impl(
-            RunUsbDiagnosticsRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-            },
-            edb_conn.as_ref(),
-            Some(&staged_pdb_path),
-            |c, t, m| {
-                let pct = 5 + ((c * 50) / t.max(1)).min(50);
-                on_progress(pct, 100, m);
-            },
-        )?;
+        let (diagnostics, parsed_pdb_from_diagnostics) = self
+            .run_usb_diagnostics_with_progress_impl(
+                RunUsbDiagnosticsRequest {
+                    usb_root: Some(usb_root.to_string_lossy().to_string()),
+                },
+                edb_conn.as_ref(),
+                Some(&staged_pdb_path),
+                |c, t, m| {
+                    let pct = 5 + ((c * 50) / t.max(1)).min(50);
+                    on_progress(pct, 100, m);
+                },
+            )?;
 
         on_progress(60, 100, "USB: Building parity guidance");
         let parity = self.run_usb_parity_report_with_progress_impl(
@@ -3360,6 +3361,7 @@ impl BackendService {
             },
             edb_conn.as_ref(),
             Some(&staged_pdb_path),
+            parsed_pdb_from_diagnostics.as_ref(),
             |c, t, m| {
                 let pct = 60 + ((c * 20) / t.max(1)).min(20);
                 on_progress(pct, 100, m);
@@ -3450,7 +3452,11 @@ impl BackendService {
         // Staged once and reused below: these ~15 detectors otherwise each
         // re-read the same PDB file fresh from the USB mount.
         let staged_pdb_path = usb_staging::stage_pdb(&usb_root)?;
-        let parsed_pdb = parse_pdb(&staged_pdb_path).ok();
+        // Reuse the PDB the diagnostics baseline above already parsed instead
+        // of parsing it a third time (once for diagnostics, once for parity,
+        // and this one) -- only falls back to a fresh parse if diagnostics'
+        // own parse failed.
+        let parsed_pdb = parsed_pdb_from_diagnostics.or_else(|| parse_pdb(&staged_pdb_path).ok());
         let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_path);
         let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_path);
         let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&staged_pdb_path);

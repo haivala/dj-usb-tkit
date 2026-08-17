@@ -456,6 +456,7 @@ impl BackendService {
         F: FnMut(usize, usize, &str),
     {
         self.run_usb_diagnostics_with_progress_impl(req, None, None, on_progress)
+            .map(|(data, _)| data)
     }
 
     /// Same as `run_usb_diagnostics_with_progress`, but lets a caller that
@@ -464,13 +465,18 @@ impl BackendService {
     /// baseline alongside its own eDB/PDB reads) share them instead of each
     /// paying the USB stat/copy/key-negotiation cost separately. Passing
     /// `None` for either opens/stages it internally exactly as before.
+    /// Returns the diagnostics report alongside the `ParsedPdb` it parsed
+    /// internally (if parsing succeeded), so a caller like
+    /// `repair_usb_diagnostics_with_progress` that needs the parsed PDB for
+    /// further work can reuse it instead of re-parsing the same unchanged
+    /// file a second time.
     pub(crate) fn run_usb_diagnostics_with_progress_impl<F>(
         &self,
         req: RunUsbDiagnosticsRequest,
         edb_conn: Option<&rusqlite::Connection>,
         staged_pdb_path: Option<&std::path::Path>,
         mut on_progress: F,
-    ) -> BackendResult<RunUsbDiagnosticsData>
+    ) -> BackendResult<(RunUsbDiagnosticsData, Option<crate::pdb_reader::ParsedPdb>)>
     where
         F: FnMut(usize, usize, &str),
     {
@@ -779,7 +785,10 @@ impl BackendService {
             &playlist_resolution.status,
         ]);
 
-        Ok(RunUsbDiagnosticsData {
+        let cdj_counter_snapshot = parsed_opt
+            .as_ref()
+            .and_then(|(parsed, _)| compute_player_counter_snapshot(&pdb_path, parsed));
+        let data = RunUsbDiagnosticsData {
             overall_status,
             pdb_integrity,
             edb_access,
@@ -787,12 +796,11 @@ impl BackendService {
             analysis_integrity,
             playlist_resolution,
             playlist_details,
-            cdj_counter_snapshot: parsed_opt
-                .as_ref()
-                .and_then(|(parsed, _)| compute_player_counter_snapshot(&pdb_path, parsed)),
+            cdj_counter_snapshot,
             warnings: raw_warnings,
             duration_ms: start.elapsed().as_millis() as u64,
-        })
+        };
+        Ok((data, parsed_opt.map(|(parsed, _)| parsed)))
     }
 
     pub fn run_usb_parity_report(
@@ -810,18 +818,20 @@ impl BackendService {
     where
         F: FnMut(usize, usize, &str),
     {
-        self.run_usb_parity_report_with_progress_impl(req, None, None, on_progress)
+        self.run_usb_parity_report_with_progress_impl(req, None, None, None, on_progress)
     }
 
     /// Same as `run_usb_parity_report_with_progress`, but lets a caller that
-    /// already has an open eDB connection and/or a locally-staged PDB path
-    /// share them instead of each paying the USB stat/copy/key-negotiation
+    /// already has an open eDB connection, a locally-staged PDB path, and/or
+    /// an already-parsed PDB (e.g. from `run_usb_diagnostics_with_progress_impl`)
+    /// share them instead of each paying the USB stat/copy/key-negotiation/parse
     /// cost separately. See `run_usb_diagnostics_with_progress_impl`.
     pub(crate) fn run_usb_parity_report_with_progress_impl<F>(
         &self,
         req: RunUsbParityReportRequest,
         edb_conn: Option<&rusqlite::Connection>,
         staged_pdb_path: Option<&std::path::Path>,
+        parsed_pdb: Option<&crate::pdb_reader::ParsedPdb>,
         mut on_progress: F,
     ) -> BackendResult<RunUsbParityReportData>
     where
@@ -863,7 +873,14 @@ impl BackendService {
             Some(p) => p.to_path_buf(),
             None => super::usb_staging::stage_pdb(&usb_root)?,
         };
-        let parsed = parse_pdb(&pdb_path)?;
+        let owned_parsed_pdb;
+        let parsed: &crate::pdb_reader::ParsedPdb = match parsed_pdb {
+            Some(parsed) => parsed,
+            None => {
+                owned_parsed_pdb = parse_pdb(&pdb_path)?;
+                &owned_parsed_pdb
+            }
+        };
         raw_warnings.extend(parsed.warnings.iter().map(|message| {
             logging::log(
                 Level::Warn,
@@ -902,7 +919,7 @@ impl BackendService {
             .map(|p| normalize_path_for_strict_presence_match(&p))
             .filter(|p| !p.is_empty())
             .collect();
-        let indexed_paths = collect_strict_indexed_paths(&parsed, &edb_playlists, conn);
+        let indexed_paths = collect_strict_indexed_paths(parsed, &edb_playlists, conn);
         // Case-insensitive containment: FAT32/exFAT resolves paths case-insensitively, and a
         // folder's on-disk casing can drift from the currently-recorded artist/album casing
         // without the file actually being missing or unindexed. See `contents_path_match_key`.
@@ -939,7 +956,7 @@ impl BackendService {
 
         on_progress(70, 100, "USB: Comparing playlist sources");
         let (checks, summary_rows, playlist_details, overall_status) = build_usb_parity_comparison(
-            &parsed,
+            parsed,
             &edb_playlists,
             &reference_only_edb_fields,
             Some(strict_raw_coverage),
