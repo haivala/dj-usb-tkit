@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+- **Improvement:** USB repair and export now open the export library database (eDB) once per
+  run and reuse that connection for every read/write step, instead of reopening it for each
+  fix or verification pass. A full repair with several fixes selected previously reopened the
+  eDB 5+ times (re-running SQLCipher key negotiation each time); it now opens it once. Repair
+  also no longer re-parses the USB's PDB a second time for the empty-analysis-files fix when
+  it already parsed one earlier in the same run.
+
 ## 0.1.20
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

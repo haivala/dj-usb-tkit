@@ -9,7 +9,7 @@ use rusqlite::params;
 
 use crate::edb::{
     ExportDbPlaylist, open_edb_from_usb_root, open_edb_rw,
-    try_read_playlists_with_metadata_from_edb,
+    try_read_playlists_with_metadata_from_edb, try_read_playlists_with_metadata_from_edb_with_conn,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
@@ -28,7 +28,8 @@ use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle};
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRowData,
     encode_album_row, load_table_columns, remove_track_ids_from_pdb_playlist_entries,
-    replace_export_playlist_row_with_identity, table_exists, write_edb_playlist, write_pdb,
+    replace_export_playlist_row_with_identity, table_exists, write_edb_playlist_with_conn,
+    write_pdb,
 };
 use super::usb_staging;
 use super::usb_utils::{
@@ -2759,12 +2760,45 @@ pub(crate) fn restore_pdb_playlist_sort_orders(
     Ok(patched)
 }
 
+/// Reuses a caller-supplied eDB connection if given, otherwise calls
+/// `open_fallback` to open (and own) one of its own. Centralizes the
+/// "reuse the shared connection, or open a local fallback" pattern that
+/// would otherwise be duplicated across every repair apply-fix helper
+/// below -- each of them previously re-opened the eDB independently even
+/// when a repair run had already opened one, redoing SQLCipher key
+/// negotiation for no reason.
+enum EdbConnHandle<'a> {
+    Shared(&'a mut rusqlite::Connection),
+    Owned(rusqlite::Connection),
+}
+
+impl<'a> EdbConnHandle<'a> {
+    fn acquire(
+        shared: Option<&'a mut rusqlite::Connection>,
+        open_fallback: impl FnOnce() -> Option<rusqlite::Connection>,
+    ) -> Option<Self> {
+        match shared {
+            Some(conn) => Some(Self::Shared(conn)),
+            None => open_fallback().map(Self::Owned),
+        }
+    }
+
+    fn conn(&mut self) -> &mut rusqlite::Connection {
+        match self {
+            Self::Shared(conn) => conn,
+            Self::Owned(conn) => conn,
+        }
+    }
+}
+
 pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
     usb_root: &std::path::Path,
+    edb_conn: Option<&mut rusqlite::Connection>,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
     let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
-    let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
+    let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
+    else {
         warnings.push(logging::log(
             Level::Error,
             "usb-repair",
@@ -2773,7 +2807,8 @@ pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
         ));
         return Ok(0);
     };
-    if !table_exists(&conn, "playlist") {
+    let conn = handle.conn();
+    if !table_exists(conn, "playlist") {
         return Ok(0);
     }
     let tx = conn.transaction()?;
@@ -4118,19 +4153,31 @@ impl BackendService {
         };
 
         if req.apply {
-            warnings.extend(self.backup_usb_databases_with_retention(&usb_root, "Before repair", None).into_iter().map(|message| {
-                logging::log(
-                    Level::Info,
-                    "usb-diagnostics",
-                    "usb.diagnostics.backup",
-                    message,
-                )
-            }));
+            warnings.extend(
+                self.backup_usb_databases_with_retention(&usb_root, "Before repair", None)
+                    .into_iter()
+                    .map(|message| {
+                        logging::log(
+                            Level::Info,
+                            "usb-diagnostics",
+                            "usb.diagnostics.backup",
+                            message,
+                        )
+                    }),
+            );
+
+            // Open the eDB read-write once for every fix below instead of
+            // each fix independently re-staging/re-opening it -- SQLCipher
+            // key negotiation is the expensive part. Individual fixes fall
+            // back to opening their own connection if this fails.
+            let mut fix_edb_conn = open_edb_rw(&usb_root, &mut warnings);
 
             if selected.contains("fix_empty_analysis_files") {
                 match self.apply_fix_empty_analysis_files(
                     &usb_root,
                     &empty_analysis_paths,
+                    fix_edb_conn.as_mut(),
+                    parsed_pdb.as_ref(),
                     &mut warnings,
                 ) {
                     Ok((fixed, skipped, failed, write_count)) => {
@@ -4229,7 +4276,12 @@ impl BackendService {
                     } else {
                         Some(&strict_upgrade_targets)
                     };
-                    match self.apply_strict_parity_upgrade(&usb_root, target_names, &mut warnings) {
+                    match self.apply_strict_parity_upgrade(
+                        &usb_root,
+                        target_names,
+                        fix_edb_conn.as_mut(),
+                        &mut warnings,
+                    ) {
                         Ok(result) => {
                             if result.failed_playlists > 0 {
                                 failed_fixes.push(format!(
@@ -4541,9 +4593,14 @@ impl BackendService {
                         &usb_root,
                         &missing_audio_track_ids,
                         &missing_audio_paths,
+                        fix_edb_conn.as_mut(),
                         &mut warnings,
                     ) {
-                        Ok((removed_db_content, removed_db_playlist_links, removed_pdb_entries)) => {
+                        Ok((
+                            removed_db_content,
+                            removed_db_playlist_links,
+                            removed_pdb_entries,
+                        )) => {
                             if removed_db_content > 0
                                 || removed_db_playlist_links > 0
                                 || removed_pdb_entries > 0
@@ -4570,8 +4627,12 @@ impl BackendService {
                     skipped_fixes
                         .push("Sync eDB History Tables From PDB: nothing to apply".to_string());
                 } else if let Some(parsed) = parsed_pdb.as_ref() {
-                    match self.apply_fix_sync_edb_history_from_pdb(&usb_root, parsed, &mut warnings)
-                    {
+                    match self.apply_fix_sync_edb_history_from_pdb(
+                        &usb_root,
+                        parsed,
+                        fix_edb_conn.as_mut(),
+                        &mut warnings,
+                    ) {
                         Ok((history_written, history_content_written)) => {
                             applied_fixes.push(format!(
                                 "Sync eDB History Tables From PDB: wrote history {history_written}, history_content {history_content_written}"
@@ -4587,6 +4648,15 @@ impl BackendService {
             } else if sync_edb_history_needed {
                 skipped_fixes.push("Sync eDB History Tables From PDB: not selected".to_string());
             }
+
+            // Checkpoint the shared eDB connection's WAL into the main db
+            // file before write-back reads it off disk below -- write-back
+            // copies raw file bytes, not through SQLite, so any change still
+            // sitting in the WAL would otherwise be silently dropped.
+            if let Some(conn) = fix_edb_conn.as_ref() {
+                let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+            }
+            drop(fix_edb_conn);
 
             // All selected fixes above write to their local staged copies only
             // (see usb_staging.rs) -- flush the accumulated local changes back
@@ -4639,6 +4709,7 @@ impl BackendService {
         &self,
         usb_root: &std::path::Path,
         target_playlist_names: Option<&HashSet<String>>,
+        mut edb_conn: Option<&mut rusqlite::Connection>,
         warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<StrictParityUpgradeApplyResult> {
         let mut result = StrictParityUpgradeApplyResult::default();
@@ -4646,7 +4717,12 @@ impl BackendService {
 
         // ── Phase 1: Collect ──────────────────────────────────────────
         let parsed = parse_pdb(&pdb_path)?;
-        let edb_playlists = try_read_playlists_with_metadata_from_edb(usb_root, warnings);
+        let edb_playlists = match edb_conn.as_deref() {
+            Some(conn) => {
+                try_read_playlists_with_metadata_from_edb_with_conn(conn, usb_root, warnings)
+            }
+            None => try_read_playlists_with_metadata_from_edb(usb_root, warnings),
+        };
 
         // Build PDB track index: identity_key → PdbTrackRow
         let pdb_track_by_key: HashMap<String, &crate::pdb_reader::PdbTrackRow> = parsed
@@ -5373,12 +5449,17 @@ impl BackendService {
         };
 
         // ── Phase 4: Write eDB ────────────────────────────────────────
+        // Open (or reuse the caller-supplied) eDB connection once for the
+        // whole write phase below, instead of once per playlist -- each
+        // open re-runs SQLCipher key negotiation.
+        let mut handle =
+            EdbConnHandle::acquire(edb_conn.take(), || open_edb_rw(usb_root, warnings));
         for mpl in &merged_playlists {
             let (playlist_data, manifest) = build_manifest_for_merged_playlist(usb_root, mpl);
             if !mpl.edb_needs_write {
                 continue;
             }
-            let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
+            let Some(conn) = handle.as_mut().map(EdbConnHandle::conn) else {
                 warnings.push(logging::log(
                     Level::Error,
                     "usb-repair",
@@ -5406,7 +5487,7 @@ impl BackendService {
                 i64::from(mpl.sort_order),
             )?;
             tx.commit()?;
-            match write_edb_playlist(usb_root, &playlist_data, &manifest, true) {
+            match write_edb_playlist_with_conn(conn, &playlist_data, &manifest, true) {
                 Ok(_) => result.edb_playlists_written += 1,
                 Err(err) => {
                     warnings.push(logging::log(
@@ -5423,7 +5504,11 @@ impl BackendService {
             }
         }
         if result.merged_playlists > 0
-            && let Err(err) = sync_edb_playlist_sort_orders_from_pdb(usb_root, warnings)
+            && let Err(err) = sync_edb_playlist_sort_orders_from_pdb(
+                usb_root,
+                handle.as_mut().map(EdbConnHandle::conn),
+                warnings,
+            )
         {
             warnings.push(logging::log(
                 Level::Error,
@@ -5441,6 +5526,8 @@ impl BackendService {
         &self,
         usb_root: &std::path::Path,
         empty_analysis_paths: &[String],
+        edb_conn: Option<&mut rusqlite::Connection>,
+        parsed_pdb: Option<&crate::pdb_reader::ParsedPdb>,
         warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize, usize, usize)> {
         if empty_analysis_paths.is_empty() {
@@ -5456,10 +5543,21 @@ impl BackendService {
 
         let mut map_by_file = std::collections::HashMap::<String, AnalysisRepairTarget>::new();
         let mut map_by_dir = std::collections::HashMap::<String, AnalysisRepairTarget>::new();
-        if let Ok(staged_pdb_path) = usb_staging::stage_pdb(usb_root)
-            && let Ok(parsed) = parse_pdb(&staged_pdb_path)
-        {
-            for t in parsed.tracks {
+        // Reuse the caller's already-parsed PDB when given -- this fix always
+        // runs before anything that mutates the PDB, so it's still current.
+        // Only stage/parse our own copy if the caller didn't have one.
+        let owned_parsed_pdb;
+        let parsed_pdb_ref: Option<&crate::pdb_reader::ParsedPdb> = match parsed_pdb {
+            Some(parsed) => Some(parsed),
+            None => {
+                owned_parsed_pdb = usb_staging::stage_pdb(usb_root)
+                    .ok()
+                    .and_then(|staged_pdb_path| parse_pdb(&staged_pdb_path).ok());
+                owned_parsed_pdb.as_ref()
+            }
+        };
+        if let Some(parsed) = parsed_pdb_ref {
+            for t in &parsed.tracks {
                 if let (Some(a), Some(s)) = (
                     resolve_usb_side_path(usb_root, &t.anlz_path),
                     resolve_usb_side_path(usb_root, &t.track_file_path),
@@ -5483,7 +5581,10 @@ impl BackendService {
             }
         }
 
-        if let Some(conn) = open_edb_from_usb_root(usb_root, warnings) {
+        if let Some(mut handle) =
+            EdbConnHandle::acquire(edb_conn, || open_edb_from_usb_root(usb_root, warnings))
+        {
+            let conn = handle.conn();
             let mut stmt = conn.prepare(
                 "SELECT path, analysisDataFilePath FROM content WHERE analysisDataFilePath IS NOT NULL",
             )?;
@@ -5606,12 +5707,15 @@ impl BackendService {
         &self,
         usb_root: &std::path::Path,
         parsed: &crate::pdb_reader::ParsedPdb,
+        edb_conn: Option<&mut rusqlite::Connection>,
         warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize)> {
         let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
-        let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
+        let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
+        else {
             return Ok((0, 0));
         };
+        let conn = handle.conn();
         let tx = conn.transaction()?;
         tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS history(history_id integer primary key, sequenceNo integer, name varchar, attribute integer, history_id_parent integer); \
@@ -5642,6 +5746,7 @@ impl BackendService {
         usb_root: &std::path::Path,
         missing_track_ids: &HashSet<u32>,
         missing_paths: &[String],
+        edb_conn: Option<&mut rusqlite::Connection>,
         warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize, usize)> {
         if missing_track_ids.is_empty() || missing_paths.is_empty() {
@@ -5655,7 +5760,10 @@ impl BackendService {
             .map(|p| normalize_pdb_path_for_edb_lookup(p))
             .collect::<HashSet<_>>();
 
-        if let Some(mut conn) = open_edb_rw(usb_root, warnings) {
+        if let Some(mut handle) =
+            EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
+        {
+            let conn = handle.conn();
             let tx = conn.transaction()?;
             if table_exists(&tx, "content") {
                 let columns = load_table_columns(&tx, "content")?;
@@ -5713,6 +5821,8 @@ impl BackendService {
                 }
             }
             tx.commit()?;
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+            let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
         } else {
             warnings.push(logging::log(
                 Level::Warn,
@@ -6134,7 +6244,7 @@ mod tests {
 
         let mut warnings = Vec::new();
         let (history_written, _history_content_written) = service
-            .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, &mut warnings)
+            .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, None, &mut warnings)
             .expect("sync edb history");
         assert_eq!(history_written, 1);
 
@@ -7074,7 +7184,7 @@ mod tests {
 
         let mut warnings = Vec::new();
         let (history_written, history_content_written) = service
-            .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, &mut warnings)
+            .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, None, &mut warnings)
             .expect("sync edb history");
         assert_eq!(history_written, 1);
         assert_eq!(

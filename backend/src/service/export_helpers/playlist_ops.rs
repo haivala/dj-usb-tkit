@@ -332,9 +332,17 @@ pub fn verify_edb_content(
                 .join(" | ")
         )));
     };
+    verify_edb_content_with_conn(usb_root, &conn, playlist, manifest)
+}
 
+pub fn verify_edb_content_with_conn(
+    usb_root: &Path,
+    conn: &rusqlite::Connection,
+    playlist: &ExportPlaylistData,
+    manifest: &ExportManifest,
+) -> BackendResult<()> {
     let playlist_id: i64 =
-        preferred_export_playlist_row_id(&conn, &playlist.name)?.ok_or_else(|| {
+        preferred_export_playlist_row_id(conn, &playlist.name)?.ok_or_else(|| {
             BackendError::Internal(format!(
                 "export verification failed: playlist not found in eDB: {}",
                 playlist.name

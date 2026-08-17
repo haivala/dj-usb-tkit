@@ -729,6 +729,12 @@ pub(crate) fn load_existing_analysis_paths_by_content_path(
     let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
         return HashMap::new();
     };
+    load_existing_analysis_paths_by_content_path_with_conn(&conn)
+}
+
+pub(crate) fn load_existing_analysis_paths_by_content_path_with_conn(
+    conn: &rusqlite::Connection,
+) -> HashMap<String, String> {
     let mut stmt = match conn.prepare(
         r#"
         SELECT path, analysisDataFilePath

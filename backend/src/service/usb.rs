@@ -923,6 +923,7 @@ impl BackendService {
         on_progress(70, 100, "USB: Syncing eDB playlist order");
         let edb_updated = crate::service::repair::sync_edb_playlist_sort_orders_from_pdb(
             &usb_root,
+            None,
             &mut warnings,
         )?;
         if edb_updated == 0 {

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{OptionalExtension, params};
 use serde_json::json;
 
+use crate::edb::{open_edb_from_usb_root, open_edb_rw};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{ExportToUsbData, ExportToUsbRequest, WarningEntry};
@@ -26,14 +27,15 @@ use super::export_helpers::{
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
     exported_media_target_path, filter_prunable_stale_paths_for_playlist, preview_pdb,
     prune_stale_export_owned_files, stable_u32_hash, to_usb_relative_path, verify_edb_content,
-    verify_pdb_content, write_edb_playlist, write_pdb,
+    verify_edb_content_with_conn, verify_pdb_content, write_edb_playlist,
+    write_edb_playlist_with_conn, write_pdb,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
 use super::usb_utils::{
     self, analysis_bundle_exists, canonicalize_playlist_name,
-    load_existing_analysis_paths_by_content_path, load_existing_analysis_paths_by_pdb_track_path,
-    resolve_usb_root, resolve_usb_side_path,
+    load_existing_analysis_paths_by_content_path, load_existing_analysis_paths_by_content_path_with_conn,
+    load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
 use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, now};
 use uuid::Uuid;
@@ -208,11 +210,17 @@ impl BackendService {
         // content, then bump by +0x10000 on re-export (handled elsewhere).
         let app_content_link_id: i64 = 0x000C_0700;
 
+        // Open the eDB once here and reuse it below for the write + verify
+        // steps too, instead of each independently re-staging/re-opening it
+        // (SQLCipher key negotiation is the expensive part).
+        let edb_read_conn = open_edb_from_usb_root(&usb_root, &mut warnings);
         let mut existing_analysis_by_path =
             load_existing_analysis_paths_by_pdb_track_path(&usb_root);
-        for (path_key, analysis_path) in
-            load_existing_analysis_paths_by_content_path(&usb_root, &mut warnings)
-        {
+        let existing_analysis_by_content_path = match edb_read_conn.as_ref() {
+            Some(conn) => load_existing_analysis_paths_by_content_path_with_conn(conn),
+            None => load_existing_analysis_paths_by_content_path(&usb_root, &mut warnings),
+        };
+        for (path_key, analysis_path) in existing_analysis_by_content_path {
             existing_analysis_by_path
                 .entry(path_key)
                 .or_insert(analysis_path);
@@ -578,8 +586,17 @@ impl BackendService {
                         .map(|message| logging::log(Level::Info, "export", "export.backup", message)),
                 );
             }
-            // Write eDB first (master), then sync PDB to match eDB playlist IDs
-            match write_edb_playlist(&usb_root, &playlist, &manifest, mirror_playlist_entries) {
+            // Write eDB first (master), then sync PDB to match eDB playlist IDs.
+            // Open one RW connection here and reuse it for the immediate
+            // post-write verification read below, instead of reopening.
+            let mut edb_write_conn = open_edb_rw(&usb_root, &mut warnings);
+            let write_result = match edb_write_conn.as_mut() {
+                Some(conn) => {
+                    write_edb_playlist_with_conn(conn, &playlist, &manifest, mirror_playlist_entries)
+                }
+                None => write_edb_playlist(&usb_root, &playlist, &manifest, mirror_playlist_entries),
+            };
+            match write_result {
                 Ok(WriteExportLibraryDbResult {
                     inserted_content,
                     linked_playlist_entries,
@@ -592,8 +609,14 @@ impl BackendService {
                     // Always keep exportExt.pdb byte-stable in normal export.
                     // Strict integrity checks can fail when exportExt header/count
                     // bytes are rewritten from eDB-derived values.
-                    let verify_warnings =
-                        self.verify_export_outputs(&usb_root, &playlist, &manifest, true, false)?;
+                    let verify_warnings = self.verify_export_outputs(
+                        &usb_root,
+                        &playlist,
+                        &manifest,
+                        true,
+                        edb_write_conn.as_ref(),
+                        false,
+                    )?;
                     warnings.extend(verify_warnings);
                     warnings.push(logging::log(
                         Level::Info,
@@ -631,6 +654,7 @@ impl BackendService {
                         &playlist,
                         &manifest,
                         false,
+                        None,
                         !skip_pdb_write,
                     )?;
                     warnings.extend(verify_pdb_warnings);
@@ -681,12 +705,12 @@ impl BackendService {
             {
                 let profile = crate::service::export_helpers::PdbLayoutProfile::from_env();
                 let profile_key = format!("pdb_profile:{}", usb_root.to_string_lossy());
-                self.db.connect()?.execute(
+                local_conn.execute(
                     "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                     params![profile_key, profile.as_str(), now()],
                 )?;
             }
-            self.db.connect()?.execute(
+            local_conn.execute(
                 "UPDATE playlists SET last_exported_at = ?1, last_exported_usb_root = ?2, last_exported_track_count = ?3 WHERE id = ?4",
                 params![
                     now(),
@@ -711,15 +735,14 @@ impl BackendService {
             // mark_mounted=false: an export happening implies the device
             // was already validated/mounted earlier in the flow, this call
             // only resolves/bumps the usb_devices row.
-            let export_conn = self.db.connect()?;
             let usb_device_id =
-                usb_utils::upsert_usb_device(&export_conn, &usb_root, false, &now())?;
+                usb_utils::upsert_usb_device(&local_conn, &usb_root, false, &now())?;
             let export_record = build_export_log_record(&playlist, &manifest);
             let track_fingerprints_json = serde_json::to_string(&export_record.track_fingerprints)
                 .map_err(|err| {
                     BackendError::Internal(format!("failed to encode track fingerprints: {err}"))
                 })?;
-            export_conn.execute(
+            local_conn.execute(
                 "INSERT INTO usb_device_exports (id, usb_device_id, playlist_id, playlist_name, exported_at, track_count, track_fingerprints, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
@@ -755,6 +778,7 @@ impl BackendService {
         playlist: &ExportPlaylistData,
         manifest: &ExportManifest,
         verify_db: bool,
+        edb_conn: Option<&rusqlite::Connection>,
         verify_pdb: bool,
     ) -> BackendResult<Vec<WarningEntry>> {
         let mut warnings = Vec::<WarningEntry>::new();
@@ -803,7 +827,10 @@ impl BackendService {
         }
 
         if verify_db {
-            verify_edb_content(usb_root, playlist, manifest)?;
+            match edb_conn {
+                Some(conn) => verify_edb_content_with_conn(usb_root, conn, playlist, manifest)?,
+                None => verify_edb_content(usb_root, playlist, manifest)?,
+            }
         }
         if verify_pdb {
             verify_pdb_content(usb_root, playlist, manifest)?;
@@ -1641,7 +1668,7 @@ mod tests {
             tracks: Vec::new(),
         };
         let err = service
-            .verify_export_outputs(usb_dir.path(), &playlist, &manifest, false, false)
+            .verify_export_outputs(usb_dir.path(), &playlist, &manifest, false, None, false)
             .unwrap_err();
         assert!(matches!(err, BackendError::Internal(_)));
     }
@@ -1664,7 +1691,7 @@ mod tests {
         };
 
         let warnings = service
-            .verify_export_outputs(usb_dir.path(), &playlist, &manifest, false, false)
+            .verify_export_outputs(usb_dir.path(), &playlist, &manifest, false, None, false)
             .expect("verify outputs");
         assert!(
             warnings

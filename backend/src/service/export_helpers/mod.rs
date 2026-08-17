@@ -45,7 +45,8 @@ pub use pdb_menu::{
 };
 pub use playlist_ops::{
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
-    remove_track_ids_from_pdb_playlist_entries, verify_edb_content, verify_pdb_content,
+    remove_track_ids_from_pdb_playlist_entries, verify_edb_content, verify_edb_content_with_conn,
+    verify_pdb_content,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -392,8 +393,6 @@ pub fn write_edb_playlist(
     manifest: &ExportManifest,
     mirror_playlist_entries: bool,
 ) -> BackendResult<WriteExportLibraryDbResult> {
-    let export_date_added = normalize_export_date(Some(&manifest.generated_at))
-        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
     let db_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -417,6 +416,17 @@ pub fn write_edb_playlist(
         )));
     };
 
+    write_edb_playlist_with_conn(&mut conn, playlist, manifest, mirror_playlist_entries)
+}
+
+pub fn write_edb_playlist_with_conn(
+    conn: &mut rusqlite::Connection,
+    playlist: &ExportPlaylistData,
+    manifest: &ExportManifest,
+    mirror_playlist_entries: bool,
+) -> BackendResult<WriteExportLibraryDbResult> {
+    let export_date_added = normalize_export_date(Some(&manifest.generated_at))
+        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
     let tx = conn.transaction()?;
     if !table_exists(&tx, "playlist")
         || !table_exists(&tx, "content")
