@@ -35,8 +35,8 @@
   fix or verification pass. A full repair with several fixes selected previously reopened the
   eDB 5+ times (re-running SQLCipher key negotiation each time); it now opens it once. A repair
   run also used to parse the USB's PDB three separate times (once for the diagnostics baseline,
-  once for the parity report, once more for the fix-detection pass) even though the file never
-  changes between those steps; it's now parsed once and reused.
+  once for the parity report, once more for the fix-detection pass), even though none of those
+  three steps writes to it; it's now parsed once and reused across all three.
 - **Chore:** ran `cargo fmt` across the backend crate to clear accumulated formatting drift
   (no `rustfmt.toml`/CI fmt check previously enforced consistency). No behavior change.
 
