@@ -2049,7 +2049,10 @@ fn resolve_usb_track_from_sources(
     // Paired together (rather than two separate params) to keep the
     // argument count down: `pdb_track_index` is always built from `parsed`
     // and the two are only ever passed as a matching pair.
-    pdb: Option<(&ParsedPdb, &HashMap<u32, Vec<&crate::pdb_reader::PdbTrackRow>>)>,
+    pdb: Option<(
+        &ParsedPdb,
+        &HashMap<u32, Vec<&crate::pdb_reader::PdbTrackRow>>,
+    )>,
     include_artwork_data_url: bool,
     edb_index: Option<&HashMap<u32, UsbTrack>>,
 ) -> Option<(String, UsbTrack)> {

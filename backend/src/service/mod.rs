@@ -1493,11 +1493,9 @@ impl BackendService {
         let mut duration_known_count: usize = 0;
         for track in &items {
             let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
-            let countable =
-                track_has_core_analysis_for_source_status(track) || (track.master_db_source && has_duration);
-            if countable
-                && let Some(d) = track.duration_ms
-            {
+            let countable = track_has_core_analysis_for_source_status(track)
+                || (track.master_db_source && has_duration);
+            if countable && let Some(d) = track.duration_ms {
                 total_duration_ms += d;
                 duration_known_count += 1;
             }
@@ -2040,9 +2038,25 @@ impl BackendService {
         let mut items = rows.collect::<Result<Vec<_>, _>>()?;
         apply_is_usb_path(&conn, &mut items)?;
 
+        // Computed once server-side (here) instead of by the frontend summing
+        // whatever tracks it happens to have loaded -- see
+        // `GetPlaylistTracksData::total_duration_ms`.
+        let mut total_duration_ms: u64 = 0;
+        let mut duration_known_count: usize = 0;
+        for track in &items {
+            if let Some(d) = track.duration_ms
+                && d > 0
+            {
+                total_duration_ms += d;
+                duration_known_count += 1;
+            }
+        }
+
         Ok(GetPlaylistTracksData {
             playlist_id: req.playlist_id,
             items,
+            total_duration_ms,
+            duration_known_count,
         })
     }
 
@@ -3530,6 +3544,64 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["t1".to_string(), "t2".to_string()]
         );
+    }
+
+    #[test]
+    fn get_playlist_tracks_computes_total_duration_server_side() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song A",
+            "Artist",
+            "/music/a.mp3",
+            Some(200_000),
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t2",
+            "Song B",
+            "Artist",
+            "/music/b.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t3",
+            "Song C",
+            "Artist",
+            "/music/c.mp3",
+            Some(100_000),
+            None,
+            false,
+        );
+        drop(conn);
+
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+        service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
+                dedupe: DedupeMode::Allow,
+            })
+            .expect("add tracks");
+
+        let tracks = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id,
+            })
+            .expect("get playlist tracks");
+        assert_eq!(tracks.total_duration_ms, 300_000);
+        assert_eq!(tracks.duration_known_count, 2);
     }
 
     #[test]

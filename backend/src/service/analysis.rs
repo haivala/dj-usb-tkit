@@ -591,9 +591,7 @@ impl BackendService {
                 let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
                 let countable = track_has_core_analysis_for_source_status(track)
                     || (track.master_db_source && has_duration);
-                if countable
-                    && let Some(d) = track.duration_ms
-                {
+                if countable && let Some(d) = track.duration_ms {
                     total_ms += d;
                     known_count += 1;
                 }

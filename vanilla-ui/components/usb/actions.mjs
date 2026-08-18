@@ -1028,7 +1028,7 @@ export async function refreshUsb(state, el, deps) {
   setProgress(true, 80, "Computing stats...");
   await new Promise((r) => setTimeout(r, 20));
 
-  const usbTrackTotal = state.usbPlaylists.reduce((sum, playlist) => sum + (playlist.tracks?.length || 0), 0);
+  const usbTrackTotal = state.usbPlaylists.reduce((sum, playlist) => sum + (playlist.trackCount || 0), 0);
   el.usbCountsText.textContent = `${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`;
   state.usbPlaylistTracks = [];
   setProgress(true, 90, "Rendering playlists...");

@@ -30,6 +30,11 @@
 
 ## Unreleased
 
+- **Improvement:** playlist "Total time" is now computed once server-side from the full
+  track list, matching how the media library and USB playlist/history views already
+  report their totals, instead of being summed client-side from whatever tracks happen
+  to be loaded.
+
 ## 0.1.21
 
 - **Fix:** searching the media library could make an unrelated, already fully-analyzed source

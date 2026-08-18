@@ -407,6 +407,10 @@ pub struct GetPlaylistTracksRequest {
 pub struct GetPlaylistTracksData {
     pub playlist_id: String,
     pub items: Vec<Track>,
+    #[serde(default)]
+    pub total_duration_ms: u64,
+    #[serde(default)]
+    pub duration_known_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -121,7 +121,10 @@ test("playlist analyze-missing only targets local non-USB tracks", async ({ page
             return { ok: true, data: { items: playlists } };
           }
           if (command === "get_playlist_tracks") {
-            return { ok: true, data: { playlistId: request.playlistId, items: playlistTracks[request.playlistId] || [] } };
+            const items = playlistTracks[request.playlistId] || [];
+            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
+            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
           }
           if (command === "search_tracks" || command === "list_tracks") {
             return { ok: true, data: { total: libraryTracks.length, items: libraryTracks } };
@@ -270,7 +273,7 @@ test("playlist analyze-missing only targets local non-USB tracks", async ({ page
   await page.goto("/");
 
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks, Total time: 3:00)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toHaveText("Analyze Missing Tracks (1)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeVisible();
   await expect(page.locator("#exportPlaylistBtn")).toBeHidden();
@@ -341,7 +344,10 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
             return { ok: true, data: { items: playlists } };
           }
           if (command === "get_playlist_tracks") {
-            return { ok: true, data: { playlistId: request.playlistId, items: playlistTracks[request.playlistId] || [] } };
+            const items = playlistTracks[request.playlistId] || [];
+            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
+            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
           }
           if (command === "search_tracks" || command === "list_tracks") {
             return { ok: true, data: { total: 0, items: [] } };
@@ -396,7 +402,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
 
   await page.goto("/");
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist (1 track, Total time: 3:00)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeHidden();
   await expect(page.locator("#exportPlaylistBtn")).toBeVisible();
 });

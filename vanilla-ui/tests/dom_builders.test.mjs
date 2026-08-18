@@ -71,20 +71,6 @@ test("renderUsbRecentRoots toggles row visibility and renders buttons", () => {
   assert.equal(el.usbRecentList.querySelector("button")?.dataset.usbRecentPath, "/USB/A");
 });
 
-test("updatePlaylistPanelTitle summarizes track count and duration", () => {
-  const dom = makeDom();
-  const el = { playlistPanelTitle: dom.window.document.getElementById("playlistPanelTitle") };
-
-  updatePlaylistPanelTitle(el, {
-    name: "Set A",
-    tracks: [{ durationMs: 60000 }, { durationMs: 125000 }]
-  }, {
-    formatDurationMs: (ms) => `fmt:${ms}`
-  });
-
-  assert.equal(el.playlistPanelTitle.textContent, "Set A (2 tracks, Total time: fmt:185000)");
-});
-
 test("populatePlaylistPanel fills export status and search input", () => {
   const dom = makeDom();
   const document = dom.window.document;

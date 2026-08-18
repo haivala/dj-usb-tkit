@@ -272,6 +272,8 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
 
   const data = await command("get_playlist_tracks", { playlistId: playlist.id });
   playlist.tracks = (data.items || []).map((track) => normalizeTrack(track, "plt"));
+  playlist.totalDurationMs = Number(data.totalDurationMs) || 0;
+  playlist.durationKnownCount = Number(data.durationKnownCount) || 0;
   state.currentPlaylistTracksView = filterTracksByQuery(playlist.tracks, state.playlistTrackSearch);
   if (el.playlistSearchInput && el.playlistSearchInput.value !== state.playlistTrackSearch) {
     el.playlistSearchInput.value = state.playlistTrackSearch;
@@ -539,15 +541,17 @@ export function renderPlaylistSidebarItemContent(playlist, deps) {
   `;
 }
 
+// The playlist's duration total is computed entirely by the backend (which
+// sums the full playlist, not just whatever tracks happen to be loaded
+// client-side) and pushed here via playlist.totalDurationMs -- see
+// GetPlaylistTracksData::total_duration_ms. This is a pure setter, no track
+// iteration.
 export function updatePlaylistPanelTitle(el, playlist, deps) {
   const { formatDurationMs } = deps;
   if (!el?.playlistPanelTitle || !playlist) return;
   const tracks = Array.isArray(playlist.tracks) ? playlist.tracks : [];
   const count = tracks.length;
-  const durations = tracks
-    .map((t) => Number(t?.durationMs))
-    .filter((v) => Number.isFinite(v) && v > 0);
-  const totalMs = durations.reduce((s, v) => s + v, 0);
+  const totalMs = Number(playlist.totalDurationMs) || 0;
   const parts = [playlist.name];
   if (count > 0) {
     parts.push(`(${count} track${count !== 1 ? "s" : ""}, Total time: ${formatDurationMs(totalMs)})`);
