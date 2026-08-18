@@ -168,6 +168,17 @@ function installTauriMock(page, mode) {
             };
           }
           if (command === "repair_usb_diagnostics") {
+            if (payload?.request?.apply) {
+              return {
+                ok: true,
+                data: {
+                  appliedFixes: payload.request.selectedFixIds || [],
+                  failedFixes: [],
+                  warnings: [],
+                  durationMs: 1
+                }
+              };
+            }
             return {
               ok: true,
               data: {
@@ -381,12 +392,21 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   // Navigate to USB, select folder, then go to playlists
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
+
+  // Open a diagnostics report first -- a successful removal must clear it,
+  // since it no longer reflects the (now stale) playlist set it reported on.
+  const usbHealthCard = page.locator("#usbHealthCard");
+  await usbHealthCard.evaluate((node) => { node.open = true; });
+  await page.locator("#reDiagnoseBtn").click();
+  await expect(page.locator("#diagSections")).not.toBeEmpty();
+
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await page.locator("#refreshUsbBtn").click();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 
   await page.locator('[data-usb-remove-playlist="usb-1"]').click();
   await expect(page.locator("#confirmOverlay")).toBeVisible();
+  await expect(page.locator("#confirmMessage")).toHaveText('Remove USB playlist "Warmup" from the stick?');
   await page.locator("#confirmCancelBtn").click();
   await expect(page.locator("#confirmOverlay")).toBeHidden();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
@@ -396,6 +416,8 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
 
   await expect(page.locator("#statusText")).toContainText("Removed USB playlist: Warmup");
   await expect(page.locator("#usbPlaylists")).toContainText("No playlists imported yet");
+  await expect(page.locator("#diagSections")).toBeEmpty();
+  await expect(page.locator("#diagOverallStatus")).toBeEmpty();
 });
 
 test("USB playlists tab shows empty state before import", async ({ page }) => {
@@ -584,6 +606,14 @@ test("Repair preview locks structural-prerequisite fix checkboxes", async ({ pag
 
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
+
+  // Load playlists first -- a successful repair apply must clear them, since
+  // an applied fix may have rewritten the PDB playlist tree they came from.
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator("#refreshUsbBtn").click();
+  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+  await page.locator('.nav-item[data-view="usb"]').click();
+
   const usbHealthCard = page.locator("#usbHealthCard");
   await usbHealthCard.evaluate((node) => {
     node.open = true;
@@ -611,6 +641,14 @@ test("Repair preview locks structural-prerequisite fix checkboxes", async ({ pag
   await expect(controlCheckbox).toBeEnabled();
   await controlCheckbox.uncheck();
   await expect(controlCheckbox).not.toBeChecked();
+
+  // applyUsbRepairs immediately re-runs diagnostics after a successful apply,
+  // which overwrites the transient "Repair apply complete" status -- assert
+  // on the settled state (playlists cleared) rather than that status text.
+  await page.locator("#applyRepairsBtn").click();
+
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(page.locator("#usbPlaylists")).toContainText("No playlists imported yet");
 });
 
 async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTop) {
@@ -632,6 +670,14 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
 
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
+
+  // Open a diagnostics report first -- a successful reorder must clear it,
+  // since it no longer reflects the (now stale) playlist order it reported on.
+  const usbHealthCard = page.locator("#usbHealthCard");
+  await usbHealthCard.evaluate((node) => { node.open = true; });
+  await page.locator("#reDiagnoseBtn").click();
+  await expect(page.locator("#diagSections")).not.toBeEmpty();
+
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await page.locator("#refreshUsbBtn").click();
 
@@ -657,6 +703,8 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
   await expect(rows.nth(0)).toContainText("Bravo");
   await expect(rows.nth(1)).toContainText("Charlie");
   await expect(rows.nth(2)).toContainText("Alpha");
+  await expect(page.locator("#diagSections")).toBeEmpty();
+  await expect(page.locator("#diagOverallStatus")).toBeEmpty();
 
   const reorderCalls = await page.evaluate(() => window.__reorderCalls);
   expect(reorderCalls.length).toBeGreaterThan(0);

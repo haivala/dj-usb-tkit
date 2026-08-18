@@ -6,7 +6,8 @@ function installTauriMock(page) {
     const historyTracks = [
       { id: "1", title: "Opener", artist: "DJ One", durationMs: 180000 },
       { id: "2", title: "Peak Time", artist: "DJ Two", durationMs: 240000 },
-      { id: "3", title: "Closer", artist: "DJ Three", durationMs: 300000 }
+      { id: "3", title: "Closer", artist: "DJ Three", durationMs: 300000 },
+      { id: "4", title: "x".repeat(200), artist: "DJ Four", durationMs: 200000 }
     ];
     window.__TAURI__ = {
       core: {
@@ -103,10 +104,28 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   await expect(page.locator("#tracklistExportOverlay")).toBeVisible();
 
   const options = page.locator("#tracklistExportStartTrack option");
-  await expect(options).toHaveCount(3);
+  await expect(options).toHaveCount(4);
   await expect(options.nth(0)).toHaveText("1. DJ One - Opener");
   await expect(options.nth(1)).toHaveText("2. DJ Two - Peak Time");
   await expect(options.nth(2)).toHaveText("3. DJ Three - Closer");
+  const longLabel = await options.nth(3).textContent();
+  expect(longLabel).toHaveLength(64);
+  expect(longLabel.endsWith("…")).toBe(true);
+
+  // Times-on by default, so the placement row starts visible; toggling times
+  // off/on should hide/show it.
+  await expect(page.locator("#tracklistExportPlacementRow")).toBeVisible();
+  await page.locator("#tracklistExportTimesToggle").uncheck();
+  await expect(page.locator("#tracklistExportPlacementRow")).toBeHidden();
+  await page.locator("#tracklistExportTimesToggle").check();
+  await expect(page.locator("#tracklistExportPlacementRow")).toBeVisible();
+
+  // Closing and reopening must rebuild the option list, not append to it.
+  await page.locator("#tracklistExportCancelBtn").click();
+  await expect(page.locator("#tracklistExportOverlay")).toBeHidden();
+  await page.locator("#exportHistoryTracklistBtn").click();
+  await expect(page.locator("#tracklistExportOverlay")).toBeVisible();
+  await expect(options).toHaveCount(4);
 
   await page.screenshot({ path: "test-results/tracklist-export-dialog.png" });
 });

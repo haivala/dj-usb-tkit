@@ -3,83 +3,6 @@ import assert from "node:assert/strict";
 import { createTrackRow, renderTrackTable } from "../track_table.mjs";
 import { escapeHtml } from "../ui_utils.mjs";
 
-test("createTrackRow escapes HTML-sensitive track fields", () => {
-  const html = createTrackRow(
-    {
-      id: "t-1",
-      title: `<script>alert("x")</script>`,
-      artist: "A&B",
-      album: `\'"<>`,
-      bpm: "",
-      key: "",
-      waveformPreview: [],
-      waveformPeaksPath: "",
-      usbAnalysisPath: ""
-    },
-    {
-      origin: "usb",
-      index: 0,
-      withCheckbox: false,
-      actionLabel: "+",
-      actionType: "add-usb",
-      compactAddButton: true,
-      enableAnalyzeActions: false,
-      secondaryActionLabel: "Play",
-      secondaryActionType: "play-usb"
-    },
-    {
-      state: { currentPlaylistId: "playlist-1" },
-      buildCoverSrcCandidates: () => [],
-      isTrackCurrentlyPlaying: () => false,
-      escapeHtml,
-      trackHasCoreAnalysis: () => false,
-      getKeyHue: () => 270,
-    }
-  );
-
-  assert.ok(html.includes("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;"));
-  assert.ok(html.includes("A&amp;B"));
-  assert.ok(html.includes("&#39;&quot;&lt;&gt;"));
-  assert.equal(html.includes("<script>alert("), false);
-});
-
-test("createTrackRow does not emit inline style attributes", () => {
-  const html = createTrackRow(
-    {
-      id: "t-2",
-      title: "Title",
-      artist: "Artist",
-      album: "Album",
-      bpm: "128",
-      key: "Am",
-      waveformPreview: [],
-      waveformPeaksPath: "",
-      usbAnalysisPath: ""
-    },
-    {
-      origin: "lib",
-      index: 0,
-      withCheckbox: true,
-      selectedIds: new Set(),
-      actionLabel: "+",
-      actionType: "add-library",
-      compactAddButton: true,
-      enableAnalyzeActions: true,
-      secondaryActionLabel: "Play",
-      secondaryActionType: "play-library"
-    },
-    {
-      state: { currentPlaylistId: "playlist-1", playlists: [{ id: "playlist-1", name: "P1" }] },
-      buildCoverSrcCandidates: () => [],
-      isTrackCurrentlyPlaying: () => false,
-      escapeHtml,
-      trackHasCoreAnalysis: () => true,
-      getKeyHue: () => 180,
-    }
-  );
-  assert.equal(/style=/.test(html), false);
-});
-
 test("createTrackRow uses helpful add-button tooltip when no playlist is active", () => {
   const html = createTrackRow(
     {
@@ -206,7 +129,7 @@ test("renderTrackTable attaches PWV4 color data before drawing", () => {
   assert.equal(rendered, true);
 });
 
-test("renderTrackTable empty state renders grid empty row in both selection modes", () => {
+test("renderTrackTable empty state renders grid empty row in playlist-view (no checkbox) mode", () => {
   const deps = {
     createTrackRow: () => "",
     attachCoverFallbackHandlers: () => {},
@@ -215,12 +138,6 @@ test("renderTrackTable empty state renders grid empty row in both selection mode
     escapeHtml,
     setStatus: () => {}
   };
-
-  const tbodyA = { innerHTML: "" };
-  renderTrackTable(tbodyA, [], { withCheckbox: true }, deps);
-  assert.ok(tbodyA.innerHTML.includes('class="track-grid-row track-grid-row-empty"'));
-  assert.ok(tbodyA.innerHTML.includes('class="track-grid-cell track-grid-empty"'));
-  assert.ok(tbodyA.innerHTML.includes("No tracks available."));
 
   const tbodyB = { innerHTML: "" };
   renderTrackTable(tbodyB, [], { withCheckbox: false }, deps);

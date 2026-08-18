@@ -108,23 +108,6 @@ test("setupConsoleFileLogging serializes non-string args", async () => {
   }
 });
 
-test("setupRuntimeErrorLogging captures CSP violations", () => {
-  const logged = [];
-  setupRuntimeErrorLogging({ pushEventLog: (entry) => { logged.push(entry); } });
-
-  window._fire("securitypolicyviolation", {
-    violatedDirective: "img-src",
-    blockedURI: "https://evil.com/img.png"
-  });
-
-  const csp = logged.find((e) => e.message.includes("CSP violation"));
-  assert.ok(csp);
-  assert.equal(csp.level, "error");
-  assert.equal(csp.source, "browser");
-  assert.ok(csp.message.includes("img-src"));
-  assert.ok(csp.message.includes("evil.com"));
-});
-
 test("setupRuntimeErrorLogging captures unhandled errors", () => {
   const logged = [];
   setupRuntimeErrorLogging({ pushEventLog: (entry) => { logged.push(entry); } });

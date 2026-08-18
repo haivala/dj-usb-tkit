@@ -70,4 +70,5 @@ test("Configured source folders with zero indexed tracks prompt scan and keep co
   await expect(page.locator("#libraryContent")).not.toHaveClass(/hidden/);
   await expect(page.locator("#sourceChipsContainer")).toContainText("/music");
   await expect(page.locator("#libraryTableBody")).toContainText("No tracks available.");
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveClass(/track-grid-row-empty/);
 });

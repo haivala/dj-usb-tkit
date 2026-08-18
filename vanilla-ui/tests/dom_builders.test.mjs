@@ -97,7 +97,7 @@ test("populatePlaylistPanel fills export status and search input", () => {
   assert.equal(exportButtonUpdates, 1);
 });
 
-test("updateUsbRootText renders disconnected and connected states", () => {
+test("updateUsbRootText renders the disconnected state", () => {
   const dom = makeDom();
   const document = dom.window.document;
   const el = {
@@ -109,10 +109,6 @@ test("updateUsbRootText renders disconnected and connected states", () => {
   assert.equal(el.usbConnectionBar.classList.contains("hidden"), false);
   assert.equal(el.usbRootPathText.textContent, "No USB selected");
   assert.equal(el.usbRootPathText.classList.contains("usb-path-valid"), false);
-
-  updateUsbRootText(el, "/media/USB", true);
-  assert.equal(el.usbRootPathText.textContent, "/media/USB");
-  assert.equal(el.usbRootPathText.classList.contains("usb-path-valid"), true);
 });
 
 test("setActiveListItem only keeps the chosen button active", () => {

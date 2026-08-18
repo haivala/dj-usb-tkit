@@ -201,6 +201,8 @@ test("source chips show analyzed green on startup and adding a source updates br
   // what's already indexed.
   const masterDbToggle = page.locator('.source-chip-toggle[data-master-db="true"]');
   await expect(masterDbToggle).toBeVisible();
+  await expect(masterDbToggle).toHaveAttribute("aria-label", "Toggle desktop library");
+  await expect(page.locator("#importMasterDbBtn")).toBeVisible();
   await masterDbToggle.check();
   await expect(masterDbToggle).toBeChecked();
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);

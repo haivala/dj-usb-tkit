@@ -79,6 +79,7 @@ test("loads shell with library active and sidebar nav", async ({ page }) => {
   await expect(page.locator("#panel-usb")).not.toHaveClass(/active/);
   await expect(page.locator('.nav-item[data-view="library"]')).toHaveAttribute("aria-current", "true");
   await expect(page.locator('.nav-item[data-view="usb"]')).not.toHaveAttribute("aria-current", "true");
+  await expect(page.locator("#importMasterDbBtn")).toHaveClass(/hidden/);
 });
 
 test("can create and delete playlist via sidebar", async ({ page }) => {

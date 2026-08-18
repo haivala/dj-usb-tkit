@@ -45,7 +45,7 @@ function installSourceRemovalMock(page) {
         id: "b-1",
         title: "B One",
         artist: "Artist B",
-        album: "Album B",
+        album: `Album B & <b>Two</b>`,
         filePath: "/music/b/Artist B - B One.mp3",
         fileSizeBytes: 1002,
         createdAt: "2026-03-01T00:00:00Z",
@@ -111,6 +111,10 @@ test("removing a source folder deletes corresponding tracks from the library", a
 
   await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(2);
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+  expect(await page.locator("#libraryTableBody .track-grid-row").first().getAttribute("style")).toBeNull();
+  await expect(
+    page.locator("#libraryTableBody .track-grid-row", { hasText: "B One" }).locator(".td-album")
+  ).toHaveText("Album B & <b>Two</b>");
 
   await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
   await page.locator("#confirmOkBtn").click();

@@ -54,20 +54,6 @@ test("computeExportButtonState keeps export text in mirror mode even when same-n
   assert.equal(state.title, "Export current playlist to selected USB");
 });
 
-test("computeExportButtonState shows Select USB first when no USB root is set", () => {
-  const state = computeExportButtonState({
-    usbRoot: null,
-    usbRootValid: false,
-    exportPruneStale: false,
-    currentPlaylistName: "Testi",
-    knownUsbPlaylistNames: new Set()
-  });
-
-  assert.equal(state.enabled, false);
-  assert.equal(state.text, "Select USB first");
-  assert.equal(state.title, "Select a valid USB folder first");
-});
-
 test("computeExportButtonState appends last path segment to export text", () => {
   const state = computeExportButtonState({
     usbRoot: "/media/user/USB_TRY",

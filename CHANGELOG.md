@@ -34,6 +34,8 @@
   track list, matching how the media library and USB playlist/history views already
   report their totals, instead of being summed client-side from whatever tracks happen
   to be loaded.
+- **Chore:** removed frontend unit tests that duplicated existing e2e coverage, and
+  extended a few e2e specs to cover what they checked.
 
 ## 0.1.21
 

@@ -405,4 +405,5 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
   await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist (1 track, Total time: 3:00)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeHidden();
   await expect(page.locator("#exportPlaylistBtn")).toBeVisible();
+  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Select USB first");
 });

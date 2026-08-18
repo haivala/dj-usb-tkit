@@ -547,29 +547,6 @@ test("handleJobEvent analysis progress calls applyRealtimeAnalyzedTrackUpdate", 
   assert.ok(realtimeCalled);
 });
 
-test("handleJobEvent applies the backend-pushed library duration total on a ready event", () => {
-  const state = makeState();
-  const el = makeEl();
-  const applied = [];
-  handleJobEvent(state, el, {
-    event: "job.progress",
-    jobId: "j1",
-    jobType: "analysis",
-    stage: "analyze_new_tracks",
-    trackId: "t7",
-    trackReady: true,
-    libraryTotalDurationMs: 123456,
-    libraryDurationUnknownCount: 2
-  }, {
-    debugFrontendLog: () => {},
-    pushEventLog: () => {},
-    applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-    setStatus: () => {},
-    applyLibraryDurationSummary: (totalMs, unknownCount) => { applied.push([totalMs, unknownCount]); }
-  });
-  assert.deepEqual(applied, [[123456, 2]]);
-});
-
 test("handleJobEvent does not apply a library duration total when the payload doesn't carry one", () => {
   const state = makeState();
   const el = makeEl();

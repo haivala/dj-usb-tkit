@@ -16,18 +16,3 @@ test("removeUsbPlaylist requires selected usb root", async () => {
   assert.equal(status, "Select USB folder first");
 });
 
-test("removeUsbPlaylist clears the diagnostics report after a successful removal", async () => {
-  const state = { usbRoot: "/tmp/usb" };
-  let clearCalls = 0;
-
-  await removeUsbPlaylist(state, { id: "pl-1", name: "USB Set" }, {
-    setStatus: () => {},
-    openConfirmDialog: async () => true,
-    command: async () => ({ removedFromEdb: 1, removedFromPdb: 1, warnings: [] }),
-    refreshUsb: async () => {},
-    clearUsbDiagnostics: () => { clearCalls += 1; }
-  });
-
-  assert.equal(clearCalls, 1);
-});
-

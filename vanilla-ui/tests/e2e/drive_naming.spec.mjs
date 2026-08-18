@@ -150,6 +150,7 @@ test("clicking a recent USB pill for an already-named drive does not reopen the 
   // Give the (skipped) async naming check a turn to run before asserting
   // it stayed closed, rather than just checking the initial synchronous state.
   await expect(page.locator("#usbRootPathText")).toContainText("/Volumes/USB-TEST");
+  await expect(page.locator("#usbRootPathText")).toHaveClass(/usb-path-valid/);
   await expect(page.locator("#driveNameOverlay")).toBeHidden();
   await expect(page.locator("#usbNameBadge")).toBeVisible();
   await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");

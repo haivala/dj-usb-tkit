@@ -122,35 +122,6 @@ test("refreshCurrentPlaylistTracks updates playlist table state and empty state"
   assert.deepEqual(calls, ["rows:1", "duration:1", "title:p1", "buttons", "list"]);
 });
 
-test("updatePlaylistExportButtons hides export while analyze-missing is available", () => {
-  const dom = makeDom();
-  const { document } = dom.window;
-  const state = {
-    usbRoot: "/usb",
-    usbRootValid: true,
-    exportPruneStale: true,
-    usbKnownPlaylistNames: new Set()
-  };
-  const el = {
-    exportPlaylistBtn: document.getElementById("exportPlaylistBtn"),
-    analyzePlaylistMissingBtn: document.getElementById("analyzePlaylistMissingBtn")
-  };
-
-  updatePlaylistExportButtons(state, el, {
-    getCurrentPlaylist: () => ({
-      name: "Set",
-      tracks: [{ id: "t1", usbAnalysisPath: null, analyzed: false }]
-    }),
-    computeExportButtonState: () => ({ enabled: true, text: "Export", title: "Go" }),
-    isUsbOriginTrack: () => false,
-    trackHasCoreAnalysis: () => false
-  });
-
-  assert.equal(el.exportPlaylistBtn.hidden, true);
-  assert.equal(el.analyzePlaylistMissingBtn.hidden, false);
-  assert.match(el.analyzePlaylistMissingBtn.textContent, /1/);
-});
-
 test("createPlaylist selects newly loaded playlist when command id is not present", async () => {
   const state = { currentPlaylistId: "p1", playlists: [{ id: "p1", name: "Old" }] };
   const calls = [];

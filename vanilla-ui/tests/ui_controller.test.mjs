@@ -3,9 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
 import {
-  setStatusText,
   updateModeText,
-  updateUsbNameBadge,
   updateActivePlaylistIndicators,
   updateAddToPlaylistButtons,
   updateSelectionCount,
@@ -58,15 +56,6 @@ function makeDom() {
   `);
 }
 
-test("setStatusText updates status text", () => {
-  const dom = makeDom();
-  const document = dom.window.document;
-  const el = { statusText: document.getElementById("statusText") };
-  setStatusText(el, "Loading");
-
-  assert.equal(el.statusText.textContent, "Loading");
-});
-
 test("updateModeText reflects current playlist and delegates indicator updates", () => {
   const dom = makeDom();
   const document = dom.window.document;
@@ -91,23 +80,6 @@ test("updateModeText reflects current playlist and delegates indicator updates",
   assert.equal(el.badgeLabel.textContent, "House");
   assert.equal(addCalls, 1);
   assert.equal(indicatorCalls, 1);
-});
-
-test("updateUsbNameBadge always shows the block, falling back to placeholder text when unset", () => {
-  const dom = makeDom();
-  const document = dom.window.document;
-  const el = {
-    usbNameBadge: document.getElementById("usbNameBadge"),
-    usbNameBadgeLabel: document.getElementById("usbNameBadgeLabel")
-  };
-
-  updateUsbNameBadge({ usbDeviceName: "Club Stick" }, el);
-  assert.equal(el.usbNameBadge.classList.contains("hidden"), false);
-  assert.equal(el.usbNameBadgeLabel.textContent, "Club Stick");
-
-  updateUsbNameBadge({ usbDeviceName: null }, el);
-  assert.equal(el.usbNameBadge.classList.contains("hidden"), false);
-  assert.equal(el.usbNameBadgeLabel.textContent, "Not connected");
 });
 
 test("updateActivePlaylistIndicators marks the active playlist button", () => {
@@ -254,37 +226,6 @@ test("updateSourceFilterIndicator is not active when all sources including maste
     masterDbEnabled: true
   }, el);
   assert.equal(el.sourceFilterIndicator.classList.contains("active"), false);
-});
-
-test("createConfirmDialogController opens, closes, and resolves the dialog promise", async () => {
-  const dom = new JSDOM(`
-    <!doctype html>
-    <body>
-      <div id="confirmOverlay" hidden></div>
-      <div id="confirmTitle"></div>
-      <div id="confirmMessage"></div>
-      <button id="confirmOkBtn" type="button"></button>
-    </body>
-  `, { pretendToBeVisual: true });
-  const { document } = dom.window;
-  const controller = createConfirmDialogController({
-    confirmOverlay: document.getElementById("confirmOverlay"),
-    confirmTitle: document.getElementById("confirmTitle"),
-    confirmMessage: document.getElementById("confirmMessage"),
-    confirmOkBtn: document.getElementById("confirmOkBtn")
-  });
-
-  const promise = controller.open({ title: "Delete", message: "Confirm?", confirmLabel: "Remove" });
-  assert.equal(controller.isOpen(), true);
-  assert.equal(document.getElementById("confirmOverlay").hidden, false);
-  assert.equal(document.getElementById("confirmTitle").textContent, "Delete");
-  assert.equal(document.getElementById("confirmMessage").textContent, "Confirm?");
-  assert.equal(document.getElementById("confirmOkBtn").textContent, "Remove");
-
-  controller.close(true);
-  assert.equal(await promise, true);
-  assert.equal(controller.isOpen(), false);
-  assert.equal(document.getElementById("confirmOverlay").hidden, true);
 });
 
 test("bindEvents wires confirm buttons and sidebar collapse/expand", () => {
