@@ -86,8 +86,6 @@ export function createInitialState() {
     progressPausedAtMs: null,
     lastJobEventAtMs: 0,
     librarySearchDebounceTimer: null,
-    realtimeRenderTimer: null,
-    realtimeRenderQueued: false,
     trackPreviewHydrateInFlight: new Set(),
     loadedPreviewHydrationSeq: 0,
     analyzingTrackIds: new Set(),

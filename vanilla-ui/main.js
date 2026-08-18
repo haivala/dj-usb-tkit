@@ -558,7 +558,7 @@ function handlePlaybackEvent(payload) {
 const analysisPatchQueue = library.createAnalysisPatchQueue();
 analysisPatchQueue.init(
   (id) => patchLibraryRowByTrackId(id),
-  () => scheduleRealtimeTrackRender(),
+  () => applySearchLocalFilter(),
   (cb) => setTimeout(cb, 0),
 );
 
@@ -604,11 +604,6 @@ function setTrackAnalyzingState(trackId, active) {
   library.setTrackAnalyzingState(state, trackId, active, {
     patchLibraryRowByTrackId,
     patchPlaylistRowByTrackId,
-    trackHasCoreAnalysis,
-    trackNeedsPreviewHydration: library.trackNeedsPreviewHydration,
-    getLibraryVisibleTracks,
-    updateLibraryDurationSummary,
-    renderSourceChips,
   });
 }
 
@@ -686,15 +681,6 @@ function renderCurrentPlaylistTracksFromState() {
     updateTrackListDurationSummary,
   });
 }
-function scheduleRealtimeTrackRender() {
-  library.scheduleRealtimeTrackRender(state, {
-    clearTimeoutFn: window.clearTimeout.bind(window),
-    setTimeoutFn: window.setTimeout.bind(window),
-    applySearchLocalFilter,
-    renderCurrentPlaylistTracksFromState,
-    delayMs: 60,
-  });
-}
 const mergeHydratedTrackIntoState = (rawTrack) => library.mergeHydratedTrackIntoState(state, rawTrack, {
     normalizeTrack,
   });
@@ -705,18 +691,12 @@ const applyRealtimeAnalyzedTrackUpdate = async (payload) => library.applyRealtim
     log: (...a) => console.log(...a),
     warn: (...a) => console.warn(...a),
     patchLibraryRowByTrackId,
-    scheduleRealtimeTrackRender,
     hydrateTrackPreviewFromBackend,
   });
-const hydrateTrackPreviewFromBackend = async (trackId, options = {}) => library.hydrateTrackPreviewFromBackend(state, trackId, options, {
+const hydrateTrackPreviewFromBackend = async (trackId) => library.hydrateTrackPreviewFromBackend(state, trackId, {
     command,
     mergeHydratedTrackIntoState,
     patchLibraryRowByTrackId,
-    nextPaint: jobMgr.nextPaint,
-    getLibraryVisibleTracks,
-    updateLibraryDurationSummary,
-    scheduleRealtimeTrackRender,
-    renderSourceChips,
   });
 const hydrateLoadedTracksPreviewsInBackground = async () => library.hydrateLoadedTracksPreviewsInBackground(state, {
     getLibraryVisibleTracks,
@@ -725,7 +705,8 @@ const hydrateLoadedTracksPreviewsInBackground = async () => library.hydrateLoade
     patchLibraryRowByTrackId,
     nextPaint: jobMgr.nextPaint,
     updateLibraryDurationSummary,
-    scheduleRealtimeTrackRender,
+    applySearchLocalFilter,
+    renderCurrentPlaylistTracksFromState,
     renderSourceChips,
     batchSize: 48,
   });
@@ -835,8 +816,7 @@ const analyzeTrackIds = async (trackIds, modeLabel = "Analyze", options = {}) =>
     mergeHydratedTrackIntoState,
     patchLibraryRowByTrackId,
     patchPlaylistRowByTrackId,
-    updateLibraryDurationSummary: () =>
-      updateLibraryDurationSummary(getLibraryVisibleTracks()),
+    applySearchLocalFilter,
     renderSourceChips,
     refreshSourceRootAnalysisStatus,
     refreshCurrentPlaylistTracks,

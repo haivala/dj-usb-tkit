@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  scheduleRealtimeTrackRender,
   trackNeedsPreviewHydration,
   mergeHydratedTrackIntoState,
   hydrateTrackPreviewFromBackend,
@@ -12,24 +11,6 @@ test("trackNeedsPreviewHydration requires waveform path and missing preview", ()
   assert.equal(trackNeedsPreviewHydration({ waveformPreview: [], waveformPeaksPath: "/a.DAT" }), true);
   assert.equal(trackNeedsPreviewHydration({ waveformPreview: [1], waveformPeaksPath: "/a.DAT" }), false);
   assert.equal(trackNeedsPreviewHydration({ waveformPreview: [], waveformPeaksPath: "" }), false);
-});
-
-test("scheduleRealtimeTrackRender queues one render and executes callbacks", async () => {
-  const state = { realtimeRenderQueued: false, realtimeRenderTimer: null };
-  let filtered = 0;
-  let rendered = 0;
-  scheduleRealtimeTrackRender(state, {
-    clearTimeoutFn: () => {},
-    setTimeoutFn: (cb) => {
-      cb();
-      return 1;
-    },
-    applySearchLocalFilter: () => { filtered += 1; },
-    renderCurrentPlaylistTracksFromState: () => { rendered += 1; }
-  });
-  assert.equal(filtered, 1);
-  assert.equal(rendered, 1);
-  assert.equal(state.realtimeRenderQueued, false);
 });
 
 test("mergeHydratedTrackIntoState merges into library and playlist", () => {
@@ -47,24 +28,19 @@ test("mergeHydratedTrackIntoState merges into library and playlist", () => {
   assert.deepEqual(state.playlists[0].tracks[0].waveformPreview, [30]);
 });
 
-test("hydrateTrackPreviewFromBackend applies updates and schedules UI", async () => {
+test("hydrateTrackPreviewFromBackend applies updates and patches the row", async () => {
   const state = {
     trackPreviewHydrateInFlight: new Set(),
     analyzingTrackIds: new Set(),
     loadedPreviewHydrationSeq: 0
   };
   const calls = [];
-  await hydrateTrackPreviewFromBackend(state, "1", {}, {
+  await hydrateTrackPreviewFromBackend(state, "1", {
     command: async () => ({ items: [{ id: "1" }] }),
     mergeHydratedTrackIntoState: () => true,
-    patchLibraryRowByTrackId: (id) => calls.push(`patch:${id}`),
-    nextPaint: async () => {},
-    getLibraryVisibleTracks: () => [],
-    updateLibraryDurationSummary: () => calls.push("summary"),
-    scheduleRealtimeTrackRender: () => calls.push("schedule"),
-    renderSourceChips: () => calls.push("chips")
+    patchLibraryRowByTrackId: (id) => calls.push(`patch:${id}`)
   });
-  assert.deepEqual(calls, ["patch:1", "schedule", "chips"]);
+  assert.deepEqual(calls, ["patch:1"]);
   assert.equal(state.trackPreviewHydrateInFlight.size, 0);
 });
 
@@ -81,7 +57,8 @@ test("hydrateLoadedTracksPreviewsInBackground batches and patches", async () => 
     patchLibraryRowByTrackId: (id) => patched.push(id),
     nextPaint: async () => {},
     updateLibraryDurationSummary: () => {},
-    scheduleRealtimeTrackRender: () => {},
+    applySearchLocalFilter: () => {},
+    renderCurrentPlaylistTracksFromState: () => {},
     renderSourceChips: () => {},
     batchSize: 10
   });

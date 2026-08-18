@@ -92,7 +92,7 @@ test("analyzeTrackIds calls analyze_new_tracks and hydrates bpm/key from the res
     mergeHydratedTrackIntoState: (item) => { merged.push(item); return true; },
     patchLibraryRowByTrackId: () => {},
     patchPlaylistRowByTrackId: () => {},
-    updateLibraryDurationSummary: () => {},
+    applySearchLocalFilter: () => {},
     renderSourceChips: () => {},
     refreshCurrentPlaylistTracks: async () => {},
     countWarningsForStatus: () => 0
@@ -133,7 +133,7 @@ test("analyzeTrackIds reports failed count from analyze_new_tracks response", as
     mergeHydratedTrackIntoState: () => false,
     patchLibraryRowByTrackId: () => {},
     patchPlaylistRowByTrackId: () => {},
-    updateLibraryDurationSummary: () => {},
+    applySearchLocalFilter: () => {},
     renderSourceChips: () => {},
     refreshCurrentPlaylistTracks: async () => {},
     countWarningsForStatus: (warnings) => Array.isArray(warnings) ? warnings.length : 0
@@ -178,7 +178,7 @@ test("analyzeTrackIds surfaces the auto-select-limit notice from a structured Wa
     mergeHydratedTrackIntoState: () => false,
     patchLibraryRowByTrackId: () => {},
     patchPlaylistRowByTrackId: () => {},
-    updateLibraryDurationSummary: () => {},
+    applySearchLocalFilter: () => {},
     renderSourceChips: () => {},
     refreshCurrentPlaylistTracks: async () => {},
     countWarningsForStatus: () => 0
@@ -208,7 +208,6 @@ test("applyRealtimeAnalyzedTrackUpdate skips no-change warning for empty bpm/key
     log: () => {},
     warn: () => { warnCalls += 1; },
     patchLibraryRowByTrackId: () => {},
-    scheduleRealtimeTrackRender: () => {},
     hydrateTrackPreviewFromBackend: async () => {}
   });
 

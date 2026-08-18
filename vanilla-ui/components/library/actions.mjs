@@ -279,27 +279,6 @@ export async function refreshMissingSourceRoots(state, deps = {}) {
   }
 }
 
-export function scheduleRealtimeTrackRender(state, deps) {
-  const {
-    clearTimeoutFn,
-    setTimeoutFn,
-    applySearchLocalFilter,
-    renderCurrentPlaylistTracksFromState,
-    delayMs = 60
-  } = deps;
-  if (state.realtimeRenderQueued) return;
-  state.realtimeRenderQueued = true;
-  if (state.realtimeRenderTimer) {
-    clearTimeoutFn(state.realtimeRenderTimer);
-  }
-  state.realtimeRenderTimer = setTimeoutFn(() => {
-    state.realtimeRenderTimer = null;
-    state.realtimeRenderQueued = false;
-    applySearchLocalFilter();
-    renderCurrentPlaylistTracksFromState();
-  }, delayMs);
-}
-
 export function trackNeedsPreviewHydration(track) {
   if (!track) return false;
   const missingWaveformPreview = !Array.isArray(track.waveformPreview) || track.waveformPreview.length === 0;
@@ -343,7 +322,6 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
     log,
     warn,
     patchLibraryRowByTrackId,
-    scheduleRealtimeTrackRender,
     hydrateTrackPreviewFromBackend
   } = deps;
 
@@ -386,16 +364,12 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
     }
   }
 
-  let playlistChanged = false;
   for (const playlist of state.playlists) {
     for (const track of playlist.tracks || []) {
       const localTrackId = String(track.localTrackId || track.id || "").trim();
       if (localTrackId !== trackId) continue;
-      playlistChanged = patchTrackAnalysisFields(track, payload) || playlistChanged;
+      patchTrackAnalysisFields(track, payload);
     }
-  }
-  if (playlistChanged) {
-    scheduleRealtimeTrackRender();
   }
 
   const payloadHasPreview = Array.isArray(payload?.waveformPreview) && payload.waveformPreview.length > 0;
@@ -406,21 +380,15 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
   }
 }
 
-export async function hydrateTrackPreviewFromBackend(state, trackId, options = {}, deps) {
+export async function hydrateTrackPreviewFromBackend(state, trackId, deps) {
   const {
     command,
     mergeHydratedTrackIntoState,
-    patchLibraryRowByTrackId,
-    nextPaint,
-    getLibraryVisibleTracks,
-    updateLibraryDurationSummary,
-    scheduleRealtimeTrackRender,
-    renderSourceChips
+    patchLibraryRowByTrackId
   } = deps;
   const id = String(trackId || "").trim();
   if (!id) return;
   if (state.trackPreviewHydrateInFlight.has(id)) return;
-  const updateSummary = options.updateSummary !== false;
   state.trackPreviewHydrateInFlight.add(id);
   try {
     const data = await command("get_tracks_by_ids_with_previews", { trackIds: [id] });
@@ -430,13 +398,6 @@ export async function hydrateTrackPreviewFromBackend(state, trackId, options = {
     }
     if (changed) {
       patchLibraryRowByTrackId(id);
-      if (updateSummary && !state.analyzingTrackIds.has(id) && state.analyzingTrackIds.size > 0) {
-        await nextPaint();
-        const visibleTracks = getLibraryVisibleTracks();
-        updateLibraryDurationSummary(visibleTracks);
-      }
-      scheduleRealtimeTrackRender();
-      renderSourceChips();
     }
   } finally {
     state.trackPreviewHydrateInFlight.delete(id);
@@ -451,7 +412,8 @@ export async function hydrateLoadedTracksPreviewsInBackground(state, deps) {
     patchLibraryRowByTrackId,
     nextPaint,
     updateLibraryDurationSummary,
-    scheduleRealtimeTrackRender,
+    applySearchLocalFilter,
+    renderCurrentPlaylistTracksFromState,
     renderSourceChips,
     batchSize = 48
   } = deps;
@@ -491,7 +453,8 @@ export async function hydrateLoadedTracksPreviewsInBackground(state, deps) {
   if (anyChanged) {
     const visibleTracks = getLibraryVisibleTracks();
     updateLibraryDurationSummary(visibleTracks);
-    scheduleRealtimeTrackRender();
+    applySearchLocalFilter();
+    renderCurrentPlaylistTracksFromState();
     renderSourceChips();
   }
 }
@@ -1152,7 +1115,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     mergeHydratedTrackIntoState,
     patchLibraryRowByTrackId,
     patchPlaylistRowByTrackId,
-    updateLibraryDurationSummary,
+    applySearchLocalFilter,
     renderSourceChips,
     refreshSourceRootAnalysisStatus = () => {},
     refreshCurrentPlaylistTracks,
@@ -1222,7 +1185,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
         patchLibraryRowByTrackId(id);
         patchPlaylistRowByTrackId(id);
       }
-      updateLibraryDurationSummary();
+      applySearchLocalFilter();
       renderSourceChips();
     }
   } catch (_) {
@@ -1333,12 +1296,7 @@ export function patchPlaylistRowByTrackId(state, el, trackId, deps) {
 export function setTrackAnalyzingState(state, trackId, active, deps) {
   const {
     patchLibraryRowByTrackId,
-    patchPlaylistRowByTrackId,
-    trackHasCoreAnalysis,
-    trackNeedsPreviewHydration,
-    getLibraryVisibleTracks,
-    updateLibraryDurationSummary,
-    renderSourceChips
+    patchPlaylistRowByTrackId
   } = deps;
   const id = String(trackId || "").trim();
   if (!id) return;
@@ -1346,14 +1304,6 @@ export function setTrackAnalyzingState(state, trackId, active, deps) {
   else state.analyzingTrackIds.delete(id);
   patchLibraryRowByTrackId(id);
   patchPlaylistRowByTrackId(id);
-  if (!active && state.analyzingTrackIds.size > 0) {
-    const localTrack = state.tracks.find((track) => String(track?.id || "") === id);
-    if (localTrack && trackHasCoreAnalysis(localTrack) && !trackNeedsPreviewHydration(localTrack)) {
-      const visibleTracks = getLibraryVisibleTracks();
-      updateLibraryDurationSummary(visibleTracks);
-      renderSourceChips();
-    }
-  }
 }
 
 export function promoteTrackIdentity(state, el, oldId, newId, deps) {

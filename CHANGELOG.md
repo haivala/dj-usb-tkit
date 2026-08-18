@@ -45,6 +45,15 @@
   id lookup instead. USB diagnostics also no longer clones every playlist's track data (including
   waveform previews and artwork) just to reshape it for internal checks; that data is moved
   instead since nothing else needed the original copy.
+- **Fix:** analyzing a large playlist no longer freezes the UI. Every analysis progress event was
+  triggering a full library re-scan, chip-panel DOM rebuild, and duration resum on the JS main
+  thread; on a big batch this ran hundreds to thousands of times instead of once. These now only
+  run once, when the whole batch actually finishes, instead of being throttled with a timer.
+- **Fix:** the pulsing border on an in-progress analyzing row no longer changes that row's height,
+  which was shifting every row below it and making the list look jumpy during analysis.
+- **Fix:** track rows with a loaded cover image rendered a few pixels taller than rows still
+  showing the placeholder square, misaligning row borders throughout the library and playlist
+  tables as covers loaded in. The cover image is now sized identically to its placeholder.
 
 ## 0.1.20
 

@@ -1537,7 +1537,7 @@ td.num, th.num {
 }
 
 .track-grid-body .track-grid-row.is-analyzing {
-  border-bottom-width: 2px;
+  border-bottom-width: 1px;
   border-bottom-style: solid;
   animation: analyzeBorderPulse 1.8s ease-in-out infinite;
 }
@@ -1929,6 +1929,7 @@ input[type="checkbox"] {
 /* ── cover & waveform ───────────────────────────────── */
 
 .cover-thumb {
+  display: block;
   width: 36px;
   height: 36px;
   border-radius: 6px;
