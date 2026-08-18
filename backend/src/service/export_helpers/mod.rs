@@ -1171,6 +1171,7 @@ fn write_pdb_fresh_with_overrides(
     let mut genre_id_by_name = HashMap::<String, u32>::new();
     let mut artwork_id_by_path = HashMap::<String, u32>::new();
     let mut track_id_by_path = HashMap::<String, u32>::new();
+    let mut track_index_by_id = HashMap::<u32, usize>::new();
 
     let mut all_artists = Vec::<PdbArtistRow>::new();
     let mut all_albums = Vec::<PdbAlbumRow>::new();
@@ -1246,6 +1247,7 @@ fn write_pdb_fresh_with_overrides(
             if !path_key.is_empty() {
                 track_id_by_path.insert(path_key, track.id);
             }
+            track_index_by_id.insert(track.id, all_tracks.len());
             all_tracks.push(PdbTrackRowData {
                 header_flags_u32: existing_header_flags_by_track_id.get(&track.id).copied(),
                 content_link: track.content_link,
@@ -1528,7 +1530,11 @@ fn write_pdb_fresh_with_overrides(
 
         let pdb_track_id = if let Some(existing) = track_id_by_path.get(&path_key).copied() {
             // Update existing track metadata for exported members in all modes.
-            if let Some(existing_track) = all_tracks.iter_mut().find(|t| t.id == existing) {
+            if let Some(existing_track) = track_index_by_id
+                .get(&existing)
+                .copied()
+                .and_then(|idx| all_tracks.get_mut(idx))
+            {
                 let edb_identity = edb_identity_by_path.get(&path_key).copied();
                 // Update dictionary references — resolve fresh IDs from manifest data
                 let resolved_artist_name = if !track.artist.trim().is_empty() {
@@ -1833,11 +1839,15 @@ fn write_pdb_fresh_with_overrides(
                 anlz_path,
                 file_path: file_path.clone(),
             });
+            track_index_by_id.insert(track_id, all_tracks.len() - 1);
             track_id_by_path.insert(path_key, track_id);
             track_id
         };
 
-        if let Some(track_row) = all_tracks.iter().find(|t| t.id == pdb_track_id) {
+        if let Some(track_row) = track_index_by_id
+            .get(&pdb_track_id)
+            .and_then(|&idx| all_tracks.get(idx))
+        {
             desired_manifest_track_rows.insert(pdb_track_id, track_row.clone());
         }
 

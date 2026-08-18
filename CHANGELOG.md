@@ -39,6 +39,12 @@
   three steps writes to it; it's now parsed once and reused across all three.
 - **Chore:** ran `cargo fmt` across the backend crate to clear accumulated formatting drift
   (no `rustfmt.toml`/CI fmt check previously enforced consistency). No behavior change.
+- **Improvement:** export no longer re-scans the full in-progress track list to look up each
+  track's row while building a playlist — for large libraries with many playlists, this scan
+  scaled with total unique tracks times total playlist entries. Track rows are now found via an
+  id lookup instead. USB diagnostics also no longer clones every playlist's track data (including
+  waveform previews and artwork) just to reshape it for internal checks; that data is moved
+  instead since nothing else needed the original copy.
 
 ## 0.1.20
 

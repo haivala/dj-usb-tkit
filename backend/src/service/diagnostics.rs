@@ -544,9 +544,9 @@ impl BackendService {
                 &mut raw_warnings,
             )
         });
-        let edb_playlist_tracks = edb_playlists.as_ref().map(|m| {
-            m.iter()
-                .map(|(name, playlist)| (name.clone(), playlist.tracks.clone()))
+        let edb_playlist_tracks = edb_playlists.map(|m| {
+            m.into_iter()
+                .map(|(name, playlist)| (name, playlist.tracks))
                 .collect::<HashMap<_, _>>()
         });
 
