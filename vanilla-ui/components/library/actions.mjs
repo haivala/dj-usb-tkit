@@ -1,4 +1,5 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
+import { loadMoreIfNearBottom } from "../../track_utils.mjs";
 import { formatDurationMs } from "../../track_utils.mjs";
 
 export function trackHasRenderableWaveform(track) {
@@ -643,7 +644,7 @@ export function renderSourceChips(state, el, deps = {}) {
   updateScanLibraryButtonLabel();
   updateSourceFilterIndicator();
 }
-export function renderCurrentPlaylistTracksFromState(state, el, deps = {}) {
+export async function renderCurrentPlaylistTracksFromState(state, el, deps = {}) {
   const {
     getCurrentPlaylist = () => null,
     filterTracksByQuery = (tracks) => tracks,
@@ -676,7 +677,7 @@ export function renderCurrentPlaylistTracksFromState(state, el, deps = {}) {
   el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", playlistEmpty);
 
   const sortedPlaylist = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
-  renderTrackTable(el.playlistTracksBody, sortedPlaylist, {
+  await renderTrackTable(el.playlistTracksBody, sortedPlaylist, {
     withCheckbox: false,
     origin: "local",
     secondaryActionLabel: "Play",
@@ -711,7 +712,7 @@ export function applyLibraryDurationSummary(el, state, totalMs, unknownCount, de
   el.libraryTotalDuration.textContent = `Total time: ${formatDurationMs(state.libraryDurationTotalMs)}${suffix}`;
 }
 
-export function renderLibraryRows(state, el, deps = {}) {
+export async function renderLibraryRows(state, el, deps = {}) {
   const {
     getLibraryVisibleTracks = () => [],
     renderEmptyState = () => {},
@@ -746,7 +747,7 @@ export function renderLibraryRows(state, el, deps = {}) {
   syncLibraryOnboardingMode();
 
   const sortedLibrary = applySortToTracks(visibleTracks, "libraryTableBody");
-  renderTrackTable(el.libraryTableBody, sortedLibrary, {
+  await renderTrackTable(el.libraryTableBody, sortedLibrary, {
     withCheckbox: true,
     selectedIds: state.selectedTrackIds,
     actionLabel: "+",
@@ -898,14 +899,16 @@ export async function ensureLibraryContainerFilled(state, el, limit, deps) {
 export function handleLibraryTableWrapScroll(state, el, deps) {
   const { LIBRARY_SCROLL_FETCH_THRESHOLD_PX, LIBRARY_LOAD_LIMIT_DEFAULT, loadMoreLibraryTracks, setStatus } = deps;
   const emitStatus = resolveEmitStatus(deps);
-  const wrap = el.libraryTableWrap;
-  if (!wrap || state.libraryLoading || !state.libraryHasMore) return;
-  const remaining = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight;
-  if (remaining > LIBRARY_SCROLL_FETCH_THRESHOLD_PX) return;
-  loadMoreLibraryTracks(LIBRARY_LOAD_LIMIT_DEFAULT).catch((err) => {
-    console.error(err);
-    emitStatus(err.message || String(err));
-  });
+  loadMoreIfNearBottom(
+    el.libraryTableWrap,
+    LIBRARY_SCROLL_FETCH_THRESHOLD_PX,
+    () => state.libraryLoading,
+    () => state.libraryHasMore,
+    () => loadMoreLibraryTracks(LIBRARY_LOAD_LIMIT_DEFAULT).catch((err) => {
+      console.error(err);
+      emitStatus(err.message || String(err));
+    })
+  );
 }
 
 export function handleWindowLibraryScroll(state, el, windowObj, deps) {

@@ -45,11 +45,20 @@ export function createInitialState() {
     usbPlaylistTracks: [],
     usbPlaylistTracksView: [],
     usbTrackSearch: "",
+    // Very large USB playlists (well above the ~80-track typical case) are
+    // rendered/hydrated a page at a time instead of all at once -- see
+    // paginateUsbSelection in components/usb/events.mjs. usbPlaylistPagedCount
+    // is how many of usbPlaylistTracksView are currently rendered; equals
+    // usbPlaylistTracksView.length for selections at/under the threshold.
+    usbPlaylistPagedCount: 0,
+    usbPlaylistLoadingMore: false,
     histories: [],
     selectedHistoryIndex: null,
     historyTracks: [],
     historyTracksView: [],
     historyTrackSearch: "",
+    historyPagedCount: 0,
+    historyLoadingMore: false,
     usbPlayerMenuCurrent: [],
     usbPlayerMenuAvailable: [],
     usbPlayerMenuCurrentSelectedKind: null,

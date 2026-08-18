@@ -446,8 +446,8 @@ const createTrackRow = (track, options) => trackTable.createTrackRow(track, opti
     getKeyHue,
   });
 
-function renderTrackTable(tbody, tracks, options = {}) {
-  trackTable.renderTrackTable(tbody, tracks, options, {
+async function renderTrackTable(tbody, tracks, options = {}) {
+  await trackTable.renderTrackTable(tbody, tracks, options, {
     createTrackRow,
     attachCoverFallbackHandlers,
     renderWaveformsIn,
@@ -482,8 +482,8 @@ function handleSortHeaderClick(e) {
 
 // --- Playback closures ---
 
-function updateTransportButtonsInDom() {
-  playback.updateTransportButtonsInDom(state, document);
+function updateTransportButtonsInDom(root) {
+  playback.updateTransportButtonsInDom(state, root || document);
 }
 function clearAllWaveformPlayheads() {
   playback.clearAllWaveformPlayheads(document);
@@ -602,8 +602,8 @@ function setTrackAnalyzingState(trackId, active) {
 
 const getLibraryVisibleTracks = () => library.getLibraryVisibleTracks(state);
 
-function renderLibraryRows() {
-  library.renderLibraryRows(state, el, {
+async function renderLibraryRows() {
+  await library.renderLibraryRows(state, el, {
     getLibraryVisibleTracks,
     renderEmptyState,
     syncLibraryOnboardingMode,
@@ -654,8 +654,8 @@ function scheduleApplySearchLocalFilter() {
 function applyLibraryDurationSummary(totalMs, unknownCount) {
   library.applyLibraryDurationSummary(el, state, totalMs, unknownCount, { formatDurationMs });
 }
-function renderCurrentPlaylistTracksFromState() {
-  library.renderCurrentPlaylistTracksFromState(state, el, {
+async function renderCurrentPlaylistTracksFromState() {
+  await library.renderCurrentPlaylistTracksFromState(state, el, {
     getCurrentPlaylist,
     filterTracksByQuery,
     renderEmptyState,
@@ -881,7 +881,7 @@ const loadPlaylists = async () => playlist.loadPlaylists(state, {
     updatePlaylistExportButtons,
   });
 async function refreshCurrentPlaylistTracks() {
-  playlist.refreshCurrentPlaylistTracks(state, el, {
+  await playlist.refreshCurrentPlaylistTracks(state, el, {
     getCurrentPlaylist,
     command,
     normalizeTrack,
@@ -933,23 +933,39 @@ const addTracksToCurrentPlaylist = async (tracks) => playlist.addTracksToCurrent
 function renderUsbPlaylists() {
   usb.renderUsbPlaylists(state, el, { escapeHtml });
 }
-function renderUsbPlaylistTracks() {
-  usb.renderUsbPlaylistTracks(state, el, {
+async function renderUsbPlaylistTracks() {
+  await usb.renderUsbPlaylistTracks(state, el, {
     filterTracksByQuery,
     applySortToTracks,
     renderTrackTable,
-    updateTrackListDurationSummary,
+    hydrateUsbTrackMetadataBatch,
+    patchUsbTrackRow,
+  });
+}
+async function loadMoreUsbPlaylistTracks(pageSize) {
+  return usb.loadMoreUsbPlaylistTracks(state, el, pageSize, {
+    renderTrackTable,
+    hydrateUsbTrackMetadataBatch,
+    patchUsbTrackRow,
   });
 }
 function renderHistoryList() {
   usb.renderHistoryList(state, el, { escapeHtml, getHistoryDateValue });
 }
-function renderHistoryTracks() {
-  usb.renderHistoryTracks(state, el, {
+async function renderHistoryTracks() {
+  await usb.renderHistoryTracks(state, el, {
     filterTracksByQuery,
     applySortToTracks,
     renderTrackTable,
-    updateTrackListDurationSummary,
+    hydrateUsbTrackMetadataBatch,
+    patchHistoryTrackRow,
+  });
+}
+async function loadMoreHistoryTracks(pageSize) {
+  return usb.loadMoreHistoryTracks(state, el, pageSize, {
+    renderTrackTable,
+    hydrateUsbTrackMetadataBatch,
+    patchHistoryTrackRow,
   });
 }
 function renderUsbPlayerMenuEditor() {
@@ -1420,6 +1436,8 @@ function bindEvents() {
     scheduleApplySearchLocalFilter,
     renderUsbPlaylistTracks,
     renderHistoryTracks,
+    loadMoreUsbPlaylistTracks,
+    loadMoreHistoryTracks,
     patchUsbTrackRow,
     patchHistoryTrackRow,
     addTracksToCurrentPlaylist,
@@ -1437,6 +1455,8 @@ function bindEvents() {
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
     hydrateUsbTrackMetadataBatch,
+    applyUsbDurationSummary: usb.applyUsbDurationSummary,
+    formatDurationMs,
     setActiveListItem: shell.setActiveListItem,
     getHistoryDateDisplay,
     getCurrentPlaylist,

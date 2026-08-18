@@ -45,9 +45,9 @@ function getPlaybackSourceLabelFn(deps = {}) {
   return typeof fallback === "function" ? fallback : () => "Local file";
 }
 
-export function updateTransportButtonsInDom(state, document) {
+export function updateTransportButtonsInDom(state, root) {
   const helpers = getPlaybackUiStateHelpers();
-  document.querySelectorAll(".transport-btn").forEach((btn) => {
+  root.querySelectorAll(".transport-btn").forEach((btn) => {
     const id = btn.dataset.id || "";
     const rowKey = btn.dataset.rowKey || "";
     const isPlaying = helpers?.isTransportButtonPlaying

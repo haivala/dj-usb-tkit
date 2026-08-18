@@ -257,6 +257,8 @@ mod tests {
             source: source.to_string(),
             track_count,
             tracks: Vec::new(),
+            total_duration_ms: 0,
+            duration_known_count: 0,
         }
     }
 

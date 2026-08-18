@@ -294,7 +294,7 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
   el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", playlistEmpty);
 
   const sortedTracks = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
-  renderTrackTable(el.playlistTracksBody, sortedTracks, {
+  await renderTrackTable(el.playlistTracksBody, sortedTracks, {
     withCheckbox: false,
     origin: "local",
     secondaryActionLabel: "Play",

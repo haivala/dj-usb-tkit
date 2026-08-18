@@ -226,6 +226,42 @@ fn apply_history_dates_from_track_date_created(
     }
 }
 
+/// Groups a parsed PDB's tracks by id so callers can look a track up in
+/// O(1) instead of doing `parsed.tracks.iter().filter(|t| t.id == id)` (an
+/// O(pdb_size) scan) once per id being resolved -- the latter turns a batch
+/// of N ids into an O(N * pdb_size) scan, which is what made hydrating a
+/// large USB playlist slow regardless of how the batch was chunked. `Vec`-
+/// valued because a PDB can legitimately contain more than one row for the
+/// same id; `resolve_usb_track_from_sources` picks the best-scoring one.
+fn build_pdb_track_index(
+    parsed: Option<&crate::pdb_reader::ParsedPdb>,
+) -> Option<HashMap<u32, Vec<&crate::pdb_reader::PdbTrackRow>>> {
+    let parsed = parsed?;
+    let mut index: HashMap<u32, Vec<&crate::pdb_reader::PdbTrackRow>> = HashMap::new();
+    for t in &parsed.tracks {
+        index.entry(t.id).or_default().push(t);
+    }
+    Some(index)
+}
+
+/// Sums `duration_ms` over tracks where it's known (`Some(d)` with `d > 0`).
+/// Computed once server-side (here) instead of by the frontend summing
+/// whatever subset of tracks it happens to have rendered/hydrated -- see
+/// `UsbPlaylist::total_duration_ms`.
+fn sum_usb_track_durations(tracks: &[UsbTrack]) -> (u64, usize) {
+    let mut total_ms = 0u64;
+    let mut known_count = 0usize;
+    for track in tracks {
+        if let Some(d) = track.duration_ms
+            && d > 0
+        {
+            total_ms += d;
+            known_count += 1;
+        }
+    }
+    (total_ms, known_count)
+}
+
 fn build_history_track_date_index(
     parsed_tracks: &[crate::pdb_reader::PdbTrackRow],
 ) -> HashMap<u32, String> {
@@ -741,6 +777,8 @@ impl BackendService {
             *source_counts.entry(source).or_insert(0) += 1;
             playlist_entries_total += playlist_tracks.len();
 
+            let (total_duration_ms, duration_known_count) =
+                sum_usb_track_durations(&playlist_tracks);
             items.push(UsbPlaylist {
                 id: candidate
                     .pdb_id
@@ -755,6 +793,8 @@ impl BackendService {
                 source: source.to_string(),
                 track_count: playlist_tracks.len(),
                 tracks: playlist_tracks,
+                total_duration_ms,
+                duration_known_count,
             });
         }
         push_usb_stage_timing(&mut warnings, "resolve playlists", &mut stage_started);
@@ -1411,6 +1451,7 @@ impl BackendService {
                         parse_history_name_numeric_id(&cleaned_name)
                             .and_then(|n| history_date_by_num.get(&n).cloned())
                     });
+                let (total_duration_ms, duration_known_count) = sum_usb_track_durations(&tracks);
                 UsbHistory {
                     id: format!("usb-h-{}", logical_playlist_id),
                     name: if cleaned_name.is_empty() {
@@ -1420,6 +1461,8 @@ impl BackendService {
                     },
                     created_at,
                     tracks,
+                    total_duration_ms,
+                    duration_known_count,
                 }
             })
             .collect::<Vec<_>>();
@@ -1831,15 +1874,20 @@ impl BackendService {
             None
         };
 
+        let pdb_track_index = build_pdb_track_index(parsed.as_ref());
+        let pdb = parsed.as_ref().zip(pdb_track_index.as_ref());
         let edb_index = try_read_track_index_from_edb(&usb_root, &mut warnings);
 
         match resolve_usb_track_from_sources(
             track_id,
-            &file_hint,
-            &title_hint,
-            &artist_hint,
+            TrackHints {
+                file: &file_hint,
+                title: &title_hint,
+                artist: &artist_hint,
+            },
             &usb_root,
-            parsed.as_ref(),
+            pdb,
+            true,
             edb_index.as_ref(),
         ) {
             Some((source, track)) => Ok(InspectUsbTrackData {
@@ -1904,6 +1952,10 @@ impl BackendService {
         let edb_index = edb_conn.as_ref().and_then(|conn| {
             try_read_track_index_from_edb_with_conn(conn, &usb_root, &mut warnings)
         });
+        // Same idea for the PDB: build the id->row lookup once instead of
+        // rescanning `parsed.tracks` per item (see `build_pdb_track_index`).
+        let pdb_track_index = build_pdb_track_index(parsed.as_ref());
+        let pdb = parsed.as_ref().zip(pdb_track_index.as_ref());
 
         let items = req
             .items
@@ -1936,11 +1988,14 @@ impl BackendService {
                     .unwrap_or_default();
                 match resolve_usb_track_from_sources(
                     track_id,
-                    &file_hint,
-                    &title_hint,
-                    &artist_hint,
+                    TrackHints {
+                        file: &file_hint,
+                        title: &title_hint,
+                        artist: &artist_hint,
+                    },
                     &usb_root,
-                    parsed.as_ref(),
+                    pdb,
+                    false,
                     edb_index.as_ref(),
                 ) {
                     Some((source, track)) => InspectUsbTrackResult {
@@ -1961,24 +2016,55 @@ impl BackendService {
     }
 }
 
+/// Hints used to disambiguate PDB rows that share a track id (rare, but the
+/// PDB doesn't enforce uniqueness). Bundled into one struct rather than
+/// three separate params to leave room on `resolve_usb_track_from_sources`
+/// for `include_artwork_data_url` without tripping
+/// `clippy::too_many_arguments`.
+struct TrackHints<'a> {
+    file: &'a str,
+    title: &'a str,
+    artist: &'a str,
+}
+
 /// Matches a single USB track id against an already-parsed PDB and/or an
 /// already-built eDB track index, preferring the PDB best-match scored
 /// against the supplied hints and falling back to the eDB index. Callers are
 /// responsible for parsing the PDB and opening/querying the eDB exactly
 /// once and passing the results in here, so this can be called once per
 /// track in a batch without repeating that work.
+///
+/// `include_artwork_data_url` gates reading the track's cover-art image file
+/// and base64-encoding it into the result. That's real per-track disk I/O
+/// (plus ~33% payload inflation from base64), so batch callers hydrating
+/// thousands of tracks at once should pass `false` -- the frontend already
+/// falls back to loading cover art directly from `artwork_path` via Tauri's
+/// asset protocol (see `buildCoverSrcCandidates`), so this is purely an
+/// eager-inline optimization worth its cost only for low-volume, one-track-
+/// at-a-time callers.
 fn resolve_usb_track_from_sources(
     track_id: u32,
-    file_hint: &str,
-    title_hint: &str,
-    artist_hint: &str,
+    hints: TrackHints<'_>,
     usb_root: &std::path::Path,
-    parsed: Option<&ParsedPdb>,
+    // Paired together (rather than two separate params) to keep the
+    // argument count down: `pdb_track_index` is always built from `parsed`
+    // and the two are only ever passed as a matching pair.
+    pdb: Option<(&ParsedPdb, &HashMap<u32, Vec<&crate::pdb_reader::PdbTrackRow>>)>,
+    include_artwork_data_url: bool,
     edb_index: Option<&HashMap<u32, UsbTrack>>,
 ) -> Option<(String, UsbTrack)> {
-    if let Some(parsed) = parsed {
+    let TrackHints {
+        file: file_hint,
+        title: title_hint,
+        artist: artist_hint,
+    } = hints;
+    if let Some((parsed, pdb_track_index)) = pdb {
         let mut best: Option<(&crate::pdb_reader::PdbTrackRow, i32)> = None;
-        for t in parsed.tracks.iter().filter(|t| t.id == track_id) {
+        let candidates: &[&crate::pdb_reader::PdbTrackRow] = pdb_track_index
+            .get(&track_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        for t in candidates.iter().copied() {
             let artist = parsed
                 .artists
                 .get(&t.artist_id)
@@ -2054,9 +2140,9 @@ fn resolve_usb_track_from_sources(
                         key,
                         file_path: resolved_file_path,
                         usb_media_path: Some(t.track_file_path.clone()),
-                        artwork_data_url: artwork_path
-                            .as_deref()
-                            .and_then(artwork_path_to_data_url),
+                        artwork_data_url: include_artwork_data_url
+                            .then(|| artwork_path.as_deref().and_then(artwork_path_to_data_url))
+                            .flatten(),
                         artwork_path,
                         waveform_peaks_path: usb_analysis_path.clone(),
                         usb_analysis_path,
@@ -2100,6 +2186,7 @@ mod tests {
         cleanup_empty_dirs_recursive, edb_track_index_from_playlist_tracks,
         filter_named_history_playlists, normalize_date_created, now, push_usb_stage_timing,
         push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
+        sum_usb_track_durations,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
@@ -2171,6 +2258,33 @@ mod tests {
     }
 
     #[test]
+    fn sum_usb_track_durations_counts_only_known_positive_durations() {
+        let tracks = vec![
+            UsbTrack {
+                duration_ms: Some(200_000),
+                ..make_track("1", "/a.mp3")
+            },
+            UsbTrack {
+                duration_ms: Some(100_000),
+                ..make_track("2", "/b.mp3")
+            },
+            UsbTrack {
+                duration_ms: Some(0),
+                ..make_track("3", "/c.mp3")
+            },
+            UsbTrack {
+                duration_ms: None,
+                ..make_track("4", "/d.mp3")
+            },
+        ];
+
+        let (total_ms, known_count) = sum_usb_track_durations(&tracks);
+
+        assert_eq!(total_ms, 300_000);
+        assert_eq!(known_count, 2);
+    }
+
+    #[test]
     fn build_history_track_date_index_uses_pdb_track_ids() {
         let index = build_history_track_date_index(&[
             make_pdb_track(1674, Some("2020-09-18")),
@@ -2196,18 +2310,24 @@ mod tests {
                     make_track("10", "/USB/Contents/A/1.mp3"),
                     make_track("20", "/USB/Contents/A/2.mp3"),
                 ],
+                total_duration_ms: 0,
+                duration_known_count: 0,
             },
             UsbHistory {
                 id: "usb-h-2".to_string(),
                 name: "HISTORY 002".to_string(),
                 created_at: Some("2021-09".to_string()),
                 tracks: vec![make_track("30", "/USB/Contents/A/3.mp3")],
+                total_duration_ms: 0,
+                duration_known_count: 0,
             },
             UsbHistory {
                 id: "usb-h-3".to_string(),
                 name: "HISTORY 003".to_string(),
                 created_at: Some("2021-09".to_string()),
                 tracks: vec![make_track("40", "/USB/Contents/A/4.mp3")],
+                total_duration_ms: 0,
+                duration_known_count: 0,
             },
         ];
         let date_created_by_track_id = HashMap::from([
@@ -2231,6 +2351,8 @@ mod tests {
             name: "HISTORY 001".to_string(),
             created_at: Some("2026-04-03".to_string()),
             tracks: vec![make_track("10", "/USB/Contents/A/1.mp3")],
+            total_duration_ms: 0,
+            duration_known_count: 0,
         }];
         let date_created_by_track_id = HashMap::from([(10u32, "2024-10-15".to_string())]);
 
@@ -2247,12 +2369,16 @@ mod tests {
                 name: "HISTORY 001".to_string(),
                 created_at: Some("2026-04-03".to_string()),
                 tracks: vec![make_track("10", "/USB/Contents/A/1.mp3")],
+                total_duration_ms: 0,
+                duration_known_count: 0,
             },
             UsbHistory {
                 id: "usb-h-2".to_string(),
                 name: "HISTORY 002".to_string(),
                 created_at: Some("2021-09".to_string()),
                 tracks: vec![make_track("20", "/USB/Contents/A/2.mp3")],
+                total_duration_ms: 0,
+                duration_known_count: 0,
             },
         ];
         let date_created_by_track_id = HashMap::from([(20u32, "2024-10-15".to_string())]);
@@ -3098,6 +3224,27 @@ mod tests {
         assert_eq!(result.items[0].track_count, 1);
         assert_eq!(result.items[0].tracks[0].title, "Song A");
         assert_eq!(result.stats.indexed_tracks, 1);
+    }
+
+    #[test]
+    fn fetch_usb_playlists_computes_total_duration_server_side() {
+        let (_dir, usb_root) = seeded_playlist_usb_with_tracks(&[
+            ("t1", "Song A", "a.mp3"),
+            ("t2", "Song B", "b.mp3"),
+        ]);
+        let (_dir2, service) = test_service();
+
+        let result = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+            })
+            .expect("fetch usb playlists");
+
+        assert_eq!(result.items.len(), 1);
+        // make_export_track() gives every seeded track a fixed 200_000ms
+        // duration, so two tracks should sum to 400_000ms with both known.
+        assert_eq!(result.items[0].total_duration_ms, 400_000);
+        assert_eq!(result.items[0].duration_known_count, 2);
     }
 
     #[test]

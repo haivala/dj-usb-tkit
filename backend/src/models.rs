@@ -689,6 +689,15 @@ pub struct UsbPlaylist {
     pub source: String,
     pub track_count: usize,
     pub tracks: Vec<UsbTrack>,
+    /// Sum of `duration_ms` over tracks where it's known (>0). Computed once
+    /// server-side from the full track list so the frontend never needs to
+    /// sum durations itself, regardless of how much of the list it has
+    /// rendered/hydrated.
+    pub total_duration_ms: u64,
+    /// How many of `tracks` contributed to `total_duration_ms` (i.e. had a
+    /// known duration). `tracks.len() - duration_known_count` is the "N
+    /// without length" count.
+    pub duration_known_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -767,6 +776,10 @@ pub struct UsbHistory {
     pub name: String,
     pub created_at: Option<String>,
     pub tracks: Vec<UsbTrack>,
+    /// See `UsbPlaylist::total_duration_ms`.
+    pub total_duration_ms: u64,
+    /// See `UsbPlaylist::duration_known_count`.
+    pub duration_known_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -105,7 +105,10 @@ export function createTrackRow(track, options, deps) {
   `;
 }
 
-export function renderTrackTable(tbody, tracks, options = {}, deps) {
+const trackTableRenderTokens = new WeakMap();
+const ROW_BUILD_CHUNK_SIZE = 300;
+
+export async function renderTrackTable(tbody, tracks, options = {}, deps) {
   const {
     createTrackRow,
     attachCoverFallbackHandlers,
@@ -116,15 +119,47 @@ export function renderTrackTable(tbody, tracks, options = {}, deps) {
     setStatus
   } = deps;
 
-  tbody.innerHTML = "";
+  // `options.append`: add `tracks` onto the end of what's already in `tbody`
+  // instead of rebuilding it (used for paginated large-selection loading,
+  // see hydrateSelectionTracks/paginateUsbSelection in usb/events.mjs).
+  // `options.indexOffset`: since an appended page's `tracks` array is only
+  // that page's slice, row indices (used for data-index/data-track-index,
+  // which click handlers resolve back into the *full* view array) need to
+  // be offset by how many rows already precede this page.
+  const isAppend = !!options.append;
+  const indexOffset = Number(options.indexOffset) || 0;
+
+  // Bump the token for this tbody so a slower, still-running render started
+  // by a previous call (e.g. the user rapidly re-selecting playlists) knows
+  // to stop appending rows once a newer render has taken over. An append
+  // call doesn't bump it -- it's a continuation of the render that already
+  // holds the current token, and gets invalidated the same way if a fresh
+  // (non-append) render for this tbody starts before it finishes.
+  let myToken;
+  if (isAppend) {
+    myToken = trackTableRenderTokens.get(tbody) ?? 0;
+  } else {
+    myToken = (trackTableRenderTokens.get(tbody) || 0) + 1;
+    trackTableRenderTokens.set(tbody, myToken);
+  }
+  const isStale = () => trackTableRenderTokens.get(tbody) !== myToken;
+
+  if (!isAppend) {
+    tbody.innerHTML = "";
+  }
 
   if (!tracks.length) {
-    tbody.innerHTML = `<div role="row" class="track-grid-row track-grid-row-empty"><div role="cell" class="track-grid-cell track-grid-empty">No tracks available.</div></div>`;
+    if (!isAppend) {
+      tbody.innerHTML = `<div role="row" class="track-grid-row track-grid-row-empty"><div role="cell" class="track-grid-cell track-grid-empty">No tracks available.</div></div>`;
+    }
     return;
   }
 
   try {
-    tracks.forEach((track, index) => {
+    for (let i = 0; i < tracks.length; i += 1) {
+      if (isStale()) return;
+      const track = tracks[i];
+      const index = i + indexOffset;
       tbody.insertAdjacentHTML("beforeend", createTrackRow(track, { ...options, index }));
       const colorData = Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6
         ? track.waveformColorData
@@ -136,12 +171,20 @@ export function renderTrackTable(tbody, tracks, options = {}, deps) {
           setWaveformColorData(waveform, colorData);
         }
       }
-    });
+      if ((i + 1) % ROW_BUILD_CHUNK_SIZE === 0 && i + 1 < tracks.length) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    if (isStale()) return;
     attachCoverFallbackHandlers(tbody);
-    renderWaveformsIn(tbody);
-    updateTransportButtonsInDom();
+    await renderWaveformsIn(tbody);
+    if (isStale()) return;
+    updateTransportButtonsInDom(tbody);
   } catch (error) {
-    tbody.innerHTML = "";
+    if (isStale()) return;
+    if (!isAppend) {
+      tbody.innerHTML = "";
+    }
     tracks.forEach((track) => {
       const maybeSelectCell = options.withCheckbox
         ? `<div role="cell" class="track-grid-cell td-select">-</div>`

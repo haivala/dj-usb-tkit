@@ -394,10 +394,17 @@ export async function switchView(state, el, viewId, deps = {}) {
     await renderBackups();
   }
 
-  requestAnimationFrameFn(() => {
-    const activePanel = documentObj?.querySelector?.(".panel.active");
-    renderWaveformsIn(activePanel || documentObj);
-  });
+  // refreshCurrentPlaylistTracks() already renders and draws waveforms for
+  // the (already-visible) playlist panel, so redrawing here would just
+  // repeat that work. Other views' content isn't necessarily re-rendered on
+  // switch, so they still need this to redraw canvases that may have been
+  // sized while hidden.
+  if (!isPlaylist) {
+    requestAnimationFrameFn(() => {
+      const activePanel = documentObj?.querySelector?.(".panel.active");
+      renderWaveformsIn(activePanel || documentObj);
+    });
+  }
 }
 
 export async function switchTab(state, el, tab, deps = {}) {

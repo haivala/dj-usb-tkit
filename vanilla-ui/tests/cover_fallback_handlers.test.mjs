@@ -39,7 +39,7 @@ test("attachCoverFallbackHandlers advances fallback queue and replaces with plac
   assert.equal(image.replacedWith.attrs["aria-hidden"], "true");
 });
 
-test("renderTrackTable wires cover fallback handlers after row render", () => {
+test("renderTrackTable wires cover fallback handlers after row render", async () => {
   let coverAttachCalls = 0;
   let waveformCalls = 0;
   let transportCalls = 0;
@@ -50,7 +50,7 @@ test("renderTrackTable wires cover fallback handlers after row render", () => {
     insertAdjacentHTML(_where, html) { inserts.push(html); }
   };
 
-  renderTrackTable(tbody, [{ id: "a" }, { id: "b" }], { origin: "usb" }, {
+  await renderTrackTable(tbody, [{ id: "a" }, { id: "b" }], { origin: "usb" }, {
     createTrackRow: (track, opts) => `<tr data-id="${track.id}" data-index="${opts.index}"></tr>`,
     attachCoverFallbackHandlers: () => { coverAttachCalls += 1; },
     renderWaveformsIn: () => { waveformCalls += 1; },
@@ -63,4 +63,33 @@ test("renderTrackTable wires cover fallback handlers after row render", () => {
   assert.equal(coverAttachCalls, 1);
   assert.equal(waveformCalls, 1);
   assert.equal(transportCalls, 1);
+});
+
+test("renderTrackTable in append mode adds rows without clearing existing ones, offsetting indices", async () => {
+  const inserts = [];
+  let innerHTMLResetCount = 0;
+  const tbody = {
+    get innerHTML() { return ""; },
+    set innerHTML(_v) { innerHTMLResetCount += 1; },
+    insertAdjacentHTML(_where, html) { inserts.push(html); }
+  };
+  const deps = {
+    createTrackRow: (track, opts) => `<div data-id="${track.id}" data-index="${opts.index}"></div>`,
+    attachCoverFallbackHandlers: () => {},
+    renderWaveformsIn: () => {},
+    updateTransportButtonsInDom: () => {},
+    escapeHtml: (v) => String(v ?? ""),
+    setStatus: () => {}
+  };
+
+  await renderTrackTable(tbody, [{ id: "a" }, { id: "b" }], { origin: "usb" }, deps);
+  assert.equal(innerHTMLResetCount, 1, "the initial (non-append) render clears the table once");
+  assert.equal(inserts.length, 2);
+
+  await renderTrackTable(tbody, [{ id: "c" }, { id: "d" }], { origin: "usb", append: true, indexOffset: 2 }, deps);
+
+  assert.equal(innerHTMLResetCount, 1, "an append render must not clear the rows the previous page already built");
+  assert.equal(inserts.length, 4, "append should add to, not replace, the previous page's rows");
+  assert.ok(inserts[2].includes('data-index="2"'), "appended rows continue the index sequence from indexOffset");
+  assert.ok(inserts[3].includes('data-index="3"'));
 });

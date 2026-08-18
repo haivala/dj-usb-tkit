@@ -6,7 +6,7 @@ import {
   renderLibraryRows
 } from "../components/library/actions.mjs";
 
-test("renderCurrentPlaylistTracksFromState renders playlist tracks and empty state", () => {
+test("renderCurrentPlaylistTracksFromState renders playlist tracks and empty state", async () => {
   const dom = new JSDOM(`<!doctype html><body><div id="empty"></div><div id="wrap"></div><table><tbody id="body"></tbody></table><div id="dur"></div></body>`);
   const state = {
     playlistTrackSearch: "",
@@ -20,7 +20,7 @@ test("renderCurrentPlaylistTracksFromState renders playlist tracks and empty sta
     playlistTotalDuration: dom.window.document.querySelector("#dur")
   };
   let rendered = 0;
-  renderCurrentPlaylistTracksFromState(state, el, {
+  await renderCurrentPlaylistTracksFromState(state, el, {
     getCurrentPlaylist: () => ({ tracks: [{ id: "t1" }] }),
     filterTracksByQuery: (tracks) => tracks,
     renderEmptyState: () => {},
@@ -37,7 +37,7 @@ test("renderCurrentPlaylistTracksFromState renders playlist tracks and empty sta
   assert.equal(el.playlistTracksBody.querySelector(".track-grid-row").classList.contains("is-analyzing"), true);
 });
 
-test("renderLibraryRows renders empty onboarding and tracks table", () => {
+test("renderLibraryRows renders empty onboarding and tracks table", async () => {
   const dom = new JSDOM(`<!doctype html><body><div id="empty"></div><div id="content"></div><button id="add"></button><table><tbody id="body"></tbody></table></body>`);
   const state = {
     sourceRoots: ["/music"],
@@ -51,7 +51,7 @@ test("renderLibraryRows renders empty onboarding and tracks table", () => {
     libraryTableBody: dom.window.document.querySelector("#body")
   };
   let rendered = 0;
-  renderLibraryRows(state, el, {
+  await renderLibraryRows(state, el, {
     getLibraryVisibleTracks: () => [{ id: "1" }],
     renderEmptyState: () => {},
     syncLibraryOnboardingMode: () => {},

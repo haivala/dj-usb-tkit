@@ -3,7 +3,7 @@ import {
   playlistTracksAffectedByMissingRoots,
   warningEntryText
 } from "../library/actions.mjs";
-import { resolveEmitStatus } from "../shared/track_actions.mjs";
+import { resolveEmitStatus, trackMetaFingerprint } from "../shared/track_actions.mjs";
 
 export function normalizePlaylistNameForCompare(value) {
   return String(value || "").trim().toLowerCase();
@@ -575,10 +575,14 @@ export function resetUsbStateViews(state, el, deps = {}) {
   state.usbKnownPlaylistNames = new Set();
   state.usbPlaylistTracks = [];
   state.usbPlaylistTracksView = [];
+  state.usbPlaylistPagedCount = 0;
+  state.usbPlaylistLoadingMore = false;
   state.histories = [];
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
   state.historyTracksView = [];
+  state.historyPagedCount = 0;
+  state.historyLoadingMore = false;
   state.usbPlayerMenuCurrent = [];
   state.usbPlayerMenuAvailable = [];
   state.usbPlayerMenuCurrentSelectedKind = null;
@@ -1682,16 +1686,59 @@ export function renderUsbPlaylists(state, el, deps = {}) {
   });
 }
 
-export function renderUsbPlaylistTracks(state, el, deps = {}) {
+// Same chunk size reasoning as USB_SELECTION_PAGE_SIZE in
+// components/usb/events.mjs (they were originally one shared constant) --
+// kept in sync manually since the two live in different modules for
+// independent reasons (this one bounds a single inspect_usb_tracks call;
+// events.mjs's bounds a single DOM render pass).
+const USB_HYDRATION_CHUNK_SIZE = 150;
+
+const usbHydrationTokens = new WeakMap();
+
+// Hydrates a page of already-rendered tracks (bpm/key/waveform/artwork),
+// patching each row in place as its data arrives, in
+// USB_HYDRATION_CHUNK_SIZE-sized batches. Self-contained per-container
+// cancellation, mirroring trackTableRenderTokens in track_table.mjs: if
+// this is called again for the same container before a previous call
+// finishes, the previous call's remaining chunks are abandoned instead of
+// racing with the new one. That makes it safe to call unconditionally from
+// every render path (initial selection, search, sort, scroll-load-more)
+// without each caller needing its own cancellation bookkeeping -- which is
+// exactly what was missing before: hydration used to be triggered by hand
+// at only two of those call sites (selection and scroll-load-more, both
+// living in one closure in events.mjs), so search and sort -- sort
+// especially, which is handled by a completely separate generic delegated
+// click handler with no access to that closure -- never hydrated newly
+// -visible tracks at all.
+async function hydrateUsbTrackPage(container, tracks, deps = {}) {
   const {
-    filterTracksByQuery = (tracks) => tracks,
-    applySortToTracks = (tracks) => tracks,
-    renderTrackTable = () => {},
-    updateTrackListDurationSummary = () => {}
+    hydrateUsbTrackMetadataBatch = async () => {},
+    patchRow = () => false,
+    renderFallback = () => {}
   } = deps;
-  state.usbPlaylistTracksView = filterTracksByQuery(state.usbPlaylistTracks, state.usbTrackSearch);
-  const sortedUsb = applySortToTracks(state.usbPlaylistTracksView, "usbPlaylistTracks");
-  renderTrackTable(el.usbPlaylistTracks, sortedUsb, {
+  const myToken = (usbHydrationTokens.get(container) || 0) + 1;
+  usbHydrationTokens.set(container, myToken);
+  const isCurrent = () => usbHydrationTokens.get(container) === myToken;
+
+  const pending = (tracks || []).filter(Boolean);
+  let missedPatch = false;
+  for (let i = 0; i < pending.length; i += USB_HYDRATION_CHUNK_SIZE) {
+    if (!isCurrent()) return;
+    const chunk = pending.slice(i, i + USB_HYDRATION_CHUNK_SIZE);
+    const before = new Map(chunk.map((track) => [track, trackMetaFingerprint(track)]));
+    await hydrateUsbTrackMetadataBatch(chunk);
+    if (!isCurrent()) return;
+    for (const track of chunk) {
+      if (trackMetaFingerprint(track) !== before.get(track)) {
+        if (!patchRow(track)) missedPatch = true;
+      }
+    }
+  }
+  if (missedPatch) renderFallback();
+}
+
+function usbPlaylistRowOptions() {
+  return {
     withCheckbox: false,
     actionLabel: "+",
     actionType: "add-usb",
@@ -1700,8 +1747,85 @@ export function renderUsbPlaylistTracks(state, el, deps = {}) {
     origin: "usb",
     secondaryActionLabel: "Play",
     secondaryActionType: "play-usb"
+  };
+}
+
+// "Total time" is not computed here (or from any client-side track sum) --
+// it's a property of the selected playlist, computed once server-side by
+// fetch_usb_playlists (see applyUsbDurationSummary / the playlist-selection
+// click handler in events.mjs) and unaffected by which rows happen to be
+// rendered/hydrated/paginated at any given moment.
+//
+// For very large selections (see LARGE_USB_SELECTION_THRESHOLD in
+// events.mjs), only the first `state.usbPlaylistPagedCount` tracks of the
+// filtered+sorted view are actually rendered -- the rest load in as the
+// user scrolls (loadMoreUsbPlaylistTracks below). For selections at/under
+// the threshold, usbPlaylistPagedCount stays 0 and every track renders, same
+// as before pagination existed.
+//
+// Every render here also hydrates whatever it just rendered (see
+// hydrateUsbTrackPage above) -- this runs for selection, search, and sort
+// alike (all three funnel through this one function), so newly-visible
+// tracks always get their bpm/key/waveform/artwork fetched regardless of
+// *why* they became visible.
+export async function renderUsbPlaylistTracks(state, el, deps = {}) {
+  const {
+    filterTracksByQuery = (tracks) => tracks,
+    applySortToTracks = (tracks) => tracks,
+    renderTrackTable = () => {},
+    hydrateUsbTrackMetadataBatch,
+    patchUsbTrackRow
+  } = deps;
+  const filtered = filterTracksByQuery(state.usbPlaylistTracks, state.usbTrackSearch);
+  // Sorted, not just filtered: row click handlers resolve a row's
+  // data-index back into this array, so it has to match rendered order.
+  state.usbPlaylistTracksView = applySortToTracks(filtered, "usbPlaylistTracks");
+  const view = state.usbPlaylistTracksView;
+  const pageCount = state.usbPlaylistPagedCount > 0
+    ? Math.min(state.usbPlaylistPagedCount, view.length)
+    : view.length;
+  const pageTracks = view.slice(0, pageCount);
+  await renderTrackTable(el.usbPlaylistTracks, pageTracks, usbPlaylistRowOptions());
+  await hydrateUsbTrackPage(el.usbPlaylistTracks, pageTracks, {
+    hydrateUsbTrackMetadataBatch,
+    patchRow: patchUsbTrackRow,
+    renderFallback: () => renderUsbPlaylistTracks(state, el, deps)
   });
-  updateTrackListDurationSummary(el.usbPlaylistTotalDuration, state.usbPlaylistTracksView);
+}
+
+// Renders and hydrates the next page of an already-paginated large USB
+// playlist selection, appending to what's already rendered instead of
+// rebuilding it (see options.append on renderTrackTable).
+export async function loadMoreUsbPlaylistTracks(state, el, pageSize, deps = {}) {
+  const { renderTrackTable = () => {}, hydrateUsbTrackMetadataBatch, patchUsbTrackRow } = deps;
+  const view = state.usbPlaylistTracksView;
+  const start = state.usbPlaylistPagedCount;
+  if (start >= view.length) return [];
+  const end = Math.min(view.length, start + pageSize);
+  const pageTracks = view.slice(start, end);
+  await renderTrackTable(el.usbPlaylistTracks, pageTracks, {
+    ...usbPlaylistRowOptions(),
+    append: true,
+    indexOffset: start
+  });
+  state.usbPlaylistPagedCount = end;
+  await hydrateUsbTrackPage(el.usbPlaylistTracks, pageTracks, {
+    hydrateUsbTrackMetadataBatch,
+    patchRow: patchUsbTrackRow,
+    renderFallback: () => renderUsbPlaylistTracks(state, el, deps)
+  });
+  return pageTracks;
+}
+
+// Pure setter -- see the comment on renderUsbPlaylistTracks above. Shared by
+// the USB playlist and USB history views (each just passes its own target
+// element and the totals already present on the selected playlist/history
+// object from fetch_usb_playlists/fetch_usb_histories).
+export function applyUsbDurationSummary(el, totalMs, unknownCount, deps = {}) {
+  const { formatDurationMs = () => "" } = deps;
+  if (!el) return;
+  const suffix = unknownCount > 0 ? ` (${unknownCount} without length)` : "";
+  el.textContent = `Total time: ${formatDurationMs(totalMs)}${suffix}`;
 }
 
 export function renderHistoryList(state, el, deps = {}) {
@@ -1728,16 +1852,8 @@ export function renderHistoryList(state, el, deps = {}) {
   });
 }
 
-export function renderHistoryTracks(state, el, deps = {}) {
-  const {
-    filterTracksByQuery = (tracks) => tracks,
-    applySortToTracks = (tracks) => tracks,
-    renderTrackTable = () => {},
-    updateTrackListDurationSummary = () => {}
-  } = deps;
-  state.historyTracksView = filterTracksByQuery(state.historyTracks, state.historyTrackSearch);
-  const sortedHistory = applySortToTracks(state.historyTracksView, "historyTracks");
-  renderTrackTable(el.historyTracks, sortedHistory, {
+function usbHistoryRowOptions() {
+  return {
     withCheckbox: false,
     actionLabel: "+",
     actionType: "add-history",
@@ -1746,8 +1862,53 @@ export function renderHistoryTracks(state, el, deps = {}) {
     origin: "usb",
     secondaryActionLabel: "Play",
     secondaryActionType: "play-history"
+  };
+}
+
+// See renderUsbPlaylistTracks above -- same pagination/duration-summary/
+// self-hydrating-render approach, applied to USB history sessions.
+export async function renderHistoryTracks(state, el, deps = {}) {
+  const {
+    filterTracksByQuery = (tracks) => tracks,
+    applySortToTracks = (tracks) => tracks,
+    renderTrackTable = () => {},
+    hydrateUsbTrackMetadataBatch,
+    patchHistoryTrackRow
+  } = deps;
+  const filtered = filterTracksByQuery(state.historyTracks, state.historyTrackSearch);
+  state.historyTracksView = applySortToTracks(filtered, "historyTracks");
+  const view = state.historyTracksView;
+  const pageCount = state.historyPagedCount > 0
+    ? Math.min(state.historyPagedCount, view.length)
+    : view.length;
+  const pageTracks = view.slice(0, pageCount);
+  await renderTrackTable(el.historyTracks, pageTracks, usbHistoryRowOptions());
+  await hydrateUsbTrackPage(el.historyTracks, pageTracks, {
+    hydrateUsbTrackMetadataBatch,
+    patchRow: patchHistoryTrackRow,
+    renderFallback: () => renderHistoryTracks(state, el, deps)
   });
-  updateTrackListDurationSummary(el.historyTotalDuration, state.historyTracksView);
+}
+
+export async function loadMoreHistoryTracks(state, el, pageSize, deps = {}) {
+  const { renderTrackTable = () => {}, hydrateUsbTrackMetadataBatch, patchHistoryTrackRow } = deps;
+  const view = state.historyTracksView;
+  const start = state.historyPagedCount;
+  if (start >= view.length) return [];
+  const end = Math.min(view.length, start + pageSize);
+  const pageTracks = view.slice(start, end);
+  await renderTrackTable(el.historyTracks, pageTracks, {
+    ...usbHistoryRowOptions(),
+    append: true,
+    indexOffset: start
+  });
+  state.historyPagedCount = end;
+  await hydrateUsbTrackPage(el.historyTracks, pageTracks, {
+    hydrateUsbTrackMetadataBatch,
+    patchRow: patchHistoryTrackRow,
+    renderFallback: () => renderHistoryTracks(state, el, deps)
+  });
+  return pageTracks;
 }
 
 export async function initializeUsb(state, el, deps = {}) {

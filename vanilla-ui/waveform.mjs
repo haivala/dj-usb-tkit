@@ -86,15 +86,28 @@ export function getWaveformPeaksFromElement(element) {
   return peaks;
 }
 
-export function drawWaveformCanvas(element) {
-  if (!element) return;
+// Reads layout geometry only - no DOM writes. Call this for every element
+// up front (in a batch) before calling paintMeasuredWaveform on any of them,
+// so the reads don't interleave with the canvas-resize writes below and
+// force a layout flush per element (layout thrashing) when painting many
+// waveforms at once.
+function measureWaveformCanvas(element) {
   const canvas = element.querySelector(".waveform-canvas-el");
-  if (!canvas) return;
+  if (!canvas) return null;
 
   const rect = element.getBoundingClientRect();
   const dpr = Math.max(1, window.devicePixelRatio || 1);
-  const width = Math.max(1, Math.round(rect.width * dpr));
-  const height = Math.max(1, Math.round(rect.height * dpr));
+  return {
+    element,
+    canvas,
+    width: Math.max(1, Math.round(rect.width * dpr)),
+    height: Math.max(1, Math.round(rect.height * dpr)),
+  };
+}
+
+// Writes/draws only - safe to run for many elements in sequence without
+// re-measuring layout in between.
+function paintMeasuredWaveform({ element, canvas, width, height }) {
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
@@ -147,8 +160,32 @@ export function drawWaveformCanvas(element) {
   }
 }
 
-export function renderWaveformsIn(root = document) {
-  root.querySelectorAll(".waveform.waveform-canvas").forEach((waveform) => {
-    drawWaveformCanvas(waveform);
+export function drawWaveformCanvas(element) {
+  if (!element) return;
+  const measured = measureWaveformCanvas(element);
+  if (!measured) return;
+  paintMeasuredWaveform(measured);
+}
+
+const WAVEFORM_PAINT_CHUNK_SIZE = 200;
+
+export async function renderWaveformsIn(root = document) {
+  const elements = root.querySelectorAll(".waveform.waveform-canvas");
+  if (!elements.length) return;
+
+  // Measure every element before painting any of them, so all the
+  // layout-forcing getBoundingClientRect() reads happen before any of the
+  // canvas-resize writes - avoids one forced layout flush per element.
+  const measured = [];
+  elements.forEach((element) => {
+    const m = measureWaveformCanvas(element);
+    if (m) measured.push(m);
   });
+
+  for (let i = 0; i < measured.length; i += 1) {
+    paintMeasuredWaveform(measured[i]);
+    if ((i + 1) % WAVEFORM_PAINT_CHUNK_SIZE === 0 && i + 1 < measured.length) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
 }

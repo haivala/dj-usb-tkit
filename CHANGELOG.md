@@ -30,6 +30,31 @@
 
 ## Unreleased
 
+- **Fix:** selecting a very large USB playlist or history session (rekordbox caps a playlist at
+  9999 tracks) could freeze the UI entirely, including making the window unresponsive just from
+  moving the mouse over the track table — rendering thousands of rows, waveforms, and cover
+  images at once is expensive regardless of how fast the underlying data fetch is. USB playlist
+  and history track tables now render and hydrate a page at a time for selections over ~300
+  tracks, loading more as the user scrolls; typical playlists (~80 tracks) render exactly as
+  before.
+- **Fix:** searching or sorting a large, paginated USB playlist/history selection could leave
+  newly-visible tracks (brought into view by the filter or the new sort order) without their
+  bpm/key/waveform/cover art, since hydration was previously only triggered on initial selection
+  and on scroll. Every render path (selection, search, sort, scroll) now hydrates whatever it
+  just displayed.
+- **Improvement:** "Total time" for a USB playlist/history selection is now computed once
+  server-side from the full track list, matching how the media library already reports its
+  total, instead of being summed client-side from whatever tracks happen to be loaded — it's
+  now correct immediately on selection regardless of hydration/pagination progress.
+- **Improvement:** resolving USB track metadata (used when selecting/paginating a playlist) no
+  longer scans the entire parsed PDB per requested track id — an O(items × library size) scan
+  that dominated hydration time for large playlists regardless of how the requests were batched.
+  Track ids now resolve via a prebuilt lookup instead.
+- **Improvement:** batched USB track hydration no longer reads and base64-encodes each track's
+  cover art into the response. That eager encoding was pure overhead — the UI already falls back
+  to loading cover art directly from the USB drive, the same way it already does for tracks
+  resolved via the export database — and inflated response sizes enough to block the UI while
+  parsing a single large batch.
 - **Improvement:** USB repair and export now open the export library database (eDB) once per
   run and reuse that connection for every read/write step, instead of reopening it for each
   fix or verification pass. A full repair with several fixes selected previously reopened the
