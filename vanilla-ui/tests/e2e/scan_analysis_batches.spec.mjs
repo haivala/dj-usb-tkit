@@ -116,6 +116,24 @@ function installScanAnalysisMock(page, opts = {}) {
       }
     }
 
+    // Mirrors track_has_core_analysis_for_source_status
+    // (backend/src/service/mod.rs): a track counts toward the library
+    // duration total only once it has all three of bpm/waveform/duration.
+    const isCountable = (track) => Number.isFinite(track.bpm) && track.bpm > 0
+      && !!track.waveformPeaksPath
+      && Number.isFinite(track.durationMs) && track.durationMs > 0;
+    const computeDurationTotals = (list) => {
+      let totalMs = 0;
+      let knownCount = 0;
+      for (const track of list) {
+        if (isCountable(track)) {
+          totalMs += track.durationMs;
+          knownCount += 1;
+        }
+      }
+      return { totalMs, knownCount };
+    };
+
     // Simulates the real backend's analyze_new_tracks_with_progress worker:
     // for each requested track id, emits 4 progressive partial job:event
     // updates (duration, artwork, waveform, bpm_key - trackReady:false, one
@@ -133,6 +151,15 @@ function installScanAnalysisMock(page, opts = {}) {
       // reset-at-start-of-batch behavior for its pause/cancel flags.
       analysisPaused = false;
       analysisCancelled = false;
+      // Live library-duration-total baseline (mirrors
+      // analyze_new_tracks_with_progress in backend/src/service/analysis.rs):
+      // seeded from every *other* track that's already countable, excluding
+      // this batch's own tracks so a re-analyzed track isn't double-counted.
+      const idSet = new Set(ids.map(String));
+      const { totalMs: baselineTotalMs, knownCount: baselineKnownCount } =
+        computeDurationTotals(tracks.filter((t) => !idSet.has(t.id)));
+      let libraryTotalDurationMs = baselineTotalMs;
+      let libraryDurationKnownCount = baselineKnownCount;
       emitJobEvent({
         event: "job.started",
         jobId,
@@ -231,6 +258,10 @@ function installScanAnalysisMock(page, opts = {}) {
         emitPartial({ bpm: track.bpm, bpmAnalyzer: "mock-analyzer", key: track.key });
 
         analyzed += 1;
+        if (isCountable(track)) {
+          libraryTotalDurationMs += track.durationMs;
+          libraryDurationKnownCount += 1;
+        }
         emitJobEvent({
           event: "job.progress",
           jobId,
@@ -248,7 +279,9 @@ function installScanAnalysisMock(page, opts = {}) {
           durationMs: track.durationMs,
           artworkPath: track.artworkPath,
           waveformPeaksPath: track.waveformPeaksPath,
-          waveformPreview: track.waveformPreview
+          waveformPreview: track.waveformPreview,
+          libraryTotalDurationMs,
+          libraryDurationUnknownCount: Math.max(0, tracks.length - libraryDurationKnownCount)
         });
       }
 
@@ -291,7 +324,11 @@ function installScanAnalysisMock(page, opts = {}) {
               if (!query) return true;
               return `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(query);
             });
-            return { ok: true, data: { total: filtered.length, items: filtered } };
+            const { totalMs, knownCount } = computeDurationTotals(filtered);
+            return {
+              ok: true,
+              data: { total: filtered.length, items: filtered, totalDurationMs: totalMs, durationKnownCount: knownCount }
+            };
           }
           if (command === "list_tracks") {
             return { ok: true, data: { total: tracks.length, items: tracks } };
@@ -432,6 +469,24 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
       };
     };
 
+    // Mirrors track_has_core_analysis_for_source_status
+    // (backend/src/service/mod.rs): a track counts toward the library
+    // duration total only once it has all three of bpm/waveform/duration.
+    const isCountable = (track) => Number.isFinite(track.bpm) && track.bpm > 0
+      && !!track.waveformPeaksPath
+      && Number.isFinite(track.durationMs) && track.durationMs > 0;
+    const computeDurationTotals = (list) => {
+      let totalMs = 0;
+      let knownCount = 0;
+      for (const track of list) {
+        if (isCountable(track)) {
+          totalMs += track.durationMs;
+          knownCount += 1;
+        }
+      }
+      return { totalMs, knownCount };
+    };
+
     const listPage = (cursorValue, query = "") => {
       const q = String(query || "").toLowerCase().trim();
       const filtered = q
@@ -441,11 +496,14 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
       const items = filtered.slice(offset, offset + pageSize).map(toTrackDto);
       const nextOffset = offset + items.length;
       const hasMore = nextOffset < filtered.length;
+      const { totalMs, knownCount } = computeDurationTotals(filtered);
       return {
         total: filtered.length,
         items,
         next_cursor: hasMore ? String(nextOffset) : null,
-        has_more: hasMore
+        has_more: hasMore,
+        totalDurationMs: totalMs,
+        durationKnownCount: knownCount
       };
     };
 
@@ -483,6 +541,16 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
 
       let analyzed = 0;
       let failed = 0;
+
+      // Live library-duration-total baseline (mirrors
+      // analyze_new_tracks_with_progress in backend/src/service/analysis.rs):
+      // seeded from every *other* track that's already countable, excluding
+      // this batch's own tracks so a re-analyzed track isn't double-counted.
+      const batchRows = new Set(ids.map((id) => findRowByAnalysisId(id)).filter(Boolean));
+      const { totalMs: baselineTotalMs, knownCount: baselineKnownCount } =
+        computeDurationTotals(tracks.filter((t) => !batchRows.has(t)));
+      let libraryTotalDurationMs = baselineTotalMs;
+      let libraryDurationKnownCount = baselineKnownCount;
 
       for (let i = 0; i < ids.length; i += 1) {
         const id = ids[i];
@@ -533,6 +601,10 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         emitPartial({ bpm: row.bpm, bpmAnalyzer: "mock-analyzer", key: row.key });
 
         analyzed += 1;
+        if (isCountable(row)) {
+          libraryTotalDurationMs += row.durationMs;
+          libraryDurationKnownCount += 1;
+        }
         emitJobEvent({
           event: "job.progress",
           jobId,
@@ -550,7 +622,9 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           durationMs: row.durationMs,
           artworkPath: row.artworkPath,
           waveformPeaksPath: row.waveformPeaksPath,
-          waveformPreview: row.waveformPreview
+          waveformPreview: row.waveformPreview,
+          libraryTotalDurationMs,
+          libraryDurationUnknownCount: Math.max(0, tracks.length - libraryDurationKnownCount)
         });
       }
 

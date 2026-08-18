@@ -51,7 +51,7 @@ test("patchPlaylistRowByTrackId resolves by localTrackId", () => {
   assert.equal(patched?.localTrackId, "local-2");
 });
 
-test("setTrackAnalyzingState updates set and triggers summary/chips when done", () => {
+test("setTrackAnalyzingState updates set and patches library/playlist rows", () => {
   const state = {
     analyzingTrackIds: new Set(["x"]),
     tracks: [{ id: "x", durationMs: 1000, bpm: 120, waveformPreview: [1] }]
@@ -59,12 +59,7 @@ test("setTrackAnalyzingState updates set and triggers summary/chips when done", 
   const calls = [];
   setTrackAnalyzingState(state, "x", false, {
     patchLibraryRowByTrackId: (id) => calls.push(`lib:${id}`),
-    patchPlaylistRowByTrackId: (id) => calls.push(`pl:${id}`),
-    trackHasCoreAnalysis: () => true,
-    trackNeedsPreviewHydration: () => false,
-    getLibraryVisibleTracks: () => [{ id: "x" }],
-    updateLibraryDurationSummary: () => calls.push("summary"),
-    renderSourceChips: () => calls.push("chips")
+    patchPlaylistRowByTrackId: (id) => calls.push(`pl:${id}`)
   });
   assert.equal(state.analyzingTrackIds.has("x"), false);
   assert.deepEqual(calls, ["lib:x", "pl:x"]);

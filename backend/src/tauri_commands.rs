@@ -185,6 +185,8 @@ fn emit_job_event<R: tauri::Runtime>(
         track_ready: None,
         failed: None,
         error_message: None,
+        library_total_duration_ms: None,
+        library_duration_unknown_count: None,
         timestamp: Utc::now().to_rfc3339(),
     };
 
@@ -239,6 +241,8 @@ fn emit_job_event_with_track<R: tauri::Runtime>(
         track_ready: Some(progress.track_ready),
         failed: Some(progress.failed),
         error_message: progress.error_message.clone(),
+        library_total_duration_ms: progress.library_total_duration_ms,
+        library_duration_unknown_count: progress.library_duration_unknown_count,
         timestamp: Utc::now().to_rfc3339(),
     };
 

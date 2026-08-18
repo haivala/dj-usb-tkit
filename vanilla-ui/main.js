@@ -610,7 +610,6 @@ function renderLibraryRows() {
     applySortToTracks,
     renderTrackTable,
     cssEscape,
-    updateLibraryDurationSummary,
     onEnableMasterDb: () => scanMasterDb(),
   });
 }
@@ -652,14 +651,8 @@ function scheduleApplySearchLocalFilter() {
     debounceMs: LIBRARY_SEARCH_DEBOUNCE_MS,
   });
 }
-function updateLibraryDurationSummary(tracks) {
-  library.updateLibraryDurationSummary(el, tracks, state, {
-    trackHasCoreAnalysis,
-    updateTrackListDurationSummary,
-  });
-}
-function bumpLibraryDurationSummary(durationMs) {
-  library.bumpLibraryDurationSummary(el, state, durationMs, { formatDurationMs });
+function applyLibraryDurationSummary(totalMs, unknownCount) {
+  library.applyLibraryDurationSummary(el, state, totalMs, unknownCount, { formatDurationMs });
 }
 function renderCurrentPlaylistTracksFromState() {
   library.renderCurrentPlaylistTracksFromState(state, el, {
@@ -695,7 +688,6 @@ const hydrateLoadedTracksPreviewsInBackground = async () => library.hydrateLoade
     mergeHydratedTrackIntoState,
     patchLibraryRowByTrackId,
     nextPaint: jobMgr.nextPaint,
-    updateLibraryDurationSummary,
     applySearchLocalFilter,
     renderCurrentPlaylistTracksFromState,
     renderSourceChips,
@@ -713,6 +705,7 @@ async function loadTracks(
     readLibraryPagination: library.readLibraryPagination,
     renderSourceChips,
     applySearchLocalFilter,
+    applyLibraryDurationSummary,
     hydrateLoadedTracksPreviewsInBackground,
   });
 }
@@ -1206,7 +1199,7 @@ function handleJobEvent(payload) {
     setStatus,
     emitMessage,
     refreshSourceRootAnalysisStatus,
-    bumpLibraryDurationSummary,
+    applyLibraryDurationSummary,
     setTrackAnalyzingState,
     setUsbRootControlsLocked,
   });

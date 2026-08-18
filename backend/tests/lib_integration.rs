@@ -691,6 +691,7 @@ fn analyzer_fixtures_validate_artwork_and_waveform_behavior() {
         bpm_max: None,
         track_ids: indexed_items.iter().map(|t| t.id.clone()).collect(),
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
@@ -2027,6 +2028,7 @@ fn analyze_new_tracks_emits_per_file_progress() {
             bpm_max: None,
             track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
             analysis_engine: None,
+            ..Default::default()
         },
         move |progress| {
             progress_ref
@@ -2091,6 +2093,147 @@ fn analyze_new_tracks_emits_per_file_progress() {
 }
 
 #[test]
+fn analyze_new_tracks_progress_reports_library_duration_total_scoped_to_visible_roots() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let root_a = media.join("RootA");
+    let root_b = media.join("RootB");
+    fs::create_dir_all(&root_a).expect("create root a");
+    fs::create_dir_all(&root_b).expect("create root b");
+    write_test_wav(&root_a.join("Artist - Visible.wav"), 440.0, 800);
+    write_test_wav(&root_b.join("Artist - Hidden.wav"), 523.25, 800);
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![
+            root_a.to_string_lossy().to_string(),
+            root_b.to_string_lossy().to_string(),
+        ],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let tracks = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 100,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+    assert_eq!(tracks.len(), 2, "expected 2 scanned tracks");
+    let visible_track = tracks
+        .iter()
+        .find(|t| t.file_path.contains("Visible"))
+        .expect("visible track");
+    let hidden_track = tracks
+        .iter()
+        .find(|t| t.file_path.contains("Hidden"))
+        .expect("hidden track");
+
+    #[derive(Debug, Clone)]
+    struct ProgressEvent {
+        track_id: String,
+        track_ready: bool,
+        library_total_duration_ms: Option<u64>,
+        library_duration_unknown_count: Option<usize>,
+    }
+
+    let progress = Arc::new(Mutex::new(Vec::<ProgressEvent>::new()));
+    let progress_ref = Arc::clone(&progress);
+    let analyzed_response = backend.analyze_new_tracks_with_progress(
+        AnalyzeNewTracksRequest {
+            bpm_min: None,
+            bpm_max: None,
+            // Analyze both tracks, but only RootA is "currently visible"
+            // under the frontend's filter -- RootB's track should never
+            // contribute to the reported library duration total, even
+            // though it's part of this same analysis batch.
+            track_ids: vec![visible_track.id.clone(), hidden_track.id.clone()],
+            analysis_engine: None,
+            source_roots: vec![root_a.to_string_lossy().to_string()],
+            ..Default::default()
+        },
+        move |progress| {
+            progress_ref
+                .lock()
+                .expect("progress lock")
+                .push(ProgressEvent {
+                    track_id: progress.track_id.clone(),
+                    track_ready: progress.track_ready,
+                    library_total_duration_ms: progress.library_total_duration_ms,
+                    library_duration_unknown_count: progress.library_duration_unknown_count,
+                });
+        },
+    );
+    assert!(
+        analyzed_response.ok,
+        "analyze internal failed: {analyzed_response:?}"
+    );
+    let analyzed = analyzed_response.data.expect("analyze data");
+    assert_eq!(
+        analyzed.analyzed + analyzed.failed,
+        2,
+        "analysis count mismatch"
+    );
+
+    let calls = progress.lock().expect("progress lock final");
+    let visible_ready = calls
+        .iter()
+        .find(|c| c.track_id == visible_track.id && c.track_ready)
+        .expect("visible track ready event");
+    let visible_duration_ms = visible_ready
+        .library_total_duration_ms
+        .expect("visible track should report a library duration total");
+    assert!(
+        visible_duration_ms > 0,
+        "expected the visible track's own duration to be reflected in the total"
+    );
+
+    // The running total only ever grows within a batch, so the *last*
+    // reported value is the settled one -- if RootB's track had incorrectly
+    // contributed, this would exceed the visible track's own duration.
+    let final_total = calls
+        .iter()
+        .filter_map(|c| c.library_total_duration_ms)
+        .max()
+        .expect("at least one library duration total reported");
+    assert_eq!(
+        final_total, visible_duration_ms,
+        "hidden (out-of-filter) track must not contribute to the library duration total"
+    );
+
+    // Worker completion order between the two tracks isn't deterministic,
+    // so the hidden track's own event reflects the total *at whatever
+    // point it happened to finish* -- either before the visible track (0)
+    // or after it (visible_duration_ms). What it must never do is include
+    // its own duration on top of either of those.
+    let hidden_ready = calls
+        .iter()
+        .find(|c| c.track_id == hidden_track.id && c.track_ready)
+        .expect("hidden track ready event");
+    assert!(
+        matches!(hidden_ready.library_total_duration_ms, Some(0) | None)
+            || hidden_ready.library_total_duration_ms == Some(visible_duration_ms),
+        "hidden track's own completion must not add its own duration to the total, got {:?} (visible alone contributes {})",
+        hidden_ready.library_total_duration_ms,
+        visible_duration_ms
+    );
+
+    // Only the visible track is in the filtered set, and it's now fully
+    // known -- unknown count settles at 0, not counting the hidden track.
+    let final_unknown_count = calls
+        .iter()
+        .rev()
+        .find_map(|c| c.library_duration_unknown_count)
+        .expect("at least one unknown count reported");
+    assert_eq!(final_unknown_count, 0);
+}
+
+#[test]
 fn analyze_new_tracks_uses_audio_content_for_bpm_key_not_filename_tokens() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
@@ -2125,6 +2268,7 @@ fn analyze_new_tracks_uses_audio_content_for_bpm_key_not_filename_tokens() {
         bpm_max: None,
         track_ids: vec![track.id.clone()],
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
@@ -2189,6 +2333,7 @@ fn analyze_new_tracks_does_not_guess_bpm_key_from_filename_on_silence() {
         bpm_max: None,
         track_ids: vec![track.id.clone()],
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
@@ -2262,6 +2407,7 @@ fn analyze_new_tracks_with_stratum_default_produces_bpm_and_key() {
         bpm_max: None,
         track_ids: vec![track.id.clone()],
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
@@ -2352,6 +2498,7 @@ fn analyze_new_tracks_respects_requested_bpm_range() {
         bpm_max: Some(220),
         track_ids: vec![track.id.clone()],
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
@@ -2467,6 +2614,7 @@ fn analyze_new_tracks_commits_periodically_not_only_at_the_end() {
             bpm_min: None,
             bpm_max: None,
             analysis_engine: None,
+            ..Default::default()
         },
         |progress| {
             if !progress.track_ready || progress.current >= progress.total {
@@ -2591,6 +2739,7 @@ fn analyze_new_tracks_commits_periodically_with_real_worker_count_on_moderate_ba
             bpm_min: None,
             bpm_max: None,
             analysis_engine: None,
+            ..Default::default()
         },
         |progress| {
             if !progress.track_ready || progress.current >= progress.total {
@@ -2712,6 +2861,7 @@ fn analyze_new_tracks_pauses_and_resumes_between_tracks() {
             bpm_min: None,
             bpm_max: None,
             analysis_engine: None,
+            ..Default::default()
         },
         |progress| {
             if !progress.track_ready {
@@ -2833,6 +2983,7 @@ fn analyze_new_tracks_cancel_stops_early_without_hanging() {
             bpm_min: None,
             bpm_max: None,
             analysis_engine: None,
+            ..Default::default()
         },
         |progress| {
             if !progress.track_ready {
@@ -3350,6 +3501,7 @@ fn analyze_new_tracks_extracts_bpm_key_from_aiff() {
         bpm_max: None,
         track_ids: vec![track.id.clone()],
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
@@ -4924,6 +5076,7 @@ fn analyze_new_tracks_essentia_without_node_returns_error_not_panic() {
         bpm_max: None,
         track_ids: vec![track.id.clone()],
         analysis_engine: None,
+        ..Default::default()
     });
     // We expect either a graceful per-track failure (counted in `failed`, with a
     // warning) or success with no BPM/key (essentia returns None when the runner

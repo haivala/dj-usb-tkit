@@ -57,6 +57,14 @@
 - **Chore:** removed the unused analysis-row-patch queue (`createAnalysisPatchQueue` and its
   wiring in `main.js`), a `requestAnimationFrame`-coalesced batching layer that was fully wired
   up but never actually invoked in production. No behavior change.
+- **Chore:** removed `refreshLoadedLibraryTracksFromBackend`, an unused helper with no callers
+  anywhere in the app. No behavior change.
+- **Fix:** the media library's "Total time" summary was computed client-side from whatever page
+  of tracks happened to be loaded, so it showed the wrong (too-low) total on app restart and
+  after any search/filter change until every matching track had been paged in. The backend now
+  computes the true total for the current filter (source roots, master.db, search query) and
+  sends it with the library listing, and pushes a live-updated total per track during an
+  analysis batch — the frontend just displays the numbers it's given instead of recomputing them.
 
 ## 0.1.20
 

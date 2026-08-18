@@ -56,7 +56,6 @@ test("hydrateLoadedTracksPreviewsInBackground batches and patches", async () => 
     mergeHydratedTrackIntoState: () => true,
     patchLibraryRowByTrackId: (id) => patched.push(id),
     nextPaint: async () => {},
-    updateLibraryDurationSummary: () => {},
     applySearchLocalFilter: () => {},
     renderCurrentPlaylistTracksFromState: () => {},
     renderSourceChips: () => {},

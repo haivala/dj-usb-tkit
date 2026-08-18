@@ -1273,51 +1273,37 @@ impl BackendService {
         })
     }
 
-    pub fn browse_source_files(
+    /// Builds the complete filtered track list for a set of source roots
+    /// (plus optional master.db tracks) matching a search query -- the same
+    /// filtering `browse_source_files` returns to the frontend before it's
+    /// paginated. Shared by `browse_source_files` and the analysis pipeline
+    /// (which uses it to compute the live library-duration-total baseline),
+    /// so both stay consistent by construction. Sanitizes/sorts/dedups
+    /// `source_roots` itself, so callers may pass raw values.
+    fn compute_visible_library_tracks(
         &self,
-        req: BrowseSourceFilesRequest,
-    ) -> BackendResult<BrowseSourceFilesData> {
-        let mut source_roots = req
-            .source_roots
-            .into_iter()
+        conn: &rusqlite::Connection,
+        source_roots: &[String],
+        include_master_db: bool,
+        query: &str,
+    ) -> BackendResult<Vec<Track>> {
+        let mut source_roots = source_roots
+            .iter()
             .map(|root| root.trim().to_string())
             .filter(|root| !root.is_empty())
             .collect::<Vec<_>>();
         source_roots.sort();
         source_roots.dedup();
-        let include_master_db = req.include_master_db;
         if source_roots.is_empty() && !include_master_db {
-            return Ok(BrowseSourceFilesData {
-                total: 0,
-                items: Vec::new(),
-                next_cursor: None,
-                has_more: false,
-                source_root_analysis: Vec::new(),
-            });
+            return Ok(Vec::new());
         }
 
-        let limit = req.limit.clamp(1, 5000);
-        let query = req.query.trim().to_lowercase();
-        let roots_signature = source_roots.join("\u{1F}");
-        let signature = build_track_cursor_signature(&[
-            TRACK_CURSOR_VERSION,
-            "browse_source_files",
-            &query,
-            &roots_signature,
-            if include_master_db {
-                "master_db"
-            } else {
-                "no_master_db"
-            },
-        ]);
-        let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
-
+        let query = query.trim().to_lowercase();
         let scanned = if source_roots.is_empty() {
             Vec::new()
         } else {
             scan_audio_files(&source_roots)?
         };
-        let conn = self.db.connect()?;
         let mut stmt = conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks"))?;
         let indexed_rows = stmt.query_map([], |row| row_to_track(row, false))?;
         let indexed_tracks = indexed_rows.collect::<Result<Vec<_>, _>>()?;
@@ -1370,28 +1356,6 @@ impl BackendService {
             })
             .collect::<Vec<_>>();
 
-        let source_root_analysis = source_roots
-            .iter()
-            .map(|root| {
-                let mut total = 0usize;
-                let mut analyzed = 0usize;
-                for track in &items {
-                    if browse_path_matches_root(&track.file_path, root) {
-                        total += 1;
-                        if track_has_core_analysis_for_source_status(track) {
-                            analyzed += 1;
-                        }
-                    }
-                }
-                SourceRootAnalysisStatus {
-                    source_root: root.clone(),
-                    total,
-                    analyzed,
-                    fully_analyzed: total > 0 && analyzed == total,
-                }
-            })
-            .collect::<Vec<_>>();
-
         if include_master_db {
             for track in indexed_tracks
                 .into_iter()
@@ -1423,6 +1387,89 @@ impl BackendService {
             });
         }
 
+        Ok(items)
+    }
+
+    pub fn browse_source_files(
+        &self,
+        req: BrowseSourceFilesRequest,
+    ) -> BackendResult<BrowseSourceFilesData> {
+        let mut source_roots = req
+            .source_roots
+            .into_iter()
+            .map(|root| root.trim().to_string())
+            .filter(|root| !root.is_empty())
+            .collect::<Vec<_>>();
+        source_roots.sort();
+        source_roots.dedup();
+        let include_master_db = req.include_master_db;
+        if source_roots.is_empty() && !include_master_db {
+            return Ok(BrowseSourceFilesData {
+                total: 0,
+                items: Vec::new(),
+                next_cursor: None,
+                has_more: false,
+                source_root_analysis: Vec::new(),
+                total_duration_ms: 0,
+                duration_known_count: 0,
+            });
+        }
+
+        let limit = req.limit.clamp(1, 5000);
+        let query = req.query.trim().to_lowercase();
+        let roots_signature = source_roots.join("\u{1F}");
+        let signature = build_track_cursor_signature(&[
+            TRACK_CURSOR_VERSION,
+            "browse_source_files",
+            &query,
+            &roots_signature,
+            if include_master_db {
+                "master_db"
+            } else {
+                "no_master_db"
+            },
+        ]);
+        let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
+
+        let conn = self.db.connect()?;
+        let items = self.compute_visible_library_tracks(&conn, &source_roots, include_master_db, &query)?;
+
+        let source_root_analysis = source_roots
+            .iter()
+            .map(|root| {
+                let mut total = 0usize;
+                let mut analyzed = 0usize;
+                for track in &items {
+                    if browse_path_matches_root(&track.file_path, root) {
+                        total += 1;
+                        if track_has_core_analysis_for_source_status(track) {
+                            analyzed += 1;
+                        }
+                    }
+                }
+                SourceRootAnalysisStatus {
+                    source_root: root.clone(),
+                    total,
+                    analyzed,
+                    fully_analyzed: total > 0 && analyzed == total,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let mut total_duration_ms: u64 = 0;
+        let mut duration_known_count: usize = 0;
+        for track in &items {
+            let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
+            let countable =
+                track_has_core_analysis_for_source_status(track) || (track.master_db_source && has_duration);
+            if countable
+                && let Some(d) = track.duration_ms
+            {
+                total_duration_ms += d;
+                duration_known_count += 1;
+            }
+        }
+
         let total = items.len();
         let start_idx = if let Some(cursor) = cursor.as_ref() {
             items
@@ -1449,6 +1496,8 @@ impl BackendService {
             next_cursor,
             has_more,
             source_root_analysis,
+            total_duration_ms,
+            duration_known_count,
         })
     }
 
@@ -3707,6 +3756,50 @@ mod tests {
         assert_eq!(result.total, 1);
         assert_eq!(result.items[0].id, "t1");
         assert!(result.items[0].master_db_source);
+    }
+
+    #[test]
+    fn browse_source_files_computes_duration_total_over_countable_tracks_only() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        // Fully core-analyzed (bpm + waveform + duration): countable via the
+        // primary rule.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES ('t1', 'Analyzed', 'Artist', '/master/a.mp3', 200000, 120.0, '/data/a.dat', ?1, 1, datetime('now'), datetime('now'))",
+            params![build_track_match_fingerprint("Analyzed", "Artist", None)],
+        )
+        .expect("insert t1");
+        // master.db track with only a duration: countable via the
+        // master-db-specific OR-branch, not the primary rule.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES ('t2', 'Master Only', 'Artist', '/master/b.mp3', 100000, ?1, 1, datetime('now'), datetime('now'))",
+            params![build_track_match_fingerprint("Master Only", "Artist", None)],
+        )
+        .expect("insert t2");
+        // No analysis at all: not countable, excluded from both the sum and
+        // the known count, but still present in `total`.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES ('t3', 'Unanalyzed', 'Artist', '/master/c.mp3', ?1, 1, datetime('now'), datetime('now'))",
+            params![build_track_match_fingerprint("Unanalyzed", "Artist", None)],
+        )
+        .expect("insert t3");
+        drop(conn);
+
+        let result = service
+            .browse_source_files(BrowseSourceFilesRequest {
+                source_roots: Vec::new(),
+                include_master_db: true,
+                query: String::new(),
+                limit: 100,
+                cursor: None,
+            })
+            .expect("browse source files");
+        assert_eq!(result.total, 3);
+        assert_eq!(result.duration_known_count, 2);
+        assert_eq!(result.total_duration_ms, 300_000);
     }
 
     #[test]

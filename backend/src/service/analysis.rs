@@ -33,7 +33,10 @@ use crate::models::{
 use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
 use super::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash};
-use super::{BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, now};
+use super::{
+    BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, now,
+    track_has_core_analysis_for_source_status,
+};
 
 const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
 // Reserved for the OS, the Tauri/WebKit UI process, and other running apps.
@@ -166,6 +169,8 @@ pub struct AnalyzeTrackProgress {
     pub track_ready: bool,
     pub failed: bool,
     pub error_message: Option<String>,
+    pub library_total_duration_ms: Option<u64>,
+    pub library_duration_unknown_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -203,6 +208,8 @@ fn build_partial_progress(
         track_ready: false,
         failed: false,
         error_message: None,
+        library_total_duration_ms: None,
+        library_duration_unknown_count: None,
     }
 }
 
@@ -228,6 +235,8 @@ fn build_done_progress_success(
         track_ready: true,
         failed: false,
         error_message: None,
+        library_total_duration_ms: None,
+        library_duration_unknown_count: None,
     }
 }
 
@@ -253,6 +262,8 @@ fn build_done_progress_error(
         track_ready: true,
         failed: true,
         error_message: Some(error_message),
+        library_total_duration_ms: None,
+        library_duration_unknown_count: None,
     }
 }
 
@@ -553,6 +564,49 @@ impl BackendService {
         let (bpm_min, bpm_max) = resolve_analysis_bpm_range(req.bpm_min, req.bpm_max);
         let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
 
+        // Live library-duration-total baseline: the frontend passes its
+        // current library filter (enabled source roots / master.db toggle /
+        // search query) so `on_progress` can push an up-to-date total as
+        // each track finishes, instead of the frontend recomputing it
+        // locally from a possibly-partial (paginated) view. No filter
+        // context (no source roots and master.db off) opts this out at no
+        // extra cost -- the two progress fields just stay `None`.
+        let mut library_context = if !req.source_roots.is_empty() || req.include_master_db {
+            let visible = self.compute_visible_library_tracks(
+                &conn,
+                &req.source_roots,
+                req.include_master_db,
+                &req.query,
+            )?;
+            let batch_ids: std::collections::HashSet<&str> =
+                tracks.iter().map(|t| t.id.as_str()).collect();
+            let visible_track_ids: std::collections::HashSet<String> =
+                visible.iter().map(|t| t.id.clone()).collect();
+            let mut total_ms: u64 = 0;
+            let mut known_count: usize = 0;
+            for track in &visible {
+                if batch_ids.contains(track.id.as_str()) {
+                    continue;
+                }
+                let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
+                let countable = track_has_core_analysis_for_source_status(track)
+                    || (track.master_db_source && has_duration);
+                if countable
+                    && let Some(d) = track.duration_ms
+                {
+                    total_ms += d;
+                    known_count += 1;
+                }
+            }
+            Some(LibraryDurationContext {
+                visible_track_ids,
+                total_ms,
+                known_count,
+            })
+        } else {
+            None
+        };
+
         let mut completed_count = 0usize;
 
         // Every new batch starts fresh: a pause/cancel from a previous batch
@@ -770,6 +824,7 @@ impl BackendService {
                                 analyzed: &mut analyzed,
                                 failed: &mut failed,
                                 warnings: &mut warnings,
+                                library_context: library_context.as_mut(),
                             },
                             &mut on_progress,
                         )?;
@@ -869,6 +924,7 @@ impl BackendService {
                         analyzed: &mut analyzed,
                         failed: &mut failed,
                         warnings: &mut warnings,
+                        library_context: library_context.as_mut(),
                     },
                     &mut on_progress,
                 )?;
@@ -896,11 +952,25 @@ impl BackendService {
     }
 }
 
+/// Tracks the live "library duration total" across an analysis batch: the
+/// set of track ids currently visible under the frontend's active library
+/// filter (source roots / master.db / search query), and a running
+/// total/known-count seeded from every *other* currently-countable visible
+/// track (this batch's own tracks are excluded from the seed so a
+/// re-analyzed track isn't counted twice -- once from the seed, once from
+/// its own "done" event below).
+struct LibraryDurationContext {
+    visible_track_ids: std::collections::HashSet<String>,
+    total_ms: u64,
+    known_count: usize,
+}
+
 struct PersistDoneCounters<'a> {
     completed_count: &'a mut usize,
     analyzed: &'a mut usize,
     failed: &'a mut usize,
     warnings: &'a mut Vec<WarningEntry>,
+    library_context: Option<&'a mut LibraryDurationContext>,
 }
 
 fn persist_done_result(
@@ -916,6 +986,7 @@ fn persist_done_result(
         analyzed,
         failed,
         warnings,
+        mut library_context,
     } = counters;
     *completed_count += 1;
     match result {
@@ -932,12 +1003,28 @@ fn persist_done_result(
                 local.first_beat_ms.map(|v| v as i64),
             ])?;
             *analyzed += 1;
-            on_progress(&build_done_progress_success(
-                *completed_count,
-                total,
-                &track,
-                &local,
-            ));
+            if let Some(ctx) = library_context.as_deref_mut()
+                && ctx.visible_track_ids.contains(&track.id)
+            {
+                let has_waveform_path = local
+                    .waveform_peaks_path
+                    .as_deref()
+                    .map(|path| !path.trim().is_empty())
+                    .unwrap_or(false);
+                let has_bpm = local.bpm.map(|bpm| bpm > 0.0).unwrap_or(false);
+                let has_duration = local.duration_ms.map(|d| d > 0).unwrap_or(false);
+                if has_waveform_path && has_bpm && has_duration {
+                    ctx.total_ms += local.duration_ms.unwrap_or(0);
+                    ctx.known_count += 1;
+                }
+            }
+            let mut progress = build_done_progress_success(*completed_count, total, &track, &local);
+            if let Some(ctx) = library_context.as_deref() {
+                progress.library_total_duration_ms = Some(ctx.total_ms);
+                progress.library_duration_unknown_count =
+                    Some(ctx.visible_track_ids.len().saturating_sub(ctx.known_count));
+            }
+            on_progress(&progress);
         }
         Err(err) => {
             *failed += 1;
@@ -948,12 +1035,13 @@ fn persist_done_result(
                 "analysis.track-failed",
                 format!("{}: {}", track.file_path, err_msg),
             ));
-            on_progress(&build_done_progress_error(
-                *completed_count,
-                total,
-                &track,
-                err_msg,
-            ));
+            let mut progress = build_done_progress_error(*completed_count, total, &track, err_msg);
+            if let Some(ctx) = library_context.as_deref() {
+                progress.library_total_duration_ms = Some(ctx.total_ms);
+                progress.library_duration_unknown_count =
+                    Some(ctx.visible_track_ids.len().saturating_sub(ctx.known_count));
+            }
+            on_progress(&progress);
         }
     }
     Ok(())

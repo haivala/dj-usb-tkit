@@ -411,7 +411,6 @@ export async function hydrateLoadedTracksPreviewsInBackground(state, deps) {
     mergeHydratedTrackIntoState,
     patchLibraryRowByTrackId,
     nextPaint,
-    updateLibraryDurationSummary,
     applySearchLocalFilter,
     renderCurrentPlaylistTracksFromState,
     renderSourceChips,
@@ -451,8 +450,6 @@ export async function hydrateLoadedTracksPreviewsInBackground(state, deps) {
 
   if (hydrationSeq !== state.loadedPreviewHydrationSeq) return;
   if (anyChanged) {
-    const visibleTracks = getLibraryVisibleTracks();
-    updateLibraryDurationSummary(visibleTracks);
     applySearchLocalFilter();
     renderCurrentPlaylistTracksFromState();
     renderSourceChips();
@@ -697,39 +694,16 @@ export function renderCurrentPlaylistTracksFromState(state, el, deps = {}) {
   updateTrackListDurationSummary(el.playlistTotalDuration, state.currentPlaylistTracksView);
 }
 
-export function updateLibraryDurationSummary(el, tracks, state, deps = {}) {
-  const {
-    trackHasCoreAnalysis = () => false,
-    updateTrackListDurationSummary = () => ({ totalMs: 0, unknownCount: 0 })
-  } = deps;
-  const summaryTracks = Array.isArray(tracks)
-    ? tracks.map((track) => {
-        const hasDuration = Number.isFinite(Number(track?.durationMs)) && Number(track?.durationMs) > 0;
-        const countable = trackHasCoreAnalysis(track) || (track?.masterDbSource && hasDuration);
-        return countable ? track : { ...track, durationMs: null };
-      })
-    : [];
-  const { totalMs, unknownCount } = updateTrackListDurationSummary(el.libraryTotalDuration, summaryTracks);
-  if (state) {
-    state.libraryDurationTotalMs = totalMs;
-    state.libraryDurationUnknownCount = unknownCount;
-  }
-}
-
-// O(1) counterpart to updateLibraryDurationSummary() above, for the analysis
-// job:event hot path: bumps the running total by one track's own duration
-// instead of re-scanning the whole visible list on every single track
-// completion (which pins the JS main thread during a large batch and makes
-// the rest of the UI, including scrolling, feel frozen). The running total
-// is kept in sync by updateLibraryDurationSummary()'s full recompute, which
-// still runs at the existing batch-completion checkpoints and corrects any
-// drift (e.g. from the visible/filtered set changing mid-batch).
-export function bumpLibraryDurationSummary(el, state, durationMs, deps = {}) {
+// The library's duration total/unknown-count are computed entirely by the
+// backend (which knows the true filtered library, not just whatever page
+// happens to be loaded client-side) and pushed here: once per fresh
+// browse_source_files response (loadTracks), and live per track via
+// job.progress events during an analysis batch (job_manager.mjs). This is
+// a pure setter -- no track iteration, no countability logic, no filtering.
+export function applyLibraryDurationSummary(el, state, totalMs, unknownCount, deps = {}) {
   const { formatDurationMs = () => "" } = deps;
-  const ms = Number(durationMs);
-  if (!Number.isFinite(ms) || ms <= 0) return;
-  state.libraryDurationTotalMs = (state.libraryDurationTotalMs || 0) + ms;
-  state.libraryDurationUnknownCount = Math.max(0, (state.libraryDurationUnknownCount || 0) - 1);
+  state.libraryDurationTotalMs = Number(totalMs) || 0;
+  state.libraryDurationUnknownCount = Math.max(0, Number(unknownCount) || 0);
   if (!el?.libraryTotalDuration) return;
   const suffix = state.libraryDurationUnknownCount > 0
     ? ` (${state.libraryDurationUnknownCount} without length)`
@@ -744,8 +718,7 @@ export function renderLibraryRows(state, el, deps = {}) {
     syncLibraryOnboardingMode = () => {},
     applySortToTracks = (tracks) => tracks,
     renderTrackTable = () => {},
-    cssEscape = (value) => String(value || ""),
-    updateLibraryDurationSummary = () => {}
+    cssEscape = (value) => String(value || "")
   } = deps;
 
   const noSources = !state.sourcesEverConfigured;
@@ -789,7 +762,6 @@ export function renderLibraryRows(state, el, deps = {}) {
     const row = el.libraryTableBody.querySelector(selector);
     if (row) row.classList.add("is-analyzing");
   }
-  updateLibraryDurationSummary(visibleTracks);
 }
 // Library loading and analysis workflows extracted from main.js.
 
@@ -800,6 +772,7 @@ export async function loadTracks(state, query, limit, cursor, options = {}, deps
     readLibraryPagination,
     renderSourceChips,
     applySearchLocalFilter,
+    applyLibraryDurationSummary = () => {},
     hydrateLoadedTracksPreviewsInBackground
   } = deps;
   const requestSeq = Number(options.requestSeq || 0);
@@ -853,6 +826,9 @@ export async function loadTracks(state, query, limit, cursor, options = {}, deps
     state.libraryHasMore = paging.hasMore;
     renderSourceChips();
     applySearchLocalFilter();
+    if (typeof data.totalDurationMs === "number") {
+      applyLibraryDurationSummary(data.totalDurationMs, Number(data.total || 0) - Number(data.durationKnownCount || 0));
+    }
     void hydrateLoadedTracksPreviewsInBackground();
   } finally {
     if (!requestSeq || requestSeq === state.libraryRequestSeq) {
@@ -916,20 +892,6 @@ export async function ensureLibraryContainerFilled(state, el, limit, deps) {
   ) {
     await loadMoreLibraryTracks(limit);
     guard += 1;
-  }
-}
-
-export async function refreshLoadedLibraryTracksFromBackend(state, deps) {
-  const {
-    LIBRARY_LOAD_LIMIT_DEFAULT,
-    resetAndLoadLibraryTracks,
-    loadMoreLibraryTracks
-  } = deps;
-  if (!state.sourceRoots.length && !state.masterDbEnabled) return;
-  const currentCount = Number(state.tracks?.length || 0);
-  await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
-  while (state.tracks.length < currentCount && state.libraryHasMore) {
-    await loadMoreLibraryTracks(LIBRARY_LOAD_LIMIT_DEFAULT);
   }
 }
 
@@ -1151,7 +1113,12 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
       trackIds: ids,
       bpmMin: bpmRange.min,
       bpmMax: bpmRange.max,
-      analysisEngine: state.analysisEngine
+      analysisEngine: state.analysisEngine,
+      sourceRoots: (state.sourceRoots || []).filter(
+        (root) => state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(state, root)
+      ),
+      includeMasterDb: state.masterDbEnabled === true,
+      query: String(state.libraryQuery || "").trim()
     });
     analyzed = Math.max(0, Number(batch?.analyzed || 0));
     failed = Math.max(0, Number(batch?.failed || 0));

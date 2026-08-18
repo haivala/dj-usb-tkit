@@ -96,6 +96,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         bpm_max: None,
         track_ids: remaining_ids.clone(),
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyzed.ok, "analyze failed: {analyzed:?}");
     let analyzed_data = analyzed.data.expect("analyze data");
@@ -517,6 +518,7 @@ fn analyze_local_track_waveform_preview_comes_from_anlz_roundtrip() {
         bpm_max: None,
         track_ids: vec![track_id.clone()],
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
     let analyze_data = analyze.data.expect("analyze data");
@@ -588,6 +590,7 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
         bpm_max: None,
         track_ids: vec![track_id.clone()],
         analysis_engine: None,
+        ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
     let analyze_data = analyze.data.expect("analyze data");

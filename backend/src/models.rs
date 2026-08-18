@@ -76,6 +76,10 @@ pub struct JobEventPayload {
     pub failed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library_total_duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library_duration_unknown_count: Option<usize>,
     pub timestamp: String,
 }
 
@@ -236,6 +240,10 @@ pub struct BrowseSourceFilesData {
     pub has_more: bool,
     #[serde(default)]
     pub source_root_analysis: Vec<SourceRootAnalysisStatus>,
+    #[serde(default)]
+    pub total_duration_ms: u64,
+    #[serde(default)]
+    pub duration_known_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -904,7 +912,7 @@ pub struct InspectUsbTracksData {
     pub warnings: Vec<WarningEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzeNewTracksRequest {
     #[serde(default)]
@@ -915,6 +923,12 @@ pub struct AnalyzeNewTracksRequest {
     pub bpm_max: Option<u32>,
     #[serde(default)]
     pub analysis_engine: Option<String>,
+    #[serde(default)]
+    pub source_roots: Vec<String>,
+    #[serde(default)]
+    pub include_master_db: bool,
+    #[serde(default)]
+    pub query: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

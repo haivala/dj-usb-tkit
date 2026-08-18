@@ -163,7 +163,7 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     debugFrontendLog,
     applyRealtimeAnalyzedTrackUpdate,
     refreshSourceRootAnalysisStatus = () => {},
-    bumpLibraryDurationSummary = () => {},
+    applyLibraryDurationSummary = () => {},
     setTrackAnalyzingState = () => {},
     setUsbRootControlsLocked,
   } = deps;
@@ -227,8 +227,8 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     // rows show "analyzing" at once as there are active workers) rather than
     // marking the whole submitted batch as analyzing for the entire call.
     setTrackAnalyzingState(String(payload.trackId), payload.trackReady !== true);
-    if (payload.trackReady === true) {
-      bumpLibraryDurationSummary(payload.durationMs);
+    if (payload.trackReady === true && typeof payload.libraryTotalDurationMs === "number") {
+      applyLibraryDurationSummary(payload.libraryTotalDurationMs, payload.libraryDurationUnknownCount);
     }
     // A pause click only stops workers from picking up a *new* track --
     // whichever track(s) were already in flight keep going, so the elapsed
