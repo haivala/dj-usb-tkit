@@ -2,8 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
-  applySortToTracks,
-  handleSortHeaderClick
+  applySortToTracks
 } from "../components/shell/actions.mjs";
 import {
   renderUsbPlaylists,
@@ -17,26 +16,6 @@ test("applySortToTracks applies configured state sorter", () => {
     sortTracks: (tracks) => [...tracks].sort((a, b) => a.title.localeCompare(b.title))
   });
   assert.deepEqual(out.map((t) => t.title), ["a", "b"]);
-});
-
-test("handleSortHeaderClick cycles sort and calls mapped renderer", () => {
-  const dom = new JSDOM(`<!doctype html><body>
-    <div data-track-grid data-body-id="usbPlaylistTracks">
-      <div class="sortable" role="columnheader" data-sort-key="title"><span class="sort-label"></span></div>
-      <div class="sort-hint hidden"></div>
-    </div>
-  </body>`);
-  const tableSortState = {};
-  let renders = 0;
-  const th = dom.window.document.querySelector('.sortable[role="columnheader"]');
-  handleSortHeaderClick(tableSortState, { target: th }, {
-    renderMap: { renderUsbPlaylistTracks: () => { renders += 1; } },
-    bodyToRendererMap: { usbPlaylistTracks: "renderUsbPlaylistTracks" },
-    doc: dom.window.document
-  });
-  assert.equal(tableSortState.usbPlaylistTracks.key, "title");
-  assert.equal(tableSortState.usbPlaylistTracks.dir, "asc");
-  assert.equal(renders, 1);
 });
 
 test("renderUsbPlaylists renders empty and populated states", () => {

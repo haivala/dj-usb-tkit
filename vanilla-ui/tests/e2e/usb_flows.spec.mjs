@@ -475,6 +475,28 @@ test("startup includes console bridge message in Event Log", async ({ page }) =>
   await expect(page.locator("#eventLogList")).toContainText("Frontend console bridge initialized");
 });
 
+test("Event Log source filter dropdown never grows duplicate options for a repeated source", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.goto("/");
+
+  // Startup alone already logs several "startup"-sourced events; add more
+  // "console"-sourced ones on top so the same source shows up repeatedly
+  // across renders -- ensureEventLogSourceOptions must still add each
+  // distinct source to the filter dropdown only once.
+  await page.evaluate(() => {
+    console.log("dup-source-1");
+    console.log("dup-source-2");
+    console.log("dup-source-3");
+  });
+
+  await page.locator("#settingsBtn").click();
+  await page.locator("#openEventLogBtn").click();
+
+  await expect(page.locator("#eventLogList")).toContainText("dup-source-3");
+  await expect(page.locator('#eventLogSourceFilter option[value="console"]')).toHaveCount(1);
+  await expect(page.locator('#eventLogSourceFilter option[value="startup"]')).toHaveCount(1);
+});
+
 test("USB sub-nav reveal/hide and fallback to USB panel", async ({ page }) => {
   await installTauriMock(page, "toggle-usb");
   await page.goto("/");

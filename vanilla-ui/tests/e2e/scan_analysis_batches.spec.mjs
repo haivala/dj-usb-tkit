@@ -404,7 +404,8 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
   const pageSize = Number(opts?.pageSize || 200);
   const pieceDelayMs = Number(opts?.pieceDelayMs || 80);
   const materializedIds = !!opts?.materializedIds;
-  return page.addInitScript(({ trackCount, pageSize, pieceDelayMs, materializedIds }) => {
+  const materializeFails = !!opts?.materializeFails;
+  return page.addInitScript(({ trackCount, pageSize, pieceDelayMs, materializedIds, materializeFails }) => {
     // See installScanAnalysisMock for why this is required: registerBackendJobEvents()
     // only calls listen("job:event", ...) when window.isTauri is truthy.
     window.isTauri = true;
@@ -677,6 +678,9 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           }
           if (command === "materialize_source_track") {
             materializeCalls += 1;
+            if (materializeFails) {
+              return { ok: false, error: { code: "INTERNAL_ERROR", message: "materialize failed" } };
+            }
             const filePath = String(payload?.request?.filePath || "");
             const row = tracks.find((t) => t.filePath === filePath);
             if (!row) {
@@ -747,7 +751,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         return materializeCalls;
       }
     };
-  }, { trackCount, pageSize, pieceDelayMs, materializedIds });
+  }, { trackCount, pageSize, pieceDelayMs, materializedIds, materializeFails });
 }
 
 test("scan applies per-piece row updates before track-ready status", async ({ page }) => {
@@ -1084,6 +1088,32 @@ test("analyze on auto-loaded non-materialized track resolves local id", async ({
   }).toBeGreaterThan(0);
 });
 
+test("analyze reports the not-in-local-library message when materializing the track fails", async ({ page }) => {
+  await installPagedMaterializeAnalyzeMock(page, {
+    trackCount: 260, pageSize: 200, pieceDelayMs: 120, materializeFails: true
+  });
+  await page.goto("/");
+
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(200);
+
+  await page.evaluate(() => {
+    const wrap = document.querySelector("#libraryTableWrap");
+    if (!wrap) return;
+    wrap.scrollTop = wrap.scrollHeight;
+    wrap.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(260);
+
+  const targetRow = page.locator("#libraryTableBody .track-grid-row").nth(230);
+  await targetRow.locator('[data-action="analyze-track"]').click();
+
+  await expect(page.locator("#statusText")).toContainText(
+    "Track is not in local library yet. Scan library first, then analyze."
+  );
+  const analyzeCalls = await page.evaluate(() => Number(window.__pagedAnalyzeStats?.analyzeCalls || 0));
+  expect(analyzeCalls).toBe(0);
+});
+
 test("analyze on auto-loaded track updates row in place without full reload", async ({ page }) => {
   await installPagedMaterializeAnalyzeMock(page, {
     trackCount: 260,
@@ -1133,4 +1163,103 @@ test("analyze on auto-loaded track updates row in place without full reload", as
   expect(afterStats.analyzeCalls).toBeGreaterThan(0);
   expect(afterStats.list).toBe(beforeStats.list);
   expect(afterStats.search).toBeGreaterThanOrEqual(beforeStats.search);
+});
+
+// A single-track library with analyze_new_tracks's response fully under the
+// test's control (no per-piece job:event choreography needed -- that's not
+// what these two tests are about) for exercising status-line formatting of
+// unusual `analyze_new_tracks` response shapes: a partial-failure count, and
+// a structured WarningEntry object (as opposed to a plain string) that must
+// still render its `message`, not "[object Object]".
+function installAnalyzeResponseMock(page, { analyzeResponse }) {
+  return page.addInitScript(({ analyzeResponse }) => {
+    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+
+    const track = {
+      id: "t-1",
+      title: "Track One",
+      artist: "Artist",
+      album: "Album",
+      filePath: "/music/Track One.mp3",
+      fileSizeBytes: 1000,
+      bpm: null,
+      key: null,
+      durationMs: null,
+      waveformPeaksPath: null,
+      waveformPreview: [],
+      createdAt: "2026-03-01T00:00:00Z",
+      updatedAt: "2026-03-01T00:00:00Z"
+    };
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command) => {
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "detect_external_master_db") {
+            return { ok: true, data: { found: false, path: null } };
+          }
+          if (command === "list_playlists") return { ok: true, data: { items: [] } };
+          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], warnings: [] } };
+          }
+          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+            return { ok: true, data: { total: 1, items: [track] } };
+          }
+          if (command === "analyze_new_tracks") {
+            return { ok: true, data: analyzeResponse };
+          }
+          if (command === "get_tracks_by_ids_with_previews") {
+            return { ok: true, data: { items: [] } };
+          }
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+        }
+      },
+      event: { listen: async () => () => {} }
+    };
+  }, { analyzeResponse });
+}
+
+test("a failed analyze_new_tracks count is reported in the status line", async ({ page }) => {
+  await installAnalyzeResponseMock(page, {
+    analyzeResponse: {
+      jobId: "job-1",
+      analyzed: 0,
+      failed: 1,
+      warnings: ["1 bpm_key (essentia): no BPM/key result"]
+    }
+  });
+  await page.goto("/");
+
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
+  await page.locator('[data-action="analyze-track"]').click();
+
+  await expect(page.locator("#statusText")).toContainText("done: analyzed 0, failed 1");
+});
+
+test("a structured warning entry's message renders in the status line instead of [object Object]", async ({ page }) => {
+  await installAnalyzeResponseMock(page, {
+    analyzeResponse: {
+      jobId: "job-1",
+      analyzed: 1,
+      failed: 0,
+      warnings: [{
+        level: "info",
+        code: "analysis.auto-select-limit",
+        message: "Auto analysis limit reached: selected 1 of 5 eligible tracks (limit 1). Run analysis again or select tracks explicitly to continue.",
+        source: "analysis"
+      }]
+    }
+  });
+  await page.goto("/");
+
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
+  await page.locator('[data-action="analyze-track"]').click();
+
+  await expect(page.locator("#statusText")).toContainText(
+    "Auto analysis limit reached: selected 1 of 5 eligible tracks"
+  );
+  await expect(page.locator("#statusText")).not.toContainText("[object Object]");
 });

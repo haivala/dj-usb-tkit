@@ -215,3 +215,166 @@ test("a normal (~80-track) playlist is not paginated and hydrates in one pass", 
   expect(calls[0].length).toBe(80);
   await expect(rowByTitle(page, "Track 0079").locator(".bpm-pill")).toBeVisible();
 });
+
+// Clicking a track row re-hydrates that one track (belt-and-suspenders for
+// a track that somehow still isn't fully hydrated once visible) and patches
+// just that row's cells in place -- it must not blow away and rebuild the
+// whole table, which would cost more render time and reset scroll/focus for
+// no reason. If the row is no longer present by the time hydration resolves
+// (e.g. it scrolled/filtered out), the code falls back to a full re-render
+// instead of silently doing nothing. Track id "3" is deliberately left
+// unhydrated by the initial batch hydration mock below to exercise both
+// paths.
+function installRowClickMock(page) {
+  return page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    window.__singleInspectCalls = [];
+
+    const tracks = Array.from({ length: 5 }, (_, i) => ({
+      id: String(i + 1),
+      title: `Track ${String(i).padStart(4, "0")}`,
+      artist: "Same Artist",
+      album: "Album"
+    }));
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "detect_external_master_db") {
+            return { ok: true, data: { found: false, path: null } };
+          }
+          if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
+          if (command === "list_playlists") return { ok: true, data: { items: [] } };
+          if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
+          if (command === "search_tracks") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "fetch_usb_histories") return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "validate_usb_root") {
+            const path = String(payload?.request?.path || "");
+            if (!path) {
+              return {
+                ok: true,
+                data: {
+                  valid: false, hasWriteAccess: false, normalizedRoot: null,
+                  hasVendorRoot: false, hasContents: false, hasPdb: false, hasEdb: false,
+                  warnings: ["USB path is empty"]
+                }
+              };
+            }
+            return {
+              ok: true,
+              data: {
+                valid: true, hasWriteAccess: true, normalizedRoot: path,
+                hasVendorRoot: true, hasContents: true, hasPdb: true, hasEdb: true,
+                warnings: []
+              }
+            };
+          }
+          if (command === "fetch_usb_playlists") {
+            return {
+              ok: true,
+              data: {
+                items: [
+                  {
+                    id: "usb-1",
+                    name: "Small Playlist",
+                    source: "mock-tauri",
+                    tracks,
+                    trackCount: tracks.length,
+                    totalDurationMs: 0,
+                    durationKnownCount: 0
+                  }
+                ],
+                stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
+                warnings: []
+              }
+            };
+          }
+          if (command === "inspect_usb_tracks") {
+            // Initial page-render hydration: every track hydrates except
+            // id "3", which the backend "misses" -- simulating the kind of
+            // gap the click-to-patch path exists to paper over.
+            const items = payload?.request?.items || [];
+            return {
+              ok: true,
+              data: {
+                items: items.map((item) => {
+                  if (String(item.trackId) === "3") {
+                    return { trackId: item.trackId, source: null, track: null };
+                  }
+                  return {
+                    trackId: item.trackId,
+                    source: "pdb",
+                    track: { bpm: 120, key: "8A", waveformPreview: [10, 20, 30, 20, 10] }
+                  };
+                }),
+                warnings: []
+              }
+            };
+          }
+          if (command === "inspect_usb_track") {
+            window.__singleInspectCalls.push(payload?.request?.trackId);
+            // Small artificial delay so a test has a window to mutate the
+            // DOM (e.g. remove the target row) after the click but before
+            // the patch attempt runs.
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return {
+              ok: true,
+              data: { source: "pdb", track: { bpm: 128, key: "5A", waveformPreview: [5, 15, 25, 15, 5] } }
+            };
+          }
+          return { ok: false, error: { code: "INTERNAL_ERROR", message: `Unknown mock command: ${command}` } };
+        }
+      }
+    };
+  });
+}
+
+test("clicking an unhydrated track row patches it in place instead of re-rendering the table", async ({ page }) => {
+  await installRowClickMock(page);
+  await selectBigPlaylist(page);
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(5);
+
+  const targetRow = page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]');
+  await expect(targetRow.locator(".bpm-pill")).toHaveCount(0);
+
+  // Tag a sibling row's live DOM node -- a full re-render rebuilds the
+  // tbody's innerHTML and would wipe this marker; an in-place cell patch of
+  // only the clicked row leaves every other row's node untouched.
+  const siblingRow = page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="1"]');
+  await siblingRow.evaluate((row) => row.setAttribute("data-test-marker", "keep"));
+
+  await targetRow.click();
+  await expect(targetRow.locator(".bpm-pill")).toHaveText("128");
+  await expect(targetRow.locator(".key-pill")).toHaveText("5A");
+
+  await expect(siblingRow).toHaveAttribute("data-test-marker", "keep");
+  const singleCalls = await page.evaluate(() => window.__singleInspectCalls);
+  expect(singleCalls).toEqual(["3"]);
+});
+
+test("falls back to a full re-render when the clicked row is gone by the time hydration resolves", async ({ page }) => {
+  await installRowClickMock(page);
+  await selectBigPlaylist(page);
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(5);
+
+  const targetRow = page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]');
+  await targetRow.click();
+
+  // Rip the row out of the DOM while the click handler's hydration request
+  // is still in flight -- when it resolves, patchUsbTrackRow's lookup for
+  // data-track-id="3" finds nothing, so the code must fall back to
+  // rebuilding the whole table from state instead of leaving the row gone.
+  await page.locator("#usbPlaylistTracks").evaluate((container) => {
+    container.querySelector('.track-grid-row[data-track-id="3"]')?.remove();
+  });
+  await expect(page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]')).toHaveCount(0);
+
+  const recoveredRow = page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]');
+  await expect(recoveredRow).toHaveCount(1);
+  await expect(recoveredRow.locator(".bpm-pill")).toHaveText("128");
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(5);
+});

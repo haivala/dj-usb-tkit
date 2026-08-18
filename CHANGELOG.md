@@ -30,6 +30,12 @@
 
 ## Unreleased
 
+- **Fix:** searching the media library could make an unrelated, already fully-analyzed source
+  folder's chip lose its green "analyzed" state — and multiple folders could be affected at
+  once — because the analyzed/total counts behind that indicator were computed from the
+  search-filtered track list instead of each folder's full contents. A search matching zero
+  tracks in a folder collapsed its count to 0, which read as "not analyzed." The chip's status
+  is now computed from each folder's full contents regardless of the current search query.
 - **Fix:** selecting a very large USB playlist or history session (rekordbox caps a playlist at
   9999 tracks) could freeze the UI entirely, including making the window unresponsive just from
   moving the mouse over the track table — rendering thousands of rows, waveforms, and cover
@@ -90,6 +96,13 @@
   computes the true total for the current filter (source roots, master.db, search query) and
   sends it with the library listing, and pushes a live-updated total per track during an
   analysis batch — the frontend just displays the numbers it's given instead of recomputing them.
+- **Chore:** trimmed the frontend unit test suite (70 files/10,848 lines down to 57/9,437), removing
+  tests that only duplicated existing Playwright e2e coverage or asserted nothing about real app
+  code. A handful of files had real, unique coverage that mocked away the DOM/event-wiring behavior
+  they were nominally testing; that coverage was ported into new or extended e2e tests (row-click
+  hydration patch/fallback, the master.db chip's scan-free filtering, event-log source-dropdown
+  dedup, and analyze error-path status messages) before the originals were deleted. No behavior
+  change.
 
 ## 0.1.20
 

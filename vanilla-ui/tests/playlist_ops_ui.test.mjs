@@ -4,8 +4,6 @@ import { JSDOM } from "jsdom";
 
 import {
   renderPlaylistList,
-  promptNewPlaylist,
-  startPlaylistRename,
   formatPlaylistExportStatus,
   loadPlaylists,
   refreshCurrentPlaylistTracks,
@@ -58,71 +56,6 @@ test("renderPlaylistList renders active and active-mode playlist buttons", () =>
   // playlists are rendered newest-first (reversed), so p2 is first, p1 is second
   assert.equal(buttons[0].classList.contains("active"), true);
   assert.equal(buttons[1].classList.contains("playlist-active-mode"), true);
-});
-
-test("promptNewPlaylist guards double submit and restores button", async () => {
-  const dom = makeDom();
-  const { document, Event, KeyboardEvent } = dom.window;
-  const el = {
-    navPlaylistList: document.getElementById("navPlaylistList"),
-    addPlaylistBtn: document.getElementById("addPlaylistBtn")
-  };
-  let created = 0;
-  const statuses = [];
-
-  promptNewPlaylist(el, {
-    document,
-    requestAnimationFrame: (cb) => cb(),
-    createPlaylist: async () => { created += 1; },
-    setStatus: (text) => statuses.push(text)
-  });
-
-  const input = document.querySelector(".nav-new-input");
-  input.value = "My Playlist";
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  input.dispatchEvent(new Event("blur", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 120));
-
-  assert.equal(created, 1);
-  assert.equal(el.addPlaylistBtn.classList.contains("hidden"), false);
-  assert.equal(statuses.length, 0);
-});
-
-test("startPlaylistRename saves new name and updates panel + badge", async () => {
-  const dom = makeDom();
-  const { document, KeyboardEvent } = dom.window;
-  const state = {
-    activeTab: "p1",
-    playlists: [{ id: "p1", name: "Old Name", lastExportedAt: "2026-01-01T00:00:00Z" }]
-  };
-  const navPlaylistList = document.getElementById("navPlaylistList");
-  navPlaylistList.innerHTML = '<li><button class="nav-playlist-item" data-playlist-id="p1">Old Name</button></li>';
-  const el = {
-    navPlaylistList,
-    playlistPanelTitle: document.getElementById("playlistPanelTitle"),
-    playlistExportStatus: document.getElementById("playlistExportStatus"),
-    badgeLabel: document.getElementById("badgeLabel")
-  };
-
-  startPlaylistRename("p1", state, el, {
-    document,
-    requestAnimationFrame: (cb) => cb(),
-    command: async () => ({ name: "New Name" }),
-    setStatus: () => {},
-    renderPlaylistSidebarItemContent: (playlist) => playlist.name,
-    getCurrentPlaylist: () => ({ id: "p1", name: "New Name" }),
-    formatPlaylistExportStatus: () => "Not exported yet."
-  });
-
-  const input = document.querySelector(".nav-rename-input");
-  input.value = "New Name";
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  assert.equal(state.playlists[0].name, "New Name");
-  assert.equal(el.playlistPanelTitle.textContent, "New Name");
-  assert.equal(el.playlistExportStatus.textContent, "Not exported yet.");
-  assert.equal(el.badgeLabel.textContent, "New Name");
 });
 
 test("formatPlaylistExportStatus formats exported playlists", () => {
@@ -216,24 +149,6 @@ test("updatePlaylistExportButtons hides export while analyze-missing is availabl
   assert.equal(el.exportPlaylistBtn.hidden, true);
   assert.equal(el.analyzePlaylistMissingBtn.hidden, false);
   assert.match(el.analyzePlaylistMissingBtn.textContent, /1/);
-});
-
-test("createPlaylist validates name and switches to the new playlist", async () => {
-  const state = { currentPlaylistId: null };
-  const calls = [];
-
-  await createPlaylist("Fresh", {
-    setStatus: (text) => calls.push(`status:${text}`),
-    withProgress: async (_label, fn) => fn(() => {}),
-    command: async () => ({ playlistId: "p9", name: "Fresh" }),
-    loadPlaylists: async () => calls.push("load"),
-    state,
-    updateModeText: () => calls.push("mode"),
-    switchTab: async (tab) => calls.push(`tab:${tab}`)
-  });
-
-  assert.equal(state.currentPlaylistId, "p9");
-  assert.deepEqual(calls, ["load", "mode", "tab:p9", "status:Playlist created: Fresh"]);
 });
 
 test("createPlaylist selects newly loaded playlist when command id is not present", async () => {

@@ -119,6 +119,18 @@ pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
     !root_key.is_empty() && (file_key == root_key || file_key.starts_with(&format!("{root_key}/")))
 }
 
+/// `query` must already be trimmed/lowercased (see `compute_visible_library_tracks`).
+fn track_matches_query(track: &Track, query: &str) -> bool {
+    let haystack = format!(
+        "{} {} {}",
+        track.title,
+        track.artist,
+        track.album.clone().unwrap_or_default()
+    )
+    .to_lowercase();
+    haystack.contains(query)
+}
+
 fn sanitize_source_roots(source_roots: Vec<String>) -> Vec<String> {
     let mut roots = Vec::<String>::new();
     for root in source_roots {
@@ -1273,19 +1285,20 @@ impl BackendService {
         })
     }
 
-    /// Builds the complete filtered track list for a set of source roots
-    /// (plus optional master.db tracks) matching a search query -- the same
-    /// filtering `browse_source_files` returns to the frontend before it's
-    /// paginated. Shared by `browse_source_files` and the analysis pipeline
-    /// (which uses it to compute the live library-duration-total baseline),
-    /// so both stay consistent by construction. Sanitizes/sorts/dedups
-    /// `source_roots` itself, so callers may pass raw values.
-    fn compute_visible_library_tracks(
+    /// Builds the complete library track list for a set of source roots
+    /// (plus optional master.db tracks) -- NOT filtered by search query.
+    /// This is the expensive, I/O-bound part (filesystem scan + DB read),
+    /// shared by `compute_visible_library_tracks` below and by
+    /// `browse_source_files` directly (which needs the *unfiltered* set to
+    /// compute `source_root_analysis` -- a folder's analyzed status must
+    /// not depend on the current search query -- without scanning twice).
+    /// Sanitizes/sorts/dedups `source_roots` itself, so callers may pass
+    /// raw values.
+    fn compute_all_library_tracks(
         &self,
         conn: &rusqlite::Connection,
         source_roots: &[String],
         include_master_db: bool,
-        query: &str,
     ) -> BackendResult<Vec<Track>> {
         let mut source_roots = source_roots
             .iter()
@@ -1298,7 +1311,6 @@ impl BackendService {
             return Ok(Vec::new());
         }
 
-        let query = query.trim().to_lowercase();
         let scanned = if source_roots.is_empty() {
             Vec::new()
         } else {
@@ -1374,19 +1386,28 @@ impl BackendService {
                 .then_with(|| a.id.cmp(&b.id))
         });
 
-        if !query.is_empty() {
-            items.retain(|track| {
-                let haystack = format!(
-                    "{} {} {}",
-                    track.title,
-                    track.artist,
-                    track.album.clone().unwrap_or_default()
-                )
-                .to_lowercase();
-                haystack.contains(&query)
-            });
-        }
+        Ok(items)
+    }
 
+    /// Builds the complete filtered track list for a set of source roots
+    /// (plus optional master.db tracks) matching a search query -- the same
+    /// filtering `browse_source_files` returns to the frontend before it's
+    /// paginated. Shared by `browse_source_files` and the analysis pipeline
+    /// (which uses it to compute the live library-duration-total baseline),
+    /// so both stay consistent by construction. Sanitizes/sorts/dedups
+    /// `source_roots` itself, so callers may pass raw values.
+    fn compute_visible_library_tracks(
+        &self,
+        conn: &rusqlite::Connection,
+        source_roots: &[String],
+        include_master_db: bool,
+        query: &str,
+    ) -> BackendResult<Vec<Track>> {
+        let mut items = self.compute_all_library_tracks(conn, source_roots, include_master_db)?;
+        let query = query.trim().to_lowercase();
+        if !query.is_empty() {
+            items.retain(|track| track_matches_query(track, &query));
+        }
         Ok(items)
     }
 
@@ -1432,14 +1453,21 @@ impl BackendService {
         let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
 
         let conn = self.db.connect()?;
-        let items = self.compute_visible_library_tracks(&conn, &source_roots, include_master_db, &query)?;
+        let all_items = self.compute_all_library_tracks(&conn, &source_roots, include_master_db)?;
 
+        // source_root_analysis describes each folder's own analyzed state
+        // and must not depend on the current search query -- otherwise a
+        // query that doesn't match (all of) a folder's tracks makes an
+        // otherwise fully-analyzed folder's chip appear unanalyzed (in the
+        // worst case, a query matching zero tracks in a folder collapses
+        // `total` to 0, and `fully_analyzed` requires `total > 0`). Computed
+        // from the full, unfiltered set -- before the query filter below.
         let source_root_analysis = source_roots
             .iter()
             .map(|root| {
                 let mut total = 0usize;
                 let mut analyzed = 0usize;
-                for track in &items {
+                for track in &all_items {
                     if browse_path_matches_root(&track.file_path, root) {
                         total += 1;
                         if track_has_core_analysis_for_source_status(track) {
@@ -1455,6 +1483,11 @@ impl BackendService {
                 }
             })
             .collect::<Vec<_>>();
+
+        let mut items = all_items;
+        if !query.is_empty() {
+            items.retain(|track| track_matches_query(track, &query));
+        }
 
         let mut total_duration_ms: u64 = 0;
         let mut duration_known_count: usize = 0;
@@ -3800,6 +3833,67 @@ mod tests {
         assert_eq!(result.total, 3);
         assert_eq!(result.duration_known_count, 2);
         assert_eq!(result.total_duration_ms, 300_000);
+    }
+
+    #[test]
+    fn browse_source_files_source_root_analysis_ignores_the_search_query() {
+        let (_dir, service) = test_service();
+        let root_a = tempfile::tempdir().expect("root a");
+        let root_b = tempfile::tempdir().expect("root b");
+        let path_a = root_a.path().join("alpha.mp3");
+        let path_b = root_b.path().join("bravo.mp3");
+        std::fs::write(&path_a, b"data").expect("write alpha");
+        std::fs::write(&path_b, b"data").expect("write bravo");
+        let path_a_str = path_a.to_string_lossy().to_string();
+        let path_b_str = path_b.to_string_lossy().to_string();
+
+        let conn = service.db.connect().expect("connect");
+        // Both tracks are fully analyzed (bpm + waveform + duration). Their
+        // titles deliberately share no substring, so a query matching one
+        // matches zero tracks in the other's source root.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES ('t1', 'Findable Alpha', 'Artist', ?1, 200000, 120.0, '/data/a.dat', ?2, 0, datetime('now'), datetime('now'))",
+            params![path_a_str, build_track_match_fingerprint("Findable Alpha", "Artist", None)],
+        )
+        .expect("insert t1");
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES ('t2', 'Unrelated Bravo', 'Artist', ?1, 200000, 120.0, '/data/b.dat', ?2, 0, datetime('now'), datetime('now'))",
+            params![path_b_str, build_track_match_fingerprint("Unrelated Bravo", "Artist", None)],
+        )
+        .expect("insert t2");
+        drop(conn);
+
+        let result = service
+            .browse_source_files(BrowseSourceFilesRequest {
+                source_roots: vec![
+                    root_a.path().to_string_lossy().to_string(),
+                    root_b.path().to_string_lossy().to_string(),
+                ],
+                include_master_db: false,
+                // Matches only the track in root_a -- root_b's track matches
+                // nothing, which used to collapse its `total` to 0 and flip
+                // `fully_analyzed` to false even though root_b is 100%
+                // analyzed on its own.
+                query: "Findable".to_string(),
+                limit: 100,
+                cursor: None,
+            })
+            .expect("browse source files");
+
+        // The search still narrows what's returned/shown...
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].id, "t1");
+
+        // ...but both source roots' analyzed status reflects their full,
+        // query-independent contents.
+        assert_eq!(result.source_root_analysis.len(), 2);
+        for status in &result.source_root_analysis {
+            assert_eq!(status.total, 1, "source root {}", status.source_root);
+            assert_eq!(status.analyzed, 1, "source root {}", status.source_root);
+            assert!(status.fully_analyzed, "source root {}", status.source_root);
+        }
     }
 
     #[test]
