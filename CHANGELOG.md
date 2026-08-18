@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.21
+
 - **Fix:** searching the media library could make an unrelated, already fully-analyzed source
   folder's chip lose its green "analyzed" state — and multiple folders could be affected at
   once — because the analyzed/total counts behind that indicator were computed from the
@@ -42,25 +44,27 @@
   images at once is expensive regardless of how fast the underlying data fetch is. USB playlist
   and history track tables now render and hydrate a page at a time for selections over ~300
   tracks, loading more as the user scrolls; typical playlists (~80 tracks) render exactly as
-  before.
-- **Fix:** searching or sorting a large, paginated USB playlist/history selection could leave
-  newly-visible tracks (brought into view by the filter or the new sort order) without their
-  bpm/key/waveform/cover art, since hydration was previously only triggered on initial selection
-  and on scroll. Every render path (selection, search, sort, scroll) now hydrates whatever it
-  just displayed.
-- **Improvement:** "Total time" for a USB playlist/history selection is now computed once
-  server-side from the full track list, matching how the media library already reports its
-  total, instead of being summed client-side from whatever tracks happen to be loaded — it's
-  now correct immediately on selection regardless of hydration/pagination progress.
-- **Improvement:** resolving USB track metadata (used when selecting/paginating a playlist) no
-  longer scans the entire parsed PDB per requested track id — an O(items × library size) scan
-  that dominated hydration time for large playlists regardless of how the requests were batched.
-  Track ids now resolve via a prebuilt lookup instead.
-- **Improvement:** batched USB track hydration no longer reads and base64-encodes each track's
-  cover art into the response. That eager encoding was pure overhead — the UI already falls back
-  to loading cover art directly from the USB drive, the same way it already does for tracks
-  resolved via the export database — and inflated response sizes enough to block the UI while
-  parsing a single large batch.
+  before. Because hydration was initially only wired up for the selection and scroll render
+  paths, searching or sorting a paginated selection could still leave newly-visible tracks
+  (brought into view by the filter or the new sort order) without their bpm/key/waveform/cover
+  art — every render path (selection, search, sort, scroll) now hydrates whatever it just
+  displayed.
+- **Fix:** "Total time" summaries — in the media library and for USB playlist/history
+  selections — were computed client-side by summing whatever tracks happened to be loaded, so
+  they showed the wrong (too-low) total on app restart, after a search/filter change until every
+  matching track had paged back in, and immediately after selecting a large paginated USB
+  playlist/history before hydration caught up. The backend now computes the true total for the
+  current filter/selection and sends it with the listing or selection response; the library
+  additionally receives a live-updated total per track during an analysis batch. The frontend
+  just displays the numbers it's given instead of recomputing them from partial data.
+- **Improvement:** batched USB track metadata hydration (used when selecting/paginating a
+  playlist) was slow for large selections for two independent reasons, both now fixed: resolving
+  a track id scanned the entire parsed PDB per requested id — an O(items × library size) scan
+  regardless of how the requests were batched, now resolved via a prebuilt lookup instead — and
+  every response eagerly read and base64-encoded each track's cover art, pure overhead since the
+  UI already falls back to loading cover art directly from the USB drive (the same way it already
+  does for tracks resolved via the export database), which inflated response sizes enough to
+  block the UI while parsing a single large batch.
 - **Improvement:** USB repair and export now open the export library database (eDB) once per
   run and reuse that connection for every read/write step, instead of reopening it for each
   fix or verification pass. A full repair with several fixes selected previously reopened the
@@ -80,22 +84,16 @@
   triggering a full library re-scan, chip-panel DOM rebuild, and duration resum on the JS main
   thread; on a big batch this ran hundreds to thousands of times instead of once. These now only
   run once, when the whole batch actually finishes, instead of being throttled with a timer.
-- **Fix:** the pulsing border on an in-progress analyzing row no longer changes that row's height,
-  which was shifting every row below it and making the list look jumpy during analysis.
-- **Fix:** track rows with a loaded cover image rendered a few pixels taller than rows still
-  showing the placeholder square, misaligning row borders throughout the library and playlist
-  tables as covers loaded in. The cover image is now sized identically to its placeholder.
-- **Chore:** removed the unused analysis-row-patch queue (`createAnalysisPatchQueue` and its
-  wiring in `main.js`), a `requestAnimationFrame`-coalesced batching layer that was fully wired
-  up but never actually invoked in production. No behavior change.
-- **Chore:** removed `refreshLoadedLibraryTracksFromBackend`, an unused helper with no callers
-  anywhere in the app. No behavior change.
-- **Fix:** the media library's "Total time" summary was computed client-side from whatever page
-  of tracks happened to be loaded, so it showed the wrong (too-low) total on app restart and
-  after any search/filter change until every matching track had been paged in. The backend now
-  computes the true total for the current filter (source roots, master.db, search query) and
-  sends it with the library listing, and pushes a live-updated total per track during an
-  analysis batch — the frontend just displays the numbers it's given instead of recomputing them.
+- **Fix:** rows in the library and playlist tables could shift/misalign for two separate reasons
+  during analysis, both now fixed: the pulsing border on an in-progress analyzing row changed that
+  row's height, shifting every row below it and making the list look jumpy; and a row with a
+  loaded cover image rendered a few pixels taller than one still showing the placeholder square,
+  misaligning row borders as covers loaded in. The border no longer affects row height, and the
+  cover image is now sized identically to its placeholder.
+- **Chore:** removed dead code with no production callers: the unused analysis-row-patch queue
+  (`createAnalysisPatchQueue` and its wiring in `main.js`, a `requestAnimationFrame`-coalesced
+  batching layer that was fully wired up but never actually invoked) and
+  `refreshLoadedLibraryTracksFromBackend`, an unused helper. No behavior change.
 - **Chore:** trimmed the frontend unit test suite (70 files/10,848 lines down to 57/9,437), removing
   tests that only duplicated existing Playwright e2e coverage or asserted nothing about real app
   code. A handful of files had real, unique coverage that mocked away the DOM/event-wiring behavior
