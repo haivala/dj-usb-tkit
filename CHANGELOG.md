@@ -54,6 +54,9 @@
 - **Fix:** track rows with a loaded cover image rendered a few pixels taller than rows still
   showing the placeholder square, misaligning row borders throughout the library and playlist
   tables as covers loaded in. The cover image is now sized identically to its placeholder.
+- **Chore:** removed the unused analysis-row-patch queue (`createAnalysisPatchQueue` and its
+  wiring in `main.js`), a `requestAnimationFrame`-coalesced batching layer that was fully wired
+  up but never actually invoked in production. No behavior change.
 
 ## 0.1.20
 

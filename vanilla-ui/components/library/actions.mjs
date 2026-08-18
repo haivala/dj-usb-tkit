@@ -1500,58 +1500,6 @@ export function patchLibraryRowCells(row, track, deps) {
   return true;
 }
 
-export function createAnalysisPatchQueue() {
-  const pending = new Set();
-  let rafId = null;
-  let patchFn = null;
-  let fallbackFn = null;
-
-  function flush() {
-    rafId = null;
-    const ids = Array.from(pending);
-    pending.clear();
-    let anyMissed = false;
-    let patched = 0;
-    for (const id of ids) {
-      if (!patchFn(id)) {
-        anyMissed = true;
-      } else {
-        patched++;
-      }
-    }
-    if (ids.length) {
-      console.log(`[analysis-ui] flush: ${patched}/${ids.length} rows patched, missed: ${anyMissed}`);
-    }
-    if (anyMissed && fallbackFn) {
-      fallbackFn();
-    }
-  }
-
-  return {
-    get pending() { return pending; },
-    get scheduled() { return rafId !== null; },
-
-    init(patchRowById, scheduleFullRender, requestAnimationFrameFn) {
-      patchFn = patchRowById;
-      fallbackFn = scheduleFullRender;
-      this._raf = requestAnimationFrameFn || globalThis.requestAnimationFrame?.bind(globalThis);
-    },
-
-    queue(trackId) {
-      pending.add(trackId);
-      if (rafId !== null) return;
-      rafId = this._raf(flush);
-    },
-
-    flush,
-
-    cancel() {
-      pending.clear();
-      rafId = null;
-    }
-  };
-}
-
 function formatDurationMsInternal(value) {
   const rawMs = Number(value);
   return Number.isFinite(rawMs) && rawMs > 0 ? formatDurationMs(rawMs) : "-";

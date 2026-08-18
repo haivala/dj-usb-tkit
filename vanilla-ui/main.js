@@ -553,15 +553,6 @@ function handlePlaybackEvent(payload) {
   });
 }
 
-// --- Analysis patch queue ---
-
-const analysisPatchQueue = library.createAnalysisPatchQueue();
-analysisPatchQueue.init(
-  (id) => patchLibraryRowByTrackId(id),
-  () => applySearchLocalFilter(),
-  (cb) => setTimeout(cb, 0),
-);
-
 const patchRowCellDeps = {
   escapeHtml,
   getKeyHue,

@@ -37,7 +37,6 @@ test("createInitialState creates fresh mutable containers", () => {
   a.usbKnownPlaylistNames.add("A");
   a.trackPreviewHydrateInFlight.add("t1");
   a.analyzingTrackIds.add("t2");
-  a.analysisPatchQueue.add("t3");
   a.selectedRepairFixIds.add("fix1");
   a.missingSourceRoots.add("/missing");
   a.sourceRoots.push("/music");
@@ -46,7 +45,6 @@ test("createInitialState creates fresh mutable containers", () => {
   assert.equal(b.usbKnownPlaylistNames.size, 0);
   assert.equal(b.trackPreviewHydrateInFlight.size, 0);
   assert.equal(b.analyzingTrackIds.size, 0);
-  assert.equal(b.analysisPatchQueue.size, 0);
   assert.equal(b.selectedRepairFixIds.size, 0);
   assert.equal(b.missingSourceRoots.size, 0);
   assert.deepEqual(b.sourceRoots, []);

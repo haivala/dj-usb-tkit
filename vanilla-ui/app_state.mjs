@@ -89,8 +89,6 @@ export function createInitialState() {
     trackPreviewHydrateInFlight: new Set(),
     loadedPreviewHydrationSeq: 0,
     analyzingTrackIds: new Set(),
-    analysisPatchQueue: new Set(),
-    analysisPatchRafId: null,
     deletingPlaylistId: null,
     selectedRepairFixIds: new Set(),
     eventLogEntries: [],
