@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.22
+
 - **New feature:** tracks inside an app playlist can now be reordered by dragging them, backed by
   a new `reorder_playlist_tracks` backend command that persists the custom order to the
   `playlist_tracks.position` column. Dragging is disabled while a column sort or search filter is

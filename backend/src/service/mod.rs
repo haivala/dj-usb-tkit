@@ -170,9 +170,7 @@ fn play_native_with_recovery(
 }
 
 // Plain data assembly for the three playback-resolution outcomes below
-// (library, USB, USB-after-library-failure) -- splitting the args into a
-// params struct wouldn't reduce the coupling, just move it.
-#[allow(clippy::too_many_arguments)]
+// (library, USB, USB-after-library-failure).
 fn play_resolved_track_data(
     status: PlaybackStatusData,
     requested_path: &str,
@@ -180,9 +178,9 @@ fn play_resolved_track_data(
     matched_by: &str,
     source: &str,
     source_label: String,
-    library_resolved: bool,
     has_usb_context: bool,
 ) -> PlayResolvedTrackData {
+    let library_resolved = source == "library";
     PlayResolvedTrackData {
         path: status.path.unwrap_or_else(|| requested_path.to_string()),
         playing: status.playing,
@@ -619,7 +617,6 @@ impl BackendService {
                         &matched_by,
                         "library",
                         playback_source_label(req.origin.as_deref(), true, has_usb_context),
-                        true,
                         has_usb_context,
                     ));
                 }
@@ -641,7 +638,6 @@ impl BackendService {
                             &matched_by,
                             "usb",
                             "USB (library unavailable)".to_string(),
-                            false,
                             has_usb_context,
                         ));
                     }
@@ -660,7 +656,6 @@ impl BackendService {
                 &matched_by,
                 "usb",
                 playback_source_label(req.origin.as_deref(), false, has_usb_context),
-                false,
                 has_usb_context,
             ));
         }
