@@ -660,6 +660,14 @@ test("playlist track drag handle is disabled with a tooltip when additive export
     "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order."
   );
 
+  // Same backend-computed collision also drives the Export button into
+  // "append" mode -- one flag, two UI spots.
+  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
+  await expect(page.locator("#exportPlaylistBtn")).toHaveAttribute(
+    "data-tooltip",
+    'Append current playlist tracks to existing USB playlist "Reorder Playlist"'
+  );
+
   // Dragging the disabled handle is a no-op -- it isn't draggable, so no
   // dragstart/reorder ever fires.
   const box = await disabledHandles.first().boundingBox();
@@ -683,4 +691,5 @@ test("playlist track drag handle stays enabled in additive mode when no same-nam
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
   await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
   await expect(page.locator("#playlistTracksBody .drag-handle.disabled")).toHaveCount(0);
+  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Export to USB: USB");
 });

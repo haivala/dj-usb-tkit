@@ -6,23 +6,14 @@ import {
   playlistUsbExportStatusById
 } from "../components/usb/actions.mjs";
 
-test("computeExportButtonState shows append text when the backend reports a reorder-locking collision", () => {
-  const statusById = playlistUsbExportStatusById([
-    { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true }
-  ]);
-
-  const state = computeExportButtonState({
-    usbRoot: "/tmp/USB",
-    usbRootValid: true,
-    currentPlaylistId: "p1",
-    currentPlaylistName: "Testi",
-    playlistUsbExportStatusById: statusById
-  });
-
-  assert.equal(state.enabled, true);
-  assert.equal(state.text, "Append to (Testi) on USB: (USB)");
-  assert.equal(state.title, 'Append current playlist tracks to existing USB playlist "Testi"');
-});
+// Append-vs-export text for a real reorder-locking / non-colliding playlist
+// is covered end-to-end via the Tauri mock in
+// tests/e2e/playlist_analysis_actions.spec.mjs ("...disabled with a tooltip
+// when additive export won't reorder it on the USB" and "...stays enabled in
+// additive mode when no same-name USB playlist exists"), which also proves
+// the backend-computed field actually reaches the DOM. The `locksReorder`
+// boolean itself is unit- and functional-tested backend-side (see
+// backend/src/service/export.rs).
 
 test("playlistUsbExportStatusById indexes the backend's per-playlist status by playlist id", () => {
   const statusById = playlistUsbExportStatusById([
@@ -35,24 +26,6 @@ test("playlistUsbExportStatusById indexes the backend's per-playlist status by p
   assert.equal(statusById.get("p1").sameNameExistsOnUsb, true);
   assert.equal(statusById.get("p2").locksReorder, false);
   assert.equal(statusById.get("missing"), undefined);
-});
-
-test("computeExportButtonState keeps export text when the backend reports no reorder lock (mirror mode)", () => {
-  const statusById = playlistUsbExportStatusById([
-    { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: false }
-  ]);
-
-  const state = computeExportButtonState({
-    usbRoot: "/tmp/USB",
-    usbRootValid: true,
-    currentPlaylistId: "p1",
-    currentPlaylistName: "Testi",
-    playlistUsbExportStatusById: statusById
-  });
-
-  assert.equal(state.enabled, true);
-  assert.equal(state.text, "Export to USB: USB");
-  assert.equal(state.title, "Export current playlist to selected USB");
 });
 
 test("computeExportButtonState appends last path segment to export text", () => {
