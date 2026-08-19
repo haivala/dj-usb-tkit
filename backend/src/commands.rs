@@ -4,23 +4,23 @@ use std::sync::{Arc, Mutex, mpsc};
 use crate::error::BackendResult;
 use crate::error::ErrorPayload;
 use crate::models::{
-    AddTracksToPlaylistData, AddTracksToPlaylistRequest, AnalyzeNewTracksData,
-    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
-    CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
-    DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData, DeleteUsbBackupRequest,
-    DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
-    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
-    GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
-    InspectUsbTracksRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
-    PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
-    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData,
+    AddTracksToPlaylistRequest, AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse,
+    BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
+    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
+    DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData,
+    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
+    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, GetUsbDeviceNameData,
+    GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
+    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
+    InspectUsbTracksData, InspectUsbTracksRequest, ListPlaylistsData, ListTracksData,
+    ListTracksRequest, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData,
+    PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
@@ -166,6 +166,13 @@ impl BackendCommands {
         req: AddTracksToPlaylistRequest,
     ) -> ApiResponse<AddTracksToPlaylistData> {
         wrap(self.service.add_tracks_to_playlist(req))
+    }
+
+    pub fn add_track_candidates_to_playlist(
+        &self,
+        req: AddTrackCandidatesToPlaylistRequest,
+    ) -> ApiResponse<AddTrackCandidatesToPlaylistData> {
+        wrap(self.service.add_track_candidates_to_playlist(req))
     }
 
     pub fn remove_tracks_from_playlist(

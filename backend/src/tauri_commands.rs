@@ -11,32 +11,33 @@ use uuid::Uuid;
 use crate::commands::BackendCommands;
 use crate::error::{ErrorCode, ErrorPayload};
 use crate::models::{
-    AddTracksToPlaylistData, AddTracksToPlaylistRequest, AnalyzeNewTracksData,
-    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
-    CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
-    DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData, DeleteUsbBackupRequest,
-    DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
-    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
-    GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
-    InspectUsbTracksRequest, JobEventPayload, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
-    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
-    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
-    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
-    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
+    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData,
+    AddTracksToPlaylistRequest, AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse,
+    BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
+    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
+    DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData,
+    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
+    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, GetUsbDeviceNameData,
+    GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
+    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
+    InspectUsbTracksData, InspectUsbTracksRequest, JobEventPayload, ListPlaylistsData,
+    ListTracksData, ListTracksRequest, ListUsbBackupsData, ListUsbBackupsRequest,
+    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
+    MergeUsbPlaceholderTracksData, PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData,
+    PlayTrackRequest, PlaybackEventPayload, PlaybackPreflightData, PlaybackPreflightRequest,
+    PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData,
+    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
+    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
+    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
+    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
+    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ResolveTrackIdentityData,
+    ResolveTrackIdentityRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
+    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
+    RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
+    SearchTracksData, SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetUsbDeviceNameData,
+    SetUsbDeviceNameRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
     UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
@@ -690,6 +691,14 @@ pub fn add_tracks_to_playlist(
     request: AddTracksToPlaylistRequest,
 ) -> ApiResponse<AddTracksToPlaylistData> {
     state.add_tracks_to_playlist(request)
+}
+
+#[tauri::command]
+pub fn add_track_candidates_to_playlist(
+    state: State<'_, BackendCommands>,
+    request: AddTrackCandidatesToPlaylistRequest,
+) -> ApiResponse<AddTrackCandidatesToPlaylistData> {
+    state.add_track_candidates_to_playlist(request)
 }
 
 #[tauri::command]

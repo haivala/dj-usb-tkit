@@ -481,6 +481,82 @@ pub struct AddTracksToPlaylistData {
     pub skipped: usize,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTrackCandidate {
+    #[serde(default, alias = "id")]
+    pub track_id: Option<String>,
+    #[serde(default)]
+    pub local_track_id: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub bpm: Option<f64>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub file_size_bytes: Option<i64>,
+    #[serde(default)]
+    pub track_number: Option<u32>,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub format_ext: Option<String>,
+    #[serde(default)]
+    pub sample_rate_hz: Option<u32>,
+    #[serde(default)]
+    pub bit_depth: Option<u8>,
+    #[serde(default)]
+    pub bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    #[serde(default)]
+    pub usb_root_valid: bool,
+    #[serde(default)]
+    pub usb_analysis_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTrackCandidateResolution {
+    #[serde(default)]
+    pub previous_id: Option<String>,
+    #[serde(default)]
+    pub track_id: Option<String>,
+    pub resolved_by: String,
+    pub materialized: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTrackCandidatesToPlaylistRequest {
+    pub playlist_id: String,
+    #[serde(default)]
+    pub tracks: Vec<AddTrackCandidate>,
+    pub dedupe: DedupeMode,
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    #[serde(default)]
+    pub usb_root_valid: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTrackCandidatesToPlaylistData {
+    pub playlist_id: String,
+    pub requested: usize,
+    pub resolved: usize,
+    pub unresolved: usize,
+    pub added: usize,
+    pub skipped: usize,
+    #[serde(default)]
+    pub resolutions: Vec<AddTrackCandidateResolution>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveTracksFromPlaylistRequest {
@@ -1044,6 +1120,8 @@ pub struct AnalyzeNewTracksData {
     pub analyzed: usize,
     pub failed: usize,
     pub warnings: Vec<WarningEntry>,
+    #[serde(default)]
+    pub items: Vec<Track>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1460,6 +1538,8 @@ pub struct RepairUsbDiagnosticsData {
     pub estimated_file_deletes: usize,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<Box<RunUsbDiagnosticsData>>,
 }
 
 // ── detect_external_master_db ──────────────────────────────

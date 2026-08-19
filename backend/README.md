@@ -15,6 +15,7 @@ Implemented command set:
   - `list_playlists`
   - `get_playlist_tracks`
   - `add_tracks_to_playlist`
+  - `add_track_candidates_to_playlist`
   - `remove_tracks_from_playlist`
 - Frontend settings:
   - `get_frontend_settings`
@@ -61,6 +62,8 @@ Implemented command set:
 - A combined event stream is also emitted as `job:event` with payload fields:
   - `event`, `jobId`, `jobType`, `stage`, `current`, `total`, `percent`, `message`, `timestamp`
 - Native playback is performed by backend Rust using `rodio` and local filesystem paths.
+- Playlist add can accept frontend row candidates through `add_track_candidates_to_playlist`;
+  the backend resolves safe local identities before mutating playlist membership.
 
 ## Test
 

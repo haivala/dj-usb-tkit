@@ -7,9 +7,10 @@ test("addTracksToCurrentPlaylist requires active playlist", async () => {
 
   await addTracksToCurrentPlaylist([{ id: "1" }], {
     requireCurrentPlaylist: () => null,
-    resolveLocalTrackId: () => "t1",
-    withProgress: async () => ({ added: 0, skipped: 0 }),
-    command: async () => ({ added: 0, skipped: 0 }),
+    withProgress: async () => {
+      throw new Error("withProgress should not run without an active playlist");
+    },
+    command: async () => ({ added: 0, skipped: 0, resolved: 0 }),
     refreshCurrentPlaylistTracks: async () => {},
     setStatus: (text) => { status = text; }
   });
@@ -17,49 +18,85 @@ test("addTracksToCurrentPlaylist requires active playlist", async () => {
   assert.equal(status, "");
 });
 
-test("addTracksToCurrentPlaylist skips when no resolvable track ids", async () => {
-  let status = "";
-
-  await addTracksToCurrentPlaylist([{ id: "1" }], {
-    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    resolveLocalTrackId: () => null,
-    withProgress: async () => {
-      throw new Error("withProgress should not run when no trackIds");
-    },
-    command: async () => ({ added: 0, skipped: 0 }),
-    refreshCurrentPlaylistTracks: async () => {},
-    setStatus: (text) => { status = text; }
-  });
-
-  assert.equal(status, "No imported track IDs found to add");
-});
-
-test("addTracksToCurrentPlaylist sends multiple track IDs with dedupe=skip and reports result", async () => {
+test("addTracksToCurrentPlaylist sends row candidates to backend and reports result", async () => {
   let capturedCommand = null;
   let refreshed = 0;
   let status = "";
 
-  await addTracksToCurrentPlaylist([{ id: "1" }, { id: "2" }, { id: "3" }], {
+  await addTracksToCurrentPlaylist([{
+    id: "1",
+    localTrackId: "local-1",
+    title: "Track One",
+    artist: "Artist",
+    album: "Album",
+    bpm: 128,
+    filePath: "/music/one.mp3",
+    fileSizeBytes: 1234
+  }], {
     requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    resolveLocalTrackId: (track) => track.id,
     withProgress: async (_label, run) => run(() => {}),
     command: async (name, payload) => {
       capturedCommand = { name, payload };
-      return { added: 3, skipped: 1 };
+      return {
+        playlistId: "pl-1",
+        requested: 1,
+        resolved: 1,
+        unresolved: 0,
+        added: 1,
+        skipped: 0,
+        resolutions: [{ previousId: "1", trackId: "local-1", resolvedBy: "localTrackId", materialized: false }]
+      };
     },
+    refreshCurrentPlaylistTracks: async () => { refreshed += 1; },
+    setStatus: (text) => { status = text; },
+    usbRoot: "/media/USB",
+    usbRootValid: true
+  });
+
+  assert.equal(capturedCommand.name, "add_track_candidates_to_playlist");
+  assert.equal(capturedCommand.payload.playlistId, "pl-1");
+  assert.equal(capturedCommand.payload.dedupe, "skip");
+  assert.equal(capturedCommand.payload.usbRoot, "/media/USB");
+  assert.equal(capturedCommand.payload.usbRootValid, true);
+  assert.deepEqual(capturedCommand.payload.tracks[0], {
+    id: "1",
+    localTrackId: "local-1",
+    title: "Track One",
+    artist: "Artist",
+    album: "Album",
+    bpm: 128,
+    filePath: "/music/one.mp3",
+    fileSizeBytes: 1234
+  });
+  assert.equal(refreshed, 1);
+  assert.match(status, /Added 1 tracks \(skipped 0\) to Main/);
+});
+
+test("addTracksToCurrentPlaylist reports unresolved backend candidates without refreshing", async () => {
+  let refreshed = 0;
+  let status = "";
+
+  await addTracksToCurrentPlaylist([{ id: "usb-1", title: "USB Track", usbAnalysisPath: "/USB/PIONEER/USBANLZ/P001/A/ANLZ0000.DAT" }], {
+    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
+    withProgress: async (_label, run) => run(() => {}),
+    command: async () => ({
+      playlistId: "pl-1",
+      requested: 1,
+      resolved: 0,
+      unresolved: 1,
+      added: 0,
+      skipped: 0,
+      resolutions: [{ previousId: "usb-1", trackId: null, resolvedBy: "usbOrigin", materialized: false }]
+    }),
     refreshCurrentPlaylistTracks: async () => { refreshed += 1; },
     setStatus: (text) => { status = text; }
   });
 
-  assert.equal(capturedCommand.name, "add_tracks_to_playlist");
-  assert.equal(capturedCommand.payload.playlistId, "pl-1");
-  assert.deepEqual(capturedCommand.payload.trackIds, ["1", "2", "3"]);
-  assert.equal(capturedCommand.payload.dedupe, "skip");
-  assert.equal(refreshed, 1);
-  assert.match(status, /Added 3 tracks \(skipped 1\) to Main/);
+  assert.equal(refreshed, 0);
+  assert.equal(status, "No imported track IDs found to add");
 });
 
-test("addTracksToCurrentPlaylist clears the playlist's exported-to-USB status", async () => {
+test("addTracksToCurrentPlaylist clears exported-to-USB status after a resolved add", async () => {
   const playlist = {
     id: "pl-1",
     name: "Main",
@@ -70,96 +107,13 @@ test("addTracksToCurrentPlaylist clears the playlist's exported-to-USB status", 
 
   await addTracksToCurrentPlaylist([{ id: "1" }], {
     requireCurrentPlaylist: () => playlist,
-    resolveLocalTrackId: (track) => track.id,
     withProgress: async (_label, run) => run(() => {}),
-    command: async () => ({ added: 1, skipped: 0 }),
+    command: async () => ({ playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] }),
     refreshCurrentPlaylistTracks: async () => {},
     setStatus: () => {}
   });
 
-  assert.equal(playlist.lastExportedAt, null, "checkmark should disappear after a post-export add");
+  assert.equal(playlist.lastExportedAt, null);
   assert.equal(playlist.lastExportedUsbRoot, null);
   assert.equal(playlist.lastExportedTrackCount, null);
-});
-
-test("addTracksToCurrentPlaylist uses existing localTrackId for usb-origin tracks", async () => {
-  let capturedCommand = null;
-
-  await addTracksToCurrentPlaylist([{
-    id: "usb-1",
-    localTrackId: "local-usb-1",
-    usbAnalysisPath: "/USB/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT",
-    filePath: "/USB/Contents/Test/track.mp3"
-  }], {
-    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    resolveLocalTrackId: (track) => track.localTrackId || null,
-    resolveLocalTrackIdAsync: async () => {
-      throw new Error("async fallback should not run when localTrackId exists");
-    },
-    shouldAllowResolvedFallback: () => false,
-    withProgress: async (_label, run) => run(() => {}),
-    command: async (name, payload) => {
-      capturedCommand = { name, payload };
-      return { added: 1, skipped: 0 };
-    },
-    refreshCurrentPlaylistTracks: async () => {},
-    setStatus: () => {}
-  });
-
-  assert.equal(capturedCommand.name, "add_tracks_to_playlist");
-  assert.deepEqual(capturedCommand.payload.trackIds, ["local-usb-1"]);
-});
-
-test("addTracksToCurrentPlaylist does not fuzzy-resolve usb-origin tracks without localTrackId", async () => {
-  let status = "";
-
-  await addTracksToCurrentPlaylist([{
-    id: "124",
-    title: "The Other Side",
-    artist: "Artist One",
-    album: "Album One",
-    usbAnalysisPath: "/USB/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT",
-    filePath: "/USB/Contents/Artist One/Album One/file.mp3"
-  }], {
-    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    resolveLocalTrackId: () => null,
-    resolveLocalTrackIdAsync: async () => "wrong-local-id",
-    shouldAllowResolvedFallback: () => false,
-    withProgress: async () => {
-      throw new Error("withProgress should not run when no trackIds");
-    },
-    command: async () => ({ added: 0, skipped: 0 }),
-    refreshCurrentPlaylistTracks: async () => {},
-    setStatus: (text) => { status = text; }
-  });
-
-  assert.equal(status, "No imported track IDs found to add");
-});
-
-test("addTracksToCurrentPlaylist materializes browse-only local tracks before adding", async () => {
-  let capturedCommand = null;
-  let refreshed = 0;
-
-  await addTracksToCurrentPlaylist([{
-    id: "/music/Artist Two - Track One - 01 Track One.mp3",
-    title: "Track One",
-    artist: "Artist Two",
-    filePath: "/music/Artist Two - Track One - 01 Track One.mp3"
-  }], {
-    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    resolveLocalTrackId: () => null,
-    resolveLocalTrackIdAsync: async () => "track-local-123",
-    shouldAllowResolvedFallback: () => true,
-    withProgress: async (_label, run) => run(() => {}),
-    command: async (name, payload) => {
-      capturedCommand = { name, payload };
-      return { added: 1, skipped: 0 };
-    },
-    refreshCurrentPlaylistTracks: async () => { refreshed += 1; },
-    setStatus: () => {}
-  });
-
-  assert.equal(capturedCommand.name, "add_tracks_to_playlist");
-  assert.deepEqual(capturedCommand.payload.trackIds, ["track-local-123"]);
-  assert.equal(refreshed, 1);
 });

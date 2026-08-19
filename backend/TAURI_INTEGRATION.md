@@ -66,6 +66,7 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `list_playlists`
   - `get_playlist_tracks`
   - `add_tracks_to_playlist`
+  - `add_track_candidates_to_playlist`
   - `remove_tracks_from_playlist`
 - Frontend settings:
   - `get_frontend_settings`

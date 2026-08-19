@@ -175,7 +175,8 @@ function installTauriMock(page, mode) {
                   appliedFixes: payload.request.selectedFixIds || [],
                   failedFixes: [],
                   warnings: [],
-                  durationMs: 1
+                  durationMs: 1,
+                  diagnostics: diagnosticsPayload
                 }
               };
             }
@@ -672,9 +673,8 @@ test("Repair preview locks structural-prerequisite fix checkboxes", async ({ pag
   await controlCheckbox.uncheck();
   await expect(controlCheckbox).not.toBeChecked();
 
-  // applyUsbRepairs immediately re-runs diagnostics after a successful apply,
-  // which overwrites the transient "Repair apply complete" status -- assert
-  // on the settled state (playlists cleared) rather than that status text.
+  // The repair response carries fresh diagnostics; assert on the settled state
+  // (playlists cleared) rather than the transient status text.
   await page.locator("#applyRepairsBtn").click();
 
   await page.locator('.nav-item[data-view="usb-playlists"]').click();

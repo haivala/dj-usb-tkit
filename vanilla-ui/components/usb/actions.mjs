@@ -1127,8 +1127,10 @@ export async function applyUsbRepairs(state, deps) {
     setStatus,
     command,
     logWarnings,
-    runUsbDiagnostics,
-    resetUsbStateViews = () => {}
+    resetUsbStateViews = () => {},
+    normalizePlaylistNameForCompare,
+    updatePlaylistExportButtons = () => {},
+    renderDiagnosticsReport = () => {}
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
   if (!state.usbRoot) {
@@ -1155,12 +1157,19 @@ export async function applyUsbRepairs(state, deps) {
   // "DB changed, clear it" reasoning diagnostics-clearing already uses.
   if (applied > 0) resetUsbStateViews({ hideDiagnostics: false });
   logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
-  emitStatus(`Repair apply complete: ${applied} applied, ${failed} failed (${data.durationMs}ms). Re-diagnosing...`);
-  try {
-    await runUsbDiagnostics();
-  } catch (err) {
-    console.warn("Post-repair diagnostics failed:", err);
+  if (data.diagnostics) {
+    if (typeof normalizePlaylistNameForCompare === "function") {
+      state.usbKnownPlaylistNames = new Set(
+        (data.diagnostics.playlistDetails || [])
+          .map((entry) => normalizePlaylistNameForCompare(entry?.name))
+          .filter(Boolean)
+      );
+      updatePlaylistExportButtons();
+    }
+    renderDiagnosticsReport(data.diagnostics);
+    logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
   }
+  emitStatus(`Repair apply complete: ${applied} applied, ${failed} failed (${data.durationMs}ms)${data.diagnostics ? ". Diagnostics refreshed." : ""}`);
 }
 
 export async function refreshHistory(state, el, deps) {

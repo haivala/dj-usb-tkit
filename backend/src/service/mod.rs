@@ -39,12 +39,13 @@ use crate::db::Db;
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    AddTracksToPlaylistData, AddTracksToPlaylistRequest, BrowseSourceFilesData,
-    BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
-    CreatePlaylistRequest, DedupeMode, DeletePlaylistData, DeletePlaylistRequest,
-    DetectExternalMasterDbData, GetFrontendSettingsData, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, InitializeUsbData,
-    InitializeUsbRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    AddTrackCandidate, AddTrackCandidateResolution, AddTrackCandidatesToPlaylistData,
+    AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AddTracksToPlaylistRequest,
+    BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
+    CreatePlaylistData, CreatePlaylistRequest, DedupeMode, DeletePlaylistData,
+    DeletePlaylistRequest, DetectExternalMasterDbData, GetFrontendSettingsData,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    InitializeUsbData, InitializeUsbRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
     MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
     PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
     PlaybackPreflightRequest, PlaybackStatusData, Playlist, RelocateSourceRootData,
@@ -228,6 +229,43 @@ fn source_root_status(root: &str) -> SourceRootStatus {
         exists: path.exists(),
         is_dir: path.is_dir(),
     }
+}
+
+fn trimmed_string(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn track_id_exists(conn: &rusqlite::Connection, track_id: &str) -> BackendResult<bool> {
+    let found = conn
+        .query_row(
+            "SELECT id FROM tracks WHERE id = ?1 LIMIT 1",
+            params![track_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(found.is_some())
+}
+
+fn add_candidate_is_usb_origin(
+    candidate: &AddTrackCandidate,
+    request_usb_root: Option<&str>,
+) -> bool {
+    let usb_analysis_path = candidate.usb_analysis_path.as_deref().unwrap_or("").trim();
+    if !usb_analysis_path.is_empty() {
+        return true;
+    }
+
+    let file_path = candidate.file_path.as_deref().unwrap_or("").trim();
+    let usb_root = candidate
+        .usb_root
+        .as_deref()
+        .or(request_usb_root)
+        .unwrap_or("")
+        .trim();
+    !file_path.is_empty() && !usb_root.is_empty() && browse_path_matches_root(file_path, usb_root)
 }
 
 pub(crate) fn normalize_source_root_for_matching(value: &str) -> String {
@@ -2397,6 +2435,127 @@ impl BackendService {
         })
     }
 
+    pub fn add_track_candidates_to_playlist(
+        &self,
+        req: AddTrackCandidatesToPlaylistRequest,
+    ) -> BackendResult<AddTrackCandidatesToPlaylistData> {
+        let conn = self.db.connect()?;
+        let requested = req.tracks.len();
+        let mut track_ids = Vec::<String>::new();
+        let mut resolutions = Vec::<AddTrackCandidateResolution>::with_capacity(requested);
+
+        for candidate in &req.tracks {
+            let resolution = self.resolve_add_track_candidate(
+                &conn,
+                candidate,
+                req.usb_root.as_deref(),
+                req.usb_root_valid,
+            )?;
+            if let Some(track_id) = resolution.track_id.as_ref() {
+                track_ids.push(track_id.clone());
+            }
+            resolutions.push(resolution);
+        }
+        drop(conn);
+
+        let resolved = track_ids.len();
+        let unresolved = requested.saturating_sub(resolved);
+        if track_ids.is_empty() {
+            return Ok(AddTrackCandidatesToPlaylistData {
+                playlist_id: req.playlist_id,
+                requested,
+                resolved,
+                unresolved,
+                added: 0,
+                skipped: 0,
+                resolutions,
+            });
+        }
+
+        let added = self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: req.playlist_id,
+            track_ids,
+            dedupe: req.dedupe,
+        })?;
+
+        Ok(AddTrackCandidatesToPlaylistData {
+            playlist_id: added.playlist_id,
+            requested,
+            resolved,
+            unresolved,
+            added: added.added,
+            skipped: added.skipped,
+            resolutions,
+        })
+    }
+
+    fn resolve_add_track_candidate(
+        &self,
+        conn: &rusqlite::Connection,
+        candidate: &AddTrackCandidate,
+        request_usb_root: Option<&str>,
+        request_usb_root_valid: bool,
+    ) -> BackendResult<AddTrackCandidateResolution> {
+        let previous_id = trimmed_string(candidate.track_id.as_deref());
+        if let Some(local_track_id) = trimmed_string(candidate.local_track_id.as_deref()) {
+            return Ok(AddTrackCandidateResolution {
+                previous_id,
+                track_id: Some(local_track_id),
+                resolved_by: "localTrackId".to_string(),
+                materialized: false,
+            });
+        }
+
+        if let Some(track_id) = previous_id.as_deref()
+            && track_id_exists(conn, track_id)?
+        {
+            return Ok(AddTrackCandidateResolution {
+                previous_id: previous_id.clone(),
+                track_id: Some(track_id.to_string()),
+                resolved_by: "self".to_string(),
+                materialized: false,
+            });
+        }
+
+        if add_candidate_is_usb_origin(candidate, request_usb_root) {
+            return Ok(AddTrackCandidateResolution {
+                previous_id,
+                track_id: None,
+                resolved_by: "usbOrigin".to_string(),
+                materialized: false,
+            });
+        }
+
+        let identity = self.resolve_track_identity(ResolveTrackIdentityRequest {
+            track_id: previous_id.clone(),
+            title: candidate.title.clone(),
+            artist: candidate.artist.clone(),
+            album: candidate.album.clone(),
+            bpm: candidate.bpm,
+            file_path: candidate.file_path.clone(),
+            file_size_bytes: candidate.file_size_bytes,
+            track_number: candidate.track_number,
+            key: candidate.key.clone(),
+            format_ext: candidate.format_ext.clone(),
+            sample_rate_hz: candidate.sample_rate_hz,
+            bit_depth: candidate.bit_depth,
+            bitrate_kbps: candidate.bitrate_kbps,
+            usb_root: candidate
+                .usb_root
+                .clone()
+                .or_else(|| trimmed_string(request_usb_root)),
+            usb_root_valid: candidate.usb_root_valid || request_usb_root_valid,
+            usb_analysis_path: candidate.usb_analysis_path.clone(),
+        })?;
+
+        Ok(AddTrackCandidateResolution {
+            previous_id,
+            track_id: identity.track_id,
+            resolved_by: identity.resolved_by,
+            materialized: identity.materialized,
+        })
+    }
+
     pub fn remove_tracks_from_playlist(
         &self,
         req: RemoveTracksFromPlaylistRequest,
@@ -3718,6 +3877,106 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn add_track_candidates_to_playlist_materializes_local_source_rows() {
+        let (_dir, service) = test_service();
+        let source_dir = tempfile::tempdir().expect("source dir");
+        let file_path = source_dir.path().join("track.mp3");
+        std::fs::write(&file_path, b"audio").expect("write source file");
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+
+        let result = service
+            .add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                tracks: vec![AddTrackCandidate {
+                    track_id: Some(file_path.to_string_lossy().to_string()),
+                    title: "Track".to_string(),
+                    artist: "Artist".to_string(),
+                    file_path: Some(file_path.to_string_lossy().to_string()),
+                    ..Default::default()
+                }],
+                dedupe: DedupeMode::Skip,
+                usb_root: None,
+                usb_root_valid: false,
+            })
+            .expect("add candidate");
+
+        assert_eq!(result.requested, 1);
+        assert_eq!(result.resolved, 1);
+        assert_eq!(result.unresolved, 0);
+        assert_eq!(result.added, 1);
+        assert_eq!(result.skipped, 0);
+        assert!(result.resolutions[0].materialized);
+        assert_eq!(result.resolutions[0].resolved_by, "materialized");
+
+        let tracks = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id,
+            })
+            .expect("get playlist tracks");
+        assert_eq!(tracks.items.len(), 1);
+        assert_eq!(tracks.items[0].title, "Track");
+    }
+
+    #[test]
+    fn add_track_candidates_to_playlist_does_not_fuzzy_resolve_usb_origin_rows() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "local-1",
+            "Same Song",
+            "Same Artist",
+            "/music/same.mp3",
+            None,
+            Some(1000),
+            false,
+        );
+        drop(conn);
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+
+        let result = service
+            .add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                tracks: vec![AddTrackCandidate {
+                    track_id: Some("usb-1".to_string()),
+                    title: "Same Song".to_string(),
+                    artist: "Same Artist".to_string(),
+                    file_path: Some("/usb/Contents/same.mp3".to_string()),
+                    file_size_bytes: Some(1000),
+                    usb_root: Some("/usb".to_string()),
+                    usb_analysis_path: Some("/usb/PIONEER/USBANLZ/P001/A/ANLZ0000.DAT".to_string()),
+                    ..Default::default()
+                }],
+                dedupe: DedupeMode::Skip,
+                usb_root: None,
+                usb_root_valid: false,
+            })
+            .expect("add candidate");
+
+        assert_eq!(result.requested, 1);
+        assert_eq!(result.resolved, 0);
+        assert_eq!(result.unresolved, 1);
+        assert_eq!(result.added, 0);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(result.resolutions[0].resolved_by, "usbOrigin");
+
+        let tracks = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id,
+            })
+            .expect("get playlist tracks");
+        assert!(tracks.items.is_empty());
     }
 
     #[test]

@@ -38,6 +38,7 @@ The UI invokes backend commands through Tauri. Core command names include:
 - `list_playlists`
 - `get_playlist_tracks`
 - `add_tracks_to_playlist`
+- `add_track_candidates_to_playlist`
 - `remove_tracks_from_playlist`
 - `resolve_track_identity`
 - `resolve_playback_source`
@@ -78,6 +79,7 @@ Key behavior:
 
 - playlists open as tabs with their own track views;
 - Library, USB, and History views can add tracks into the current playlist;
+- add-to-playlist sends row candidates to the backend instead of resolving local IDs in JS;
 - status and event-log messages flow through `message_bus`;
 - track views share a table layout with cover and waveform preview columns;
 - USB/history tracks hydrate waveform, artwork, BPM, and key metadata lazily;

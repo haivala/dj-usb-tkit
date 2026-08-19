@@ -499,7 +499,6 @@ function setWaveformPlayhead(element, fraction, playing) {
 }
 const resolveLocalTrackId = (track) => playback.resolveLocalTrackId(track, state, { normalizePath });
 const resolveLocalTrack = (track) => playback.resolveLocalTrack(track, state);
-const shouldAllowResolvedFallback = (track) => playback.shouldAllowResolvedFallback(track, state, { normalizePath });
 const getTrackPlaybackPath = (track) => playback.getTrackPlaybackPath(track, { resolveLocalTrack });
 const isTrackCurrentlyPlaying = (track) => playback.isTrackCurrentlyPlaying(track, state, {
     normalizePath,
@@ -920,15 +919,15 @@ const deletePlaylist = async (playlistId) => playlist.deletePlaylist(playlistId,
   });
 const addTracksToCurrentPlaylist = async (tracks) => playlist.addTracksToCurrentPlaylist(tracks, {
     requireCurrentPlaylist,
-    resolveLocalTrackId,
-    resolveLocalTrackIdAsync,
-    shouldAllowResolvedFallback,
     pushEventLog,
     setStatus,
     emitStatus,
     withProgress,
     command,
     refreshCurrentPlaylistTracks,
+    promoteTrackIdentity,
+    usbRoot: state.usbRoot,
+    usbRootValid: state.usbRootValid,
   });
 
 // --- USB closures ---
@@ -1150,8 +1149,10 @@ const previewUsbRepairs = async () => usb.previewUsbRepairs(state, {
   });
 const applyUsbRepairs = async () => usb.applyUsbRepairs(state, {
     ...usbJobBaseDeps,
-    runUsbDiagnostics,
     resetUsbStateViews,
+    normalizePlaylistNameForCompare: usb.normalizePlaylistNameForCompare,
+    updatePlaylistExportButtons,
+    renderDiagnosticsReport,
   });
 const refreshHistory = async () => usb.refreshHistory(state, el, {
     setStatus,

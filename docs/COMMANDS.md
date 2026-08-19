@@ -75,6 +75,7 @@ drive selection from being rendered against a newer selected drive.
 - `list_playlists`
 - `get_playlist_tracks`
 - `add_tracks_to_playlist`
+- `add_track_candidates_to_playlist`
 - `remove_tracks_from_playlist`
 
 ### USB import/export
@@ -125,6 +126,16 @@ PDB+eDB snapshot pairs taken before every USB-mutating operation.
 - `run_usb_diagnostics`
 - `run_usb_parity_report`
 - `repair_usb_diagnostics`
+
+`add_track_candidates_to_playlist` accepts frontend row candidates, resolves/materializes safe
+local source rows server-side, preserves the USB-origin no-fuzzy-match rule, and then delegates
+to playlist membership insertion.
+
+`analyze_new_tracks` returns hydrated changed track rows in `items`, so the UI can patch rows from
+the analysis response without a separate `get_tracks_by_ids_with_previews` call.
+
+When `repair_usb_diagnostics` is called with `apply: true`, the response may include a fresh
+`diagnostics` report for the post-repair state.
 
 ### Analysis
 

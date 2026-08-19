@@ -35,9 +35,12 @@ function installSelectionMock(page) {
             playlistTracks.set(id, []);
             return { ok: true, data: { playlistId: id, name } };
           }
-          if (command === "add_tracks_to_playlist") {
+          if (command === "add_track_candidates_to_playlist") {
             const playlistId = String(payload?.request?.playlistId || "");
-            const ids = Array.isArray(payload?.request?.trackIds) ? payload.request.trackIds.map(String) : [];
+            const candidates = Array.isArray(payload?.request?.tracks) ? payload.request.tracks : [];
+            const ids = candidates
+              .map((track) => String(track?.localTrackId || track?.trackId || track?.id || "").trim())
+              .filter(Boolean);
             const current = playlistTracks.get(playlistId) || [];
             let added = 0;
             for (const id of ids) {
@@ -47,7 +50,23 @@ function installSelectionMock(page) {
               }
             }
             playlistTracks.set(playlistId, current);
-            return { ok: true, data: { added, skipped: ids.length - added } };
+            return {
+              ok: true,
+              data: {
+                playlistId,
+                requested: candidates.length,
+                resolved: ids.length,
+                unresolved: candidates.length - ids.length,
+                added,
+                skipped: ids.length - added,
+                resolutions: candidates.map((track, index) => ({
+                  previousId: track?.trackId || track?.id || null,
+                  trackId: ids[index] || null,
+                  resolvedBy: ids[index] ? "self" : "none",
+                  materialized: false
+                }))
+              }
+            };
           }
           if (command === "get_playlist_tracks") {
             const playlistId = String(payload?.request?.playlistId || "");

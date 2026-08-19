@@ -213,7 +213,8 @@ test("playlist analyze-missing only targets local non-USB tracks", async ({ page
                 jobId,
                 analyzed: ids.length,
                 failed: 0,
-                warnings: []
+                warnings: [],
+                items: ids.includes("local-missing-1") ? [hydratedTrack()] : []
               }
             };
           }

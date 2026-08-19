@@ -457,6 +457,33 @@ export function createMockInvoke({ state, normalizePath, constants }) {
       };
     }
 
+    if (command === "add_track_candidates_to_playlist") {
+      const req = payload?.request || {};
+      const resolutions = (req.tracks || []).map((track) => {
+        const localTrackId = String(track?.localTrackId || "").trim();
+        const trackId = localTrackId || String(track?.trackId || track?.id || "").trim() || null;
+        return {
+          previousId: track?.trackId || track?.id || null,
+          trackId,
+          resolvedBy: localTrackId ? "localTrackId" : (trackId ? "self" : "none"),
+          materialized: false
+        };
+      });
+      const trackIds = resolutions.map((item) => item.trackId).filter(Boolean);
+      return {
+        ok: true,
+        data: {
+          playlistId: req.playlistId || "",
+          requested: req.tracks?.length || 0,
+          resolved: trackIds.length,
+          unresolved: (req.tracks?.length || 0) - trackIds.length,
+          added: trackIds.length,
+          skipped: 0,
+          resolutions
+        }
+      };
+    }
+
     if (command === "remove_tracks_from_playlist") {
       const playlistId = payload?.request?.playlistId || "";
       const ids = new Set(payload?.request?.trackIds || []);
@@ -852,7 +879,8 @@ export function createMockInvoke({ state, normalizePath, constants }) {
           jobId: "job-analysis-mock",
           analyzed: 0,
           failed: 0,
-          warnings: []
+          warnings: [],
+          items: []
         }
       };
     }

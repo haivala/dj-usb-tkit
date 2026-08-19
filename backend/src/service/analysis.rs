@@ -27,7 +27,8 @@ use uuid::Uuid;
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    AnalyzeNewTracksData, AnalyzeNewTracksRequest, SetAnalysisPausedData, WarningEntry,
+    AnalyzeNewTracksData, AnalyzeNewTracksRequest, GetTracksByIdsRequest, SetAnalysisPausedData,
+    WarningEntry,
 };
 
 use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
@@ -533,8 +534,13 @@ impl BackendService {
                     "analysis.no-eligible-tracks",
                     "No eligible tracks found for analysis",
                 )],
+                items: Vec::new(),
             });
         }
+        let hydrate_track_ids = tracks
+            .iter()
+            .map(|track| track.id.clone())
+            .collect::<Vec<_>>();
 
         let analysis_dir = self.db.data_dir().join("analysis");
         let waveform_dir = analysis_dir.join("waveforms");
@@ -931,11 +937,19 @@ impl BackendService {
             tx_db.commit()?;
         }
 
+        let items = self
+            .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
+                track_ids: hydrate_track_ids,
+            })
+            .map(|data| data.items)
+            .unwrap_or_default();
+
         Ok(AnalyzeNewTracksData {
             job_id,
             analyzed,
             failed,
             warnings,
+            items,
         })
     }
 

@@ -21,6 +21,7 @@ The playlist command layer is intentionally CRUD-oriented:
 
 - `create_playlist`, `rename_playlist`, `delete_playlist` change container metadata
 - `list_playlists`, `get_playlist_tracks` read container and ordered membership state
+- `add_track_candidates_to_playlist` resolves frontend row candidates and delegates to `add_tracks_to_playlist`
 - `add_tracks_to_playlist`, `remove_tracks_from_playlist` mutate membership rows
 
 Playlist export is blocked when the selected playlist contains local tracks

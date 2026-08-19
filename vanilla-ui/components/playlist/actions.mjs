@@ -441,63 +441,56 @@ export async function deletePlaylist(playlistId, deps) {
 export async function addTracksToCurrentPlaylist(tracks, deps) {
   const {
     requireCurrentPlaylist,
-    resolveLocalTrackId,
-    resolveLocalTrackIdAsync,
-    shouldAllowResolvedFallback,
     pushEventLog,
     setStatus,
     withProgress,
     command,
-    refreshCurrentPlaylistTracks
+    refreshCurrentPlaylistTracks,
+    promoteTrackIdentity
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
 
   const playlist = requireCurrentPlaylist();
   if (!playlist) return;
-
-  const trackIds = [];
-  for (const track of tracks) {
-    let id = resolveLocalTrackId(track);
-    if (!id
-      && typeof resolveLocalTrackIdAsync === "function"
-      && (typeof shouldAllowResolvedFallback !== "function" || shouldAllowResolvedFallback(track))) {
-      id = await resolveLocalTrackIdAsync(track);
-    }
-    if (typeof pushEventLog === "function") {
-      pushEventLog({
-        level: "info",
-        source: "playlist-add",
-        code: "playlist_add.resolve",
-        message: `Resolved add-track candidate: ${track?.title || "Unknown Title"}`,
-        details: `origin=${track?.usbAnalysisPath ? "usb" : "local"} | resolvedTrackId=${id || "none"} | localTrackId=${track?.localTrackId || "none"} | filePath=${track?.filePath || ""}`
-      });
-    }
-    if (id) trackIds.push(id);
-  }
-
-  if (!trackIds.length) {
+  const candidates = Array.isArray(tracks) ? tracks : [];
+  if (!candidates.length) {
     emitStatus("No imported track IDs found to add");
     return;
   }
 
   const result = await withProgress("Adding tracks", async (progress) => {
-    progress(40, "Writing playlist entries...");
+    progress(25, "Resolving tracks...");
     if (typeof pushEventLog === "function") {
       pushEventLog({
         level: "info",
         source: "playlist-add",
         code: "playlist_add.request",
-        message: `Adding ${trackIds.length} track(s) to ${playlist.name}`,
-        details: `trackIds=${trackIds.join(",")}`
+        message: `Adding ${candidates.length} track(s) to ${playlist.name}`,
+        details: `candidateIds=${candidates.map((item) => item.trackId || item.id || item.filePath || "unknown").join(",")}`
       });
     }
-    const add = await command("add_tracks_to_playlist", {
+    const add = await command("add_track_candidates_to_playlist", {
       playlistId: playlist.id,
-      trackIds,
-      dedupe: "skip"
+      tracks: candidates,
+      dedupe: "skip",
+      usbRoot: deps.usbRoot || null,
+      usbRootValid: !!deps.usbRootValid
     });
+    for (let i = 0; i < (add.resolutions || []).length; i += 1) {
+      const resolution = add.resolutions[i] || {};
+      const resolvedId = String(resolution.trackId || "").trim();
+      if (!resolvedId) continue;
+      if (tracks?.[i]) tracks[i].localTrackId = resolvedId;
+      const previousId = String(resolution.previousId || "").trim();
+      if (previousId && previousId !== resolvedId && typeof promoteTrackIdentity === "function") {
+        promoteTrackIdentity(previousId, resolvedId);
+      }
+    }
+    if (!Number(add.resolved || 0)) {
+      return add;
+    }
     // Backend unconditionally nulls out last_exported_* on every
-    // add_tracks_to_playlist call (mod.rs) -- mirror that here so the
+    // add-track call (mod.rs) -- mirror that here so the
     // sidebar's "exported to USB" checkmark doesn't keep showing stale
     // state until an unrelated list_playlists refetch happens.
     playlist.lastExportedAt = null;
@@ -511,11 +504,15 @@ export async function addTracksToCurrentPlaylist(tracks, deps) {
         source: "playlist-add",
         code: "playlist_add.result",
         message: `Added ${add.added} track(s) to ${playlist.name}`,
-        details: `requested=${trackIds.length} | added=${add.added} | skipped=${add.skipped}`
+        details: `requested=${add.requested || candidates.length} | resolved=${add.resolved || 0} | added=${add.added} | skipped=${add.skipped}`
       });
     }
     return add;
   });
+  if (!Number(result.resolved || 0)) {
+    emitStatus("No imported track IDs found to add");
+    return;
+  }
   emitStatus(`Added ${result.added} tracks (skipped ${result.skipped}) to ${playlist.name}`);
 }
 

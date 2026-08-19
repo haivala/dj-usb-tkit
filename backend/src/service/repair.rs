@@ -4706,7 +4706,41 @@ impl BackendService {
             unsupported_items.retain(|item| seen.insert(format!("{}|{}", item.issue, item.reason)));
         }
 
-        on_progress(100, 100, "USB: Repair preview ready");
+        let diagnostics_after_apply = if req.apply {
+            on_progress(95, 100, "USB: Re-running diagnostics after repair");
+            match self.run_usb_diagnostics_with_progress(
+                RunUsbDiagnosticsRequest {
+                    usb_root: Some(usb_root.to_string_lossy().to_string()),
+                },
+                |c, t, m| {
+                    let pct = 95 + ((c * 4) / t.max(1)).min(4);
+                    on_progress(pct, 100, m);
+                },
+            ) {
+                Ok(data) => Some(Box::new(data)),
+                Err(err) => {
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-repair",
+                        "usb.repair.post-diagnostics-failed",
+                        format!("Post-repair diagnostics failed: {err}"),
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        on_progress(
+            100,
+            100,
+            if req.apply {
+                "USB: Repair apply complete"
+            } else {
+                "USB: Repair preview ready"
+            },
+        );
         Ok(RepairUsbDiagnosticsData {
             detected_issues,
             proposed_fixes,
@@ -4718,6 +4752,7 @@ impl BackendService {
             estimated_file_deletes,
             warnings,
             duration_ms: start.elapsed().as_millis() as u64,
+            diagnostics: diagnostics_after_apply,
         })
     }
 

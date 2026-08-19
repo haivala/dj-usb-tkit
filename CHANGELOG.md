@@ -41,6 +41,11 @@
   command boundary while the migrated retry/source-label policy is tested in Rust. Track identity
   recovery for analysis/playlist actions also moved behind backend `resolve_track_identity`
   instead of sequencing materialize/fallback commands in the frontend.
+- **Improvement:** playlist add, post-analysis hydration, and post-repair diagnostics now do
+  more orchestration in the backend. The frontend sends row candidates through
+  `add_track_candidates_to_playlist`, consumes hydrated `analyze_new_tracks.items` instead of
+  making a second fetch, and renders diagnostics returned by `repair_usb_diagnostics` after
+  apply instead of re-running diagnostics client-side.
 - **Improvement:** playlist "Total time" is now computed once server-side from the full
   track list, matching how the media library and USB playlist/history views already
   report their totals, instead of being summed client-side from whatever tracks happen

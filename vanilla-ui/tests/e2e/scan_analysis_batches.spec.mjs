@@ -198,7 +198,8 @@ function installScanAnalysisMock(page, opts = {}) {
             jobId,
             analyzed,
             failed,
-            warnings: [`Analysis cancelled: ${analyzed} of ${total} tracks analyzed`]
+            warnings: [`Analysis cancelled: ${analyzed} of ${total} tracks analyzed`],
+            items: tracks.filter((track) => ids.includes(String(track.id)))
           };
         }
 
@@ -297,7 +298,13 @@ function installScanAnalysisMock(page, opts = {}) {
         timestamp: nowIso()
       });
 
-      return { jobId, analyzed, failed, warnings: [] };
+      return {
+        jobId,
+        analyzed,
+        failed,
+        warnings: [],
+        items: tracks.filter((track) => ids.includes(String(track.id)))
+      };
     };
 
     window.__TAURI__ = {
@@ -641,7 +648,15 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         timestamp: nowIso()
       });
 
-      return { jobId, analyzed, failed, warnings: [] };
+      return {
+        jobId,
+        analyzed,
+        failed,
+        warnings: [],
+        items: tracks
+          .filter((track) => ids.some((id) => findRowByAnalysisId(id) === track))
+          .map(toTrackDto)
+      };
     };
 
     window.__TAURI__ = {

@@ -1102,6 +1102,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
   let analyzed = 0;
   let failed = 0;
   const warnings = [];
+  let hydratedItems = [];
 
   emitStatus(`${modeLabel}: 0/${ids.length} track(s) ready...`);
 
@@ -1127,6 +1128,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     failed = Math.max(0, Number(batch?.failed || 0));
     const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
     warnings.push(...batchWarnings);
+    hydratedItems = Array.isArray(batch?.items) ? batch.items : [];
     emitStatus(`${modeLabel}: ${ids.length}/${ids.length} track(s) ready...`);
   } catch (err) {
     failed = ids.length;
@@ -1136,30 +1138,25 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
       setTrackAnalyzingState(String(id), false);
     }
   }
-  try {
-    const hydrated = await command("get_tracks_by_ids_with_previews", { trackIds: ids });
-    const changedIds = [];
-    for (const item of hydrated?.items || []) {
-      const changed = mergeHydratedTrackIntoState(item);
-      if (changed) {
-        const id = String(item?.id || "").trim();
-        if (id) changedIds.push(id);
-      }
+  const changedIds = [];
+  for (const item of hydratedItems) {
+    const changed = mergeHydratedTrackIntoState(item);
+    if (changed) {
+      const id = String(item?.id || "").trim();
+      if (id) changedIds.push(id);
     }
-    if (changedIds.length) {
-      if (ids.length === 1) {
-        await nextPaint();
-        await nextPaint();
-      }
-      for (const id of changedIds) {
-        patchLibraryRowByTrackId(id);
-        patchPlaylistRowByTrackId(id);
-      }
-      applySearchLocalFilter();
-      renderSourceChips();
+  }
+  if (changedIds.length) {
+    if (ids.length === 1) {
+      await nextPaint();
+      await nextPaint();
     }
-  } catch (_) {
-    // final sync pass only
+    for (const id of changedIds) {
+      patchLibraryRowByTrackId(id);
+      patchPlaylistRowByTrackId(id);
+    }
+    applySearchLocalFilter();
+    renderSourceChips();
   }
 
   Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
