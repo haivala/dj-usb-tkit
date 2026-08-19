@@ -23,12 +23,27 @@ The playlist command layer is intentionally CRUD-oriented:
 - `list_playlists`, `get_playlist_tracks` read container and ordered membership state
 - `add_track_candidates_to_playlist` resolves frontend row candidates and delegates to `add_tracks_to_playlist`
 - `add_tracks_to_playlist`, `remove_tracks_from_playlist` mutate membership rows
+- `reorder_playlist_tracks` persists a user drag-reorder to `playlist_tracks.position`
 
 Playlist export is blocked when the selected playlist contains local tracks
 under a known missing source root. The user must relocate the source folder or
 explicitly remove that source before export proceeds. This prevents a moved or
 unmounted music folder from producing an empty or partially empty USB playlist
 without an explicit user decision.
+
+Track rows within an app playlist can be reordered by dragging. Dragging is
+disabled client-side while a column sort or search filter is active, since the
+rendered row order wouldn't match the playlist's real track order in that
+case. It is also locked when the current export sync mode is additive
+(`pruneStale = false`, see `docs/USB_EXPORT.md`) and a same-named playlist
+already exists on the connected USB, since an additive export never rewrites
+the order of entries already on the device — a reorder there wouldn't be
+reflected on next export. That lock condition is computed once, server-side,
+as `locks_reorder` on `PlaylistUsbExportStatus`
+(`backend/src/service/export.rs`, `compute_playlist_usb_export_status`) and
+returned alongside `fetch_usb_playlists`/`run_usb_diagnostics` rather than
+re-derived per UI spot from raw state; the same status also backs the Export
+button's "Append to..." label.
 
 Playback architecture is backend-owned so transport behavior stays consistent across views and source types. The frontend requests playback actions, but audio lifecycle state is emitted by backend events. The UI subscribes to those events and updates controls/playhead state from the push stream.
 

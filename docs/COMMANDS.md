@@ -77,6 +77,7 @@ drive selection from being rendered against a newer selected drive.
 - `add_tracks_to_playlist`
 - `add_track_candidates_to_playlist`
 - `remove_tracks_from_playlist`
+- `reorder_playlist_tracks`
 
 ### USB import/export
 
@@ -130,6 +131,12 @@ PDB+eDB snapshot pairs taken before every USB-mutating operation.
 `add_track_candidates_to_playlist` accepts frontend row candidates, resolves/materializes safe
 local source rows server-side, preserves the USB-origin no-fuzzy-match rule, and then delegates
 to playlist membership insertion.
+
+`reorder_playlist_tracks` takes an ordered list of track ids and persists that order to the
+`playlist_tracks.position` column for a local (app-owned) playlist; see `docs/PLAYLISTS_PLAYBACK.md`
+for when the UI disables reordering. `fetch_usb_playlists` and `run_usb_diagnostics` both return a
+`playlistUsbExportStatus` array (one entry per local playlist) so the frontend doesn't have to
+re-derive that lock condition from raw USB-scan/export-setting state.
 
 `analyze_new_tracks` returns hydrated changed track rows in `items`, so the UI can patch rows from
 the analysis response without a separate `get_tracks_by_ids_with_previews` call.

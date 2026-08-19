@@ -17,6 +17,7 @@ Implemented command set:
   - `add_tracks_to_playlist`
   - `add_track_candidates_to_playlist`
   - `remove_tracks_from_playlist`
+  - `reorder_playlist_tracks`
 - Frontend settings:
   - `get_frontend_settings`
   - `set_frontend_setting`

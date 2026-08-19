@@ -230,6 +230,9 @@ Both modes use the same manifest build path, but they differ in how existing pla
   - existing playlist membership rows are preserved.
   - new manifest members are linked only when not already present.
   - entry sequencing continues from existing max order instead of resetting.
+  - because of this, the app locks drag-reordering of a local playlist's tracks whenever a
+    same-named playlist already exists on the connected USB — see "Deep technical details" in
+    `docs/PLAYLISTS_PLAYBACK.md`.
 
 Scope is playlist-local in both modes: unrelated playlists are not implicitly rewritten to mirror the exported playlist state.
 
