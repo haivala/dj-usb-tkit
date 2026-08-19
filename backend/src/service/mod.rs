@@ -169,6 +169,10 @@ fn play_native_with_recovery(
     }
 }
 
+// Plain data assembly for the three playback-resolution outcomes below
+// (library, USB, USB-after-library-failure) -- splitting the args into a
+// params struct wouldn't reduce the coupling, just move it.
+#[allow(clippy::too_many_arguments)]
 fn play_resolved_track_data(
     status: PlaybackStatusData,
     requested_path: &str,
@@ -2015,8 +2019,9 @@ impl BackendService {
             });
         }
 
-        if !file_path.is_empty() && !path_has_usb_marker {
-            match self.materialize_source_track(MaterializeSourceTrackRequest {
+        if !file_path.is_empty()
+            && !path_has_usb_marker
+            && let Ok(data) = self.materialize_source_track(MaterializeSourceTrackRequest {
                 file_path: file_path.to_string(),
                 title: req.title.clone(),
                 artist: req.artist.clone(),
@@ -2028,16 +2033,13 @@ impl BackendService {
                 sample_rate_hz: req.sample_rate_hz,
                 bit_depth: req.bit_depth,
                 bitrate_kbps: req.bitrate_kbps,
-            }) {
-                Ok(data) => {
-                    return Ok(ResolveTrackIdentityData {
-                        track_id: Some(data.track_id),
-                        resolved_by: "materialized".to_string(),
-                        materialized: true,
-                    });
-                }
-                Err(_) => {}
-            }
+            })
+        {
+            return Ok(ResolveTrackIdentityData {
+                track_id: Some(data.track_id),
+                resolved_by: "materialized".to_string(),
+                materialized: true,
+            });
         }
 
         Ok(ResolveTrackIdentityData {
@@ -2795,6 +2797,21 @@ pub(crate) fn configured_source_roots(conn: &rusqlite::Connection) -> BackendRes
     Ok(raw
         .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
         .unwrap_or_default())
+}
+
+/// The user's currently-configured export sync mode, read directly from
+/// `app_settings` (the same `"1"`/`"0"` string the frontend mirrors into
+/// `localStorage` under `SETTING_UI_EXPORT_PRUNE_STALE`). Defaults to `true`
+/// (mirror/prune-stale) when unset, matching the frontend's own default.
+pub(crate) fn export_prune_stale_setting(conn: &rusqlite::Connection) -> BackendResult<bool> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![SETTING_UI_EXPORT_PRUNE_STALE],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(raw.map(|value| value == "1").unwrap_or(true))
 }
 
 /// All known USB device root paths, minus any that are also currently

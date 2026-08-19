@@ -38,7 +38,11 @@
   already exists on the connected USB and additive (non-mirror) export is enabled, since that
   export mode never rewrites the order of tracks already on the device — reordering there wouldn't
   be reflected on next export. Newly added tracks are unaffected and still export in the chosen
-  order.
+  order. That same "does exporting this playlist right now append to (rather than reorder) an
+  existing same-named USB playlist" check — also used for the Export button's "Append to..."
+  label — is computed once, server-side (`PlaylistUsbExportStatus` in the backend export
+  service) and returned alongside `fetch_usb_playlists`/`run_usb_diagnostics`, rather than each
+  UI spot re-deriving it from raw USB-scan/export-setting state.
 - **Fix:** drag-and-drop reordering (both the new playlist-track reordering above and the existing
   USB playlist sidebar reordering) now auto-scrolls the list when the drag is held near its top or
   bottom edge, or via the mouse wheel. Previously a drag couldn't reach items outside the visible

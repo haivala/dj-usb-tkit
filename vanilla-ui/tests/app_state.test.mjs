@@ -34,7 +34,7 @@ test("createInitialState creates fresh mutable containers", () => {
   const b = createInitialState();
 
   a.selectedTrackIds.add("1");
-  a.usbKnownPlaylistNames.add("A");
+  a.playlistUsbExportStatusById.set("p1", { sameNameExistsOnUsb: true, locksReorder: true });
   a.trackPreviewHydrateInFlight.add("t1");
   a.analyzingTrackIds.add("t2");
   a.selectedRepairFixIds.add("fix1");
@@ -42,7 +42,7 @@ test("createInitialState creates fresh mutable containers", () => {
   a.sourceRoots.push("/music");
 
   assert.equal(b.selectedTrackIds.size, 0);
-  assert.equal(b.usbKnownPlaylistNames.size, 0);
+  assert.equal(b.playlistUsbExportStatusById.size, 0);
   assert.equal(b.trackPreviewHydrateInFlight.size, 0);
   assert.equal(b.analyzingTrackIds.size, 0);
   assert.equal(b.selectedRepairFixIds.size, 0);

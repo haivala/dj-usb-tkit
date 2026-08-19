@@ -9,7 +9,9 @@ use serde_json::json;
 use crate::edb::{open_edb_from_usb_root, open_edb_rw};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
-use crate::models::{ExportToUsbData, ExportToUsbRequest, WarningEntry};
+use crate::models::{
+    ExportToUsbData, ExportToUsbRequest, Playlist, PlaylistUsbExportStatus, WarningEntry,
+};
 
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
 type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
@@ -146,6 +148,56 @@ fn ensure_playlist_tracks_analysis_ready(
             "totalTrackCount": total,
         }),
     ))
+}
+
+/// Same normalization the frontend used to do client-side (trim + lowercase)
+/// before this comparison moved to the backend -- kept distinct from
+/// `usb_utils::canonicalize_playlist_name` (alnum-only, used for matching a
+/// local playlist to its possibly-mangled eDB row), since that's a stricter
+/// match than "is this the playlist a user would call the same name".
+pub(crate) fn normalize_playlist_name_for_compare(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+/// Whether reordering a local playlist's tracks would have no visible effect
+/// on the next export: true when the export won't be a full mirror (i.e.
+/// `prune_stale` is false, see `mirror_playlist_entries` below, which is the
+/// same flag) *and* a same-named playlist already exists on the USB, since an
+/// additive export never rewrites the order of entries already on the
+/// device. Kept as one function -- alongside `mirror_playlist_entries` --
+/// so the two can't silently drift apart.
+pub(crate) fn playlist_locks_reorder_on_export(
+    prune_stale: bool,
+    same_name_exists_on_usb: bool,
+) -> bool {
+    !prune_stale && same_name_exists_on_usb
+}
+
+/// Join every local playlist against the set of playlist names already known
+/// to exist on the connected USB (already normalized via
+/// `normalize_playlist_name_for_compare`), computed once server-side so the
+/// frontend never re-derives this from raw state.
+pub(crate) fn compute_playlist_usb_export_status(
+    local_playlists: &[Playlist],
+    usb_playlist_names: &HashSet<String>,
+    prune_stale: bool,
+) -> Vec<PlaylistUsbExportStatus> {
+    local_playlists
+        .iter()
+        .map(|playlist| {
+            let same_name_exists_on_usb = usb_playlist_names
+                .contains(&normalize_playlist_name_for_compare(&playlist.name));
+            PlaylistUsbExportStatus {
+                playlist_id: playlist.id.clone(),
+                playlist_name: playlist.name.clone(),
+                same_name_exists_on_usb,
+                locks_reorder: playlist_locks_reorder_on_export(
+                    prune_stale,
+                    same_name_exists_on_usb,
+                ),
+            }
+        })
+        .collect()
 }
 
 impl BackendService {
@@ -500,6 +552,8 @@ impl BackendService {
             warnings: warnings.clone(),
             tracks: manifest_tracks,
         };
+        // Same flag `playlist_locks_reorder_on_export` (above) keys off of --
+        // see that function's doc comment.
         let mirror_playlist_entries = options.prune_stale;
         let skip_pdb_write = std::env::var("PDB_WRITE_MODE")
             .ok()
@@ -1147,12 +1201,13 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendService, content_fingerprint_key, ensure_playlist_tracks_analysis_ready,
-        existing_usb_relative_if_file, existing_usb_relative_if_present, has_required_analysis,
-        has_required_analysis_fields,
+        BackendService, compute_playlist_usb_export_status, content_fingerprint_key,
+        ensure_playlist_tracks_analysis_ready, existing_usb_relative_if_file,
+        existing_usb_relative_if_present, has_required_analysis, has_required_analysis_fields,
+        normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
     };
     use crate::error::BackendError;
-    use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest};
+    use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, Playlist};
     use crate::service::export_helpers::{
         ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
     };
@@ -1763,5 +1818,55 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn normalize_playlist_name_for_compare_trims_and_lowercases() {
+        assert_eq!(normalize_playlist_name_for_compare("  My Playlist  "), "my playlist");
+        assert_eq!(normalize_playlist_name_for_compare("ALREADY LOWER"), "already lower");
+    }
+
+    #[test]
+    fn playlist_locks_reorder_on_export_only_when_additive_and_same_name_exists() {
+        assert!(!playlist_locks_reorder_on_export(true, true));
+        assert!(!playlist_locks_reorder_on_export(true, false));
+        assert!(!playlist_locks_reorder_on_export(false, false));
+        assert!(playlist_locks_reorder_on_export(false, true));
+    }
+
+    fn make_playlist(id: &str, name: &str) -> Playlist {
+        Playlist {
+            id: id.to_string(),
+            name: name.to_string(),
+            source: "app".to_string(),
+            last_exported_at: None,
+            last_exported_usb_root: None,
+            last_exported_track_count: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn compute_playlist_usb_export_status_flags_reorder_lock_only_for_additive_collision() {
+        let local_playlists = vec![
+            make_playlist("p1", "My Set"),
+            make_playlist("p2", "Brand New"),
+        ];
+        let usb_names: std::collections::HashSet<String> =
+            [normalize_playlist_name_for_compare("My Set")].into_iter().collect();
+
+        let additive = compute_playlist_usb_export_status(&local_playlists, &usb_names, false);
+        let p1 = additive.iter().find(|s| s.playlist_id == "p1").unwrap();
+        let p2 = additive.iter().find(|s| s.playlist_id == "p2").unwrap();
+        assert!(p1.same_name_exists_on_usb);
+        assert!(p1.locks_reorder);
+        assert!(!p2.same_name_exists_on_usb);
+        assert!(!p2.locks_reorder);
+
+        let mirror = compute_playlist_usb_export_status(&local_playlists, &usb_names, true);
+        let p1_mirror = mirror.iter().find(|s| s.playlist_id == "p1").unwrap();
+        assert!(p1_mirror.same_name_exists_on_usb);
+        assert!(!p1_mirror.locks_reorder);
     }
 }

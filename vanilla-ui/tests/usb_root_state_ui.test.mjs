@@ -36,7 +36,7 @@ test("loadUsbRootFromStorage hydrates usb root and updates controls", () => {
 test("resetUsbStateViews clears lists and rerenders", () => {
   const state = {
     usbPlaylists: [{ id: 1 }],
-    usbKnownPlaylistNames: new Set(["a"]),
+    playlistUsbExportStatusById: new Map([["p1", { sameNameExistsOnUsb: true, locksReorder: false }]]),
     usbPlaylistTracks: [{ id: 1 }],
     usbPlaylistTracksView: [{ id: 1 }],
     histories: [{ id: 1 }],
@@ -58,7 +58,7 @@ test("resetUsbStateViews clears lists and rerenders", () => {
   });
   assert.equal(state.usbPlaylists.length, 0);
   assert.equal(state.histories.length, 0);
-  assert.equal(state.usbKnownPlaylistNames.size, 0);
+  assert.equal(state.playlistUsbExportStatusById.size, 0);
   assert.equal(renders, 4);
 });
 

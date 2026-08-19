@@ -41,7 +41,12 @@ export function createInitialState() {
     playlistTrackSearch: "",
     currentPlaylistTracksView: [],
     usbPlaylists: [],
-    usbKnownPlaylistNames: new Set(),
+    // Keyed by local playlist id -- { sameNameExistsOnUsb, locksReorder },
+    // computed server-side (see backend's PlaylistUsbExportStatus) whenever a
+    // command scans the connected USB's playlist names, so the frontend never
+    // re-derives the "does this collide with an existing USB playlist, and
+    // would an additive export leave its order untouched" rule itself.
+    playlistUsbExportStatusById: new Map(),
     usbPlaylistTracks: [],
     usbPlaylistTracksView: [],
     usbTrackSearch: "",

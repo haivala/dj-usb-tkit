@@ -266,8 +266,7 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
     updatePlaylistPanelTitle,
     updatePlaylistExportButtons,
     renderPlaylistList,
-    isPlaylistTrackSortActive = () => false,
-    normalizePlaylistNameForCompare = (value) => String(value || "").trim().toLowerCase()
+    isPlaylistTrackSortActive = () => false
   } = deps;
   const playlist = getCurrentPlaylist();
   if (!playlist) return;
@@ -299,9 +298,7 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
 
   const sortedTracks = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
   const sortOrSearchActive = isPlaylistTrackSortActive() || !!state.playlistTrackSearch;
-  const sameNameUsbPlaylistExists = state.usbKnownPlaylistNames instanceof Set
-    && state.usbKnownPlaylistNames.has(normalizePlaylistNameForCompare(playlist.name));
-  const exportBlocksReorder = !state.exportPruneStale && sameNameUsbPlaylistExists;
+  const exportBlocksReorder = !!state.playlistUsbExportStatusById?.get(playlist.id)?.locksReorder;
   const enableDragReorder = !sortOrSearchActive && !exportBlocksReorder;
   const dragDisabledTooltip = (!sortOrSearchActive && exportBlocksReorder)
     ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
@@ -337,9 +334,9 @@ export function updatePlaylistExportButtons(state, el, deps) {
   const buttonState = computeExportButtonState({
     usbRoot: state.usbRoot,
     usbRootValid: state.usbRootValid,
-    exportPruneStale: state.exportPruneStale,
+    currentPlaylistId: current?.id,
     currentPlaylistName: current?.name,
-    knownUsbPlaylistNames: state.usbKnownPlaylistNames
+    playlistUsbExportStatusById: state.playlistUsbExportStatusById
   });
 
   el.exportPlaylistBtn.disabled = !!isUsbRootChangeBlocked?.(state);

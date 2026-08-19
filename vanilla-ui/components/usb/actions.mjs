@@ -5,10 +5,6 @@ import {
 } from "../library/actions.mjs";
 import { resolveEmitStatus, trackMetaFingerprint } from "../shared/track_actions.mjs";
 
-export function normalizePlaylistNameForCompare(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
 // Job types that scope a Tauri command to state.usbRoot -- while one of
 // these is running, the currently-selected root must not change underneath
 // it, or an in-flight response (e.g. a parity report) can land after the
@@ -52,28 +48,33 @@ function joinWarningTexts(warnings) {
     .join(" | ");
 }
 
-export function knownUsbPlaylistNamesFromPlaylists(playlists) {
-  const names = new Set();
-  for (const playlist of playlists || []) {
-    const key = normalizePlaylistNameForCompare(playlist?.name);
-    if (key) names.add(key);
+// Index the backend's per-playlist `playlistUsbExportStatus` (see
+// PlaylistUsbExportStatus in backend/src/models.rs) by playlist id, for O(1)
+// lookup while rendering. The backend computes same-name-on-USB and
+// export-mode-locks-reorder itself; the frontend only looks the answer up.
+export function playlistUsbExportStatusById(statusList) {
+  const byId = new Map();
+  for (const entry of statusList || []) {
+    const id = String(entry?.playlistId || "");
+    if (id) byId.set(id, entry);
   }
-  return names;
+  return byId;
 }
 
 export function computeExportButtonState({
   usbRoot,
   usbRootValid,
-  exportPruneStale,
+  currentPlaylistId,
   currentPlaylistName,
-  knownUsbPlaylistNames
+  playlistUsbExportStatusById: statusById
 }) {
   const enabled = !!usbRoot && !!usbRootValid;
   const currentName = String(currentPlaylistName || "").trim();
-  const normalized = normalizePlaylistNameForCompare(currentName);
-  const sameNameUsbPlaylistExists =
-    !!currentName && !!normalized && knownUsbPlaylistNames instanceof Set && knownUsbPlaylistNames.has(normalized);
-  const appendModeToExisting = enabled && !exportPruneStale && sameNameUsbPlaylistExists;
+  const status = statusById instanceof Map ? statusById.get(String(currentPlaylistId || "")) : null;
+  // `locksReorder` is exactly "additive export mode AND same-named playlist
+  // already on USB" (see PlaylistUsbExportStatus) -- the same condition that
+  // makes an export here an append rather than a fresh write.
+  const appendModeToExisting = enabled && !!status?.locksReorder;
 
   const lastDir = enabled
     ? String(usbRoot).replace(/[\\/]+$/, "").split(/[\\/]/).pop() || ""
@@ -572,7 +573,7 @@ export function resetUsbStateViews(state, el, deps = {}) {
   } = deps;
 
   state.usbPlaylists = [];
-  state.usbKnownPlaylistNames = new Set();
+  state.playlistUsbExportStatusById = new Map();
   state.usbPlaylistTracks = [];
   state.usbPlaylistTracksView = [];
   state.usbPlaylistPagedCount = 0;
@@ -982,7 +983,6 @@ export async function refreshUsb(state, el, deps) {
     startProgressHeartbeat,
     stopProgressHeartbeat,
     normalizeUsbPlaylist,
-    rebuildKnownUsbPlaylistNames,
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
     updatePlaylistExportButtons,
@@ -1023,7 +1023,7 @@ export async function refreshUsb(state, el, deps) {
       await new Promise((r) => setTimeout(r, 0));
     }
   }
-  rebuildKnownUsbPlaylistNames();
+  state.playlistUsbExportStatusById = playlistUsbExportStatusById(data.playlistUsbExportStatus);
 
   setProgress(true, 80, "Computing stats...");
   await new Promise((r) => setTimeout(r, 20));
@@ -1049,7 +1049,6 @@ export async function runUsbDiagnostics(state, deps) {
   const {
     setStatus,
     command,
-    normalizePlaylistNameForCompare,
     updatePlaylistExportButtons,
     renderDiagnosticsReport,
     logWarnings
@@ -1069,11 +1068,7 @@ export async function runUsbDiagnostics(state, deps) {
   const data = await command("run_usb_diagnostics", {
     usbRoot: state.usbRoot
   });
-  state.usbKnownPlaylistNames = new Set(
-    (data?.playlistDetails || [])
-      .map((entry) => normalizePlaylistNameForCompare(entry?.name))
-      .filter(Boolean)
-  );
+  state.playlistUsbExportStatusById = playlistUsbExportStatusById(data?.playlistUsbExportStatus);
   updatePlaylistExportButtons();
   renderDiagnosticsReport(data);
   logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
@@ -1128,7 +1123,6 @@ export async function applyUsbRepairs(state, deps) {
     command,
     logWarnings,
     resetUsbStateViews = () => {},
-    normalizePlaylistNameForCompare,
     updatePlaylistExportButtons = () => {},
     renderDiagnosticsReport = () => {}
   } = deps;
@@ -1158,14 +1152,10 @@ export async function applyUsbRepairs(state, deps) {
   if (applied > 0) resetUsbStateViews({ hideDiagnostics: false });
   logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
   if (data.diagnostics) {
-    if (typeof normalizePlaylistNameForCompare === "function") {
-      state.usbKnownPlaylistNames = new Set(
-        (data.diagnostics.playlistDetails || [])
-          .map((entry) => normalizePlaylistNameForCompare(entry?.name))
-          .filter(Boolean)
-      );
-      updatePlaylistExportButtons();
-    }
+    state.playlistUsbExportStatusById = playlistUsbExportStatusById(
+      data.diagnostics.playlistUsbExportStatus
+    );
+    updatePlaylistExportButtons();
     renderDiagnosticsReport(data.diagnostics);
     logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
   }
@@ -2036,9 +2026,6 @@ export async function hydrateUsbTrackMetadataBatch(state, tracks, deps = {}) {
   return tracks;
 }
 
-export function rebuildKnownUsbPlaylistNames(state) {
-  state.usbKnownPlaylistNames = knownUsbPlaylistNamesFromPlaylists(state.usbPlaylists);
-}
 
 // Replaces the old localStorage/app_settings "recent USB roots" list with a
 // live query against the usb_devices table -- so mount state and pruning

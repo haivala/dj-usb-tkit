@@ -44,10 +44,11 @@ use super::usb_utils::{
 use super::usb_vendor_compat::{
     USB_CONTENTS_DIR, USB_VENDOR_ROOT_DIR, vendor_edb_path, vendor_pdb_path,
 };
+use super::export::{compute_playlist_usb_export_status, normalize_playlist_name_for_compare};
 use super::{
     BackendService, FINGERPRINT_MATCH_DURATION_TOLERANCE_MS, browse_path_matches_root,
-    build_track_match_fingerprint, export_log, find_confident_fingerprint_match, now,
-    untainted_usb_root_paths,
+    build_track_match_fingerprint, export_log, export_prune_stale_setting,
+    find_confident_fingerprint_match, now, untainted_usb_root_paths,
 };
 
 const SLOW_USB_STAGE_MS: u128 = 8_000;
@@ -873,10 +874,21 @@ impl BackendService {
             ));
         }
 
+        let usb_playlist_names: HashSet<String> = items
+            .iter()
+            .map(|playlist| normalize_playlist_name_for_compare(&playlist.name))
+            .collect();
+        let local_playlists = self.list_playlists()?.items;
+        let conn = self.db.connect()?;
+        let prune_stale = export_prune_stale_setting(&conn)?;
+        let playlist_usb_export_status =
+            compute_playlist_usb_export_status(&local_playlists, &usb_playlist_names, prune_stale);
+
         Ok(FetchUsbPlaylistsData {
             items,
             stats,
             warnings,
+            playlist_usb_export_status,
         })
     }
 

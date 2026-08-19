@@ -18,7 +18,6 @@ test("applyUsbRepairs does not clear playlists when nothing was applied", async 
     }),
     logWarnings: () => {},
     resetUsbStateViews: () => { resetCalls += 1; },
-    normalizePlaylistNameForCompare: (value) => String(value || "").toLowerCase(),
     updatePlaylistExportButtons: () => {},
     renderDiagnosticsReport: () => { renderCalls += 1; }
   });

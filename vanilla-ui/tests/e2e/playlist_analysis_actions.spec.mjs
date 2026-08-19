@@ -510,12 +510,22 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
                   trackCount: 1
                 }]
               : [];
+            const usbNames = new Set(items.map((item) => String(item.name || "").trim().toLowerCase()));
             return {
               ok: true,
               data: {
                 items,
                 stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
-                warnings: []
+                warnings: [],
+                playlistUsbExportStatus: playlists.map((playlist) => {
+                  const sameNameExistsOnUsb = usbNames.has(String(playlist.name || "").trim().toLowerCase());
+                  return {
+                    playlistId: playlist.id,
+                    playlistName: playlist.name,
+                    sameNameExistsOnUsb,
+                    locksReorder: exportPruneStale === false && sameNameExistsOnUsb
+                  };
+                })
               }
             };
           }
@@ -531,7 +541,8 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
                 analysisIntegrity: { title: "Analysis Files", status: "PASS", checks: [], counts: null },
                 playlistResolution: { title: "Playlist Resolution", status: "PASS", checks: [], counts: null },
                 playlistDetails: [],
-                warnings: []
+                warnings: [],
+                playlistUsbExportStatus: []
               }
             };
           }

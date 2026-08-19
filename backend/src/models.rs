@@ -856,12 +856,29 @@ pub struct WarningEntry {
     pub source: String,
 }
 
+/// For one local playlist, whether it shares a name with a playlist already
+/// on the connected USB, and -- combining that with the user's current
+/// export sync mode -- whether reordering its tracks right now would have no
+/// visible effect on the next export (an additive export never rewrites the
+/// order of entries already on the device). Computed once server-side (see
+/// `service::export::compute_playlist_usb_export_status`) so the frontend
+/// never re-derives this business rule from raw state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistUsbExportStatus {
+    pub playlist_id: String,
+    pub playlist_name: String,
+    pub same_name_exists_on_usb: bool,
+    pub locks_reorder: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchUsbPlaylistsData {
     pub items: Vec<UsbPlaylist>,
     pub stats: UsbImportStats,
     pub warnings: Vec<WarningEntry>,
+    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1300,6 +1317,7 @@ pub struct RunUsbDiagnosticsData {
     pub cdj_counter_snapshot: Option<PlayerCounterSnapshot>,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
+    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

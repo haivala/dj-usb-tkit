@@ -1,5 +1,23 @@
 // Browser/dev mock backend. Production API wiring lives in api_client.mjs.
 
+// Mirrors the backend's PlaylistUsbExportStatus join (see
+// backend/src/service/export.rs's compute_playlist_usb_export_status) so
+// e2e tests exercise the same reorder-lock/append-label logic the real
+// backend computes, not a frontend-side reimplementation of it.
+function computeMockPlaylistUsbExportStatus(localPlaylists, usbPlaylistNames, pruneStale) {
+  const normalize = (value) => String(value || "").trim().toLowerCase();
+  const knownUsbNames = new Set((usbPlaylistNames || []).map(normalize));
+  return (localPlaylists || []).map((playlist) => {
+    const sameNameExistsOnUsb = knownUsbNames.has(normalize(playlist.name));
+    return {
+      playlistId: playlist.id,
+      playlistName: playlist.name,
+      sameNameExistsOnUsb,
+      locksReorder: !pruneStale && sameNameExistsOnUsb
+    };
+  });
+}
+
 export function createMockInvoke({ state, normalizePath, constants }) {
   const { LIBRARY_LOAD_LIMIT_DEFAULT, LIBRARY_LOAD_LIMIT_POST_SCAN } = constants;
 
@@ -571,7 +589,12 @@ export function createMockInvoke({ state, normalizePath, constants }) {
             playlistReferencedTracks: 2,
             playlistEntries: 2
           },
-          warnings: []
+          warnings: [],
+          playlistUsbExportStatus: computeMockPlaylistUsbExportStatus(
+            state.playlists,
+            ["Warmup"],
+            state.exportPruneStale
+          )
         }
       };
     }
@@ -670,7 +693,12 @@ export function createMockInvoke({ state, normalizePath, constants }) {
           warnings: [
             { level: "info", code: "usb.diagnostics.info", message: "USB root: /media/usb", source: "usb-diagnostics" }
           ],
-          durationMs: 42
+          durationMs: 42,
+          playlistUsbExportStatus: computeMockPlaylistUsbExportStatus(
+            state.playlists,
+            ["Warmup"],
+            state.exportPruneStale
+          )
         }
       };
     }

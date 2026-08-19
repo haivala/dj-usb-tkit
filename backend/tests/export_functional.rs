@@ -9,6 +9,7 @@ use backend::models::{
     ExportToUsbRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, InitializeUsbRequest,
     MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ReorderUsbPlaylistsRequest,
     RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest,
+    SetFrontendSettingRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -2819,6 +2820,156 @@ fn export_sync_mode_mirror_new_playlist_does_not_prune_existing_playlists() {
     assert!(
         pdb_size_after >= pdb_size_before,
         "mirror export on new playlist should not shrink PDB (before={pdb_size_before}, after={pdb_size_after})"
+    );
+}
+
+#[test]
+fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collision() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    copy_audio_fixture(&media, "formats/track_format_wav.wav", "Alpha.wav");
+    copy_audio_fixture(&media, "formats/track_format_aif.aif", "Beta.aif");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    seed_edb_for_export(
+        &usb.join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("exportLibrary.db"),
+    );
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let track_ids = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect::<Vec<_>>();
+    assert_eq!(track_ids.len(), 2, "expected two scanned tracks");
+    seed_tracks_as_analyzed(&data_dir, &track_ids);
+
+    let exported_name = "On USB Already";
+    let exported = backend.create_playlist(CreatePlaylistRequest {
+        name: exported_name.to_string(),
+    });
+    assert!(exported.ok, "create exported playlist failed: {exported:?}");
+    let exported_id = exported.data.expect("exported playlist data").playlist_id;
+    let added_exported = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: exported_id.clone(),
+        track_ids: vec![track_ids[0].clone()],
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added_exported.ok, "add to exported playlist failed: {added_exported:?}");
+
+    let export_once = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: exported_id.clone(),
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: true,
+            ..Default::default()
+        }),
+    });
+    assert!(export_once.ok, "initial export failed: {export_once:?}");
+
+    let never_exported_name = "Never On USB";
+    let never_exported = backend.create_playlist(CreatePlaylistRequest {
+        name: never_exported_name.to_string(),
+    });
+    assert!(
+        never_exported.ok,
+        "create never-exported playlist failed: {never_exported:?}"
+    );
+    let never_exported_id = never_exported
+        .data
+        .expect("never-exported playlist data")
+        .playlist_id;
+    let added_never_exported = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: never_exported_id.clone(),
+        track_ids: vec![track_ids[1].clone()],
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(
+        added_never_exported.ok,
+        "add to never-exported playlist failed: {added_never_exported:?}"
+    );
+
+    let status_by_id = |backend: &BackendCommands| -> BTreeMap<String, (bool, bool)> {
+        let fetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        });
+        assert!(fetched.ok, "fetch_usb_playlists failed: {fetched:?}");
+        fetched
+            .data
+            .expect("fetch data")
+            .playlist_usb_export_status
+            .into_iter()
+            .map(|s| (s.playlist_id, (s.same_name_exists_on_usb, s.locks_reorder)))
+            .collect()
+    };
+
+    // Default setting (unset -> mirror/prune-stale=true): same-name match is
+    // reported, but reorder is never locked because a mirror export always
+    // rewrites the playlist's order on the device.
+    let default_status = status_by_id(&backend);
+    assert_eq!(
+        default_status.get(exported_id.as_str()),
+        Some(&(true, false))
+    );
+    assert_eq!(
+        default_status.get(never_exported_id.as_str()),
+        Some(&(false, false))
+    );
+
+    // Switch to additive (prune_stale=false): the same-name collision now
+    // locks reorder, since additive export never rewrites existing entries.
+    let set_additive = backend.set_frontend_setting(SetFrontendSettingRequest {
+        key: "ui_export_prune_stale_v1".to_string(),
+        value: Some("0".to_string()),
+    });
+    assert!(set_additive.ok, "set additive mode failed: {set_additive:?}");
+    let additive_status = status_by_id(&backend);
+    assert_eq!(
+        additive_status.get(exported_id.as_str()),
+        Some(&(true, true))
+    );
+    assert_eq!(
+        additive_status.get(never_exported_id.as_str()),
+        Some(&(false, false))
+    );
+
+    // Switch back to mirror explicitly: reorder unlocks again even though the
+    // same-name collision is still present.
+    let set_mirror = backend.set_frontend_setting(SetFrontendSettingRequest {
+        key: "ui_export_prune_stale_v1".to_string(),
+        value: Some("1".to_string()),
+    });
+    assert!(set_mirror.ok, "set mirror mode failed: {set_mirror:?}");
+    let mirror_status = status_by_id(&backend);
+    assert_eq!(
+        mirror_status.get(exported_id.as_str()),
+        Some(&(true, false))
     );
 }
 

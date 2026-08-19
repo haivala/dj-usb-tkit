@@ -653,8 +653,7 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
     renderTrackTable = () => {},
     cssEscape = (value) => String(value || ""),
     updateTrackListDurationSummary = () => {},
-    isPlaylistTrackSortActive = () => false,
-    normalizePlaylistNameForCompare = (value) => String(value || "").trim().toLowerCase()
+    isPlaylistTrackSortActive = () => false
   } = deps;
 
   const playlist = getCurrentPlaylist();
@@ -680,9 +679,7 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
 
   const sortedPlaylist = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
   const sortOrSearchActive = isPlaylistTrackSortActive() || !!state.playlistTrackSearch;
-  const sameNameUsbPlaylistExists = state.usbKnownPlaylistNames instanceof Set
-    && state.usbKnownPlaylistNames.has(normalizePlaylistNameForCompare(playlist.name));
-  const exportBlocksReorder = !state.exportPruneStale && sameNameUsbPlaylistExists;
+  const exportBlocksReorder = !!state.playlistUsbExportStatusById?.get(playlist.id)?.locksReorder;
   const enableDragReorder = !sortOrSearchActive && !exportBlocksReorder;
   const dragDisabledTooltip = (!sortOrSearchActive && exportBlocksReorder)
     ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`

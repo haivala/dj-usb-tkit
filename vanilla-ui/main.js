@@ -666,7 +666,6 @@ async function renderCurrentPlaylistTracksFromState() {
     cssEscape,
     updateTrackListDurationSummary,
     isPlaylistTrackSortActive: () => !!tableSortState.playlistTracksBody,
-    normalizePlaylistNameForCompare: usb.normalizePlaylistNameForCompare,
   });
 }
 const mergeHydratedTrackIntoState = (rawTrack) => library.mergeHydratedTrackIntoState(state, rawTrack, {
@@ -898,7 +897,6 @@ async function refreshCurrentPlaylistTracks() {
     updatePlaylistExportButtons,
     renderPlaylistList,
     isPlaylistTrackSortActive: () => !!tableSortState.playlistTracksBody,
-    normalizePlaylistNameForCompare: usb.normalizePlaylistNameForCompare,
   });
 }
 const createPlaylist = async (name) => playlist.createPlaylist(name, {
@@ -982,9 +980,6 @@ function syncUsbPlayerMenuEditorControls() {
 }
 function handleUsbPlayerMenuListClick(side, event) {
   usb.handleUsbPlayerMenuListClick(state, el, { documentObj: document }, side, event);
-}
-function rebuildKnownUsbPlaylistNames() {
-  usb.rebuildKnownUsbPlaylistNames(state);
 }
 function resetUsbStateViews({ hideDiagnostics = true } = {}) {
   usb.resetUsbStateViews(state, el, {
@@ -1104,7 +1099,6 @@ const refreshUsb = async () => usb.refreshUsb(state, el, {
     startProgressHeartbeat,
     stopProgressHeartbeat,
     normalizeUsbPlaylist,
-    rebuildKnownUsbPlaylistNames,
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
     updatePlaylistExportButtons,
@@ -1139,7 +1133,6 @@ const usbJobBaseDeps = {
 
 const runUsbDiagnostics = async () => usb.runUsbDiagnostics(state, {
     ...usbJobBaseDeps,
-    normalizePlaylistNameForCompare: usb.normalizePlaylistNameForCompare,
     updatePlaylistExportButtons,
     renderDiagnosticsReport,
   });
@@ -1154,7 +1147,6 @@ const previewUsbRepairs = async () => usb.previewUsbRepairs(state, {
 const applyUsbRepairs = async () => usb.applyUsbRepairs(state, {
     ...usbJobBaseDeps,
     resetUsbStateViews,
-    normalizePlaylistNameForCompare: usb.normalizePlaylistNameForCompare,
     updatePlaylistExportButtons,
     renderDiagnosticsReport,
   });
