@@ -22,15 +22,9 @@ function makeElement(tag = "div") {
     title: "",
     children: [],
     _listeners: {},
-    appendChild(node) {
-      this.children.push(node);
-    },
-    addEventListener(event, handler) {
-      this._listeners[event] = handler;
-    },
-    trigger(event, payload) {
-      this._listeners[event]?.(payload);
-    }
+    appendChild(node) { this.children.push(node); },
+    addEventListener(event, handler) { this._listeners[event] = handler; },
+    trigger(event, payload) { this._listeners[event]?.(payload); }
   };
 }
 
@@ -40,42 +34,43 @@ function makeRepairEl() {
     diagRepairPanel: { classList: makeClassList() },
     diagReportView: { classList: makeClassList() },
     diagRepairSummary: { textContent: "", className: "" },
-    diagRepairFixes: {
-      innerHTML: "",
-      children: [],
-      appendChild(node) {
-        this.children.push(node);
-      }
-    },
+    diagRepairFixes: { innerHTML: "", children: [], appendChild(node) { this.children.push(node); } },
     applyRepairsBtn: { disabled: false },
     previewRepairsBtn: { disabled: false }
   };
 }
 
-test("renderRepairPreview disables apply and preview when there are no fixes", () => {
+function renderPreview(payload, deps = {}) {
   const el = makeRepairEl();
+  const selection = deps.selection || new Set();
+  renderRepairPreview(el, payload, {
+    documentObj: { createElement: (tag) => makeElement(tag) },
+    showDiagRepairView: () => showDiagRepairView(el),
+    getSelectedFixIds: () => selection,
+    setSelectedFixIds: (ids) => {
+      selection.clear();
+      for (const id of ids) selection.add(id);
+    },
+    ...deps
+  });
+  return { el, selection };
+}
 
-  renderRepairPreview(el, {
+test("renderRepairPreview handles no fixes and supported fix selection", () => {
+  const empty = renderPreview({
     detectedIssues: [],
     proposedFixes: [],
     estimatedFileWrites: 0,
     estimatedFileDeletes: 0,
     unsupportedItems: []
-  }, {
-    documentObj: { createElement: (tag) => makeElement(tag) },
-    showDiagRepairView: () => showDiagRepairView(el)
-  });
+  }).el;
+  assert.equal(empty.applyRepairsBtn.disabled, true);
+  assert.equal(empty.previewRepairsBtn.disabled, true);
+  assert.equal(empty.diagRepairSummary.textContent, "No issues found.");
 
-  assert.equal(el.applyRepairsBtn.disabled, true);
-  assert.equal(el.previewRepairsBtn.disabled, true);
-  assert.equal(el.diagRepairSummary.textContent, "No issues found.");
-});
-
-test("renderRepairPreview lets supported fix selection control apply state", () => {
-  const el = makeRepairEl();
-  const selection = new Set();
-
-  renderRepairPreview(el, {
+  const selected = new Set();
+  let withFixes = null;
+  withFixes = renderPreview({
     detectedIssues: ["a"],
     proposedFixes: [
       { id: "fix_a", title: "Fix A", description: "desc", supported: true, destructive: false },
@@ -85,72 +80,43 @@ test("renderRepairPreview lets supported fix selection control apply state", () 
     estimatedFileDeletes: 0,
     unsupportedItems: []
   }, {
-    documentObj: { createElement: (tag) => makeElement(tag) },
-    showDiagRepairView: () => showDiagRepairView(el),
-    getSelectedFixIds: () => selection,
-    setSelectedFixIds: (ids) => {
-      selection.clear();
-      for (const id of ids) selection.add(id);
-    },
+    selection: selected,
     onToggleFixSelection: (id, checked) => {
-      if (checked) selection.add(id);
-      else selection.delete(id);
-      el.applyRepairsBtn.disabled = selection.size === 0;
+      if (checked) selected.add(id);
+      else selected.delete(id);
+      withFixes.el.applyRepairsBtn.disabled = selected.size === 0;
     }
   });
+  assert.deepEqual(Array.from(selected).sort(), ["fix_a", "fix_b"]);
+  assert.equal(withFixes.el.applyRepairsBtn.disabled, false);
 
-  assert.deepEqual(Array.from(selection).sort(), ["fix_a", "fix_b"]);
-  assert.equal(el.applyRepairsBtn.disabled, false);
-
-  el.diagRepairFixes.children[0].children[0].trigger("change", { target: { checked: false } });
-  el.diagRepairFixes.children[1].children[0].trigger("change", { target: { checked: false } });
-
-  assert.equal(selection.size, 0);
-  assert.equal(el.applyRepairsBtn.disabled, true);
+  withFixes.el.diagRepairFixes.children[0].children[0].trigger("change", { target: { checked: false } });
+  withFixes.el.diagRepairFixes.children[1].children[0].trigger("change", { target: { checked: false } });
+  assert.equal(selected.size, 0);
+  assert.equal(withFixes.el.applyRepairsBtn.disabled, true);
 });
 
 test("renderRepairPreview merges preview-only missing-audio manual review into one item", () => {
-  const el = makeRepairEl();
-
-  renderRepairPreview(el, {
+  const { el } = renderPreview({
     detectedIssues: ["unindexed", "missing-audio"],
     proposedFixes: [
-      {
-        title: "Manual Re-import Unindexed Audio",
-        description: "placeholder",
-        supported: false,
-        destructive: false
-      },
-      {
-        title: "Remove Missing Audio References",
-        description: "placeholder",
-        supported: false,
-        destructive: false
-      }
+      { title: "Manual Re-import Unindexed Audio", description: "placeholder", supported: false, destructive: false },
+      { title: "Remove Missing Audio References", description: "placeholder", supported: false, destructive: false }
     ],
     estimatedFileWrites: 0,
     estimatedFileDeletes: 0,
     unsupportedItems: [
-      {
-        issue: "13 unindexed audio file(s) under Contents",
-        reason: "Automatic deletion is intentionally disabled."
-      },
+      { issue: "13 unindexed audio file(s) under Contents", reason: "Automatic deletion is intentionally disabled." },
       {
         issue: "9 missing-audio reference(s) require manual review",
         reason: "Automatic removal is disabled while 13 unindexed audio file(s) are present."
       }
     ]
-  }, {
-    documentObj: { createElement: (tag) => makeElement(tag) },
-    showDiagRepairView: () => showDiagRepairView(el)
   });
 
   assert.match(el.diagRepairSummary.textContent, /2 issue\(s\).*0 fixable/);
   assert.equal(el.diagRepairFixes.children.length, 2);
-  assert.equal(
-    el.diagRepairFixes.children[1].children[0].children[0].children[0].textContent,
-    "Remove Missing Audio References"
-  );
+  assert.equal(el.diagRepairFixes.children[1].children[0].children[0].children[0].textContent, "Remove Missing Audio References");
   assert.match(
     el.diagRepairFixes.children[1].children[0].children[1].textContent,
     /9 missing-audio reference\(s\) require manual review.*13 unindexed audio file\(s\)/
@@ -177,7 +143,6 @@ function makeDiagnosticsEl() {
     }
   };
   healthCard.classList.add("is-loading");
-
   const el = {
     usbHealthDot: makeHealthDot(),
     usbHeaderHealthDot: makeHealthDot(),
@@ -203,12 +168,12 @@ function makeDiagnosticsEl() {
 }
 
 function assertDiagnosticsContentCleared(el) {
-  assert.equal(el.diagSections.innerHTML, "");
-  assert.equal(el.diagOverallStatus.textContent, "");
-  assert.equal(el.diagDuration.textContent, "");
-  assert.equal(el.diagPlaylistTableBody.innerHTML, "");
-  assert.equal(el.diagRepairSummary.textContent, "");
-  assert.equal(el.diagRepairFixes.innerHTML, "");
+  for (const key of ["diagSections", "diagPlaylistTableBody", "diagRepairFixes"]) {
+    assert.equal(el[key].innerHTML, "");
+  }
+  for (const key of ["diagOverallStatus", "diagDuration", "diagRepairSummary"]) {
+    assert.equal(el[key].textContent, "");
+  }
   assert.equal(el.previewRepairsBtn.disabled, true);
   assert.equal(el.applyRepairsBtn.disabled, true);
   assert.equal(el.diagPlaylistDetails.classList.contains("hidden"), true);
@@ -218,24 +183,16 @@ function assertDiagnosticsContentCleared(el) {
   assert.equal(el.usbHealthDot.dataset.tooltip, "USB health: unknown");
 }
 
-test("clearUsbDiagnostics blanks the report but leaves the panel and health card open state alone", () => {
-  const el = makeDiagnosticsEl();
-
-  clearUsbDiagnostics(el);
-
-  assertDiagnosticsContentCleared(el);
-  assert.equal(el.usbDiagnosticsCard.classList.contains("hidden"), false);
-  assert.equal(el._healthCard.open, true);
-  assert.equal(el._healthCard.classList.contains("is-loading"), true);
-});
-
-test("hideUsbDiagnostics blanks the report and collapses the panel and health card", () => {
-  const el = makeDiagnosticsEl();
-
-  hideUsbDiagnostics(el);
-
-  assertDiagnosticsContentCleared(el);
-  assert.equal(el.usbDiagnosticsCard.classList.contains("hidden"), true);
-  assert.equal(el._healthCard.open, false);
-  assert.equal(el._healthCard.classList.contains("is-loading"), false);
+test("clearUsbDiagnostics and hideUsbDiagnostics blank content with different visibility effects", () => {
+  for (const [action, cardHidden, cardOpen, loading] of [
+    [clearUsbDiagnostics, false, true, true],
+    [hideUsbDiagnostics, true, false, false]
+  ]) {
+    const el = makeDiagnosticsEl();
+    action(el);
+    assertDiagnosticsContentCleared(el);
+    assert.equal(el.usbDiagnosticsCard.classList.contains("hidden"), cardHidden);
+    assert.equal(el._healthCard.open, cardOpen);
+    assert.equal(el._healthCard.classList.contains("is-loading"), loading);
+  }
 });

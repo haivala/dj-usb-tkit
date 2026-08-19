@@ -15,184 +15,123 @@ function makeClient(overrides = {}) {
     mockPlayback: { path: null, playing: false, startedAtMs: 0, startOffsetMs: 0, durationMs: 240000 },
     ...overrides.state
   };
-  const tauriInvoke = overrides.tauriInvoke || (() => { throw new Error("not tauri"); });
-  const tauriIsTauri = overrides.tauriIsTauri || (() => false);
-  const tauriListen = overrides.tauriListen || (() => {});
-  const normalizePath = overrides.normalizePath || ((v) => String(v || "").trim().toLowerCase().replace(/\\/g, "/"));
   const constants = {
     LIBRARY_LOAD_LIMIT_DEFAULT: 200,
     LIBRARY_LOAD_LIMIT_POST_SCAN: 1000,
     ...overrides.constants
   };
-  return { client: createApiClient({ tauriInvoke, tauriIsTauri, tauriListen, state, normalizePath, constants }), state };
+  return {
+    client: createApiClient({
+      tauriInvoke: overrides.tauriInvoke || (() => { throw new Error("not tauri"); }),
+      tauriIsTauri: overrides.tauriIsTauri || (() => false),
+      tauriListen: overrides.tauriListen || (() => {}),
+      state,
+      normalizePath: overrides.normalizePath || ((value) => String(value || "").trim().toLowerCase().replace(/\\/g, "/")),
+      constants
+    }),
+    state
+  };
 }
 
-test("isTauriRuntime returns false when tauriIsTauri returns false", () => {
-  const { client } = makeClient({ tauriIsTauri: () => false });
-  assert.equal(client.isTauriRuntime(), false);
-});
+test("runtime detection handles false, true, thrown checks, and delegates in Tauri", async () => {
+  for (const [tauriIsTauri, expected] of [
+    [() => false, false],
+    [() => true, true],
+    [() => { throw new Error("no window"); }, false]
+  ]) {
+    assert.equal(makeClient({ tauriIsTauri }).client.isTauriRuntime(), expected);
+  }
 
-test("isTauriRuntime returns true when tauriIsTauri returns true", () => {
-  const { client } = makeClient({ tauriIsTauri: () => true });
-  assert.equal(client.isTauriRuntime(), true);
-});
-
-test("isTauriRuntime returns false when tauriIsTauri throws", () => {
-  const { client } = makeClient({ tauriIsTauri: () => { throw new Error("no window"); } });
-  assert.equal(client.isTauriRuntime(), false);
-});
-
-test("invoke delegates to tauriInvoke in tauri runtime", async () => {
   const calls = [];
   const { client } = makeClient({
     tauriIsTauri: () => true,
-    tauriInvoke: (cmd, payload) => { calls.push({ cmd, payload }); return { ok: true, data: "real" }; }
+    tauriInvoke: (cmd, payload) => {
+      calls.push({ cmd, payload });
+      return { ok: true, data: "real" };
+    }
   });
-  const result = await client.invoke("scan_library", { foo: 1 });
-  assert.equal(result.data, "real");
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].cmd, "scan_library");
+  assert.equal((await client.invoke("scan_library", { foo: 1 })).data, "real");
+  assert.deepEqual(calls, [{ cmd: "scan_library", payload: { foo: 1 } }]);
 });
 
-test("invoke returns mock for scan_library in non-tauri", async () => {
+test("mock library commands scan, search, filter, and scope source roots", async () => {
   const { client } = makeClient();
-  const result = await client.invoke("scan_library");
-  assert.equal(result.ok, true);
-  assert.equal(result.data.jobId, "mock-scan");
-});
+  assert.equal((await client.invoke("scan_library")).data.jobId, "mock-scan");
 
-test("invoke returns mock for search_tracks in non-tauri", async () => {
-  const { client } = makeClient();
-  const result = await client.invoke("search_tracks", { request: { query: "", limit: 10 } });
-  assert.equal(result.ok, true);
-  assert.equal(result.data.items.length, 3);
-});
+  const allTracks = await client.invoke("search_tracks", { request: { query: "", limit: 10 } });
+  assert.equal(allTracks.ok, true);
+  assert.equal(allTracks.data.items.length, 3);
 
-test("invoke search_tracks filters by query", async () => {
-  const { client } = makeClient();
-  const result = await client.invoke("search_tracks", { request: { query: "Track A", limit: 10 } });
-  assert.equal(result.ok, true);
-  assert.equal(result.data.items.length, 1);
-  assert.equal(result.data.items[0].title, "Track A");
-});
+  const filtered = await client.invoke("search_tracks", { request: { query: "Track A", limit: 10 } });
+  assert.equal(filtered.data.items.length, 1);
+  assert.equal(filtered.data.items[0].title, "Track A");
 
-test("invoke mock browse_source_files scopes folder and master.db rows independently", async () => {
-  const { client } = makeClient();
+  const browse = async (payload) => (await client.invoke("browse_source_files", payload)).data;
+  assert.equal((await browse({ sourceRoots: [], includeMasterDb: false, query: "", limit: 10 })).items.length, 0);
 
-  const empty = await client.invoke("browse_source_files", {
-    sourceRoots: [],
-    includeMasterDb: false,
-    query: "",
-    limit: 10
-  });
-  assert.equal(empty.ok, true);
-  assert.equal(empty.data.items.length, 0);
-
-  const folderOnly = await client.invoke("browse_source_files", {
-    sourceRoots: ["/music"],
-    includeMasterDb: false,
-    query: "",
-    limit: 10
-  });
-  assert.equal(folderOnly.data.items.length, 3);
-  assert.equal(folderOnly.data.items.some((track) => track.masterDbSource), false);
-  assert.deepEqual(folderOnly.data.sourceRootAnalysis, [
+  const folderOnly = await browse({ sourceRoots: ["/music"], includeMasterDb: false, query: "", limit: 10 });
+  assert.equal(folderOnly.items.length, 3);
+  assert.equal(folderOnly.items.some((track) => track.masterDbSource), false);
+  assert.deepEqual(folderOnly.sourceRootAnalysis, [
     { sourceRoot: "/music", total: 3, analyzed: 0, fullyAnalyzed: false }
   ]);
 
-  const masterOnly = await client.invoke("browse_source_files", {
-    sourceRoots: [],
-    includeMasterDb: true,
-    query: "",
-    limit: 10
-  });
-  assert.deepEqual(masterOnly.data.items.map((track) => track.id), ["db-1"]);
-  assert.equal(masterOnly.data.items[0].masterDbSource, true);
+  const masterOnly = await browse({ sourceRoots: [], includeMasterDb: true, query: "", limit: 10 });
+  assert.deepEqual(masterOnly.items.map((track) => track.id), ["db-1"]);
+  assert.equal(masterOnly.items[0].masterDbSource, true);
 });
 
-test("invoke returns mock for create_playlist and pushes to state", async () => {
-  const { client, state } = makeClient();
-  assert.equal(state.playlists.length, 0);
-  const result = await client.invoke("create_playlist", { request: { name: "My Set" } });
-  assert.equal(result.ok, true);
-  assert.equal(result.data.name, "My Set");
-  assert.equal(state.playlists.length, 1);
-});
-
-test("invoke returns mock for delete_playlist and removes from state", async () => {
+test("mock playlist, USB, playback, and removal commands mutate state consistently", async () => {
+  const playlist = { id: "p1", name: "Set", tracks: [{ id: "t1" }, { id: "t2" }, { id: "t3" }] };
   const { client, state } = makeClient({
-    state: { playlists: [{ id: "p1", name: "A" }, { id: "p2", name: "B" }] }
+    state: { playlists: [playlist] }
   });
-  const result = await client.invoke("delete_playlist", { request: { playlistId: "p1" } });
-  assert.equal(result.ok, true);
-  assert.equal(result.data.deleted, true);
-  assert.equal(state.playlists.length, 1);
-  assert.equal(state.playlists[0].id, "p2");
-});
 
-test("invoke returns mock for validate_usb_root", async () => {
-  const { client } = makeClient();
-  const valid = await client.invoke("validate_usb_root", { request: { path: "/media/usb" } });
-  assert.equal(valid.ok, true);
-  assert.equal(valid.data.valid, true);
-  assert.equal(valid.data.normalizedRoot, "/media/usb");
+  const created = await client.invoke("create_playlist", { request: { name: "My Set" } });
+  assert.equal(created.ok, true);
+  assert.equal(created.data.name, "My Set");
+  assert.equal(state.playlists.length, 2);
 
-  const empty = await client.invoke("validate_usb_root", { request: { path: "" } });
-  assert.equal(empty.data.valid, false);
-});
+  const deleted = await client.invoke("delete_playlist", { request: { playlistId: "p1" } });
+  assert.equal(deleted.data.deleted, true);
+  assert.deepEqual(state.playlists.map((item) => item.name), ["My Set"]);
 
-test("invoke mock play_track_native updates mockPlayback state", async () => {
-  const { client, state } = makeClient();
-  const result = await client.invoke("play_track_native", { request: { path: "/music/track.mp3" } });
-  assert.equal(result.ok, true);
-  assert.equal(result.data.playing, true);
-  assert.equal(state.mockPlayback.playing, true);
+  const validRoot = await client.invoke("validate_usb_root", { request: { path: "/media/usb" } });
+  const emptyRoot = await client.invoke("validate_usb_root", { request: { path: "" } });
+  assert.equal(validRoot.data.valid, true);
+  assert.equal(validRoot.data.normalizedRoot, "/media/usb");
+  assert.equal(emptyRoot.data.valid, false);
+
+  const play = await client.invoke("play_track_native", { request: { path: "/music/track.mp3" } });
+  assert.equal(play.data.playing, true);
   assert.equal(state.mockPlayback.path, "/music/track.mp3");
-});
+  assert.equal(state.mockPlayback.playing, true);
 
-test("invoke mock stop_playback_native resets mockPlayback state", async () => {
-  const { client, state } = makeClient({
-    state: { mockPlayback: { path: "/music/track.mp3", playing: true, startedAtMs: 1000, startOffsetMs: 0, durationMs: 240000 } }
-  });
-  const result = await client.invoke("stop_playback_native", {});
-  assert.equal(result.ok, true);
-  assert.equal(result.data.stopped, true);
-  assert.equal(state.mockPlayback.playing, false);
+  const stop = await client.invoke("stop_playback_native", {});
+  assert.equal(stop.data.stopped, true);
   assert.equal(state.mockPlayback.path, null);
+  assert.equal(state.mockPlayback.playing, false);
+
+  const removePlaylist = { id: "p2", name: "Set", tracks: [{ id: "t1" }, { id: "t2" }, { id: "t3" }] };
+  state.playlists.push(removePlaylist);
+  const removed = await client.invoke("remove_tracks_from_playlist", {
+    request: { playlistId: "p2", trackIds: ["t1", "t3"] }
+  });
+  assert.equal(removed.data.removed, 2);
+  assert.deepEqual(removePlaylist.tracks, [{ id: "t2" }]);
 });
 
-test("invoke returns error for unknown mock command", async () => {
+test("mock command helper unwraps successes and throws mock command errors", async () => {
   const { client } = makeClient();
-  const result = await client.invoke("nonexistent_command");
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "INTERNAL_ERROR");
-});
+  const unknown = await client.invoke("nonexistent_command");
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.error.code, "INTERNAL_ERROR");
 
-test("command unwraps successful response", async () => {
-  const { client } = makeClient();
   const data = await client.command("search_tracks", { query: "", limit: 10 });
-  assert.ok(Array.isArray(data.items));
   assert.equal(data.items.length, 3);
-});
 
-test("command throws on error response", async () => {
-  const { client } = makeClient();
   await assert.rejects(
     () => client.command("nonexistent_command"),
-    (err) => {
-      assert.ok(err.message.includes("Unknown mock command"));
-      return true;
-    }
+    /Unknown mock command/
   );
-});
-
-test("invoke mock remove_tracks_from_playlist removes matching tracks", async () => {
-  const playlist = { id: "p1", name: "Set", tracks: [{ id: "t1" }, { id: "t2" }, { id: "t3" }] };
-  const { client } = makeClient({ state: { playlists: [playlist] } });
-  const result = await client.invoke("remove_tracks_from_playlist", {
-    request: { playlistId: "p1", trackIds: ["t1", "t3"] }
-  });
-  assert.equal(result.data.removed, 2);
-  assert.equal(playlist.tracks.length, 1);
-  assert.equal(playlist.tracks[0].id, "t2");
 });

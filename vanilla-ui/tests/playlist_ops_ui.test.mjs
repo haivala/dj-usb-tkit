@@ -3,167 +3,39 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
 import {
-  renderPlaylistList,
+  createPlaylist,
   formatPlaylistExportStatus,
   loadPlaylists,
   refreshCurrentPlaylistTracks,
-  updatePlaylistExportButtons,
-  createPlaylist
+  renderPlaylistList
 } from "../components/playlist/actions.mjs";
 import { bindPlaylistEvents } from "../components/playlist/events.mjs";
 
 function makeDom() {
-  const dom = new JSDOM(`
-    <!doctype html>
-    <body>
-      <ul id="navPlaylistList"></ul>
-      <button id="addPlaylistBtn"></button>
-      <div id="playlistPanelTitle"></div>
-      <div id="playlistExportStatus"></div>
-      <div id="badgeLabel"></div>
-      <input id="playlistSearchInput" value="" />
-      <div id="playlistEmptyState"></div>
-      <div id="playlistTableWrap"></div>
-      <tbody id="playlistTracksBody"></tbody>
-      <div id="playlistTotalDuration"></div>
-      <button id="exportPlaylistBtn"></button>
-      <button id="analyzePlaylistMissingBtn"></button>
-    </body>
-  `, { pretendToBeVisual: true });
-  return dom;
+  return new JSDOM(`<!doctype html><body>
+    <ul id="navPlaylistList"></ul>
+    <button id="addPlaylistBtn"></button>
+    <div id="playlistPanelTitle"></div>
+    <div id="playlistExportStatus"></div>
+    <div id="badgeLabel"></div>
+    <input id="playlistSearchInput" value="" />
+    <div id="playlistEmptyState"></div>
+    <div id="playlistTableWrap"></div>
+    <tbody id="playlistTracksBody"></tbody>
+    <div id="playlistTotalDuration"></div>
+    <button id="exportPlaylistBtn"></button>
+    <button id="analyzePlaylistMissingBtn"></button>
+  </body>`, { pretendToBeVisual: true });
 }
 
-test("renderPlaylistList renders active and active-mode playlist buttons", () => {
-  const dom = makeDom();
-  const { document } = dom.window;
-  const state = {
-    activeTab: "p2",
-    currentPlaylistId: "p1",
-    playlists: [
-      { id: "p1", name: "One" },
-      { id: "p2", name: "Two" }
-    ]
-  };
-  const el = { navPlaylistList: document.getElementById("navPlaylistList") };
+function elements(document, ids) {
+  return Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+}
 
-  renderPlaylistList(state, el, {
-    document,
-    renderPlaylistSidebarItemContent: (playlist) => playlist.name
-  });
-
-  const buttons = document.querySelectorAll(".nav-playlist-item");
-  assert.equal(buttons.length, 2);
-  // playlists are rendered newest-first (reversed), so p2 is first, p1 is second
-  assert.equal(buttons[0].classList.contains("active"), true);
-  assert.equal(buttons[1].classList.contains("playlist-active-mode"), true);
-});
-
-test("formatPlaylistExportStatus formats exported playlists", () => {
-  const text = formatPlaylistExportStatus(
-    {
-      lastExportedAt: "2026-01-01T00:00:00Z",
-      lastExportedUsbRoot: "/usb",
-      lastExportedTrackCount: 5
-    },
-    { formatTimestampLocal: () => "Jan 1" }
-  );
-
-  assert.equal(text, "Last exported Jan 1 to /usb (5 track(s)).");
-});
-
-test("loadPlaylists normalizes items and triggers playlist refresh hooks", async () => {
-  const state = { playlists: [] };
-  const calls = [];
-
-  await loadPlaylists(state, {
-    command: async () => ({ items: [{ id: "p1", name: "One" }] }),
-    renderPlaylistTabsAndPanels: () => calls.push("render"),
-    updatePlaylistExportButtons: () => calls.push("buttons")
-  });
-
-  assert.deepEqual(state.playlists, [{ id: "p1", name: "One", tracks: [] }]);
-  assert.deepEqual(calls, ["render", "buttons"]);
-});
-
-test("refreshCurrentPlaylistTracks updates playlist table state and empty state", async () => {
-  const dom = makeDom();
-  const { document } = dom.window;
-  const playlist = { id: "p1", name: "One", tracks: [] };
-  const state = {
-    playlistTrackSearch: "",
-    currentPlaylistTracksView: []
-  };
-  const el = {
-    playlistSearchInput: document.getElementById("playlistSearchInput"),
-    playlistEmptyState: document.getElementById("playlistEmptyState"),
-    playlistTableWrap: document.getElementById("playlistTableWrap"),
-    playlistTracksBody: document.getElementById("playlistTracksBody"),
-    playlistTotalDuration: document.getElementById("playlistTotalDuration")
-  };
-  const calls = [];
-
-  await refreshCurrentPlaylistTracks(state, el, {
-    getCurrentPlaylist: () => playlist,
-    command: async () => ({ items: [{ id: "t1", title: "Track" }] }),
-    normalizeTrack: (track) => track,
-    filterTracksByQuery: (tracks) => tracks,
-    renderEmptyState: (_container, payload) => calls.push(payload.heading),
-    applySortToTracks: (tracks) => tracks,
-    renderTrackTable: (_tbody, tracks) => calls.push(`rows:${tracks.length}`),
-    updateTrackListDurationSummary: (_node, tracks) => calls.push(`duration:${tracks.length}`),
-    updatePlaylistPanelTitle: (item) => calls.push(`title:${item.id}`),
-    updatePlaylistExportButtons: () => calls.push("buttons"),
-    renderPlaylistList: () => calls.push("list")
-  });
-
-  assert.equal(playlist.tracks.length, 1);
-  assert.equal(state.currentPlaylistTracksView.length, 1);
-  assert.equal(el.playlistTableWrap.classList.contains("hidden"), false);
-  assert.deepEqual(calls, ["rows:1", "duration:1", "title:p1", "buttons", "list"]);
-});
-
-test("createPlaylist selects newly loaded playlist when command id is not present", async () => {
-  const state = { currentPlaylistId: "p1", playlists: [{ id: "p1", name: "Old" }] };
-  const calls = [];
-
-  await createPlaylist("Fresh", {
-    setStatus: (text) => calls.push(`status:${text}`),
-    withProgress: async (_label, fn) => fn(() => {}),
-    command: async () => ({ playlistId: "missing-id", name: "Fresh" }),
-    loadPlaylists: async () => {
-      state.playlists = [{ id: "p1", name: "Old" }, { id: "p2", name: "Fresh" }];
-      calls.push("load");
-    },
-    state,
-    updateModeText: () => calls.push("mode"),
-    switchTab: async (tab) => calls.push(`tab:${tab}`)
-  });
-
-  assert.equal(state.currentPlaylistId, "p2");
-  assert.deepEqual(calls, ["load", "mode", "tab:p2", "status:Playlist created: Fresh"]);
-});
-
-test("bindPlaylistEvents ignores playlist selection clicks while new playlist input is open", async () => {
-  const dom = makeDom();
-  const { document, Event } = dom.window;
-  const el = {
-    navPlaylistList: document.getElementById("navPlaylistList"),
-    addPlaylistBtn: document.getElementById("addPlaylistBtn"),
-    panels: { playlist: document.createElement("div") },
-    playlistSearchInput: document.getElementById("playlistSearchInput"),
-    exportPlaylistBtn: document.getElementById("exportPlaylistBtn")
-  };
-  el.navPlaylistList.innerHTML = `
-    <li><button class="nav-playlist-item" data-playlist-id="p1">One</button></li>
-    <li class="nav-new-input-wrap"><input class="nav-new-input" /></li>
-  `;
-
-  const switched = [];
-  bindPlaylistEvents({
-    state: { currentPlaylistId: "p0", currentPlaylistTracksView: [], selectedTrackIds: new Set() },
-    el,
+function bindDeps(overrides) {
+  return {
     setStatus: () => {},
-    switchView: async (view) => { switched.push(view); },
+    switchView: async () => {},
     deletePlaylist: async () => {},
     startPlaylistRename: () => {},
     promptNewPlaylist: () => {},
@@ -181,8 +53,113 @@ test("bindPlaylistEvents ignores playlist selection clicks while new playlist in
     trackHasCoreAnalysis: () => false,
     analyzeTrackIds: async () => {},
     resolveLocalTrackId: () => null,
-    refreshCurrentPlaylistTracks: async () => {}
+    refreshCurrentPlaylistTracks: async () => {},
+    ...overrides
+  };
+}
+
+test("renderPlaylistList marks active tabs and active playlist mode", () => {
+  const { document } = makeDom().window;
+  renderPlaylistList({
+    activeTab: "p2",
+    currentPlaylistId: "p1",
+    playlists: [{ id: "p1", name: "One" }, { id: "p2", name: "Two" }]
+  }, elements(document, ["navPlaylistList"]), {
+    document,
+    renderPlaylistSidebarItemContent: (playlist) => playlist.name
   });
+
+  const buttons = document.querySelectorAll(".nav-playlist-item");
+  assert.equal(buttons.length, 2);
+  assert.equal(buttons[0].classList.contains("active"), true);
+  assert.equal(buttons[1].classList.contains("playlist-active-mode"), true);
+});
+
+test("playlist commands format export status, load lists, and select newly loaded playlists", async () => {
+  assert.equal(formatPlaylistExportStatus({
+    lastExportedAt: "2026-01-01T00:00:00Z",
+    lastExportedUsbRoot: "/usb",
+    lastExportedTrackCount: 5
+  }, { formatTimestampLocal: () => "Jan 1" }), "Last exported Jan 1 to /usb (5 track(s)).");
+
+  const loaded = { playlists: [] };
+  const loadCalls = [];
+  await loadPlaylists(loaded, {
+    command: async () => ({ items: [{ id: "p1", name: "One" }] }),
+    renderPlaylistTabsAndPanels: () => loadCalls.push("render"),
+    updatePlaylistExportButtons: () => loadCalls.push("buttons")
+  });
+  assert.deepEqual(loaded.playlists, [{ id: "p1", name: "One", tracks: [] }]);
+  assert.deepEqual(loadCalls, ["render", "buttons"]);
+
+  const state = { currentPlaylistId: "p1", playlists: [{ id: "p1", name: "Old" }] };
+  const createCalls = [];
+  await createPlaylist("Fresh", {
+    setStatus: (text) => createCalls.push(`status:${text}`),
+    withProgress: async (_label, fn) => fn(() => {}),
+    command: async () => ({ playlistId: "missing-id", name: "Fresh" }),
+    loadPlaylists: async () => {
+      state.playlists = [{ id: "p1", name: "Old" }, { id: "p2", name: "Fresh" }];
+      createCalls.push("load");
+    },
+    state,
+    updateModeText: () => createCalls.push("mode"),
+    switchTab: async (tab) => createCalls.push(`tab:${tab}`)
+  });
+  assert.equal(state.currentPlaylistId, "p2");
+  assert.deepEqual(createCalls, ["load", "mode", "tab:p2", "status:Playlist created: Fresh"]);
+});
+
+test("refreshCurrentPlaylistTracks updates table state and refresh hooks", async () => {
+  const { document } = makeDom().window;
+  const playlist = { id: "p1", name: "One", tracks: [] };
+  const state = { playlistTrackSearch: "", currentPlaylistTracksView: [] };
+  const calls = [];
+
+  await refreshCurrentPlaylistTracks(state, elements(document, [
+    "playlistSearchInput",
+    "playlistEmptyState",
+    "playlistTableWrap",
+    "playlistTracksBody",
+    "playlistTotalDuration"
+  ]), {
+    getCurrentPlaylist: () => playlist,
+    command: async () => ({ items: [{ id: "t1", title: "Track" }] }),
+    normalizeTrack: (track) => track,
+    filterTracksByQuery: (tracks) => tracks,
+    renderEmptyState: (_container, payload) => calls.push(payload.heading),
+    applySortToTracks: (tracks) => tracks,
+    renderTrackTable: (_tbody, tracks) => calls.push(`rows:${tracks.length}`),
+    updateTrackListDurationSummary: (_node, tracks) => calls.push(`duration:${tracks.length}`),
+    updatePlaylistPanelTitle: (item) => calls.push(`title:${item.id}`),
+    updatePlaylistExportButtons: () => calls.push("buttons"),
+    renderPlaylistList: () => calls.push("list")
+  });
+
+  assert.equal(playlist.tracks.length, 1);
+  assert.equal(state.currentPlaylistTracksView.length, 1);
+  assert.equal(document.getElementById("playlistTableWrap").classList.contains("hidden"), false);
+  assert.deepEqual(calls, ["rows:1", "duration:1", "title:p1", "buttons", "list"]);
+});
+
+test("bindPlaylistEvents ignores playlist selection clicks while new playlist input is open", async () => {
+  const dom = makeDom();
+  const { document, Event } = dom.window;
+  const el = {
+    ...elements(document, ["navPlaylistList", "addPlaylistBtn", "playlistSearchInput", "exportPlaylistBtn"]),
+    panels: { playlist: document.createElement("div") }
+  };
+  el.navPlaylistList.innerHTML = `
+    <li><button class="nav-playlist-item" data-playlist-id="p1">One</button></li>
+    <li class="nav-new-input-wrap"><input class="nav-new-input" /></li>
+  `;
+  const switched = [];
+
+  bindPlaylistEvents(bindDeps({
+    state: { currentPlaylistId: "p0", currentPlaylistTracksView: [], selectedTrackIds: new Set() },
+    el,
+    switchView: async (view) => { switched.push(view); }
+  }));
 
   document.querySelector(".nav-playlist-item").dispatchEvent(new Event("click", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 0));
