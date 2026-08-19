@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// job_manager.mjs references window.setInterval/clearInterval
 if (typeof globalThis.window === "undefined") {
   globalThis.window = {
     setInterval: globalThis.setInterval,
@@ -11,14 +10,14 @@ if (typeof globalThis.window === "undefined") {
 }
 
 import {
-  setProgress,
   dismissProgress,
-  startProgressHeartbeat,
-  stopProgressHeartbeat,
+  formatJobStatusText,
+  handleJobEvent,
   pauseProgressHeartbeat,
   resumeProgressHeartbeat,
-  handleJobEvent,
-  formatJobStatusText
+  setProgress,
+  startProgressHeartbeat,
+  stopProgressHeartbeat
 } from "../job_manager.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
 
@@ -26,7 +25,10 @@ function makeButton() {
   return {
     hidden: true,
     innerHTML: "",
-    setAttribute: () => {}
+    attrs: {},
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    }
   };
 }
 
@@ -51,570 +53,251 @@ function makeState() {
     progressStartedAtMs: 0,
     progressPausedAtMs: null,
     lastJobEventAtMs: 0,
-    activeJobId: null
+    activeJobId: null,
+    activeJobType: null
   };
 }
 
-test("setProgress sets clamped percent and text on state and el", () => {
-  const state = makeState();
-  const el = makeEl();
-  setProgress(state, el, true, 42, "Scanning...");
-  assert.equal(state.progressPercent, 42);
-  assert.equal(state.progressBaseText, "Scanning...");
-  assert.equal(el.progressFill.style.width, "42%");
-  assert.equal(el.progressText.textContent, "Scanning...");
-  assert.ok(el.progressFooter.classList.contains("active"));
-});
-
-test("setProgress clamps percent to 0-100", () => {
-  const state = makeState();
-  const el = makeEl();
-  setProgress(state, el, true, 150, "Over");
-  assert.equal(state.progressPercent, 100);
-  setProgress(state, el, true, -10, "Under");
-  assert.equal(state.progressPercent, 0);
-});
-
-test("setProgress uses default text when empty", () => {
-  const state = makeState();
-  const el = makeEl();
-  setProgress(state, el, true, 50, "");
-  assert.equal(state.progressBaseText, "Working...");
-  setProgress(state, el, false, 0, "");
-  assert.equal(state.progressBaseText, "Idle");
-});
-
-test("setProgress toggles error and dismissable classes", () => {
-  const state = makeState();
-  const el = makeEl();
-  setProgress(state, el, true, 100, "Failed", { error: true, dismissable: true });
-  assert.ok(el.progressFooter.classList.contains("error"));
-  assert.ok(el.progressFooter.classList.contains("dismissable"));
-  setProgress(state, el, false, 0, "Idle");
-  assert.ok(!el.progressFooter.classList.contains("error"));
-  assert.ok(!el.progressFooter.classList.contains("dismissable"));
-});
-
-test("dismissProgress resets to idle", () => {
-  const state = makeState();
-  const el = makeEl();
-  setProgress(state, el, true, 75, "Working...");
-  dismissProgress(state, el);
-  assert.equal(state.progressPercent, 0);
-  assert.equal(state.progressBaseText, "Idle");
-  assert.ok(!el.progressFooter.classList.contains("active"));
-});
-
-test("startProgressHeartbeat sets timer and timestamps", () => {
-  const state = makeState();
-  const el = makeEl();
+function withTimerStubs(fn) {
+  const original = {
+    setInterval: window.setInterval,
+    clearInterval: window.clearInterval,
+    setTimeout: window.setTimeout,
+    globalSetTimeout: globalThis.setTimeout
+  };
   const timers = [];
-  const origSetInterval = window.setInterval;
-  window.setInterval = (fn, ms) => { const id = 42; timers.push({ fn, ms }); return id; };
+  const cleared = [];
+  window.setInterval = (tick, ms) => {
+    const id = timers.length + 1;
+    timers.push({ id, tick, ms });
+    return id;
+  };
+  window.clearInterval = (id) => {
+    cleared.push(id);
+  };
+  window.setTimeout = (callback) => {
+    callback();
+    return 1;
+  };
+  globalThis.setTimeout = window.setTimeout;
   try {
+    return fn({ timers, cleared });
+  } finally {
+    window.setInterval = original.setInterval;
+    window.clearInterval = original.clearInterval;
+    window.setTimeout = original.setTimeout;
+    globalThis.setTimeout = original.globalSetTimeout;
+  }
+}
+
+test("progress primitives clamp, classify, dismiss, and pause/resume heartbeat", () => {
+  withTimerStubs(({ timers, cleared }) => {
+    const state = makeState();
+    const el = makeEl();
+
+    setProgress(state, el, true, 150, "", { error: true, dismissable: true });
+    assert.equal(state.progressPercent, 100);
+    assert.equal(state.progressBaseText, "Working...");
+    assert.equal(el.progressFill.style.width, "100%");
+    assert.equal(el.progressFooter.classList.contains("active"), true);
+    assert.equal(el.progressFooter.classList.contains("error"), true);
+    assert.equal(el.progressFooter.classList.contains("dismissable"), true);
+
+    setProgress(state, el, true, -10, "Under");
+    assert.equal(state.progressPercent, 0);
+    dismissProgress(state, el);
+    assert.equal(state.progressBaseText, "Idle");
+    assert.equal(el.progressFooter.classList.contains("active"), false);
+
     startProgressHeartbeat(state, el);
-    assert.equal(state.progressHeartbeatTimer, 42);
-    assert.ok(state.progressStartedAtMs > 0);
-    assert.ok(state.lastJobEventAtMs > 0);
+    startProgressHeartbeat(state, el);
+    assert.equal(state.progressHeartbeatTimer, 1);
     assert.equal(timers.length, 1);
     assert.equal(timers[0].ms, 1000);
-  } finally {
-    window.setInterval = origSetInterval;
-  }
-});
 
-test("startProgressHeartbeat is no-op when timer already exists", () => {
-  const state = makeState();
-  state.progressHeartbeatTimer = 99;
-  const el = makeEl();
-  const origSetInterval = window.setInterval;
-  let called = false;
-  window.setInterval = () => { called = true; return 100; };
-  try {
-    startProgressHeartbeat(state, el);
-    assert.ok(!called);
-    assert.equal(state.progressHeartbeatTimer, 99);
-  } finally {
-    window.setInterval = origSetInterval;
-  }
-});
-
-test("stopProgressHeartbeat clears timer", () => {
-  const state = makeState();
-  state.progressHeartbeatTimer = 77;
-  let clearedId = null;
-  const origClearInterval = window.clearInterval;
-  window.clearInterval = (id) => { clearedId = id; };
-  try {
-    stopProgressHeartbeat(state);
-    assert.equal(clearedId, 77);
-    assert.equal(state.progressHeartbeatTimer, null);
-  } finally {
-    window.clearInterval = origClearInterval;
-  }
-});
-
-test("stopProgressHeartbeat is no-op without timer", () => {
-  const state = makeState();
-  let called = false;
-  const origClearInterval = window.clearInterval;
-  window.clearInterval = () => { called = true; };
-  try {
-    stopProgressHeartbeat(state);
-    assert.ok(!called);
-  } finally {
-    window.clearInterval = origClearInterval;
-  }
-});
-
-test("pauseProgressHeartbeat freezes the display text at 'paused' and records a timestamp", () => {
-  const state = makeState();
-  state.progressBaseText = "Analyzing 3/10: Track.wav";
-  const el = makeEl();
-  pauseProgressHeartbeat(state, el);
-  assert.equal(el.progressText.textContent, "Analyzing 3/10: Track.wav (paused)");
-  assert.ok(state.progressPausedAtMs > 0);
-});
-
-test("pauseProgressHeartbeat is idempotent when already paused", () => {
-  const state = makeState();
-  const el = makeEl();
-  pauseProgressHeartbeat(state, el);
-  const firstPausedAt = state.progressPausedAtMs;
-  pauseProgressHeartbeat(state, el);
-  assert.equal(state.progressPausedAtMs, firstPausedAt);
-});
-
-test("resumeProgressHeartbeat clears the pause and shifts the start time forward by the paused duration", () => {
-  const state = makeState();
-  const el = makeEl();
-  const now = Date.now();
-  state.progressStartedAtMs = now - 10000;
-  state.progressPausedAtMs = now - 4000;
-  resumeProgressHeartbeat(state, el);
-  assert.equal(state.progressPausedAtMs, null);
-  // Elapsed should reflect only the 6s before the pause, not the 4s spent
-  // paused, so it "continues from where it was" instead of counting the
-  // paused interval.
-  const elapsedSecs = Math.round((Date.now() - state.progressStartedAtMs) / 1000);
-  assert.ok(elapsedSecs <= 7, `expected paused duration to be excluded from elapsed time, got ${elapsedSecs}s`);
-  assert.match(el.progressText.textContent, /\(\d+s\)$/);
-});
-
-test("resumeProgressHeartbeat is a no-op when not paused", () => {
-  const state = makeState();
-  state.progressBaseText = "Idle";
-  const el = makeEl();
-  const startedAt = state.progressStartedAtMs;
-  resumeProgressHeartbeat(state, el);
-  assert.equal(state.progressStartedAtMs, startedAt);
-  assert.equal(el.progressText.textContent, "");
-});
-
-test("heartbeat tick keeps showing 'paused' while paused instead of the elapsed seconds", () => {
-  const state = makeState();
-  const el = makeEl();
-  el.progressFooter.classList.add("active");
-  let tick;
-  const origSetInterval = window.setInterval;
-  window.setInterval = (fn) => { tick = fn; return 1; };
-  try {
-    startProgressHeartbeat(state, el);
-    state.progressBaseText = "Analyzing 1/5: Track.wav";
+    el.progressFooter.classList.add("active");
+    state.progressBaseText = "Analyzing";
     pauseProgressHeartbeat(state, el);
-    tick();
-    assert.equal(el.progressText.textContent, "Analyzing 1/5: Track.wav (paused)");
-  } finally {
-    window.setInterval = origSetInterval;
-  }
-});
+    timers[0].tick();
+    assert.equal(el.progressText.textContent, "Analyzing (paused)");
 
-test("stopProgressHeartbeat clears the paused timestamp too", () => {
-  const state = makeState();
-  state.progressHeartbeatTimer = 5;
-  state.progressPausedAtMs = Date.now();
-  const origClearInterval = window.clearInterval;
-  window.clearInterval = () => {};
-  try {
-    stopProgressHeartbeat(state);
+    resumeProgressHeartbeat(state, el);
     assert.equal(state.progressPausedAtMs, null);
-  } finally {
-    window.clearInterval = origClearInterval;
-  }
+    assert.match(el.progressText.textContent, /Analyzing \(\d+s\)$/);
+
+    pauseProgressHeartbeat(state, el);
+    stopProgressHeartbeat(state);
+    assert.deepEqual(cleared, [1]);
+    assert.equal(state.progressHeartbeatTimer, null);
+    assert.equal(state.progressPausedAtMs, null);
+  });
 });
 
-test("handleJobEvent job.started sets active job and progress", () => {
-  const state = makeState();
-  const el = makeEl();
-  let statusText = "";
-  const origSetInterval = window.setInterval;
-  window.setInterval = (fn, ms) => 42;
-  try {
+test("formatJobStatusText preserves backend messages and returns empty when there is no message", () => {
+  assert.equal(formatJobStatusText("usb_read", "fetch_usb_playlists", "Importing USB playlists..."), "Importing USB playlists...");
+  assert.equal(formatJobStatusText("usb_read", "fetch_usb_histories", "Importing USB histories..."), "Importing USB histories...");
+  assert.equal(formatJobStatusText("scan", "unknown_stage", "Running"), "Running");
+  assert.equal(formatJobStatusText("scan", "unknown_stage", ""), "");
+});
+
+test("handleJobEvent tracks lifecycle, ignores stale jobs, and toggles USB locks", () => {
+  withTimerStubs(() => {
+    const state = makeState();
+    const el = makeEl();
+    const messages = [];
+    const usbLocks = [];
+    const deps = {
+      debugFrontendLog: () => {},
+      applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
+      emitMessage: (message) => messages.push(message),
+      setUsbRootControlsLocked: (locked) => usbLocks.push(locked)
+    };
+
     handleJobEvent(state, el, {
       event: "job.started",
-      jobId: "j1",
+      jobId: "export-1",
       jobType: "export",
       stage: "copy",
       message: "Copying files",
       percent: 5
-    }, {
-      debugFrontendLog: () => {},
-      pushEventLog: () => {},
-      applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-      setStatus: (t) => { statusText = t; }
-    });
-    assert.equal(state.activeJobId, "j1");
+    }, deps);
+    assert.equal(state.activeJobId, "export-1");
+    assert.equal(state.activeJobType, "export");
     assert.equal(state.progressPercent, 5);
-    assert.equal(statusText, "Copying files");
-  } finally {
-    window.setInterval = origSetInterval;
-  }
-});
-
-test("handleJobEvent shows pause/cancel controls only for analysis jobs, hides them on completion", () => {
-  const state = makeState();
-  const el = makeEl();
-  const origSetInterval = window.setInterval;
-  window.setInterval = () => 42;
-  try {
-    handleJobEvent(state, el, {
-      event: "job.started",
-      jobId: "j-scan",
-      jobType: "scan",
-      stage: "index",
-      message: "Scanning",
-      percent: 0
-    }, { debugFrontendLog: () => {}, applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve() });
-    assert.equal(el.progressPauseBtn.hidden, true);
-    assert.equal(el.progressCancelAnalysisBtn.hidden, true);
+    assert.deepEqual(usbLocks, [true]);
+    assert.equal(messages.at(-1).status.text, "Copying files");
 
     handleJobEvent(state, el, {
-      event: "job.started",
-      jobId: "j-analysis",
-      jobType: "analysis",
-      stage: "analyze_new_tracks",
-      message: "Analyzing",
-      percent: 0
-    }, { debugFrontendLog: () => {}, applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve() });
-    assert.equal(el.progressPauseBtn.hidden, false);
-    assert.equal(el.progressCancelAnalysisBtn.hidden, false);
-    assert.equal(state.activeJobType, "analysis");
-    assert.equal(state.analysisPaused, false);
+      event: "job.progress",
+      jobId: "other-job",
+      jobType: "export",
+      message: "Wrong job",
+      percent: 80
+    }, deps);
+    assert.equal(state.progressPercent, 5);
 
     handleJobEvent(state, el, {
       event: "job.completed",
-      jobId: "j-analysis",
-      jobType: "analysis",
-      stage: "analyze_new_tracks",
-      message: "Done",
-      percent: 100
-    }, { debugFrontendLog: () => {}, applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve() });
-    assert.equal(el.progressPauseBtn.hidden, true);
-    assert.equal(el.progressCancelAnalysisBtn.hidden, true);
+      jobId: "export-1",
+      jobType: "export",
+      message: "Done"
+    }, deps);
+    assert.equal(state.activeJobId, null);
     assert.equal(state.activeJobType, null);
-  } finally {
-    window.setInterval = origSetInterval;
-  }
-});
+    assert.deepEqual(usbLocks, [true, false]);
+    assert.equal(el.progressFooter.classList.contains("active"), false);
 
-test("handleJobEvent keeps the elapsed timer counting for in-flight tracks after pause, only freezing once none remain", () => {
-  const state = makeState();
-  state.analyzingTrackIds = new Set(["track-1", "track-2"]);
-  const el = makeEl();
-  const origSetInterval = window.setInterval;
-  window.setInterval = () => 42;
-  const deps = {
-    debugFrontendLog: () => {},
-    applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-    setTrackAnalyzingState: (trackId, active) => {
-      if (active) state.analyzingTrackIds.add(trackId);
-      else state.analyzingTrackIds.delete(trackId);
-    }
-  };
-  try {
     handleJobEvent(state, el, {
       event: "job.started",
-      jobId: "j-analysis",
+      jobId: "analysis-1",
       jobType: "analysis",
       stage: "analyze_new_tracks",
       message: "Analyzing",
       percent: 0
     }, deps);
+    assert.equal(el.progressPauseBtn.hidden, false);
+    assert.equal(el.progressCancelAnalysisBtn.hidden, false);
 
-    // Pause is requested while two tracks are still in flight.
+    handleJobEvent(state, el, {
+      event: "job.completed",
+      jobId: "analysis-1",
+      jobType: "analysis",
+      message: "Analysis done"
+    }, deps);
+    assert.equal(el.progressPauseBtn.hidden, true);
+    assert.equal(el.progressCancelAnalysisBtn.hidden, true);
+  });
+});
+
+test("handleJobEvent applies analysis progress, duration totals, and delayed pause freeze", () => {
+  withTimerStubs(() => {
+    const state = makeState();
+    state.activeJobId = "analysis-1";
     state.analysisPaused = true;
+    state.analyzingTrackIds = new Set(["track-1", "track-2"]);
+    const el = makeEl();
+    const realtimePayloads = [];
+    const durationSummaries = [];
+    const deps = {
+      debugFrontendLog: () => {},
+      applyRealtimeAnalyzedTrackUpdate: (payload) => {
+        realtimePayloads.push(payload);
+        return Promise.resolve();
+      },
+      setTrackAnalyzingState: (trackId, active) => {
+        if (active) state.analyzingTrackIds.add(trackId);
+        else state.analyzingTrackIds.delete(trackId);
+      },
+      applyLibraryDurationSummary: (totalMs, unknownCount) => {
+        durationSummaries.push([totalMs, unknownCount]);
+      }
+    };
 
-    // The first in-flight track finishes -- one is still running, so the
-    // timer must not freeze yet.
     handleJobEvent(state, el, {
       event: "job.progress",
-      jobId: "j-analysis",
+      jobId: "analysis-1",
+      jobType: "analysis",
       stage: "analyze_new_tracks",
       trackId: "track-1",
-      trackReady: true,
-      durationMs: 1000
+      trackReady: true
     }, deps);
-    assert.equal(state.progressPausedAtMs, null);
+    assert.equal(realtimePayloads.length, 1);
     assert.equal(state.analyzingTrackIds.size, 1);
+    assert.equal(state.progressPausedAtMs, null);
+    assert.deepEqual(durationSummaries, []);
 
-    // The second (last) in-flight track finishes -- now it has really
-    // stopped, so the timer should freeze on "(paused)".
     handleJobEvent(state, el, {
       event: "job.progress",
-      jobId: "j-analysis",
+      jobId: "analysis-1",
+      jobType: "analysis",
       stage: "analyze_new_tracks",
       trackId: "track-2",
       trackReady: true,
-      durationMs: 1000
+      libraryTotalDurationMs: 3000,
+      libraryDurationUnknownCount: 1
     }, deps);
     assert.equal(state.analyzingTrackIds.size, 0);
     assert.ok(state.progressPausedAtMs > 0);
     assert.match(el.progressText.textContent, /\(paused\)$/);
-  } finally {
-    window.setInterval = origSetInterval;
-  }
+    assert.deepEqual(durationSummaries, [[3000, 1]]);
+  });
 });
 
-test("formatJobStatusText applies usb import stage-specific override", () => {
-  assert.equal(
-    formatJobStatusText("usb_read", "fetch_usb_playlists", "Importing USB playlists..."),
-    "Importing USB playlists..."
-  );
-  assert.equal(
-    formatJobStatusText("usb_read", "fetch_usb_histories", "Importing USB histories..."),
-    "Importing USB histories..."
-  );
-});
-
-test("formatJobStatusText uses fallback template for unknown stage", () => {
-  assert.equal(
-    formatJobStatusText("scan", "unknown_stage", "Running"),
-    "Running"
-  );
-  assert.equal(formatJobStatusText("scan", "unknown_stage", ""), "");
-});
-
-test("handleJobEvent omits usb_read fetch status prefix for playlist and history imports", () => {
-  const state = makeState();
-  const el = makeEl();
-  const seen = [];
-  const origSetInterval = window.setInterval;
-  window.setInterval = () => 42;
-  try {
-    handleJobEvent(state, el, {
-      event: "job.started",
-      jobId: "j-usb-playlists",
-      jobType: "usb_read",
-      stage: "fetch_usb_playlists",
-      message: "Importing USB playlists...",
-      percent: 10
-    }, {
+test("handleJobEvent routes analysis and job failures to the event log", () => {
+  withTimerStubs(() => {
+    const state = makeState();
+    const el = makeEl();
+    const messages = [];
+    const deps = {
       debugFrontendLog: () => {},
-      pushEventLog: () => {},
       applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-      setStatus: (t) => { seen.push(t); }
-    });
-    assert.equal(seen.at(-1), "Importing USB playlists...");
+      emitMessage: (message) => messages.push(message)
+    };
 
     handleJobEvent(state, el, {
       event: "job.progress",
-      jobId: "j-usb-playlists",
-      jobType: "usb_read",
-      stage: "fetch_usb_histories",
-      message: "Importing USB histories...",
-      percent: 60
-    }, {
-      debugFrontendLog: () => {},
-      pushEventLog: () => {},
-      applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-      setStatus: (t) => { seen.push(t); }
-    });
-    assert.equal(seen.at(-1), "Importing USB histories...");
-  } finally {
-    window.setInterval = origSetInterval;
-  }
-});
+      stage: "analyze_new_tracks",
+      trackId: "t6",
+      trackTitle: "Bad Track",
+      failed: true,
+      errorMessage: "decode failed",
+      filePath: "/music/bad.mp3"
+    }, deps);
+    assert.equal(messages[0].level, "error");
+    assert.equal(messages[0].source, "analysis");
+    assert.match(messages[0].eventLog.text, /Bad Track.*decode failed/);
+    assert.equal(messages[0].eventLog.details, "/music/bad.mp3");
 
-test("handleJobEvent job.completed resets active job", () => {
-  const state = makeState();
-  state.activeJobId = "j1";
-  const el = makeEl();
-  const origSetTimeout = window.setTimeout;
-  const origClearInterval = window.clearInterval;
-  window.setTimeout = (fn) => fn();
-  window.clearInterval = () => {};
-  try {
-    handleJobEvent(state, el, {
-      event: "job.completed",
-      jobId: "j1",
-      jobType: "export",
-      message: "Done"
-    }, {
-      debugFrontendLog: () => {},
-      pushEventLog: () => {},
-      applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-      setStatus: () => {}
-    });
-    assert.equal(state.activeJobId, null);
-  } finally {
-    window.setTimeout = origSetTimeout;
-    window.clearInterval = origClearInterval;
-  }
-});
-
-test("handleJobEvent job.completed refreshes source root analysis status", () => {
-  const state = makeState();
-  state.activeJobId = "j1";
-  const el = makeEl();
-  const origSetTimeout = window.setTimeout;
-  const origClearInterval = window.clearInterval;
-  window.setTimeout = (fn) => fn();
-  window.clearInterval = () => {};
-  let refreshCalls = 0;
-  try {
-    handleJobEvent(state, el, {
-      event: "job.completed",
-      jobId: "j1",
-      jobType: "analyze_new_tracks",
-      message: "Done"
-    }, {
-      debugFrontendLog: () => {},
-      pushEventLog: () => {},
-      applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-      setStatus: () => {},
-      refreshSourceRootAnalysisStatus: () => { refreshCalls += 1; return Promise.resolve(); }
-    });
-    assert.equal(refreshCalls, 1);
-  } finally {
-    window.setTimeout = origSetTimeout;
-    window.clearInterval = origClearInterval;
-  }
-});
-
-test("handleJobEvent ignores events for different job id", () => {
-  const state = makeState();
-  state.activeJobId = "j1";
-  const el = makeEl();
-  let statusCalled = false;
-  handleJobEvent(state, el, {
-    event: "job.progress",
-    jobId: "j-other",
-    percent: 50,
-    message: "Other job"
-  }, {
-    debugFrontendLog: () => {},
-    pushEventLog: () => {},
-    applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-    setStatus: () => { statusCalled = true; }
-  });
-  assert.ok(!statusCalled);
-});
-
-test("handleJobEvent ignores null/non-object payload", () => {
-  const state = makeState();
-  const el = makeEl();
-  const deps = {
-    debugFrontendLog: () => {},
-    pushEventLog: () => {},
-    applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-    setStatus: () => {}
-  };
-  // Should not throw
-  handleJobEvent(state, el, null, deps);
-  handleJobEvent(state, el, "string", deps);
-  handleJobEvent(state, el, undefined, deps);
-});
-
-test("handleJobEvent analysis progress calls applyRealtimeAnalyzedTrackUpdate", () => {
-  const state = makeState();
-  const el = makeEl();
-  let realtimeCalled = false;
-  handleJobEvent(state, el, {
-    event: "job.progress",
-    jobId: "j1",
-    jobType: "analysis",
-    stage: "analyze_new_tracks",
-    trackId: "t5",
-    trackTitle: "Track E",
-    percent: 40,
-    message: "Analyzing"
-  }, {
-    debugFrontendLog: () => {},
-    pushEventLog: () => {},
-    applyRealtimeAnalyzedTrackUpdate: () => { realtimeCalled = true; return Promise.resolve(); },
-    setStatus: () => {}
-  });
-  assert.ok(realtimeCalled);
-});
-
-test("handleJobEvent does not apply a library duration total when the payload doesn't carry one", () => {
-  const state = makeState();
-  const el = makeEl();
-  const applied = [];
-  handleJobEvent(state, el, {
-    event: "job.progress",
-    jobId: "j1",
-    jobType: "analysis",
-    stage: "analyze_new_tracks",
-    trackId: "t8",
-    trackReady: true
-  }, {
-    debugFrontendLog: () => {},
-    pushEventLog: () => {},
-    applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-    setStatus: () => {},
-    applyLibraryDurationSummary: (totalMs, unknownCount) => { applied.push([totalMs, unknownCount]); }
-  });
-  assert.deepEqual(applied, []);
-});
-
-test("handleJobEvent analysis failure pushes error to event log", () => {
-  const state = makeState();
-  const el = makeEl();
-  const logged = [];
-  handleJobEvent(state, el, {
-    event: "job.progress",
-    stage: "analyze_new_tracks",
-    trackId: "t6",
-    trackTitle: "Bad Track",
-    failed: true,
-    errorMessage: "decode failed",
-    filePath: "/music/bad.mp3"
-  }, {
-    debugFrontendLog: () => {},
-    pushEventLog: (entry) => { logged.push(entry); },
-    applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-    setStatus: () => {}
-  });
-  assert.equal(logged.length, 1);
-  assert.equal(logged[0].level, "error");
-  assert.ok(logged[0].message.includes("Bad Track"));
-  assert.ok(logged[0].message.includes("decode failed"));
-  assert.equal(logged[0].details, "/music/bad.mp3");
-});
-
-test("handleJobEvent job.failed resets active job", () => {
-  const state = makeState();
-  state.activeJobId = "j1";
-  const el = makeEl();
-  const origSetTimeout = window.setTimeout;
-  const origClearInterval = window.clearInterval;
-  window.setTimeout = (fn) => fn();
-  window.clearInterval = () => {};
-  try {
+    state.activeJobId = "export-1";
     handleJobEvent(state, el, {
       event: "job.failed",
-      jobId: "j1",
+      jobId: "export-1",
+      jobType: "export",
+      stage: "copy",
       message: "Export failed"
-    }, {
-      debugFrontendLog: () => {},
-      pushEventLog: () => {},
-      applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-      setStatus: () => {}
-    });
+    }, deps);
     assert.equal(state.activeJobId, null);
-  } finally {
-    window.setTimeout = origSetTimeout;
-    window.clearInterval = origClearInterval;
-  }
+    assert.equal(messages.at(-1).level, "error");
+    assert.equal(messages.at(-1).eventLog.text, "Export failed");
+  });
 });

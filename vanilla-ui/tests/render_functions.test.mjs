@@ -3,78 +3,90 @@ import assert from "node:assert/strict";
 import { createTrackRow, renderTrackTable } from "../track_table.mjs";
 import { escapeHtml } from "../ui_utils.mjs";
 
-test("createTrackRow uses helpful add-button tooltip when no playlist is active", () => {
-  const html = createTrackRow(
-    {
-      id: "t-3",
-      title: "Title",
-      artist: "Artist",
-      album: "Album",
-      bpm: "",
-      key: "",
-      waveformPreview: [],
-      waveformPeaksPath: "",
-      usbAnalysisPath: ""
-    },
-    {
-      origin: "lib",
-      index: 0,
-      withCheckbox: false,
-      actionLabel: "+",
-      actionType: "add-library",
-      compactAddButton: true,
-      enableAnalyzeActions: false,
-      secondaryActionLabel: "Play",
-      secondaryActionType: "play-library"
-    },
-    {
-      state: { currentPlaylistId: "", playlists: [] },
-      buildCoverSrcCandidates: () => [],
-      isTrackCurrentlyPlaying: () => false,
-      escapeHtml,
-      trackHasCoreAnalysis: () => false,
-      getKeyHue: () => 180,
-    }
+const baseTrack = {
+  id: "t-1",
+  title: "Title",
+  artist: "Artist",
+  album: "Album",
+  bpm: "",
+  key: "",
+  waveformPreview: [],
+  waveformPeaksPath: "",
+  usbAnalysisPath: ""
+};
+
+const baseRowOptions = {
+  origin: "lib",
+  index: 0,
+  withCheckbox: false,
+  actionLabel: "+",
+  actionType: "add-library",
+  compactAddButton: true,
+  enableAnalyzeActions: false,
+  secondaryActionLabel: "Play",
+  secondaryActionType: "play-library"
+};
+
+function rowDeps(overrides = {}) {
+  return {
+    state: { currentPlaylistId: "playlist-1", playlists: [{ id: "playlist-1", name: "P1" }] },
+    buildCoverSrcCandidates: () => [],
+    isTrackCurrentlyPlaying: () => false,
+    escapeHtml,
+    trackHasCoreAnalysis: () => false,
+    getKeyHue: () => 180,
+    ...overrides
+  };
+}
+
+function renderRow(track = {}, options = {}, deps = {}) {
+  return createTrackRow(
+    { ...baseTrack, ...track },
+    { ...baseRowOptions, ...options },
+    rowDeps(deps)
   );
+}
+
+function tableDeps(overrides = {}) {
+  return {
+    createTrackRow: () => "",
+    attachCoverFallbackHandlers: () => {},
+    renderWaveformsIn: () => {},
+    updateTransportButtonsInDom: () => {},
+    escapeHtml,
+    setStatus: () => {},
+    ...overrides
+  };
+}
+
+function formatBadgeRow(track) {
+  return renderRow(track, {
+    origin: "usb",
+    actionType: "add-usb",
+    secondaryActionLabel: undefined,
+    secondaryActionType: undefined
+  }, {
+    state: {},
+    trackHasCoreAnalysis: () => false,
+    getKeyHue: () => 0
+  });
+}
+
+test("createTrackRow disables add with a helpful tooltip when no playlist is active", () => {
+  const html = renderRow({ id: "t-3" }, {}, { state: { currentPlaylistId: "", playlists: [] } });
 
   assert.ok(html.includes("data-tooltip=\"Create and activate a playlist first, then add tracks to it.\""));
   assert.ok(html.includes("disabled"));
 });
 
 test("createTrackRow renders a canvas for PWV4-only waveform data", () => {
-  const html = createTrackRow(
-    {
-      id: "t-pwv4",
-      title: "Title",
-      artist: "Artist",
-      album: "Album",
-      bpm: "",
-      key: "",
-      waveformPreview: [],
-      waveformColorData: [1, 2, 3, 4, 5, 6],
-      waveformPeaksPath: "/tmp/ANLZ0000.EXT",
-      usbAnalysisPath: ""
-    },
-    {
-      origin: "lib",
-      index: 0,
-      withCheckbox: false,
-      actionLabel: "+",
-      actionType: "add-library",
-      compactAddButton: true,
-      enableAnalyzeActions: false,
-      secondaryActionLabel: "Play",
-      secondaryActionType: "play-library"
-    },
-    {
-      state: { currentPlaylistId: "playlist-1", playlists: [{ id: "playlist-1", name: "P1" }] },
-      buildCoverSrcCandidates: () => [],
-      isTrackCurrentlyPlaying: () => false,
-      escapeHtml,
-      trackHasCoreAnalysis: () => true,
-      getKeyHue: () => 180,
-    }
-  );
+  const html = renderRow({
+    id: "t-pwv4",
+    waveformColorData: [1, 2, 3, 4, 5, 6],
+    waveformPeaksPath: "/tmp/ANLZ0000.EXT"
+  }, {}, {
+    trackHasCoreAnalysis: () => true
+  });
 
   assert.ok(html.includes("waveform waveform-canvas"));
   assert.ok(html.includes("waveform-canvas-el"));
@@ -95,146 +107,66 @@ test("renderTrackTable attaches PWV4 color data before drawing", () => {
   let attached = null;
   let rendered = false;
   const track = {
+    ...baseTrack,
     id: "t-pwv4",
-    title: "Title",
-    artist: "Artist",
-    album: "Album",
-    bpm: "",
-    key: "",
-    waveformPreview: [],
     waveformColorData: [1, 2, 3, 4, 5, 6],
-    waveformPeaksPath: "/tmp/ANLZ0000.EXT",
-    usbAnalysisPath: ""
+    waveformPeaksPath: "/tmp/ANLZ0000.EXT"
   };
 
-  renderTrackTable(tbody, [track], { origin: "lib" }, {
-    createTrackRow: (row, options) => createTrackRow(row, options, {
-      state: { currentPlaylistId: "playlist-1", playlists: [{ id: "playlist-1", name: "P1" }] },
-      buildCoverSrcCandidates: () => [],
-      isTrackCurrentlyPlaying: () => false,
-      escapeHtml,
-      trackHasCoreAnalysis: () => true,
-      getKeyHue: () => 180,
-    }),
-    attachCoverFallbackHandlers: () => {},
+  renderTrackTable(tbody, [track], { origin: "lib" }, tableDeps({
+    createTrackRow: (row, options) => createTrackRow(row, options, rowDeps({
+      trackHasCoreAnalysis: () => true
+    })),
     renderWaveformsIn: () => { rendered = true; },
-    setWaveformColorData: (element, data) => { attached = { element, data }; },
-    updateTransportButtonsInDom: () => {},
-    escapeHtml,
-    setStatus: () => {}
-  });
+    setWaveformColorData: (element, data) => { attached = { element, data }; }
+  }));
 
   assert.equal(attached.element, waveformEl);
   assert.deepEqual(attached.data, [1, 2, 3, 4, 5, 6]);
   assert.equal(rendered, true);
 });
 
-test("renderTrackTable empty state renders grid empty row in playlist-view (no checkbox) mode", () => {
-  const deps = {
-    createTrackRow: () => "",
-    attachCoverFallbackHandlers: () => {},
-    renderWaveformsIn: () => {},
-    updateTransportButtonsInDom: () => {},
-    escapeHtml,
-    setStatus: () => {}
-  };
+test("renderTrackTable empty states use one full-width grid empty cell", () => {
+  const playlistView = { innerHTML: "" };
+  renderTrackTable(playlistView, [], { withCheckbox: false }, tableDeps());
+  assert.ok(playlistView.innerHTML.includes('class="track-grid-row track-grid-row-empty"'));
+  assert.ok(playlistView.innerHTML.includes('class="track-grid-cell track-grid-empty"'));
+  assert.ok(playlistView.innerHTML.includes("No tracks available."));
 
-  const tbodyB = { innerHTML: "" };
-  renderTrackTable(tbodyB, [], { withCheckbox: false }, deps);
-  assert.ok(tbodyB.innerHTML.includes('class="track-grid-row track-grid-row-empty"'));
-  assert.ok(tbodyB.innerHTML.includes('class="track-grid-cell track-grid-empty"'));
-  assert.ok(tbodyB.innerHTML.includes("No tracks available."));
+  for (const withCheckbox of [true, false]) {
+    const tbody = { innerHTML: "" };
+    renderTrackTable(tbody, [], { withCheckbox }, tableDeps());
+    assert.equal((tbody.innerHTML.match(/role="cell"/g) || []).length, 1);
+  }
 });
 
-test("renderTrackTable empty row keeps a single full-width cell regardless of checkbox mode", () => {
-  const deps = {
-    createTrackRow: () => "",
-    attachCoverFallbackHandlers: () => {},
-    renderWaveformsIn: () => {},
-    updateTransportButtonsInDom: () => {},
-    escapeHtml,
-    setStatus: () => {}
-  };
-
-  const withCheckbox = { innerHTML: "" };
-  renderTrackTable(withCheckbox, [], { withCheckbox: true }, deps);
-  const cellsA = (withCheckbox.innerHTML.match(/role="cell"/g) || []).length;
-  assert.equal(cellsA, 1);
-
-  const withoutCheckbox = { innerHTML: "" };
-  renderTrackTable(withoutCheckbox, [], { withCheckbox: false }, deps);
-  const cellsB = (withoutCheckbox.innerHTML.match(/role="cell"/g) || []).length;
-  assert.equal(cellsB, 1);
-});
-
-function renderFormatBadgeRow(track) {
-  return createTrackRow(
-    {
-      id: "t-format",
-      title: "Title",
-      artist: "Artist",
-      album: "Album",
-      bpm: "",
-      key: "",
-      waveformPreview: [],
-      waveformPeaksPath: "",
-      usbAnalysisPath: "",
-      ...track
-    },
-    {
-      origin: "usb",
-      index: 0,
-      withCheckbox: false,
-      actionLabel: "+",
-      actionType: "add-usb",
-      compactAddButton: true,
-      enableAnalyzeActions: false
-    },
-    {
-      state: {},
-      buildCoverSrcCandidates: () => [],
-      isTrackCurrentlyPlaying: () => false,
-      escapeHtml,
-      trackHasCoreAnalysis: () => false,
-      getKeyHue: () => 0
-    }
-  );
-}
-
-test("createTrackRow shows an autofix badge for WAVE_FORMAT_EXTENSIBLE PCM wav tracks", () => {
-  const html = renderFormatBadgeRow({
+test("createTrackRow renders the expected wav format badge variants", () => {
+  const autofix = formatBadgeRow({
     filePath: "/media/track.wav",
     formatExt: "wav",
     wavExtensibleKind: "extensible_pcm"
   });
+  assert.ok(autofix.includes('class="format-badge autofix"'));
+  assert.ok(!autofix.includes('class="format-badge warn"'));
+  assert.ok(autofix.includes("Will be automatically converted to standard PCM on export"));
 
-  assert.ok(html.includes('class="format-badge autofix"'));
-  assert.ok(!html.includes('class="format-badge warn"'));
-  assert.ok(html.includes("Will be automatically converted to standard PCM on export"));
-});
-
-test("createTrackRow keeps a hard warning badge for extensible wav with an unsafe subformat", () => {
-  const html = renderFormatBadgeRow({
+  const warning = formatBadgeRow({
     filePath: "/media/track.wav",
     formatExt: "wav",
     wavExtensibleKind: "extensible_other"
   });
+  assert.ok(warning.includes('class="format-badge warn"'));
+  assert.ok(!warning.includes('class="format-badge autofix"'));
+  assert.ok(warning.includes("cannot be safely converted"));
 
-  assert.ok(html.includes('class="format-badge warn"'));
-  assert.ok(!html.includes('class="format-badge autofix"'));
-  assert.ok(html.includes("cannot be safely converted"));
-});
-
-test("createTrackRow shows a plain badge for a wav with no extensible header issue", () => {
-  const html = renderFormatBadgeRow({
+  const plain = formatBadgeRow({
     filePath: "/media/track.wav",
     formatExt: "wav",
     wavExtensibleKind: null,
     sampleRateHz: 44100,
     bitDepth: 16
   });
-
-  assert.ok(html.includes('class="format-badge" data-tooltip="44.1 kHz · 16-bit">WAV</span>'));
-  assert.ok(!html.includes('class="format-badge warn"'));
-  assert.ok(!html.includes('class="format-badge autofix"'));
+  assert.ok(plain.includes('class="format-badge" data-tooltip="44.1 kHz \u00b7 16-bit">WAV</span>'));
+  assert.ok(!plain.includes('class="format-badge warn"'));
+  assert.ok(!plain.includes('class="format-badge autofix"'));
 });

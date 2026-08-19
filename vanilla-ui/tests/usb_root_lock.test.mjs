@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// job_manager.mjs references window.setInterval/clearInterval
 if (typeof globalThis.window === "undefined") {
   globalThis.window = {
     setInterval: globalThis.setInterval,
@@ -13,120 +12,33 @@ if (typeof globalThis.window === "undefined") {
 import {
   USB_ROOT_LOCKING_JOB_TYPES,
   isUsbRootChangeBlocked,
-  setUsbRootControlsLocked,
-  pickUsbFolder,
-  validateAndSetUsbRoot,
-  renderUsbRecentRoots,
   loadUsbDevices,
-  pruneUsbDevice
+  pickUsbFolder,
+  pruneUsbDevice,
+  renderUsbRecentRoots,
+  setUsbRootControlsLocked,
+  validateAndSetUsbRoot
 } from "../components/usb/actions.mjs";
 import { updatePlaylistExportButtons } from "../components/playlist/actions.mjs";
 import { handleJobEvent } from "../job_manager.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
 
-test("pickUsbFolder rejects while any locking job type is active, without opening the picker", async (t) => {
-  for (const jobType of USB_ROOT_LOCKING_JOB_TYPES) {
-    await t.test(`blocked for jobType=${jobType}`, async () => {
-      const state = { activeJobId: "job-1", activeJobType: jobType };
-      let invokeCalled = false;
-      let lastStatus = "";
-      const result = await pickUsbFolder({
-        invoke: async () => { invokeCalled = true; return "/tmp/usb"; },
-        validateAndSetUsbRoot: async () => {},
-        state,
-        emitStatus: (text) => { lastStatus = text; }
-      });
-      assert.equal(result, null);
-      assert.equal(invokeCalled, false);
-      assert.match(lastStatus, /wait/i);
-    });
-  }
-});
-
-test("pickUsbFolder proceeds when no locking job is active", async () => {
-  const state = { activeJobId: null, activeJobType: null };
-  let invokeCalled = false;
-  let validateCalled = false;
-  await pickUsbFolder({
-    invoke: async () => { invokeCalled = true; return "/tmp/usb"; },
-    validateAndSetUsbRoot: async () => { validateCalled = true; },
-    state,
-    emitStatus: () => {}
-  });
-  assert.equal(invokeCalled, true);
-  assert.equal(validateCalled, true);
-});
-
-test("pickUsbFolder proceeds for unrelated job types (e.g. analysis)", async () => {
-  const state = { activeJobId: "job-1", activeJobType: "analysis" };
-  let invokeCalled = false;
-  await pickUsbFolder({
-    invoke: async () => { invokeCalled = true; return "/tmp/usb"; },
-    validateAndSetUsbRoot: async () => {},
-    state,
-    emitStatus: () => {}
-  });
-  assert.equal(invokeCalled, true);
-});
-
-test("validateAndSetUsbRoot rejects while any locking job type is active, without calling the backend", async (t) => {
-  for (const jobType of USB_ROOT_LOCKING_JOB_TYPES) {
-    await t.test(`blocked for jobType=${jobType}`, async () => {
-      const state = { activeJobId: "job-1", activeJobType: jobType, usbRoot: null };
-      let commandCalled = false;
-      let lastStatus = "";
-      const valid = await validateAndSetUsbRoot(state, {}, "/tmp/new-usb", false, {
-        command: async () => { commandCalled = true; return {}; },
-        setStatus: (text) => { lastStatus = text; }
-      });
-      assert.equal(valid, false);
-      assert.equal(commandCalled, false);
-      assert.match(lastStatus, /wait/i);
-    });
-  }
-});
-
-test("setUsbRootControlsLocked disables the select button, every recent-root button, and the export button", () => {
-  const state = {};
+function jobHarness() {
   const el = {
-    selectUsbFolderBtn: { disabled: false, title: "" },
-    usbRecentList: {
-      querySelectorAll: () => [{ disabled: false }, { disabled: false }]
-    },
-    exportPlaylistBtn: { disabled: false }
+    progressFooter: { classList: makeClassList() },
+    progressFill: { style: {} },
+    progressText: {},
+    progressPauseBtn: { setAttribute() {} },
+    progressCancelAnalysisBtn: {}
   };
-  setUsbRootControlsLocked(state, el, true, {});
-  assert.equal(el.selectUsbFolderBtn.disabled, true);
-  assert.match(el.selectUsbFolderBtn.title, /wait/i);
-  assert.equal(el.exportPlaylistBtn.disabled, true);
-});
+  el.progressFooter.querySelector = () => null;
+  return { state: { activeJobId: null, activeJobType: null }, el };
+}
 
-test("setUsbRootControlsLocked unlocking calls updatePlaylistExportButtons rather than force-enabling export", () => {
-  const state = {};
-  const el = {
-    selectUsbFolderBtn: { disabled: true, title: "wait" },
-    usbRecentList: { querySelectorAll: () => [] },
-    exportPlaylistBtn: { disabled: true }
-  };
-  let updateCalled = false;
-  setUsbRootControlsLocked(state, el, false, {
-    updatePlaylistExportButtons: () => { updateCalled = true; }
-  });
-  assert.equal(el.selectUsbFolderBtn.disabled, false);
-  assert.equal(updateCalled, true);
-  // Export button disabled state is left to updatePlaylistExportButtons, not force-set here.
-  assert.equal(el.exportPlaylistBtn.disabled, true);
-});
-
-test("renderUsbRecentRoots disables recent-root buttons while locked", () => {
-  const el = {
-    usbRecentRow: { classList: makeClassList() },
-    usbRecentList: { innerHTML: "", appendChild(btn) { this._btn = btn; } }
-  };
-  const btns = [];
-  const documentStub = {
+function recentRootDocumentStub(buttons) {
+  return {
     createElement: (tag) => {
-      const el = {
+      const element = {
         tag,
         classList: makeClassList(),
         dataset: {},
@@ -134,131 +46,178 @@ test("renderUsbRecentRoots disables recent-root buttons while locked", () => {
         _children: [],
         appendChild(child) { this._children.push(child); }
       };
-      if (tag === "button") btns.push(el);
-      return el;
+      if (tag === "button") buttons.push(element);
+      return element;
     }
   };
-  renderUsbRecentRoots(el, ["/tmp/usb1"], documentStub, { activeJobId: "job-1", activeJobType: "diagnostics" });
-  assert.equal(btns[0].disabled, true);
-});
-
-test("updatePlaylistExportButtons keeps the export button disabled while isUsbRootChangeBlocked is true, regardless of playlist selection", () => {
-  const state = { activeJobId: "job-1", activeJobType: "export" };
-  const el = { exportPlaylistBtn: { disabled: false, textContent: "", dataset: {} } };
-  updatePlaylistExportButtons(state, el, {
-    getCurrentPlaylist: () => ({ name: "My Playlist", tracks: [] }),
-    computeExportButtonState: () => ({ text: "Export", title: "" }),
-    isUsbOriginTrack: () => false,
-    trackHasCoreAnalysis: () => true,
-    isUsbRootChangeBlocked
-  });
-  assert.equal(el.exportPlaylistBtn.disabled, true);
-});
-
-test("updatePlaylistExportButtons enables the export button when nothing is blocking", () => {
-  const state = { activeJobId: null, activeJobType: null };
-  const el = { exportPlaylistBtn: { disabled: true, textContent: "", dataset: {} } };
-  updatePlaylistExportButtons(state, el, {
-    getCurrentPlaylist: () => ({ name: "My Playlist", tracks: [] }),
-    computeExportButtonState: () => ({ text: "Export", title: "" }),
-    isUsbOriginTrack: () => false,
-    trackHasCoreAnalysis: () => true,
-    isUsbRootChangeBlocked
-  });
-  assert.equal(el.exportPlaylistBtn.disabled, false);
-});
-
-function makeJobManagerHarness() {
-  const state = { activeJobId: null, activeJobType: null };
-  const el = {
-    progressFooter: { classList: makeClassList() },
-    progressFill: { style: {} },
-    progressText: {},
-    progressPauseBtn: { setAttribute() {}, },
-    progressCancelAnalysisBtn: {},
-  };
-  el.progressFooter.querySelector = () => null;
-  return { state, el };
 }
 
-test("handleJobEvent locks USB controls only for locking job types", () => {
-  const { state, el } = makeJobManagerHarness();
-  let lockedCalls = [];
-  const deps = {
-    debugFrontendLog: () => {},
-    setUsbRootControlsLocked: (locked) => lockedCalls.push(locked)
-  };
+test("pickUsbFolder blocks every USB-locking job type and allows unlocked or unrelated jobs", async (t) => {
+  for (const jobType of USB_ROOT_LOCKING_JOB_TYPES) {
+    await t.test(`blocked for jobType=${jobType}`, async () => {
+      let invokeCalled = false;
+      let lastStatus = "";
+      const result = await pickUsbFolder({
+        invoke: async () => { invokeCalled = true; return "/tmp/usb"; },
+        validateAndSetUsbRoot: async () => {},
+        state: { activeJobId: "job-1", activeJobType: jobType },
+        emitStatus: (text) => { lastStatus = text; }
+      });
+      assert.equal(result, null);
+      assert.equal(invokeCalled, false);
+      assert.match(lastStatus, /wait/i);
+    });
+  }
 
-  handleJobEvent(state, el, { event: "job.started", jobId: "job-1", jobType: "diagnostics" }, deps);
-  assert.deepEqual(lockedCalls, [true]);
-
-  handleJobEvent(state, el, { event: "job.completed", jobId: "job-1", jobType: "diagnostics" }, deps);
-  assert.deepEqual(lockedCalls, [true, false]);
+  for (const [activeJobId, activeJobType] of [[null, null], ["job-1", "analysis"]]) {
+    let invokeCalled = false;
+    let validateCalled = false;
+    await pickUsbFolder({
+      invoke: async () => { invokeCalled = true; return "/tmp/usb"; },
+      validateAndSetUsbRoot: async () => { validateCalled = true; },
+      state: { activeJobId, activeJobType },
+      emitStatus: () => {}
+    });
+    assert.equal(invokeCalled, true);
+    assert.equal(validateCalled, true);
+  }
 });
 
-test("handleJobEvent does not lock USB controls for unrelated job types", () => {
-  const { state, el } = makeJobManagerHarness();
-  let lockedCalls = [];
-  const deps = {
-    debugFrontendLog: () => {},
-    setUsbRootControlsLocked: (locked) => lockedCalls.push(locked)
-  };
-
-  handleJobEvent(state, el, { event: "job.started", jobId: "job-1", jobType: "analysis" }, deps);
-  handleJobEvent(state, el, { event: "job.completed", jobId: "job-1", jobType: "analysis" }, deps);
-  assert.deepEqual(lockedCalls, []);
+test("validateAndSetUsbRoot blocks every USB-locking job type before backend validation", async (t) => {
+  for (const jobType of USB_ROOT_LOCKING_JOB_TYPES) {
+    await t.test(`blocked for jobType=${jobType}`, async () => {
+      let commandCalled = false;
+      let lastStatus = "";
+      const valid = await validateAndSetUsbRoot(
+        { activeJobId: "job-1", activeJobType: jobType, usbRoot: null },
+        {},
+        "/tmp/new-usb",
+        false,
+        {
+          command: async () => { commandCalled = true; return {}; },
+          setStatus: (text) => { lastStatus = text; }
+        }
+      );
+      assert.equal(valid, false);
+      assert.equal(commandCalled, false);
+      assert.match(lastStatus, /wait/i);
+    });
+  }
 });
 
-test("handleJobEvent unlocks USB controls on job.failed for locking job types", () => {
-  const { state, el } = makeJobManagerHarness();
-  let lockedCalls = [];
-  const deps = {
-    debugFrontendLog: () => {},
-    setUsbRootControlsLocked: (locked) => lockedCalls.push(locked)
+test("USB root controls and recent-root buttons reflect lock state", () => {
+  const lockedEl = {
+    selectUsbFolderBtn: { disabled: false, title: "" },
+    usbRecentList: { querySelectorAll: () => [{ disabled: false }, { disabled: false }] },
+    exportPlaylistBtn: { disabled: false }
   };
+  setUsbRootControlsLocked({}, lockedEl, true, {});
+  assert.equal(lockedEl.selectUsbFolderBtn.disabled, true);
+  assert.match(lockedEl.selectUsbFolderBtn.title, /wait/i);
+  assert.equal(lockedEl.exportPlaylistBtn.disabled, true);
 
-  handleJobEvent(state, el, { event: "job.started", jobId: "job-1", jobType: "usb_write" }, deps);
-  handleJobEvent(state, el, { event: "job.failed", jobId: "job-1", jobType: "usb_write" }, deps);
-  assert.deepEqual(lockedCalls, [true, false]);
+  const unlockedEl = {
+    selectUsbFolderBtn: { disabled: true, title: "wait" },
+    usbRecentList: { querySelectorAll: () => [] },
+    exportPlaylistBtn: { disabled: true }
+  };
+  let updateCalled = false;
+  setUsbRootControlsLocked({}, unlockedEl, false, {
+    updatePlaylistExportButtons: () => { updateCalled = true; }
+  });
+  assert.equal(unlockedEl.selectUsbFolderBtn.disabled, false);
+  assert.equal(updateCalled, true);
+  assert.equal(unlockedEl.exportPlaylistBtn.disabled, true);
+
+  const buttons = [];
+  renderUsbRecentRoots({
+    usbRecentRow: { classList: makeClassList() },
+    usbRecentList: { innerHTML: "", appendChild(btn) { this._btn = btn; } }
+  }, ["/tmp/usb1"], recentRootDocumentStub(buttons), {
+    activeJobId: "job-1",
+    activeJobType: "diagnostics"
+  });
+  assert.equal(buttons[0].disabled, true);
 });
 
-test("loadUsbDevices maps items[].rootPath into state.usbRecentRoots in backend order", async () => {
+test("updatePlaylistExportButtons respects USB-root lock state", () => {
+  for (const [state, expectedDisabled] of [
+    [{ activeJobId: "job-1", activeJobType: "export" }, true],
+    [{ activeJobId: null, activeJobType: null }, false]
+  ]) {
+    const el = { exportPlaylistBtn: { disabled: !expectedDisabled, textContent: "", dataset: {} } };
+    updatePlaylistExportButtons(state, el, {
+      getCurrentPlaylist: () => ({ name: "My Playlist", tracks: [] }),
+      computeExportButtonState: () => ({ text: "Export", title: "" }),
+      isUsbOriginTrack: () => false,
+      trackHasCoreAnalysis: () => true,
+      isUsbRootChangeBlocked
+    });
+    assert.equal(el.exportPlaylistBtn.disabled, expectedDisabled);
+  }
+});
+
+test("handleJobEvent locks USB controls only for USB-locking job lifecycles", () => {
+  const locking = jobHarness();
+  const lockingCalls = [];
+  const deps = {
+    debugFrontendLog: () => {},
+    setUsbRootControlsLocked: (locked) => lockingCalls.push(locked)
+  };
+  handleJobEvent(locking.state, locking.el, { event: "job.started", jobId: "job-1", jobType: "diagnostics" }, deps);
+  handleJobEvent(locking.state, locking.el, { event: "job.completed", jobId: "job-1", jobType: "diagnostics" }, deps);
+  assert.deepEqual(lockingCalls, [true, false]);
+
+  const analysis = jobHarness();
+  const analysisCalls = [];
+  const analysisDeps = {
+    debugFrontendLog: () => {},
+    setUsbRootControlsLocked: (locked) => analysisCalls.push(locked)
+  };
+  handleJobEvent(analysis.state, analysis.el, { event: "job.started", jobId: "job-1", jobType: "analysis" }, analysisDeps);
+  handleJobEvent(analysis.state, analysis.el, { event: "job.completed", jobId: "job-1", jobType: "analysis" }, analysisDeps);
+  assert.deepEqual(analysisCalls, []);
+
+  const failed = jobHarness();
+  const failedCalls = [];
+  const failedDeps = {
+    debugFrontendLog: () => {},
+    setUsbRootControlsLocked: (locked) => failedCalls.push(locked)
+  };
+  handleJobEvent(failed.state, failed.el, { event: "job.started", jobId: "job-1", jobType: "usb_write" }, failedDeps);
+  handleJobEvent(failed.state, failed.el, { event: "job.failed", jobId: "job-1", jobType: "usb_write" }, failedDeps);
+  assert.deepEqual(failedCalls, [true, false]);
+});
+
+test("loadUsbDevices maps backend devices and recovers to an empty list on failure", async () => {
   const state = {};
   const items = [
     { id: "dev-1", rootPath: "/mnt/usbA", mounted: true },
     { id: "dev-2", rootPath: "/mnt/usbB", mounted: false }
   ];
-  const command = async (name) => {
+  const rows = await loadUsbDevices(state, async (name) => {
     assert.equal(name, "list_usb_devices");
     return { items };
-  };
-  const rows = await loadUsbDevices(state, command);
+  });
   assert.deepEqual(rows, ["/mnt/usbA", "/mnt/usbB"]);
   assert.deepEqual(state.usbRecentRoots, ["/mnt/usbA", "/mnt/usbB"]);
   assert.deepEqual(state.usbDevices, items);
+
+  const failed = {};
+  assert.deepEqual(await loadUsbDevices(failed, async () => { throw new Error("boom"); }), []);
+  assert.deepEqual(failed.usbRecentRoots, []);
 });
 
-test("loadUsbDevices recovers to an empty list on command failure", async () => {
-  const state = {};
-  const rows = await loadUsbDevices(state, async () => { throw new Error("boom"); });
-  assert.deepEqual(rows, []);
-  assert.deepEqual(state.usbRecentRoots, []);
-});
-
-test("pruneUsbDevice calls command('prune_usb_device', { id }) and re-loads the list", async () => {
-  const state = {};
+test("pruneUsbDevice calls the backend and reloads only when an id is provided", async () => {
   const calls = [];
   let reloaded = false;
-  await pruneUsbDevice(state, "dev-1", {
+  await pruneUsbDevice({}, "dev-1", {
     command: async (name, payload) => { calls.push({ name, payload }); },
     reload: async () => { reloaded = true; }
   });
   assert.deepEqual(calls, [{ name: "prune_usb_device", payload: { id: "dev-1" } }]);
   assert.equal(reloaded, true);
-});
 
-test("pruneUsbDevice is a no-op without an id", async () => {
-  const calls = [];
-  await pruneUsbDevice({}, null, { command: async (...a) => calls.push(a) });
-  assert.equal(calls.length, 0);
+  await pruneUsbDevice({}, null, { command: async (...args) => calls.push(args) });
+  assert.equal(calls.length, 1);
 });

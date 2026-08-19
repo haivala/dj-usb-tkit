@@ -11,44 +11,60 @@ function fakeRaf() {
   };
 }
 
-test("handlePlaybackEvent applies a playback.started confirmation and starts playhead interpolation", () => {
+function eventDeps(overrides = {}) {
+  const calls = { waveform: 0, transport: 0, clear: 0, status: "", cancelled: [] };
+  return {
+    calls,
+    deps: {
+      setWaveformPlayhead: (_wf, fraction, playing) => {
+        calls.waveform += 1;
+        calls.fraction = fraction;
+        calls.playing = playing;
+      },
+      updateTransportButtonsInDom: () => { calls.transport += 1; },
+      clearAllWaveformPlayheads: () => { calls.clear += 1; },
+      setStatus: (text) => { calls.status = text; },
+      cancelAnimationFrameFn: (handle) => { calls.cancelled.push(handle); },
+      ...overrides
+    }
+  };
+}
+
+function started(path = "/music/a.mp3", overrides = {}) {
+  return {
+    event: "playback.started",
+    path,
+    playing: true,
+    positionMs: 5000,
+    durationMs: 20000,
+    ...overrides
+  };
+}
+
+test("handlePlaybackEvent applies a started confirmation and starts playhead interpolation", () => {
   const state = {
     playbackActive: false,
     playbackPath: null,
     playbackPendingKind: "play",
     activeWaveform: { id: "wf" }
   };
-  const calls = { waveform: 0, transport: 0 };
   const raf = fakeRaf();
-
-  handlePlaybackEvent(state, {
-    event: "playback.started",
-    path: "/music/a.mp3",
-    playing: true,
-    positionMs: 5000,
-    durationMs: 20000
-  }, {
-    setWaveformPlayhead: (_wf, fraction, playing) => {
-      calls.waveform += 1;
-      state._fraction = fraction;
-      state._playing = playing;
-    },
-    updateTransportButtonsInDom: () => { calls.transport += 1; },
-    clearAllWaveformPlayheads: () => {},
-    setStatus: () => {},
+  const { calls, deps } = eventDeps({
     requestAnimationFrameFn: raf.requestAnimationFrameFn,
     cancelAnimationFrameFn: raf.cancelAnimationFrameFn
   });
+
+  handlePlaybackEvent(state, started(), deps);
 
   assert.equal(state.playbackActive, true);
   assert.equal(state.playbackPath, "/music/a.mp3");
   assert.equal(calls.waveform, 1);
   assert.equal(calls.transport, 1);
-  assert.ok(Math.abs(state._fraction - 0.25) < 0.001);
-  assert.equal(state._playing, true);
+  assert.ok(Math.abs(calls.fraction - 0.25) < 0.001);
+  assert.equal(calls.playing, true);
 });
 
-test("handlePlaybackEvent resets playback state on stop and cancels playhead interpolation", () => {
+test("handlePlaybackEvent resets playback state on stop and cancels interpolation", () => {
   const state = {
     playbackActive: true,
     playbackPath: "/music/a.mp3",
@@ -57,15 +73,9 @@ test("handlePlaybackEvent resets playback state on stop and cancels playhead int
     activeWaveform: { id: "wf" },
     playheadAnimationHandle: 42
   };
-  const calls = { clear: 0, transport: 0, status: "", cancelled: [] };
+  const { calls, deps } = eventDeps();
 
-  handlePlaybackEvent(state, { event: "playback.stopped" }, {
-    setWaveformPlayhead: () => {},
-    updateTransportButtonsInDom: () => { calls.transport += 1; },
-    clearAllWaveformPlayheads: () => { calls.clear += 1; },
-    setStatus: (text) => { calls.status = text; },
-    cancelAnimationFrameFn: (handle) => { calls.cancelled.push(handle); }
-  });
+  handlePlaybackEvent(state, { event: "playback.stopped" }, deps);
 
   assert.equal(state.playbackActive, false);
   assert.equal(state.playbackPath, null);
@@ -79,8 +89,8 @@ test("handlePlaybackEvent resets playback state on stop and cancels playhead int
   assert.equal(calls.status, "Idle");
 });
 
-test("handlePlaybackEvent reconciles playbackTrackId and clears playbackRowKey when path changes", () => {
-  const state = {
+test("handlePlaybackEvent reconciles ids on path changes but leaves seek state intact", () => {
+  const changed = {
     playbackActive: true,
     playbackPath: "/music/a.mp3",
     playbackTrackId: "old-id",
@@ -88,28 +98,14 @@ test("handlePlaybackEvent reconciles playbackTrackId and clears playbackRowKey w
     activeWaveform: null,
     tracks: [{ id: "new-id", filePath: "/music/b.mp3" }]
   };
+  handlePlaybackEvent(changed, started("/music/b.mp3", { positionMs: 0, durationMs: 0 }), eventDeps({
+    resolveTrackIdForPath: (path) => changed.tracks.find((track) => track.filePath === path)?.id || null
+  }).deps);
+  assert.equal(changed.playbackPath, "/music/b.mp3");
+  assert.equal(changed.playbackTrackId, "new-id");
+  assert.equal(changed.playbackRowKey, null);
 
-  handlePlaybackEvent(state, {
-    event: "playback.started",
-    path: "/music/b.mp3",
-    playing: true,
-    positionMs: 0,
-    durationMs: 0
-  }, {
-    setWaveformPlayhead: () => {},
-    updateTransportButtonsInDom: () => {},
-    clearAllWaveformPlayheads: () => {},
-    setStatus: () => {},
-    resolveTrackIdForPath: (path) => state.tracks.find((t) => t.filePath === path)?.id || null
-  });
-
-  assert.equal(state.playbackPath, "/music/b.mp3");
-  assert.equal(state.playbackTrackId, "new-id");
-  assert.equal(state.playbackRowKey, null);
-});
-
-test("handlePlaybackEvent leaves playbackTrackId/playbackRowKey untouched when path is unchanged (seek)", () => {
-  const state = {
+  const seeked = {
     playbackActive: true,
     playbackPath: "/music/a.mp3",
     playbackTrackId: "id-1",
@@ -117,28 +113,16 @@ test("handlePlaybackEvent leaves playbackTrackId/playbackRowKey untouched when p
     activeWaveform: null
   };
   let resolveCalls = 0;
-
-  handlePlaybackEvent(state, {
-    event: "playback.seeked",
-    path: "/music/a.mp3",
-    playing: true,
-    positionMs: 5000,
-    durationMs: 20000
-  }, {
-    setWaveformPlayhead: () => {},
-    updateTransportButtonsInDom: () => {},
-    clearAllWaveformPlayheads: () => {},
-    setStatus: () => {},
+  handlePlaybackEvent(seeked, started("/music/a.mp3", { event: "playback.seeked" }), eventDeps({
     resolveTrackIdForPath: () => { resolveCalls += 1; return null; }
-  });
-
-  assert.equal(state.playbackTrackId, "id-1");
-  assert.equal(state.playbackRowKey, "row-1");
+  }).deps);
+  assert.equal(seeked.playbackTrackId, "id-1");
+  assert.equal(seeked.playbackRowKey, "row-1");
   assert.equal(resolveCalls, 0);
 });
 
-test("handlePlaybackEvent ignores a stray playing:true event after an explicit stop already completed", () => {
-  const state = {
+test("handlePlaybackEvent ignores stray started events but applies pending started events", () => {
+  const stray = {
     playbackActive: false,
     playbackPath: null,
     playbackTrackId: null,
@@ -146,33 +130,14 @@ test("handlePlaybackEvent ignores a stray playing:true event after an explicit s
     playbackPendingKind: null,
     activeWaveform: null
   };
-  const calls = { waveform: 0, transport: 0 };
+  const strayHarness = eventDeps();
+  handlePlaybackEvent(stray, started(), strayHarness.deps);
+  assert.equal(stray.playbackActive, false);
+  assert.equal(stray.playbackPath, null);
+  assert.equal(strayHarness.calls.waveform, 0);
+  assert.equal(strayHarness.calls.transport, 0);
 
-  // Natural-end-of-track detection and a fresh explicit play travel to the frontend via
-  // independent threads (the transition relay vs. the direct command's own emit) with no
-  // ordering guarantee — a "started" confirmation that lands with no active path and
-  // nothing pending can't be legitimate; treat it as noise rather than reviving cleared state.
-  handlePlaybackEvent(state, {
-    event: "playback.started",
-    path: "/music/a.mp3",
-    playing: true,
-    positionMs: 6000,
-    durationMs: 20000
-  }, {
-    setWaveformPlayhead: () => { calls.waveform += 1; },
-    updateTransportButtonsInDom: () => { calls.transport += 1; },
-    clearAllWaveformPlayheads: () => {},
-    setStatus: () => {}
-  });
-
-  assert.equal(state.playbackActive, false);
-  assert.equal(state.playbackPath, null);
-  assert.equal(calls.waveform, 0);
-  assert.equal(calls.transport, 0);
-});
-
-test("handlePlaybackEvent applies a playing:true event while our own play is still pending", () => {
-  const state = {
+  const pending = {
     playbackActive: false,
     playbackPath: null,
     playbackPendingKind: "play",
@@ -180,86 +145,53 @@ test("handlePlaybackEvent applies a playing:true event while our own play is sti
     playbackPendingTrackId: "t1",
     activeWaveform: null
   };
-  const calls = { transport: 0 };
-
-  handlePlaybackEvent(state, {
-    event: "playback.started",
-    path: "/music/a.mp3",
-    playing: true,
-    positionMs: 0,
-    durationMs: 20000
-  }, {
-    setWaveformPlayhead: () => {},
-    updateTransportButtonsInDom: () => { calls.transport += 1; },
-    clearAllWaveformPlayheads: () => {},
-    setStatus: () => {}
-  });
-
-  assert.equal(state.playbackActive, true);
-  assert.equal(state.playbackPath, "/music/a.mp3");
-  assert.equal(calls.transport, 1);
+  const pendingHarness = eventDeps();
+  handlePlaybackEvent(pending, started("/music/a.mp3", { positionMs: 0 }), pendingHarness.deps);
+  assert.equal(pending.playbackActive, true);
+  assert.equal(pending.playbackPath, "/music/a.mp3");
+  assert.equal(pendingHarness.calls.transport, 1);
 });
 
-test("handlePlaybackEvent ignores a stopped event for a path we've already moved on from", () => {
-  const state = {
+test("handlePlaybackEvent ignores stale stopped paths and applies matching stopped paths", () => {
+  const stale = {
     playbackActive: true,
     playbackPath: "/music/b.mp3",
     playbackTrackId: "t-b",
     playbackRowKey: "row-b",
     activeWaveform: { id: "wf" }
   };
-  const calls = { clear: 0, transport: 0, status: "" };
+  const staleHarness = eventDeps();
+  handlePlaybackEvent(stale, { event: "playback.stopped", path: "/music/a.mp3" }, staleHarness.deps);
+  assert.equal(stale.playbackActive, true);
+  assert.equal(stale.playbackPath, "/music/b.mp3");
+  assert.equal(stale.playbackTrackId, "t-b");
+  assert.equal(stale.playbackRowKey, "row-b");
+  assert.equal(staleHarness.calls.clear, 0);
+  assert.equal(staleHarness.calls.transport, 0);
+  assert.equal(staleHarness.calls.status, "");
 
-  // Simulates a natural-stop notification for track A (which finished on its own) arriving
-  // after the user already switched to and started track B — must not blank out B.
-  handlePlaybackEvent(state, { event: "playback.stopped", path: "/music/a.mp3" }, {
-    setWaveformPlayhead: () => {},
-    updateTransportButtonsInDom: () => { calls.transport += 1; },
-    clearAllWaveformPlayheads: () => { calls.clear += 1; },
-    setStatus: (text) => { calls.status = text; }
-  });
-
-  assert.equal(state.playbackActive, true);
-  assert.equal(state.playbackPath, "/music/b.mp3");
-  assert.equal(state.playbackTrackId, "t-b");
-  assert.equal(state.playbackRowKey, "row-b");
-  assert.equal(calls.clear, 0);
-  assert.equal(calls.transport, 0);
-  assert.equal(calls.status, "");
-});
-
-test("handlePlaybackEvent applies a stopped event matching the current path", () => {
-  const state = {
+  const current = {
     playbackActive: true,
     playbackPath: "/music/a.mp3",
     playbackTrackId: "t-a",
     playbackRowKey: "row-a",
     activeWaveform: { id: "wf" }
   };
-  const calls = { clear: 0, transport: 0, status: "" };
-
-  handlePlaybackEvent(state, { event: "playback.stopped", path: "/music/a.mp3" }, {
-    setWaveformPlayhead: () => {},
-    updateTransportButtonsInDom: () => { calls.transport += 1; },
-    clearAllWaveformPlayheads: () => { calls.clear += 1; },
-    setStatus: (text) => { calls.status = text; }
-  });
-
-  assert.equal(state.playbackActive, false);
-  assert.equal(state.playbackPath, null);
-  assert.equal(calls.clear, 1);
-  assert.equal(calls.transport, 1);
-  assert.equal(calls.status, "Idle");
+  const currentHarness = eventDeps();
+  handlePlaybackEvent(current, { event: "playback.stopped", path: "/music/a.mp3" }, currentHarness.deps);
+  assert.equal(current.playbackActive, false);
+  assert.equal(current.playbackPath, null);
+  assert.equal(currentHarness.calls.clear, 1);
+  assert.equal(currentHarness.calls.transport, 1);
+  assert.equal(currentHarness.calls.status, "Idle");
 });
 
 test("handlePlaybackEvent surfaces playback errors", () => {
-  let status = "";
-  handlePlaybackEvent({ activeWaveform: null }, { event: "playback.error", message: "Audio device busy" }, {
-    setWaveformPlayhead: () => {},
-    updateTransportButtonsInDom: () => {},
-    clearAllWaveformPlayheads: () => {},
-    setStatus: (text) => { status = text; }
-  });
+  const { calls, deps } = eventDeps();
+  handlePlaybackEvent({ activeWaveform: null }, {
+    event: "playback.error",
+    message: "Audio device busy"
+  }, deps);
 
-  assert.equal(status, "Audio device busy");
+  assert.equal(calls.status, "Audio device busy");
 });
