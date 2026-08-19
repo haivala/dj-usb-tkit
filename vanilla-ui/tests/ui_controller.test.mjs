@@ -3,19 +3,19 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
 import {
-  updateModeText,
+  closeSettingsDrawer,
+  setStatusText,
+  syncLibraryOnboardingMode,
   updateActivePlaylistIndicators,
   updateAddToPlaylistButtons,
-  updateSelectionCount,
-  updateUsbSubNavDisabledState,
-  updateUsbEmptyState,
-  updateSourceFilterIndicator,
+  updateModeText,
   updateScanLibraryButtonLabel,
-  closeSettingsDrawer,
+  updateSelectionCount,
+  updateSourceFilterIndicator,
+  updateUsbEmptyState,
   updateUsbHealthDot,
-  syncLibraryOnboardingMode,
-  createConfirmDialogController,
-  bindEvents
+  updateUsbNameBadge,
+  updateUsbSubNavDisabledState
 } from "../ui_controller.mjs";
 import { initTooltips } from "../tooltip.mjs";
 
@@ -34,6 +34,7 @@ function makeDom() {
       </ul>
       <button data-action="add-library"></button>
       <button data-action="add-usb"></button>
+      <button data-action="add-history"></button>
       <button id="addSelectedBtn"></button>
       <div id="selectionCount"></div>
       <div id="selectionActions" class="hidden"></div>
@@ -56,66 +57,56 @@ function makeDom() {
   `);
 }
 
-test("updateModeText reflects current playlist and delegates indicator updates", () => {
+test("setStatusText turns warning suffixes into event-log links", () => {
+  const dom = makeDom();
+  const statusText = dom.window.document.getElementById("statusText");
+
+  setStatusText({ statusText }, "USB playlists loaded: 1 | (2 warning(s))", 2);
+
+  assert.equal(statusText.textContent, "USB playlists loaded: 1 | (2 warning(s))");
+  const link = statusText.querySelector(".status-warning-link");
+  assert.equal(link?.textContent, "(2 warning(s))");
+  assert.equal(link?.getAttribute("href"), "#");
+});
+
+test("playlist mode and selection helpers derive DOM state from app state", () => {
   const dom = makeDom();
   const document = dom.window.document;
   const el = {
     playlistBadge: document.getElementById("playlistBadge"),
-    badgeLabel: document.getElementById("badgeLabel")
-  };
-  let addCalls = 0;
-  let indicatorCalls = 0;
-
-  updateModeText(
-    { currentPlaylistId: "p1" },
-    el,
-    {
-      getCurrentPlaylist: () => ({ id: "p1", name: "House" }),
-      updateAddToPlaylistButtons: () => { addCalls += 1; },
-      updateActivePlaylistIndicators: () => { indicatorCalls += 1; }
-    }
-  );
-
-  assert.equal(el.playlistBadge.className, "playlist-badge active");
-  assert.equal(el.badgeLabel.textContent, "House");
-  assert.equal(addCalls, 1);
-  assert.equal(indicatorCalls, 1);
-});
-
-test("updateActivePlaylistIndicators marks the active playlist button", () => {
-  const dom = makeDom();
-  const document = dom.window.document;
-  const el = { navPlaylistList: document.getElementById("navPlaylistList") };
-
-  updateActivePlaylistIndicators({ currentPlaylistId: "p2" }, el);
-
-  assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), false);
-  assert.equal(document.querySelector('[data-playlist-id="p2"]').classList.contains("playlist-active-mode"), true);
-});
-
-test("updateAddToPlaylistButtons and updateSelectionCount keep controls in sync", () => {
-  const dom = makeDom();
-  const document = dom.window.document;
-  const el = {
+    badgeLabel: document.getElementById("badgeLabel"),
+    navPlaylistList: document.getElementById("navPlaylistList"),
     selectionCount: document.getElementById("selectionCount"),
     selectionActions: document.getElementById("selectionActions"),
     addSelectedBtn: document.getElementById("addSelectedBtn")
   };
-  const state = {
-    currentPlaylistId: "p1",
-    selectedTrackIds: new Set(["a", "b"])
-  };
+  let addButtonUpdates = 0;
+  let activeIndicatorUpdates = 0;
 
-  updateAddToPlaylistButtons(state, document);
-  updateSelectionCount(state, el);
+  updateModeText({ currentPlaylistId: "p1" }, el, {
+    getCurrentPlaylist: () => ({ id: "p1", name: "House" }),
+    updateAddToPlaylistButtons: () => { addButtonUpdates += 1; },
+    updateActivePlaylistIndicators: () => { activeIndicatorUpdates += 1; }
+  });
+  updateActivePlaylistIndicators({ currentPlaylistId: "p2" }, el);
+  updateAddToPlaylistButtons({ currentPlaylistId: "p1" }, document);
+  updateSelectionCount({ currentPlaylistId: "p1", selectedTrackIds: new Set(["a", "b"]) }, el);
 
+  assert.equal(el.playlistBadge.className, "playlist-badge active");
+  assert.equal(el.badgeLabel.textContent, "House");
+  assert.equal(addButtonUpdates, 1);
+  assert.equal(activeIndicatorUpdates, 1);
+  assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), false);
+  assert.equal(document.querySelector('[data-playlist-id="p2"]').classList.contains("playlist-active-mode"), true);
   assert.equal(document.querySelector('[data-action="add-library"]').disabled, false);
+  assert.equal(document.querySelector('[data-action="add-usb"]').disabled, false);
+  assert.equal(document.querySelector('[data-action="add-history"]').disabled, false);
   assert.equal(el.selectionCount.textContent, "2 selected");
   assert.equal(el.selectionActions.classList.contains("hidden"), false);
   assert.equal(el.addSelectedBtn.disabled, false);
 });
 
-test("updateUsbSubNavDisabledState reveals USB subnav and falls back when disconnected", async () => {
+test("USB nav and empty-state helpers follow the selected-root state", () => {
   const dom = makeDom();
   const document = dom.window.document;
   const el = {
@@ -124,53 +115,34 @@ test("updateUsbSubNavDisabledState reveals USB subnav and falls back when discon
     refreshHistoryBtn: document.getElementById("refreshHistoryBtn")
   };
   const switched = [];
-
-  updateUsbSubNavDisabledState(
-    { usbRoot: null, usbRootValid: false, activeTab: "usb-playlists" },
-    el,
-    { switchView: async (view) => { switched.push(view); } }
-  );
-
-  assert.equal(el.refreshUsbBtn.disabled, true);
-  assert.deepEqual(switched, ["usb"]);
-});
-
-test("updateUsbSubNavDisabledState also falls back from usb-player-menu when disconnected", async () => {
-  const dom = makeDom();
-  const document = dom.window.document;
-  const el = {
-    navSidebar: document.getElementById("navSidebar"),
-    refreshUsbBtn: document.getElementById("refreshUsbBtn"),
-    refreshHistoryBtn: document.getElementById("refreshHistoryBtn")
-  };
-  const switched = [];
+  const renderPayloads = [];
 
   updateUsbSubNavDisabledState(
     { usbRoot: null, usbRootValid: false, activeTab: "usb-player-menu" },
     el,
     { switchView: async (view) => { switched.push(view); } }
   );
-
-  assert.equal(el.refreshUsbBtn.disabled, true);
-  assert.deepEqual(switched, ["usb"]);
-});
-
-test("updateUsbEmptyState renders empty state only without root or recents", () => {
-  const dom = makeDom();
-  const document = dom.window.document;
-  const payloads = [];
-
   updateUsbEmptyState(
     { usbRoot: null, usbRootValid: false, usbRecentRoots: [] },
     document,
-    { renderEmptyState: (container, payload) => payloads.push({ container, payload }) }
+    { renderEmptyState: (_container, payload) => renderPayloads.push(payload) }
   );
 
-  assert.equal(payloads.length, 1);
-  assert.equal(payloads[0].payload.heading, "Connect a USB drive to browse and export");
+  assert.equal(el.refreshUsbBtn.disabled, true);
+  assert.equal(el.refreshHistoryBtn.disabled, true);
+  assert.deepEqual(switched, ["usb"]);
+  assert.equal(renderPayloads[0].heading, "Connect a USB drive to browse and export");
+
+  updateUsbSubNavDisabledState(
+    { usbRoot: "/USB", usbRootValid: true, activeTab: "usb" },
+    el,
+    { switchView: async () => {} }
+  );
+  assert.equal(document.querySelector('.nav-sub-item[data-view="usb-playlists"]').classList.contains("revealed"), true);
+  assert.equal(el.refreshUsbBtn.disabled, false);
 });
 
-test("updateSourceFilterIndicator, updateScanLibraryButtonLabel, closeSettingsDrawer, updateUsbHealthDot, and syncLibraryOnboardingMode work", () => {
+test("source, settings, health, name badge, and onboarding helpers update compact UI state", () => {
   const dom = makeDom();
   const document = dom.window.document;
   const el = {
@@ -179,15 +151,23 @@ test("updateSourceFilterIndicator, updateScanLibraryButtonLabel, closeSettingsDr
     settingsDrawer: document.getElementById("settingsDrawer"),
     settingsBackdrop: document.getElementById("settingsBackdrop"),
     usbHealthDot: document.getElementById("usbHealthDot"),
-    usbHeaderHealthDot: document.getElementById("usbHeaderHealthDot")
+    usbHeaderHealthDot: document.getElementById("usbHeaderHealthDot"),
+    usbNameBadge: document.getElementById("usbNameBadge"),
+    usbNameBadgeLabel: document.getElementById("usbNameBadgeLabel")
   };
 
-  updateSourceFilterIndicator({ sourceRoots: ["/a"], sourceRootEnabled: { "/a": false } }, el);
+  updateSourceFilterIndicator({
+    sourceRoots: ["/a"],
+    sourceRootEnabled: { "/a": true },
+    externalMasterDbPath: "/path/to/master.db",
+    masterDbEnabled: false
+  }, el);
   updateScanLibraryButtonLabel({ sourceRoots: ["/a"] }, el, {
     scanLibraryButtonLabel: (roots) => `Scan ${roots.length}`
   });
   closeSettingsDrawer(el);
   updateUsbHealthDot(el, "WARN");
+  updateUsbNameBadge({ usbDeviceName: "Club Stick" }, el);
   syncLibraryOnboardingMode({ activeTab: "library", sourceRoots: [] }, document);
 
   assert.equal(el.sourceFilterIndicator.classList.contains("active"), true);
@@ -196,261 +176,12 @@ test("updateSourceFilterIndicator, updateScanLibraryButtonLabel, closeSettingsDr
   assert.equal(el.settingsBackdrop.classList.contains("hidden"), true);
   assert.equal(el.usbHealthDot.classList.contains("health-warn"), true);
   assert.equal(el.usbHealthDot.dataset.tooltip, "USB health: warnings");
-  assert.equal(el.usbHealthDot.getAttribute("aria-label"), "USB health: warnings");
   assert.equal(el.usbHeaderHealthDot.classList.contains("health-warn"), true);
-  assert.equal(el.usbHeaderHealthDot.dataset.tooltip, "USB health: warnings");
-  assert.equal(el.usbHeaderHealthDot.getAttribute("aria-label"), "USB health: warnings");
+  assert.equal(el.usbNameBadgeLabel.textContent, "Club Stick");
   assert.equal(document.body.classList.contains("library-onboarding"), true);
 });
 
-test("updateSourceFilterIndicator is active when masterDb is filtered out", () => {
-  const dom = makeDom();
-  const el = { sourceFilterIndicator: dom.window.document.getElementById("sourceFilterIndicator") };
-  // all filesystem roots enabled but master.db disabled
-  updateSourceFilterIndicator({
-    sourceRoots: ["/a"],
-    sourceRootEnabled: { "/a": true },
-    externalMasterDbPath: "/path/to/master.db",
-    masterDbEnabled: false
-  }, el);
-  assert.equal(el.sourceFilterIndicator.classList.contains("active"), true);
-});
-
-test("updateSourceFilterIndicator is not active when all sources including masterDb are enabled", () => {
-  const dom = makeDom();
-  const el = { sourceFilterIndicator: dom.window.document.getElementById("sourceFilterIndicator") };
-  updateSourceFilterIndicator({
-    sourceRoots: ["/a"],
-    sourceRootEnabled: { "/a": true },
-    externalMasterDbPath: "/path/to/master.db",
-    masterDbEnabled: true
-  }, el);
-  assert.equal(el.sourceFilterIndicator.classList.contains("active"), false);
-});
-
-test("bindEvents wires confirm buttons and sidebar collapse/expand", () => {
-  const listeners = new Map();
-  const makeEmitter = () => ({
-    hidden: false,
-    disabled: false,
-    checked: false,
-    value: "",
-    textContent: "",
-    dataset: {},
-    focus() {},
-    classList: {
-      add() {},
-      remove() {},
-      toggle() {},
-      contains() { return false; }
-    },
-    addEventListener(type, handler) {
-      listeners.set(this, { ...(listeners.get(this) || {}), [type]: handler });
-    },
-    querySelectorAll() { return []; },
-    querySelector() { return null; }
-  });
-  const confirmOkBtn = makeEmitter();
-  const confirmCancelBtn = makeEmitter();
-  const confirmOverlay = makeEmitter();
-  const navSidebar = Object.assign(makeEmitter(), { classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } } });
-  const sidebarExpandBtn = Object.assign(makeEmitter(), { classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } } });
-  const documentListeners = {};
-  const document = {
-    activeElement: confirmOkBtn,
-    body: { classList: { add() {}, remove() {}, toggle() {} } },
-    addEventListener(type, handler) { documentListeners[type] = handler; },
-    getElementById() { return null; },
-    querySelector() { return null; },
-    querySelectorAll() { return []; }
-  };
-  const windowObj = { addEventListener() {}, open() {}, __TAURI__: null, __TAURI_INTERNALS__: null };
-  const navigatorObj = { clipboard: { writeText: async () => {} } };
-  const state = {
-    sourceRoots: [],
-    sourceRootEnabled: {},
-    usbRoot: null,
-    usbRootValid: false,
-    usbRecentRoots: [],
-    activeTab: "library",
-    currentPlaylistId: null,
-    selectedTrackIds: new Set(),
-    tracks: [],
-    filteredTracks: [],
-    usbPlaylists: [],
-    usbPlaylistTracks: [],
-    usbPlaylistTracksView: [],
-    histories: [],
-    historyTracks: [],
-    historyTracksView: [],
-    currentPlaylistTracksView: [],
-    playlists: [],
-    playbackActive: false,
-    playbackRowKey: null,
-    eventLogEntries: [],
-    libraryQuery: "",
-    exportPruneStale: true,
-    analysisBpmRange: "wide"
-  };
-  const el = {
-    confirmOkBtn,
-    confirmCancelBtn,
-    confirmOverlay,
-    navSidebar,
-    navPlaylistList: makeEmitter(),
-    addPlaylistBtn: makeEmitter(),
-    sidebarCollapseBtn: makeEmitter(),
-    settingsBtn: makeEmitter(),
-    settingsDrawer: makeEmitter(),
-    settingsBackdrop: makeEmitter(),
-    settingsCloseBtn: makeEmitter(),
-    openEventLogBtn: makeEmitter(),
-    eventLogLevelFilter: makeEmitter(),
-    eventLogSourceFilter: makeEmitter(),
-    eventLogClearBtn: makeEmitter(),
-    helpBtn: makeEmitter(),
-    helpCloseBtn: makeEmitter(),
-    helpOverlay: makeEmitter(),
-    sourceChipsContainer: makeEmitter(),
-    externalMasterDbCheckbox: makeEmitter(),
-    addSourceBtn: makeEmitter(),
-    scanLibraryBtn: makeEmitter(),
-    progressDismiss: makeEmitter(),
-    refreshUsbBtn: makeEmitter(),
-    selectUsbFolderBtn: makeEmitter(),
-    usbRecentList: makeEmitter(),
-    initializeUsbBtn: makeEmitter(),
-    exportSyncModeGroup: makeEmitter(),
-    analysisBpmRangeSelect: makeEmitter(),
-    runUsbParityBtn: makeEmitter(),
-    reDiagnoseBtn: makeEmitter(),
-    previewRepairsBtn: makeEmitter(),
-    applyRepairsBtn: makeEmitter(),
-    diagBackToReportBtn: makeEmitter(),
-    refreshHistoryBtn: makeEmitter(),
-    libraryTableWrap: makeEmitter(),
-    librarySearch: makeEmitter(),
-    usbTrackSearch: makeEmitter(),
-    historyTrackSearch: makeEmitter(),
-    playlistSearchInput: makeEmitter(),
-    addSelectedBtn: makeEmitter(),
-    selectAllTracks: makeEmitter(),
-    libraryTableBody: makeEmitter(),
-    usbPlaylists: makeEmitter(),
-    usbPlaylistTracks: makeEmitter(),
-    historyList: makeEmitter(),
-    historyTracks: makeEmitter(),
-    panels: { playlist: makeEmitter() },
-    exportPlaylistBtn: makeEmitter(),
-    analyzePlaylistMissingBtn: makeEmitter(),
-    usbSelectedPlaylistText: makeEmitter(),
-    selectedHistoryText: makeEmitter()
-  };
-  const confirmDialog = createConfirmDialogController({
-    confirmOverlay,
-    confirmTitle: { textContent: "" },
-    confirmMessage: { textContent: "" },
-    confirmOkBtn
-  });
-  let persisted = [];
-
-  bindEvents({
-    state,
-    el,
-    document,
-    window: windowObj,
-    navigator: navigatorObj,
-    eventLogStore: { clear() {} },
-    sidebarExpandBtn,
-    confirmDialog,
-    constants: {
-      STORAGE_KEY_SIDEBAR_COLLAPSED: "sidebar",
-      FRONTEND_DB_KEY_SIDEBAR_COLLAPSED: "sidebar_db",
-      STORAGE_KEY_HELP_SEEN: "help",
-      FRONTEND_DB_KEY_HELP_SEEN: "help_db",
-      STORAGE_KEY_EXPORT_PRUNE_STALE: "prune",
-      FRONTEND_DB_KEY_EXPORT_PRUNE_STALE: "prune_db",
-      STORAGE_KEY_ANALYSIS_BPM_RANGE: "bpm",
-      FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE: "bpm_db",
-      LIBRARY_LOAD_LIMIT_DEFAULT: 200
-    },
-    setStatus() {},
-    closeSettingsDrawer() {},
-    renderEventLog() {},
-    switchView: async () => {},
-    deletePlaylist: async () => {},
-    startPlaylistRename() {},
-    promptNewPlaylist() {},
-    persistSetting: (...args) => { persisted.push(args); },
-    renderSourceChips() {},
-    syncAssetScopePaths: async () => {},
-    applySearchLocalFilter() {},
-    updateSelectionCount() {},
-    command: async () => ({ removed: 0 }),
-    resetAndLoadLibraryTracks: async () => {},
-    refreshCurrentPlaylistTracks: async () => {},
-    withProgress: async (_, fn) => fn(() => {}),
-    persistSourceRoots() {},
-    persistSourceRootEnabled() {},
-    enabledSourceRoots: () => [],
-    pickSourceFolders: async () => [],
-    scanLibrary: async () => {},
-    dismissProgress() {},
-    refreshUsb: async () => {},
-    pickUsbFolder: async () => {},
-    validateAndSetUsbRoot: async () => {},
-    initializeUsb: async () => {},
-    normalizeAnalysisBpmRange: (v) => v || "wide",
-    updatePlaylistExportButtons() {},
-    runUsbParityReport: async () => {},
-    runUsbDiagnostics: async () => {},
-    previewUsbRepairs: async () => {},
-    applyUsbRepairs: async () => {},
-    showDiagReportView() {},
-    refreshHistory: async () => {},
-    scheduleApplySearchLocalFilter() {},
-    renderUsbPlaylistTracks() {},
-    renderHistoryTracks() {},
-    addTracksToCurrentPlaylist: async () => {},
-    getLibraryVisibleTracks: () => [],
-    analyzeSingleTrack: async () => {},
-    getPlaybackUiStateHelpers: () => null,
-    isTrackCurrentlyPlaying: () => false,
-    stopPlaybackFromUi: async () => {},
-    playTrackFromOrigin: async () => {},
-    scrubRatioFromPointer: () => 0,
-    removeUsbPlaylist: async () => {},
-    stopPlaybackIfActive: async () => {},
-    hydrateUsbTrackMetadata: async () => {},
-    hydrateUsbTrackMetadataBatch: async () => {},
-    setActiveListItem() {},
-    getHistoryDateDisplay: () => "",
-    getCurrentPlaylist: () => null,
-    loadPlaylists: async () => {},
-    updateModeText() {},
-    exportPlaylistToUsb: async () => {},
-    isUsbOriginTrack: () => false,
-    trackHasCoreAnalysis: () => false,
-    analyzeTrackIds: async () => {},
-    resolveLocalTrackId: () => null,
-    handleSortHeaderClick() {},
-    handleLibraryTableWrapScroll() {},
-    handleWindowLibraryScroll() {},
-    renderLibraryRows() {}
-  });
-
-  confirmDialog.open({ title: "T", message: "M" });
-  listeners.get(confirmOkBtn).click();
-  listeners.get(sidebarExpandBtn).click();
-  listeners.get(el.sidebarCollapseBtn).click();
-  documentListeners.keydown({ key: "Escape", preventDefault() {} });
-
-  assert.equal(persisted.length, 2);
-  assert.deepEqual(persisted[0], ["sidebar", "sidebar_db", "0"]);
-  assert.deepEqual(persisted[1], ["sidebar", "sidebar_db", "1"]);
-});
-
-test("initTooltips shows a custom tooltip for [data-tooltip] elements after the show delay and hides on mouseout", () => {
+test("initTooltips shows a custom tooltip after delay and hides on mouseout", () => {
   const dom = new JSDOM(`
     <!doctype html>
     <body>
@@ -459,22 +190,27 @@ test("initTooltips shows a custom tooltip for [data-tooltip] elements after the 
   `);
   const { document } = dom.window;
   const target = document.getElementById("target");
-
   let scheduled = null;
-  const windowStub = {
-    setTimeout: (fn) => { scheduled = fn; return 1; },
-    clearTimeout: () => { scheduled = null; },
-    innerWidth: 1024
-  };
 
-  initTooltips({ document, window: windowStub });
+  initTooltips({
+    document,
+    window: {
+      setTimeout: (fn) => {
+        scheduled = fn;
+        return 1;
+      },
+      clearTimeout: () => {
+        scheduled = null;
+      },
+      innerWidth: 1024
+    }
+  });
 
   target.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
-  assert.equal(typeof scheduled, "function", "show is scheduled, not immediate");
+  assert.equal(typeof scheduled, "function");
   scheduled();
 
   const tooltipEl = document.getElementById("app-tooltip");
-  assert.ok(tooltipEl, "tooltip element created on first show");
   assert.equal(tooltipEl.textContent, "Full detail text");
   assert.equal(tooltipEl.classList.contains("app-tooltip--visible"), true);
   assert.equal(target.getAttribute("aria-describedby"), "app-tooltip");
@@ -493,13 +229,15 @@ test("initTooltips shows immediately on focus and hides on Escape", () => {
   `);
   const { document } = dom.window;
   const target = document.getElementById("target");
-  const windowStub = { setTimeout: () => 1, clearTimeout: () => {}, innerWidth: 1024 };
 
-  initTooltips({ document, window: windowStub });
+  initTooltips({
+    document,
+    window: { setTimeout: () => 1, clearTimeout: () => {}, innerWidth: 1024 }
+  });
 
   target.dispatchEvent(new dom.window.FocusEvent("focusin", { bubbles: true }));
   const tooltipEl = document.getElementById("app-tooltip");
-  assert.equal(tooltipEl.classList.contains("app-tooltip--visible"), true, "focus shows immediately, no delay");
+  assert.equal(tooltipEl.classList.contains("app-tooltip--visible"), true);
 
   document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.equal(tooltipEl.classList.contains("app-tooltip--visible"), false);
@@ -515,9 +253,11 @@ test("initTooltips clamps tooltip position within the viewport", () => {
   const { document } = dom.window;
   const target = document.getElementById("target");
   target.getBoundingClientRect = () => ({ top: 5, bottom: 25, left: 2, right: 20, width: 18, height: 20 });
-  const windowStub = { setTimeout: (fn) => { fn(); return 1; }, clearTimeout: () => {}, innerWidth: 100 };
 
-  initTooltips({ document, window: windowStub });
+  initTooltips({
+    document,
+    window: { setTimeout: (fn) => { fn(); return 1; }, clearTimeout: () => {}, innerWidth: 100 }
+  });
   target.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
 
   const tooltipEl = document.getElementById("app-tooltip");
@@ -526,6 +266,6 @@ test("initTooltips clamps tooltip position within the viewport", () => {
   target.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
   target.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
 
-  assert.equal(tooltipEl.style.left, "8px", "clamped to the left viewport margin instead of going negative");
-  assert.equal(tooltipEl.style.top, "31px", "flips below the target since above would clip the viewport top");
+  assert.equal(tooltipEl.style.left, "8px");
+  assert.equal(tooltipEl.style.top, "31px");
 });

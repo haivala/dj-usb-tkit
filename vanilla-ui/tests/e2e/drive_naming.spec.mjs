@@ -1,14 +1,10 @@
 import { test, expect } from "./coverage-fixture.mjs";
 
-// Exercises the "Name this drive" prompt end-to-end in a real browser DOM
-// (unlike the unit tests in tests/usb_init_flow_behavior.test.mjs, which
-// mock `command`/`el` directly and so can't catch real DOM-wiring issues,
-// element-id typos, or overlay stacking/visibility bugs). In particular
-// this covers the recent-USB-pill entry point specifically, since that's
-// the one reported as not opening the prompt in practice -- it's rendered
-// at startup from `list_usb_devices`, not from a fresh folder pick.
-function installTauriMock(page, { deviceName = null, suggestedName = null } = {}) {
-  return page.addInitScript(({ deviceName, suggestedName }) => {
+// Exercises the "Name this drive" prompt end-to-end in a real browser DOM,
+// where element ids, overlay visibility, and recent-USB-pill wiring are all
+// part of the assertion surface.
+function installTauriMock(page, { deviceName = null, suggestedName = null, getNameMode = "normal" } = {}) {
+  return page.addInitScript(({ deviceName, suggestedName, getNameMode }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.__setNameCalls = [];
     let storedName = deviceName;
@@ -82,6 +78,12 @@ function installTauriMock(page, { deviceName = null, suggestedName = null } = {}
             };
           }
           if (command === "get_usb_device_name") {
+            if (getNameMode === "throw") {
+              throw new Error("usb root not found");
+            }
+            if (getNameMode === "unexpected") {
+              return { ok: true, data: {} };
+            }
             return {
               ok: true,
               data: { name: storedName, suggestedName: storedName ? null : suggestedName }
@@ -113,18 +115,21 @@ function installTauriMock(page, { deviceName = null, suggestedName = null } = {}
         }
       }
     };
-  }, { deviceName, suggestedName });
+  }, { deviceName, suggestedName, getNameMode });
 }
 
-test("clicking a recent USB pill for an unnamed drive opens the naming prompt, saves the name, and shows it in the status-line badge", async ({ page }) => {
-  await installTauriMock(page, {});
+async function openRecentUsbNamingPrompt(page, opts = {}) {
+  await installTauriMock(page, opts);
   await page.goto("/");
-
   await page.locator('.nav-item[data-view="usb"]').click();
-
   const pill = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]');
   await expect(pill).toBeVisible();
   await pill.click();
+  return pill;
+}
+
+test("clicking a recent USB pill for an unnamed drive opens the naming prompt, saves the name, and shows it in the status-line badge", async ({ page }) => {
+  await openRecentUsbNamingPrompt(page);
 
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
   await expect(page.locator("#usbNameBadge")).toBeVisible();
@@ -157,12 +162,43 @@ test("clicking a recent USB pill for an already-named drive does not reopen the 
 });
 
 test("recent USB pill naming prompt pre-fills the OS-suggested drive label", async ({ page }) => {
-  await installTauriMock(page, { suggestedName: "CLUBSTICK" });
-  await page.goto("/");
-
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]').click();
+  await openRecentUsbNamingPrompt(page, { suggestedName: "CLUBSTICK" });
 
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
   await expect(page.locator("#driveNameInput")).toHaveValue("CLUBSTICK");
+});
+
+test("recent USB naming prompt can be dismissed without saving", async ({ page }) => {
+  const pill = await openRecentUsbNamingPrompt(page);
+  await expect(page.locator("#driveNameOverlay")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
+
+  await pill.click();
+  await expect(page.locator("#driveNameOverlay")).toBeVisible();
+  await page.locator("#driveNameOverlay").dispatchEvent("click");
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
+
+  await pill.click();
+  await expect(page.locator("#driveNameOverlay")).toBeVisible();
+  await page.locator("#driveNameSkipBtn").click();
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
+
+  const calls = await page.evaluate(() => window.__setNameCalls);
+  expect(calls).toEqual([]);
+});
+
+test("recent USB naming check failures do not open a blocking prompt", async ({ page }) => {
+  await openRecentUsbNamingPrompt(page, { getNameMode: "throw" });
+
+  await expect(page.locator("#usbRootPathText")).toContainText("/Volumes/USB-TEST");
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
+});
+
+test("recent USB naming check fails closed on an unexpected response shape", async ({ page }) => {
+  await openRecentUsbNamingPrompt(page, { getNameMode: "unexpected" });
+
+  await expect(page.locator("#usbRootPathText")).toContainText("/Volumes/USB-TEST");
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
 });

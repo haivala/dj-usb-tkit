@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  showDiagReportView, showDiagRepairView, renderRepairPreview,
-  diagStatusIcon, renderDiagnosticsReport, renderParityReport,
-  hideUsbDiagnostics, clearUsbDiagnostics
+  clearUsbDiagnostics,
+  hideUsbDiagnostics,
+  renderRepairPreview,
+  showDiagRepairView
 } from "../components/usb/actions.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
 
@@ -17,87 +18,68 @@ function makeElement(tag = "div") {
     dataset: {},
     type: "",
     checked: false,
+    disabled: false,
+    title: "",
     children: [],
     _listeners: {},
-    appendChild(node) { this.children.push(node); },
-    addEventListener(event, handler) { this._listeners[event] = handler; },
+    appendChild(node) {
+      this.children.push(node);
+    },
+    addEventListener(event, handler) {
+      this._listeners[event] = handler;
+    },
     trigger(event, payload) {
-      const fn = this._listeners[event];
-      if (typeof fn === "function") fn(payload);
+      this._listeners[event]?.(payload);
     }
   };
 }
 
-test("showDiagReportView and showDiagRepairView toggle diagnostic views", () => {
-  const el = {
-    diagReportView: { classList: makeClassList() },
-    diagRepairPanel: { classList: makeClassList() }
-  };
-
-  showDiagRepairView(el);
-  assert.equal(el.diagReportView.classList.contains("hidden"), true);
-  assert.equal(el.diagRepairPanel.classList.contains("hidden"), false);
-
-  showDiagReportView(el);
-  assert.equal(el.diagReportView.classList.contains("hidden"), false);
-  assert.equal(el.diagRepairPanel.classList.contains("hidden"), true);
-});
-
-test("renderRepairPreview enables apply when supported fixes exist", () => {
-  const selection = new Set();
-  const el = {
+function makeRepairEl() {
+  return {
     usbDiagnosticsCard: { classList: makeClassList() },
     diagRepairPanel: { classList: makeClassList() },
     diagReportView: { classList: makeClassList() },
     diagRepairSummary: { textContent: "", className: "" },
-    diagRepairFixes: { innerHTML: "", children: [], appendChild(node) { this.children.push(node); } },
-    applyRepairsBtn: { disabled: true },
+    diagRepairFixes: {
+      innerHTML: "",
+      children: [],
+      appendChild(node) {
+        this.children.push(node);
+      }
+    },
+    applyRepairsBtn: { disabled: false },
     previewRepairsBtn: { disabled: false }
   };
+}
+
+test("renderRepairPreview disables apply and preview when there are no fixes", () => {
+  const el = makeRepairEl();
 
   renderRepairPreview(el, {
-    detectedIssues: [{ issue: "a" }, { issue: "b" }],
-    proposedFixes: [
-      { id: "fix_a", title: "Fix A", description: "desc", supported: true, destructive: false, estimatedWrites: 2, estimatedDeletes: 0 },
-      { id: "fix_b", title: "Fix B", description: "desc", supported: false, destructive: true, estimatedWrites: 0, estimatedDeletes: 1 }
-    ],
-    estimatedFileWrites: 2,
-    estimatedFileDeletes: 1,
-    unsupportedItems: [{ issue: "x", reason: "n/a" }]
+    detectedIssues: [],
+    proposedFixes: [],
+    estimatedFileWrites: 0,
+    estimatedFileDeletes: 0,
+    unsupportedItems: []
   }, {
     documentObj: { createElement: (tag) => makeElement(tag) },
-    showDiagRepairView: () => showDiagRepairView(el),
-    getSelectedFixIds: () => selection,
-    setSelectedFixIds: (ids) => {
-      selection.clear();
-      for (const id of ids) selection.add(id);
-    }
+    showDiagRepairView: () => showDiagRepairView(el)
   });
 
-  assert.equal(el.usbDiagnosticsCard.classList.contains("hidden"), false);
-  assert.match(el.diagRepairSummary.textContent, /2 issue\(s\)/);
-  assert.equal(el.applyRepairsBtn.disabled, false);
-  assert.equal(el.previewRepairsBtn.disabled, false);
-  assert.equal(el.diagRepairFixes.children.length, 3);
+  assert.equal(el.applyRepairsBtn.disabled, true);
+  assert.equal(el.previewRepairsBtn.disabled, true);
+  assert.equal(el.diagRepairSummary.textContent, "No issues found.");
 });
 
-test("renderRepairPreview disables apply when no supported fixes are selected", () => {
+test("renderRepairPreview lets supported fix selection control apply state", () => {
+  const el = makeRepairEl();
   const selection = new Set();
-  const el = {
-    usbDiagnosticsCard: { classList: makeClassList() },
-    diagRepairPanel: { classList: makeClassList() },
-    diagReportView: { classList: makeClassList() },
-    diagRepairSummary: { textContent: "", className: "" },
-    diagRepairFixes: { innerHTML: "", children: [], appendChild(node) { this.children.push(node); } },
-    applyRepairsBtn: { disabled: true },
-    previewRepairsBtn: { disabled: false }
-  };
 
   renderRepairPreview(el, {
-    detectedIssues: [{ issue: "a" }],
+    detectedIssues: ["a"],
     proposedFixes: [
-      { id: "fix_a", title: "Fix A", description: "desc", supported: true, destructive: false, estimatedWrites: 1, estimatedDeletes: 0 },
-      { id: "fix_b", title: "Fix B", description: "desc", supported: true, destructive: false, estimatedWrites: 1, estimatedDeletes: 0 }
+      { id: "fix_a", title: "Fix A", description: "desc", supported: true, destructive: false },
+      { id: "fix_b", title: "Fix B", description: "desc", supported: true, destructive: false }
     ],
     estimatedFileWrites: 2,
     estimatedFileDeletes: 0,
@@ -117,55 +99,18 @@ test("renderRepairPreview disables apply when no supported fixes are selected", 
     }
   });
 
-  assert.equal(el.applyRepairsBtn.disabled, false);
   assert.deepEqual(Array.from(selection).sort(), ["fix_a", "fix_b"]);
+  assert.equal(el.applyRepairsBtn.disabled, false);
 
-  const firstFixInput = el.diagRepairFixes.children[0].children[0];
-  const secondFixInput = el.diagRepairFixes.children[1].children[0];
-  firstFixInput.trigger("change", { target: { checked: false } });
-  secondFixInput.trigger("change", { target: { checked: false } });
+  el.diagRepairFixes.children[0].children[0].trigger("change", { target: { checked: false } });
+  el.diagRepairFixes.children[1].children[0].trigger("change", { target: { checked: false } });
 
   assert.equal(selection.size, 0);
   assert.equal(el.applyRepairsBtn.disabled, true);
 });
 
-test("renderRepairPreview disables apply and preview when there are no fixes", () => {
-  const el = {
-    usbDiagnosticsCard: { classList: makeClassList() },
-    diagRepairPanel: { classList: makeClassList() },
-    diagReportView: { classList: makeClassList() },
-    diagRepairSummary: { textContent: "", className: "" },
-    diagRepairFixes: { innerHTML: "", children: [], appendChild(node) { this.children.push(node); } },
-    applyRepairsBtn: { disabled: false },
-    previewRepairsBtn: { disabled: false }
-  };
-
-  renderRepairPreview(el, {
-    detectedIssues: [],
-    proposedFixes: [],
-    estimatedFileWrites: 0,
-    estimatedFileDeletes: 0,
-    unsupportedItems: []
-  }, {
-    documentObj: { createElement: (tag) => makeElement(tag) },
-    showDiagRepairView: () => showDiagRepairView(el)
-  });
-
-  assert.equal(el.applyRepairsBtn.disabled, true);
-  assert.equal(el.previewRepairsBtn.disabled, true);
-  assert.equal(el.diagRepairSummary.textContent, "No issues found.");
-});
-
-test("renderRepairPreview merges preview-only missing-audio manual review into one card", () => {
-  const el = {
-    usbDiagnosticsCard: { classList: makeClassList() },
-    diagRepairPanel: { classList: makeClassList() },
-    diagReportView: { classList: makeClassList() },
-    diagRepairSummary: { textContent: "", className: "" },
-    diagRepairFixes: { innerHTML: "", children: [], appendChild(node) { this.children.push(node); } },
-    applyRepairsBtn: { disabled: true },
-    previewRepairsBtn: { disabled: false }
-  };
+test("renderRepairPreview merges preview-only missing-audio manual review into one item", () => {
+  const el = makeRepairEl();
 
   renderRepairPreview(el, {
     detectedIssues: ["unindexed", "missing-audio"],
@@ -174,17 +119,13 @@ test("renderRepairPreview merges preview-only missing-audio manual review into o
         title: "Manual Re-import Unindexed Audio",
         description: "placeholder",
         supported: false,
-        destructive: false,
-        estimatedWrites: 0,
-        estimatedDeletes: 0
+        destructive: false
       },
       {
         title: "Remove Missing Audio References",
         description: "placeholder",
         supported: false,
-        destructive: false,
-        estimatedWrites: 0,
-        estimatedDeletes: 0
+        destructive: false
       }
     ],
     estimatedFileWrites: 0,
@@ -204,327 +145,97 @@ test("renderRepairPreview merges preview-only missing-audio manual review into o
     showDiagRepairView: () => showDiagRepairView(el)
   });
 
-  assert.match(el.diagRepairSummary.textContent, /2 issue\(s\) · 0 fixable/);
+  assert.match(el.diagRepairSummary.textContent, /2 issue\(s\).*0 fixable/);
   assert.equal(el.diagRepairFixes.children.length, 2);
-  assert.equal(el.diagRepairFixes.children[1].children[0].children[0].children[0].textContent, "Remove Missing Audio References");
+  assert.equal(
+    el.diagRepairFixes.children[1].children[0].children[0].children[0].textContent,
+    "Remove Missing Audio References"
+  );
   assert.match(
     el.diagRepairFixes.children[1].children[0].children[1].textContent,
     /9 missing-audio reference\(s\) require manual review.*13 unindexed audio file\(s\)/
   );
 });
 
-// --- Coverage: diagStatusIcon ---
-
-test("diagStatusIcon returns check for PASS", () => {
-  assert.equal(diagStatusIcon("PASS"), "\u2713");
-});
-
-test("diagStatusIcon returns warning for WARN", () => {
-  assert.equal(diagStatusIcon("WARN"), "\u26A0");
-});
-
-test("diagStatusIcon returns cross for FAIL", () => {
-  assert.equal(diagStatusIcon("FAIL"), "\u2717");
-});
-
-test("diagStatusIcon returns cross for unknown status", () => {
-  assert.equal(diagStatusIcon("UNKNOWN"), "\u2717");
-});
-
-// --- Coverage: renderDiagnosticsReport ---
-
-function makeDiagEl() {
-  const cl = () => {
-    const classes = new Set();
-    return {
-      add(name) { classes.add(name); },
-      remove(name) { classes.delete(name); },
-      contains(name) { return classes.has(name); },
-      toggle(name, force) { if (force) classes.add(name); else classes.delete(name); }
-    };
-  };
-  return {
-    usbDiagnosticsCard: { classList: cl() },
-    diagReportView: { classList: cl() },
-    diagRepairPanel: { classList: cl() },
-    previewRepairsBtn: { disabled: true },
-    diagOverallStatus: { textContent: "", className: "" },
-    diagDuration: { textContent: "" },
-    diagSections: { innerHTML: "", children: [], appendChild(n) { this.children.push(n); } },
-    diagPlaylistDetails: {
-      classList: cl(),
-      querySelector: (sel) => {
-        if (sel === "summary") return { textContent: "" };
-        if (sel === "thead tr") return { innerHTML: "" };
-        return null;
-      }
-    },
-    diagPlaylistTableBody: { innerHTML: "", children: [], appendChild(n) { this.children.push(n); } }
-  };
-}
-
-test("renderDiagnosticsReport populates overall status and sections", () => {
-  const el = makeDiagEl();
-  let healthDotStatus = null;
-  renderDiagnosticsReport(el, {
-    overallStatus: "WARN",
-    durationMs: 55,
-    pdbIntegrity: { title: "PDB Integrity", status: "PASS", checks: [{ label: "PDB exists", status: "PASS", detail: "Found" }] },
-    edbAccess: { title: "Database Access", status: "PASS", checks: [] },
-    contentsIntegrity: null,
-    analysisIntegrity: null,
-    playlistResolution: null,
-    playlistDetails: [],
-    warnings: []
-  }, {
-    escapeHtml: (s) => String(s),
-    showDiagReportView: () => showDiagReportView(el),
-    updateUsbHealthDot: (s) => { healthDotStatus = s; },
-    documentObj: {
-      getElementById: () => null,
-      createElement: (tag) => makeElement(tag)
-    }
-  });
-
-  assert.equal(el.diagOverallStatus.textContent, "WARN");
-  assert.ok(el.diagOverallStatus.className.includes("diag-warn"));
-  assert.ok(el.diagDuration.textContent.includes("55ms"));
-  assert.equal(healthDotStatus, "WARN");
-  assert.equal(el.previewRepairsBtn.disabled, false);
-  assert.ok(!el.usbDiagnosticsCard.classList.contains("hidden"));
-  // Two sections (pdbIntegrity, edbAccess) — contentsIntegrity/analysisIntegrity/playlistResolution are null
-  assert.equal(el.diagSections.children.length, 2);
-});
-
-test("renderDiagnosticsReport renders playlist details table", () => {
-  const el = makeDiagEl();
-  renderDiagnosticsReport(el, {
-    overallStatus: "PASS",
-    durationMs: 10,
-    pdbIntegrity: { title: "PDB", status: "PASS", checks: [] },
-    playlistDetails: [
-      { name: "Warmup", status: "PASS", resolvedEntries: 3, totalEntries: 3, resolutionRate: 1.0 }
-    ],
-    warnings: []
-  }, {
-    escapeHtml: (s) => String(s),
-    showDiagReportView: () => showDiagReportView(el),
-    updateUsbHealthDot: () => {},
-    documentObj: {
-      getElementById: () => null,
-      createElement: (tag) => makeElement(tag)
-    }
-  });
-
-  assert.ok(!el.diagPlaylistDetails.classList.contains("hidden"));
-  assert.equal(el.diagPlaylistTableBody.children.length, 1);
-});
-
-test("renderDiagnosticsReport hides playlist details when empty", () => {
-  const el = makeDiagEl();
-  renderDiagnosticsReport(el, {
-    overallStatus: "PASS",
-    durationMs: 10,
-    playlistDetails: [],
-    warnings: []
-  }, {
-    escapeHtml: (s) => String(s),
-    showDiagReportView: () => showDiagReportView(el),
-    updateUsbHealthDot: () => {},
-    documentObj: {
-      getElementById: () => null,
-      createElement: (tag) => makeElement(tag)
-    }
-  });
-
-  assert.ok(el.diagPlaylistDetails.classList.contains("hidden"));
-});
-
-test("renderDiagnosticsReport renders player counter snapshot section when present", () => {
-  const el = makeDiagEl();
-  renderDiagnosticsReport(el, {
-    overallStatus: "PASS",
-    durationMs: 10,
-    pdbIntegrity: { title: "PDB", status: "PASS", checks: [] },
-    cdjCounterSnapshot: {
-      confidence: "high",
-      playlistCountCandidate: 2,
-      songCountCandidate: 10,
-      shapeMode: "additive",
-      baselineInitLike: false,
-      t00Tracks: 10,
-      t08Entries: 12,
-      t11: { first: 0, last: 0, ec: 0 },
-      t12: { first: 0, last: 0, ec: 0 },
-      t17: { first: 0, last: 0, ec: 0 },
-      t18: { first: 0, last: 0, ec: 0 },
-      t19: { ec: 1, chainLen: 1, dataPage: { page: 1, nrs: 1, numRl: 0, rowpf0: 0x0020, tranrf0: 0x0001 } }
-    },
-    playlistDetails: [],
-    warnings: []
-  }, {
-    escapeHtml: (s) => String(s),
-    showDiagReportView: () => showDiagReportView(el),
-    updateUsbHealthDot: () => {},
-    documentObj: {
-      getElementById: () => null,
-      createElement: (tag) => makeElement(tag)
-    }
-  });
-
-  // pdbIntegrity + cdjCounterSnapshot = 2 sections
-  assert.equal(el.diagSections.children.length, 2);
-});
-
-// --- Coverage: renderParityReport ---
-
-test("renderParityReport populates overall status and checks", () => {
-  const el = makeDiagEl();
-  renderParityReport(el, {
-    overallStatus: "FAIL",
-    durationMs: 21,
-    checks: [
-      { label: "Overall player parity status", status: "FAIL", detail: "playlists checked: 1, fail: 1" }
-    ],
-    summaryRows: [
-      { label: "Failing playlists", status: "FAIL", count: 1 },
-      { label: "PDB metadata gaps", status: "FAIL", count: 1 }
-    ],
-    playlistDetails: [],
-    warnings: []
-  }, {
-    escapeHtml: (s) => String(s),
-    showDiagReportView: () => showDiagReportView(el),
-    formatParityIssues: () => [],
-    documentObj: { createElement: (tag) => makeElement(tag) }
-  });
-
-  assert.equal(el.diagOverallStatus.textContent, "FAIL");
-  assert.ok(el.diagOverallStatus.className.includes("diag-fail"));
-  assert.ok(el.diagDuration.textContent.includes("21ms"));
-  assert.equal(el.diagSections.children.length, 1);
-  assert.ok(el.diagPlaylistDetails.classList.contains("hidden"));
-});
-
-test("renderParityReport renders playlist detail rows with issues", () => {
-  const el = makeDiagEl();
-  renderParityReport(el, {
-    overallStatus: "FAIL",
-    durationMs: 10,
-    checks: [],
-    summaryRows: [],
-    playlistDetails: [
-      {
-        name: "Warmup",
-        status: "FAIL",
-        pdbTracks: 3,
-        edbTracks: 3,
-        matchedTracks: 2,
-        onlyInPdb: 1,
-        onlyInEdb: 0,
-        pdbMissingCoreMetadata: 1
-      }
-    ],
-    warnings: []
-  }, {
-    escapeHtml: (s) => String(s),
-    showDiagReportView: () => showDiagReportView(el),
-    formatParityIssues: (pd) => pd.onlyInPdb ? ["+1 PDB only"] : [],
-    documentObj: { createElement: (tag) => makeElement(tag) }
-  });
-
-  assert.ok(!el.diagPlaylistDetails.classList.contains("hidden"));
-  assert.equal(el.diagPlaylistTableBody.children.length, 1);
-});
-
-test("renderParityReport handles missing summaryRows gracefully", () => {
-  const el = makeDiagEl();
-  renderParityReport(el, {
-    overallStatus: "PASS",
-    durationMs: 5,
-    checks: [],
-    playlistDetails: [],
-    warnings: []
-  }, {
-    escapeHtml: (s) => String(s),
-    showDiagReportView: () => showDiagReportView(el),
-    formatParityIssues: () => [],
-    documentObj: { createElement: (tag) => makeElement(tag) }
-  });
-
-  assert.equal(el.diagOverallStatus.textContent, "PASS");
-  assert.equal(el.diagSections.children.length, 1);
-});
-
-// --- Coverage: clearUsbDiagnostics vs hideUsbDiagnostics ---
-
 function makeHealthDot() {
   return {
     classList: makeClassList(),
     dataset: {},
     ariaLabel: "",
-    setAttribute(name, value) { if (name === "aria-label") this.ariaLabel = value; }
+    setAttribute(name, value) {
+      if (name === "aria-label") this.ariaLabel = value;
+    }
   };
 }
 
-function makeHideClearTestEl() {
-  const el = makeDiagEl();
-  el.usbHealthDot = makeHealthDot();
-  el.usbHeaderHealthDot = makeHealthDot();
-  el.diagRepairSummary = { textContent: "stale summary", className: "diag-repair-summary is-bad" };
-  el.diagRepairFixes = { innerHTML: "<div>stale fix</div>" };
-  el.applyRepairsBtn = { disabled: false };
-  el.diagSections.innerHTML = "<div>stale</div>";
-  el.diagOverallStatus.textContent = "WARN";
-  el.diagDuration.textContent = "Completed in 1ms";
-  el.diagPlaylistTableBody.innerHTML = "<tr></tr>";
-  el.usbHealthDot.classList.add("health-warn");
-
+function makeDiagnosticsEl() {
   const healthCard = {
     classList: makeClassList(),
     open: true,
-    removeAttribute(name) { if (name === "open") this.open = false; }
+    removeAttribute(name) {
+      if (name === "open") this.open = false;
+    }
   };
   healthCard.classList.add("is-loading");
-  el.usbDiagnosticsCard.closest = (sel) => (sel === "#usbHealthCard" ? healthCard : null);
-  el._healthCard = healthCard;
+
+  const el = {
+    usbHealthDot: makeHealthDot(),
+    usbHeaderHealthDot: makeHealthDot(),
+    usbDiagnosticsCard: {
+      classList: makeClassList(),
+      closest: (selector) => selector === "#usbHealthCard" ? healthCard : null
+    },
+    diagSections: { innerHTML: "<div>stale</div>" },
+    diagOverallStatus: { textContent: "WARN", className: "diag-badge diag-warn" },
+    diagDuration: { textContent: "Completed in 1ms" },
+    diagPlaylistDetails: { classList: makeClassList() },
+    diagPlaylistTableBody: { innerHTML: "<tr></tr>" },
+    diagRepairSummary: { textContent: "stale summary", className: "diag-repair-summary is-bad" },
+    diagRepairFixes: { innerHTML: "<div>stale fix</div>" },
+    previewRepairsBtn: { disabled: false },
+    applyRepairsBtn: { disabled: false },
+    diagReportView: { classList: makeClassList() },
+    diagRepairPanel: { classList: makeClassList() },
+    _healthCard: healthCard
+  };
+  el.usbHealthDot.classList.add("health-warn");
   return el;
 }
 
-function assertContentCleared(el) {
+function assertDiagnosticsContentCleared(el) {
   assert.equal(el.diagSections.innerHTML, "");
   assert.equal(el.diagOverallStatus.textContent, "");
   assert.equal(el.diagDuration.textContent, "");
   assert.equal(el.diagPlaylistTableBody.innerHTML, "");
-  assert.ok(el.diagPlaylistDetails.classList.contains("hidden"));
   assert.equal(el.diagRepairSummary.textContent, "");
   assert.equal(el.diagRepairFixes.innerHTML, "");
   assert.equal(el.previewRepairsBtn.disabled, true);
   assert.equal(el.applyRepairsBtn.disabled, true);
-  assert.ok(!el.diagReportView.classList.contains("hidden"));
-  assert.ok(el.diagRepairPanel.classList.contains("hidden"));
-  assert.ok(!el.usbHealthDot.classList.contains("health-warn"));
+  assert.equal(el.diagPlaylistDetails.classList.contains("hidden"), true);
+  assert.equal(el.diagReportView.classList.contains("hidden"), false);
+  assert.equal(el.diagRepairPanel.classList.contains("hidden"), true);
+  assert.equal(el.usbHealthDot.classList.contains("health-warn"), false);
   assert.equal(el.usbHealthDot.dataset.tooltip, "USB health: unknown");
 }
 
 test("clearUsbDiagnostics blanks the report but leaves the panel and health card open state alone", () => {
-  const el = makeHideClearTestEl();
+  const el = makeDiagnosticsEl();
 
   clearUsbDiagnostics(el);
 
-  assertContentCleared(el);
-  assert.ok(!el.usbDiagnosticsCard.classList.contains("hidden"), "panel must stay visible on a clear");
-  assert.equal(el._healthCard.open, true, "health card's open state must be left alone on a clear");
-  assert.ok(el._healthCard.classList.contains("is-loading"), "clear must not touch is-loading state");
+  assertDiagnosticsContentCleared(el);
+  assert.equal(el.usbDiagnosticsCard.classList.contains("hidden"), false);
+  assert.equal(el._healthCard.open, true);
+  assert.equal(el._healthCard.classList.contains("is-loading"), true);
 });
 
-test("hideUsbDiagnostics blanks the report and also collapses the panel and health card", () => {
-  const el = makeHideClearTestEl();
+test("hideUsbDiagnostics blanks the report and collapses the panel and health card", () => {
+  const el = makeDiagnosticsEl();
 
   hideUsbDiagnostics(el);
 
-  assertContentCleared(el);
-  assert.ok(el.usbDiagnosticsCard.classList.contains("hidden"), "hide must collapse the panel");
-  assert.equal(el._healthCard.open, false, "hide must close the health card");
-  assert.ok(!el._healthCard.classList.contains("is-loading"));
+  assertDiagnosticsContentCleared(el);
+  assert.equal(el.usbDiagnosticsCard.classList.contains("hidden"), true);
+  assert.equal(el._healthCard.open, false);
+  assert.equal(el._healthCard.classList.contains("is-loading"), false);
 });

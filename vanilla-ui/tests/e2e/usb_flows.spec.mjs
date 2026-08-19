@@ -271,6 +271,22 @@ function installTauriMock(page, mode) {
                 }
               };
             }
+            const warnings = mode === "needs-init-structured"
+              ? [
+                  {
+                    level: "warn",
+                    code: "usb.validate.missing-vendor-root",
+                    message: "Missing vendor root folder",
+                    source: "usb-validate"
+                  },
+                  {
+                    level: "warn",
+                    code: "usb.validate.missing-contents",
+                    message: "Missing Contents directory",
+                    source: "usb-validate"
+                  }
+                ]
+              : ["missing External library structure"];
             return {
               ok: true,
               data: {
@@ -281,7 +297,7 @@ function installTauriMock(page, mode) {
                 hasContents: false,
                 hasPdb: false,
                 hasEdb: false,
-                warnings: ["missing External library structure"]
+                warnings
               }
             };
           }
@@ -383,6 +399,20 @@ test("USB initialize flow: invalid-but-writable root can be initialized and unlo
 
   await expect(page.locator("#usbInitRow")).toHaveClass(/hidden/);
   await expect(page.locator("#usbSelectedControls")).not.toHaveClass(/hidden/);
+});
+
+test("USB initialize hint renders structured warning messages", async ({ page }) => {
+  await installTauriMock(page, "needs-init-structured");
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+
+  await expect(page.locator("#usbInitRow")).not.toHaveClass(/hidden/);
+  await expect(page.locator("#usbInitHint")).toContainText("Missing vendor root folder");
+  await expect(page.locator("#usbInitHint")).toContainText("Missing Contents directory");
+  await expect(page.locator("#usbInitHint")).not.toContainText("[object Object]");
+  await expect(page.locator("#statusText")).not.toContainText("[object Object]");
 });
 
 test("USB playlist removal confirm path handles cancel and confirm", async ({ page }) => {
