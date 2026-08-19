@@ -44,21 +44,24 @@ test("resolveLocalTrackIdAsync materializes local track and promotes identity", 
   const id = await resolveLocalTrackIdAsync(track, state, {
     command: async (name, payload) => {
       calls.push({ name, payload });
-      if (name === "materialize_source_track") return { trackId: "local-99" };
+      if (name === "resolve_track_identity") {
+        return { trackId: "local-99", resolvedBy: "materialized", materialized: true };
+      }
       throw new Error(`unexpected command ${name}`);
     },
     normalizePath,
     promoteTrackIdentity: (from, to) => {
       promoted = { from, to };
     },
-    resolveLocalTrackId: () => null,
-    shouldAllowResolvedFallback: () => true
+    resolveLocalTrackId: () => null
   });
 
   assert.equal(id, "local-99");
   assert.equal(track.localTrackId, "local-99");
   assert.deepEqual(promoted, { from: "usb-1", to: "local-99" });
-  assert.equal(calls[0].name, "materialize_source_track");
+  assert.equal(calls[0].name, "resolve_track_identity");
+  assert.equal(calls[0].payload.trackId, "usb-1");
+  assert.equal(calls[0].payload.filePath, "/music/a.mp3");
 });
 
 test("resolveLocalTrack finds exact file path candidate", () => {

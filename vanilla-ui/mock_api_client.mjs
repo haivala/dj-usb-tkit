@@ -275,6 +275,85 @@ export function createMockInvoke({ state, normalizePath, constants }) {
       };
     }
 
+    if (command === "materialize_source_track") {
+      const req = payload?.request || {};
+      const filePath = String(req.filePath || "").trim();
+      if (!filePath) {
+        return { ok: false, error: { code: "VALIDATION_ERROR", message: "filePath must not be empty" } };
+      }
+      const existing = state.tracks.find((track) => normalizePath(track.filePath || "") === normalizePath(filePath));
+      if (existing?.id) {
+        existing.title = req.title || existing.title || "";
+        existing.artist = req.artist || existing.artist || "";
+        existing.album = req.album ?? existing.album ?? null;
+        existing.fileSizeBytes = req.fileSizeBytes ?? existing.fileSizeBytes ?? null;
+        return { ok: true, data: { trackId: existing.id } };
+      }
+      const track = {
+        id: `local-${Date.now()}`,
+        title: req.title || "",
+        artist: req.artist || "",
+        album: req.album || null,
+        trackNumber: req.trackNumber || null,
+        bpm: null,
+        key: req.key || null,
+        filePath,
+        fileSizeBytes: req.fileSizeBytes || null,
+        formatExt: req.formatExt || null,
+        sampleRateHz: req.sampleRateHz || null,
+        bitDepth: req.bitDepth || null,
+        bitrateKbps: req.bitrateKbps || null,
+        artworkPath: null,
+        waveformPeaksPath: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      state.tracks.push(track);
+      return { ok: true, data: { trackId: track.id } };
+    }
+
+    if (command === "resolve_track_identity") {
+      const req = payload?.request || {};
+      const trackId = String(req.trackId || "").trim();
+      const byId = state.tracks.find((track) => String(track.id || "") === trackId);
+      if (byId?.id && normalizePath(byId.id) !== normalizePath(byId.filePath || "")) {
+        return { ok: true, data: { trackId: byId.id, resolvedBy: "self", materialized: false } };
+      }
+
+      const filePath = String(req.filePath || "").trim();
+      const usbRoot = String(req.usbRoot || "").trim();
+      const normalizedPath = normalizePath(filePath);
+      const normalizedRoot = normalizePath(usbRoot).replace(/\/+$/, "");
+      const pathIsSelectedUsb = !!normalizedPath && !!normalizedRoot
+        && (normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`));
+      const usbMarked = !!String(req.usbAnalysisPath || "").trim() || pathIsSelectedUsb;
+
+      if (filePath && !usbMarked) {
+        const materialized = await invoke("materialize_source_track", { request: req });
+        if (materialized?.ok && materialized.data?.trackId) {
+          return {
+            ok: true,
+            data: {
+              trackId: materialized.data.trackId,
+              resolvedBy: "materialized",
+              materialized: true
+            }
+          };
+        }
+      }
+
+      const resolved = await invoke("resolve_playback_source", { request: req });
+      if (!resolved?.ok) return resolved;
+      return {
+        ok: true,
+        data: {
+          trackId: resolved.data?.trackId || null,
+          resolvedBy: resolved.data?.matchedBy || "none",
+          materialized: false
+        }
+      };
+    }
+
     if (command === "play_resolved_track") {
       const req = payload?.request || {};
       const resolved = await invoke("resolve_playback_source", { request: req });

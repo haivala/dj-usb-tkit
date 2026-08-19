@@ -676,6 +676,25 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
             const cursor = payload?.request?.cursor ?? null;
             return { ok: true, data: listPage(cursor, query) };
           }
+          if (command === "resolve_track_identity") {
+            materializeCalls += 1;
+            if (materializeFails) {
+              return { ok: false, error: { code: "INTERNAL_ERROR", message: "materialize failed" } };
+            }
+            const filePath = String(payload?.request?.filePath || "");
+            const row = tracks.find((t) => t.filePath === filePath);
+            if (!row) {
+              return { ok: true, data: { trackId: null, resolvedBy: "none", materialized: false } };
+            }
+            if (!row.localTrackId) {
+              const suffix = String(row.filePath).replace(/[^0-9]+/g, "") || "1";
+              row.localTrackId = `ml-${suffix}`;
+            }
+            return {
+              ok: true,
+              data: { trackId: row.localTrackId, resolvedBy: "materialized", materialized: true }
+            };
+          }
           if (command === "materialize_source_track") {
             materializeCalls += 1;
             if (materializeFails) {

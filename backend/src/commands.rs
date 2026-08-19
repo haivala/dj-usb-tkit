@@ -24,13 +24,13 @@ use crate::models::{
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
-    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
-    RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
-    SearchTracksData, SearchTracksRequest, SetAnalysisPausedData, SetFrontendSettingData,
-    SetFrontendSettingRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData,
-    ValidateUsbRootRequest,
+    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
+    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
+    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetUsbDeviceNameData,
+    SetUsbDeviceNameRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -101,6 +101,13 @@ impl BackendCommands {
         req: MaterializeSourceTrackRequest,
     ) -> ApiResponse<MaterializeSourceTrackData> {
         wrap(self.service.materialize_source_track(req))
+    }
+
+    pub fn resolve_track_identity(
+        &self,
+        req: ResolveTrackIdentityRequest,
+    ) -> ApiResponse<ResolveTrackIdentityData> {
+        wrap(self.service.resolve_track_identity(req))
     }
 
     pub fn remove_tracks_by_source_roots(

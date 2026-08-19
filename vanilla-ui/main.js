@@ -511,7 +511,6 @@ const resolveLocalTrackIdAsync = async (track) => playback.resolveLocalTrackIdAs
     normalizePath,
     promoteTrackIdentity,
     resolveLocalTrackId,
-    shouldAllowResolvedFallback,
   });
 function promoteTrackIdentity(oldId, newId) {
   library.promoteTrackIdentity(state, el, oldId, newId, { cssEscape });
@@ -535,12 +534,10 @@ const stopPlaybackFromUi = async () => playback.stopPlaybackFromUi(state, {
 const playTrackFromOrigin = async (track, origin, options = {}) => playback.playTrackFromOriginController(state, track, origin, options, {
     playTrackFromOriginCore: playback.playTrackFromOrigin,
     command,
-    trackPathMatchesAnyRoot: library.trackPathMatchesAnyRoot,
     clearAllWaveformPlayheads,
     setWaveformPlayhead,
     updateTransportButtonsInDom,
     setStatus,
-    warn: (...a) => console.warn(...a),
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
     getPlaybackSourceLabel: globalThis?.playbackSourceLabel?.getPlaybackSourceLabel,

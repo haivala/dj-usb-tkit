@@ -255,59 +255,43 @@ export async function resolveLocalTrackIdAsync(track, state, deps) {
   } = deps;
   const resolveLocalTrackIdFn = deps.resolveLocalTrackId
     || ((value) => resolveLocalTrackId(value, state, { normalizePath }));
-  const shouldAllowResolvedFallbackFn = deps.shouldAllowResolvedFallback
-    || ((value) => shouldAllowResolvedFallback(value, state, { normalizePath }));
 
   const syncId = resolveLocalTrackIdFn(track);
   if (syncId) return syncId;
   if (!track) return null;
 
   const filePath = String(track.filePath || "").trim();
-  const isUsbOrigin = !shouldAllowResolvedFallbackFn(track);
-  if (filePath && !isUsbOrigin) {
-    try {
-      const data = await command("materialize_source_track", {
-        filePath,
-        title: track.title || "",
-        artist: track.artist || "",
-        album: track.album || null,
-        trackNumber: toNumberOrNull(track.trackNumber),
-        key: track.key || null,
-        fileSizeBytes: toNumberOrNull(track.fileSizeBytes),
-        formatExt: track.formatExt || null,
-        sampleRateHz: toNumberOrNull(track.sampleRateHz),
-        bitDepth: toNumberOrNull(track.bitDepth),
-        bitrateKbps: toNumberOrNull(track.bitrateKbps)
-      });
-      if (data?.trackId) {
-        const previousId = String(track.id || "").trim();
-        track.localTrackId = data.trackId;
-        if (typeof promoteTrackIdentity === "function") {
-          promoteTrackIdentity(previousId, data.trackId);
-        }
-        return data.trackId;
-      }
-    } catch (_) {
-      return null;
-    }
-  }
-
-  const title = String(track.title || "").trim();
-  const artist = String(track.artist || "").trim();
-  if (!title || !artist) return null;
   try {
-    const data = await command("resolve_playback_source", {
-      title,
-      artist,
+    const data = await command("resolve_track_identity", {
+      trackId: track.id || null,
+      title: track.title || "",
+      artist: track.artist || "",
       album: track.album || null,
       bpm: toNumberOrNull(track.bpm),
       filePath: filePath || null,
-      fileSizeBytes: toNumberOrNull(track.fileSizeBytes)
+      fileSizeBytes: toNumberOrNull(track.fileSizeBytes),
+      trackNumber: toNumberOrNull(track.trackNumber),
+      key: track.key || null,
+      formatExt: track.formatExt || null,
+      sampleRateHz: toNumberOrNull(track.sampleRateHz),
+      bitDepth: toNumberOrNull(track.bitDepth),
+      bitrateKbps: toNumberOrNull(track.bitrateKbps),
+      usbRoot: state.usbRoot || null,
+      usbRootValid: !!state.usbRootValid,
+      usbAnalysisPath: track.usbAnalysisPath || null
     });
-    return data?.trackId || null;
+    if (data?.trackId) {
+      const previousId = String(track.id || "").trim();
+      track.localTrackId = data.trackId;
+      if (typeof promoteTrackIdentity === "function") {
+        promoteTrackIdentity(previousId, data.trackId);
+      }
+      return data.trackId;
+    }
   } catch (_) {
     return null;
   }
+  return null;
 }
 
 function getFileName(value) {

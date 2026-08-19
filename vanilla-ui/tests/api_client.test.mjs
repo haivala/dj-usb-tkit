@@ -106,6 +106,12 @@ test("mock playlist, USB, playback, and removal commands mutate state consistent
   assert.equal(emptyRoot.data.valid, false);
 
   state.tracks.push({ id: "t-play", title: "Track", artist: "Artist", filePath: "/music/track.mp3" });
+  const identity = await client.invoke("resolve_track_identity", {
+    request: { title: "Track", artist: "Artist", filePath: "/music/track.mp3", trackId: "t-play" }
+  });
+  assert.equal(identity.data.trackId, "t-play");
+  assert.equal(identity.data.resolvedBy, "self");
+
   const play = await client.invoke("play_resolved_track", {
     request: {
       title: "Track",

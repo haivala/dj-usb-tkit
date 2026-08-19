@@ -57,6 +57,7 @@ drive selection from being rendered against a newer selected drive.
 - `browse_source_files`
 - `check_source_roots`
 - `materialize_source_track`
+- `resolve_track_identity`
 - `remove_tracks_by_source_roots`
 - `relocate_source_root`
 - `get_tracks_by_ids_with_previews`

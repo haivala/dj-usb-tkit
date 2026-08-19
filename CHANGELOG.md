@@ -38,7 +38,9 @@
 - **Chore:** split the browser/dev mock backend out of `api_client.mjs` into
   `mock_api_client.mjs`, lazy-loading it only outside Tauri. `api_client.mjs` is now just the
   Tauri/mock selector and command helper, and the playback unit tests now cover the frontend
-  command boundary while the migrated retry/source-label policy is tested in Rust.
+  command boundary while the migrated retry/source-label policy is tested in Rust. Track identity
+  recovery for analysis/playlist actions also moved behind backend `resolve_track_identity`
+  instead of sequencing materialize/fallback commands in the frontend.
 - **Improvement:** playlist "Total time" is now computed once server-side from the full
   track list, matching how the media library and USB playlist/history views already
   report their totals, instead of being summed client-side from whatever tracks happen

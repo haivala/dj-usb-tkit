@@ -309,6 +309,51 @@ pub struct MaterializeSourceTrackData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ResolveTrackIdentityRequest {
+    #[serde(default)]
+    pub track_id: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub bpm: Option<f64>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub file_size_bytes: Option<i64>,
+    #[serde(default)]
+    pub track_number: Option<u32>,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub format_ext: Option<String>,
+    #[serde(default)]
+    pub sample_rate_hz: Option<u32>,
+    #[serde(default)]
+    pub bit_depth: Option<u8>,
+    #[serde(default)]
+    pub bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    #[serde(default)]
+    pub usb_root_valid: bool,
+    #[serde(default)]
+    pub usb_analysis_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveTrackIdentityData {
+    pub track_id: Option<String>,
+    pub resolved_by: String,
+    pub materialized: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoveTracksBySourceRootsRequest {
     pub source_roots: Vec<String>,
 }

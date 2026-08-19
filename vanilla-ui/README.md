@@ -39,6 +39,7 @@ The UI invokes backend commands through Tauri. Core command names include:
 - `get_playlist_tracks`
 - `add_tracks_to_playlist`
 - `remove_tracks_from_playlist`
+- `resolve_track_identity`
 - `resolve_playback_source`
 - `play_resolved_track`
 - `play_track_native`

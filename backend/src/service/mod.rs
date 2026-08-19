@@ -51,9 +51,10 @@ use crate::models::{
     RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RenamePlaylistData,
     RenamePlaylistRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
-    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
-    SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track, WarningEntry,
+    ResolveTrackIdentityData, ResolveTrackIdentityRequest, ScanLibraryData, ScanLibraryRequest,
+    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
+    SetFrontendSettingRequest, SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track,
+    WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -1943,6 +1944,69 @@ impl BackendService {
         };
 
         Ok(MaterializeSourceTrackData { track_id })
+    }
+
+    pub fn resolve_track_identity(
+        &self,
+        req: ResolveTrackIdentityRequest,
+    ) -> BackendResult<ResolveTrackIdentityData> {
+        let file_path = req.file_path.as_deref().unwrap_or("").trim();
+        let usb_root = req.usb_root.as_deref().unwrap_or("").trim();
+        let usb_analysis_path = req.usb_analysis_path.as_deref().unwrap_or("").trim();
+        let path_is_selected_usb = !file_path.is_empty()
+            && !usb_root.is_empty()
+            && browse_path_matches_root(file_path, usb_root);
+        let path_has_usb_marker = !usb_analysis_path.is_empty() || path_is_selected_usb;
+
+        let resolve_request = || ResolvePlaybackSourceRequest {
+            title: req.title.clone(),
+            artist: req.artist.clone(),
+            album: req.album.clone(),
+            bpm: req.bpm,
+            file_path: req.file_path.clone(),
+            file_size_bytes: req.file_size_bytes,
+            track_id: req.track_id.clone(),
+        };
+
+        let resolved = self.resolve_playback_source(resolve_request())?;
+        if resolved.matched_by == "self" {
+            return Ok(ResolveTrackIdentityData {
+                track_id: resolved.track_id,
+                resolved_by: resolved.matched_by,
+                materialized: false,
+            });
+        }
+
+        if !file_path.is_empty() && !path_has_usb_marker {
+            match self.materialize_source_track(MaterializeSourceTrackRequest {
+                file_path: file_path.to_string(),
+                title: req.title.clone(),
+                artist: req.artist.clone(),
+                album: req.album.clone(),
+                track_number: req.track_number,
+                key: req.key.clone(),
+                file_size_bytes: req.file_size_bytes,
+                format_ext: req.format_ext.clone(),
+                sample_rate_hz: req.sample_rate_hz,
+                bit_depth: req.bit_depth,
+                bitrate_kbps: req.bitrate_kbps,
+            }) {
+                Ok(data) => {
+                    return Ok(ResolveTrackIdentityData {
+                        track_id: Some(data.track_id),
+                        resolved_by: "materialized".to_string(),
+                        materialized: true,
+                    });
+                }
+                Err(_) => {}
+            }
+        }
+
+        Ok(ResolveTrackIdentityData {
+            track_id: resolved.track_id,
+            resolved_by: resolved.matched_by,
+            materialized: false,
+        })
     }
 
     pub fn remove_tracks_by_source_roots(
@@ -4286,6 +4350,81 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn resolve_track_identity_materializes_safe_local_source_path() {
+        let (_dir, service) = test_service();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("song.mp3");
+        std::fs::write(&file_path, b"data").expect("write file");
+
+        let result = service
+            .resolve_track_identity(ResolveTrackIdentityRequest {
+                track_id: Some(file_path.to_string_lossy().to_string()),
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                bpm: None,
+                file_path: Some(file_path.to_string_lossy().to_string()),
+                file_size_bytes: None,
+                track_number: None,
+                key: Some("8A".to_string()),
+                format_ext: Some("mp3".to_string()),
+                sample_rate_hz: None,
+                bit_depth: None,
+                bitrate_kbps: None,
+                usb_root: Some("/usb".to_string()),
+                usb_root_valid: true,
+                usb_analysis_path: None,
+            })
+            .expect("resolve identity");
+
+        assert!(result.materialized);
+        assert_eq!(result.resolved_by, "materialized");
+        assert!(result.track_id.is_some());
+    }
+
+    #[test]
+    fn resolve_track_identity_skips_usb_materialization_and_resolves_local_match() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "local-1",
+            "Song",
+            "Artist",
+            "/music/song.mp3",
+            None,
+            Some(1234),
+            false,
+        );
+        drop(conn);
+
+        let result = service
+            .resolve_track_identity(ResolveTrackIdentityRequest {
+                track_id: Some("usb-placeholder".to_string()),
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                bpm: None,
+                file_path: Some("/usb/Contents/song.mp3".to_string()),
+                file_size_bytes: Some(1234),
+                track_number: None,
+                key: None,
+                format_ext: Some("mp3".to_string()),
+                sample_rate_hz: None,
+                bit_depth: None,
+                bitrate_kbps: None,
+                usb_root: Some("/usb".to_string()),
+                usb_root_valid: true,
+                usb_analysis_path: Some("/usb/PIONEER/USBANLZ/ANLZ0000.DAT".to_string()),
+            })
+            .expect("resolve identity");
+
+        assert!(!result.materialized);
+        assert_eq!(result.resolved_by, "hash");
+        assert_eq!(result.track_id.as_deref(), Some("local-1"));
     }
 
     #[test]

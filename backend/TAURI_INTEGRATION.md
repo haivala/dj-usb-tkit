@@ -92,6 +92,9 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `download_essentia`
   - `cancel_essentia_download`
   - `remove_essentia`
+- Library identity:
+  - `materialize_source_track`
+  - `resolve_track_identity`
 - Playback:
   - `resolve_playback_source`
   - `play_resolved_track`

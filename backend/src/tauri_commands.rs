@@ -31,12 +31,12 @@ use crate::models::{
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
-    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
-    RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
-    SearchTracksData, SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest,
-    SetFrontendSettingData, SetFrontendSettingRequest, SetUsbDeviceNameData,
-    SetUsbDeviceNameRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
+    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
+    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
+    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
+    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
     UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
@@ -605,6 +605,14 @@ pub fn materialize_source_track(
     request: MaterializeSourceTrackRequest,
 ) -> ApiResponse<MaterializeSourceTrackData> {
     state.materialize_source_track(request)
+}
+
+#[tauri::command]
+pub fn resolve_track_identity(
+    state: State<'_, BackendCommands>,
+    request: ResolveTrackIdentityRequest,
+) -> ApiResponse<ResolveTrackIdentityData> {
+    state.resolve_track_identity(request)
 }
 
 #[tauri::command]
