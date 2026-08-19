@@ -29,7 +29,8 @@ use crate::models::{
     PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData,
     RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData,
+    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
+    ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ReorderUsbPlaylistsData,
     ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
     ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ResolveTrackIdentityData,
     ResolveTrackIdentityRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
@@ -707,6 +708,14 @@ pub fn remove_tracks_from_playlist(
     request: RemoveTracksFromPlaylistRequest,
 ) -> ApiResponse<RemoveTracksFromPlaylistData> {
     state.remove_tracks_from_playlist(request)
+}
+
+#[tauri::command]
+pub fn reorder_playlist_tracks(
+    state: State<'_, BackendCommands>,
+    request: ReorderPlaylistTracksRequest,
+) -> ApiResponse<ReorderPlaylistTracksData> {
+    state.reorder_playlist_tracks(request)
 }
 
 #[tauri::command]

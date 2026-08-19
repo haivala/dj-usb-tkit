@@ -51,11 +51,11 @@ use crate::models::{
     PlaybackPreflightRequest, PlaybackStatusData, Playlist, RelocateSourceRootData,
     RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RenamePlaylistData,
-    RenamePlaylistRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
-    ResolveTrackIdentityData, ResolveTrackIdentityRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
-    SetFrontendSettingRequest, SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track,
-    WarningEntry,
+    RenamePlaylistRequest, ReorderPlaylistTracksData, ReorderPlaylistTracksRequest,
+    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ResolveTrackIdentityData,
+    ResolveTrackIdentityRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
+    SearchTracksData, SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track, WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -2611,6 +2611,83 @@ impl BackendService {
         })
     }
 
+    pub fn reorder_playlist_tracks(
+        &self,
+        req: ReorderPlaylistTracksRequest,
+    ) -> BackendResult<ReorderPlaylistTracksData> {
+        if req.ordered_track_ids.is_empty() {
+            return Err(BackendError::Validation(
+                "orderedTrackIds must contain at least one id".to_string(),
+            ));
+        }
+
+        let mut uniq_ordered_ids = req.ordered_track_ids.clone();
+        uniq_ordered_ids.sort();
+        uniq_ordered_ids.dedup();
+        if uniq_ordered_ids.len() != req.ordered_track_ids.len() {
+            return Err(BackendError::Validation(
+                "orderedTrackIds must not contain duplicates".to_string(),
+            ));
+        }
+
+        let mut conn = self.db.connect()?;
+        let tx = conn.transaction()?;
+        ensure_playlist_exists_conn(&tx, &req.playlist_id)?;
+
+        let mut row_by_track_id = std::collections::HashMap::<String, String>::new();
+        {
+            let mut stmt =
+                tx.prepare("SELECT id, track_id FROM playlist_tracks WHERE playlist_id = ?1")?;
+            let rows = stmt.query_map(params![req.playlist_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (id, track_id) = row?;
+                row_by_track_id.insert(track_id, id);
+            }
+        }
+
+        let existing_track_ids: std::collections::HashSet<&String> =
+            row_by_track_id.keys().collect();
+        let requested_track_ids: std::collections::HashSet<&String> =
+            req.ordered_track_ids.iter().collect();
+        if existing_track_ids != requested_track_ids {
+            return Err(BackendError::Validation(
+                "orderedTrackIds must match the playlist's current track set".to_string(),
+            ));
+        }
+
+        // Two-phase update: `playlist_tracks` has UNIQUE(playlist_id, position),
+        // so writing final positions directly can collide mid-transaction with
+        // whatever a row currently holds. Shift every row to a disjoint negative
+        // range first, then assign the real 1..N positions in a second pass.
+        for (idx, track_id) in req.ordered_track_ids.iter().enumerate() {
+            let row_id = &row_by_track_id[track_id];
+            tx.execute(
+                "UPDATE playlist_tracks SET position = ?1 WHERE id = ?2",
+                params![-((idx as i64) + 1), row_id],
+            )?;
+        }
+        for (idx, track_id) in req.ordered_track_ids.iter().enumerate() {
+            let row_id = &row_by_track_id[track_id];
+            tx.execute(
+                "UPDATE playlist_tracks SET position = ?1 WHERE id = ?2",
+                params![(idx as i64) + 1, row_id],
+            )?;
+        }
+
+        tx.execute(
+            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL WHERE id = ?2",
+            params![now(), req.playlist_id],
+        )?;
+
+        tx.commit()?;
+        Ok(ReorderPlaylistTracksData {
+            playlist_id: req.playlist_id,
+            reordered: req.ordered_track_ids.len(),
+        })
+    }
+
     pub fn get_frontend_settings(&self) -> BackendResult<GetFrontendSettingsData> {
         let conn = self.db.connect()?;
         let mut values = std::collections::HashMap::<String, String>::new();
@@ -4175,6 +4252,136 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["t1".to_string(), "t3".to_string()]
         );
+    }
+
+    #[test]
+    fn reorder_playlist_tracks_applies_arbitrary_new_order() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song A",
+            "Artist",
+            "/music/a.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t2",
+            "Song B",
+            "Artist",
+            "/music/b.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t3",
+            "Song C",
+            "Artist",
+            "/music/c.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+        service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
+                dedupe: DedupeMode::Allow,
+            })
+            .expect("add tracks");
+
+        let reordered = service
+            .reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                ordered_track_ids: vec!["t3".to_string(), "t1".to_string(), "t2".to_string()],
+            })
+            .expect("reorder tracks");
+        assert_eq!(reordered.reordered, 3);
+
+        let tracks = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id,
+            })
+            .expect("get playlist tracks");
+        assert_eq!(
+            tracks
+                .items
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["t3".to_string(), "t1".to_string(), "t2".to_string()]
+        );
+    }
+
+    #[test]
+    fn reorder_playlist_tracks_rejects_mismatched_track_set() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song A",
+            "Artist",
+            "/music/a.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn,
+            "t2",
+            "Song B",
+            "Artist",
+            "/music/b.mp3",
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+        service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t1".to_string(), "t2".to_string()],
+                dedupe: DedupeMode::Allow,
+            })
+            .expect("add tracks");
+
+        let missing_track = service.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+            playlist_id: playlist.playlist_id.clone(),
+            ordered_track_ids: vec!["t1".to_string()],
+        });
+        assert!(missing_track.is_err());
+
+        let unknown_track = service.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+            playlist_id: playlist.playlist_id.clone(),
+            ordered_track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
+        });
+        assert!(unknown_track.is_err());
+
+        let duplicate_track = service.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+            playlist_id: playlist.playlist_id,
+            ordered_track_ids: vec!["t1".to_string(), "t1".to_string()],
+        });
+        assert!(duplicate_track.is_err());
     }
 
     #[test]

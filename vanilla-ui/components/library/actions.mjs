@@ -652,7 +652,9 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
     applySortToTracks = (tracks) => tracks,
     renderTrackTable = () => {},
     cssEscape = (value) => String(value || ""),
-    updateTrackListDurationSummary = () => {}
+    updateTrackListDurationSummary = () => {},
+    isPlaylistTrackSortActive = () => false,
+    normalizePlaylistNameForCompare = (value) => String(value || "").trim().toLowerCase()
   } = deps;
 
   const playlist = getCurrentPlaylist();
@@ -677,6 +679,14 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
   el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", playlistEmpty);
 
   const sortedPlaylist = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
+  const sortOrSearchActive = isPlaylistTrackSortActive() || !!state.playlistTrackSearch;
+  const sameNameUsbPlaylistExists = state.usbKnownPlaylistNames instanceof Set
+    && state.usbKnownPlaylistNames.has(normalizePlaylistNameForCompare(playlist.name));
+  const exportBlocksReorder = !state.exportPruneStale && sameNameUsbPlaylistExists;
+  const enableDragReorder = !sortOrSearchActive && !exportBlocksReorder;
+  const dragDisabledTooltip = (!sortOrSearchActive && exportBlocksReorder)
+    ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
+    : null;
   await renderTrackTable(el.playlistTracksBody, sortedPlaylist, {
     withCheckbox: false,
     origin: "local",
@@ -685,7 +695,10 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
     enableAnalyzeActions: false,
     actionLabel: "×",
     actionType: "remove-playlist-track",
-    compactAddButton: true
+    compactAddButton: true,
+    reservesDragColumn: true,
+    enableDragReorder,
+    dragDisabledTooltip
   });
   for (const id of state.analyzingTrackIds) {
     const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;

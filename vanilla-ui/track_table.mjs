@@ -45,6 +45,14 @@ export function createTrackRow(track, options, deps) {
     ? `<div role="cell" class="track-grid-cell td-select"><input type="checkbox" data-id="${track.id}" ${options.selectedIds?.has(track.id) ? "checked" : ""} /></div>`
     : "";
 
+  const dragHandleCell = options.reservesDragColumn
+    ? (options.enableDragReorder
+      ? `<div role="cell" class="track-grid-cell td-drag"><span class="drag-handle" data-playlist-track-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">⠿</span></div>`
+      : options.dragDisabledTooltip
+        ? `<div role="cell" class="track-grid-cell td-drag"><span class="drag-handle disabled" data-tooltip="${escapeHtml(options.dragDisabledTooltip)}" aria-label="${escapeHtml(options.dragDisabledTooltip)}">⠿</span></div>`
+        : `<div role="cell" class="track-grid-cell td-drag"></div>`)
+    : "";
+
   let actionCell = `<div role="cell" class="track-grid-cell td-action">-</div>`;
   if (options.actionLabel || options.enableAnalyzeActions) {
     const isRemoveAction = options.actionType === "remove-playlist-track";
@@ -88,6 +96,7 @@ export function createTrackRow(track, options, deps) {
 
   return `
     <div role="row" class="track-grid-row" data-playback-row="${escapeHtml(rowKey)}" data-track-id="${escapeHtml(renderTrackId)}" data-track-index="${options.index}" data-track-origin="${escapeHtml(options.origin || "unknown")}">
+      ${dragHandleCell}
       ${selectCell}
       <div role="cell" class="track-grid-cell td-cover">${coverCell}</div>
       <div role="cell" class="track-grid-cell td-waveform">${waveformWithAction}</div>
@@ -186,12 +195,15 @@ export async function renderTrackTable(tbody, tracks, options = {}, deps) {
       tbody.innerHTML = "";
     }
     tracks.forEach((track) => {
+      const maybeDragCell = options.reservesDragColumn
+        ? `<div role="cell" class="track-grid-cell td-drag">-</div>`
+        : "";
       const maybeSelectCell = options.withCheckbox
         ? `<div role="cell" class="track-grid-cell td-select">-</div>`
         : "";
       tbody.insertAdjacentHTML(
         "beforeend",
-        `<div role="row" class="track-grid-row">${maybeSelectCell}<div role="cell" class="track-grid-cell td-cover">-</div><div role="cell" class="track-grid-cell td-waveform">-</div><div role="cell" class="track-grid-cell td-track">${escapeHtml(track.title)}</div><div role="cell" class="track-grid-cell td-album">-</div><div role="cell" class="track-grid-cell td-format">-</div><div role="cell" class="track-grid-cell td-length">-</div><div role="cell" class="track-grid-cell td-bpm">-</div><div role="cell" class="track-grid-cell td-key">-</div><div role="cell" class="track-grid-cell td-action">-</div></div>`
+        `<div role="row" class="track-grid-row">${maybeDragCell}${maybeSelectCell}<div role="cell" class="track-grid-cell td-cover">-</div><div role="cell" class="track-grid-cell td-waveform">-</div><div role="cell" class="track-grid-cell td-track">${escapeHtml(track.title)}</div><div role="cell" class="track-grid-cell td-album">-</div><div role="cell" class="track-grid-cell td-format">-</div><div role="cell" class="track-grid-cell td-length">-</div><div role="cell" class="track-grid-cell td-bpm">-</div><div role="cell" class="track-grid-cell td-key">-</div><div role="cell" class="track-grid-cell td-action">-</div></div>`
       );
     });
     setStatus(`Track render fallback used: ${error?.message || "unknown render error"}`);

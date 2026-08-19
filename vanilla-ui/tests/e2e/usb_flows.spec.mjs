@@ -4,7 +4,7 @@ function installTauriMock(page, mode) {
   return page.addInitScript(({ mode }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     const state = {
-      initialized: mode === "valid" || mode === "warning-mix" || mode === "toggle-usb" || mode === "reorder",
+      initialized: mode === "valid" || mode === "warning-mix" || mode === "toggle-usb" || mode === "reorder" || mode === "reorder-scroll",
       pickCount: 0,
       usbPlaylists: mode === "valid" || mode === "warning-mix"
         ? [
@@ -23,6 +23,13 @@ function installTauriMock(page, mode) {
             { id: "usb-pl-2", name: "Bravo", source: "mock-tauri", tracks: [{ title: "Track B" }] },
             { id: "usb-pl-3", name: "Charlie", source: "mock-tauri", tracks: [{ title: "Track C" }] }
           ]
+        : mode === "reorder-scroll"
+        ? Array.from({ length: 40 }, (_, i) => ({
+            id: `usb-pl-${i}`,
+            name: `Playlist ${String(i).padStart(2, "0")}`,
+            source: "mock-tauri",
+            tracks: [{ title: "Track" }]
+          }))
         : []
     };
     window.__reorderCalls = [];
@@ -765,6 +772,57 @@ test("USB playlist drag that does not change position skips persisting order", a
   await expect(rows.nth(0)).toContainText("Alpha");
   const reorderCalls = await page.evaluate(() => window.__reorderCalls);
   expect(reorderCalls).toEqual([]);
+});
+
+test("USB playlist drag auto-scrolls the list when held near its bottom edge", async ({ page }) => {
+  await installTauriMock(page, "reorder-scroll");
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator("#refreshUsbBtn").click();
+
+  const list = page.locator("#usbPlaylists");
+  await expect(page.locator("#usbPlaylists li[data-usb-playlist-li]")).toHaveCount(40);
+
+  const initialScrollTop = await list.evaluate((node) => node.scrollTop);
+  expect(initialScrollTop).toBe(0);
+
+  // The progress footer briefly overlaps the bottom of the viewport after a
+  // refresh -- wait for it to clear so it doesn't swallow the drag events
+  // meant for the list underneath it.
+  await expect(page.locator("#progressFooter")).not.toHaveClass(/active/, { timeout: 3000 });
+
+  const handle = page.locator('#usbPlaylists li[data-usb-playlist-li="0"] [data-usb-drag-handle]');
+  const handleBox = await handle.boundingBox();
+  const listBox = await list.boundingBox();
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2 + 10, { steps: 5 });
+
+  // Move down toward the bottom edge of the scrollable list, then dwell
+  // there -- native dragover keeps firing periodically while the pointer
+  // stays over a valid drop target, which is what drives auto-scroll (see
+  // dnd_autoscroll.mjs).
+  const endX = listBox.x + listBox.width / 2;
+  const endY = listBox.y + listBox.height - 4;
+  await page.mouse.move(endX, endY, { steps: 15 });
+  for (let i = 0; i < 15; i += 1) {
+    await page.mouse.move(endX, endY - (i % 2), { steps: 1 });
+    await page.waitForTimeout(80);
+  }
+
+  await page.waitForFunction(
+    () => document.querySelector("#usbPlaylists").scrollTop > 0,
+    null,
+    { timeout: 3000 }
+  );
+  const scrolledTop = await list.evaluate((node) => node.scrollTop);
+  await page.mouse.up();
+
+  expect(scrolledTop).toBeGreaterThan(0);
 });
 
 test("USB toggle race ends in deterministic final state", async ({ page }) => {

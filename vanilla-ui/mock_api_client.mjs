@@ -503,6 +503,23 @@ export function createMockInvoke({ state, normalizePath, constants }) {
       };
     }
 
+    if (command === "reorder_playlist_tracks") {
+      const playlistId = payload?.request?.playlistId || "";
+      const orderedTrackIds = payload?.request?.orderedTrackIds || [];
+      const playlist = state.playlists.find((p) => String(p.id) === String(playlistId));
+      if (playlist?.tracks?.length) {
+        const byId = new Map(playlist.tracks.map((t) => [String(t.id), t]));
+        playlist.tracks = orderedTrackIds.map((id) => byId.get(String(id))).filter(Boolean);
+      }
+      return {
+        ok: true,
+        data: {
+          playlistId,
+          reordered: orderedTrackIds.length
+        }
+      };
+    }
+
     if (command === "validate_usb_root") {
       const requested = String(payload?.request?.path || "");
       const valid = !!requested;

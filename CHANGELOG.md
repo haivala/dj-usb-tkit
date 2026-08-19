@@ -30,6 +30,19 @@
 
 ## Unreleased
 
+- **New feature:** tracks inside an app playlist can now be reordered by dragging them, backed by
+  a new `reorder_playlist_tracks` backend command that persists the custom order to the
+  `playlist_tracks.position` column. Dragging is disabled while a column sort or search filter is
+  active, since the rendered row order wouldn't match the playlist's real track order in that case.
+  It's also disabled (with a tooltip naming the matching USB playlist) when a same-named playlist
+  already exists on the connected USB and additive (non-mirror) export is enabled, since that
+  export mode never rewrites the order of tracks already on the device — reordering there wouldn't
+  be reflected on next export. Newly added tracks are unaffected and still export in the chosen
+  order.
+- **Fix:** drag-and-drop reordering (both the new playlist-track reordering above and the existing
+  USB playlist sidebar reordering) now auto-scrolls the list when the drag is held near its top or
+  bottom edge, or via the mouse wheel. Previously a drag couldn't reach items outside the visible
+  area of a long list.
 - **Improvement:** playback start is now backend-owned through `play_resolved_track`: the
   frontend sends one request, while the backend resolves local-vs-USB source paths, validates
   selected-USB fallback paths, retries recoverable native playback startup errors, and returns

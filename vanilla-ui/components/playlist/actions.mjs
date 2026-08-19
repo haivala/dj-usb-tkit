@@ -265,7 +265,9 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
     updateTrackListDurationSummary,
     updatePlaylistPanelTitle,
     updatePlaylistExportButtons,
-    renderPlaylistList
+    renderPlaylistList,
+    isPlaylistTrackSortActive = () => false,
+    normalizePlaylistNameForCompare = (value) => String(value || "").trim().toLowerCase()
   } = deps;
   const playlist = getCurrentPlaylist();
   if (!playlist) return;
@@ -296,6 +298,14 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
   el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", playlistEmpty);
 
   const sortedTracks = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
+  const sortOrSearchActive = isPlaylistTrackSortActive() || !!state.playlistTrackSearch;
+  const sameNameUsbPlaylistExists = state.usbKnownPlaylistNames instanceof Set
+    && state.usbKnownPlaylistNames.has(normalizePlaylistNameForCompare(playlist.name));
+  const exportBlocksReorder = !state.exportPruneStale && sameNameUsbPlaylistExists;
+  const enableDragReorder = !sortOrSearchActive && !exportBlocksReorder;
+  const dragDisabledTooltip = (!sortOrSearchActive && exportBlocksReorder)
+    ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
+    : null;
   await renderTrackTable(el.playlistTracksBody, sortedTracks, {
     withCheckbox: false,
     origin: "local",
@@ -304,7 +314,10 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
     enableAnalyzeActions: false,
     actionLabel: "\u00d7",
     actionType: "remove-playlist-track",
-    compactAddButton: true
+    compactAddButton: true,
+    reservesDragColumn: true,
+    enableDragReorder,
+    dragDisabledTooltip
   });
   updateTrackListDurationSummary(el.playlistTotalDuration, state.currentPlaylistTracksView);
   updatePlaylistPanelTitle(playlist);

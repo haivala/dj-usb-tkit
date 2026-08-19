@@ -408,3 +408,268 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
   await expect(page.locator("#exportPlaylistBtn")).toBeVisible();
   await expect(page.locator("#exportPlaylistBtn")).toHaveText("Select USB first");
 });
+
+function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneStale } = {}) {
+  return page.addInitScript(({ usbSameNamePlaylistName, exportPruneStale }) => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    if (exportPruneStale !== undefined) {
+      window.localStorage.setItem("djusbtkit.exportPruneStale", exportPruneStale ? "1" : "0");
+    }
+
+    const playlists = [{
+      id: "pl-1",
+      name: "Reorder Playlist",
+      source: "local",
+      lastExportedAt: null,
+      lastExportedUsbRoot: null,
+      lastExportedTrackCount: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }];
+
+    const playlistTracks = {
+      "pl-1": [
+        { id: "t1", title: "Song A", artist: "Artist", album: "", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
+        { id: "t2", title: "Song B", artist: "Artist", album: "", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
+        { id: "t3", title: "Song C", artist: "Artist", album: "", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+      ]
+    };
+
+    window.__reorderPlaylistTrackCalls = [];
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request || payload;
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "detect_external_master_db") {
+            return { ok: true, data: { found: false, path: null } };
+          }
+          if (command === "list_playlists") {
+            return { ok: true, data: { items: playlists } };
+          }
+          if (command === "get_playlist_tracks") {
+            const items = playlistTracks[request.playlistId] || [];
+            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
+            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+          }
+          if (command === "reorder_playlist_tracks") {
+            window.__reorderPlaylistTrackCalls.push(request.orderedTrackIds);
+            const byId = new Map((playlistTracks[request.playlistId] || []).map((t) => [t.id, t]));
+            playlistTracks[request.playlistId] = request.orderedTrackIds
+              .map((id) => byId.get(id))
+              .filter(Boolean);
+            return {
+              ok: true,
+              data: { playlistId: request.playlistId, reordered: request.orderedTrackIds.length }
+            };
+          }
+          if (command === "search_tracks" || command === "list_tracks") {
+            return { ok: true, data: { total: 0, items: [] } };
+          }
+          if (command === "browse_source_files") {
+            return { ok: true, data: { total: 0, items: [] } };
+          }
+          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
+            return command === "get_frontend_settings"
+              ? { ok: true, data: { settings: {} } }
+              : { ok: true, data: { key: request.key, value: request.value } };
+          }
+          if (command === "resolve_playback_source") {
+            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
+          }
+          if (command === "pick_usb_folder") {
+            return usbSameNamePlaylistName ? "/USB" : null;
+          }
+          if (command === "validate_usb_root") {
+            const valid = !!usbSameNamePlaylistName;
+            return {
+              ok: true,
+              data: {
+                valid,
+                hasWriteAccess: valid,
+                normalizedRoot: valid ? "/USB" : "",
+                hasVendorRoot: valid,
+                hasContents: valid,
+                hasPdb: valid,
+                hasEdb: valid,
+                warnings: []
+              }
+            };
+          }
+          if (command === "fetch_usb_playlists") {
+            const items = usbSameNamePlaylistName
+              ? [{
+                  id: "usb-pl-1",
+                  name: usbSameNamePlaylistName,
+                  source: "mock-tauri",
+                  tracks: [{ title: "USB Track" }],
+                  trackCount: 1
+                }]
+              : [];
+            return {
+              ok: true,
+              data: {
+                items,
+                stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
+                warnings: []
+              }
+            };
+          }
+          if (command === "run_usb_diagnostics") {
+            return {
+              ok: true,
+              data: {
+                overallStatus: "PASS",
+                durationMs: 1,
+                pdbIntegrity: { title: "PDB Integrity", status: "PASS", checks: [], counts: null },
+                edbAccess: { title: "Database Access", status: "PASS", checks: [], counts: null },
+                contentsIntegrity: { title: "Contents Integrity", status: "PASS", checks: [], counts: null },
+                analysisIntegrity: { title: "Analysis Files", status: "PASS", checks: [], counts: null },
+                playlistResolution: { title: "Playlist Resolution", status: "PASS", checks: [], counts: null },
+                playlistDetails: [],
+                warnings: []
+              }
+            };
+          }
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        }
+      }
+    };
+  }, { usbSameNamePlaylistName, exportPruneStale });
+}
+
+async function dragPlaylistTrackRow(page, fromTrackId, toTrackId, dropNearTop) {
+  const source = page.locator(`#playlistTracksBody .track-grid-row[data-track-id="${fromTrackId}"] [data-playlist-track-drag-handle]`);
+  const target = page.locator(`#playlistTracksBody .track-grid-row[data-track-id="${toTrackId}"]`);
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2 + 10, { steps: 5 });
+  const targetY = dropNearTop ? targetBox.y + targetBox.height * 0.25 : targetBox.y + targetBox.height * 0.75;
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetY, { steps: 10 });
+  await page.mouse.up();
+}
+
+test("playlist track drag-and-drop reorder persists the new order", async ({ page }) => {
+  await installReorderTauriMock(page);
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const rows = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
+  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t2");
+  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t3");
+
+  // Drag "Song A" (t1, row 0) to below "Song C" (t3, row 2).
+  await dragPlaylistTrackRow(page, "t1", "t3", false);
+
+  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t2");
+  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t3");
+  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t1");
+
+  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(calls.length).toBeGreaterThan(0);
+  expect(calls[calls.length - 1]).toEqual(["t2", "t3", "t1"]);
+});
+
+test("playlist track drag that does not change position skips persisting order", async ({ page }) => {
+  await installReorderTauriMock(page);
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const rows = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(rows).toHaveCount(3);
+
+  const handle = page.locator('#playlistTracksBody .track-grid-row[data-track-id="t1"] [data-playlist-track-drag-handle]');
+  const box = await handle.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 2, { steps: 3 });
+  await page.mouse.up();
+
+  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
+  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(calls).toEqual([]);
+});
+
+test("playlist track drag handle is hidden while a column sort is active", async ({ page }) => {
+  await installReorderTauriMock(page);
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
+
+  await page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]').click();
+  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
+});
+
+test("playlist track drag handle is hidden while a search filter is active", async ({ page }) => {
+  await installReorderTauriMock(page);
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
+
+  await page.locator("#playlistSearchInput").fill("Song A");
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(1);
+  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
+});
+
+async function connectUsbAndFetchPlaylists(page) {
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator("#refreshUsbBtn").click();
+  await expect(page.locator("#usbPlaylists li[data-usb-playlist-li]")).toHaveCount(1);
+}
+
+test("playlist track drag handle is disabled with a tooltip when additive export won't reorder it on the USB", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });
+  await page.goto("/");
+
+  await connectUsbAndFetchPlaylists(page);
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const rows = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
+
+  const disabledHandles = page.locator("#playlistTracksBody .drag-handle.disabled");
+  await expect(disabledHandles).toHaveCount(3);
+  await expect(disabledHandles.first()).toHaveAttribute(
+    "data-tooltip",
+    "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order."
+  );
+
+  // Dragging the disabled handle is a no-op -- it isn't draggable, so no
+  // dragstart/reorder ever fires.
+  const box = await disabledHandles.first().boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 40, { steps: 5 });
+  await page.mouse.up();
+
+  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
+  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(calls).toEqual([]);
+});
+
+test("playlist track drag handle stays enabled in additive mode when no same-name USB playlist exists", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Some Other Playlist", exportPruneStale: false });
+  await page.goto("/");
+
+  await connectUsbAndFetchPlaylists(page);
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
+  await expect(page.locator("#playlistTracksBody .drag-handle.disabled")).toHaveCount(0);
+});

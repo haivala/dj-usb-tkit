@@ -9,8 +9,9 @@ use backend::models::{
     GetPlaylistTracksRequest, InitializeUsbRequest, ListTracksRequest, PlayResolvedTrackRequest,
     PlayTrackRequest, PlaybackPreflightRequest, PruneUsbDeviceRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
-    ReorderUsbPlaylistsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    ScanLibraryRequest, ScanMasterDbRequest, SearchTracksRequest, ValidateUsbRootRequest,
+    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, RunUsbDiagnosticsRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksRequest,
+    ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -199,6 +200,79 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
     assert_eq!(
         final_titles,
         vec!["A".to_string(), "C".to_string(), "B".to_string()]
+    );
+}
+
+#[test]
+fn reorder_playlist_tracks_persists_a_custom_order() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+
+    for name in ["Artist - A.mp3", "Artist - B.mp3", "Artist - C.mp3"] {
+        fs::write(media.join(name), b"audio").expect("write fixture track");
+    }
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let mut id_by_title = HashMap::new();
+    for track in backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items
+    {
+        id_by_title.insert(track.title.clone(), track.id);
+    }
+
+    let track_a = id_by_title.get("A").expect("track A id").clone();
+    let track_b = id_by_title.get("B").expect("track B id").clone();
+    let track_c = id_by_title.get("C").expect("track C id").clone();
+
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: "Reorder Test".to_string(),
+        })
+        .data
+        .expect("playlist data")
+        .playlist_id;
+
+    let add_initial = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(add_initial.ok, "initial add failed: {add_initial:?}");
+
+    let reorder = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+        playlist_id: playlist_id.clone(),
+        ordered_track_ids: vec![track_c.clone(), track_a.clone(), track_b.clone()],
+    });
+    assert!(reorder.ok, "reorder failed: {reorder:?}");
+    assert_eq!(reorder.data.expect("reorder data").reordered, 3);
+
+    let reordered_titles = backend
+        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id })
+        .data
+        .expect("reordered tracks data")
+        .items
+        .into_iter()
+        .map(|t| t.title)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reordered_titles,
+        vec!["C".to_string(), "A".to_string(), "B".to_string()]
     );
 }
 

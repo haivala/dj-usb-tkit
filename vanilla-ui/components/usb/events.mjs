@@ -1,5 +1,6 @@
 import { catchErr, handleTrackAction, trackMetaFingerprint, resolveEmitStatus } from "../shared/track_actions.mjs";
 import { loadMoreIfNearBottom } from "../../track_utils.mjs";
+import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 
 export function bindUsbEvents(ctx) {
   const {
@@ -329,6 +330,7 @@ export function bindUsbEvents(ctx) {
 
   let dragSourceLi = null;
   let dragSourceIndex = null;
+  const usbPlaylistAutoScroller = createDragAutoScroller(el.usbPlaylists);
 
   el.usbPlaylists.addEventListener("dragstart", (event) => {
     const handle = event.target.closest("[data-usb-drag-handle]");
@@ -340,6 +342,7 @@ export function bindUsbEvents(ctx) {
     dragSourceLi = li;
     dragSourceIndex = Number(li.dataset.usbPlaylistLi);
     li.classList.add("dragging");
+    usbPlaylistAutoScroller.attachWheel();
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", String(dragSourceIndex));
@@ -349,6 +352,7 @@ export function bindUsbEvents(ctx) {
   el.usbPlaylists.addEventListener("dragover", (event) => {
     if (!dragSourceLi) return;
     event.preventDefault();
+    usbPlaylistAutoScroller.update(event.clientY);
     const targetLi = event.target.closest("li[data-usb-playlist-li]");
     if (!targetLi || targetLi === dragSourceLi) return;
     const rect = targetLi.getBoundingClientRect();
@@ -365,6 +369,8 @@ export function bindUsbEvents(ctx) {
   });
 
   el.usbPlaylists.addEventListener("dragend", () => {
+    usbPlaylistAutoScroller.stop();
+    usbPlaylistAutoScroller.detachWheel();
     if (!dragSourceLi) return;
     dragSourceLi.classList.remove("dragging");
     const lis = Array.from(el.usbPlaylists.querySelectorAll("li[data-usb-playlist-li]"));

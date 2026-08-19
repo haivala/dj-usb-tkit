@@ -1432,6 +1432,14 @@ td.num, th.num {
   --track-grid-cols: 52px 180px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
 }
 
+/* App playlist tracks reserve a leading column for the drag-to-reorder
+   handle -- scoped by id rather than widening the shared --no-select
+   template, since USB playlist/history tracks use that same class but
+   never reorder. */
+.track-grid[data-body-id="playlistTracksBody"] {
+  --track-grid-cols: 24px 52px 180px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
+}
+
 .track-grid-row {
   display: grid;
   grid-template-columns: var(--track-grid-cols);
@@ -1740,6 +1748,36 @@ input[type="checkbox"] {
 
 .list li.dragging button {
   border-style: dashed;
+}
+
+/* drag handle for reordering tracks within an app playlist */
+.track-grid-cell.td-drag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 0;
+}
+
+.track-grid-row .drag-handle {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+}
+
+.track-grid-row .drag-handle:active {
+  cursor: grabbing;
+}
+
+.track-grid-row .drag-handle.disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.track-grid-row.dragging {
+  opacity: 0.5;
 }
 
 /* ── split layout ───────────────────────────────────── */

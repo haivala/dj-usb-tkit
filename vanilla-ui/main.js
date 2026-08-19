@@ -665,6 +665,8 @@ async function renderCurrentPlaylistTracksFromState() {
     renderTrackTable,
     cssEscape,
     updateTrackListDurationSummary,
+    isPlaylistTrackSortActive: () => !!tableSortState.playlistTracksBody,
+    normalizePlaylistNameForCompare: usb.normalizePlaylistNameForCompare,
   });
 }
 const mergeHydratedTrackIntoState = (rawTrack) => library.mergeHydratedTrackIntoState(state, rawTrack, {
@@ -895,6 +897,8 @@ async function refreshCurrentPlaylistTracks() {
     updatePlaylistPanelTitle,
     updatePlaylistExportButtons,
     renderPlaylistList,
+    isPlaylistTrackSortActive: () => !!tableSortState.playlistTracksBody,
+    normalizePlaylistNameForCompare: usb.normalizePlaylistNameForCompare,
   });
 }
 const createPlaylist = async (name) => playlist.createPlaylist(name, {

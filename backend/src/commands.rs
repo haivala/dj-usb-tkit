@@ -22,7 +22,8 @@ use crate::models::{
     PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
+    RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
+    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
     ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
     RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
@@ -180,6 +181,13 @@ impl BackendCommands {
         req: RemoveTracksFromPlaylistRequest,
     ) -> ApiResponse<RemoveTracksFromPlaylistData> {
         wrap(self.service.remove_tracks_from_playlist(req))
+    }
+
+    pub fn reorder_playlist_tracks(
+        &self,
+        req: ReorderPlaylistTracksRequest,
+    ) -> ApiResponse<ReorderPlaylistTracksData> {
+        wrap(self.service.reorder_playlist_tracks(req))
     }
 
     pub fn get_frontend_settings(&self) -> ApiResponse<GetFrontendSettingsData> {

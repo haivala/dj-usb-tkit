@@ -573,6 +573,20 @@ pub struct RemoveTracksFromPlaylistData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReorderPlaylistTracksRequest {
+    pub playlist_id: String,
+    pub ordered_track_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderPlaylistTracksData {
+    pub playlist_id: String,
+    pub reordered: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetFrontendSettingsData {
     pub values: HashMap<String, String>,
     pub node_available: bool,
