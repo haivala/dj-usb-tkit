@@ -16,10 +16,11 @@ use crate::models::{
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
     InspectUsbTracksRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
     ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
-    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
-    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
+    PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
+    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
+    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
@@ -404,6 +405,13 @@ impl BackendCommands {
 
     pub fn play_track_native(&self, req: PlayTrackRequest) -> ApiResponse<PlayTrackData> {
         wrap(self.service.play_track_native(&self.playback, req))
+    }
+
+    pub fn play_resolved_track(
+        &self,
+        req: PlayResolvedTrackRequest,
+    ) -> ApiResponse<PlayResolvedTrackData> {
+        wrap(self.service.play_resolved_track(&self.playback, req))
     }
 
     pub fn stop_playback_native(&self) -> ApiResponse<StopPlaybackData> {

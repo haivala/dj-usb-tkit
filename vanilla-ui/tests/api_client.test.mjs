@@ -6,6 +6,7 @@ if (typeof globalThis.window === "undefined") {
 }
 
 import { createApiClient } from "../api_client.mjs";
+import { createMockInvoke } from "../mock_api_client.mjs";
 
 function makeClient(overrides = {}) {
   const state = {
@@ -20,14 +21,16 @@ function makeClient(overrides = {}) {
     LIBRARY_LOAD_LIMIT_POST_SCAN: 1000,
     ...overrides.constants
   };
+  const normalizePath = overrides.normalizePath || ((value) => String(value || "").trim().toLowerCase().replace(/\\/g, "/"));
+  const mockInvoke = Object.hasOwn(overrides, "mockInvoke")
+    ? overrides.mockInvoke
+    : createMockInvoke({ state, normalizePath, constants });
   return {
     client: createApiClient({
       tauriInvoke: overrides.tauriInvoke || (() => { throw new Error("not tauri"); }),
       tauriIsTauri: overrides.tauriIsTauri || (() => false),
       tauriListen: overrides.tauriListen || (() => {}),
-      state,
-      normalizePath: overrides.normalizePath || ((value) => String(value || "").trim().toLowerCase().replace(/\\/g, "/")),
-      constants
+      mockInvoke
     }),
     state
   };
@@ -102,7 +105,16 @@ test("mock playlist, USB, playback, and removal commands mutate state consistent
   assert.equal(validRoot.data.normalizedRoot, "/media/usb");
   assert.equal(emptyRoot.data.valid, false);
 
-  const play = await client.invoke("play_track_native", { request: { path: "/music/track.mp3" } });
+  state.tracks.push({ id: "t-play", title: "Track", artist: "Artist", filePath: "/music/track.mp3" });
+  const play = await client.invoke("play_resolved_track", {
+    request: {
+      title: "Track",
+      artist: "Artist",
+      filePath: "/music/track.mp3",
+      trackId: "t-play",
+      origin: "library"
+    }
+  });
   assert.equal(play.data.playing, true);
   assert.equal(state.mockPlayback.path, "/music/track.mp3");
   assert.equal(state.mockPlayback.playing, true);

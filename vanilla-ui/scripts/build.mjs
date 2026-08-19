@@ -11,6 +11,7 @@ const distDir = path.join(rootDir, "dist");
 const staticFiles = [
   "index.html",
   "styles.css",
+  "mock_api_client.mjs",
   "text-icon.svg",
   "playback_ui_state.js",
   "playback_source_label.js"

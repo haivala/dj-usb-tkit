@@ -38,6 +38,7 @@ Implemented command set:
   - `cancel_analysis`
 - Playback:
   - `resolve_playback_source`
+  - `play_resolved_track`
   - `play_track_native`
   - `stop_playback_native`
   - `get_playback_status_native`

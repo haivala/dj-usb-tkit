@@ -828,6 +828,50 @@ pub struct PlayTrackData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PlayResolvedTrackRequest {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub bpm: Option<f64>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub file_size_bytes: Option<i64>,
+    #[serde(default)]
+    pub track_id: Option<String>,
+    #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    #[serde(default)]
+    pub usb_root_valid: bool,
+    #[serde(default)]
+    pub start_offset_ms: Option<u64>,
+    #[serde(default)]
+    pub start_ratio: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayResolvedTrackData {
+    pub path: String,
+    pub playing: bool,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub track_id: Option<String>,
+    pub matched_by: String,
+    pub source: String,
+    pub source_label: String,
+    pub library_resolved: bool,
+    pub has_usb_context: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StopPlaybackData {
     pub stopped: bool,
     pub previous_path: Option<String>,

@@ -1,8 +1,6 @@
 (function (root) {
-  // Backend guarantees (see resolve_playback_source's USB-root exclusion and
-  // track_id fast path) that libraryResolved:true only ever means a genuine
-  // local track was found -- no path-prefix/sourceRoots check needed here
-  // anymore.
+  // Backend guarantees (see play_resolved_track/resolve_playback_source) that
+  // libraryResolved:true only ever means a genuine local track was found.
   function getPlaybackSourceLabel(input) {
     const origin = String(input && input.origin || "");
     const isExternalOrigin = origin === "usb" || origin === "history";

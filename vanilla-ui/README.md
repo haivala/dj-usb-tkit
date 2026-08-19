@@ -12,7 +12,8 @@ The build output is written to `vanilla-ui/dist/`, which is loaded by
 - `index.html`: application shell, panels, dialogs, and static templates
 - `styles.css`: frontend styling
 - `main.js`: application bootstrap and cross-component orchestration
-- `api_client.mjs`: Tauri command wrapper and browser mock command layer
+- `api_client.mjs`: Tauri command wrapper and lazy browser mock loader
+- `mock_api_client.mjs`: browser/dev mock backend used outside Tauri
 - `app_state.mjs`: initial state and shared state constructors
 - `message_bus.mjs`: centralized status, progress, and event-log message routing
 - `event_log.mjs`: event-log normalization and coalescing store
@@ -39,6 +40,7 @@ The UI invokes backend commands through Tauri. Core command names include:
 - `add_tracks_to_playlist`
 - `remove_tracks_from_playlist`
 - `resolve_playback_source`
+- `play_resolved_track`
 - `play_track_native`
 - `stop_playback_native`
 - `fetch_usb_playlists`
@@ -67,7 +69,7 @@ For the full backend command contract, see `docs/COMMANDS.md`.
 
 ## Behavior
 
-If the Tauri runtime is unavailable, the frontend uses local mock data so the UI
+If the Tauri runtime is unavailable, the frontend lazy-loads local mock data so the UI
 can be exercised in a browser. USB export is intentionally excluded from browser
 mocks and requires the Tauri backend runtime.
 

@@ -45,15 +45,15 @@ use crate::models::{
     DetectExternalMasterDbData, GetFrontendSettingsData, GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, InitializeUsbData,
     InitializeUsbRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayTrackData, PlayTrackRequest,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, Playlist,
-    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
-    RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
-    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
-    SetFrontendSettingRequest, SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track,
-    WarningEntry,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
+    PlaybackPreflightRequest, PlaybackStatusData, Playlist, RelocateSourceRootData,
+    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
+    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RenamePlaylistData,
+    RenamePlaylistRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
+    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
+    SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track, WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -117,6 +117,78 @@ pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
     let file_key = browse_path_key(file_path);
     let root_key = browse_path_key(root).trim_end_matches('/').to_string();
     !root_key.is_empty() && (file_key == root_key || file_key.starts_with(&format!("{root_key}/")))
+}
+
+fn playback_source_label(
+    origin: Option<&str>,
+    library_resolved: bool,
+    has_usb_context: bool,
+) -> String {
+    let origin = origin.unwrap_or("").trim().to_ascii_lowercase();
+    let external_origin = origin == "usb" || origin == "history";
+    if library_resolved {
+        if external_origin {
+            "Library (matched)"
+        } else {
+            "Library"
+        }
+    } else if external_origin && has_usb_context {
+        "USB"
+    } else {
+        "Local file"
+    }
+    .to_string()
+}
+
+fn is_recoverable_playback_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    [
+        "busy", "already", "in use", "device", "stream", "sink", "playing",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn play_native_with_recovery(
+    playback: &PlaybackController,
+    path: &str,
+    start_offset_ms: Option<u64>,
+    start_ratio: Option<f64>,
+) -> BackendResult<PlaybackStatusData> {
+    match playback.play_path(path, start_offset_ms, start_ratio) {
+        Ok(status) => Ok(status),
+        Err(err) => {
+            if !is_recoverable_playback_error(&err.to_string()) {
+                return Err(err);
+            }
+            let _ = playback.stop();
+            playback.play_path(path, start_offset_ms, start_ratio)
+        }
+    }
+}
+
+fn play_resolved_track_data(
+    status: PlaybackStatusData,
+    requested_path: &str,
+    track_id: Option<String>,
+    matched_by: &str,
+    source: &str,
+    source_label: String,
+    library_resolved: bool,
+    has_usb_context: bool,
+) -> PlayResolvedTrackData {
+    PlayResolvedTrackData {
+        path: status.path.unwrap_or_else(|| requested_path.to_string()),
+        playing: status.playing,
+        position_ms: status.position_ms,
+        duration_ms: status.duration_ms,
+        track_id,
+        matched_by: matched_by.to_string(),
+        source: source.to_string(),
+        source_label,
+        library_resolved,
+        has_usb_context,
+    }
 }
 
 /// `query` must already be trimmed/lowercased (see `compute_visible_library_tracks`).
@@ -447,6 +519,112 @@ impl BackendService {
             position_ms: status.position_ms,
             duration_ms: status.duration_ms,
         })
+    }
+
+    pub fn play_resolved_track(
+        &self,
+        playback: &PlaybackController,
+        req: PlayResolvedTrackRequest,
+    ) -> BackendResult<PlayResolvedTrackData> {
+        let resolved = self.resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: req.title.clone(),
+            artist: req.artist.clone(),
+            album: req.album.clone(),
+            bpm: req.bpm,
+            file_path: req.file_path.clone(),
+            file_size_bytes: req.file_size_bytes,
+            track_id: req.track_id.clone(),
+        })?;
+        let matched_by = resolved.matched_by.clone();
+        let library_path = resolved
+            .resolved_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .filter(|_| matches!(matched_by.as_str(), "self" | "hash" | "metadata"))
+            .map(|path| path.trim().to_string());
+        let has_usb_context = req.usb_root_valid
+            && req
+                .usb_root
+                .as_deref()
+                .map(|root| !root.trim().is_empty())
+                .unwrap_or(false);
+        let usb_path = if has_usb_context {
+            let track_path = req.file_path.as_deref().unwrap_or("").trim();
+            let root = req.usb_root.as_deref().unwrap_or("").trim();
+            if !track_path.is_empty() && browse_path_matches_root(track_path, root) {
+                Some(track_path.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if library_path.is_none() && usb_path.is_none() {
+            return Err(BackendError::NotFound(
+                "track not found in Library or selected USB".to_string(),
+            ));
+        }
+
+        if let Some(path) = library_path.as_deref() {
+            match play_native_with_recovery(playback, path, req.start_offset_ms, req.start_ratio) {
+                Ok(status) => {
+                    return Ok(play_resolved_track_data(
+                        status,
+                        path,
+                        resolved.track_id.or(req.track_id),
+                        &matched_by,
+                        "library",
+                        playback_source_label(req.origin.as_deref(), true, has_usb_context),
+                        true,
+                        has_usb_context,
+                    ));
+                }
+                Err(library_err) => {
+                    if let Some(path) = usb_path
+                        .as_deref()
+                        .filter(|usb_path| browse_path_key(usb_path) != browse_path_key(path))
+                    {
+                        let status = play_native_with_recovery(
+                            playback,
+                            path,
+                            req.start_offset_ms,
+                            req.start_ratio,
+                        )?;
+                        return Ok(play_resolved_track_data(
+                            status,
+                            path,
+                            req.track_id,
+                            &matched_by,
+                            "usb",
+                            "USB (library unavailable)".to_string(),
+                            false,
+                            has_usb_context,
+                        ));
+                    }
+                    return Err(library_err);
+                }
+            }
+        }
+
+        if let Some(path) = usb_path.as_deref() {
+            let status =
+                play_native_with_recovery(playback, path, req.start_offset_ms, req.start_ratio)?;
+            return Ok(play_resolved_track_data(
+                status,
+                path,
+                req.track_id,
+                &matched_by,
+                "usb",
+                playback_source_label(req.origin.as_deref(), false, has_usb_context),
+                false,
+                has_usb_context,
+            ));
+        }
+
+        Err(BackendError::NotFound(
+            "track not found in Library or selected USB".to_string(),
+        ))
     }
 
     pub fn stop_playback_native(
@@ -4203,6 +4381,32 @@ mod tests {
             })
             .expect("get tracks by ids");
         assert!(result.items.is_empty());
+    }
+
+    #[test]
+    fn playback_source_label_matches_origin_and_resolution_context() {
+        assert_eq!(playback_source_label(Some("local"), true, false), "Library");
+        assert_eq!(
+            playback_source_label(Some("playlist"), true, false),
+            "Library"
+        );
+        assert_eq!(
+            playback_source_label(Some("usb"), true, true),
+            "Library (matched)"
+        );
+        assert_eq!(playback_source_label(Some("history"), false, true), "USB");
+        assert_eq!(
+            playback_source_label(Some("history"), false, false),
+            "Local file"
+        );
+    }
+
+    #[test]
+    fn recoverable_playback_error_detection_matches_backend_retry_policy() {
+        assert!(is_recoverable_playback_error("Output device is busy"));
+        assert!(is_recoverable_playback_error("stream is already playing"));
+        assert!(is_recoverable_playback_error("sink in use"));
+        assert!(!is_recoverable_playback_error("decoder error: bad frame"));
     }
 
     #[test]

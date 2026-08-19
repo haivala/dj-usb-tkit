@@ -117,19 +117,26 @@ test("stop supersedes a pending start; the stale start's success is not committe
   let resolvePlay;
   const pendingPlay = new Promise((resolve) => { resolvePlay = resolve; });
   const commonDeps = {
-    command: async (name, payload) => {
+    command: async (name) => {
       calls.push(name);
-      if (name === "resolve_playback_source") {
-        return { resolvedPath: "/music/Track.mp3", trackId: "t1", matchedBy: "self" };
-      }
-      if (name === "play_track_native") {
+      if (name === "play_resolved_track") {
         await pendingPlay;
-        return { path: payload.path, durationMs: 1000, positionMs: 0 };
+        return {
+          path: "/music/Track.mp3",
+          playing: true,
+          durationMs: 1000,
+          positionMs: 0,
+          trackId: "t1",
+          matchedBy: "self",
+          source: "library",
+          sourceLabel: "Library",
+          libraryResolved: true,
+          hasUsbContext: false
+        };
       }
       if (name === "stop_playback_native") return { stopped: true };
       throw new Error(`unexpected command ${name}`);
     },
-    trackPathMatchesAnyRoot: (path, roots) => roots.some((root) => String(path || "").startsWith(root)),
     clearAllWaveformPlayheads: () => {},
     setWaveformPlayhead: () => {},
     updateTransportButtonsInDom: () => {},
@@ -147,7 +154,7 @@ test("stop supersedes a pending start; the stale start's success is not committe
   });
 
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(calls, ["resolve_playback_source", "play_track_native"]);
+  assert.deepEqual(calls, ["play_resolved_track"]);
 
   const stopPromise = stopPlaybackFromUi(state, commonDeps);
   assert.equal(state.playbackPendingKind, "stop");
@@ -156,7 +163,7 @@ test("stop supersedes a pending start; the stale start's success is not committe
   resolvePlay();
   await Promise.all([startPromise, stopPromise]);
 
-  assert.deepEqual(calls, ["resolve_playback_source", "play_track_native", "stop_playback_native"]);
+  assert.deepEqual(calls, ["play_resolved_track", "stop_playback_native"]);
   assert.equal(state.playbackActive, false);
   assert.equal(state.playbackTrackId, null);
   assert.equal(state.playbackPath, null);

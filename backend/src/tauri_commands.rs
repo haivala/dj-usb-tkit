@@ -23,9 +23,10 @@ use crate::models::{
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
     InspectUsbTracksRequest, JobEventPayload, ListPlaylistsData, ListTracksData, ListTracksRequest,
     ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayTrackData, PlayTrackRequest,
-    PlaybackEventPayload, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
-    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
@@ -945,6 +946,55 @@ pub async fn play_track_native(
     let request_for_call = request.clone();
     let response = match run_playback_blocking(&app, "start", move || {
         commands.play_track_native(request_for_call)
+    })
+    .await
+    {
+        Ok(r) => r,
+        Err(r) => return Ok(r),
+    };
+    if let Some(data) = response.data.as_ref() {
+        emit_playback_event(
+            &app,
+            if is_seek {
+                "playback.seeked"
+            } else {
+                "playback.started"
+            },
+            Some(data.path.clone()),
+            data.playing,
+            data.position_ms,
+            data.duration_ms,
+            None,
+        );
+    } else {
+        emit_playback_event(
+            &app,
+            "playback.error",
+            None,
+            false,
+            0,
+            None,
+            response.error.as_ref().map(|e| e.message.clone()),
+        );
+    }
+    Ok(response)
+}
+
+#[tauri::command]
+pub async fn play_resolved_track(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+    request: PlayResolvedTrackRequest,
+) -> Result<ApiResponse<PlayResolvedTrackData>, String> {
+    let commands = state.inner().clone();
+    let is_seek = request.start_offset_ms.unwrap_or(0) > 0
+        || request
+            .start_ratio
+            .map(|ratio| ratio > 0.0)
+            .unwrap_or(false);
+    let request_for_call = request.clone();
+    let response = match run_playback_blocking(&app, "start", move || {
+        commands.play_resolved_track(request_for_call)
     })
     .await
     {

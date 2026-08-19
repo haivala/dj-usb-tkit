@@ -94,6 +94,7 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `remove_essentia`
 - Playback:
   - `resolve_playback_source`
+  - `play_resolved_track`
   - `play_track_native`
   - `stop_playback_native`
   - `get_playback_status_native`

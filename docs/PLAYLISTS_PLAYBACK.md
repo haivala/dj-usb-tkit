@@ -33,11 +33,11 @@ Playback architecture is backend-owned so transport behavior stays consistent ac
 
 Playback resolution is source-aware:
 
-1. The app passes the originating `trackId` to backend `resolve_playback_source` whenever possible.
-2. If that id belongs to a non-USB-rooted local track, the backend resolves directly to that row.
+1. The app starts playback with `play_resolved_track`, passing the originating `trackId` whenever possible.
+2. The backend uses `resolve_playback_source`; if that id belongs to a non-USB-rooted local track, it resolves directly to that row.
 3. If the id is missing or points at a stale USB placeholder, the backend falls through to fingerprint/title matching.
 4. USB-rooted candidate rows are excluded from local substitution, so placeholder rows do not masquerade as real local media.
-5. If no verified local candidate exists, playback can fall back to USB path playback.
+5. If no verified local candidate exists, the backend can fall back to USB path playback when the path is under the selected USB root.
 
 This prevents the common failure mode of matching the wrong local file by loose metadata while still preserving USB playback for unresolved tracks. It also lets older playlist entries that still reference stale USB placeholder rows self-heal on next playback when a genuine local match exists.
 

@@ -137,6 +137,7 @@ PDB+eDB snapshot pairs taken before every USB-mutating operation.
 ### Playback
 
 - `resolve_playback_source`
+- `play_resolved_track`
 - `play_track_native`
 - `stop_playback_native`
 - `get_playback_status_native`

@@ -30,6 +30,15 @@
 
 ## Unreleased
 
+- **Improvement:** playback start is now backend-owned through `play_resolved_track`: the
+  frontend sends one request, while the backend resolves local-vs-USB source paths, validates
+  selected-USB fallback paths, retries recoverable native playback startup errors, and returns
+  the source label used by the UI. This removes the old client-side resolve/play/retry/fallback
+  orchestration without changing playback behavior.
+- **Chore:** split the browser/dev mock backend out of `api_client.mjs` into
+  `mock_api_client.mjs`, lazy-loading it only outside Tauri. `api_client.mjs` is now just the
+  Tauri/mock selector and command helper, and the playback unit tests now cover the frontend
+  command boundary while the migrated retry/source-label policy is tested in Rust.
 - **Improvement:** playlist "Total time" is now computed once server-side from the full
   track list, matching how the media library and USB playlist/history views already
   report their totals, instead of being summed client-side from whatever tracks happen

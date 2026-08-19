@@ -848,6 +848,7 @@ fn main() {
             backend::tauri_commands::cancel_essentia_download,
             backend::tauri_commands::remove_essentia,
             backend::tauri_commands::play_track_native,
+            backend::tauri_commands::play_resolved_track,
             backend::tauri_commands::stop_playback_native,
             backend::tauri_commands::get_playback_status_native,
             backend::tauri_commands::playback_preflight_native,

@@ -6,11 +6,11 @@ use backend::commands::BackendCommands;
 use backend::models::{
     AddTracksToPlaylistRequest, CheckSourceRootsRequest, CreatePlaylistRequest, DedupeMode,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
-    GetPlaylistTracksRequest, InitializeUsbRequest, ListTracksRequest, PlayTrackRequest,
-    PlaybackPreflightRequest, PruneUsbDeviceRequest, RemoveTracksFromPlaylistRequest,
-    RemoveUsbPlaylistRequest, RenamePlaylistRequest, ReorderUsbPlaylistsRequest,
-    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest, ScanMasterDbRequest,
-    SearchTracksRequest, ValidateUsbRootRequest,
+    GetPlaylistTracksRequest, InitializeUsbRequest, ListTracksRequest, PlayResolvedTrackRequest,
+    PlayTrackRequest, PlaybackPreflightRequest, PruneUsbDeviceRequest,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
+    ReorderUsbPlaylistsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    ScanLibraryRequest, ScanMasterDbRequest, SearchTracksRequest, ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -624,6 +624,36 @@ fn play_track_native_rejects_missing_file_before_touching_audio_hardware() {
     });
 
     assert!(!response.ok, "missing file should be rejected");
+}
+
+#[test]
+fn play_resolved_track_reports_not_found_without_library_or_usb_path() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let response = backend.play_resolved_track(PlayResolvedTrackRequest {
+        title: "Missing".to_string(),
+        artist: "Artist".to_string(),
+        album: None,
+        bpm: None,
+        file_path: Some("/detached/track.mp3".to_string()),
+        file_size_bytes: None,
+        track_id: Some("usb-placeholder".to_string()),
+        origin: Some("usb".to_string()),
+        usb_root: Some("/usb".to_string()),
+        usb_root_valid: true,
+        start_offset_ms: None,
+        start_ratio: None,
+    });
+
+    assert!(!response.ok, "unresolved track should fail");
+    let error = response.error.expect("error payload");
+    assert!(
+        error
+            .message
+            .contains("track not found in Library or selected USB")
+    );
 }
 
 #[test]

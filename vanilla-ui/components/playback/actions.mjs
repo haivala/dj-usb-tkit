@@ -400,12 +400,10 @@ export function isTrackCurrentlyPlaying(track, state, deps) {
 export async function playTrackFromOrigin(state, track, origin, options = {}, deps) {
   const {
     command,
-    trackPathMatchesAnyRoot,
     clearAllWaveformPlayheads,
     setWaveformPlayhead,
     updateTransportButtonsInDom,
     setStatus,
-    warn,
     generation,
     requestAnimationFrameFn,
     cancelAnimationFrameFn
@@ -413,149 +411,85 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
 
   const trackPath = String(track?.filePath || "").trim();
   const originLower = String(origin || "").toLowerCase();
-
-  // Every origin (library, playlist, USB, history) now routes through the
-  // same resolution call -- Steps 6/6c on the backend guarantee this only
-  // ever returns a genuine local row (or a fast "self" match for the
-  // already-fine common case), so a playlist entry that still references a
-  // stale USB placeholder self-heals here with no migration required.
-  let resolved = null;
-  try {
-    resolved = await command("resolve_playback_source", {
-      title: track?.title || "",
-      artist: track?.artist || "",
-      album: track?.album || null,
-      bpm: Number.isFinite(Number(track?.bpm)) ? Number(track.bpm) : null,
-      filePath: track?.filePath || null,
-      fileSizeBytes: Number.isFinite(Number(track?.fileSizeBytes)) ? Number(track.fileSizeBytes) : null,
-      trackId: track?.id || null
-    });
-  } catch (err) {
-    warn("resolve_playback_source failed:", err);
-  }
-
   const artist = String(track?.artist || "").trim();
   const titlePart = track?.title || "Unknown Title";
   const title = artist ? `${artist} - ${titlePart}` : titlePart;
   const startRatio = Math.max(0, Math.min(1, Number(options.startRatio) || 0));
+  const rawStartOffsetMs = toNumberOrNull(options.startOffsetMs);
+  const startOffsetMs = rawStartOffsetMs === null ? null : Math.max(0, Math.round(rawStartOffsetMs));
   const waveformEl = options.waveformEl || null;
-
   const hasUsbContext = !!state.usbRoot && !!state.usbRootValid;
-  const isLibraryResolved = resolved?.matchedBy === "self"
-    || resolved?.matchedBy === "hash"
-    || resolved?.matchedBy === "metadata";
-  const libraryPath = isLibraryResolved ? String(resolved?.resolvedPath || "").trim() : "";
-  // "is this literally under the mounted USB root" -- unrelated to the backend fix,
-  // this is just how the transient audio-file fallback below decides it has a USB copy to try.
-  const usbPath = hasUsbContext && trackPathMatchesAnyRoot(trackPath, [state.usbRoot])
-    ? trackPath
-    : "";
+  const fallbackSourceLabel = ["local", "library", "playlist"].includes(originLower)
+    ? "Library"
+    : getPlaybackSourceLabelFn(deps)({
+        origin: originLower,
+        libraryResolved: false,
+        hasUsbContext
+      });
 
-  const playPath = libraryPath || usbPath;
-  const playId = isLibraryResolved
-    ? (resolved?.trackId || track?.id || null)
-    : (track?.id || null);
-  const sourceLabel = getPlaybackSourceLabelFn(deps)({
-    origin: originLower,
-    libraryResolved: isLibraryResolved,
-    hasUsbContext
-  });
-
-  const playNativeWithRecovery = async (path) => {
+  return withBackendQueue(state, async () => {
+    if (!isGenerationCurrent(state, generation)) return;
     try {
-      return await command("play_track_native", { path, startRatio });
-    } catch (err) {
-      const message = String(err?.message || err || "").toLowerCase();
-      const recoverable = /busy|already|in use|device|stream|sink|playing/.test(message);
-      if (!recoverable) throw err;
-      try {
-        await command("stop_playback_native");
-      } catch (stopErr) {
-        warn("stop_playback_native recovery attempt failed:", stopErr);
-      }
-      return command("play_track_native", { path, startRatio });
-    }
-  };
-
-  if (playPath) {
-    return withBackendQueue(state, async () => {
+      const playback = await command("play_resolved_track", {
+        title: track?.title || "",
+        artist: track?.artist || "",
+        album: track?.album || null,
+        bpm: toNumberOrNull(track?.bpm),
+        filePath: trackPath || null,
+        fileSizeBytes: toNumberOrNull(track?.fileSizeBytes),
+        trackId: track?.id || null,
+        origin: originLower,
+        usbRoot: state.usbRoot || null,
+        usbRootValid: !!state.usbRootValid,
+        startOffsetMs,
+        startRatio
+      });
       if (!isGenerationCurrent(state, generation)) return;
-      try {
-        const playback = await playNativeWithRecovery(playPath);
-        if (!isGenerationCurrent(state, generation)) return;
-        if (waveformEl) {
-          clearAllWaveformPlayheads();
-          state.activeWaveform = waveformEl;
-          const duration = Number(playback?.durationMs || 0);
-          const position = Number(playback?.positionMs || 0);
-          if (duration > 0) {
-            startPlayheadInterpolation(state, {
-              waveformEl,
-              initialPositionMs: position,
-              durationMs: duration,
-              setWaveformPlayhead,
-              requestAnimationFrameFn,
-              cancelAnimationFrameFn
-            });
-          } else {
-            setWaveformPlayhead(waveformEl, startRatio, true);
-          }
+      if (waveformEl) {
+        clearAllWaveformPlayheads();
+        state.activeWaveform = waveformEl;
+        const duration = Number(playback?.durationMs || 0);
+        const position = Number(playback?.positionMs || 0);
+        if (duration > 0) {
+          startPlayheadInterpolation(state, {
+            waveformEl,
+            initialPositionMs: position,
+            durationMs: duration,
+            setWaveformPlayhead,
+            requestAnimationFrameFn,
+            cancelAnimationFrameFn
+          });
+        } else {
+          setWaveformPlayhead(waveformEl, startRatio, true);
         }
-        state.playbackActive = true;
-        state.playbackTrackId = playId;
-        state.playbackPath = playback?.path || playPath;
-        state.playbackRowKey = options.rowKey || null;
-        state.playbackLabelContext = { origin: originLower, libraryResolved: isLibraryResolved, hasUsbContext, title };
-        updateTransportButtonsInDom();
-        setStatus(`Playing from ${sourceLabel}: ${title}`);
-        return;
-      } catch (err) {
-        if (libraryPath && usbPath && usbPath !== playPath) {
-          try {
-            const playback = await playNativeWithRecovery(usbPath);
-            if (!isGenerationCurrent(state, generation)) return;
-            if (waveformEl) {
-              clearAllWaveformPlayheads();
-              state.activeWaveform = waveformEl;
-              const duration = Number(playback?.durationMs || 0);
-              const position = Number(playback?.positionMs || 0);
-              if (duration > 0) {
-                startPlayheadInterpolation(state, {
-                  waveformEl,
-                  initialPositionMs: position,
-                  durationMs: duration,
-                  setWaveformPlayhead,
-                  requestAnimationFrameFn,
-                  cancelAnimationFrameFn
-                });
-              } else {
-                setWaveformPlayhead(waveformEl, startRatio, true);
-              }
-            }
-            state.playbackActive = true;
-            state.playbackTrackId = track?.id || null;
-            state.playbackPath = playback?.path || usbPath;
-            state.playbackRowKey = options.rowKey || null;
-            state.playbackLabelContext = { origin: originLower, libraryResolved: false, hasUsbContext, title };
-            updateTransportButtonsInDom();
-            setStatus(`Playing from USB (library unavailable): ${title}`);
-            return;
-          } catch (fallbackErr) {
-            if (!isGenerationCurrent(state, generation)) return;
-            const message = fallbackErr?.message || String(fallbackErr);
-            setStatus(`Playback failed (${sourceLabel}): ${message}`, { level: "error", source: "playback" });
-            return;
-          }
-        }
-        if (!isGenerationCurrent(state, generation)) return;
-        const message = err?.message || String(err);
-        setStatus(`Playback failed (${sourceLabel}): ${message}`, { level: "error", source: "playback" });
+      }
+      const libraryResolved = playback?.libraryResolved === true || playback?.source === "library";
+      const sourceLabel = playback?.sourceLabel || fallbackSourceLabel;
+      const responseHasUsbContext = typeof playback?.hasUsbContext === "boolean"
+        ? playback.hasUsbContext
+        : hasUsbContext;
+      state.playbackActive = true;
+      state.playbackTrackId = playback?.trackId || track?.id || null;
+      state.playbackPath = playback?.path || trackPath;
+      state.playbackRowKey = options.rowKey || null;
+      state.playbackLabelContext = {
+        origin: originLower,
+        libraryResolved,
+        hasUsbContext: responseHasUsbContext,
+        title
+      };
+      updateTransportButtonsInDom();
+      setStatus(`Playing from ${sourceLabel}: ${title}`);
+    } catch (err) {
+      if (!isGenerationCurrent(state, generation)) return;
+      const message = err?.message || String(err);
+      if (/track not found in Library or selected USB/i.test(message)) {
+        setStatus("Cannot play: track not found in Library or selected USB.", { level: "warn", source: "playback" });
         return;
       }
-    });
-  }
-
-  setStatus("Cannot play: track not found in Library or selected USB.", { level: "warn", source: "playback" });
+      setStatus(`Playback failed (${fallbackSourceLabel}): ${message}`, { level: "error", source: "playback" });
+    }
+  });
 }
 export async function stopPlaybackIfActive(state, deps) {
   const {
@@ -657,7 +591,7 @@ export function handlePlaybackEvent(state, payload, deps) {
   const duration = Number(payload.durationMs || 0);
 
   if (eventName === "playback.started" || eventName === "playback.seeked") {
-    // These are one-shot confirmations tied directly to our own play_track_native call
+    // These are one-shot confirmations tied directly to our own playback start call
     // (unlike a continuous progress stream). If we have no active path and nothing
     // pending, this can't be a legitimate confirmation of anything we're waiting on —
     // treat a stray playing:true here as noise rather than reviving cleared state.
