@@ -230,13 +230,10 @@ export function bindLibraryEvents(ctx) {
     const target = event.target.closest("[data-action]");
     const action = target?.dataset?.action;
     const id = target?.dataset?.id;
-    const index = Number(target?.dataset?.index);
     const rowKey = target?.closest(".track-grid-row")?.dataset?.playbackRow || null;
     const visibleTracks = getLibraryVisibleTracks();
-    const track = action === "scrub-play"
-      ? visibleTracks[index]
-      : visibleTracks.find((item) => String(item.id) === String(id))
-        || state.tracks.find((item) => String(item.id) === String(id));
+    const track = visibleTracks.find((item) => String(item.id) === String(id))
+      || state.tracks.find((item) => String(item.id) === String(id));
     if (!track) return;
 
     handleTrackAction({ action, track, origin: "local", target, event, state, rowKey, ctx });

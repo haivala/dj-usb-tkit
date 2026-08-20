@@ -30,6 +30,11 @@
 
 ## Unreleased
 
+- **Fix (CRITICAL):** in the Library and Playlist track lists, sorting by a column (e.g. Title,
+  Artist) could cause Play, click-to-seek, and Remove to act on the wrong track — the row you
+  clicked and the track actually played or deleted could differ once the list was sorted. Track
+  actions now always resolve by the track's id instead of its row position.
+
 ## 0.1.24
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

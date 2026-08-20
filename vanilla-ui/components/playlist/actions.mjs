@@ -328,6 +328,9 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
   el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", playlistEmpty);
 
   const sortedTracks = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
+  // Row click handlers resolve data-id back into this array, so it has to
+  // match rendered order (see components/usb/actions.mjs for the same rule).
+  state.currentPlaylistTracksView = sortedTracks;
   const sortOrSearchActive = isPlaylistTrackSortActive() || !!state.playlistTrackSearch;
   const exportBlocksReorder = !!state.playlistUsbExportStatusById?.get(playlist.id)?.locksReorder;
   const enableDragReorder = !sortOrSearchActive && !exportBlocksReorder;
