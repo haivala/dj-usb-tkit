@@ -116,7 +116,7 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     artist,
     album,
     trackNumber: toFiniteOrNull(track?.trackNumber),
-    bpm: track?.bpm || "",
+    bpm: toFiniteOrNull(track?.bpm),
     bpmAnalyzer: track?.bpmAnalyzer || track?.bpm_analyzer || "",
     key: track?.key || "",
     artworkUrl: convertedArtwork,

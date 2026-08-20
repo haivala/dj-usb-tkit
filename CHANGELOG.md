@@ -30,6 +30,18 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** adding tracks to a playlist from the media library crashed with an
+  "invalid type" backend error for any track that hadn't been BPM-analyzed yet. The
+  add-to-playlist request now sends a payload built explicitly for the backend command instead
+  of forwarding the UI's display-normalized track object, so UI-only state (like an empty BPM
+  placeholder) can no longer break the request.
+- **Fix (CRITICAL):** the library's "select all" checkbox only selected tracks already loaded
+  into the UI, silently skipping matches beyond the first page on any library or search with
+  more results than a single page. It now loads the full matching set from the backend before
+  selecting.
+
 ## 0.1.22
 
 - **New feature:** tracks inside an app playlist can now be reordered by dragging them, backed by

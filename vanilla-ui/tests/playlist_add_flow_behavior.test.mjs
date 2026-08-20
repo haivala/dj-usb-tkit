@@ -60,16 +60,55 @@ test("addTracksToCurrentPlaylist sends row candidates to backend and reports res
   assert.equal(capturedCommand.payload.usbRootValid, true);
   assert.deepEqual(capturedCommand.payload.tracks[0], {
     id: "1",
+    trackId: null,
     localTrackId: "local-1",
     title: "Track One",
     artist: "Artist",
     album: "Album",
     bpm: 128,
     filePath: "/music/one.mp3",
-    fileSizeBytes: 1234
+    fileSizeBytes: 1234,
+    trackNumber: null,
+    key: null,
+    formatExt: null,
+    sampleRateHz: null,
+    bitDepth: null,
+    bitrateKbps: null,
+    usbAnalysisPath: null,
+    usbRoot: null,
+    usbRootValid: false
   });
   assert.equal(refreshed, 1);
   assert.match(status, /Added 1 tracks \(skipped 0\) to Main/);
+});
+
+test("addTracksToCurrentPlaylist never sends a non-numeric bpm, even for an unanalyzed track", async () => {
+  let capturedCommand = null;
+
+  // Shaped like normalizeTrack() would (pre-fix) produce for a track that hasn't been
+  // BPM-analyzed yet -- this is exactly the payload that used to crash the real backend
+  // with "invalid type: string \"\", expected f64".
+  await addTracksToCurrentPlaylist([{
+    id: "1",
+    localTrackId: null,
+    title: "Unanalyzed Track",
+    artist: "Artist",
+    album: "",
+    bpm: "",
+    filePath: "/music/unanalyzed.mp3"
+  }], {
+    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
+    withProgress: async (_label, run) => run(() => {}),
+    command: async (name, payload) => {
+      capturedCommand = { name, payload };
+      return { playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] };
+    },
+    refreshCurrentPlaylistTracks: async () => {},
+    setStatus: () => {}
+  });
+
+  assert.notEqual(typeof capturedCommand.payload.tracks[0].bpm, "string");
+  assert.equal(capturedCommand.payload.tracks[0].bpm, null);
 });
 
 test("addTracksToCurrentPlaylist reports unresolved backend candidates without refreshing", async () => {

@@ -1441,6 +1441,7 @@ function bindEvents() {
     patchUsbTrackRow,
     patchHistoryTrackRow,
     addTracksToCurrentPlaylist,
+    loadMoreLibraryTracks,
     pruneUsbDevice,
     getLibraryVisibleTracks,
     analyzeSingleTrack,

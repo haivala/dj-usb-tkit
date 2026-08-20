@@ -31,6 +31,7 @@ export function bindLibraryEvents(ctx) {
     getLibraryVisibleTracks,
     hydrateLoadedTracksPreviewsInBackground = async () => {},
     LIBRARY_LOAD_LIMIT_DEFAULT,
+    loadMoreLibraryTracks,
   } = ctx;
   const emitStatus = resolveEmitStatus(ctx);
 
@@ -188,12 +189,32 @@ export function bindLibraryEvents(ctx) {
   });
 
   el.selectAllTracks.addEventListener("change", (event) => {
-    state.selectedTrackIds.clear();
-    if (event.target.checked) {
-      state.filteredTracks.forEach((track) => state.selectedTrackIds.add(track.id));
+    const checkbox = event.target;
+    if (!checkbox.checked) {
+      state.selectedTrackIds.clear();
+      ctx.renderLibraryRows();
+      updateSelectionCount();
+      return;
     }
-    ctx.renderLibraryRows();
-    updateSelectionCount();
+    (async () => {
+      if (state.libraryHasMore) {
+        await withProgress("Loading all matching tracks", async (progress) => {
+          while (state.libraryHasMore) {
+            await loadMoreLibraryTracks(LIBRARY_LOAD_LIMIT_DEFAULT);
+            const total = state.libraryLoadedTotal || state.tracks.length || 1;
+            progress(
+              Math.min(90, Math.round((state.tracks.length / total) * 90)),
+              `Loaded ${state.tracks.length} of ${total}...`
+            );
+          }
+        });
+      }
+      if (!checkbox.checked) return;
+      state.selectedTrackIds.clear();
+      state.filteredTracks.forEach((track) => state.selectedTrackIds.add(track.id));
+      ctx.renderLibraryRows();
+      updateSelectionCount();
+    })().catch(catchErr(emitStatus));
   });
 
   el.libraryTableBody.addEventListener("change", (event) => {

@@ -1,5 +1,34 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
 
+// Builds the wire payload for add_track_candidates_to_playlist from a UI track object,
+// keeping only the fields AddTrackCandidate (backend/src/models.rs) declares so UI-display
+// state/sentinels (e.g. bpm: "" for "not analyzed yet") never reach the backend's strict types.
+function toAddTrackCandidatePayload(track) {
+  // > 0, not just isFinite: an empty-string/undefined "not analyzed yet" sentinel coerces to 0
+  // via Number(), and 0 is a valid f64 that would otherwise get materialized as a real BPM value.
+  const bpm = Number(track?.bpm);
+  return {
+    id: track?.id ?? null,
+    trackId: track?.trackId ?? null,
+    localTrackId: track?.localTrackId ?? null,
+    title: track?.title ?? "",
+    artist: track?.artist ?? "",
+    album: track?.album ?? null,
+    bpm: Number.isFinite(bpm) && bpm > 0 ? bpm : null,
+    filePath: track?.filePath ?? null,
+    fileSizeBytes: track?.fileSizeBytes ?? null,
+    trackNumber: track?.trackNumber ?? null,
+    key: track?.key ?? null,
+    formatExt: track?.formatExt ?? null,
+    sampleRateHz: track?.sampleRateHz ?? null,
+    bitDepth: track?.bitDepth ?? null,
+    bitrateKbps: track?.bitrateKbps ?? null,
+    usbAnalysisPath: track?.usbAnalysisPath ?? null,
+    usbRoot: track?.usbRoot ?? null,
+    usbRootValid: !!track?.usbRootValid
+  };
+}
+
 export function renderPlaylistTabsAndPanels(state, el, deps) {
   const {
     document,
@@ -481,7 +510,7 @@ export async function addTracksToCurrentPlaylist(tracks, deps) {
     }
     const add = await command("add_track_candidates_to_playlist", {
       playlistId: playlist.id,
-      tracks: candidates,
+      tracks: candidates.map(toAddTrackCandidatePayload),
       dedupe: "skip",
       usbRoot: deps.usbRoot || null,
       usbRootValid: !!deps.usbRootValid
