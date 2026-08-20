@@ -54,6 +54,15 @@ function installSelectionMock(page) {
                   error: { code: "INVALID_ARGS", message: `invalid type: string "${bpm}", expected f64` }
                 };
               }
+              // AddTrackCandidate.track_id declares `id` as a serde alias of `trackId` --
+              // sending both keys at once makes the real backend reject the request with
+              // "duplicate field trackId". Mimic that here so a regression fails this test too.
+              if (track && typeof track === "object" && "id" in track) {
+                return {
+                  ok: false,
+                  error: { code: "INVALID_ARGS", message: "duplicate field trackId" }
+                };
+              }
             }
             const ids = candidates
               .map((track) => String(track?.localTrackId || track?.trackId || track?.id || "").trim())

@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** adding tracks to a playlist from the media library (via a selection) failed
+  every time with a "duplicate field trackId" backend error, a regression from the 0.1.23 fix
+  below: the add-to-playlist payload sent both `id` and `trackId`, which the backend treats as
+  two names for the same field. Only `trackId` is sent now.
+
 ## 0.1.23
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

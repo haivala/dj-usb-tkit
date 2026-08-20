@@ -8,8 +8,10 @@ function toAddTrackCandidatePayload(track) {
   // via Number(), and 0 is a valid f64 that would otherwise get materialized as a real BPM value.
   const bpm = Number(track?.bpm);
   return {
-    id: track?.id ?? null,
-    trackId: track?.trackId ?? null,
+    // Backend's AddTrackCandidate.track_id declares `id` as a serde alias of
+    // `trackId` -- sending both keys at once (even one as null) makes serde
+    // reject the request with "duplicate field trackId", so only one may go out.
+    trackId: track?.trackId ?? track?.id ?? null,
     localTrackId: track?.localTrackId ?? null,
     title: track?.title ?? "",
     artist: track?.artist ?? "",

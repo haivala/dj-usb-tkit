@@ -59,8 +59,7 @@ test("addTracksToCurrentPlaylist sends row candidates to backend and reports res
   assert.equal(capturedCommand.payload.usbRoot, "/media/USB");
   assert.equal(capturedCommand.payload.usbRootValid, true);
   assert.deepEqual(capturedCommand.payload.tracks[0], {
-    id: "1",
-    trackId: null,
+    trackId: "1",
     localTrackId: "local-1",
     title: "Track One",
     artist: "Artist",
@@ -80,6 +79,28 @@ test("addTracksToCurrentPlaylist sends row candidates to backend and reports res
   });
   assert.equal(refreshed, 1);
   assert.match(status, /Added 1 tracks \(skipped 0\) to Main/);
+});
+
+test("addTracksToCurrentPlaylist never sends both id and trackId (backend aliases them to the same field)", async () => {
+  // Regression test: AddTrackCandidate.track_id (backend/src/models.rs) declares `id` as a
+  // serde alias of `trackId`. Sending both keys at once -- even with one set to null -- makes
+  // serde reject the whole request with "duplicate field trackId", which broke every bulk add
+  // from the library (the exact bug the id/trackId split payload used to trigger).
+  let capturedCommand = null;
+
+  await addTracksToCurrentPlaylist([{ id: "1", title: "Track One", artist: "Artist" }], {
+    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
+    withProgress: async (_label, run) => run(() => {}),
+    command: async (name, payload) => {
+      capturedCommand = { name, payload };
+      return { playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] };
+    },
+    refreshCurrentPlaylistTracks: async () => {},
+    setStatus: () => {}
+  });
+
+  assert.equal("id" in capturedCommand.payload.tracks[0], false);
+  assert.equal(capturedCommand.payload.tracks[0].trackId, "1");
 });
 
 test("addTracksToCurrentPlaylist never sends a non-numeric bpm, even for an unanalyzed track", async () => {
