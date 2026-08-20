@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.23
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** adding tracks to a playlist from the media library crashed with an

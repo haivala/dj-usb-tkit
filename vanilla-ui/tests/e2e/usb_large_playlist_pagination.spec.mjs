@@ -317,10 +317,12 @@ function installRowClickMock(page) {
           }
           if (command === "inspect_usb_track") {
             window.__singleInspectCalls.push(payload?.request?.trackId);
-            // Small artificial delay so a test has a window to mutate the
-            // DOM (e.g. remove the target row) after the click but before
-            // the patch attempt runs.
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            // Wait for the test to explicitly release this call instead of a
+            // fixed timer -- a fixed delay races against however long the
+            // test's own click()/evaluate() round trip happens to take, and
+            // is not a reliable way to guarantee the DOM mutation below
+            // happens before the patch attempt runs.
+            await new Promise((resolve) => { window.__releaseInspectUsbTrack = resolve; });
             return {
               ok: true,
               data: { source: "pdb", track: { bpm: 128, key: "5A", waveformPreview: [5, 15, 25, 15, 5] } }
@@ -348,6 +350,8 @@ test("clicking an unhydrated track row patches it in place instead of re-renderi
   await siblingRow.evaluate((row) => row.setAttribute("data-test-marker", "keep"));
 
   await targetRow.click();
+  await page.waitForFunction(() => typeof window.__releaseInspectUsbTrack === "function");
+  await page.evaluate(() => window.__releaseInspectUsbTrack());
   await expect(targetRow.locator(".bpm-pill")).toHaveText("128");
   await expect(targetRow.locator(".key-pill")).toHaveText("5A");
 
@@ -363,6 +367,7 @@ test("falls back to a full re-render when the clicked row is gone by the time hy
 
   const targetRow = page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]');
   await targetRow.click();
+  await page.waitForFunction(() => typeof window.__releaseInspectUsbTrack === "function");
 
   // Rip the row out of the DOM while the click handler's hydration request
   // is still in flight -- when it resolves, patchUsbTrackRow's lookup for
@@ -372,6 +377,7 @@ test("falls back to a full re-render when the clicked row is gone by the time hy
     container.querySelector('.track-grid-row[data-track-id="3"]')?.remove();
   });
   await expect(page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]')).toHaveCount(0);
+  await page.evaluate(() => window.__releaseInspectUsbTrack());
 
   const recoveredRow = page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]');
   await expect(recoveredRow).toHaveCount(1);

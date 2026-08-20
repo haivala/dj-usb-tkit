@@ -21,6 +21,7 @@ function installScanAnalysisMock(page, opts = {}) {
   const seedArtwork = !!opts?.seedArtwork;
   const variedArtists = !!opts?.variedArtists;
   const analysisBpmRange = String(opts?.analysisBpmRange || "70-180");
+  const pauseBeforeBpmKey = !!opts?.pauseBeforeBpmKey;
   return page.addInitScript(({
     trackCount,
     pieceDelayMs,
@@ -29,7 +30,8 @@ function installScanAnalysisMock(page, opts = {}) {
     seedDuration,
     seedArtwork,
     variedArtists,
-    analysisBpmRange
+    analysisBpmRange,
+    pauseBeforeBpmKey
   }) => {
     // registerBackendJobEvents() (components/playback/actions.mjs) gates the
     // "job:event" listen() call behind isTauriRuntime(), which checks
@@ -251,6 +253,15 @@ function installScanAnalysisMock(page, opts = {}) {
         pieceEventsByPiece.duration += 1;
         emitPartial({ durationMs: track.durationMs });
 
+        if (pauseBeforeBpmKey) {
+          // Holds here instead of racing a fixed delay against whatever the
+          // test does next -- the test releases this explicitly (via
+          // window.__releaseBeforeBpmKey) once it's done asserting the
+          // track is still not-ready, so that assertion can never lose a
+          // timing race against this mock's own progress under load.
+          await new Promise((resolve) => { window.__releaseBeforeBpmKey = resolve; });
+        }
+
         await sleep(Math.max(0, pieceDelayMs));
         track.bpm = 120 + (Number(id.replace(/\D+/g, "")) % 4);
         track.key = `${(Number(id.replace(/\D+/g, "")) % 12) + 1}A`;
@@ -403,7 +414,7 @@ function installScanAnalysisMock(page, opts = {}) {
         return analysisCancelled;
       }
     };
-  }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange });
+  }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange, pauseBeforeBpmKey });
 }
 
 function installPagedMaterializeAnalyzeMock(page, opts = {}) {
@@ -789,7 +800,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
 }
 
 test("scan applies per-piece row updates before track-ready status", async ({ page }) => {
-  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 250 });
+  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 250, pauseBeforeBpmKey: true });
   await page.goto("/");
 
   await page.locator("#scanLibraryBtn").click();
@@ -807,6 +818,13 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
       || (text || "").includes("Scan done: 1 tracks / 1 albums | analyzed 1, failed 0");
   }).toBeTruthy();
   await expect(page.locator("#libraryTotalDuration")).toContainText("1 without length");
+
+  // The mock is holding just before the bpm_key piece / trackReady event
+  // (see pauseBeforeBpmKey) specifically so the assertion above -- which
+  // must observe the track as still not-ready -- can never lose a race
+  // against the mock's own progress regardless of system load. Release it
+  // now that the not-ready assertions are done.
+  await page.evaluate(() => window.__releaseBeforeBpmKey?.());
 
   await page.waitForFunction(() => {
     const waveform = document.querySelector("#libraryTableBody .track-grid-row .waveform");
@@ -875,7 +893,7 @@ test("analysis populates BPM and key cells for all tracks", async ({ page }) => 
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(40);
   await expect(
     page.locator('#libraryTableBody button[data-action="analyze-track"]', { hasText: "Reanalyze" })
-  ).toHaveCount(40);
+  ).toHaveCount(40, { timeout: 15_000 });
 
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(40);
   await expect(page.locator("#libraryTableBody .key-pill")).toHaveCount(40);
