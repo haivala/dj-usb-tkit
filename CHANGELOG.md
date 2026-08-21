@@ -30,6 +30,9 @@
 
 ## Unreleased
 
+- **New feature:** in the Media Library view, selecting one or more tracks now turns the "Scan
+  Library" button into "Analyze Selected" — clicking it re-analyzes (BPM/key/waveform) just the
+  selected tracks instead of rescanning and analyzing the whole library.
 - **Fix (CRITICAL):** in the Library and Playlist track lists, sorting by a column (e.g. Title,
   Artist) could cause Play, click-to-seek, and Remove to act on the wrong track — the row you
   clicked and the track actually played or deleted could differ once the list was sorted. Track

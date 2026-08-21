@@ -123,7 +123,7 @@ export function updateSourceFilterIndicator(state, el) {
 export function updateScanLibraryButtonLabel(state, el, deps) {
   const { scanLibraryButtonLabel } = deps;
   if (!el.scanLibraryBtn) return;
-  el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.sourceRoots);
+  el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.sourceRoots, state.selectedTrackIds.size);
 }
 
 export function closeSettingsDrawer(el) {

@@ -154,7 +154,7 @@ test("source, settings, health, name badge, and onboarding helpers update compac
     externalMasterDbPath: "/path/to/master.db",
     masterDbEnabled: false
   }, el);
-  updateScanLibraryButtonLabel({ sourceRoots: ["/a"] }, el, {
+  updateScanLibraryButtonLabel({ sourceRoots: ["/a"], selectedTrackIds: new Set() }, el, {
     scanLibraryButtonLabel: (roots) => `Scan ${roots.length}`
   });
   closeSettingsDrawer(el);

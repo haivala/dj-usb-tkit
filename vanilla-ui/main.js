@@ -371,6 +371,7 @@ function updateAddToPlaylistButtons() {
 }
 function updateSelectionCount() {
   uiCtrl.updateSelectionCount(state, el);
+  updateScanLibraryButtonLabel();
 }
 function updateUsbSubNavDisabledState() {
   uiCtrl.updateUsbSubNavDisabledState(state, el, { switchView });
@@ -809,6 +810,12 @@ const analyzeTrackIds = async (trackIds, modeLabel = "Analyze", options = {}) =>
     refreshCurrentPlaylistTracks,
     countWarningsForStatus: eventLog.countWarningsForStatus,
     logWarnings,
+  });
+const analyzeSelectedTracks = async () => library.analyzeSelectedTracks(state, {
+    setStatus,
+    emitStatus,
+    analyzeTrackIds,
+    refreshCurrentPlaylistTracks,
   });
 const analyzeSingleTrack = async (track, modeLabel = null) => library.analyzeSingleTrack(state, track, modeLabel, {
     resolveLocalTrackId,
@@ -1407,6 +1414,7 @@ function bindEvents() {
     relocateSourceRoot,
     scanLibrary,
     scanMasterDb,
+    analyzeSelectedTracks,
     LIBRARY_LOAD_LIMIT_DEFAULT,
     dismissProgress,
     toggleAnalysisPause,

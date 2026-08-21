@@ -1024,6 +1024,18 @@ export async function scanLibrary(state, deps) {
   );
 }
 
+export async function analyzeSelectedTracks(state, deps) {
+  const { analyzeTrackIds, refreshCurrentPlaylistTracks } = deps;
+  const emitStatus = resolveEmitStatus(deps);
+  const trackIds = Array.from(state.selectedTrackIds || []).filter(Boolean);
+  if (!trackIds.length) {
+    emitStatus("Select at least one track to analyze");
+    return;
+  }
+  await analyzeTrackIds(trackIds, "Analyze selected");
+  await refreshCurrentPlaylistTracks();
+}
+
 export async function scanMasterDb(state, deps) {
   const {
     command,
@@ -1563,7 +1575,8 @@ export function enabledSourceRoots(sourceRoots, sourceRootEnabled = {}, missingS
   });
 }
 
-export function scanLibraryButtonLabel(sourceRoots) {
+export function scanLibraryButtonLabel(sourceRoots, selectedCount = 0) {
+  if (Number(selectedCount) > 0) return "Analyze Selected";
   const count = Array.isArray(sourceRoots) ? sourceRoots.length : 0;
   return count > 1 ? "Scan Libraries" : "Scan Library";
 }

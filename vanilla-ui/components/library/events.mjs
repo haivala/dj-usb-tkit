@@ -26,6 +26,7 @@ export function bindLibraryEvents(ctx) {
     relocateSourceRoot,
     scanLibrary,
     scanMasterDb,
+    analyzeSelectedTracks,
     scheduleApplySearchLocalFilter,
     addTracksToCurrentPlaylist,
     getLibraryVisibleTracks,
@@ -161,7 +162,8 @@ export function bindLibraryEvents(ctx) {
   });
 
   el.scanLibraryBtn.addEventListener("click", () => {
-    scanLibrary().catch(catchErr(emitStatus));
+    const action = state.selectedTrackIds.size > 0 ? analyzeSelectedTracks : scanLibrary;
+    action().catch(catchErr(emitStatus));
   });
 
   el.importMasterDbBtn?.addEventListener("click", () => {

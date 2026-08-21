@@ -185,3 +185,68 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
   const removeCall = await page.evaluate(() => window.__removeTrackCalls[0]);
   expect(removeCall.trackIds).toEqual(["t3"]);
 });
+
+test("Library: sorting by BPM column actually orders rows by numeric BPM value", async ({ page }) => {
+  await page.addInitScript(({ base }) => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+
+    // BPM values are deliberately non-monotonic with insertion order and
+    // include decimals/duplicates, so a broken comparator (e.g. lexicographic
+    // string compare, or a comparator applied to the wrong array) reorders
+    // rows without the BPM column actually ending up sorted.
+    const tracks = [
+      { id: "t1", title: "Track A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPreview: [], durationMs: 180000, bpm: 128, key: "8A" },
+      { id: "t2", title: "Track B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPreview: [], durationMs: 180000, bpm: 90, key: "8A" },
+      { id: "t3", title: "Track C", artist: "Artist", album: "Album", filePath: "/music/c.mp3", waveformPreview: [], durationMs: 180000, bpm: 174, key: "8A" },
+      { id: "t4", title: "Track D", artist: "Artist", album: "Album", filePath: "/music/d.mp3", waveformPreview: [], durationMs: 180000, bpm: 9, key: "8A" },
+      { id: "t5", title: "Track E", artist: "Artist", album: "Album", filePath: "/music/e.mp3", waveformPreview: [], durationMs: 180000, bpm: 128.5, key: "8A" }
+    ];
+
+    const handlers = {
+      ...base,
+      list_playlists: async () => ({ ok: true, data: { items: [] } }),
+      list_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
+      search_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
+      browse_source_files: async () => ({ ok: true, data: { total: tracks.length, items: tracks } })
+    };
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request || payload;
+          const handler = handlers[command];
+          if (handler) return handler(request);
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        }
+      }
+    };
+  }, { base: {} });
+
+  await page.goto("/");
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(5);
+
+  const bpmCellTexts = () => page.locator("#libraryTableBody .track-grid-row .td-bpm").allTextContents();
+
+  // Ascending: 9, 90, 128, 128.5, 174.
+  await page.locator('#panel-library .sortable[data-sort-key="bpm"]').click();
+  await expect(page.locator("#libraryTableBody .track-grid-row .track-title")).toHaveText([
+    "Track D",
+    "Track B",
+    "Track A",
+    "Track E",
+    "Track C"
+  ]);
+  expect((await bpmCellTexts()).map(Number)).toEqual([9, 90, 128, 128.5, 174]);
+
+  // Descending: 174, 128.5, 128, 90, 9.
+  await page.locator('#panel-library .sortable[data-sort-key="bpm"]').click();
+  await expect(page.locator("#libraryTableBody .track-grid-row .track-title")).toHaveText([
+    "Track C",
+    "Track E",
+    "Track A",
+    "Track B",
+    "Track D"
+  ]);
+  expect((await bpmCellTexts()).map(Number)).toEqual([174, 128.5, 128, 90, 9]);
+});
