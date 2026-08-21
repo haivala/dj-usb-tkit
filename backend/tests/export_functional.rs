@@ -8,8 +8,7 @@ use backend::models::{
     AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, InitializeUsbRequest,
     MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ReorderUsbPlaylistsRequest,
-    RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest,
-    SetFrontendSettingRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -2879,7 +2878,10 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
         track_ids: vec![track_ids[0].clone()],
         dedupe: DedupeMode::Skip,
     });
-    assert!(added_exported.ok, "add to exported playlist failed: {added_exported:?}");
+    assert!(
+        added_exported.ok,
+        "add to exported playlist failed: {added_exported:?}"
+    );
 
     let export_once = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -2948,7 +2950,10 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
         key: "ui_export_prune_stale_v1".to_string(),
         value: Some("0".to_string()),
     });
-    assert!(set_additive.ok, "set additive mode failed: {set_additive:?}");
+    assert!(
+        set_additive.ok,
+        "set additive mode failed: {set_additive:?}"
+    );
     let additive_status = status_by_id(&backend);
     assert_eq!(
         additive_status.get(exported_id.as_str()),

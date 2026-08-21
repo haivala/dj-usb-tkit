@@ -26,6 +26,7 @@ use crate::pdb_reader::{
 };
 
 use super::analysis::normalize_text;
+use super::export::{compute_playlist_usb_export_status, normalize_playlist_name_for_compare};
 use super::export_helpers::{
     analysis_bundle_path_variants, prune_stale_export_owned_files,
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
@@ -44,7 +45,6 @@ use super::usb_utils::{
 use super::usb_vendor_compat::{
     USB_CONTENTS_DIR, USB_VENDOR_ROOT_DIR, vendor_edb_path, vendor_pdb_path,
 };
-use super::export::{compute_playlist_usb_export_status, normalize_playlist_name_for_compare};
 use super::{
     BackendService, FINGERPRINT_MATCH_DURATION_TOLERANCE_MS, browse_path_matches_root,
     build_track_match_fingerprint, export_log, export_prune_stale_setting,

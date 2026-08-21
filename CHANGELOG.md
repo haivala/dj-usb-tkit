@@ -30,6 +30,10 @@
 
 ## Unreleased
 
+## 0.1.25
+
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
 - **New feature:** in the Media Library view, selecting one or more tracks now turns the "Scan
   Library" button into "Analyze Selected" — clicking it re-analyzes (BPM/key/waveform) just the
   selected tracks instead of rescanning and analyzing the whole library.

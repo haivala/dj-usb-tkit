@@ -185,8 +185,8 @@ pub(crate) fn compute_playlist_usb_export_status(
     local_playlists
         .iter()
         .map(|playlist| {
-            let same_name_exists_on_usb = usb_playlist_names
-                .contains(&normalize_playlist_name_for_compare(&playlist.name));
+            let same_name_exists_on_usb =
+                usb_playlist_names.contains(&normalize_playlist_name_for_compare(&playlist.name));
             PlaylistUsbExportStatus {
                 playlist_id: playlist.id.clone(),
                 playlist_name: playlist.name.clone(),
@@ -1822,8 +1822,14 @@ mod tests {
 
     #[test]
     fn normalize_playlist_name_for_compare_trims_and_lowercases() {
-        assert_eq!(normalize_playlist_name_for_compare("  My Playlist  "), "my playlist");
-        assert_eq!(normalize_playlist_name_for_compare("ALREADY LOWER"), "already lower");
+        assert_eq!(
+            normalize_playlist_name_for_compare("  My Playlist  "),
+            "my playlist"
+        );
+        assert_eq!(
+            normalize_playlist_name_for_compare("ALREADY LOWER"),
+            "already lower"
+        );
     }
 
     #[test]
@@ -1854,7 +1860,9 @@ mod tests {
             make_playlist("p2", "Brand New"),
         ];
         let usb_names: std::collections::HashSet<String> =
-            [normalize_playlist_name_for_compare("My Set")].into_iter().collect();
+            [normalize_playlist_name_for_compare("My Set")]
+                .into_iter()
+                .collect();
 
         let additive = compute_playlist_usb_export_status(&local_playlists, &usb_names, false);
         let p1 = additive.iter().find(|s| s.playlist_id == "p1").unwrap();
