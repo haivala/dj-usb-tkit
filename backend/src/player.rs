@@ -12,6 +12,12 @@ use crate::error::{BackendError, BackendResult};
 use crate::models::{PlaybackPreflightData, PlaybackStatusData};
 
 const PLAYBACK_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+/// Play specifically involves opening/probing/decoding the first packet of a file that may
+/// live on slow removable media (USB), so it gets a much more generous ceiling than the other
+/// commands. This is a dead-thread safety net, not a responsiveness bound: the worker thread
+/// itself is never blocked on this I/O (see `begin_play_in_worker`), so a slow open no longer
+/// delays Stop/Status or a newer Play the way it used to.
+const PLAYBACK_PLAY_TIMEOUT: Duration = Duration::from_secs(25);
 const NATURAL_STOP_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 
 /// A natural end-of-track notification: the loaded sink emptied on its own, without an
@@ -33,7 +39,8 @@ impl PlaybackController {
     pub fn new() -> (Self, mpsc::Receiver<PlaybackTransition>) {
         let (tx, rx) = mpsc::channel::<PlaybackCommand>();
         let (transition_tx, transition_rx) = mpsc::channel::<PlaybackTransition>();
-        thread::spawn(move || playback_worker(rx, transition_tx));
+        let worker_tx = tx.clone();
+        thread::spawn(move || playback_worker(rx, worker_tx, transition_tx));
         (Self { tx }, transition_rx)
     }
 
@@ -51,6 +58,7 @@ impl PlaybackController {
                 reply_tx,
             },
             "starting playback",
+            PLAYBACK_PLAY_TIMEOUT,
         )
     }
 
@@ -58,6 +66,7 @@ impl PlaybackController {
         self.send_command(
             |reply_tx| PlaybackCommand::Stop { reply_tx },
             "stopping playback",
+            PLAYBACK_COMMAND_TIMEOUT,
         )
     }
 
@@ -65,6 +74,7 @@ impl PlaybackController {
         self.send_command(
             |reply_tx| PlaybackCommand::Status { reply_tx },
             "reading playback status",
+            PLAYBACK_COMMAND_TIMEOUT,
         )
     }
 
@@ -72,23 +82,21 @@ impl PlaybackController {
         &self,
         build: impl FnOnce(mpsc::Sender<BackendResult<PlaybackStatusData>>) -> PlaybackCommand,
         action: &str,
+        timeout: Duration,
     ) -> BackendResult<PlaybackStatusData> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(build(reply_tx))
             .map_err(|err| BackendError::Internal(format!("playback worker unavailable: {err}")))?;
-        reply_rx
-            .recv_timeout(PLAYBACK_COMMAND_TIMEOUT)
-            .map_err(|err| {
-                BackendError::Internal(format!(
-                    "playback worker timed out after {}s while {action}: {err}",
-                    PLAYBACK_COMMAND_TIMEOUT.as_secs()
-                ))
-            })?
+        reply_rx.recv_timeout(timeout).map_err(|err| {
+            BackendError::Internal(format!(
+                "playback worker timed out after {}s while {action}: {err}",
+                timeout.as_secs()
+            ))
+        })?
     }
 }
 
-#[derive(Debug)]
 enum PlaybackCommand {
     Play {
         path: String,
@@ -102,6 +110,27 @@ enum PlaybackCommand {
     Status {
         reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
     },
+    /// Sent by the detached thread spawned in `begin_play_in_worker` once the slow
+    /// open/probe/first-decode of a file has finished (or failed). Routed back through the
+    /// same command channel so applying it to `WorkerState` stays serialized with every other
+    /// command, without the worker thread ever blocking on the disk I/O itself.
+    DecoderReady {
+        generation: u64,
+        normalized_path: String,
+        start_offset_ms: Option<u64>,
+        start_ratio: Option<f64>,
+        result: Result<
+            crate::symphonia_decoder::SeekableSymphoniaSource,
+            crate::symphonia_decoder::DecoderError,
+        >,
+    },
+}
+
+/// A `Play` whose fast checks passed and whose slow decoder-open has been handed off to its
+/// own thread. Kept in `WorkerState` so a later `DecoderReady`/`Stop`/newer `Play` can find it.
+struct PendingPlay {
+    generation: u64,
+    reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
 }
 
 #[derive(Default)]
@@ -113,10 +142,13 @@ struct WorkerState {
     started_at: Option<Instant>,
     start_offset_ms: u64,
     duration_ms: Option<u64>,
+    next_play_generation: u64,
+    pending_play: Option<PendingPlay>,
 }
 
 fn playback_worker(
     rx: mpsc::Receiver<PlaybackCommand>,
+    tx: mpsc::Sender<PlaybackCommand>,
     transitions: mpsc::Sender<PlaybackTransition>,
 ) {
     let mut state = WorkerState::default();
@@ -145,17 +177,51 @@ fn playback_worker(
                 start_ratio,
                 reply_tx,
             } => {
-                let result = play_in_worker(&mut state, &path, start_offset_ms, start_ratio);
-                let _ = reply_tx.send(result);
+                begin_play_in_worker(
+                    &mut state,
+                    &tx,
+                    path,
+                    start_offset_ms,
+                    start_ratio,
+                    reply_tx,
+                );
             }
             PlaybackCommand::Stop { reply_tx } => {
+                supersede_pending_play(&mut state);
                 stop_in_worker(&mut state);
                 let _ = reply_tx.send(Ok(snapshot(&mut state)));
             }
             PlaybackCommand::Status { reply_tx } => {
                 let _ = reply_tx.send(Ok(snapshot(&mut state)));
             }
+            PlaybackCommand::DecoderReady {
+                generation,
+                normalized_path,
+                start_offset_ms,
+                start_ratio,
+                result,
+            } => {
+                finish_play_in_worker(
+                    &mut state,
+                    generation,
+                    normalized_path,
+                    start_offset_ms,
+                    start_ratio,
+                    result,
+                );
+            }
         }
+    }
+}
+
+/// Replies to a still-in-flight `Play` (if any) with a "superseded" error so its caller
+/// unblocks immediately instead of waiting out `PLAYBACK_PLAY_TIMEOUT`, and marks it so the
+/// eventual `DecoderReady` for it is dropped instead of hijacking playback state.
+fn supersede_pending_play(state: &mut WorkerState) {
+    if let Some(pending) = state.pending_play.take() {
+        let _ = pending.reply_tx.send(Err(BackendError::Internal(
+            "playback request superseded by a newer play/stop request".to_string(),
+        )));
     }
 }
 
@@ -172,13 +238,32 @@ fn check_natural_stop(state: &mut WorkerState, transitions: &mpsc::Sender<Playba
     let _ = transitions.send(PlaybackTransition { path, duration_ms });
 }
 
-fn play_in_worker(
+/// Fast phase of `Play`: validation, the same-track-seek fast path, and ensuring the audio
+/// output device is open all stay synchronous on the worker thread since they're cheap/local.
+/// The one genuinely slow, variable-latency step — opening/probing/decoding the first packet
+/// of the target file, which may sit on slow removable media — is handed off to its own
+/// thread (see `DecoderReady`) so the worker thread is never blocked by it and can keep
+/// servicing Stop/Status/a newer Play in the meantime.
+fn begin_play_in_worker(
     state: &mut WorkerState,
-    path: &str,
+    tx: &mpsc::Sender<PlaybackCommand>,
+    path: String,
     start_offset_ms: Option<u64>,
     start_ratio: Option<f64>,
-) -> BackendResult<PlaybackStatusData> {
-    let normalized = normalize_and_validate_path(path)?;
+    reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
+) {
+    let normalized = match normalize_and_validate_path(&path) {
+        Ok(normalized) => normalized,
+        Err(err) => {
+            let _ = reply_tx.send(Err(err));
+            return;
+        }
+    };
+
+    // A newer Play always supersedes an older one still waiting on its decoder to open,
+    // regardless of how this new one ends up resolving below.
+    supersede_pending_play(state);
+
     let same_track_loaded = state.path.as_deref() == Some(normalized.as_str());
     if same_track_loaded
         && let Some(sink) = state.sink.as_ref()
@@ -189,26 +274,93 @@ fn play_in_worker(
             sink.play();
             state.started_at = Some(Instant::now());
             state.start_offset_ms = offset_ms;
-            return Ok(snapshot(state));
+            let _ = reply_tx.send(Ok(snapshot(state)));
+            return;
         }
     }
 
     if state.stream.is_none() || state.stream_handle.is_none() {
-        let (stream, stream_handle) = open_output_stream()?;
-        state.stream = Some(stream);
-        state.stream_handle = Some(stream_handle);
+        match open_output_stream() {
+            Ok((stream, stream_handle)) => {
+                state.stream = Some(stream);
+                state.stream_handle = Some(stream_handle);
+            }
+            Err(err) => {
+                let _ = reply_tx.send(Err(err));
+                return;
+            }
+        }
     }
-    let Some(stream_handle) = state.stream_handle.as_ref() else {
-        return Err(BackendError::Internal(
-            "audio output handle unavailable after initialization".to_string(),
-        ));
-    };
-    let sink = Sink::try_new(stream_handle)
-        .map_err(|err| BackendError::Internal(format!("failed to create audio sink: {err}")))?;
 
-    let mut decoder =
-        crate::symphonia_decoder::SeekableSymphoniaSource::open(Path::new(&normalized))
-            .map_err(|err| BackendError::Internal(format!("decoder error: {err}")))?;
+    let generation = state.next_play_generation;
+    state.next_play_generation += 1;
+    state.pending_play = Some(PendingPlay {
+        generation,
+        reply_tx,
+    });
+
+    let decode_tx = tx.clone();
+    thread::spawn(move || {
+        let result =
+            crate::symphonia_decoder::SeekableSymphoniaSource::open(Path::new(&normalized));
+        let _ = decode_tx.send(PlaybackCommand::DecoderReady {
+            generation,
+            normalized_path: normalized,
+            start_offset_ms,
+            start_ratio,
+            result,
+        });
+    });
+}
+
+/// Slow phase of `Play`: applies a completed (or failed) decoder open to `WorkerState`, but
+/// only if it's still the current request — a stale `generation` means a newer `Play` (or a
+/// `Stop`) has already superseded it, so it's dropped without touching playback state.
+fn finish_play_in_worker(
+    state: &mut WorkerState,
+    generation: u64,
+    normalized_path: String,
+    start_offset_ms: Option<u64>,
+    start_ratio: Option<f64>,
+    result: Result<
+        crate::symphonia_decoder::SeekableSymphoniaSource,
+        crate::symphonia_decoder::DecoderError,
+    >,
+) {
+    let is_current = state
+        .pending_play
+        .as_ref()
+        .is_some_and(|pending| pending.generation == generation);
+    if !is_current {
+        return;
+    }
+    let pending = state.pending_play.take().expect("checked above");
+
+    let mut decoder = match result {
+        Ok(decoder) => decoder,
+        Err(err) => {
+            let _ = pending
+                .reply_tx
+                .send(Err(BackendError::Internal(format!("decoder error: {err}"))));
+            return;
+        }
+    };
+
+    let Some(stream_handle) = state.stream_handle.as_ref() else {
+        let _ = pending.reply_tx.send(Err(BackendError::Internal(
+            "audio output handle unavailable after initialization".to_string(),
+        )));
+        return;
+    };
+    let sink = match Sink::try_new(stream_handle) {
+        Ok(sink) => sink,
+        Err(err) => {
+            let _ = pending.reply_tx.send(Err(BackendError::Internal(format!(
+                "failed to create audio sink: {err}"
+            ))));
+            return;
+        }
+    };
 
     let duration_ms = decoder
         .total_duration()
@@ -221,13 +373,8 @@ fn play_in_worker(
         sink.append(decoder);
     }
     sink.play();
-    Ok(load_playback_state(
-        state,
-        sink,
-        normalized,
-        offset_ms,
-        duration_ms,
-    ))
+    let status = load_playback_state(state, sink, normalized_path, offset_ms, duration_ms);
+    let _ = pending.reply_tx.send(Ok(status));
 }
 
 fn load_playback_state(
@@ -828,5 +975,87 @@ mod tests {
             .play_path("/nonexistent/path/to/track.mp3", None, None)
             .expect_err("missing file should be rejected before touching audio hardware");
         assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn supersede_pending_play_replies_with_error_and_clears_state() {
+        let mut state = WorkerState::default();
+        let (reply_tx, reply_rx) = mpsc::channel();
+        state.pending_play = Some(PendingPlay {
+            generation: 1,
+            reply_tx,
+        });
+
+        supersede_pending_play(&mut state);
+
+        assert!(state.pending_play.is_none());
+        let err = reply_rx
+            .try_recv()
+            .expect("superseded request should get an immediate reply")
+            .expect_err("superseded request should be an error, not a playback status");
+        assert!(matches!(err, BackendError::Internal(msg) if msg.contains("superseded")));
+    }
+
+    #[test]
+    fn finish_play_in_worker_drops_a_stale_generation_without_touching_pending_state() {
+        let mut state = WorkerState::default();
+        let (reply_tx, reply_rx) = mpsc::channel();
+        state.pending_play = Some(PendingPlay {
+            generation: 5,
+            reply_tx,
+        });
+
+        // A late DecoderReady for an older, already-superseded generation (e.g. the user
+        // skipped tracks while this one's disk open was still in flight).
+        finish_play_in_worker(
+            &mut state,
+            3,
+            "fake/stale.mp3".to_string(),
+            None,
+            None,
+            Err(crate::symphonia_decoder::DecoderError(
+                "should never be applied".to_string(),
+            )),
+        );
+
+        assert!(
+            reply_rx.try_recv().is_err(),
+            "the still-pending (newer) request should not have been replied to"
+        );
+        assert!(
+            state.pending_play.is_some_and(|p| p.generation == 5),
+            "the current pending play should be left untouched"
+        );
+    }
+
+    #[test]
+    fn finish_play_in_worker_reports_decoder_error_for_the_current_generation() {
+        let mut state = WorkerState::default();
+        let (reply_tx, reply_rx) = mpsc::channel();
+        state.pending_play = Some(PendingPlay {
+            generation: 7,
+            reply_tx,
+        });
+
+        finish_play_in_worker(
+            &mut state,
+            7,
+            "fake/track.mp3".to_string(),
+            None,
+            None,
+            Err(crate::symphonia_decoder::DecoderError("boom".to_string())),
+        );
+
+        assert!(
+            state.pending_play.is_none(),
+            "pending play should be cleared once resolved"
+        );
+        let err = reply_rx
+            .try_recv()
+            .expect("the current request should get a reply")
+            .expect_err("a decoder error should surface as an error, not a status");
+        assert!(
+            matches!(err, BackendError::Internal(msg) if msg.contains("decoder error") && msg.contains("boom"))
+        );
     }
 }

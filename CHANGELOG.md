@@ -38,6 +38,22 @@
   status message if that save fails, so a stale order never gets exported silently. A playlist you
   never sorted yourself never inherits another playlist's pending sort, since the shared playlist
   view commits (or discards) whatever sort was active the moment you leave.
+- **Fix:** a source folder that was removed from the media library and then re-added showed its
+  tracks again, but they couldn't be played — every attempt failed with "track not found in
+  Library or selected USB" — until you separately clicked "Scan Library". Adding a folder now
+  indexes it immediately, so its tracks are usable right away.
+- **Fix:** starting playback of a track from a USB drive occasionally failed with "playback
+  worker timed out ... while starting playback", sometimes several times in a row, even though
+  the track then started playing normally moments later. The backend's single playback worker
+  thread opened/decoded the target file inline and gave itself a fixed 5-second budget to do so
+  — fine for local disk, but an occasional false failure on USB media whose first ("cold") read
+  can legitimately take a bit longer. That slow, one-off open also blocked the same worker
+  thread from handling Stop/Status or a newer Play in the meantime, so skipping tracks while one
+  was still loading could pile up several of these false timeouts back to back. Opening a file
+  now happens on its own thread instead of blocking the worker, so Stop/Status/a newer Play stay
+  responsive regardless, a newer Play immediately supersedes a still-loading older one instead of
+  queuing behind it, and Play itself is no longer bound by a tight fixed timeout that was racing
+  legitimately slow (but not stuck) disk reads.
 
 ## 0.1.25
 

@@ -126,19 +126,20 @@ export function bindLibraryEvents(ctx) {
         if (!picked.length) return;
 
         const known = new Set(state.sourceRoots);
-        let addedCount = 0;
+        const newRoots = [];
         for (const path of picked) {
           if (!known.has(path)) {
             state.sourceRoots.push(path);
             state.sourceRootEnabled[path] = true;
             known.add(path);
-            addedCount += 1;
+            newRoots.push(path);
           }
         }
-        if (addedCount === 0) {
+        if (newRoots.length === 0) {
           emitStatus(`Source folders unchanged: ${state.sourceRoots.length}`);
           return;
         }
+        let indexResult = null;
         await withProgress("Loading media library", async (progress) => {
           progress(20, "Saving source folders...");
           persistSourceRoots(state.sourceRoots);
@@ -150,13 +151,19 @@ export function bindLibraryEvents(ctx) {
           renderSourceChips();
           syncAssetScopePaths().catch(() => {});
 
-          progress(55, "Building track list...");
+          progress(45, "Indexing new files...");
+          indexResult = await command("scan_library", {
+            sourceRoots: newRoots,
+            incremental: true
+          });
+
+          progress(70, "Building track list...");
           await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
 
           progress(85, "Refreshing playlist views...");
           await refreshCurrentPlaylistTracks();
         });
-        emitStatus(`Source folders: ${state.sourceRoots.length} | browse updated (scan required for new files)`);
+        emitStatus(`Source folders: ${state.sourceRoots.length} | indexed ${Number(indexResult?.indexed || 0)} track(s)`);
       })
       .catch(catchErr(emitStatus));
   });

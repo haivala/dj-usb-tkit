@@ -151,7 +151,7 @@ function installSourceChipAnalysisMock(page) {
 
     window.__TAURI__ = {
       core: {
-        invoke: async (command) => {
+        invoke: async (command, payload = {}) => {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
@@ -167,6 +167,7 @@ function installSourceChipAnalysisMock(page) {
           }
           if (command === "scan_library") {
             window.__scanCalls += 1;
+            window.__lastScanPayload = payload?.request || null;
             return { ok: true, data: { indexed: 1, updated: 0, removed: 0 } };
           }
           if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
@@ -186,13 +187,20 @@ function installSourceChipAnalysisMock(page) {
   });
 }
 
-test("source chips show analyzed green on startup and adding a source updates browse without auto scan", async ({ page }) => {
+test("source chips show analyzed green on startup and adding a source indexes it via scan_library", async ({ page }) => {
   await installSourceChipAnalysisMock(page);
   await page.goto("/");
 
   await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(1);
   await page.locator("#addSourceBtn").click();
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);
+  // Newly added folders must be indexed immediately (scan_library, metadata-only
+  // insert) so tracks are playable right away without a manual "Scan Library"
+  // click -- see backend/src/service/mod.rs scan_library / resolve_playback_source.
+  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
+  await expect.poll(async () => page.evaluate(() => window.__lastScanPayload)).toEqual({
+    sourceRoots: ["/music2"],
+    incremental: true
+  });
   await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
 
   // The master.db chip's checkbox is a pure browse-filter toggle -- it must
@@ -205,7 +213,7 @@ test("source chips show analyzed green on startup and adding a source updates br
   await expect(page.locator("#importMasterDbBtn")).toBeVisible();
   await masterDbToggle.check();
   await expect(masterDbToggle).toBeChecked();
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);
+  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
 });
 
 // Regression coverage for: searching the library used to make a fully
