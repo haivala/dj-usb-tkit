@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
 import {
+  commitActivePlaylistSort,
   createPlaylist,
   formatPlaylistExportStatus,
   loadPlaylists,
@@ -140,6 +141,69 @@ test("refreshCurrentPlaylistTracks updates table state and refresh hooks", async
   assert.equal(state.currentPlaylistTracksView.length, 1);
   assert.equal(document.getElementById("playlistTableWrap").classList.contains("hidden"), false);
   assert.deepEqual(calls, ["rows:1", "duration:1", "title:p1", "buttons", "list"]);
+});
+
+function commitDeps(overrides = {}) {
+  const calls = [];
+  return {
+    calls,
+    deps: {
+      command: async (cmd, payload) => { calls.push([cmd, payload]); return {}; },
+      isPlaylistSortActive: () => true,
+      clearPlaylistTrackSort: () => { calls.push(["clear"]); },
+      applySortToTracks: (tracks) => tracks,
+      ...overrides
+    }
+  };
+}
+
+test("commitActivePlaylistSort commits the full track order when a sort is active", async () => {
+  const state = {
+    playlists: [{ id: "p1", name: "A", tracks: [{ id: "t2" }, { id: "t1" }] }],
+    playlistUsbExportStatusById: new Map()
+  };
+  const { calls, deps } = commitDeps();
+
+  await commitActivePlaylistSort(state, "p1", deps);
+
+  assert.deepEqual(calls, [
+    ["clear"],
+    ["reorder_playlist_tracks", { playlistId: "p1", orderedTrackIds: ["t2", "t1"] }]
+  ]);
+});
+
+test("commitActivePlaylistSort no-ops (still clears) when no sort is active", async () => {
+  const state = {
+    playlists: [{ id: "p1", name: "A", tracks: [{ id: "t1" }] }],
+    playlistUsbExportStatusById: new Map()
+  };
+  const { calls, deps } = commitDeps({ isPlaylistSortActive: () => false });
+
+  await commitActivePlaylistSort(state, "p1", deps);
+
+  assert.deepEqual(calls, [["clear"]]);
+});
+
+test("commitActivePlaylistSort no-ops when the playlist is now additive-export-locked", async () => {
+  const state = {
+    playlists: [{ id: "p1", name: "A", tracks: [{ id: "t1" }] }],
+    playlistUsbExportStatusById: new Map([["p1", { locksReorder: true }]])
+  };
+  const { calls, deps } = commitDeps();
+
+  await commitActivePlaylistSort(state, "p1", deps);
+
+  assert.deepEqual(calls, [["clear"]]);
+});
+
+test("commitActivePlaylistSort no-ops for a missing/empty playlist id", async () => {
+  const state = { playlists: [], playlistUsbExportStatusById: new Map() };
+  const { calls, deps } = commitDeps();
+
+  await commitActivePlaylistSort(state, null, deps);
+  await commitActivePlaylistSort(state, "does-not-exist", deps);
+
+  assert.deepEqual(calls, [["clear"], ["clear"]]);
 });
 
 test("bindPlaylistEvents ignores playlist selection clicks while new playlist input is open", async () => {

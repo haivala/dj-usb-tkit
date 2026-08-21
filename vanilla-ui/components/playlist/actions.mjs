@@ -367,6 +367,26 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
   renderPlaylistList();
 }
 
+// Column-sort on the app playlist tracklist is a free, reversible view-only
+// action while browsing (it never touches the backend on its own) -- the
+// currently active sort only becomes the playlist's real (and thus exported)
+// order at two points: navigating away from the playlist, and exporting it.
+// Both call this with the playlist the sort belongs to.
+export async function commitActivePlaylistSort(state, playlistId, deps) {
+  const { command, isPlaylistSortActive, clearPlaylistTrackSort, applySortToTracks } = deps;
+  const wasSortActive = isPlaylistSortActive();
+  // Compute the sorted order *before* clearing -- applySortToTracks reads
+  // the same sort state clearPlaylistTrackSort deletes.
+  const playlist = wasSortActive ? (state.playlists || []).find((p) => p.id === playlistId) : null;
+  const orderedTrackIds = playlist?.tracks?.length
+    ? applySortToTracks(playlist.tracks, "playlistTracksBody").map((t) => t.id)
+    : null;
+  clearPlaylistTrackSort();
+  if (!playlistId || !orderedTrackIds) return;
+  if (state.playlistUsbExportStatusById?.get(playlistId)?.locksReorder) return;
+  await command("reorder_playlist_tracks", { playlistId, orderedTrackIds });
+}
+
 export function updatePlaylistExportButtons(state, el, deps) {
   const {
     getCurrentPlaylist,

@@ -475,6 +475,13 @@ const clearPlaylistTrackSort = () => shell.clearTrackSort(
   el.playlistTracksBody?.closest("[data-track-grid]")
 );
 
+const commitActivePlaylistSort = (playlistId) => playlist.commitActivePlaylistSort(state, playlistId, {
+  command,
+  isPlaylistSortActive: () => !!tableSortState.playlistTracksBody,
+  clearPlaylistTrackSort,
+  applySortToTracks,
+});
+
 function handleSortHeaderClick(e) {
   shell.handleSortHeaderClick(tableSortState, e, {
     renderMap: {
@@ -1211,6 +1218,7 @@ const exportPlaylistToUsb = async (playlistId) => usb.exportPlaylistToUsb(state,
     renderUsbPlaylistTracks,
     refreshMissingSourceRoots: checkSourceRoots,
     clearUsbDiagnostics: () => usb.clearUsbDiagnostics(el),
+    commitActivePlaylistSort,
   });
 
 // --- Bootstrap closures ---
@@ -1260,6 +1268,8 @@ async function switchView(viewId) {
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     documentObj: document,
     renderWaveformsIn,
+    commitActivePlaylistSort,
+    emitStatus,
   });
   if (viewId === "usb-player-menu") {
     renderUsbPlayerMenuEditor();
@@ -1279,6 +1289,8 @@ const switchTab = async (tab) => bootstrap.switchTab(state, el, tab, {
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     documentObj: document,
     renderWaveformsIn,
+    commitActivePlaylistSort,
+    emitStatus,
   });
 const hydrateAppVersionLabel = () => bootstrap.hydrateAppVersionLabel(el, {
     appVersionFallback: APP_VERSION_FALLBACK,

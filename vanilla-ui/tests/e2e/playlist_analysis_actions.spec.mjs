@@ -745,3 +745,243 @@ test("playlist track drag handle stays enabled in additive mode when no same-nam
   await expect(page.locator("#playlistTracksBody .drag-handle.disabled")).toHaveCount(0);
   await expect(page.locator("#exportPlaylistBtn")).toHaveText("Export to USB: USB");
 });
+
+test("switching away from a sorted playlist commits the sort as its real order, and the next playlist doesn't inherit it", async ({ page }) => {
+  // Column sort is a free, reversible view op while browsing -- it only
+  // becomes the playlist's real (and thus exported) order once you leave
+  // the view. The playlist panel's header/table DOM is shared across every
+  // playlist, so the *next* playlist viewed must never show a leftover
+  // hint/arrow from a sort that belonged to a different one.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    window.localStorage.setItem("djusbtkit.exportPruneStale", "0");
+
+    const playlists = [
+      { id: "pl-free", name: "Free Playlist", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      { id: "pl-locked", name: "Locked Playlist", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    ];
+
+    const playlistTracks = {
+      "pl-free": [
+        { id: "t1", title: "Song A", artist: "Artist", album: "Zulu Album", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
+        { id: "t2", title: "Song B", artist: "Artist", album: "Alpha Album", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+      ],
+      "pl-locked": [
+        { id: "t3", title: "Song C", artist: "Artist", album: "Zulu Album", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
+        { id: "t4", title: "Song D", artist: "Artist", album: "Alpha Album", filePath: "/music/d.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+      ]
+    };
+
+    window.__reorderPlaylistTrackCalls = [];
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request || payload;
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "get_playlist_tracks") {
+            const items = playlistTracks[request.playlistId] || [];
+            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
+            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+          }
+          if (command === "reorder_playlist_tracks") {
+            window.__reorderPlaylistTrackCalls.push(request);
+            const byId = new Map((playlistTracks[request.playlistId] || []).map((t) => [t.id, t]));
+            playlistTracks[request.playlistId] = request.orderedTrackIds.map((id) => byId.get(id)).filter(Boolean);
+            return { ok: true, data: { playlistId: request.playlistId, reordered: request.orderedTrackIds.length } };
+          }
+          if (command === "search_tracks" || command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
+            return command === "get_frontend_settings"
+              ? { ok: true, data: { settings: {} } }
+              : { ok: true, data: { key: request.key, value: request.value } };
+          }
+          if (command === "resolve_playback_source") {
+            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
+          }
+          if (command === "pick_usb_folder") return "/USB";
+          if (command === "validate_usb_root") {
+            return {
+              ok: true,
+              data: { valid: true, hasWriteAccess: true, normalizedRoot: "/USB", hasVendorRoot: true, hasContents: true, hasPdb: true, hasEdb: true, warnings: [] }
+            };
+          }
+          if (command === "fetch_usb_playlists") {
+            const items = [{ id: "usb-pl-1", name: "Locked Playlist", source: "mock-tauri", tracks: [{ title: "USB Track" }], trackCount: 1 }];
+            const usbNames = new Set(items.map((item) => String(item.name || "").trim().toLowerCase()));
+            return {
+              ok: true,
+              data: {
+                items,
+                stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
+                warnings: [],
+                playlistUsbExportStatus: playlists.map((playlist) => {
+                  const sameNameExistsOnUsb = usbNames.has(String(playlist.name || "").trim().toLowerCase());
+                  return {
+                    playlistId: playlist.id,
+                    playlistName: playlist.name,
+                    sameNameExistsOnUsb,
+                    locksReorder: sameNameExistsOnUsb
+                  };
+                })
+              }
+            };
+          }
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        }
+      }
+    };
+  });
+
+  await page.goto("/");
+  await connectUsbAndFetchPlaylists(page);
+
+  // Sort the unlocked playlist by Album.
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Free Playlist" }).click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+  await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+  await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
+
+  // Sorting alone must not have committed anything yet.
+  expect(await page.evaluate(() => window.__reorderPlaylistTrackCalls.length)).toBe(0);
+
+  // Switch to the locked playlist -- leaving Free Playlist commits its sort.
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Locked Playlist" }).click();
+  const lockedRows = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(lockedRows).toHaveCount(2);
+
+  const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(reorderCalls).toEqual([{ playlistId: "pl-free", orderedTrackIds: ["t2", "t1"] }]);
+
+  // The locked playlist must not inherit the sort -- it was never sorted itself.
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+  await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).not.toHaveClass(/sort-asc|sort-desc/);
+  await expect(lockedRows.nth(0)).toHaveAttribute("data-track-id", "t3");
+  await expect(lockedRows.nth(1)).toHaveAttribute("data-track-id", "t4");
+});
+
+function installTwoPlaylistTauriMock(page) {
+  return page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+
+    const playlists = [
+      { id: "pl-a", name: "Playlist A", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      { id: "pl-b", name: "Playlist B", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    ];
+
+    const playlistTracks = {
+      "pl-a": [
+        { id: "t1", title: "Song A", artist: "Artist", album: "Zulu Album", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
+        { id: "t2", title: "Song B", artist: "Artist", album: "Alpha Album", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+      ],
+      "pl-b": [
+        { id: "t3", title: "Song C", artist: "Artist", album: "Zulu Album", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
+        { id: "t4", title: "Song D", artist: "Artist", album: "Alpha Album", filePath: "/music/d.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+      ]
+    };
+
+    window.__reorderPlaylistTrackCalls = [];
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request || payload;
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "get_playlist_tracks") {
+            const items = playlistTracks[request.playlistId] || [];
+            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
+            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+          }
+          if (command === "reorder_playlist_tracks") {
+            window.__reorderPlaylistTrackCalls.push(request);
+            const byId = new Map((playlistTracks[request.playlistId] || []).map((t) => [t.id, t]));
+            playlistTracks[request.playlistId] = request.orderedTrackIds.map((id) => byId.get(id)).filter(Boolean);
+            return { ok: true, data: { playlistId: request.playlistId, reordered: request.orderedTrackIds.length } };
+          }
+          if (command === "search_tracks" || command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
+            return command === "get_frontend_settings"
+              ? { ok: true, data: { settings: {} } }
+              : { ok: true, data: { key: request.key, value: request.value } };
+          }
+          if (command === "resolve_playback_source") {
+            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
+          }
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        }
+      }
+    };
+  });
+}
+
+test("switching between two unlocked playlists commits the outgoing sort and doesn't carry it into the next", async ({ page }) => {
+  await installTwoPlaylistTauriMock(page);
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+  await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+  await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
+
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist B" }).click();
+  const rowsB = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(rowsB).toHaveCount(2);
+
+  const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(reorderCalls).toEqual([{ playlistId: "pl-a", orderedTrackIds: ["t2", "t1"] }]);
+
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+  await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).not.toHaveClass(/sort-asc|sort-desc/);
+  await expect(rowsB.nth(0)).toHaveAttribute("data-track-id", "t3");
+  await expect(rowsB.nth(1)).toHaveAttribute("data-track-id", "t4");
+});
+
+test("switching to a non-playlist view (Library) also commits an active playlist sort", async ({ page }) => {
+  await installTwoPlaylistTauriMock(page);
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+  await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+
+  await page.locator('.nav-item[data-view="library"]').click();
+  await expect.poll(() => page.evaluate(() => window.__reorderPlaylistTrackCalls.length)).toBeGreaterThan(0);
+  const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(reorderCalls).toEqual([{ playlistId: "pl-a", orderedTrackIds: ["t2", "t1"] }]);
+});
+
+test("a same-playlist refresh (search) does not clear or commit an active sort", async ({ page }) => {
+  await installTwoPlaylistTauriMock(page);
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+  await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+  await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
+
+  // Typing in the playlist search box refreshes the same playlist's view --
+  // the sort must survive that (still just a view op), and search alone
+  // must never trigger a commit (it would only submit the filtered subset).
+  await page.locator("#playlistSearchInput").fill("Song");
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+  await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).toHaveClass(/sort-asc/);
+  await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
+  expect(await page.evaluate(() => window.__reorderPlaylistTrackCalls.length)).toBe(0);
+});

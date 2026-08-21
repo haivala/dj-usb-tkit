@@ -30,6 +30,15 @@
 
 ## Unreleased
 
+- **New feature:** sorting an app playlist by a column now sets its real (and thus exported)
+  track order, not just how it looks while browsing. Sorting stays a free, reversible view action
+  while you're viewing the playlist (search included — searching a sorted playlist never affects
+  what gets saved), and only gets written to the playlist's real order — the same way dragging a
+  track already does — when you navigate away from it or export it. Exporting is blocked with a
+  status message if that save fails, so a stale order never gets exported silently. A playlist you
+  never sorted yourself never inherits another playlist's pending sort, since the shared playlist
+  view commits (or discards) whatever sort was active the moment you leave.
+
 ## 0.1.25
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

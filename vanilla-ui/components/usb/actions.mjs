@@ -1552,7 +1552,8 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
     refreshMissingSourceRoots = async () => [],
-    clearUsbDiagnostics = () => {}
+    clearUsbDiagnostics = () => {},
+    commitActivePlaylistSort = async () => {}
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
   const emitErrorEvent = (text, details = null, coalesceKey = "export.failure") => {
@@ -1578,6 +1579,12 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
   };
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
+  try {
+    await commitActivePlaylistSort(playlistId);
+  } catch (err) {
+    emitStatus(`Export blocked: couldn't save the current sort order (${err.message || err})`);
+    return;
+  }
   if (!playlist.tracks?.length) {
     emitStatus("Playlist must contain tracks before export");
     return;

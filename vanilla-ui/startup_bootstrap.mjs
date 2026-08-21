@@ -350,11 +350,19 @@ export async function switchView(state, el, viewId, deps = {}) {
     renderBackups = async () => {},
     requestAnimationFrameFn = (cb) => cb(),
     documentObj = typeof document !== "undefined" ? document : null,
-    renderWaveformsIn = () => {}
+    renderWaveformsIn = () => {},
+    commitActivePlaylistSort = async () => {},
+    emitStatus = () => {}
   } = deps;
 
   if (viewId !== state.activeTab) {
     await stopPlaybackIfActive();
+    try {
+      await commitActivePlaylistSort(state.activeTab);
+    } catch (err) {
+      console.error(err);
+      emitStatus(`Save track order failed: ${err.message || err}`);
+    }
   }
   state.activeTab = viewId;
 

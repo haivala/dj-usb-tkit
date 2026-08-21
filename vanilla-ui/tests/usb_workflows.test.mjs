@@ -234,6 +234,40 @@ test("exportPlaylistToUsb clears diagnostics after success and forwards backup o
   }
 });
 
+test("exportPlaylistToUsb commits an active sort before exporting", async () => {
+  const calls = [];
+  await exportPlaylistToUsb(
+    makeExportState(),
+    {},
+    "p1",
+    makeExportDeps({
+      commitActivePlaylistSort: async (playlistId) => { calls.push(`commit:${playlistId}`); },
+      command: async (cmd) => { calls.push(cmd); return { exportedTracks: 1, skippedTracks: 0, warnings: [] }; }
+    })
+  );
+
+  assert.deepEqual(calls, ["commit:p1", "export_to_usb"]);
+});
+
+test("exportPlaylistToUsb blocks export when the sort commit fails, without calling export_to_usb", async () => {
+  let status = "";
+  let exportCalled = false;
+
+  await exportPlaylistToUsb(
+    makeExportState(),
+    {},
+    "p1",
+    makeExportDeps({
+      setStatus: (text) => { status = text; },
+      commitActivePlaylistSort: async () => { throw new Error("disk full"); },
+      command: async () => { exportCalled = true; return {}; }
+    })
+  );
+
+  assert.equal(exportCalled, false);
+  assert.match(status, /Export blocked: couldn't save the current sort order \(disk full\)/);
+});
+
 test("player menu single-select clears opposite list and enables proper actions", () => {
   const dom = new JSDOM(`<!doctype html><body>
     <button id="add"></button>

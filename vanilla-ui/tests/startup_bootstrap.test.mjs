@@ -6,7 +6,8 @@ import {
   hydrateAppVersionLabel,
   restoreStoredUiPrefs,
   runDeferredInitialLoad,
-  showHelpOnFirstVisit
+  showHelpOnFirstVisit,
+  switchView
 } from "../startup_bootstrap.mjs";
 
 const prefConstants = {
@@ -127,4 +128,64 @@ test("runDeferredInitialLoad loads initial data, selects fallback playlists, and
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(existing.currentPlaylistId, "p2");
   assert.equal(existing.startupPhase, false);
+});
+
+function switchViewDom() {
+  const dom = new JSDOM(`<!doctype html><body>
+    <nav id="navSidebar">
+      <button class="nav-item" data-view="library"></button>
+      <button class="nav-item" data-view="usb"></button>
+    </nav>
+    <ul id="navPlaylistList"></ul>
+  </body>`);
+  const document = dom.window.document;
+  return {
+    document,
+    el: {
+      navSidebar: document.getElementById("navSidebar"),
+      navPlaylistList: document.getElementById("navPlaylistList"),
+      panels: {
+        library: document.createElement("div"),
+        usb: document.createElement("div"),
+        playlist: document.createElement("div")
+      }
+    }
+  };
+}
+
+test("switchView commits the outgoing playlist's sort only when the view actually changes", async () => {
+  const { el } = switchViewDom();
+  const state = { activeTab: "p1", playlists: [{ id: "p1" }] };
+  const commitCalls = [];
+
+  await switchView(state, el, "usb", {
+    staticTabs: ["library", "usb"],
+    commitActivePlaylistSort: async (playlistId) => { commitCalls.push(playlistId); }
+  });
+
+  assert.deepEqual(commitCalls, ["p1"]);
+  assert.equal(state.activeTab, "usb");
+
+  // Re-selecting the same view should not fire another commit.
+  await switchView(state, el, "usb", {
+    staticTabs: ["library", "usb"],
+    commitActivePlaylistSort: async (playlistId) => { commitCalls.push(playlistId); }
+  });
+  assert.deepEqual(commitCalls, ["p1"]);
+});
+
+test("switchView still completes the switch when the sort commit fails", async () => {
+  const { el } = switchViewDom();
+  const state = { activeTab: "p1", playlists: [{ id: "p1" }] };
+  const statusMessages = [];
+
+  await switchView(state, el, "library", {
+    staticTabs: ["library", "usb"],
+    commitActivePlaylistSort: async () => { throw new Error("boom"); },
+    emitStatus: (text) => statusMessages.push(text)
+  });
+
+  assert.equal(state.activeTab, "library");
+  assert.equal(statusMessages.length, 1);
+  assert.match(statusMessages[0], /Save track order failed: boom/);
 });
