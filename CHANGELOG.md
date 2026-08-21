@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.26
+
 - **New feature:** sorting an app playlist by a column now sets its real (and thus exported)
   track order, not just how it looks while browsing. Sorting stays a free, reversible view action
   while you're viewing the playlist (search included — searching a sorted playlist never affects
