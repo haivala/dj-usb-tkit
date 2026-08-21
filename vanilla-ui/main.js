@@ -469,6 +469,12 @@ const applySortToTracks = (tracks, tbodyId) => shell.applySortToTracks(tableSort
     sortTracks: trackTable.sortTracks,
   });
 
+const clearPlaylistTrackSort = () => shell.clearTrackSort(
+  tableSortState,
+  "playlistTracksBody",
+  el.playlistTracksBody?.closest("[data-track-grid]")
+);
+
 function handleSortHeaderClick(e) {
   shell.handleSortHeaderClick(tableSortState, e, {
     renderMap: {
@@ -666,7 +672,6 @@ async function renderCurrentPlaylistTracksFromState() {
     renderTrackTable,
     cssEscape,
     updateTrackListDurationSummary,
-    isPlaylistTrackSortActive: () => !!tableSortState.playlistTracksBody,
   });
 }
 const mergeHydratedTrackIntoState = (rawTrack) => library.mergeHydratedTrackIntoState(state, rawTrack, {
@@ -903,7 +908,6 @@ async function refreshCurrentPlaylistTracks() {
     updatePlaylistPanelTitle,
     updatePlaylistExportButtons,
     renderPlaylistList,
-    isPlaylistTrackSortActive: () => !!tableSortState.playlistTracksBody,
   });
 }
 const createPlaylist = async (name) => playlist.createPlaylist(name, {
@@ -1404,6 +1408,7 @@ function bindEvents() {
     setProgress,
     resetAndLoadLibraryTracks,
     refreshCurrentPlaylistTracks,
+    clearPlaylistTrackSort,
     withProgress,
     persistSourceRoots,
     persistSourceRootEnabled,

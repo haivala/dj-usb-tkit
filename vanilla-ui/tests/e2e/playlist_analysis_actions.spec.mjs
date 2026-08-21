@@ -609,7 +609,7 @@ test("playlist track drag that does not change position skips persisting order",
   expect(calls).toEqual([]);
 });
 
-test("playlist track drag handle is hidden while a column sort is active", async ({ page }) => {
+test("playlist track drag handle stays enabled while a column sort is active", async ({ page }) => {
   await installReorderTauriMock(page);
   await page.goto("/");
 
@@ -618,7 +618,33 @@ test("playlist track drag handle is hidden while a column sort is active", async
   await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
 
   await page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]').click();
-  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
+  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
+});
+
+test("dragging a playlist track while sorted persists the manual order and clears the sorted-by hint", async ({ page }) => {
+  await installReorderTauriMock(page);
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const rows = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(rows).toHaveCount(3);
+
+  await page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]').click();
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+
+  // Drag "Song A" (t1, row 0) to below "Song C" (t3, row 2) while sorted.
+  await dragPlaylistTrackRow(page, "t1", "t3", false);
+
+  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(calls.length).toBeGreaterThan(0);
+  expect(calls[calls.length - 1]).toEqual(["t2", "t3", "t1"]);
+
+  // The drag clears the sort so the manual order isn't immediately re-sorted away.
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+  await expect(page.locator("#panel-playlist .sortable.sort-asc, #panel-playlist .sortable.sort-desc")).toHaveCount(0);
+  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t2");
+  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t3");
+  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t1");
 });
 
 test("playlist track drag handle is hidden while a search filter is active", async ({ page }) => {
@@ -679,6 +705,32 @@ test("playlist track drag handle is disabled with a tooltip when additive export
   await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
   const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
   expect(calls).toEqual([]);
+});
+
+test("playlist header sort is disabled with a tooltip when additive export won't reorder it on the USB", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });
+  await page.goto("/");
+
+  await connectUsbAndFetchPlaylists(page);
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const rows = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(rows).toHaveCount(3);
+
+  const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
+  await expect(artistHeader).toHaveAttribute(
+    "data-tooltip",
+    "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order."
+  );
+
+  await artistHeader.click();
+
+  // Clicking a locked header is a no-op: no hint, no sort classes, no reorder of rows.
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+  await expect(artistHeader).not.toHaveClass(/sort-asc|sort-desc/);
+  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
+  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t2");
+  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t3");
 });
 
 test("playlist track drag handle stays enabled in additive mode when no same-name USB playlist exists", async ({ page }) => {

@@ -5,6 +5,17 @@ export function applySortToTracks(tableSortState, tracks, tbodyId, deps = {}) {
   return sortTracks(tracks, st.key, st.dir);
 }
 
+export function clearTrackSort(tableSortState, bodyId, grid) {
+  delete tableSortState[bodyId];
+  if (!grid) return;
+  grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
+    h.classList.remove("sort-asc", "sort-desc");
+    const labelEl = h.querySelector(".sort-label");
+    if (labelEl) labelEl.textContent = h.dataset.sortDefault || "";
+  });
+  grid.querySelector(".sort-hint")?.classList.add("hidden");
+}
+
 export function handleSortHeaderClick(tableSortState, event, deps = {}) {
   const {
     renderMap = {},
@@ -16,6 +27,7 @@ export function handleSortHeaderClick(tableSortState, event, deps = {}) {
   const grid = th.closest("[data-track-grid]");
   const bodyId = grid?.dataset?.bodyId;
   if (!bodyId) return;
+  if (grid.dataset.sortLocked === "true") return;
 
   const key = th.dataset.sortKey;
   const altKeys = th.dataset.sortAlt ? th.dataset.sortAlt.split(",") : null;
@@ -30,39 +42,36 @@ export function handleSortHeaderClick(tableSortState, event, deps = {}) {
 
   const allKeys = [key, ...(altKeys || [])];
   const isThisHeader = current && allKeys.includes(current.key);
+  let nextState = null;
   if (isThisHeader) {
     const idx = cycle.findIndex((s) => s.key === current.key && s.dir === current.dir);
     if (idx >= 0 && idx < cycle.length - 1) {
-      tableSortState[bodyId] = cycle[idx + 1];
-    } else {
-      delete tableSortState[bodyId];
+      nextState = cycle[idx + 1];
     }
   } else {
-    tableSortState[bodyId] = cycle[0];
+    nextState = cycle[0];
   }
 
-  grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
-    h.classList.remove("sort-asc", "sort-desc");
-    const labelEl = h.querySelector(".sort-label");
-    if (labelEl) labelEl.textContent = h.dataset.sortDefault || "";
-  });
-
-  const st = tableSortState[bodyId];
-  const sortHint = grid.querySelector(".sort-hint");
-  if (st) {
-    const ownerTh = allKeys.includes(st.key)
+  if (!nextState) {
+    clearTrackSort(tableSortState, bodyId, grid);
+  } else {
+    tableSortState[bodyId] = nextState;
+    grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
+      h.classList.remove("sort-asc", "sort-desc");
+      const labelEl = h.querySelector(".sort-label");
+      if (labelEl) labelEl.textContent = h.dataset.sortDefault || "";
+    });
+    const ownerTh = allKeys.includes(nextState.key)
       ? th
-      : grid.querySelector(`[role="columnheader"][data-sort-key="${st.key}"]`);
+      : grid.querySelector(`[role="columnheader"][data-sort-key="${nextState.key}"]`);
     if (ownerTh) {
-      ownerTh.classList.add(st.dir === "asc" ? "sort-asc" : "sort-desc");
+      ownerTh.classList.add(nextState.dir === "asc" ? "sort-asc" : "sort-desc");
       if (altKeys) {
         const labelEl = ownerTh.querySelector(".sort-label");
-        if (labelEl) labelEl.textContent = st.key.charAt(0).toUpperCase() + st.key.slice(1);
+        if (labelEl) labelEl.textContent = nextState.key.charAt(0).toUpperCase() + nextState.key.slice(1);
       }
     }
-    if (sortHint) sortHint.classList.remove("hidden");
-  } else if (sortHint) {
-    sortHint.classList.add("hidden");
+    grid.querySelector(".sort-hint")?.classList.remove("hidden");
   }
 
   const rendererName = bodyToRendererMap[bodyId];

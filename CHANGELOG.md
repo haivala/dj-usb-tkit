@@ -37,6 +37,13 @@
   Artist) could cause Play, click-to-seek, and Remove to act on the wrong track — the row you
   clicked and the track actually played or deleted could differ once the list was sorted. Track
   actions now always resolve by the track's id instead of its row position.
+- **Improvement:** the Playlist track list now shows the same "sorted by" header hint as the
+  Library/USB/History track lists when a column sort is active, and dragging a track to a new
+  position now works even while sorted — the drag clears the sort so your manual order sticks
+  instead of being immediately re-sorted away.
+- **Fix:** column-header sorting in a local playlist's track list is now disabled — with the same
+  tooltip already shown on the disabled drag handle — when additive export would leave the USB's
+  existing copy of that playlist's order untouched, matching the existing drag-reorder guard.
 
 ## 0.1.24
 

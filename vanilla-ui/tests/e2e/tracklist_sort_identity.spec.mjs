@@ -186,6 +186,78 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
   expect(removeCall.trackIds).toEqual(["t3"]);
 });
 
+test("Playlist: header click shows and clears the sorted-by hint like other tracklists", async ({ page }) => {
+  await page.addInitScript(({ base }) => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+
+    const playlists = [{
+      id: "pl-1",
+      name: "Test Playlist",
+      source: "local",
+      lastExportedAt: null,
+      lastExportedUsbRoot: null,
+      lastExportedTrackCount: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }];
+
+    const playlistTracks = {
+      "pl-1": [
+        { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
+        { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+      ]
+    };
+
+    const handlers = {
+      ...base,
+      list_playlists: async () => ({ ok: true, data: { items: playlists } }),
+      get_playlist_tracks: async (request) => {
+        const items = playlistTracks[request.playlistId] || [];
+        const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
+        const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+        return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+      },
+      list_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
+      search_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
+      browse_source_files: async () => ({ ok: true, data: { total: 0, items: [] } })
+    };
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request || payload;
+          const handler = handlers[command];
+          if (handler) return handler(request);
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        }
+      }
+    };
+  }, { base: {} });
+
+  await page.goto("/");
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+
+  const albumHeader = page.locator('#panel-playlist .sortable[data-sort-key="album"]');
+  const sortHint = page.locator("#panel-playlist .sort-hint");
+  await expect(sortHint).toBeHidden();
+
+  // Ascending click shows the hint, like Library/USB/History tracklists.
+  await albumHeader.click();
+  await expect(sortHint).toBeVisible();
+  await expect(albumHeader).toHaveClass(/sort-asc/);
+
+  // Descending click keeps it visible.
+  await albumHeader.click();
+  await expect(sortHint).toBeVisible();
+  await expect(albumHeader).toHaveClass(/sort-desc/);
+
+  // Third click cycles back to unsorted -- hint hides again.
+  await albumHeader.click();
+  await expect(sortHint).toBeHidden();
+  await expect(albumHeader).not.toHaveClass(/sort-asc|sort-desc/);
+});
+
 test("Library: sorting by BPM column actually orders rows by numeric BPM value", async ({ page }) => {
   await page.addInitScript(({ base }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");

@@ -652,8 +652,7 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
     applySortToTracks = (tracks) => tracks,
     renderTrackTable = () => {},
     cssEscape = (value) => String(value || ""),
-    updateTrackListDurationSummary = () => {},
-    isPlaylistTrackSortActive = () => false
+    updateTrackListDurationSummary = () => {}
   } = deps;
 
   const playlist = getCurrentPlaylist();
@@ -681,12 +680,24 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
   // Row click handlers resolve data-id back into this array, so it has to
   // match rendered order (see components/usb/actions.mjs for the same rule).
   state.currentPlaylistTracksView = sortedPlaylist;
-  const sortOrSearchActive = isPlaylistTrackSortActive() || !!state.playlistTrackSearch;
+  const searchActive = !!state.playlistTrackSearch;
   const exportBlocksReorder = !!state.playlistUsbExportStatusById?.get(playlist.id)?.locksReorder;
-  const enableDragReorder = !sortOrSearchActive && !exportBlocksReorder;
-  const dragDisabledTooltip = (!sortOrSearchActive && exportBlocksReorder)
+  const enableDragReorder = !searchActive && !exportBlocksReorder;
+  const exportLockedTooltip = exportBlocksReorder
     ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
     : null;
+  const dragDisabledTooltip = !searchActive ? exportLockedTooltip : null;
+  const sortGrid = el.playlistTracksBody?.closest("[data-track-grid]");
+  if (sortGrid) {
+    sortGrid.dataset.sortLocked = exportBlocksReorder ? "true" : "false";
+    sortGrid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
+      if (exportLockedTooltip) {
+        h.setAttribute("data-tooltip", exportLockedTooltip);
+      } else {
+        h.removeAttribute("data-tooltip");
+      }
+    });
+  }
   await renderTrackTable(el.playlistTracksBody, sortedPlaylist, {
     withCheckbox: false,
     origin: "local",
