@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.27
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** a playlist that had been exported to the same USB many times over its history could
