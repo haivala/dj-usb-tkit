@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.28
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix:** initializing a fresh USB now writes its baseline `export.pdb`/`exportLibrary.db` through
