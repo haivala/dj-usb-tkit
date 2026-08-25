@@ -15,16 +15,13 @@ if (typeof globalThis.window === "undefined") {
 }
 
 import { setupConsoleFileLogging, setupRuntimeErrorLogging } from "../components/event-log/actions.mjs";
+import { withSilencedConsole } from "./test_helpers.mjs";
 
 test("setupConsoleFileLogging intercepts console methods and pushes to event log", async () => {
-  const originalLog = console.log;
-  const originalInfo = console.info;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  const logged = [];
-  const invoked = [];
+  await withSilencedConsole(async () => {
+    const logged = [];
+    const invoked = [];
 
-  try {
     await setupConsoleFileLogging({
       isTauriRuntime: () => false,
       invoke: (cmd, payload) => { invoked.push({ cmd, payload }); },
@@ -43,22 +40,13 @@ test("setupConsoleFileLogging intercepts console methods and pushes to event log
     assert.equal(logged[2].level, "error");
     // Non-tauri: no file forwarding
     assert.equal(invoked.length, 0);
-  } finally {
-    console.log = originalLog;
-    console.info = originalInfo;
-    console.warn = originalWarn;
-    console.error = originalError;
-  }
+  });
 });
 
 test("setupConsoleFileLogging forwards to file in tauri mode", async () => {
-  const originalLog = console.log;
-  const originalInfo = console.info;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  const invoked = [];
+  await withSilencedConsole(async () => {
+    const invoked = [];
 
-  try {
     await setupConsoleFileLogging({
       isTauriRuntime: () => true,
       invoke: (cmd, payload) => { invoked.push({ cmd, payload }); return Promise.resolve(); },
@@ -72,22 +60,13 @@ test("setupConsoleFileLogging forwards to file in tauri mode", async () => {
     assert.ok(appendCalls.length >= 1);
     assert.equal(appendCalls[0].payload.level, "info");
     assert.equal(appendCalls[0].payload.message, "test message");
-  } finally {
-    console.log = originalLog;
-    console.info = originalInfo;
-    console.warn = originalWarn;
-    console.error = originalError;
-  }
+  });
 });
 
 test("setupConsoleFileLogging serializes non-string args", async () => {
-  const originalLog = console.log;
-  const originalInfo = console.info;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  const logged = [];
+  await withSilencedConsole(async () => {
+    const logged = [];
 
-  try {
     await setupConsoleFileLogging({
       isTauriRuntime: () => false,
       invoke: () => {},
@@ -100,12 +79,7 @@ test("setupConsoleFileLogging serializes non-string args", async () => {
     assert.ok(logged[0].message.includes("count:"));
     assert.ok(logged[0].message.includes("42"));
     assert.ok(logged[0].message.includes('"key"'));
-  } finally {
-    console.log = originalLog;
-    console.info = originalInfo;
-    console.warn = originalWarn;
-    console.error = originalError;
-  }
+  });
 });
 
 test("setupRuntimeErrorLogging captures unhandled errors", () => {

@@ -9,6 +9,7 @@ import {
   showHelpOnFirstVisit,
   switchView
 } from "../startup_bootstrap.mjs";
+import { withSilencedConsole } from "./test_helpers.mjs";
 
 const prefConstants = {
   STORAGE_KEY_EXPORT_PRUNE_STALE: "prune",
@@ -179,11 +180,14 @@ test("switchView still completes the switch when the sort commit fails", async (
   const state = { activeTab: "p1", playlists: [{ id: "p1" }] };
   const statusMessages = [];
 
-  await switchView(state, el, "library", {
+  // switchView logs the caught commit error via console.error -- expected
+  // here since we're deliberately exercising that path, so silence it to
+  // keep the test run's terminal output clean.
+  await withSilencedConsole(() => switchView(state, el, "library", {
     staticTabs: ["library", "usb"],
     commitActivePlaylistSort: async () => { throw new Error("boom"); },
     emitStatus: (text) => statusMessages.push(text)
-  });
+  }));
 
   assert.equal(state.activeTab, "library");
   assert.equal(statusMessages.length, 1);

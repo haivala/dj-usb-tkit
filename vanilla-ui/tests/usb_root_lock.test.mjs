@@ -22,6 +22,7 @@ import {
 import { updatePlaylistExportButtons } from "../components/playlist/actions.mjs";
 import { handleJobEvent } from "../job_manager.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
+import { withSilencedConsole } from "./test_helpers.mjs";
 
 function jobHarness() {
   const el = {
@@ -157,36 +158,42 @@ test("updatePlaylistExportButtons respects USB-root lock state", () => {
   }
 });
 
-test("handleJobEvent locks USB controls only for USB-locking job lifecycles", () => {
-  const locking = jobHarness();
-  const lockingCalls = [];
-  const deps = {
-    debugFrontendLog: () => {},
-    setUsbRootControlsLocked: (locked) => lockingCalls.push(locked)
-  };
-  handleJobEvent(locking.state, locking.el, { event: "job.started", jobId: "job-1", jobType: "diagnostics" }, deps);
-  handleJobEvent(locking.state, locking.el, { event: "job.completed", jobId: "job-1", jobType: "diagnostics" }, deps);
-  assert.deepEqual(lockingCalls, [true, false]);
+test("handleJobEvent locks USB controls only for USB-locking job lifecycles", async () => {
+  // handleJobEvent unconditionally console.logs a "[job-event]" trace line
+  // for every event it handles -- expected here since we're calling it
+  // directly and repeatedly, so silence it to keep the test run's terminal
+  // output clean.
+  await withSilencedConsole(() => {
+    const locking = jobHarness();
+    const lockingCalls = [];
+    const deps = {
+      debugFrontendLog: () => {},
+      setUsbRootControlsLocked: (locked) => lockingCalls.push(locked)
+    };
+    handleJobEvent(locking.state, locking.el, { event: "job.started", jobId: "job-1", jobType: "diagnostics" }, deps);
+    handleJobEvent(locking.state, locking.el, { event: "job.completed", jobId: "job-1", jobType: "diagnostics" }, deps);
+    assert.deepEqual(lockingCalls, [true, false]);
 
-  const analysis = jobHarness();
-  const analysisCalls = [];
-  const analysisDeps = {
-    debugFrontendLog: () => {},
-    setUsbRootControlsLocked: (locked) => analysisCalls.push(locked)
-  };
-  handleJobEvent(analysis.state, analysis.el, { event: "job.started", jobId: "job-1", jobType: "analysis" }, analysisDeps);
-  handleJobEvent(analysis.state, analysis.el, { event: "job.completed", jobId: "job-1", jobType: "analysis" }, analysisDeps);
-  assert.deepEqual(analysisCalls, []);
+    const analysis = jobHarness();
+    const analysisCalls = [];
+    const analysisDeps = {
+      debugFrontendLog: () => {},
+      setUsbRootControlsLocked: (locked) => analysisCalls.push(locked)
+    };
+    handleJobEvent(analysis.state, analysis.el, { event: "job.started", jobId: "job-1", jobType: "analysis" }, analysisDeps);
+    handleJobEvent(analysis.state, analysis.el, { event: "job.completed", jobId: "job-1", jobType: "analysis" }, analysisDeps);
+    assert.deepEqual(analysisCalls, []);
 
-  const failed = jobHarness();
-  const failedCalls = [];
-  const failedDeps = {
-    debugFrontendLog: () => {},
-    setUsbRootControlsLocked: (locked) => failedCalls.push(locked)
-  };
-  handleJobEvent(failed.state, failed.el, { event: "job.started", jobId: "job-1", jobType: "usb_write" }, failedDeps);
-  handleJobEvent(failed.state, failed.el, { event: "job.failed", jobId: "job-1", jobType: "usb_write" }, failedDeps);
-  assert.deepEqual(failedCalls, [true, false]);
+    const failed = jobHarness();
+    const failedCalls = [];
+    const failedDeps = {
+      debugFrontendLog: () => {},
+      setUsbRootControlsLocked: (locked) => failedCalls.push(locked)
+    };
+    handleJobEvent(failed.state, failed.el, { event: "job.started", jobId: "job-1", jobType: "usb_write" }, failedDeps);
+    handleJobEvent(failed.state, failed.el, { event: "job.failed", jobId: "job-1", jobType: "usb_write" }, failedDeps);
+    assert.deepEqual(failedCalls, [true, false]);
+  });
 });
 
 test("loadUsbDevices maps backend devices and recovers to an empty list on failure", async () => {
@@ -204,7 +211,12 @@ test("loadUsbDevices maps backend devices and recovers to an empty list on failu
   assert.deepEqual(state.usbDevices, items);
 
   const failed = {};
-  assert.deepEqual(await loadUsbDevices(failed, async () => { throw new Error("boom"); }), []);
+  // loadUsbDevices logs the caught failure via console.warn -- expected
+  // here since we're deliberately exercising that path.
+  const failedRows = await withSilencedConsole(() =>
+    loadUsbDevices(failed, async () => { throw new Error("boom"); })
+  );
+  assert.deepEqual(failedRows, []);
   assert.deepEqual(failed.usbRecentRoots, []);
 });
 
