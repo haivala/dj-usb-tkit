@@ -30,6 +30,19 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** a playlist that had been exported to the same USB many times over its history could
+  accumulate duplicate rows in the exported database — one real-world drive had a single track
+  duplicated 7 times — eventually corrupting the export enough that the drive failed to load on
+  a CDJ at all (no menu, not even a specific-track error). This happened because the writer
+  identified a playlist entry by its track *and* its position together, so a track whose position
+  changed between exports was treated as one entry being removed and a different one being added,
+  instead of the same entry moving — and if that removal ever lagged behind the addition across a
+  playlist's export history, the stale copy was never cleaned up. Track positions are now updated
+  in place, and every export also sweeps for and removes any duplicate entries already left behind
+  on a drive from before this fix.
+
 ## 0.1.26
 
 - **New feature:** sorting an app playlist by a column now sets its real (and thus exported)

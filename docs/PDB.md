@@ -65,6 +65,11 @@ Known PDB rules:
   older PDB-first hardware players.
 - `tt=8` playlist-entry pages are strictly validated as
   `u5=1, num_rl=trc-1`.
+- `tt=8` playlist-entry rows are identified by `(playlist_id, track_id)`.
+  `entry_index` is a mutable position, never part of identity: a track whose
+  order within an already-exported playlist changes is patched in place
+  (`patch_t08_entry_indices_in_place`), not removed and re-added. See "t08
+  duplicate playlist-entry accumulation" below.
 - PDB/eDB strict parity failures are repaired through explicit repair actions,
   not by report commands.
 
@@ -175,6 +180,37 @@ immediately when a table's chain is unreachable
 (`backend/src/pdb_writer.rs:4732`), which otherwise blocks (or makes
 order-dependent) every strict-parity playlist mutation that needs a new or
 changed track row.
+
+**t08 duplicate playlist-entry accumulation.** Found on a real-world export
+that failed to load on hardware at all (CDJ menu never appeared): a playlist
+re-exported many times over its history had one track
+duplicated across 7 separate `tt=8` rows (another, 4 times; four more, once
+each) — 87 rows for a playlist eDB said should have 74. The playlist that had
+been exported in a single session, on the same drive, was clean; only the
+one repeatedly re-exported was affected.
+
+Root cause: the additive writer used to identify a `tt=8` row by
+`(playlist_id, track_id, entry_index)` — all three fields — instead of
+`(playlist_id, track_id)` alone. Every time a track's position within an
+already-exported playlist changed, that was computed as "old
+`(playlist,track,old_index)` removed, new `(playlist,track,new_index)`
+added" instead of "this entry's position changed." In a single clean write
+that pair completes correctly and leaves no trace; the accumulation only
+shows up after enough repeated position changes across a playlist's export
+history that the removal half of some pair doesn't keep up with the
+addition half. Fixed by giving repositioning its own path
+(`patch_t08_entry_indices_in_place`): a track that's still in the playlist
+but at a new `entry_index` gets that field overwritten in place at its
+existing row location, so there is no remove+add pair for a reposition to
+begin with. `try_write_pdb_additive_in_place` also now runs
+`remove_duplicate_playlist_entries_inplace` unconditionally on every
+additive write (previously only from one specific repair path) as a
+self-healing sweep for USBs that already accumulated duplicates before this
+fix — its survivor tie-break keeps the *highest* `entry_index` per
+`(playlist_id, track_id)` (the most recently written, i.e. correct, position
+for this failure mode; do not revert to "keep lowest" without re-reading
+`remove_duplicate_playlist_entries_inplace`'s doc comment, which also
+protects an unrelated stale-page-relocation scenario).
 
 Known table families used by this repository:
 

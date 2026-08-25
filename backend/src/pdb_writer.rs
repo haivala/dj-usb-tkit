@@ -1337,7 +1337,14 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
         }
     }
 
-    // ── Decide removals: keep the lowest entry_index per (playlist_id, track_id) ──
+    // ── Decide removals: keep the highest entry_index per (playlist_id, track_id) ──
+    // The additive writer now updates a track's entry_index in place when its
+    // position changes (see `patch_t08_entry_indices_in_place`), so this sweep
+    // only exists to clean up duplicates left behind by exports predating that
+    // fix. In that failure mode the *highest* entry_index is the most recently
+    // written (correct, current) position; the lower one(s) are the stale
+    // pre-reposition copies that were never cleaned up. Keeping the lowest (the
+    // prior behavior) would silently keep the stale position instead.
     let mut to_remove: std::collections::HashSet<(usize, usize, usize)> =
         std::collections::HashSet::new();
     for locs in locations.values() {
@@ -1346,7 +1353,7 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
         }
         let mut sorted: Vec<&PlaylistEntryLocation> = locs.iter().collect();
         sorted.sort_by_key(|l| (l.entry_index, l.page_idx, l.group_start_row, l.bit));
-        for loc in sorted.into_iter().skip(1) {
+        for loc in sorted.into_iter().rev().skip(1) {
             to_remove.insert((loc.page_idx, loc.group_start_row, loc.bit));
         }
     }
@@ -1451,6 +1458,150 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
     }
 
     removed
+}
+
+/// Update a t08 (playlist_entry) row's `entry_index` in place, without
+/// touching its `track_id`/`playlist_id` identity or moving the row.
+///
+/// `patches` is `(playlist_id, track_id, new_entry_index)`. An existing row
+/// is matched by `(playlist_id, track_id)` only — `entry_index` is treated
+/// as a mutable position, never part of identity (see `T08EntryKey`'s doc
+/// comment). This is what makes a track's position change in an already-
+/// exported playlist a true in-place update instead of a remove+add pair:
+/// there is no delete/add pair here for a partial failure (e.g. an
+/// interrupted export) to leave duplicated behind. Rows are fixed-length
+/// (12 bytes), so this is a pure 4-byte overwrite — no page relayout.
+///
+/// Returns the number of rows actually patched.
+pub(crate) fn patch_t08_entry_indices_in_place(
+    bytes: &mut [u8],
+    patches: &[(u32, u32, u32)],
+    page_size: usize,
+) -> usize {
+    if patches.is_empty() {
+        return 0;
+    }
+    if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size)
+    {
+        return 0;
+    }
+    let desired_by_identity: std::collections::HashMap<(u32, u32), u32> = patches
+        .iter()
+        .map(|&(playlist_id, track_id, new_entry_index)| {
+            ((playlist_id, track_id), new_entry_index)
+        })
+        .collect();
+
+    let total_pages = bytes.len() / page_size;
+    let mut touched_pages = std::collections::HashSet::<usize>::new();
+    let mut patched = 0usize;
+
+    for page_idx in 1..total_pages {
+        let page_start = page_idx * page_size;
+        let page_end = page_start + page_size;
+        if page_end > bytes.len() {
+            break;
+        }
+        let Some(pt) = read_u32_le_at(bytes, page_start + 0x08) else {
+            continue;
+        };
+        if pt != 8 {
+            continue;
+        }
+        let page_flags = bytes[page_start + 0x1b];
+        if page_flags & 0x40 != 0 {
+            continue; // tombstoned page
+        }
+        let packed = u32::from(bytes[page_start + 0x18])
+            | (u32::from(bytes[page_start + 0x19]) << 8)
+            | (u32::from(bytes[page_start + 0x1a]) << 16);
+        let num_row_offsets = (packed & 0x1FFF) as usize;
+        if num_row_offsets == 0 {
+            continue;
+        }
+        let Some(used_size) = read_u16_le_at(bytes, page_start + 0x1e).map(|v| v as usize) else {
+            continue;
+        };
+        let payload_start = page_start + HEAP_START;
+        let payload_end = payload_start + used_size;
+        if payload_end > page_end {
+            continue;
+        }
+
+        let mut cursor = page_end;
+        for group_start_row in (0..num_row_offsets).step_by(16) {
+            let group_len = (num_row_offsets - group_start_row).min(16);
+            if cursor < page_start + 4 + group_len * 2 {
+                break;
+            }
+            cursor -= 2; // tranrf (unused here)
+            cursor -= 2;
+            let rowpf_off = cursor;
+            let Some(rowpf) = read_u16_le_at(bytes, rowpf_off) else {
+                continue;
+            };
+            let mut offsets = Vec::with_capacity(group_len);
+            for _ in 0..group_len {
+                cursor -= 2;
+                let Some(off) = read_u16_le_at(bytes, cursor).map(|v| v as usize) else {
+                    offsets.clear();
+                    break;
+                };
+                offsets.push(off);
+            }
+            if offsets.len() != group_len {
+                continue;
+            }
+            for (j, &heap_off) in offsets.iter().enumerate() {
+                let bit = 1u16 << (j as u16);
+                if rowpf & bit == 0 {
+                    continue;
+                }
+                let row_abs = payload_start + heap_off;
+                if row_abs + 12 > payload_end.min(page_end) {
+                    continue;
+                }
+                let row_data = &bytes[row_abs..row_abs + 12];
+                let (Some(track_id), Some(playlist_id)) = (
+                    extract_playlist_entry_track_id(row_data),
+                    extract_playlist_entry_playlist_id(row_data),
+                ) else {
+                    continue;
+                };
+                let Some(&new_entry_index) = desired_by_identity.get(&(playlist_id, track_id))
+                else {
+                    continue;
+                };
+                let current_entry_index = extract_u32_at(row_data, 0x00).unwrap_or(0);
+                if current_entry_index == new_entry_index {
+                    continue;
+                }
+                bytes[row_abs..row_abs + 4].copy_from_slice(&new_entry_index.to_le_bytes());
+                touched_pages.insert(page_idx);
+                patched += 1;
+            }
+        }
+    }
+
+    if !touched_pages.is_empty() {
+        let mut next_seq = max_seqpage_in_file(bytes, page_size)
+            .saturating_add(1)
+            .max(2);
+        let mut pages: Vec<usize> = touched_pages.into_iter().collect();
+        pages.sort_unstable();
+        for page_idx in pages {
+            let off = page_idx * page_size;
+            let _ = write_u32_le_at(bytes, off + 0x10, next_seq);
+            next_seq = next_seq.saturating_add(1);
+        }
+        let seqdb = read_u32_le_at(bytes, 0x14)
+            .unwrap_or(0)
+            .max(next_seq)
+            .max(max_seqpage_in_file(bytes, page_size).saturating_add(1));
+        let _ = write_u32_le_at(bytes, 0x14, seqdb);
+    }
+
+    patched
 }
 
 /// Normalise tt=8 (playlist_entry) page footer fields to `(u5=1, num_rl=trc-1)`.
@@ -2719,11 +2870,14 @@ mod writer_tests {
     fn remove_duplicate_playlist_entries_collapses_stale_copy() {
         // Same shape as the real-world defect this repairs: a track is
         // duplicated under the same playlist_id with a different
-        // entry_index, and an unrelated row must survive untouched.
+        // entry_index, and an unrelated row must survive untouched. The
+        // highest entry_index is the most recently written (current)
+        // position -- see the doc comment on the removal sort in
+        // `remove_duplicate_playlist_entries_inplace`.
         let mut bytes = build_tt8_test_page(&[
-            (1, 100, 1), // kept: lowest entry_index for (playlist=1, track=100)
+            (1, 100, 1), // stale duplicate, must be removed
             (2, 200, 1), // untouched: distinct track
-            (5, 100, 1), // stale duplicate of the first row, must be removed
+            (5, 100, 1), // kept: highest entry_index for (playlist=1, track=100)
         ]);
 
         let removed = remove_duplicate_playlist_entries_inplace(&mut bytes);
@@ -2731,7 +2885,7 @@ mod writer_tests {
 
         let mut rows = active_tt8_rows(&bytes);
         rows.sort();
-        assert_eq!(rows, vec![(1, 100, 1), (2, 200, 1)]);
+        assert_eq!(rows, vec![(2, 200, 1), (5, 100, 1)]);
     }
 
     #[test]
@@ -2760,6 +2914,8 @@ mod writer_tests {
 
     #[test]
     fn remove_duplicate_playlist_entries_removes_all_but_one_of_triple() {
+        // Three copies of (playlist=33, track=900) at entry_index 4/11/26;
+        // the highest (26, most recently written) survives.
         let mut bytes =
             build_tt8_test_page(&[(4, 900, 33), (11, 900, 33), (26, 900, 33), (12, 950, 33)]);
 
@@ -2768,7 +2924,7 @@ mod writer_tests {
 
         let mut rows = active_tt8_rows(&bytes);
         rows.sort();
-        assert_eq!(rows, vec![(4, 900, 33), (12, 950, 33)]);
+        assert_eq!(rows, vec![(12, 950, 33), (26, 900, 33)]);
     }
 
     #[test]
@@ -3755,9 +3911,20 @@ pub(crate) struct PdbAdditiveDiff {
     /// Desired final t08 entries; passed through to the existing in-place
     /// patch helpers, which figure out what to add and where.
     pub desired_t08_entries: Vec<T08EntryKey>,
-    /// t08 entries to remove in-place before appending new ones.
-    /// Non-empty when mirror-mode export shrinks an existing playlist.
+    /// t08 entries whose `(playlist_id, track_id)` identity is no longer
+    /// desired at all — to be removed in-place. Does NOT include entries
+    /// that are still desired but at a different `entry_index`; those are
+    /// `repositioned_t08_entries` instead, so a position change is never a
+    /// remove+add pair. Non-empty when mirror-mode export shrinks an
+    /// existing playlist, or an additive export drops a track from it.
     pub removed_t08_entries: Vec<T08EntryKey>,
+    /// Existing `(playlist_id, track_id)` entries whose desired
+    /// `entry_index` differs from what's currently on disk — patched in
+    /// place via `patch_t08_entry_indices_in_place` rather than deleted and
+    /// re-added, so a playlist whose track order changes can never
+    /// accumulate duplicate rows across repeated exports.
+    /// `(playlist_id, track_id, new_entry_index)`.
+    pub repositioned_t08_entries: Vec<(u32, u32, u32)>,
     /// Number of t19 runtime-history rows to synthesize in place for a
     /// template first export. Includes the seed row, so this is usually
     /// `track_count + 1`.
@@ -4124,24 +4291,43 @@ pub(crate) fn compute_additive_diff(
         })
         .collect();
 
-    // ── t08 deletion check ──────────────────────────────────────────
+    // ── t08 deletion + reposition check ─────────────────────────────
     //
     // `desired_t08_entries` describes the FINAL desired set for the
-    // target playlist. Existing entries for that playlist that are not
-    // in the desired set will be removed in-place by the apply step.
-    // Record them here rather than rejecting the diff.
-    let removed_t08_entries: Vec<T08EntryKey> = if !desired_t08_entries.is_empty() {
-        let target_playlist_id = desired_t08_entries[0].playlist_id;
-        let desired_set: std::collections::HashSet<T08EntryKey> =
-            desired_t08_entries.iter().copied().collect();
-        let existing_t08 = collect_t08_entry_keys(existing_bytes, 4096);
-        existing_t08
-            .into_iter()
-            .filter(|k| k.playlist_id == target_playlist_id && !desired_set.contains(k))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    // target playlist. An existing entry is matched against it by
+    // `(playlist_id, track_id)` identity only -- `entry_index` is a
+    // position, not part of identity (see `T08EntryKey`'s doc comment and
+    // `patch_t08_entry_indices_in_place`). This keeps a track whose order
+    // changed from ever being computed as a remove+add pair: it is either
+    // unchanged, or its position is patched in place, never both removed
+    // and re-added.
+    let (removed_t08_entries, repositioned_t08_entries): (Vec<T08EntryKey>, Vec<(u32, u32, u32)>) =
+        if !desired_t08_entries.is_empty() {
+            let target_playlist_id = desired_t08_entries[0].playlist_id;
+            let desired_by_identity: std::collections::HashMap<(u32, u32), u32> =
+                desired_t08_entries
+                    .iter()
+                    .map(|k| ((k.playlist_id, k.track_id), k.entry_index))
+                    .collect();
+            let existing_t08 = collect_t08_entry_keys(existing_bytes, 4096);
+            let mut removed = Vec::new();
+            let mut repositioned = Vec::new();
+            for k in existing_t08 {
+                if k.playlist_id != target_playlist_id {
+                    continue;
+                }
+                match desired_by_identity.get(&(k.playlist_id, k.track_id)) {
+                    None => removed.push(k),
+                    Some(&new_entry_index) if new_entry_index != k.entry_index => {
+                        repositioned.push((k.playlist_id, k.track_id, new_entry_index));
+                    }
+                    _ => {}
+                }
+            }
+            (removed, repositioned)
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
     Ok(PdbAdditiveDiff {
         new_tracks,
@@ -4156,6 +4342,7 @@ pub(crate) fn compute_additive_diff(
         new_playlist_tree,
         desired_t08_entries,
         removed_t08_entries,
+        repositioned_t08_entries,
         synthesize_t19_runtime_rows,
     })
 }
@@ -5065,15 +5252,19 @@ pub(crate) fn apply_additive_diff(
     // helpers refuse that case and would silently leave the new
     // entries unwritten.
     if !diff.desired_t08_entries.is_empty() {
-        let existing_keys: std::collections::HashSet<T08EntryKey> =
+        // Identity only (playlist_id, track_id) -- an entry whose
+        // entry_index is about to be patched in place below is still
+        // "existing" here and must not also be appended as new.
+        let existing_identities: std::collections::HashSet<(u32, u32)> =
             collect_t08_entry_keys(&out, page_size)
                 .into_iter()
+                .map(|k| (k.playlist_id, k.track_id))
                 .collect();
         let added_keys: Vec<T08EntryKey> = diff
             .desired_t08_entries
             .iter()
             .copied()
-            .filter(|k| !existing_keys.contains(k))
+            .filter(|k| !existing_identities.contains(&(k.playlist_id, k.track_id)))
             .collect();
         if !added_keys.is_empty() {
             let added_rows: Vec<Vec<u8>> = added_keys
@@ -5082,6 +5273,21 @@ pub(crate) fn apply_additive_diff(
                 .collect();
             let _ = append_rows_to_chain_in_place(&mut out, 8, &added_rows, page_size)?;
         }
+    }
+
+    // ── t08 playlist_entries: reposition existing entries in place ──────
+    //
+    // A track whose entry_index changed (e.g. the playlist was reordered)
+    // but whose (playlist_id, track_id) identity is unchanged is patched
+    // in place here rather than removed and re-added -- see
+    // `patch_t08_entry_indices_in_place`'s doc comment for why that
+    // matters.
+    if !diff.repositioned_t08_entries.is_empty() {
+        let _ = patch_t08_entry_indices_in_place(
+            &mut out,
+            &diff.repositioned_t08_entries,
+            page_size,
+        );
     }
 
     if let Some(row_count) = diff.synthesize_t19_runtime_rows {
@@ -5142,6 +5348,13 @@ pub(crate) fn try_write_pdb_additive_in_place(
     }
 
     fix_tt8_num_rl_conventions_inplace(&mut bytes);
+
+    // Defense in depth: `repositioned_t08_entries` (above) prevents new t08
+    // duplicates from being created, but this sweep also self-heals a USB
+    // that already has duplicate (playlist_id, track_id) rows from before
+    // that fix existed -- every additive export cleans them up a little
+    // more, without requiring a manual repair action.
+    remove_duplicate_playlist_entries_inplace(&mut bytes);
 
     let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
     if !mismatches.is_empty() {
@@ -7407,6 +7620,214 @@ mod additive_tests {
             after[ec7_off..ec7_off + PAGE_SIZE].iter().all(|b| *b == 0),
             "tt=7 empty candidate page should remain blank"
         );
+    }
+
+    fn reposition_test_track(id: u32) -> crate::service::export_helpers::PdbTrackRowData {
+        use crate::service::export_helpers::PdbTrackRowData;
+        PdbTrackRowData {
+            header_flags_u32: None,
+            content_link: None,
+            sample_rate_hz: None,
+            file_size_bytes: None,
+            master_content_id: None,
+            master_db_id: None,
+            id,
+            artist_id: 0,
+            album_id: 0,
+            artwork_id: 0,
+            key_id: 0,
+            genre_id: 0,
+            bitrate_kbps: None,
+            track_number: None,
+            bpm: None,
+            release_year: None,
+            bit_depth: None,
+            duration_seconds: Some(180),
+            file_type: None,
+            isrc: None,
+            date_added: None,
+            release_date: None,
+            dj_comment: None,
+            file_name: Some(format!("reposition-track-{id}.flac")),
+            publish_track_info_on: None,
+            autoload_hotcues_on: None,
+            title: format!("Reposition Track {id}"),
+            anlz_path: format!("/PIONEER/USBANLZ/P000/{id:08X}/ANLZ0000.DAT"),
+            file_path: format!("/Contents/reposition-track-{id}.flac"),
+        }
+    }
+
+    #[test]
+    fn additive_diff_reposition_does_not_duplicate_or_reappend() {
+        // A playlist whose members' entry_index changes (e.g. a reorder)
+        // must be patched in place, never removed and re-added -- that's
+        // what makes duplication structurally impossible. This is the
+        // pure-reposition case: same track set, only order changes.
+        let mut seed = PdbData::empty();
+        seed.colors = standard_colors();
+        seed.columns_raw_rows = standard_columns_raw();
+        let before = write_pdb(&seed).expect("write empty seed");
+
+        let mut first = seed.clone();
+        for id in 1..=3u32 {
+            first.tracks.push(reposition_test_track(id));
+        }
+        first.playlist_tree.push(PdbPlaylistTreeRow {
+            id: 1,
+            parent_id: 0,
+            sort_order: 0,
+            is_folder: false,
+            name: "Reposition Playlist".into(),
+        });
+        for id in 1..=3u32 {
+            first.playlist_entries.push(PdbPlaylistEntryRow {
+                entry_index: id,
+                track_id: id,
+                playlist_id: 1,
+            });
+        }
+        let first_desired = first
+            .playlist_entries
+            .iter()
+            .map(|e| T08EntryKey {
+                entry_index: e.entry_index,
+                track_id: e.track_id,
+                playlist_id: e.playlist_id,
+            })
+            .collect::<Vec<_>>();
+        let (after_first, _) =
+            try_write_pdb_additive_in_place(&before, &first, first_desired, PAGE_SIZE)
+                .expect("first export result")
+                .expect("first export accepted");
+        assert_eq!(collect_t08_entry_keys(&after_first, PAGE_SIZE).len(), 3);
+
+        // Reorder: track 3 moves to the front, everything else shifts down.
+        let mut reordered = first.clone();
+        reordered.playlist_entries = vec![
+            PdbPlaylistEntryRow {
+                entry_index: 1,
+                track_id: 3,
+                playlist_id: 1,
+            },
+            PdbPlaylistEntryRow {
+                entry_index: 2,
+                track_id: 1,
+                playlist_id: 1,
+            },
+            PdbPlaylistEntryRow {
+                entry_index: 3,
+                track_id: 2,
+                playlist_id: 1,
+            },
+        ];
+        let reordered_desired = reordered
+            .playlist_entries
+            .iter()
+            .map(|e| T08EntryKey {
+                entry_index: e.entry_index,
+                track_id: e.track_id,
+                playlist_id: e.playlist_id,
+            })
+            .collect::<Vec<_>>();
+        let (after_reorder, summary) = try_write_pdb_additive_in_place(
+            &after_first,
+            &reordered,
+            reordered_desired,
+            PAGE_SIZE,
+        )
+        .expect("reorder export result")
+        .expect("reorder export accepted");
+
+        assert_eq!(
+            summary.new_tracks, 0,
+            "reordering existing tracks must not classify any of them as new"
+        );
+        let mut final_rows = collect_t08_entry_keys(&after_reorder, PAGE_SIZE);
+        assert_eq!(
+            final_rows.len(),
+            3,
+            "reorder must not leave duplicate playlist-entry rows behind"
+        );
+        final_rows.sort_by_key(|k| k.track_id);
+        assert_eq!(final_rows[0].track_id, 1);
+        assert_eq!(final_rows[0].entry_index, 2);
+        assert_eq!(final_rows[1].track_id, 2);
+        assert_eq!(final_rows[1].entry_index, 3);
+        assert_eq!(final_rows[2].track_id, 3);
+        assert_eq!(final_rows[2].entry_index, 1);
+    }
+
+    #[test]
+    fn additive_diff_repeated_reposition_never_accumulates_duplicates() {
+        // Regression test for a real-world defect found on a hardware
+        // export: a playlist re-exported many times, each time with a
+        // handful of tracks' entry_index shifted (as repeated reordering
+        // would produce), must never accumulate duplicate
+        // (playlist_id, track_id) rows -- the real drive had one track
+        // duplicated 7 times this way.
+        let mut seed = PdbData::empty();
+        seed.colors = standard_colors();
+        seed.columns_raw_rows = standard_columns_raw();
+        let before = write_pdb(&seed).expect("write empty seed");
+
+        let track_count = 10u32;
+        let mut data = seed.clone();
+        for id in 1..=track_count {
+            data.tracks.push(reposition_test_track(id));
+        }
+        data.playlist_tree.push(PdbPlaylistTreeRow {
+            id: 1,
+            parent_id: 0,
+            sort_order: 0,
+            is_folder: false,
+            name: "Repeated Reposition Playlist".into(),
+        });
+
+        let mut order: Vec<u32> = (1..=track_count).collect();
+        let mut current = before;
+        for cycle in 0..8u32 {
+            // Rotate the order each cycle so a broad, shifting subset of
+            // tracks' entry_index changes every time, the same way
+            // incremental local reordering across many sessions would.
+            order.rotate_left(1 + (cycle as usize % 3));
+            data.playlist_entries = order
+                .iter()
+                .enumerate()
+                .map(|(i, &track_id)| PdbPlaylistEntryRow {
+                    entry_index: (i as u32) + 1,
+                    track_id,
+                    playlist_id: 1,
+                })
+                .collect();
+            let desired = data
+                .playlist_entries
+                .iter()
+                .map(|e| T08EntryKey {
+                    entry_index: e.entry_index,
+                    track_id: e.track_id,
+                    playlist_id: e.playlist_id,
+                })
+                .collect::<Vec<_>>();
+            let (after, _) = try_write_pdb_additive_in_place(&current, &data, desired, PAGE_SIZE)
+                .unwrap_or_else(|e| panic!("cycle {cycle} export failed: {e}"))
+                .unwrap_or_else(|| panic!("cycle {cycle} export not accepted as additive"));
+
+            let rows = collect_t08_entry_keys(&after, PAGE_SIZE);
+            assert_eq!(
+                rows.len(),
+                track_count as usize,
+                "cycle {cycle}: expected exactly {track_count} playlist-entry rows, found {} \
+                 (duplicates accumulated)",
+                rows.len()
+            );
+            current = after;
+        }
+
+        // Final state must match the last cycle's order exactly.
+        let mut final_rows = collect_t08_entry_keys(&current, PAGE_SIZE);
+        final_rows.sort_by_key(|k| k.entry_index);
+        let final_order: Vec<u32> = final_rows.iter().map(|k| k.track_id).collect();
+        assert_eq!(final_order, order);
     }
 
     /// PdbData fields used by the diff classifier (deferred to a later

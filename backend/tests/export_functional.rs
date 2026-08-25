@@ -908,6 +908,152 @@ fn export_to_usb_many_playlists_pdb_growth_does_not_change_player_menu_in_edb_or
 }
 
 #[test]
+fn export_to_usb_reexport_with_changed_track_order_does_not_duplicate_playlist_entries() {
+    // Regression test for a real-world defect found on a hardware export: a
+    // playlist whose track order changes between exports must not leave
+    // duplicate PDB playlist-entry rows behind. This repo has no dedicated
+    // track-reorder command, so order is changed the same way any local
+    // playlist edit would -- remove the tracks, then re-add them in a
+    // different order -- and the export is run twice, mirroring the
+    // repeated additive re-export that produced the real defect.
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    for i in 0..6usize {
+        copy_audio_fixture(
+            &media,
+            "formats/track_format_wav.wav",
+            &format!("Reorder Artist {i} - Reorder Track {i}.wav"),
+        );
+    }
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let tracks = backend
+        .search_tracks(SearchTracksRequest {
+            query: "reorder".to_string(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+    assert_eq!(tracks.len(), 6, "expected all 6 reorder fixtures");
+    let track_ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+    seed_tracks_as_analyzed(&data_dir, &track_ids);
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Reorder Playlist".to_string(),
+    });
+    assert!(created.ok, "create playlist failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+
+    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: track_ids.clone(),
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added.ok, "add tracks failed: {added:?}");
+
+    let export_options = Some(ExportToUsbOptions {
+        include_artwork: false,
+        include_analysis: false,
+        prune_stale: false,
+        ..Default::default()
+    });
+
+    let first_export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: export_options.clone(),
+    });
+    assert!(first_export.ok, "first export failed: {first_export:?}");
+
+    // Change the track order: remove all, then re-add reversed.
+    let removed = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: track_ids.clone(),
+    });
+    assert!(removed.ok, "remove tracks failed: {removed:?}");
+    let mut reversed_ids = track_ids.clone();
+    reversed_ids.reverse();
+    let re_added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: reversed_ids,
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(re_added.ok, "re-add tracks failed: {re_added:?}");
+
+    let second_export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: export_options,
+    });
+    assert!(second_export.ok, "second export failed: {second_export:?}");
+
+    let pdb_path = usb.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR).join("export.pdb");
+    let parsed = parse_pdb(&pdb_path).expect("parse exported pdb");
+    let target_playlist_id = parsed
+        .playlist_tree
+        .iter()
+        .find(|p| p.name == "Reorder Playlist")
+        .expect("exported playlist row")
+        .id;
+    let entries: Vec<_> = parsed
+        .playlist_entries
+        .iter()
+        .filter(|e| e.playlist_id == target_playlist_id)
+        .collect();
+    assert_eq!(
+        entries.len(),
+        6,
+        "expected exactly 6 playlist-entry rows after re-export with changed order, found {} \
+         (duplicates accumulated)",
+        entries.len()
+    );
+    let mut seen_track_ids: Vec<u32> = entries.iter().map(|e| e.track_id).collect();
+    seen_track_ids.sort_unstable();
+    seen_track_ids.dedup();
+    assert_eq!(
+        seen_track_ids.len(),
+        6,
+        "each track must appear as exactly one playlist-entry row"
+    );
+
+    let edb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("exportLibrary.db");
+    let conn = open_edb(&edb_path);
+    let edb_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM playlist_content WHERE playlist_id = ?1",
+            [target_playlist_id],
+            |row| row.get(0),
+        )
+        .expect("count edb playlist_content rows");
+    assert_eq!(
+        edb_count, 6,
+        "eDB playlist_content count must match the PDB entry count"
+    );
+}
+
+#[test]
 fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
