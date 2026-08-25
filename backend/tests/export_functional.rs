@@ -7,8 +7,9 @@ use backend::error::ErrorCode;
 use backend::models::{
     AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, InitializeUsbRequest,
-    MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ReorderUsbPlaylistsRequest,
-    RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest,
+    MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ReorderPlaylistTracksRequest,
+    ReorderUsbPlaylistsRequest, RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest,
+    SetFrontendSettingRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -1006,7 +1007,10 @@ fn export_to_usb_reexport_with_changed_track_order_does_not_duplicate_playlist_e
     });
     assert!(second_export.ok, "second export failed: {second_export:?}");
 
-    let pdb_path = usb.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR).join("export.pdb");
+    let pdb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
     let parsed = parse_pdb(&pdb_path).expect("parse exported pdb");
     let target_playlist_id = parsed
         .playlist_tree
@@ -3561,4 +3565,613 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
             detail.name
         );
     }
+}
+
+/// PDB `playlist_entries` for `playlist_name`, ordered by `entry_index` and
+/// mapped to each entry's exported track path. Returns the exported USB
+/// playlist id alongside the ordered path list.
+fn ordered_target_playlist_paths(pdb_path: &Path, playlist_name: &str) -> (u32, Vec<String>) {
+    let parsed = parse_pdb(pdb_path).expect("parse exported pdb");
+    let usb_playlist_id = parsed
+        .playlist_tree
+        .iter()
+        .find(|p| p.name == playlist_name)
+        .unwrap_or_else(|| panic!("exported playlist tree row for {playlist_name}"))
+        .id;
+    let by_track_id = parsed
+        .tracks
+        .iter()
+        .map(|row| (row.id, row.track_file_path.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut entries: Vec<_> = parsed
+        .playlist_entries
+        .iter()
+        .filter(|e| e.playlist_id == usb_playlist_id)
+        .cloned()
+        .collect();
+    entries.sort_by_key(|e| e.entry_index);
+    let paths = entries
+        .iter()
+        .map(|e| {
+            by_track_id
+                .get(&e.track_id)
+                .cloned()
+                .unwrap_or_else(|| panic!("no exported path for track_id {}", e.track_id))
+        })
+        .collect();
+    (usb_playlist_id, paths)
+}
+
+#[test]
+fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs_correct() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    // 30 filler tracks to force the PDB into a multi-page "growth" state,
+    // mirroring export_to_usb_many_playlists_pdb_growth_does_not_change_player_menu_in_edb_or_pdb.
+    for i in 0..10usize {
+        copy_audio_fixture(
+            &media,
+            "formats/track_format_wav.wav",
+            &format!("Growth Artist {i} - Growth Track {i}.wav"),
+        );
+        copy_audio_fixture(
+            &media,
+            "formats/track_format_flac.flac",
+            &format!("Growth Artist {i} - Growth Track {i}.flac"),
+        );
+        copy_audio_fixture(
+            &media,
+            "formats/track_format_aif.aif",
+            &format!("Growth Artist {i} - Growth Track {i}.aif"),
+        );
+    }
+
+    // 6 target tracks whose playlist goes additive -> reorder -> remove -> mirror.
+    for i in 0..6usize {
+        copy_audio_fixture(
+            &media,
+            "formats/track_format_wav.wav",
+            &format!("Target Artist {i} - Target Track {i}.wav"),
+        );
+    }
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let growth_tracks = backend
+        .search_tracks(SearchTracksRequest {
+            query: "growth".to_string(),
+            limit: 50,
+            cursor: None,
+        })
+        .data
+        .expect("search growth data")
+        .items;
+    assert_eq!(growth_tracks.len(), 30, "expected 30 growth tracks");
+    let growth_ids: Vec<String> = growth_tracks.iter().map(|t| t.id.clone()).collect();
+
+    let target_tracks = backend
+        .search_tracks(SearchTracksRequest {
+            query: "target".to_string(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search target data")
+        .items;
+    assert_eq!(target_tracks.len(), 6, "expected 6 target tracks");
+    let target_ids: Vec<String> = target_tracks.iter().map(|t| t.id.clone()).collect();
+
+    let mut all_ids = growth_ids.clone();
+    all_ids.extend(target_ids.iter().cloned());
+    seed_tracks_as_analyzed(&data_dir, &all_ids);
+
+    let export_options = |prune_stale: bool| {
+        Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale,
+            backup_before_export: false,
+        })
+    };
+
+    // --- Build PDB growth via 10 filler playlists, each exported additively. ---
+    let mut growth_playlist_ids = Vec::with_capacity(10);
+    for i in 0..10usize {
+        let created = backend.create_playlist(CreatePlaylistRequest {
+            name: format!("Growth Playlist {i}"),
+        });
+        assert!(created.ok, "create growth playlist {i} failed: {created:?}");
+        let pid = created.data.expect("playlist data").playlist_id;
+        let chunk: Vec<_> = growth_ids[i * 3..(i + 1) * 3].to_vec();
+        let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: pid.clone(),
+            track_ids: chunk,
+            dedupe: DedupeMode::Skip,
+        });
+        assert!(
+            added.ok,
+            "add tracks to growth playlist {i} failed: {added:?}"
+        );
+        growth_playlist_ids.push(pid);
+    }
+    for (i, pid) in growth_playlist_ids.iter().enumerate() {
+        let exported = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: pid.clone(),
+            options: export_options(false),
+        });
+        assert!(
+            exported.ok,
+            "export growth playlist {i} failed: {exported:?}"
+        );
+    }
+
+    // --- Create & additively export the target playlist against the now-grown PDB. ---
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Target Playlist".to_string(),
+    });
+    assert!(created.ok, "create target playlist failed: {created:?}");
+    let target_playlist_id = created.data.expect("playlist data").playlist_id;
+
+    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: target_playlist_id.clone(),
+        track_ids: target_ids.clone(),
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added.ok, "add target tracks failed: {added:?}");
+
+    let first_export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: target_playlist_id.clone(),
+        options: export_options(false),
+    });
+    assert!(
+        first_export.ok,
+        "additive target export failed: {first_export:?}"
+    );
+
+    let pdb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let (_, first_paths) = ordered_target_playlist_paths(&pdb_path, "Target Playlist");
+    assert_eq!(
+        first_paths.len(),
+        6,
+        "expected 6 entries after first additive export against a grown PDB, got {first_paths:?}"
+    );
+
+    // A brand-new playlist's first additive export appends entries in
+    // insertion order, so target_ids[i] corresponds 1:1 to first_paths[i].
+    let path_by_track_id: std::collections::HashMap<String, String> = target_ids
+        .iter()
+        .cloned()
+        .zip(first_paths.iter().cloned())
+        .collect();
+
+    // --- Reorder (full set required), then remove two tracks, before the next export. ---
+    // T2 is a plain removal (no history) and must be pruned by the mirror export.
+    // T1 gets a device play-history entry injected before the mirror export and
+    // must survive pruning despite no longer being in the playlist -- mirroring
+    // remove_usb_playlist's existing history guard (playlist_ops.rs:191-198).
+    let new_order_ids: Vec<String> = vec![
+        target_ids[5].clone(),
+        target_ids[4].clone(),
+        target_ids[3].clone(),
+        target_ids[2].clone(),
+        target_ids[1].clone(),
+        target_ids[0].clone(),
+    ];
+    let reordered = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+        playlist_id: target_playlist_id.clone(),
+        ordered_track_ids: new_order_ids.clone(),
+    });
+    assert!(
+        reordered.ok,
+        "reorder target playlist failed: {reordered:?}"
+    );
+
+    let plain_removed_id = target_ids[2].clone();
+    let played_removed_id = target_ids[1].clone();
+    let removed = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
+        playlist_id: target_playlist_id.clone(),
+        track_ids: vec![plain_removed_id.clone(), played_removed_id.clone()],
+    });
+    assert!(removed.ok, "remove target tracks failed: {removed:?}");
+
+    let expected_final_ids: Vec<String> = new_order_ids
+        .into_iter()
+        .filter(|id| id != &plain_removed_id && id != &played_removed_id)
+        .collect();
+    assert_eq!(expected_final_ids.len(), 4);
+    let expected_final_paths: Vec<String> = expected_final_ids
+        .iter()
+        .map(|id| path_by_track_id.get(id).cloned().expect("known target id"))
+        .collect();
+    let plain_removed_path = path_by_track_id
+        .get(&plain_removed_id)
+        .cloned()
+        .expect("plain removed track path");
+    let played_removed_path = path_by_track_id
+        .get(&played_removed_id)
+        .cloned()
+        .expect("played removed track path");
+
+    // Inject a device play-history entry for the "played" track directly into
+    // the real, already-exported PDB -- there is no in-app command to create
+    // one, since history only ever originates from actual CDJ hardware play.
+    let parsed_before_mirror = parse_pdb(&pdb_path).expect("parse pdb before history injection");
+    let played_pdb_track_id = parsed_before_mirror
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == played_removed_path)
+        .expect("played track present in pdb before mirror export")
+        .id;
+    append_history_to_pdb(&pdb_path, 1, &[played_pdb_track_id]);
+
+    let contents_count_before_mirror = WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .count();
+
+    // --- Mirror-mode re-export: full rewrite + prune of the target playlist. ---
+    let mirror_export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: target_playlist_id.clone(),
+        options: export_options(true),
+    });
+    assert!(
+        mirror_export.ok,
+        "mirror target export failed: {mirror_export:?}"
+    );
+
+    // --- PDB verification ---
+    let (target_usb_playlist_id, mirror_paths) =
+        ordered_target_playlist_paths(&pdb_path, "Target Playlist");
+    assert_eq!(
+        mirror_paths, expected_final_paths,
+        "PDB entry order after mirror re-export must match the new local order with both \
+         removed tracks excluded"
+    );
+
+    let parsed = parse_pdb(&pdb_path).expect("parse exported pdb");
+    let target_entries: Vec<_> = parsed
+        .playlist_entries
+        .iter()
+        .filter(|e| e.playlist_id == target_usb_playlist_id)
+        .collect();
+    assert_eq!(
+        target_entries.len(),
+        4,
+        "expected exactly 4 playlist-entry rows after mirror re-export with two removals, \
+         found {} (duplicates accumulated)",
+        target_entries.len()
+    );
+    let mut seen_track_ids: Vec<u32> = target_entries.iter().map(|e| e.track_id).collect();
+    seen_track_ids.sort_unstable();
+    seen_track_ids.dedup();
+    assert_eq!(
+        seen_track_ids.len(),
+        4,
+        "each remaining target track must appear as exactly one playlist-entry row"
+    );
+
+    for i in 0..10usize {
+        let name = format!("Growth Playlist {i}");
+        let tree_row = parsed
+            .playlist_tree
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("missing growth playlist tree row for {name}"));
+        let count = parsed
+            .playlist_entries
+            .iter()
+            .filter(|e| e.playlist_id == tree_row.id)
+            .count();
+        assert_eq!(
+            count, 3,
+            "growth playlist {i} entry count changed after unrelated target mirror export"
+        );
+    }
+
+    // --- eDB verification (true order parity, not just counts) ---
+    let edb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("exportLibrary.db");
+    let conn = open_edb(&edb_path);
+    let edb_playlist_id: i64 = conn
+        .query_row(
+            "SELECT playlist_id FROM playlist WHERE name = ?1",
+            ["Target Playlist"],
+            |row| row.get(0),
+        )
+        .expect("resolve target playlist id in eDB");
+    let mut stmt = conn
+        .prepare(
+            "SELECT c.path FROM playlist_content pc \
+             JOIN content c ON c.content_id = pc.content_id \
+             WHERE pc.playlist_id = ?1 ORDER BY pc.sequenceNo",
+        )
+        .expect("prepare edb order query");
+    let edb_paths: Vec<String> = stmt
+        .query_map([edb_playlist_id], |row| row.get::<_, String>(0))
+        .expect("query edb order")
+        .collect::<Result<_, _>>()
+        .expect("collect edb paths");
+    assert_eq!(
+        edb_paths, mirror_paths,
+        "eDB playlist_content order must match PDB playlist_entries order exactly"
+    );
+
+    // --- Parity report ---
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity.ok, "parity report failed: {parity:?}");
+    let parity_data = parity.data.expect("parity data");
+    let target_detail = parity_data
+        .playlist_details
+        .iter()
+        .find(|d| d.name == "Target Playlist")
+        .expect("target playlist parity detail");
+    assert!(
+        target_detail.sort_order_match,
+        "target playlist sort order mismatch after mirror export: {target_detail:?}"
+    );
+    assert_eq!(target_detail.matched_tracks, 4, "{target_detail:?}");
+    assert_eq!(target_detail.only_in_pdb, 0, "{target_detail:?}");
+    assert_eq!(target_detail.only_in_edb, 0, "{target_detail:?}");
+    assert!(!target_detail.order_mismatch, "{target_detail:?}");
+    assert_eq!(target_detail.pdb_duplicate_entries, 0, "{target_detail:?}");
+    for i in 0..10usize {
+        let name = format!("Growth Playlist {i}");
+        let detail = parity_data
+            .playlist_details
+            .iter()
+            .find(|d| d.name == name)
+            .unwrap_or_else(|| panic!("missing parity detail for {name}"));
+        assert!(
+            detail.sort_order_match,
+            "growth playlist {i} lost sort order parity: {detail:?}"
+        );
+        assert_eq!(
+            detail.pdb_duplicate_entries, 0,
+            "growth playlist {i} unexpectedly has duplicate pdb entries: {detail:?}"
+        );
+    }
+
+    // --- Filesystem pruning: the plain-removed track's file must be deleted, ---
+    // --- but the played-and-removed track's file must survive, and remaining ---
+    // --- playlist tracks' files must be untouched. ---
+    let plain_removed_abs_path = usb.join(plain_removed_path.trim_start_matches('/'));
+    assert!(
+        !plain_removed_abs_path.exists(),
+        "mirror export should have pruned the plain removed track's exported file: \
+         {plain_removed_abs_path:?}"
+    );
+    let played_removed_abs_path = usb.join(played_removed_path.trim_start_matches('/'));
+    assert!(
+        played_removed_abs_path.exists(),
+        "mirror export must not prune a track's exported file when it has device play \
+         history, even after removal from its only playlist: {played_removed_abs_path:?}"
+    );
+    for path in &expected_final_paths {
+        let abs_path = usb.join(path.trim_start_matches('/'));
+        assert!(
+            abs_path.exists(),
+            "exported file for a track still in the playlist must remain: {abs_path:?}"
+        );
+    }
+    let contents_count_after_mirror = WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .count();
+    assert_eq!(
+        contents_count_after_mirror,
+        contents_count_before_mirror - 1,
+        "exactly one exported audio file (the non-history track) should be pruned by the \
+         mirror export; the history-protected track must survive"
+    );
+
+    // --- Idempotency: a second mirror re-export with no local changes must not ---
+    // --- reintroduce duplicates or drift order. ---
+    let second_mirror_export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: target_playlist_id.clone(),
+        options: export_options(true),
+    });
+    assert!(
+        second_mirror_export.ok,
+        "second mirror target export failed: {second_mirror_export:?}"
+    );
+
+    let (_, second_mirror_paths) = ordered_target_playlist_paths(&pdb_path, "Target Playlist");
+    assert_eq!(
+        second_mirror_paths, expected_final_paths,
+        "idempotent mirror re-export must not change entry order or content"
+    );
+
+    let conn = open_edb(&edb_path);
+    let mut stmt = conn
+        .prepare(
+            "SELECT c.path FROM playlist_content pc \
+             JOIN content c ON c.content_id = pc.content_id \
+             WHERE pc.playlist_id = ?1 ORDER BY pc.sequenceNo",
+        )
+        .expect("prepare edb order query");
+    let edb_paths_after_second: Vec<String> = stmt
+        .query_map([edb_playlist_id], |row| row.get::<_, String>(0))
+        .expect("query edb order")
+        .collect::<Result<_, _>>()
+        .expect("collect edb paths");
+    assert_eq!(
+        edb_paths_after_second, mirror_paths,
+        "idempotent mirror re-export must not change eDB order or content"
+    );
+
+    assert!(
+        played_removed_abs_path.exists(),
+        "played track's exported file must still survive after an idempotent mirror re-export"
+    );
+    let contents_count_after_second_mirror = WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .count();
+    assert_eq!(
+        contents_count_after_second_mirror, contents_count_after_mirror,
+        "idempotent mirror re-export must not delete or duplicate exported files"
+    );
+}
+
+/// Appends synthetic PDB history-playlist (t11) and history-entry (t12) pages
+/// directly onto a real exported PDB, since there is no in-app command to
+/// create device play history -- it only ever originates from actual CDJ
+/// hardware play. Ported from usb_service_functional.rs (each `tests/*.rs`
+/// file compiles as its own binary, so helpers aren't shared).
+fn append_history_to_pdb(pdb_path: &Path, history_id: u32, track_ids: &[u32]) {
+    let mut bytes = fs::read(pdb_path).expect("read PDB");
+    let len_page = read_u32_le(&bytes, 4).expect("len_page") as usize;
+    let num_tables = read_u32_le(&bytes, 8).expect("num_tables") as usize;
+    let max_page = parse_max_last_page(&bytes, num_tables) as u32;
+
+    let history_playlist_page = max_page + 1;
+    let history_entries_page = max_page + 2;
+
+    let playlist_row = build_history_playlist_row(history_id, "HISTORY 1");
+    let entry_rows = track_ids
+        .iter()
+        .enumerate()
+        .map(|(idx, track_id)| build_history_entry_row(*track_id, history_id, (idx + 1) as u32))
+        .collect::<Vec<_>>();
+
+    let playlist_page = build_pdb_page(
+        11,
+        history_playlist_page,
+        history_playlist_page,
+        &[playlist_row],
+        len_page,
+    );
+    let entries_page = build_pdb_page(
+        12,
+        history_entries_page,
+        history_entries_page,
+        &entry_rows,
+        len_page,
+    );
+
+    bytes.extend_from_slice(&playlist_page);
+    bytes.extend_from_slice(&entries_page);
+
+    let p1 = 28 + num_tables * 16;
+    let p2 = p1 + 16;
+    bytes[p1..p1 + 4].copy_from_slice(&11u32.to_le_bytes());
+    bytes[p1 + 8..p1 + 12].copy_from_slice(&history_playlist_page.to_le_bytes());
+    bytes[p1 + 12..p1 + 16].copy_from_slice(&history_playlist_page.to_le_bytes());
+
+    bytes[p2..p2 + 4].copy_from_slice(&12u32.to_le_bytes());
+    bytes[p2 + 8..p2 + 12].copy_from_slice(&history_entries_page.to_le_bytes());
+    bytes[p2 + 12..p2 + 16].copy_from_slice(&history_entries_page.to_le_bytes());
+
+    bytes[8..12].copy_from_slice(&((num_tables as u32) + 2).to_le_bytes());
+    fs::write(pdb_path, bytes).expect("write PDB with history tables");
+}
+
+fn build_history_playlist_row(id: u32, name: &str) -> Vec<u8> {
+    let mut row = Vec::<u8>::new();
+    row.extend_from_slice(&id.to_le_bytes());
+    row.extend_from_slice(&encode_pdb_ascii_string(name));
+    row
+}
+
+fn build_history_entry_row(track_id: u32, playlist_id: u32, entry_index: u32) -> Vec<u8> {
+    let mut row = vec![0u8; 12];
+    row[0..4].copy_from_slice(&track_id.to_le_bytes());
+    row[4..8].copy_from_slice(&playlist_id.to_le_bytes());
+    row[8..12].copy_from_slice(&entry_index.to_le_bytes());
+    row
+}
+
+fn encode_pdb_ascii_string(value: &str) -> Vec<u8> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::<u8>::with_capacity(4 + bytes.len());
+    out.push(0u8);
+    out.extend_from_slice(&(4u16 + bytes.len() as u16).to_le_bytes());
+    out.push(0u8);
+    out.extend_from_slice(bytes);
+    out
+}
+
+fn build_pdb_page(
+    table_type: u32,
+    page_index: u32,
+    seq: u32,
+    rows: &[Vec<u8>],
+    len_page: usize,
+) -> Vec<u8> {
+    let mut page = vec![0u8; len_page];
+    page[4..8].copy_from_slice(&page_index.to_le_bytes());
+    page[8..12].copy_from_slice(&table_type.to_le_bytes());
+    page[12..16].copy_from_slice(&0u32.to_le_bytes());
+    page[16..20].copy_from_slice(&seq.to_le_bytes());
+
+    let mut payload_offset = 0usize;
+    let mut row_offsets = Vec::<u16>::new();
+    for row in rows {
+        row_offsets.push(payload_offset as u16);
+        let start = 40 + payload_offset;
+        let end = start + row.len();
+        page[start..end].copy_from_slice(row);
+        payload_offset += row.len();
+    }
+
+    page[24] = (rows.len() % 256) as u8;
+    page[30..32].copy_from_slice(&(payload_offset as u16).to_le_bytes());
+    page[34..36].copy_from_slice(&((rows.len().saturating_sub(1)) as u16).to_le_bytes());
+
+    let mut cursor = len_page;
+    for group_start in (0..rows.len()).step_by(16) {
+        cursor -= 4;
+        let group_len = (rows.len() - group_start).min(16);
+        let bits = ((1u32 << group_len) - 1) as u16;
+        page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
+        for j in 0..group_len {
+            cursor -= 2;
+            page[cursor..cursor + 2].copy_from_slice(&row_offsets[group_start + j].to_le_bytes());
+        }
+    }
+
+    page
+}
+
+fn parse_max_last_page(bytes: &[u8], num_tables: usize) -> usize {
+    let mut cursor = 28usize;
+    let mut max_page = 0usize;
+    for _ in 0..num_tables {
+        let Some(last_page) = read_u32_le(bytes, cursor + 12) else {
+            break;
+        };
+        max_page = max_page.max(last_page as usize);
+        cursor += 16;
+    }
+    max_page
 }

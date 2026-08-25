@@ -1481,15 +1481,12 @@ pub(crate) fn patch_t08_entry_indices_in_place(
     if patches.is_empty() {
         return 0;
     }
-    if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size)
-    {
+    if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
         return 0;
     }
     let desired_by_identity: std::collections::HashMap<(u32, u32), u32> = patches
         .iter()
-        .map(|&(playlist_id, track_id, new_entry_index)| {
-            ((playlist_id, track_id), new_entry_index)
-        })
+        .map(|&(playlist_id, track_id, new_entry_index)| ((playlist_id, track_id), new_entry_index))
         .collect();
 
     let total_pages = bytes.len() / page_size;
@@ -5283,11 +5280,8 @@ pub(crate) fn apply_additive_diff(
     // `patch_t08_entry_indices_in_place`'s doc comment for why that
     // matters.
     if !diff.repositioned_t08_entries.is_empty() {
-        let _ = patch_t08_entry_indices_in_place(
-            &mut out,
-            &diff.repositioned_t08_entries,
-            page_size,
-        );
+        let _ =
+            patch_t08_entry_indices_in_place(&mut out, &diff.repositioned_t08_entries, page_size);
     }
 
     if let Some(row_count) = diff.synthesize_t19_runtime_rows {
@@ -7729,14 +7723,10 @@ mod additive_tests {
                 playlist_id: e.playlist_id,
             })
             .collect::<Vec<_>>();
-        let (after_reorder, summary) = try_write_pdb_additive_in_place(
-            &after_first,
-            &reordered,
-            reordered_desired,
-            PAGE_SIZE,
-        )
-        .expect("reorder export result")
-        .expect("reorder export accepted");
+        let (after_reorder, summary) =
+            try_write_pdb_additive_in_place(&after_first, &reordered, reordered_desired, PAGE_SIZE)
+                .expect("reorder export result")
+                .expect("reorder export accepted");
 
         assert_eq!(
             summary.new_tracks, 0,

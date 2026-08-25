@@ -660,6 +660,32 @@ pub fn filter_prunable_stale_paths_for_playlist(
                 protect_artwork_variants_if_stale(&mut protected, &stale_normalized, normalized);
             }
         }
+
+        // A track with device play history is protected from pruning even when it
+        // has no remaining playlist membership, matching remove_usb_playlist's
+        // history guard (see remove_playlist_and_tracks_from_pdb).
+        for he in &parsed.history_entries {
+            let Some(track_id) = he.track_id else {
+                continue;
+            };
+            let Some(track) = track_by_id.get(&track_id).copied() else {
+                continue;
+            };
+            if let Some(path) = normalize_owned_export_path(usb_root, &track.track_file_path) {
+                protect_if_stale(&mut protected, &stale_normalized, path);
+            }
+            protect_analysis_variants_if_stale(
+                &mut protected,
+                &stale_normalized,
+                usb_root,
+                &track.anlz_path,
+            );
+            if let Some(art_path) = parsed.artworks.get(&track.artwork_id)
+                && let Some(normalized) = normalize_owned_export_path(usb_root, art_path)
+            {
+                protect_artwork_variants_if_stale(&mut protected, &stale_normalized, normalized);
+            }
+        }
     }
 
     let mut prunable = stale_paths
