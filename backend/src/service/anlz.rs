@@ -541,8 +541,10 @@ pub(crate) fn ppth_path_from_anlz(data: &[u8]) -> Option<String> {
                 return None;
             }
             let mut units = payload
-                .chunks_exact(2)
-                .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|chunk| u16::from_be_bytes(*chunk))
                 .collect::<Vec<_>>();
             if units.last() == Some(&0) {
                 units.pop();

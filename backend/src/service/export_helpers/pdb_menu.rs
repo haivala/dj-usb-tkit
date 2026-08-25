@@ -132,8 +132,10 @@ fn decode_pdb_row_string(row: &[u8], offset: usize) -> Option<String> {
                     return None;
                 }
                 let code_units = body
-                    .chunks_exact(2)
-                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| u16::from_le_bytes(*c))
                     .collect::<Vec<_>>();
                 String::from_utf16(&code_units).ok()?
             } else {

@@ -907,17 +907,30 @@ pub fn initialize_usb(usb_root: &str) -> BackendResult<crate::models::Initialize
         }
     }
 
-    // Create full-shape PDB baseline if missing.
+    // Create full-shape PDB baseline if missing, through staging like every
+    // other PDB write -- when staging is enabled this commits atomically
+    // (temp file + rename) instead of a plain overwrite.
     let pdb_file = vendor_pdb_path(root);
     if !pdb_file.exists() {
-        std::fs::write(&pdb_file, build_fullshape_pdb_bytes())?;
+        super::usb_staging::commit_and_write_back(
+            root,
+            super::usb_staging::DbKind::Pdb,
+            &build_fullshape_pdb_bytes(),
+        )?;
         created.push(pdb_file.to_string_lossy().to_string());
     }
 
-    // Create full-shape encrypted eDB when missing.
+    // Create full-shape encrypted eDB when missing, through staging like
+    // every other eDB write: open the connection at the staged (local-cache
+    // or, if staging is disabled, USB) path, then flush it back to USB.
     let edb_file = vendor_db_dir(root).join("exportLibrary.db");
     if !edb_file.exists() {
-        initialize_fullshape_edb(&edb_file)?;
+        let local_edb_path = super::usb_staging::stage_edb(root)?;
+        if let Some(parent) = local_edb_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        initialize_fullshape_edb(&local_edb_path)?;
+        super::usb_staging::write_back_if_changed(root, super::usb_staging::DbKind::Edb)?;
         created.push(edb_file.to_string_lossy().to_string());
     }
 
@@ -2014,6 +2027,72 @@ mod diag_tests {
         );
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn initialize_usb_writes_pdb_and_edb_through_staging_when_enabled() {
+        let usb = tempfile::tempdir().expect("usb tempdir");
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        let result = initialize_usb(usb.path().to_str().expect("usb path")).unwrap();
+        assert!(!result.created_dirs.is_empty());
+
+        let db_dir = usb.path().join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        let pdb_usb_path = db_dir.join("export.pdb");
+        let edb_usb_path = db_dir.join("exportLibrary.db");
+        assert!(pdb_usb_path.is_file(), "PDB must be committed to the USB");
+        assert!(edb_usb_path.is_file(), "eDB must be committed to the USB");
+        parse_pdb(&pdb_usb_path).expect("committed PDB must parse");
+        rusqlite::Connection::open(&edb_usb_path).expect("committed eDB must open");
+
+        // No leftover atomic-commit temp files beside either database.
+        let leftover_tmp = std::fs::read_dir(&db_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains("tmp-"));
+        assert!(
+            !leftover_tmp,
+            "atomic commit must not leave a temp file behind"
+        );
+
+        // Both files must actually have gone through the local cache, not
+        // just been written straight to the USB.
+        let staged_pdb =
+            crate::service::usb_staging::stage_pdb(usb.path()).expect("stage pdb after init");
+        let staged_edb =
+            crate::service::usb_staging::stage_edb(usb.path()).expect("stage edb after init");
+        assert_ne!(
+            staged_pdb, pdb_usb_path,
+            "PDB should be staged to a local cache path"
+        );
+        assert_ne!(
+            staged_edb, edb_usb_path,
+            "eDB should be staged to a local cache path"
+        );
+        assert_eq!(
+            std::fs::read(&staged_pdb).unwrap(),
+            std::fs::read(&pdb_usb_path).unwrap()
+        );
+        assert_eq!(
+            std::fs::read(&staged_edb).unwrap(),
+            std::fs::read(&edb_usb_path).unwrap()
+        );
+
+        // Re-staging must not need to re-copy: the write-back already
+        // recorded the synced state, so the cached copy is trusted as-is.
+        let mtime_before = std::fs::metadata(&staged_edb).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let staged_edb_again =
+            crate::service::usb_staging::stage_edb(usb.path()).expect("stage edb again");
+        let mtime_after = std::fs::metadata(&staged_edb_again)
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(
+            mtime_before, mtime_after,
+            "unchanged USB source after init should not trigger a re-copy"
+        );
     }
 
     #[test]

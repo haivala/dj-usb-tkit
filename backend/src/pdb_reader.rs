@@ -969,8 +969,8 @@ pub(crate) fn get_string_from_pdb(row: &[u8], offset: usize) -> Option<String> {
     Some(match enc {
         "utf16le" => {
             let mut buf = Vec::with_capacity(data.len() / 2);
-            for chunk in data.chunks_exact(2) {
-                buf.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+            for chunk in data.as_chunks::<2>().0 {
+                buf.push(u16::from_le_bytes(*chunk));
             }
             String::from_utf16_lossy(&buf)
                 .trim_end_matches('\0')

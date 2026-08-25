@@ -970,7 +970,9 @@ pub(crate) fn write_pdb_with_warnings(data: &PdbData) -> BackendResult<(Vec<u8>,
     // use seqpage=29 to match reference exports, so we cannot hardcode a low
     // constant here — compute the actual maximum and add 1.
     let max_seqpage = file
-        .chunks_exact(PAGE_SIZE)
+        .as_chunks::<PAGE_SIZE>()
+        .0
+        .iter()
         .skip(1) // skip header page 0
         .map(|p| u32::from_le_bytes(p[0x10..0x14].try_into().unwrap_or([0; 4])))
         .max()
@@ -2472,7 +2474,7 @@ mod writer_tests {
         // (3) tt=8 (playlist_entries) page must specifically use u5=1 — this
         // was the failing field on the broken USB and the most strictly
         // observed value across reference exports.
-        for chunk in bytes.chunks_exact(PAGE_SIZE).skip(1) {
+        for chunk in bytes.as_chunks::<PAGE_SIZE>().0.iter().skip(1) {
             let stored_idx = read_u32_le(chunk, 0x04);
             if stored_idx == 0 {
                 continue;

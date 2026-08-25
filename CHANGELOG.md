@@ -30,11 +30,17 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix:** initializing a fresh USB now writes its baseline `export.pdb`/`exportLibrary.db` through
+  the same local-HDD staging path as every other database write, instead of writing directly to the
+  USB — restoring atomic (temp-file + rename) commits and local caching for a drive's very first
+  database write
 - **Chore:** update deps
-- **Fix:** mirror-mode USB export could delete the exported file for a track that had been played
-  on the device, if that track was removed from its only local playlist — pruning now protects any
-  track with device play history, matching the existing protection when removing a whole playlist
-  from the USB
+- **Fix (CRITICAL):** mirror-mode USB export could delete the exported file for a track that had
+  been played on the device, if that track was removed from its only local playlist — pruning now
+  protects any track with device play history, matching the existing protection when removing a
+  whole playlist from the USB
 - **Chore:** add an integration test covering additive export while the exported database is
   growing across multiple pages, followed by a local track reorder and removal (including a track
   with device play history), then a mirror-mode re-export — verifying PDB/eDB entry order parity,
