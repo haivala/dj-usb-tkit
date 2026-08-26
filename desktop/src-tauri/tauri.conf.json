@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DJ_USB_Tkit",
+  "productName": "DJ USB Tkit",
   "identifier": "art.chiph.djusbtkit",
   "build": {
     "frontendDist": "../../vanilla-ui/dist"
