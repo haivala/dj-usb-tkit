@@ -36,6 +36,12 @@
   always failed with "an internal database error occurred", with no workaround — a stale local
   staging-cache copy of `exportLibrary.db` left over from before the deletion is now discarded before
   rebuilding it, instead of colliding with its already-existing schema
+- **Chore:** extend the additive-growth/mirror/reorder/history-guard workflow integration test with a
+  check that an additive re-export right after a local reorder leaves entry order and count
+  untouched (order sync is mirror-only), and remove a now-redundant reorder/duplicate-entries
+  regression test whose remove+re-add workaround predated the `reorder_playlist_tracks` command and
+  whose scenario the workflow test now covers more realistically (dedicated reorder command, against
+  a multi-page PDB, through an actual mirror export)
 
 ## 0.1.28
 
