@@ -15,6 +15,7 @@ use tempfile::{TempDir, tempdir};
 const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
 const USB_VENDOR_DB_DIR: &str = "rekordbox";
 const PDB_HEADER_COMPATIBILITY_FIX_ID: &str = "repair_pdb_header_compatibility_field";
+const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
 const PDB_SENTINEL_U5_FIX_ID: &str = "repair_pdb_sentinel_u5_on_data_pages";
 const PDB_WRONG_PAGE_FLAGS_FIX_ID: &str = "repair_pdb_wrong_page_flags";
 const PDB_ZERO_TRANRF_FIX_ID: &str = "repair_pdb_zero_tranrf_on_track_pages";
@@ -3405,6 +3406,61 @@ fn repair_pdb_sentinel_u5_detects_and_fixes_via_orchestrator() {
     assert_fix_proposed(&backend, &usb, PDB_SENTINEL_U5_FIX_ID);
     apply_fix_and_assert_applied(&backend, &usb, PDB_SENTINEL_U5_FIX_ID);
     assert_no_pdb_structural_repairs(&backend, &usb);
+}
+
+#[test]
+fn repair_pdb_duplicate_playlist_entries_detects_and_fixes_via_orchestrator() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 8).expect("tt=8 playlist_entries page");
+        let off = page * page_size;
+        let page_end = off + page_size;
+        let heap_start = off + 0x28;
+
+        let packed = u32::from(bytes[off + 0x18])
+            | (u32::from(bytes[off + 0x19]) << 8)
+            | (u32::from(bytes[off + 0x1a]) << 16);
+        let n = (packed & 0x1FFF) as usize; // active row count
+        let used_s =
+            u16::from_le_bytes(bytes[off + 0x1e..off + 0x20].try_into().unwrap()) as usize;
+
+        // Resolve row 0's real heap offset via its offset-table entry (don't
+        // assume it's 0) -- mirrors the read loop in
+        // remove_duplicate_playlist_entries_inplace exactly.
+        let rowpf_off = page_end - 4;
+        let row0_heap_off =
+            u16::from_le_bytes(bytes[rowpf_off - 2..rowpf_off].try_into().unwrap()) as usize;
+        let row0 = heap_start + row0_heap_off;
+        let orig_entry_index = u32::from_le_bytes(bytes[row0..row0 + 4].try_into().unwrap());
+        let track_id = u32::from_le_bytes(bytes[row0 + 4..row0 + 8].try_into().unwrap());
+        let playlist_id = u32::from_le_bytes(bytes[row0 + 8..row0 + 12].try_into().unwrap());
+
+        // Append a duplicate of row 0 under a higher entry_index -- same
+        // shape as the real-world stale-tail defect fixed in 0.1.27.
+        let new_row = heap_start + used_s;
+        bytes[new_row..new_row + 4].copy_from_slice(&(orig_entry_index + 1000).to_le_bytes());
+        bytes[new_row + 4..new_row + 8].copy_from_slice(&track_id.to_le_bytes());
+        bytes[new_row + 8..new_row + 12].copy_from_slice(&playlist_id.to_le_bytes());
+
+        let new_n = (n + 1) as u32;
+        let new_packed = (new_n & 0x1FFF) | ((new_n & 0x7FF) << 13);
+        bytes[off + 0x18] = (new_packed & 0xFF) as u8;
+        bytes[off + 0x19] = ((new_packed >> 8) & 0xFF) as u8;
+        bytes[off + 0x1a] = ((new_packed >> 16) & 0xFF) as u8;
+        bytes[off + 0x1e..off + 0x20].copy_from_slice(&((used_s + 12) as u16).to_le_bytes());
+
+        let mut rowpf = u16::from_le_bytes(bytes[rowpf_off..rowpf_off + 2].try_into().unwrap());
+        rowpf |= 1u16 << n;
+        bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&rowpf.to_le_bytes());
+
+        let new_off_pos = rowpf_off - 2 * (n + 1);
+        bytes[new_off_pos..new_off_pos + 2].copy_from_slice(&(used_s as u16).to_le_bytes());
+    });
+
+    assert_fix_proposed(&backend, &usb, PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID);
+    assert_fix_not_proposed(&backend, &usb, PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID);
 }
 
 #[test]

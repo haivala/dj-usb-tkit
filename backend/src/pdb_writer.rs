@@ -1830,7 +1830,7 @@ pub(crate) fn extract_artwork_id(row: &[u8]) -> Option<u32> {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod writer_tests {
+pub(crate) mod writer_tests {
     use super::*;
 
     fn read_u16_le(buf: &[u8], off: usize) -> u16 {
@@ -2807,7 +2807,7 @@ mod writer_tests {
     /// using the wide `num_row_offsets`/`num_rows` packed footer field (the
     /// same convention `remove_rows_inplace` and
     /// `remove_duplicate_playlist_entries_inplace` read).
-    fn build_tt8_test_page(rows: &[(u32, u32, u32)]) -> Vec<u8> {
+    pub(crate) fn build_tt8_test_page(rows: &[(u32, u32, u32)]) -> Vec<u8> {
         assert!(
             rows.len() <= 16,
             "test helper only supports one footer group"

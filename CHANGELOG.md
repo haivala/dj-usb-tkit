@@ -36,6 +36,11 @@
   always failed with "an internal database error occurred", with no workaround — a stale local
   staging-cache copy of `exportLibrary.db` left over from before the deletion is now discarded before
   rebuilding it, instead of colliding with its already-existing schema
+- **New feature:** add a standalone "Remove Duplicate PDB Playlist Entries" repair fix that cleans
+  up stale duplicate `playlist_entries` rows (the same defect fixed by 0.1.27's export-time sweep)
+  without requiring the much more invasive "Upgrade Export Data To Strict Parity" fix, which also
+  merges playlists between eDB/PDB and rewrites both databases. Previously the only ways to clean
+  up leftover duplicate PDB rows were to accept that full merge or re-export the affected playlist
 - **Improvement:** show the sync mode (mirror/additive) in the Backups panel's "Before export" entries,
   so a pre-export snapshot's listed reason records which export mode produced it
 - **Chore:** extend the additive-growth/mirror/reorder/history-guard workflow integration test with a

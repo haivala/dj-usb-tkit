@@ -50,6 +50,7 @@ use super::diagnostics::{
 };
 
 const STRICT_PARITY_UPGRADE_FIX_ID: &str = "upgrade_export_data_to_strict_parity";
+const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
 const SYNC_EDB_HISTORY_FROM_PDB_FIX_ID: &str = "sync_edb_history_from_pdb";
 const PDB_HEADER_COMPATIBILITY_FIX_ID: &str = "repair_pdb_header_compatibility_field";
 const PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE: u32 = 5;
@@ -86,6 +87,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,
     PDB_TORN_GROWTH_PAGES_FIX_ID,
     STRICT_PARITY_UPGRADE_FIX_ID,
+    PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID,
     PDB_ZERO_TRANRF_FIX_ID,
     PDB_WRONG_PAGE_FLAGS_FIX_ID,
     PDB_SENTINEL_U5_FIX_ID,
@@ -277,6 +279,22 @@ fn apply_pdb_sentinel_u5_repair(usb_root: &Path, pages: &[SentinelU5Page]) -> Ba
     }
     std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
+}
+
+/// Standalone counterpart to the duplicate-entry sweep bundled into
+/// `apply_strict_parity_upgrade` (see its "Phase 3b"). Safe to run on its
+/// own: `remove_duplicate_playlist_entries_inplace` is a pure function over
+/// the raw PDB byte image with no dependency on eDB or merged-playlist
+/// state, and it's idempotent (a second call on an already-clean PDB
+/// returns 0 and leaves the bytes untouched).
+fn apply_pdb_duplicate_playlist_entries_repair(usb_root: &Path) -> BackendResult<usize> {
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
+    let mut bytes = std::fs::read(&pdb_path)?;
+    let removed = crate::pdb_writer::remove_duplicate_playlist_entries_inplace(&mut bytes);
+    if removed > 0 {
+        std::fs::write(&pdb_path, &bytes)?;
+    }
+    Ok(removed)
 }
 
 fn expected_page_flags(table_type: u32) -> u8 {
@@ -4099,6 +4117,7 @@ impl BackendService {
         }
 
         let mut strict_upgrade_targets = HashSet::<String>::new();
+        let mut pdb_duplicate_entry_count: usize = 0;
         match parity {
             Ok(report) => {
                 if let Some(raw_issue) =
@@ -4132,6 +4151,32 @@ impl BackendService {
                         supported: true,
                         destructive: false,
                         estimated_writes: 0,
+                        estimated_deletes: 0,
+                    });
+                }
+
+                pdb_duplicate_entry_count = report
+                    .playlist_details
+                    .iter()
+                    .map(|d| d.pdb_duplicate_entries)
+                    .sum();
+                if pdb_duplicate_entry_count > 0 {
+                    detected_issues.push(format!(
+                        "{pdb_duplicate_entry_count} duplicate PDB playlist entry/entries detected"
+                    ));
+                    proposed_fixes.push(RepairFixProposal {
+                        id: PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID.to_string(),
+                        title: "Remove Duplicate PDB Playlist Entries".to_string(),
+                        description: format!(
+                            "Remove {pdb_duplicate_entry_count} stale duplicate playlist_entries row(s) left \
+                             behind on shared pages from repeated exports of the same playlist over time. \
+                             This only cleans up duplicate rows already in the PDB — it does not merge \
+                             playlists between eDB and PDB or otherwise rewrite the export. For that broader \
+                             repair, use \"Upgrade Export Data To Strict Parity\" instead (or in addition)."
+                        ),
+                        supported: true,
+                        destructive: false,
+                        estimated_writes: 1,
                         estimated_deletes: 0,
                     });
                 }
@@ -4338,6 +4383,22 @@ impl BackendService {
             } else {
                 skipped_fixes
                     .push("Upgrade Export Data To Strict Parity: not selected".to_string());
+            }
+
+            if selected.contains(PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID) {
+                match apply_pdb_duplicate_playlist_entries_repair(&usb_root) {
+                    Ok(0) => skipped_fixes.push(
+                        "Remove Duplicate PDB Playlist Entries: nothing to apply".to_string(),
+                    ),
+                    Ok(n) => applied_fixes.push(format!(
+                        "Remove Duplicate PDB Playlist Entries: removed {n} duplicate entry/entries"
+                    )),
+                    Err(err) => failed_fixes.push(format!(
+                        "Remove Duplicate PDB Playlist Entries failed: {err}"
+                    )),
+                }
+            } else if pdb_duplicate_entry_count > 0 {
+                skipped_fixes.push("Remove Duplicate PDB Playlist Entries: not selected".to_string());
             }
 
             if selected.contains(PDB_ZERO_TRANRF_FIX_ID) {
@@ -6446,6 +6507,32 @@ mod tests {
             detect_pdb_sentinel_u5_on_data_pages(&pdb_path).is_empty(),
             "repair should be idempotent"
         );
+    }
+
+    #[test]
+    fn duplicate_playlist_entries_repair_removes_stale_rows_and_is_idempotent() {
+        use crate::pdb_writer::writer_tests::build_tt8_test_page;
+
+        let bytes = build_tt8_test_page(&[
+            (1, 100, 1), // stale duplicate, must be removed
+            (2, 200, 1), // untouched: distinct track
+            (5, 100, 1), // kept: highest entry_index for (playlist=1, track=100)
+        ]);
+        let pages: Vec<Vec<u8>> = bytes.chunks(TEST_PAGE_SIZE).map(|c| c.to_vec()).collect();
+        let (_td, usb_root) = write_pdb_pages_as_usb_root(pages);
+
+        let removed = apply_pdb_duplicate_playlist_entries_repair(&usb_root).unwrap();
+        assert_eq!(removed, 1);
+
+        let removed_again = apply_pdb_duplicate_playlist_entries_repair(&usb_root).unwrap();
+        assert_eq!(removed_again, 0, "repair should be idempotent");
+    }
+
+    #[test]
+    fn duplicate_playlist_entries_repair_is_noop_on_clean_pdb() {
+        let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), data_page(1, 8)]);
+        let removed = apply_pdb_duplicate_playlist_entries_repair(&usb_root).unwrap();
+        assert_eq!(removed, 0);
     }
 
     #[test]
