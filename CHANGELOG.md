@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** re-initializing a USB after manually deleting its `PIONEER`/`Contents` folders
+  always failed with "an internal database error occurred", with no workaround — a stale local
+  staging-cache copy of `exportLibrary.db` left over from before the deletion is now discarded before
+  rebuilding it, instead of colliding with its already-existing schema
+
 ## 0.1.28
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

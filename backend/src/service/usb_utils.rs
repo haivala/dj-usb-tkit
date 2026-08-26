@@ -926,6 +926,15 @@ pub fn initialize_usb(usb_root: &str) -> BackendResult<crate::models::Initialize
     let edb_file = vendor_db_dir(root).join("exportLibrary.db");
     if !edb_file.exists() {
         let local_edb_path = super::usb_staging::stage_edb(root)?;
+        // The USB copy is confirmed absent, so any local cache file left over
+        // from a prior session (e.g. the user deleted PIONEER/Contents by
+        // hand and reconnected the same-identity drive) is now stale --
+        // `stage_edb` doesn't know that and can hand back that old path.
+        // Discard it before creating fresh schema on top of it, since we
+        // synthesize all content from scratch here regardless.
+        if local_edb_path.exists() {
+            std::fs::remove_file(&local_edb_path)?;
+        }
         if let Some(parent) = local_edb_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -2093,6 +2102,42 @@ mod diag_tests {
             mtime_before, mtime_after,
             "unchanged USB source after init should not trigger a re-copy"
         );
+    }
+
+    #[test]
+    fn initialize_usb_recovers_when_usb_wiped_but_local_cache_is_stale() {
+        let usb = tempfile::tempdir().expect("usb tempdir");
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+
+        // First init: populates both the USB and the local cache with a
+        // full PDB/eDB.
+        initialize_usb(usb.path().to_str().expect("usb path")).unwrap();
+
+        // Simulate the user manually deleting PIONEER and Contents directly
+        // on the USB, then reconnecting -- the local cache directory (same
+        // identity, since it's the same mount path) is left untouched and
+        // now holds a stale, fully-populated eDB.
+        std::fs::remove_dir_all(usb.path().join(USB_VENDOR_ROOT_DIR)).unwrap();
+        std::fs::remove_dir_all(usb.path().join(USB_CONTENTS_DIR)).unwrap();
+
+        // Re-initializing must succeed, not fail with a stale-schema DB error.
+        let result = initialize_usb(usb.path().to_str().expect("usb path"))
+            .expect("re-initialize after manual wipe should succeed");
+        assert!(!result.created_dirs.is_empty());
+
+        let edb_usb_path = usb
+            .path()
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("exportLibrary.db");
+        let conn = rusqlite::Connection::open(&edb_usb_path).expect("re-created eDB must open");
+        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
+            .expect("re-created eDB must decrypt with the standard key");
+        let content_count: i64 = conn
+            .query_row("SELECT count(*) FROM content", [], |row| row.get(0))
+            .expect("content table must exist and be queryable");
+        assert_eq!(content_count, 0, "re-created eDB should be freshly empty");
     }
 
     #[test]
