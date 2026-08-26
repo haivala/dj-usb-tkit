@@ -1173,25 +1173,34 @@ pub(crate) fn remove_rows_inplace(
             // on a sealed (0x24) overflow page would produce 0x34 which DJ
             // players reject as corrupted on non-tail pages.
 
-            // Update u5=1, num_rl=last removed slot. One-row transaction
-            // per tombstone operation, num_rl = highest-indexed tombstoned slot.
-            // Only tables in the `(1, trc - 1)` convention group use this
-            // shape; `(trc, 0)`-convention tables (t06/t07/t16/t17/t18) keep
-            // their existing u5/num_rl/tranrf untouched, since trc doesn't
-            // change when a row is merely tombstoned (see
+            // Update u5=1, num_rl=trc-1 (the page's last row slot). Only
+            // tables in the `(1, trc - 1)` convention group use this shape;
+            // `(trc, 0)`-convention tables (t06/t07/t16/t17/t18) keep their
+            // existing u5/num_rl/tranrf untouched, since trc doesn't change
+            // when a row is merely tombstoned (see
             // `table_uses_tombstone_footer_convention`).
+            //
+            // num_rl must be trc-1 unconditionally, NOT the tombstoned row's
+            // own slot index -- num_row_offsets never shrinks on a tombstone,
+            // so the page's last slot stays num_row_offsets-1 regardless of
+            // which row got removed. Using the removed slot here only looked
+            // correct in exports where the removed row happened to be the
+            // page's last one; a mid-page removal left num_rl short of
+            // trc-1, which strict player validation (and
+            // `validate_pdb_page_conventions`) rejects.
             if table_uses_tombstone_footer_convention(table_type)
-                && let Some(slot) = highest_removed_slot
+                && highest_removed_slot.is_some()
             {
+                let last_slot = num_row_offsets.saturating_sub(1);
                 bytes[page_start + 0x20..page_start + 0x22].copy_from_slice(&1u16.to_le_bytes());
                 bytes[page_start + 0x22..page_start + 0x24]
-                    .copy_from_slice(&(slot as u16).to_le_bytes());
+                    .copy_from_slice(&(last_slot as u16).to_le_bytes());
 
                 // Rewrite tranrf for ALL groups: only the group containing
-                // `slot` gets 1<<(slot%16); all other groups get 0.
-                // This matches the pattern confirmed from working multi-track tombstone exports.
-                let last_group = slot / 16;
-                let last_bit = (slot % 16) as u32;
+                // the page's last slot gets 1<<(last_slot%16); all other
+                // groups get 0.
+                let last_group = last_slot / 16;
+                let last_bit = (last_slot % 16) as u32;
                 for &(tranrf_off, group_start) in &group_offsets {
                     let tranrf_val: u16 = if group_start / 16 == last_group {
                         1u16 << last_bit
@@ -1440,13 +1449,19 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
             bytes[page_start + 0x19] = ((new_packed >> 8) & 0xFF) as u8;
             bytes[page_start + 0x1a] = ((new_packed >> 16) & 0xFF) as u8;
 
-            if let Some(slot) = highest_removed_slot {
+            if highest_removed_slot.is_some() {
+                // num_rl is always trc-1 (the page's last row slot), never the
+                // tombstoned slot itself -- num_row_offsets doesn't shrink on a
+                // tombstone, so the last slot stays num_row_offsets-1 even when
+                // the removed duplicate wasn't the page's last row. See the
+                // matching fix in `remove_rows_inplace`.
+                let last_slot = num_row_offsets.saturating_sub(1);
                 bytes[page_start + 0x20..page_start + 0x22].copy_from_slice(&1u16.to_le_bytes());
                 bytes[page_start + 0x22..page_start + 0x24]
-                    .copy_from_slice(&(slot as u16).to_le_bytes());
+                    .copy_from_slice(&(last_slot as u16).to_le_bytes());
 
-                let last_group = slot / 16;
-                let last_bit = (slot % 16) as u32;
+                let last_group = last_slot / 16;
+                let last_bit = (last_slot % 16) as u32;
                 for &(tranrf_off, group_start) in &group_offsets {
                     let tranrf_val: u16 = if group_start / 16 == last_group {
                         1u16 << last_bit
@@ -2924,6 +2939,29 @@ pub(crate) mod writer_tests {
         let mut rows = active_tt8_rows(&bytes);
         rows.sort();
         assert_eq!(rows, vec![(12, 950, 33), (26, 900, 33)]);
+    }
+
+    #[test]
+    fn remove_duplicate_playlist_entries_sets_trc_minus_one_num_rl_when_removed_row_is_not_last_slot() {
+        // Regression for a real export failure: tombstoning a duplicate that
+        // isn't the page's last row slot must still leave num_rl at
+        // num_row_offsets-1, not at the tombstoned row's own slot index.
+        // Slots 0 and 1 get removed here (their entry_index 4/11 lose to
+        // slot 2's entry_index 26), while slot 3 stays -- so the page's last
+        // slot (3) is never touched by the tombstone itself.
+        let mut bytes =
+            build_tt8_test_page(&[(4, 900, 33), (11, 900, 33), (26, 900, 33), (12, 950, 33)]);
+
+        let removed = remove_duplicate_playlist_entries_inplace(&mut bytes);
+        assert_eq!(removed, 2);
+
+        let page = &bytes[PAGE_SIZE..PAGE_SIZE * 2];
+        let u5 = read_u16_le_at(page, 0x20).unwrap();
+        let num_rl = read_u16_le_at(page, 0x22).unwrap();
+        assert_eq!((u5, num_rl), (1, 3), "num_rl must stay trc-1 (3), not the removed slot");
+
+        let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
+        assert!(mismatches.is_empty(), "unexpected mismatches: {mismatches:?}");
     }
 
     #[test]

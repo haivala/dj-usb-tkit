@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+## 0.1.30
+
+- **Fix (CRITICAL):** additive export could be blocked with "PDB additive write blocked: page-header
+  convention mismatches" after tombstoning a duplicate or removed `playlist_entries` row that wasn't
+  the last row slot on its page — the tombstone footer's `num_rl` field was set to the tombstoned
+  row's own slot index instead of the page's fixed last slot, which strict player validation rejects
+
 ## 0.1.29
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
