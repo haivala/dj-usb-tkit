@@ -636,10 +636,15 @@ impl BackendService {
                 let playlist_count = usb_staging::stage_pdb(&usb_root)
                     .ok()
                     .and_then(|p| crate::pdb_reader::count_pdb_playlists(&p));
+                let backup_reason = if options.prune_stale {
+                    "Before export (mirror)"
+                } else {
+                    "Before export (additive)"
+                };
                 warnings.extend(
                     self.backup_usb_databases_with_retention(
                         &usb_root,
-                        "Before export",
+                        backup_reason,
                         playlist_count,
                     )
                     .into_iter()

@@ -36,6 +36,8 @@
   always failed with "an internal database error occurred", with no workaround — a stale local
   staging-cache copy of `exportLibrary.db` left over from before the deletion is now discarded before
   rebuilding it, instead of colliding with its already-existing schema
+- **Improvement:** show the sync mode (mirror/additive) in the Backups panel's "Before export" entries,
+  so a pre-export snapshot's listed reason records which export mode produced it
 - **Chore:** extend the additive-growth/mirror/reorder/history-guard workflow integration test with a
   check that an additive re-export right after a local reorder leaves entry order and count
   untouched (order sync is mirror-only), and remove a now-redundant reorder/duplicate-entries
