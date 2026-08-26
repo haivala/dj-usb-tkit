@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.29
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** re-initializing a USB after manually deleting its `PIONEER`/`Contents` folders
