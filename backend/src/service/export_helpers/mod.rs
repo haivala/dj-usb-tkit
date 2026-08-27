@@ -28,8 +28,9 @@ pub use export_paths::{
     canonical_analysis_bundle_paths, canonical_artwork_target_paths, collect_manifest_owned_paths,
     copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
-    exported_media_target_path, filter_prunable_stale_paths_for_playlist,
-    is_safe_export_owned_path, limit_contents_file_name, normalize_owned_export_path,
+    exported_media_target_path, exported_media_target_path_with_ordinal,
+    filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path,
+    limit_contents_file_name, limit_contents_file_name_with_suffix, normalize_owned_export_path,
     prune_stale_export_owned_files, sanitize_contents_component, sanitize_filename_component,
     stable_u32_hash, to_usb_relative_path, truncate_component,
 };
@@ -1669,6 +1670,34 @@ fn write_pdb_fresh_with_overrides(
                 if let Some(tn) = track.track_number {
                     existing_track.track_number = Some(tn);
                 }
+                // These were previously never refreshed on an update, so a
+                // re-exported track that got re-encoded/replaced (different
+                // size, bitrate, sample rate) at the same path kept the
+                // *original* insert's stale values forever, even though
+                // duration/title/anlz_path above were refreshing correctly
+                // -- a real PDB-vs-actual-file mismatch, not just a
+                // collision-specific symptom.
+                if let Some(size) = track.file_size_bytes.and_then(|v| u32::try_from(v).ok()) {
+                    existing_track.file_size_bytes = Some(size);
+                }
+                if let Some(sr) = track.sample_rate_hz {
+                    existing_track.sample_rate_hz = Some(sr);
+                }
+                if let Some(br) = track.bitrate_kbps {
+                    existing_track.bitrate_kbps = Some(br);
+                }
+                if let Some(ft) = track.file_type.and_then(|v| u16::try_from(v).ok()) {
+                    existing_track.file_type = Some(ft);
+                }
+                if let Some(ry) = track.release_year.and_then(|v| u16::try_from(v).ok()) {
+                    existing_track.release_year = Some(ry);
+                }
+                if let Some(rd) = resolve_track_release_date_for_export(track) {
+                    existing_track.release_date = Some(rd);
+                }
+                if let Some(ref isrc) = track.isrc {
+                    existing_track.isrc = Some(isrc.clone());
+                }
                 if let Some(ref wp) = track.waveform_path {
                     existing_track.anlz_path =
                         to_usb_relative_path(usb_root, wp).unwrap_or_else(|| wp.clone());
@@ -2840,6 +2869,47 @@ mod tests {
         let long_name = "a".repeat(60);
         let result = limit_contents_file_name(&long_name, 48);
         assert_eq!(result.chars().count(), 48);
+    }
+
+    // --- limit_contents_file_name_with_suffix ---
+
+    #[test]
+    fn limit_filename_with_suffix_none_matches_plain() {
+        let long_name = format!("{}.mp3", "a".repeat(60));
+        assert_eq!(
+            limit_contents_file_name_with_suffix(&long_name, 48, None),
+            limit_contents_file_name(&long_name, 48)
+        );
+    }
+
+    #[test]
+    fn limit_filename_with_suffix_appends_ordinal_before_extension() {
+        let long_name = "June Rodriguez - Deep Tribal House Music Frequencies - 01 Rktex.wav";
+        let plain = limit_contents_file_name_with_suffix(long_name, 48, None);
+        let first = limit_contents_file_name_with_suffix(long_name, 48, Some(1));
+        let second = limit_contents_file_name_with_suffix(long_name, 48, Some(2));
+        assert!(first.ends_with("-1.wav"), "got: {first}");
+        assert!(second.ends_with("-2.wav"), "got: {second}");
+        assert_ne!(plain, first);
+        assert_ne!(first, second);
+        assert!(plain.chars().count() <= 48);
+        assert!(first.chars().count() <= 48);
+        assert!(second.chars().count() <= 48);
+    }
+
+    #[test]
+    fn limit_filename_with_suffix_disambiguates_a_seven_way_collision() {
+        // The exact shape of the USB_DISCONNECTS bug: 7 tracks share a
+        // >48-char common prefix and all truncate identically at ordinal
+        // None. Assigning ordinals 1..=6 to the collisions must yield 7
+        // total distinct names.
+        let long_name = "June Rodriguez - Deep Tribal House Music Frequencies - 07 Rescue.wav";
+        let mut names = vec![limit_contents_file_name_with_suffix(long_name, 48, None)];
+        for n in 1..=6u32 {
+            names.push(limit_contents_file_name_with_suffix(long_name, 48, Some(n)));
+        }
+        let unique: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "collided names: {names:?}");
     }
 
     // --- stable_u32_hash ---
@@ -5557,6 +5627,56 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn write_pdb_refreshes_file_size_sample_rate_bitrate_on_reexport_of_existing_track() {
+        // A track re-exported at the *same* exported_path (e.g. re-encoded/
+        // replaced with a different file, then the playlist re-exported)
+        // must have its PDB row's file_size_bytes/sample_rate_hz/bitrate_kbps
+        // refreshed, not frozen at whatever the first export originally
+        // wrote -- these previously weren't in the "update existing track"
+        // field list even though duration/title/anlz_path were.
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path();
+        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
+            .expect("initialize usb skeleton");
+
+        let playlist = ExportPlaylistData {
+            id: "pl-refresh".to_string(),
+            name: "Refresh".to_string(),
+            tracks: vec![make_test_track("t1", "Song", "song.mp3")],
+        };
+
+        let mut first_manifest = make_test_manifest(
+            "pl-refresh",
+            "Refresh",
+            usb_root,
+            &[("t1", "Song", "song.mp3")],
+        );
+        first_manifest.tracks[0].file_size_bytes = Some(1_000_000);
+        first_manifest.tracks[0].sample_rate_hz = Some(44_100);
+        first_manifest.tracks[0].bitrate_kbps = Some(128);
+        write_pdb(usb_root, &playlist, &first_manifest, true, None, None)
+            .expect("write initial export");
+
+        let mut second_manifest = first_manifest.clone();
+        second_manifest.tracks[0].file_size_bytes = Some(2_500_000);
+        second_manifest.tracks[0].sample_rate_hz = Some(48_000);
+        second_manifest.tracks[0].bitrate_kbps = Some(320);
+        write_pdb(usb_root, &playlist, &second_manifest, true, None, None)
+            .expect("write re-export with replaced file metadata");
+
+        let pdb_path = usb_root
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb");
+        let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse pdb");
+        assert_eq!(parsed.tracks.len(), 1, "re-export must update, not duplicate");
+        let track = &parsed.tracks[0];
+        assert_eq!(track.file_size_bytes, Some(2_500_000));
+        assert_eq!(track.sample_rate_hz, Some(48_000));
+        assert_eq!(track.bitrate_kbps, Some(320));
     }
 
     // --- collect_manifest_owned_paths ---

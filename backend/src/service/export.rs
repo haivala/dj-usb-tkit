@@ -27,7 +27,8 @@ use super::export_helpers::{
     WriteExportLibraryDbResult, WriteExportPdbResult, collect_manifest_owned_paths,
     copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
-    exported_media_target_path, filter_prunable_stale_paths_for_playlist, preview_pdb,
+    exported_media_target_path, exported_media_target_path_with_ordinal,
+    filter_prunable_stale_paths_for_playlist, preview_pdb,
     prune_stale_export_owned_files, stable_u32_hash, to_usb_relative_path, verify_edb_content,
     verify_edb_content_with_conn, verify_pdb_content, write_edb_playlist,
     write_edb_playlist_with_conn, write_pdb,
@@ -71,6 +72,70 @@ fn content_fingerprint_key(
         return None;
     }
     Some((size, title_key, canonicalize_playlist_name(artist)))
+}
+
+/// Resolves the on-disk media target path for one track within a single
+/// export run, disambiguating it from any *different* track that already
+/// claimed the same truncated name this run (see `CONTENT_FILENAME_MAX_LEN`
+/// / `limit_contents_file_name` — the 48-char CDJ limit truncates the raw
+/// filename with no collision awareness, so tracks sharing a long
+/// artist/album prefix can truncate identically and silently overwrite each
+/// other). `claimed` tracks every target path resolved so far this run,
+/// keyed by path and valued by the claiming track's content fingerprint
+/// (`None` when a fingerprint couldn't be computed, e.g. missing file size —
+/// tracked unconditionally regardless, so collision *detection* never
+/// depends on fingerprint availability, only the same-track *reuse* check
+/// below does). This call inserts its own result before returning.
+///
+/// A collision against the *same* track (fingerprint match) reuses the
+/// already-claimed path rather than minting a new suffix -- e.g. a
+/// legitimate re-processing of one track, not two distinct ones. Anything
+/// else -- a genuinely different track, or either side's identity being
+/// unknown -- takes the next free `-N` slot, matching the disambiguation
+/// convention observed in real rekordbox exports hitting the same collision
+/// shape (`Name.wav`, `Nam-1.wav`, `Na-2.wav`, ...).
+#[allow(clippy::too_many_arguments)]
+fn resolve_collision_free_media_target(
+    claimed: &mut HashMap<PathBuf, Option<ContentFingerprint>>,
+    media_root: &Path,
+    source: &Path,
+    artist: &str,
+    album: Option<&str>,
+    title: &str,
+    extension: &str,
+    fingerprint: Option<ContentFingerprint>,
+) -> PathBuf {
+    let same_track = |claimant: &Option<ContentFingerprint>| -> bool {
+        matches!((claimant, &fingerprint), (Some(a), Some(b)) if a == b)
+    };
+    let mut target = exported_media_target_path(media_root, source, artist, album, title, extension);
+    if let Some(claimant) = claimed.get(&target)
+        && !same_track(claimant)
+    {
+        let mut ordinal = 1u32;
+        loop {
+            let candidate = exported_media_target_path_with_ordinal(
+                media_root,
+                source,
+                artist,
+                album,
+                title,
+                extension,
+                Some(ordinal),
+            );
+            match claimed.get(&candidate) {
+                Some(claimant) if !same_track(claimant) => {
+                    ordinal += 1;
+                }
+                _ => {
+                    target = candidate;
+                    break;
+                }
+            }
+        }
+    }
+    claimed.insert(target.clone(), fingerprint);
+    target
 }
 
 /// Verify a USB-PDB-relative path (e.g. `/Contents/Artist/Album/Song.mp3`)
@@ -324,6 +389,16 @@ impl BackendService {
         let mut exported_artworks = 0usize;
         let mut exported_analysis_files = 0usize;
         let mut manifest_tracks = Vec::<ExportManifestTrack>::new();
+        // Tracks the on-disk target path each track in *this run* resolves
+        // to, so distinct tracks whose (artist, album)-truncated file name
+        // collides (e.g. several tracks from the same artist/release, where
+        // the differentiating title falls past CONTENT_FILENAME_MAX_LEN) get
+        // disambiguated instead of silently overwriting each other's audio
+        // and merging into one eDB/PDB row. Keyed by the *claimed* target
+        // path, valued by the claiming track's content fingerprint so a
+        // later collision against the *same* track (not just the same path)
+        // can reuse it rather than minting a new suffix.
+        let mut claimed_media_targets = HashMap::<PathBuf, Option<ContentFingerprint>>::new();
 
         for (idx, track) in playlist.tracks.iter().enumerate() {
             on_progress(
@@ -355,15 +430,18 @@ impl BackendService {
                 .filter(|s| !s.trim().is_empty())
                 .map(|s| s.to_ascii_lowercase())
                 .unwrap_or_else(|| "bin".to_string());
-            let target_base = exported_media_target_path(
+            let this_fingerprint =
+                content_fingerprint_key(track.file_size_bytes, &track.title, &track.artist);
+            let target = resolve_collision_free_media_target(
+                &mut claimed_media_targets,
                 &media_root,
                 &source,
                 &track.artist,
                 track.album.as_deref(),
                 &track.title,
                 &extension,
+                this_fingerprint,
             );
-            let target = target_base;
             let computed_target_relative =
                 to_usb_relative_path(&usb_root, &target.to_string_lossy());
             let existing_exported_path =
@@ -1210,13 +1288,15 @@ mod tests {
         ensure_playlist_tracks_analysis_ready, existing_usb_relative_if_file,
         existing_usb_relative_if_present, has_required_analysis, has_required_analysis_fields,
         normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
+        resolve_collision_free_media_target,
     };
     use crate::error::BackendError;
     use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, Playlist};
     use crate::service::export_helpers::{
         ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
     };
-    use std::path::Path;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
     fn make_track() -> ExportTrackData {
@@ -1434,6 +1514,120 @@ mod tests {
         assert_ne!(
             base,
             content_fingerprint_key(Some(1234), "Title", "Other").unwrap()
+        );
+    }
+
+    // --- resolve_collision_free_media_target ---
+
+    #[test]
+    fn resolve_collision_free_media_target_disambiguates_same_artist_long_prefix_group() {
+        // Reproduces the USB_DISCONNECTS defect: 7 tracks from the same
+        // artist share a long common "Artist - Album - " prefix that, once
+        // truncated to CONTENT_FILENAME_MAX_LEN (48), all collapse to the
+        // identical on-disk filename. Each must resolve to a distinct path.
+        let media_root = PathBuf::from("/usb/Contents");
+        let mut claimed = HashMap::new();
+        let artist = "June Rodriguez";
+        let album = "Deep Tribal House Music Frequencies";
+        let titles = [
+            "01 Rktex",
+            "02 Oceans Deep",
+            "03 Revolt",
+            "04 Mundo Hondo",
+            "05 Star69",
+            "06 Oracion",
+            "07 Rescue",
+        ];
+        let mut targets = Vec::new();
+        for title in titles {
+            let source = PathBuf::from(format!("/music/{artist} - {album} - {title}.wav"));
+            let fingerprint = content_fingerprint_key(Some(1_000_000), title, artist);
+            let target = resolve_collision_free_media_target(
+                &mut claimed,
+                &media_root,
+                &source,
+                artist,
+                Some(album),
+                title,
+                "wav",
+                fingerprint,
+            );
+            targets.push(target);
+        }
+        let unique: std::collections::HashSet<_> = targets.iter().collect();
+        assert_eq!(
+            unique.len(),
+            titles.len(),
+            "all 7 same-artist tracks must resolve to distinct paths, got: {targets:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_collision_free_media_target_reuses_path_for_same_track() {
+        // Re-processing the *same* track (matching content fingerprint)
+        // within one run must reuse its already-claimed path, not mint a
+        // spurious `-1` suffix.
+        let media_root = PathBuf::from("/usb/Contents");
+        let mut claimed = HashMap::new();
+        let source = PathBuf::from("/music/Some Artist - Some Very Long Album Title - Track.wav");
+        let fingerprint = content_fingerprint_key(Some(1_000_000), "Track", "Some Artist");
+        let first = resolve_collision_free_media_target(
+            &mut claimed,
+            &media_root,
+            &source,
+            "Some Artist",
+            Some("Some Very Long Album Title"),
+            "Track",
+            "wav",
+            fingerprint.clone(),
+        );
+        let second = resolve_collision_free_media_target(
+            &mut claimed,
+            &media_root,
+            &source,
+            "Some Artist",
+            Some("Some Very Long Album Title"),
+            "Track",
+            "wav",
+            fingerprint,
+        );
+        assert_eq!(first, second, "same track must reuse its claimed path");
+    }
+
+    #[test]
+    fn resolve_collision_free_media_target_leaves_non_colliding_tracks_untouched() {
+        // Two tracks with short, distinct names never approach the 48-char
+        // limit and must not be touched by the collision machinery at all.
+        let media_root = PathBuf::from("/usb/Contents");
+        let mut claimed = HashMap::new();
+        let a = resolve_collision_free_media_target(
+            &mut claimed,
+            &media_root,
+            &PathBuf::from("/music/a.mp3"),
+            "Artist A",
+            Some("Album A"),
+            "Song A",
+            "mp3",
+            content_fingerprint_key(Some(1_000), "Song A", "Artist A"),
+        );
+        let b = resolve_collision_free_media_target(
+            &mut claimed,
+            &media_root,
+            &PathBuf::from("/music/b.mp3"),
+            "Artist B",
+            Some("Album B"),
+            "Song B",
+            "mp3",
+            content_fingerprint_key(Some(1_000), "Song B", "Artist B"),
+        );
+        assert_ne!(a, b);
+        assert!(
+            a.to_string_lossy().ends_with("a.mp3") && !a.to_string_lossy().contains('-'),
+            "non-colliding track must not get a disambiguating suffix: {a:?}"
+        );
+        assert!(
+            b.to_string_lossy().ends_with("b.mp3") && !b.to_string_lossy().contains('-'),
+            "non-colliding track must not get a disambiguating suffix: {b:?}"
         );
     }
 

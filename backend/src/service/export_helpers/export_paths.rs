@@ -85,6 +85,41 @@ pub fn truncate_component(value: &str, max_len: usize) -> String {
 }
 
 pub fn limit_contents_file_name(file_name: &str, max_len: usize) -> String {
+    limit_contents_file_name_with_suffix(file_name, max_len, None)
+}
+
+/// Like `limit_contents_file_name`, but when `ordinal` is `Some(n)` (n >= 1)
+/// reserves room for a `-{n}` disambiguator and appends it before the
+/// extension, truncating the stem one or more characters shorter to make
+/// room. Used when the plain-truncated name collides with a *different*
+/// track's already-claimed target within the same export run — matches the
+/// disambiguation convention observed in real rekordbox exports for the
+/// same collision shape (`Some Long Name.wav`, then `Some Long Nam-1.wav`,
+/// `Some Long Na-2.wav`, ...). `ordinal` is `None` for the plain (first,
+/// non-colliding) case, which is byte-identical to `limit_contents_file_name`'s
+/// prior behavior.
+pub fn limit_contents_file_name_with_suffix(
+    file_name: &str,
+    max_len: usize,
+    ordinal: Option<u32>,
+) -> String {
+    let Some(n) = ordinal else {
+        return limit_contents_file_name_plain(file_name, max_len);
+    };
+    let suffix = format!("-{n}");
+    let reduced_max = max_len.saturating_sub(suffix.chars().count()).max(1);
+    let base = limit_contents_file_name_plain(file_name, reduced_max);
+    let (stem, ext) = match base.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() && !e.is_empty() => (s, Some(e)),
+        _ => (base.as_str(), None),
+    };
+    match ext {
+        Some(e) => format!("{stem}{suffix}.{e}"),
+        None => format!("{stem}{suffix}"),
+    }
+}
+
+fn limit_contents_file_name_plain(file_name: &str, max_len: usize) -> String {
     if file_name.chars().count() <= max_len {
         return file_name.to_string();
     }
@@ -390,13 +425,31 @@ pub fn exported_media_target_path(
     title: &str,
     extension: &str,
 ) -> PathBuf {
+    exported_media_target_path_with_ordinal(media_root, source, artist, album, title, extension, None)
+}
+
+/// Like `exported_media_target_path`, but when `ordinal` is `Some(n)` (n >= 1)
+/// disambiguates the file name the same way `limit_contents_file_name_with_suffix`
+/// does. Callers use this to retry with an incrementing ordinal when the
+/// plain (ordinal `None`) target collides with a *different* track already
+/// claimed within the same export run — see `export.rs`'s copy loop.
+pub fn exported_media_target_path_with_ordinal(
+    media_root: &Path,
+    source: &Path,
+    artist: &str,
+    album: Option<&str>,
+    title: &str,
+    extension: &str,
+    ordinal: Option<u32>,
+) -> PathBuf {
     let parts = source
         .components()
         .map(|c| c.as_os_str().to_string_lossy().to_string())
         .collect::<Vec<_>>();
-    if let Some(contents_index) = parts
-        .iter()
-        .position(|p| p.eq_ignore_ascii_case("Contents"))
+    if ordinal.is_none()
+        && let Some(contents_index) = parts
+            .iter()
+            .position(|p| p.eq_ignore_ascii_case("Contents"))
     {
         let rel_parts = parts
             .into_iter()
@@ -419,8 +472,11 @@ pub fn exported_media_target_path(
     let album_clean = sanitize_contents_component(album.unwrap_or("UnknownAlbum"));
     let artist_dir = truncate_component(&artist_clean, CONTENT_COMPONENT_MAX_LEN);
     let album_dir = truncate_component(&album_clean, CONTENT_COMPONENT_MAX_LEN);
-    let source_file_name =
-        limit_contents_file_name(&raw_source_file_name, CONTENT_FILENAME_MAX_LEN);
+    let source_file_name = limit_contents_file_name_with_suffix(
+        &raw_source_file_name,
+        CONTENT_FILENAME_MAX_LEN,
+        ordinal,
+    );
     media_root
         .join(artist_dir)
         .join(album_dir)

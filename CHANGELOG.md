@@ -30,6 +30,21 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** exporting more than 16 tracks to a USB could produce a PDB that rekordbox
+  desktop rejected as corrupted and that caused a CDJ-2000NXS2 to mount and silently eject the drive
+  in a loop. The per-track runtime table's footer incorrectly marked every row as simultaneously
+  "active" instead of only the most recent one, once the table grew past a single 16-row footer
+  group.
+- **Fix:** tracks whose CDJ-truncated filename collided with another track's (e.g. several tracks
+  by the same artist sharing a long title prefix) silently overwrote each other on export, losing
+  tracks from the exported playlist without any warning. Colliding filenames now get a numbered
+  suffix, matching rekordbox's own naming convention.
+- **Fix:** re-exporting a track that already had a PDB row (e.g. after re-encoding the source file)
+  kept its old file size, sample rate, bitrate, file type, release year/date, and ISRC instead of
+  refreshing them.
+
 ## 0.1.30
 
 - **Fix (CRITICAL):** additive export could be blocked with "PDB additive write blocked: page-header

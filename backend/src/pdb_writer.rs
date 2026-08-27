@@ -665,22 +665,60 @@ fn build_data_page(table_type: u32, pf: u8, seq: u32, rows: &[&[u8]], sealed: bo
     }
 
     if table_type == 19 {
-        // Runtime profile: rowpf marks the last row bit and tranrf carries
-        // rowpf plus the preceding transaction-row bit.
-        let n = rows.len();
-        if (1..=16).contains(&n) {
-            let rowpf = 1u16 << (n - 1);
-            let tranrf = if n > 1 {
-                rowpf | (1u16 << (n - 2))
-            } else {
-                rowpf
-            };
-            page[PAGE_SIZE - 4..PAGE_SIZE - 2].copy_from_slice(&rowpf.to_le_bytes());
-            page[PAGE_SIZE - 2..PAGE_SIZE].copy_from_slice(&tranrf.to_le_bytes());
-        }
+        write_t19_runtime_footer_groups(&mut page, rows.len());
     }
 
     page
+}
+
+/// Write the tt=19 (history_runtime) "runtime profile" rowpf/tranrf footer
+/// for a page holding `row_count` rows, into a full `PAGE_SIZE` page buffer.
+///
+/// Only the most recently added row (and, when it shares a footer group
+/// with it, the row immediately before it) is "active"/current — every
+/// earlier row is committed history. This must hold across ALL footer
+/// groups, not just the first: verified against real rekordbox's own
+/// multi-group tt=19 output (USB_DISCONNECTS_RB, 88 rows across 6 groups of
+/// 16), which has exactly one rowpf bit and two tranrf bits set globally,
+/// both in the group holding the final row. `write_row_index_footer`
+/// defaults every group's rowpf/tranrf to "all rows active", which is
+/// correct for ordinary tables but wrong here for any group — this
+/// overwrites every group's rowpf/tranrf accordingly.
+///
+/// Both call sites of this used to only handle the single-group case,
+/// `row_count <= 16`; a page with more than 16 history rows silently kept
+/// every row falsely marked simultaneously active once history rows
+/// accumulated past one footer group (a real-world case: `USB_DISCONNECTS`,
+/// the very first crashing export from this investigation, already had 75
+/// history rows across 5 groups, all falsely marked active).
+fn write_t19_runtime_footer_groups(page: &mut [u8], row_count: usize) {
+    if row_count == 0 {
+        return;
+    }
+    let n = row_count;
+    let last_idx = n - 1;
+    let last_group_start = last_idx / 16 * 16;
+    let last_bit = last_idx % 16;
+    let mut cursor = PAGE_SIZE;
+    for group_start in (0..n).step_by(16) {
+        let group_len = (n - group_start).min(16);
+        let (rowpf, tranrf) = if group_start == last_group_start {
+            let rowpf = 1u16 << last_bit;
+            let tranrf = if last_bit >= 1 {
+                rowpf | (1u16 << (last_bit - 1))
+            } else {
+                rowpf
+            };
+            (rowpf, tranrf)
+        } else {
+            (0u16, 0u16)
+        };
+        cursor -= 2;
+        page[cursor..cursor + 2].copy_from_slice(&tranrf.to_le_bytes());
+        cursor -= 2;
+        page[cursor..cursor + 2].copy_from_slice(&rowpf.to_le_bytes());
+        cursor -= group_len * 2;
+    }
 }
 
 /// Write the row index footer into a page buffer.
@@ -3100,6 +3138,62 @@ pub(crate) mod writer_tests {
             "tt=19 empty_candidate={ec19} must not point to a tt=0 data page"
         );
     }
+
+    #[test]
+    fn test_history_runtime_footer_only_last_row_active_beyond_one_group() {
+        // Regression: a tt=19 (history_runtime) page with more than 16 rows
+        // used to leave every row's rowpf/tranrf bit set — the "only the
+        // last row(s) active" override only handled n<=16, so any group
+        // past the first silently kept write_row_index_footer's default
+        // "all rows active" pattern. Verified wrong against real
+        // rekordbox's own multi-group tt=19 output (USB_DISCONNECTS_RB, 88
+        // history rows across 6 groups of 16): rowpf has exactly one bit
+        // set globally, tranrf exactly two, both in the group holding the
+        // final row.
+        let mut data = PdbData::empty();
+        data.colors = standard_colors();
+        data.columns_raw_rows = standard_columns_raw();
+        // 20 dummy raw rows forces a second footer group (rows 16..20).
+        data.history_raw_rows = (0..20u32).map(|_| vec![0u8; 16]).collect();
+
+        let bytes = write_pdb(&data).unwrap();
+
+        let (_, first, last) = table_ptr_fields(&bytes, 19).expect("tt=19 pointer");
+        let chain =
+            crate::utils::collect_chain(&bytes, PAGE_SIZE, first, last).expect("tt=19 chain");
+        // chain[0] = sentinel, chain[1] = the single data page (20 small rows fit on one page)
+        let data_page = chain[1];
+        let off = page_offset(data_page, PAGE_SIZE).expect("page offset");
+
+        // Group 0 (rows 0..16): must be fully inactive now, not "all active".
+        let group0_rowpf = u16::from_le_bytes([bytes[off + PAGE_SIZE - 4], bytes[off + PAGE_SIZE - 3]]);
+        let group0_tranrf = u16::from_le_bytes([bytes[off + PAGE_SIZE - 2], bytes[off + PAGE_SIZE - 1]]);
+        assert_eq!(
+            group0_rowpf, 0,
+            "earlier footer group must not be marked active"
+        );
+        assert_eq!(
+            group0_tranrf, 0,
+            "earlier footer group must not be marked active"
+        );
+
+        // Group 1 (rows 16..20, group_len=4): only the true last row (index
+        // 19, local bit 3) plus the row before it (local bit 2) marked.
+        let g1_rowpf_off = off + PAGE_SIZE - 40;
+        let g1_tranrf_off = off + PAGE_SIZE - 38;
+        let group1_rowpf =
+            u16::from_le_bytes([bytes[g1_rowpf_off], bytes[g1_rowpf_off + 1]]);
+        let group1_tranrf =
+            u16::from_le_bytes([bytes[g1_tranrf_off], bytes[g1_tranrf_off + 1]]);
+        assert_eq!(
+            group1_rowpf, 0b1000,
+            "only the final row's bit should be set in rowpf"
+        );
+        assert_eq!(
+            group1_tranrf, 0b1100,
+            "tranrf should carry the final row plus the one before it"
+        );
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4539,15 +4633,8 @@ fn synthesize_t19_runtime_rows_in_place(
     let (u5, num_rl) = data_page_footer_fields(19, row_count as u16);
     bytes[off + 0x20..off + 0x22].copy_from_slice(&u5.to_le_bytes());
     bytes[off + 0x22..off + 0x24].copy_from_slice(&num_rl.to_le_bytes());
-    if (1..=16).contains(&row_count) {
-        let rowpf = 1u16 << (row_count - 1);
-        let tranrf = if row_count > 1 {
-            rowpf | (1u16 << (row_count - 2))
-        } else {
-            rowpf
-        };
-        bytes[off + page_size - 4..off + page_size - 2].copy_from_slice(&rowpf.to_le_bytes());
-        bytes[off + page_size - 2..off + page_size].copy_from_slice(&tranrf.to_le_bytes());
+    if let Some(page) = bytes.get_mut(off..off + page_size) {
+        write_t19_runtime_footer_groups(page, row_count);
     }
 
     let seqdb = read_u32_le_at(bytes, 0x14)
