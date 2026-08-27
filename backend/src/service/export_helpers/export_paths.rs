@@ -425,7 +425,9 @@ pub fn exported_media_target_path(
     title: &str,
     extension: &str,
 ) -> PathBuf {
-    exported_media_target_path_with_ordinal(media_root, source, artist, album, title, extension, None)
+    exported_media_target_path_with_ordinal(
+        media_root, source, artist, album, title, extension, None,
+    )
 }
 
 /// Like `exported_media_target_path`, but when `ordinal` is `Some(n)` (n >= 1)

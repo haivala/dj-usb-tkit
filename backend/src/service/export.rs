@@ -28,10 +28,9 @@ use super::export_helpers::{
     copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
     exported_media_target_path, exported_media_target_path_with_ordinal,
-    filter_prunable_stale_paths_for_playlist, preview_pdb,
-    prune_stale_export_owned_files, stable_u32_hash, to_usb_relative_path, verify_edb_content,
-    verify_edb_content_with_conn, verify_pdb_content, write_edb_playlist,
-    write_edb_playlist_with_conn, write_pdb,
+    filter_prunable_stale_paths_for_playlist, preview_pdb, prune_stale_export_owned_files,
+    stable_u32_hash, to_usb_relative_path, verify_edb_content, verify_edb_content_with_conn,
+    verify_pdb_content, write_edb_playlist, write_edb_playlist_with_conn, write_pdb,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
@@ -108,7 +107,8 @@ fn resolve_collision_free_media_target(
     let same_track = |claimant: &Option<ContentFingerprint>| -> bool {
         matches!((claimant, &fingerprint), (Some(a), Some(b)) if a == b)
     };
-    let mut target = exported_media_target_path(media_root, source, artist, album, title, extension);
+    let mut target =
+        exported_media_target_path(media_root, source, artist, album, title, extension);
     if let Some(claimant) = claimed.get(&target)
         && !same_track(claimant)
     {

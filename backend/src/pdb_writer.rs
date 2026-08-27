@@ -1226,8 +1226,7 @@ pub(crate) fn remove_rows_inplace(
             // page's last one; a mid-page removal left num_rl short of
             // trc-1, which strict player validation (and
             // `validate_pdb_page_conventions`) rejects.
-            if table_uses_tombstone_footer_convention(table_type)
-                && highest_removed_slot.is_some()
+            if table_uses_tombstone_footer_convention(table_type) && highest_removed_slot.is_some()
             {
                 let last_slot = num_row_offsets.saturating_sub(1);
                 bytes[page_start + 0x20..page_start + 0x22].copy_from_slice(&1u16.to_le_bytes());
@@ -2980,7 +2979,8 @@ pub(crate) mod writer_tests {
     }
 
     #[test]
-    fn remove_duplicate_playlist_entries_sets_trc_minus_one_num_rl_when_removed_row_is_not_last_slot() {
+    fn remove_duplicate_playlist_entries_sets_trc_minus_one_num_rl_when_removed_row_is_not_last_slot()
+     {
         // Regression for a real export failure: tombstoning a duplicate that
         // isn't the page's last row slot must still leave num_rl at
         // num_row_offsets-1, not at the tombstoned row's own slot index.
@@ -2996,10 +2996,17 @@ pub(crate) mod writer_tests {
         let page = &bytes[PAGE_SIZE..PAGE_SIZE * 2];
         let u5 = read_u16_le_at(page, 0x20).unwrap();
         let num_rl = read_u16_le_at(page, 0x22).unwrap();
-        assert_eq!((u5, num_rl), (1, 3), "num_rl must stay trc-1 (3), not the removed slot");
+        assert_eq!(
+            (u5, num_rl),
+            (1, 3),
+            "num_rl must stay trc-1 (3), not the removed slot"
+        );
 
         let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
-        assert!(mismatches.is_empty(), "unexpected mismatches: {mismatches:?}");
+        assert!(
+            mismatches.is_empty(),
+            "unexpected mismatches: {mismatches:?}"
+        );
     }
 
     #[test]
@@ -3166,8 +3173,10 @@ pub(crate) mod writer_tests {
         let off = page_offset(data_page, PAGE_SIZE).expect("page offset");
 
         // Group 0 (rows 0..16): must be fully inactive now, not "all active".
-        let group0_rowpf = u16::from_le_bytes([bytes[off + PAGE_SIZE - 4], bytes[off + PAGE_SIZE - 3]]);
-        let group0_tranrf = u16::from_le_bytes([bytes[off + PAGE_SIZE - 2], bytes[off + PAGE_SIZE - 1]]);
+        let group0_rowpf =
+            u16::from_le_bytes([bytes[off + PAGE_SIZE - 4], bytes[off + PAGE_SIZE - 3]]);
+        let group0_tranrf =
+            u16::from_le_bytes([bytes[off + PAGE_SIZE - 2], bytes[off + PAGE_SIZE - 1]]);
         assert_eq!(
             group0_rowpf, 0,
             "earlier footer group must not be marked active"
@@ -3181,10 +3190,8 @@ pub(crate) mod writer_tests {
         // 19, local bit 3) plus the row before it (local bit 2) marked.
         let g1_rowpf_off = off + PAGE_SIZE - 40;
         let g1_tranrf_off = off + PAGE_SIZE - 38;
-        let group1_rowpf =
-            u16::from_le_bytes([bytes[g1_rowpf_off], bytes[g1_rowpf_off + 1]]);
-        let group1_tranrf =
-            u16::from_le_bytes([bytes[g1_tranrf_off], bytes[g1_tranrf_off + 1]]);
+        let group1_rowpf = u16::from_le_bytes([bytes[g1_rowpf_off], bytes[g1_rowpf_off + 1]]);
+        let group1_tranrf = u16::from_le_bytes([bytes[g1_tranrf_off], bytes[g1_tranrf_off + 1]]);
         assert_eq!(
             group1_rowpf, 0b1000,
             "only the final row's bit should be set in rowpf"

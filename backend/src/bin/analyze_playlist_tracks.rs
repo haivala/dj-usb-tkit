@@ -54,6 +54,7 @@ fn main() {
         bpm_min: None,
         bpm_max: None,
         analysis_engine: None,
+        ..Default::default()
     });
     if !analyze_resp.ok {
         fail(format!(

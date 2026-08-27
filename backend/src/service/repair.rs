@@ -4398,7 +4398,8 @@ impl BackendService {
                     )),
                 }
             } else if pdb_duplicate_entry_count > 0 {
-                skipped_fixes.push("Remove Duplicate PDB Playlist Entries: not selected".to_string());
+                skipped_fixes
+                    .push("Remove Duplicate PDB Playlist Entries: not selected".to_string());
             }
 
             if selected.contains(PDB_ZERO_TRANRF_FIX_ID) {

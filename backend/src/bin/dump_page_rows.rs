@@ -98,7 +98,7 @@ fn parse_pdb_string(row: &[u8], offset: usize) -> String {
     let b8 = (code & 0b1000_0000) != 0;
     if b5 && b8 {
         let mut u16s = Vec::with_capacity(data.len() / 2);
-        for c in data.chunks_exact(2) {
+        for c in data.as_chunks::<2>().0 {
             u16s.push(u16::from_le_bytes([c[0], c[1]]));
         }
         String::from_utf16_lossy(&u16s)

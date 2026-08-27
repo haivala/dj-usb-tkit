@@ -29,8 +29,8 @@ pub use export_paths::{
     copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
     exported_media_target_path, exported_media_target_path_with_ordinal,
-    filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path,
-    limit_contents_file_name, limit_contents_file_name_with_suffix, normalize_owned_export_path,
+    filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path, limit_contents_file_name,
+    limit_contents_file_name_with_suffix, normalize_owned_export_path,
     prune_stale_export_owned_files, sanitize_contents_component, sanitize_filename_component,
     stable_u32_hash, to_usb_relative_path, truncate_component,
 };
@@ -5672,7 +5672,11 @@ mod tests {
             .join(USB_VENDOR_DB_DIR)
             .join("export.pdb");
         let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse pdb");
-        assert_eq!(parsed.tracks.len(), 1, "re-export must update, not duplicate");
+        assert_eq!(
+            parsed.tracks.len(),
+            1,
+            "re-export must update, not duplicate"
+        );
         let track = &parsed.tracks[0];
         assert_eq!(track.file_size_bytes, Some(2_500_000));
         assert_eq!(track.sample_rate_hz, Some(48_000));

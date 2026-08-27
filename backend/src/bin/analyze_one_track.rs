@@ -41,6 +41,7 @@ fn main() {
         bpm_min: None,
         bpm_max: None,
         analysis_engine,
+        ..Default::default()
     });
     if !analyzed.ok {
         let msg = analyzed

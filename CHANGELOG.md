@@ -44,6 +44,8 @@
 - **Fix:** re-exporting a track that already had a PDB row (e.g. after re-encoding the source file)
   kept its old file size, sample rate, bitrate, file type, release year/date, and ISRC instead of
   refreshing them.
+- **Chore:** updated dependencies (`chacha20`, `combine`, `libredox`, `uuid`), applied `rustfmt`,
+  and fixed clippy/build warnings in the helper binaries.
 
 ## 0.1.30
 

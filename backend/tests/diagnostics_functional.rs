@@ -3422,8 +3422,7 @@ fn repair_pdb_duplicate_playlist_entries_detects_and_fixes_via_orchestrator() {
             | (u32::from(bytes[off + 0x19]) << 8)
             | (u32::from(bytes[off + 0x1a]) << 16);
         let n = (packed & 0x1FFF) as usize; // active row count
-        let used_s =
-            u16::from_le_bytes(bytes[off + 0x1e..off + 0x20].try_into().unwrap()) as usize;
+        let used_s = u16::from_le_bytes(bytes[off + 0x1e..off + 0x20].try_into().unwrap()) as usize;
 
         // Resolve row 0's real heap offset via its offset-table entry (don't
         // assume it's 0) -- mirrors the read loop in
