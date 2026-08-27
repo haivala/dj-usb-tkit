@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.31
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** exporting more than 16 tracks to a USB could produce a PDB that rekordbox
