@@ -20,6 +20,14 @@ use crate::service::export_helpers::{
 const PAGE_SIZE: usize = 4096;
 const HEAP_START: usize = 0x28; // 40 bytes: 32 common header + 8 extended header
 const NUM_TABLES: u32 = 20;
+// `nrs` (the page-local row-slot count at offset 0x18) is a single byte and
+// wraps silently past 255. Our own reader tolerates that wraparound (see
+// docs/PDB.md "Page Footer Conventions"), but real player parsers are not
+// verified to -- the writer must never rely on it. A page must never hold
+// more than 255 rows regardless of remaining byte capacity, even for tables
+// with small rows (e.g. tt=8 playlist_entries, 12 bytes/row) where a large
+// enough playlist could otherwise pack 300+ rows on a single 4096-byte page.
+const MAX_ROWS_PER_PAGE: usize = 255;
 const TABLE_POINTER_SIZE: usize = 16;
 const TABLE_POINTERS_OFFSET: usize = 0x1c;
 
@@ -489,7 +497,8 @@ fn pack_rows_into_pages(
         let new_footer = footer_size(current_rows.len() + 1);
         let needed = HEAP_START + current_heap_used + aligned_len + new_footer;
 
-        if needed > PAGE_SIZE && !current_rows.is_empty() {
+        if (needed > PAGE_SIZE || current_rows.len() >= MAX_ROWS_PER_PAGE) && !current_rows.is_empty()
+        {
             // First flushed page keeps the active flag (reference exporter convention:
             // the baseline/template page stays ACTV). All subsequent overflow flushes
             // are sealed (0x24, committed-transaction footer).
@@ -643,32 +652,80 @@ fn build_data_page(table_type: u32, pf: u8, seq: u32, rows: &[&[u8]], sealed: bo
     //         tranrf is at the very LAST 2 bytes of the page
     write_row_index_footer(&mut page, &row_offsets);
 
-    if u5 == 1 && table_type != 19 && !row_offsets.is_empty() {
-        // Pages with u5=1 convention: tranrf must have only the last row's bit set.
-        // Formula: tranrf[group] = 1<<(num_rl%16) for group==num_rl/16, else 0.
-        // Applies to both sealed and active pages. Tables with u5=trc keep tranrf=rowpf.
-        // Entry format: bit N = row N within a 16-row group; group 0 at page end.
-        let n = row_offsets.len();
-        let last_bit = (n - 1) % 16;
-        let last_group_start = (n - 1) / 16 * 16;
-        let mut pos = PAGE_SIZE;
-        for group_start in (0..n).step_by(16) {
-            let group_len = (n - group_start).min(16);
-            let tranrf: u16 = if group_start == last_group_start {
-                1u16 << last_bit
-            } else {
-                0u16
-            };
-            page[pos - 2..pos].copy_from_slice(&tranrf.to_le_bytes());
-            pos -= 2 + 2 + group_len * 2;
-        }
-    }
-
-    if table_type == 19 {
-        write_t19_runtime_footer_groups(&mut page, rows.len());
+    // Re-stamp u5/num_rl/tranrf to the per-table convention.
+    // `write_row_index_footer` above left every group's rowpf/tranrf at
+    // "all rows active", which is only correct for `(trc, 0)`-family tables.
+    // A sealed page already forced `(u5, num_rl) = (1, trc-1)` above
+    // regardless of table type, so pass table 0's convention (also `(1,
+    // trc-1)`) here to get the matching single-bit tranrf shape for it too.
+    if !row_offsets.is_empty() {
+        let conv_table = if sealed { 0 } else { table_type };
+        apply_page_footer_convention(&mut page, conv_table, row_offsets.len());
     }
 
     page
+}
+
+/// Single source of truth for a data page's footer-convention fields: `u5`
+/// (0x20), `num_rl` (0x22), and the per-16-row-group `tranrf` bitmasks.
+///
+/// `write_row_index_footer` and `rewrite_variable_page_rows_in_place` both
+/// leave a page with all-bits `rowpf`/`tranrf` in every group — correct only
+/// for `(trc, 0)`-convention tables (t06/t07/t16/t17/t18). Every other
+/// in-place rewrite must call this afterward so the page's shape matches
+/// what [`build_data_page`] (the from-scratch writer) would emit for the
+/// same row set. See docs/PDB.md "Page Footer Conventions" and "Row Footer".
+///
+/// `row_count` is the page's active row-slot count (`trc`). `page` must be a
+/// full `PAGE_SIZE` page slice. For `tt=19` this assumes the page holds the
+/// table's one live history row (see [`write_t19_runtime_footer_groups`]).
+fn apply_page_footer_convention(page: &mut [u8], table_type: u32, row_count: usize) {
+    if page.len() < 0x24 {
+        return;
+    }
+    if row_count == 0 {
+        page[0x20..0x22].copy_from_slice(&0u16.to_le_bytes());
+        page[0x22..0x24].copy_from_slice(&0u16.to_le_bytes());
+        return;
+    }
+
+    let trc = row_count as u16;
+    let (u5, num_rl) = data_page_footer_fields(table_type, trc);
+    page[0x20..0x22].copy_from_slice(&u5.to_le_bytes());
+    page[0x22..0x24].copy_from_slice(&num_rl.to_le_bytes());
+
+    if table_type == 19 {
+        // tt=19 "runtime profile": exactly one active row, in the last group.
+        write_t19_runtime_footer_groups(page, row_count);
+        return;
+    }
+
+    // `(trc, 0)` tables (t06/t07/t16/t17/t18) keep `tranrf == rowpf ==
+    // all-bits`, which is exactly what the row-index footer writer already
+    // wrote — nothing left to do.
+    if u5 != 1 {
+        return;
+    }
+
+    // `u5 == 1` tables: `tranrf` carries a single bit — the page's last row
+    // slot (`num_rl`), in the group that holds it. Every other group's
+    // `tranrf` is 0. Formula: bit N = row N within a 16-row group, group 0
+    // at the page's very end.
+    let n = row_count;
+    let last_group = num_rl as usize / 16;
+    let last_bit = num_rl as usize % 16;
+    let mut cursor = PAGE_SIZE;
+    for group_start in (0..n).step_by(16) {
+        let group_len = (n - group_start).min(16);
+        let tranrf: u16 = if group_start / 16 == last_group {
+            1u16 << last_bit
+        } else {
+            0
+        };
+        cursor -= 2;
+        page[cursor..cursor + 2].copy_from_slice(&tranrf.to_le_bytes());
+        cursor -= 2 + group_len * 2;
+    }
 }
 
 /// Write the tt=19 (history_runtime) "runtime profile" rowpf/tranrf footer
@@ -678,8 +735,8 @@ fn build_data_page(table_type: u32, pf: u8, seq: u32, rows: &[&[u8]], sealed: bo
 /// with it, the row immediately before it) is "active"/current — every
 /// earlier row is committed history. This must hold across ALL footer
 /// groups, not just the first: verified against real rekordbox's own
-/// multi-group tt=19 output (USB_DISCONNECTS_RB, 88 rows across 6 groups of
-/// 16), which has exactly one rowpf bit and two tranrf bits set globally,
+/// multi-group tt=19 output (a reference export of 88 rows across 6 groups
+/// of 16), which has exactly one rowpf bit and two tranrf bits set globally,
 /// both in the group holding the final row. `write_row_index_footer`
 /// defaults every group's rowpf/tranrf to "all rows active", which is
 /// correct for ordinary tables but wrong here for any group — this
@@ -688,9 +745,9 @@ fn build_data_page(table_type: u32, pf: u8, seq: u32, rows: &[&[u8]], sealed: bo
 /// Both call sites of this used to only handle the single-group case,
 /// `row_count <= 16`; a page with more than 16 history rows silently kept
 /// every row falsely marked simultaneously active once history rows
-/// accumulated past one footer group (a real-world case: `USB_DISCONNECTS`,
-/// the very first crashing export from this investigation, already had 75
-/// history rows across 5 groups, all falsely marked active).
+/// accumulated past one footer group (a real-world case: a drive from a
+/// corruption report already had 75 history rows across 5 groups, all
+/// falsely marked active).
 fn write_t19_runtime_footer_groups(page: &mut [u8], row_count: usize) {
     if row_count == 0 {
         return;
@@ -3153,7 +3210,7 @@ pub(crate) mod writer_tests {
         // last row(s) active" override only handled n<=16, so any group
         // past the first silently kept write_row_index_footer's default
         // "all rows active" pattern. Verified wrong against real
-        // rekordbox's own multi-group tt=19 output (USB_DISCONNECTS_RB, 88
+        // rekordbox's own multi-group tt=19 output (a reference export of 88
         // history rows across 6 groups of 16): rowpf has exactly one bit
         // set globally, tranrf exactly two, both in the group holding the
         // final row.
@@ -3212,7 +3269,6 @@ use crate::utils::{
     collect_chain as collect_chain_pages, page_offset, read_u8_at, set_table_ptr_fields,
     table_ptr_fields, write_u32_le_at,
 };
-use std::collections::{HashMap, HashSet};
 
 const PAGE_HEADER_SIZE: usize = 40;
 /// Maximum encoded row length that can fit on any single page after 4-byte heap
@@ -3344,6 +3400,16 @@ fn append_rows_to_existing_page_preserving_footer_state(
     if rows.is_empty() {
         return Ok(0);
     }
+    // tt=19 (history_runtime) carries a whole-page "runtime profile" (exactly
+    // one active row) rather than per-row presence bits. OR-ing an appended
+    // row's bit into an existing page's footer here would mark every history
+    // row active — the exact shape the tt=19 footer-corruption fix removed.
+    // Growth of tt=19 must only ever go through
+    // `synthesize_t19_runtime_rows_in_place`, never this generic path.
+    debug_assert_ne!(
+        table_type, 19,
+        "tt=19 must not grow through the generic append path"
+    );
     let off = page_offset(page_idx, page_size).ok_or_else(|| {
         BackendError::Validation(format!(
             "additive append: page {page_idx} for table {table_type} out of bounds"
@@ -3377,7 +3443,9 @@ fn append_rows_to_existing_page_preserving_footer_state(
             .saturating_add(absorbed)
             .saturating_add(1);
         let new_footer = footer_size_for_rows(new_row_count);
-        if PAGE_HEADER_SIZE + aligned_end + new_footer > page_size {
+        if PAGE_HEADER_SIZE + aligned_end + new_footer > page_size
+            || new_row_count > MAX_ROWS_PER_PAGE
+        {
             break;
         }
         new_used_s = aligned_end;
@@ -3748,7 +3816,8 @@ pub(crate) fn append_rows_to_chain_in_place(
             let new_count = fitted.len() + 1;
             let new_used = local_used + aligned;
             let new_footer = footer_size_for_rows(new_count);
-            if PAGE_HEADER_SIZE + new_used + new_footer > page_size {
+            if PAGE_HEADER_SIZE + new_used + new_footer > page_size || new_count > MAX_ROWS_PER_PAGE
+            {
                 break;
             }
             fitted.push(candidate.clone());
@@ -4140,8 +4209,33 @@ pub(crate) fn compute_additive_diff(
     let parsed = crate::pdb_reader::parse_pdb_bytes(existing_bytes)
         .map_err(|e| NonAdditiveReason::Unparseable(e.to_string()))?;
 
-    let synthesize_t19_runtime_rows = if parsed.tracks.is_empty() && !new_data.tracks.is_empty() {
-        Some(new_data.tracks.len().saturating_add(1))
+    // A fresh USB has no real play history yet, so this seeds a single
+    // placeholder tt=19 (history_runtime) row rather than one per track.
+    // Previously this scaled with track count (`new_data.tracks.len() + 1`),
+    // which both had no real basis (there's no real history to represent on
+    // a never-played device) and hard-failed any first export past ~95
+    // tracks, since a tt=19 page holds at most 96 fixed-40-byte rows and
+    // this function has never needed to grow tt=19 across multiple pages.
+    // Confirmed against Mixo (an independent, real, working DJ export tool)
+    // that a single static row is the correct baseline: its own PDB writer
+    // seeds table 19 with exactly one fixed row on every export, never
+    // scaled to library size. See docs/PDB.md's Row Footer section.
+    //
+    // Only synthesize when the existing tt=19 page doesn't already have
+    // exactly one row. A genuine rekordbox-initialized template (confirmed
+    // via a reference template confirmed to carry rekordbox-only files like
+    // `djprofile.nxs`/`DEVSETTING.DAT` this app never writes) already ships
+    // tt=19 with exactly one row, but SEALED (flags=0x24, u5=1) -- a
+    // different footer shape than `write_t19_runtime_footer_groups`
+    // produces (ACTIVE, u5=2). Previously this unconditionally rewrote that
+    // page on every first export regardless, silently replacing a valid
+    // rekordbox-native page with a different, self-invented one even when
+    // nothing needed to change. Skipping the no-op case avoids that.
+    let synthesize_t19_runtime_rows = if parsed.tracks.is_empty()
+        && !new_data.tracks.is_empty()
+        && parsed.history_raw_rows_bytes.len() != 1
+    {
+        Some(1usize)
     } else {
         None
     };
@@ -4549,10 +4643,14 @@ pub(crate) fn remove_t08_entries_in_place(
                 "remove_t08_entries: rewrite failed for page {page_idx}"
             )));
         }
-        let trc = kept.len() as u16;
-        let (u5, num_rl) = data_page_footer_fields(8, trc);
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&u5.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&num_rl.to_le_bytes());
+        // `rewrite_variable_page_rows_in_place` left `(u5, num_rl) = (trc,
+        // trc-1)` and all-bits rowpf/tranrf in every footer group.  tt=8 is
+        // a `u5=1` table, so re-stamp the full convention — not just
+        // `(u5, num_rl)` — or a mirror-mode removal leaves every remaining
+        // row falsely marked "active" in tranrf instead of just the last.
+        if let Some(page) = bytes.get_mut(off..off + page_size) {
+            apply_page_footer_convention(page, 8, kept.len());
+        }
     }
 
     if !any_changed {
@@ -4605,6 +4703,15 @@ fn synthesize_t19_runtime_rows_in_place(
     let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
         BackendError::Validation("t19 runtime synthesis: t19 chain unreachable".into())
     })?;
+    // KNOWN GAP: if tt=19 genuinely has no data page yet (chain.len()==1, i.e.
+    // first==last==sentinel), this falls back to `last`, which is the sentinel
+    // page itself, and would overwrite it in place rather than allocating a
+    // real data page (this function takes &mut [u8], not &mut Vec<u8>, so it
+    // cannot grow the file to allocate one). Not reachable in production: the
+    // real `initialize_usb` template always pre-seeds exactly one tt=19 data
+    // page (`seed_rb_initialized_history_shape` in usb_utils.rs), so `chain`
+    // always has at least 2 entries by the time this runs. Tests must mirror
+    // that pre-seeded page rather than a bare empty PdbData with no tt=19 row.
     let page_idx = chain.get(1).copied().unwrap_or(last);
 
     let rows: Vec<Vec<u8>> = (0..row_count)
@@ -5286,10 +5393,10 @@ pub(crate) fn realign_dictionary_rows_in_place(
 /// so that newly-allocated dictionary IDs are present in the file before
 /// the rows that reference them.
 ///
-/// `t08` playlist_entries handling is delegated entirely to the existing
-/// `try_patch_t08_with_context` and `try_patch_t08_with_multi_page_growth`
-/// helpers, which understand the latent-slot activation pattern that
-/// produces exactly the byte-shape DJ software emits.
+/// `t08` playlist_entries handling is split across three steps below:
+/// removal (mirror mode), appending new entries via the unified
+/// `append_rows_to_chain_in_place` path, and repositioning existing entries
+/// whose `entry_index` changed in place.
 ///
 /// On success returns the patched bytes; on failure returns the same
 /// `BackendError::Validation` variant the caller would see from the
@@ -6022,6 +6129,58 @@ mod additive_tests {
         if outcome.pages_appended > 0 {
             assert_ne!(last_after, last_before, "last must advance on append");
         }
+    }
+
+    #[test]
+    fn append_rows_to_chain_in_place_never_exceeds_255_rows_per_page() {
+        // Regression: a page's row-slot count (`nrs`) is a single byte and
+        // wraps silently past 255 -- docs/PDB.md already documented this as
+        // a hazard the writer must never rely on. tt=8 (playlist_entries)
+        // rows are only 12 bytes, so a large enough playlist (confirmed via
+        // a real 559-track playlist crashing rekordbox desktop outright,
+        // with no error dialog) could previously pack 250+ rows onto a
+        // single page purely because there was still byte capacity left,
+        // producing an invalid `nrs` value real player parsers are not
+        // verified to tolerate.
+        let mut data = PdbData::empty();
+        data.colors = standard_colors();
+        data.columns_raw_rows = standard_columns_raw();
+        let bytes = write_pdb(&data).expect("write empty seed");
+        let mut bytes = bytes;
+
+        let new_rows: Vec<Vec<u8>> = (1u32..=600)
+            .map(|i| {
+                encode_t08_row(T08EntryKey {
+                    entry_index: i,
+                    track_id: i,
+                    playlist_id: 1,
+                })
+                .to_vec()
+            })
+            .collect();
+        append_rows_to_chain_in_place(&mut bytes, 8, &new_rows, PAGE_SIZE)
+            .expect("append 600 playlist entries");
+
+        let (_ec, first, last) = table_ptr_fields(&bytes, 8).expect("tt=8 pointer");
+        let chain = collect_chain_pages(&bytes, PAGE_SIZE, first, last).expect("tt=8 chain");
+        let mut total_rows = 0usize;
+        for &page_idx in chain.iter().skip(1) {
+            let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
+            let page = &bytes[off..off + PAGE_SIZE];
+            if page[0x1b] == 0x64 {
+                continue; // sentinel/blank
+            }
+            let packed = (page[0x18] as u32)
+                | ((page[0x19] as u32) << 8)
+                | ((page[0x1a] as u32) << 16);
+            let row_count = ((packed >> 13) & 0x7FF) as usize;
+            assert!(
+                row_count <= MAX_ROWS_PER_PAGE,
+                "page[{page_idx}] has {row_count} rows, exceeding the 255-row cap"
+            );
+            total_rows += row_count;
+        }
+        assert_eq!(total_rows, 600, "all 600 rows must be present across the chain");
     }
 
     #[test]
@@ -7555,7 +7714,216 @@ mod additive_tests {
 
         let diff = compute_additive_diff(&bytes, &next, vec![]).expect("additive first export");
         assert_eq!(diff.new_tracks.len(), 1);
-        assert_eq!(diff.synthesize_t19_runtime_rows, Some(2));
+        assert_eq!(diff.synthesize_t19_runtime_rows, Some(1));
+    }
+
+    #[test]
+    fn mirror_removal_leaves_tt8_pages_with_single_bit_tranrf() {
+        // Regression: a mirror-mode export that removes playlist entries used
+        // to leave the rewritten tt=8 (playlist_entries) pages with every
+        // footer group's tranrf bitmask at the `rewrite_variable_page_rows_in_place`
+        // default of "all rows active" -- `remove_t08_entries_in_place` only
+        // re-stamped (u5, num_rl) afterward, never tranrf. Same footer-shape
+        // bug class as the tt=19 corruption fix, just for a different table
+        // and a different trigger (removal, not synthesis). Fixed by routing
+        // through the shared `apply_page_footer_convention`.
+        use crate::service::export_helpers::PdbTrackRowData;
+
+        let track = |id: u32| PdbTrackRowData {
+            header_flags_u32: None,
+            content_link: None,
+            sample_rate_hz: None,
+            file_size_bytes: None,
+            master_content_id: None,
+            master_db_id: None,
+            id,
+            artist_id: 0,
+            album_id: 0,
+            artwork_id: 0,
+            key_id: 0,
+            genre_id: 0,
+            bitrate_kbps: None,
+            track_number: None,
+            bpm: None,
+            release_year: None,
+            bit_depth: None,
+            duration_seconds: Some(120),
+            file_type: None,
+            isrc: None,
+            date_added: None,
+            release_date: None,
+            dj_comment: None,
+            file_name: Some(format!("t{id:03}.flac")),
+            publish_track_info_on: None,
+            autoload_hotcues_on: None,
+            title: format!("Track {id:03}"),
+            anlz_path: String::new(),
+            file_path: format!("/Contents/t{id:03}.flac"),
+        };
+
+        let mut seed = PdbData::empty();
+        seed.colors = standard_colors();
+        seed.columns_raw_rows = standard_columns_raw();
+        let before = write_pdb(&seed).expect("write seed");
+
+        let mut full = seed.clone();
+        full.playlist_tree.push(PdbPlaylistTreeRow {
+            id: 1,
+            parent_id: 0,
+            sort_order: 0,
+            is_folder: false,
+            name: "P".into(),
+        });
+        for id in 1..=20u32 {
+            full.tracks.push(track(id));
+            full.playlist_entries.push(PdbPlaylistEntryRow {
+                entry_index: id,
+                track_id: id,
+                playlist_id: 1,
+            });
+        }
+        let all_desired: Vec<T08EntryKey> = full
+            .playlist_entries
+            .iter()
+            .map(|e| T08EntryKey {
+                entry_index: e.entry_index,
+                track_id: e.track_id,
+                playlist_id: e.playlist_id,
+            })
+            .collect();
+        let (after_first, _) =
+            try_write_pdb_additive_in_place(&before, &full, all_desired, PAGE_SIZE)
+                .expect("first export")
+                .expect("first export accepted");
+        assert_eq!(collect_t08_entry_keys(&after_first, PAGE_SIZE).len(), 20);
+
+        // Mirror re-export: keep every track, but only the first 8 playlist
+        // entries. The other 12 become `removed_t08_entries`.
+        let mut pruned = full.clone();
+        pruned.playlist_entries.retain(|e| e.entry_index <= 8);
+        let pruned_desired: Vec<T08EntryKey> = pruned
+            .playlist_entries
+            .iter()
+            .map(|e| T08EntryKey {
+                entry_index: e.entry_index,
+                track_id: e.track_id,
+                playlist_id: e.playlist_id,
+            })
+            .collect();
+        let (after_prune, _) =
+            try_write_pdb_additive_in_place(&after_first, &pruned, pruned_desired, PAGE_SIZE)
+                .expect("mirror export")
+                .expect("mirror export accepted");
+
+        assert!(
+            crate::pdb_reader::validate_pdb_page_conventions(&after_prune).is_empty(),
+            "mirror-pruned pdb violates page conventions: {:?}",
+            crate::pdb_reader::validate_pdb_page_conventions(&after_prune)
+        );
+        assert_eq!(collect_t08_entry_keys(&after_prune, PAGE_SIZE).len(), 8);
+
+        let (_ec, first, last) = table_ptr_fields(&after_prune, 8).expect("t08 ptr");
+        let chain = collect_chain_pages(&after_prune, PAGE_SIZE, first, last).expect("t08 chain");
+        for &pi in chain.iter().skip(1) {
+            let off = page_offset(pi, PAGE_SIZE).unwrap();
+            let page = &after_prune[off..off + PAGE_SIZE];
+            if page[0x18] == 0 {
+                continue;
+            }
+            let fs = read_page_footer_state(page, PAGE_SIZE).expect("footer state");
+            let total_tranrf_bits: u32 = fs.tranrf_by_group.iter().map(|g| g.count_ones()).sum();
+            assert_eq!(
+                total_tranrf_bits, 1,
+                "tt=8 page {pi} must carry exactly one tranrf bit after mirror removal, \
+                 got groups {:?}",
+                fs.tranrf_by_group
+            );
+        }
+    }
+
+    #[test]
+    fn additive_first_export_large_library_synthesizes_single_t19_row() {
+        use crate::service::export_helpers::PdbTrackRowData;
+
+        // Regression: a first export of a large library (559 tracks, matching
+        // the real-world report this test is modeled on) to a freshly
+        // initialized USB used to hard-fail with "t19 runtime synthesis: 560
+        // rows do not fit on page 40" -- synthesize_t19_runtime_rows_in_place
+        // fabricated one placeholder tt=19 row per track with no cap, and a
+        // tt=19 page can only ever hold ~96 40-byte rows. There is no real
+        // play history to represent on a never-played device, and no
+        // reference export (real rekordbox or Mixo, an independent working
+        // DJ export tool) has ever shown tt=19 needing more than one row for
+        // a fresh export, so this must synthesize exactly one row regardless
+        // of library size, not scale with track count at all.
+        let mut empty = PdbData::empty();
+        empty.colors = standard_colors();
+        empty.columns_raw_rows = standard_columns_raw();
+        // Real `initialize_usb` templates always seed exactly one tt=19 row
+        // up front (`seed_rb_initialized_history_shape` in usb_utils.rs) --
+        // mirror that here so this "before" baseline has a real tt=19 data
+        // page to patch, matching what compute_additive_diff actually sees
+        // in production instead of the degenerate no-data-page case.
+        empty.history_raw_rows = vec![vec![0u8; 40]];
+        let bytes = write_pdb(&empty).expect("write empty seed");
+
+        let mut next = empty.clone();
+        for id in 1u32..=559 {
+            next.artists.push(PdbArtistRow {
+                id,
+                name: format!("Artist {id}"),
+            });
+            next.tracks.push(PdbTrackRowData {
+                header_flags_u32: None,
+                content_link: None,
+                sample_rate_hz: None,
+                file_size_bytes: None,
+                master_content_id: None,
+                master_db_id: None,
+                id,
+                artist_id: id,
+                album_id: 0,
+                artwork_id: 0,
+                key_id: 0,
+                genre_id: 0,
+                bitrate_kbps: None,
+                track_number: None,
+                bpm: None,
+                release_year: None,
+                bit_depth: None,
+                duration_seconds: Some(180),
+                file_type: None,
+                isrc: None,
+                date_added: None,
+                release_date: None,
+                dj_comment: None,
+                file_name: Some(format!("track{id}.flac")),
+                publish_track_info_on: None,
+                autoload_hotcues_on: None,
+                title: format!("Track {id}"),
+                anlz_path: format!("/PIONEER/USBANLZ/P000/{id:08}/ANLZ0000.DAT"),
+                file_path: format!("/Contents/track{id}.flac"),
+            });
+        }
+
+        let (out, _summary) = try_write_pdb_additive_in_place(&bytes, &next, vec![], PAGE_SIZE)
+            .expect("additive write must not error")
+            .expect("additive write must not decline (fall through to unsafe fresh rebuild)");
+
+        let (_, first, last) = table_ptr_fields(&out, 19).expect("tt=19 pointer");
+        let chain = collect_chain_pages(&out, PAGE_SIZE, first, last).expect("tt=19 chain");
+        // chain[0] = sentinel, chain[1] = the single data page.
+        assert_eq!(chain.len(), 2, "t19 synthesis must stay on a single page");
+        let off = page_offset(chain[1], PAGE_SIZE).expect("page offset");
+        let nrs = out[off + 0x18] as usize;
+        assert_eq!(
+            nrs, 1,
+            "synthesized t19 row count must always be 1, not scaled with track count"
+        );
+        let rowpf = u16::from_le_bytes([out[off + PAGE_SIZE - 4], out[off + PAGE_SIZE - 3]]);
+        let tranrf = u16::from_le_bytes([out[off + PAGE_SIZE - 2], out[off + PAGE_SIZE - 1]]);
+        assert_eq!(rowpf, 0b1, "the single row must be marked active");
+        assert_eq!(tranrf, 0b1, "no preceding row exists to also mark in tranrf");
     }
 
     #[test]
@@ -7565,6 +7933,11 @@ mod additive_tests {
         let mut empty = PdbData::empty();
         empty.colors = standard_colors();
         empty.columns_raw_rows = standard_columns_raw();
+        // Real `initialize_usb` templates always seed exactly one tt=19 row
+        // up front (`seed_rb_initialized_history_shape` in usb_utils.rs) --
+        // mirror that here so synthesize_t19_runtime_rows_in_place has a real
+        // data page to patch (see its "KNOWN GAP" comment).
+        empty.history_raw_rows = vec![vec![0u8; 40]];
         let before = write_pdb(&empty).expect("write empty seed");
         let t16_before = table_ptr_fields(&before, 16).expect("t16 before");
         let t17_before = table_ptr_fields(&before, 17).expect("t17 before");
@@ -7649,9 +8022,13 @@ mod additive_tests {
 
         let (_ec19, _first19, last19) = table_ptr_fields(&after, 19).unwrap();
         let off19 = last19 as usize * PAGE_SIZE;
-        assert_eq!(after[off19 + 0x18], 2, "t19 should have seed + track row");
-        assert_eq!(read_u16_le_at(&after, off19 + PAGE_SIZE - 4), Some(0x0002));
-        assert_eq!(read_u16_le_at(&after, off19 + PAGE_SIZE - 2), Some(0x0003));
+        assert_eq!(
+            after[off19 + 0x18],
+            1,
+            "t19 always synthesizes exactly one row, regardless of track count"
+        );
+        assert_eq!(read_u16_le_at(&after, off19 + PAGE_SIZE - 4), Some(0x0001));
+        assert_eq!(read_u16_le_at(&after, off19 + PAGE_SIZE - 2), Some(0x0001));
     }
 
     #[test]
@@ -8042,7 +8419,11 @@ pub struct T08EntryKey {
 #[derive(Clone, Debug)]
 struct T08EntryLoc {
     key: T08EntryKey,
+    // Retained for callers that may need the physical location/raw bytes of
+    // a t08 entry in the future; only `key` is read by current call sites.
+    #[allow(dead_code)]
     page_index: u32,
+    #[allow(dead_code)]
     raw: [u8; 12],
 }
 
@@ -8223,182 +8604,6 @@ fn parse_t08_entries_with_locs(bytes: &[u8], chain: &[u32], page_size: usize) ->
     out
 }
 
-fn rewrite_t08_page_rows_in_place(
-    bytes: &mut [u8],
-    page_index: u32,
-    rows: &[[u8; 12]],
-    page_size: usize,
-) -> bool {
-    let Some(off) = page_offset(page_index, page_size) else {
-        return false;
-    };
-    let Some(page) = bytes.get_mut(off..off + page_size) else {
-        return false;
-    };
-    let mut payload = Vec::<u8>::new();
-    let mut row_offsets = Vec::<u16>::with_capacity(rows.len());
-    for row in rows {
-        row_offsets.push(payload.len() as u16);
-        payload.extend_from_slice(row);
-    }
-    let used_s = payload.len();
-    let footer_size = footer_size_for_rows(rows.len());
-    if 40 + used_s + footer_size > page_size {
-        return false;
-    }
-
-    // Preserve stable page identity/chain/header fields; rebuild row payload/index metadata.
-    page[24] = (rows.len() & 0xff) as u8;
-    let n = rows.len() as u32;
-    let packed = (n & 0x1fff) | ((n & 0x7ff) << 13);
-    page[0x18] = (packed & 0xff) as u8;
-    page[0x19] = ((packed >> 8) & 0xff) as u8;
-    page[0x1a] = ((packed >> 16) & 0xff) as u8;
-    // tt=8 (playlist_entries) convention: u5=1 (transaction_row_count of the
-    // most recent commit), num_rl=trc-1. The earlier `u5=trc` form caused
-    // "communication error" — see docs/PDB.md "Per-table page-header
-    // conventions".
-    page[0x20..0x22].copy_from_slice(&1u16.to_le_bytes());
-    page[30..32].copy_from_slice(&(used_s as u16).to_le_bytes());
-    let free_s = page_size.saturating_sub(40 + used_s + footer_size);
-    page[28..30].copy_from_slice(&(free_s as u16).to_le_bytes());
-    let num_rl = if rows.is_empty() {
-        0u16
-    } else {
-        (rows.len() - 1) as u16
-    };
-    page[34..36].copy_from_slice(&num_rl.to_le_bytes());
-
-    if page_size > 40 {
-        page[40..].fill(0u8);
-    }
-    if !payload.is_empty() {
-        page[40..40 + payload.len()].copy_from_slice(&payload);
-    }
-    if !row_offsets.is_empty() {
-        let mut cursor = page_size;
-        for group_start in (0..row_offsets.len()).step_by(16) {
-            let group_len = (row_offsets.len() - group_start).min(16);
-            let bits = ((1u32 << group_len) - 1) as u16;
-            cursor -= 2;
-            page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
-            cursor -= 2;
-            page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
-            for j in 0..group_len {
-                cursor -= 2;
-                page[cursor..cursor + 2]
-                    .copy_from_slice(&row_offsets[group_start + j].to_le_bytes());
-            }
-        }
-    }
-    true
-}
-
-fn try_activate_t08_latent_slots_in_place(
-    bytes: &mut [u8],
-    page_index: u32,
-    rows: &[[u8; 12]],
-    page_size: usize,
-) -> bool {
-    if rows.is_empty() {
-        return false;
-    }
-    let Some(off) = page_offset(page_index, page_size) else {
-        return false;
-    };
-    let Some(page) = bytes.get_mut(off..off + page_size) else {
-        return false;
-    };
-    let used_s = read_u16_le_at(page, 30).unwrap_or(0) as usize;
-    if used_s < 12 {
-        return false;
-    }
-    let nrs = page[24] as usize;
-    let num_rl = read_u16_le_at(page, 34).unwrap_or(0) as usize;
-    if num_rl == 8191 {
-        return false;
-    }
-    let current = nrs.max(num_rl);
-    if current == 0 {
-        return false;
-    }
-    // Parse existing footer for current slots and remember row-presence locations.
-    let mut m = page_size;
-    let mut rowpf_off_by_group = Vec::<usize>::new();
-    for i in 0..current {
-        if i % 16 == 0 {
-            if m < 4 {
-                return false;
-            }
-            m -= 4;
-            rowpf_off_by_group.push(m);
-        }
-        if m < 2 {
-            return false;
-        }
-        m -= 2;
-    }
-
-    // Activate preallocated latent slots in-footer, extending into additional
-    // row groups when present (stale-slot reuse behavior).
-    for (k, row) in rows.iter().enumerate() {
-        let slot = current + k;
-        if slot.is_multiple_of(16) {
-            if m < 4 {
-                return false;
-            }
-            m -= 4;
-            rowpf_off_by_group.push(m);
-        }
-        if m < 2 {
-            return false;
-        }
-        m -= 2;
-        let Some(slot_off) = read_u16_le_at(page, m).map(|v| v as usize) else {
-            return false;
-        };
-        if slot_off + 12 > used_s {
-            return false;
-        }
-        let payload_start = 40 + slot_off;
-        let Some(dst) = page.get_mut(payload_start..payload_start + 12) else {
-            return false;
-        };
-        dst.copy_from_slice(row);
-
-        let group = slot / 16;
-        let bit = slot % 16;
-        let Some(&rowpf_off) = rowpf_off_by_group.get(group) else {
-            return false;
-        };
-        let Some(rowpf_bytes) = page.get_mut(rowpf_off..rowpf_off + 2) else {
-            return false;
-        };
-        let mut rowpf = u16::from_le_bytes([rowpf_bytes[0], rowpf_bytes[1]]);
-        rowpf |= 1u16 << bit;
-        rowpf_bytes.copy_from_slice(&rowpf.to_le_bytes());
-
-        // Mark touched row bits in transaction flags for activated slots.
-        if let Some(tranrf) = page.get_mut(rowpf_off + 2..rowpf_off + 4) {
-            let mut v = u16::from_le_bytes([tranrf[0], tranrf[1]]);
-            v |= 1u16 << bit;
-            tranrf.copy_from_slice(&v.to_le_bytes());
-        }
-    }
-
-    let new_num_rl = (current + rows.len()) as u16;
-    page[34..36].copy_from_slice(&new_num_rl.to_le_bytes());
-    // Keep transaction-row-index non-zero for pages modified in-place.
-    page[32..34].copy_from_slice(&1u16.to_le_bytes());
-    true
-}
-
-#[derive(Debug, Clone)]
-pub struct T08PatchContext {
-    pub playlist_id: u32,
-    pub desired_entries: Vec<T08EntryKey>,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PageRowSlot {
     pub(crate) start: usize,
@@ -8553,294 +8758,6 @@ pub(crate) fn rewrite_variable_page_rows_in_place(
             }
         }
     }
-    true
-}
-
-pub fn try_patch_t08_with_context(
-    before_bytes: &[u8],
-    out: &mut [u8],
-    old_chain: &[u32],
-    page_size: usize,
-    ctx: &T08PatchContext,
-) -> bool {
-    let debug_t08 = std::env::var("RE_DEBUG_T08")
-        .ok()
-        .map(|v| {
-            let n = v.trim().to_ascii_lowercase();
-            n == "1" || n == "true" || n == "yes" || n == "on"
-        })
-        .unwrap_or(false);
-    if ctx.playlist_id == 0 || ctx.desired_entries.is_empty() {
-        return false;
-    }
-    let old_entries = parse_t08_entries_with_locs(before_bytes, old_chain, page_size);
-    if old_entries.is_empty() {
-        return false;
-    }
-    let old_set: HashSet<T08EntryKey> = old_entries.iter().map(|r| r.key).collect();
-    let mut added = ctx
-        .desired_entries
-        .iter()
-        .copied()
-        .filter(|k| !old_set.contains(k))
-        .collect::<Vec<_>>();
-    if added.is_empty() {
-        return false;
-    }
-    added.sort_by_key(|k| k.entry_index);
-
-    // Prefer pages already used by this playlist.
-    let existing_pages = old_entries
-        .iter()
-        .filter(|r| r.key.playlist_id == ctx.playlist_id)
-        .map(|r| r.page_index)
-        .collect::<Vec<_>>();
-
-    // For brand new playlists, pick the first page whose playlist-id range
-    // starts at or above the target playlist id. This matches observed placement
-    // behavior better than blindly appending into the tail page.
-    let mut boundary_page: Option<u32> = None;
-    if existing_pages.is_empty() {
-        let mut page_pid_bounds = HashMap::<u32, (u32, u32)>::new();
-        for row in &old_entries {
-            let entry = page_pid_bounds
-                .entry(row.page_index)
-                .or_insert((row.key.playlist_id, row.key.playlist_id));
-            entry.0 = entry.0.min(row.key.playlist_id);
-            entry.1 = entry.1.max(row.key.playlist_id);
-        }
-        let mut ordered = page_pid_bounds
-            .into_iter()
-            .map(|(page, (min_pid, max_pid))| (page, min_pid, max_pid))
-            .collect::<Vec<_>>();
-        ordered.sort_by_key(|(page, _, _)| *page);
-        boundary_page = ordered
-            .iter()
-            .find(|(_, min_pid, _)| *min_pid >= ctx.playlist_id)
-            .map(|(page, _, _)| *page);
-    }
-
-    let mut candidates = Vec::<u32>::new();
-    if !existing_pages.is_empty() {
-        candidates.extend(existing_pages.iter().copied());
-        for page in old_chain.iter().skip(1).copied() {
-            if !candidates.contains(&page) {
-                candidates.push(page);
-            }
-        }
-    } else if let Some(page) = boundary_page {
-        // New playlist: write only into the id-boundary page.
-        candidates.push(page);
-    } else {
-        // Fallback when boundary cannot be inferred.
-        candidates.extend(old_chain.iter().skip(1).copied());
-    }
-    if debug_t08 {
-        crate::logging::emit(
-            crate::logging::Level::Info,
-            "pdb-patch.t08",
-            &format!(
-                "playlist_id={} existing_pages={:?} boundary_page={:?} candidates={:?} added={}",
-                ctx.playlist_id,
-                existing_pages,
-                boundary_page,
-                candidates,
-                added.len()
-            ),
-        );
-    }
-
-    for target_page in candidates {
-        let mut page_rows = old_entries
-            .iter()
-            .filter(|r| r.page_index == target_page)
-            .map(|r| r.raw)
-            .collect::<Vec<_>>();
-        if page_rows.is_empty() {
-            continue;
-        }
-        if existing_pages.is_empty() && boundary_page == Some(target_page) {
-            let latent_rows = added.iter().map(|k| encode_t08_row(*k)).collect::<Vec<_>>();
-            if try_activate_t08_latent_slots_in_place(out, target_page, &latent_rows, page_size) {
-                if debug_t08 {
-                    crate::logging::emit(
-                        crate::logging::Level::Info,
-                        "pdb-patch.t08",
-                        &format!(
-                            "success latent-page={} rows_added={}",
-                            target_page,
-                            latent_rows.len()
-                        ),
-                    );
-                }
-                return true;
-            }
-        }
-        // If this is a brand new playlist insertion page, front-load new rows
-        // so they are written before higher playlist ids on that page.
-        if existing_pages.is_empty() && boundary_page == Some(target_page) {
-            let mut prefixed = added.iter().map(|k| encode_t08_row(*k)).collect::<Vec<_>>();
-            prefixed.extend(page_rows);
-            page_rows = prefixed;
-        } else {
-            for key in &added {
-                page_rows.push(encode_t08_row(*key));
-            }
-        }
-        if rewrite_t08_page_rows_in_place(out, target_page, &page_rows, page_size) {
-            if debug_t08 {
-                crate::logging::emit(
-                    crate::logging::Level::Info,
-                    "pdb-patch.t08",
-                    &format!(
-                        "success page={} rows_before={} rows_after={}",
-                        target_page,
-                        old_entries
-                            .iter()
-                            .filter(|r| r.page_index == target_page)
-                            .count(),
-                        page_rows.len()
-                    ),
-                );
-            }
-            return true;
-        }
-        if debug_t08 {
-            crate::logging::emit(
-                crate::logging::Level::Info,
-                "pdb-patch.t08",
-                &format!(
-                    "failed page={} rows_before={} rows_after={}",
-                    target_page,
-                    old_entries
-                        .iter()
-                        .filter(|r| r.page_index == target_page)
-                        .count(),
-                    page_rows.len()
-                ),
-            );
-        }
-    }
-    false
-}
-
-/// Multi-page fallback for t08 growth in the export path.
-/// Called when `try_patch_t08_with_context` fails because entries don't fit
-/// on any single page. Distributes ALL entries (existing + new) evenly across
-/// existing data pages and appends new pages for overflow.
-pub fn try_patch_t08_with_multi_page_growth(
-    out: &mut Vec<u8>,
-    old_chain: &[u32],
-    old_first: u32,
-    old_last: u32,
-    page_size: usize,
-    ctx: &T08PatchContext,
-) -> bool {
-    if ctx.playlist_id == 0 || ctx.desired_entries.is_empty() || old_chain.len() <= 1 {
-        return false;
-    }
-
-    // Parse all existing t08 entries
-    let old_entries = parse_t08_entries_with_locs(out, old_chain, page_size);
-
-    // Build merged entry list: keep other playlists' entries, replace target playlist's
-    let mut all_rows: Vec<[u8; 12]> = Vec::new();
-    for entry in &old_entries {
-        if entry.key.playlist_id == ctx.playlist_id {
-            continue; // will be replaced by desired_entries
-        }
-        all_rows.push(entry.raw);
-    }
-    for key in &ctx.desired_entries {
-        all_rows.push(encode_t08_row(*key));
-    }
-
-    let data_pages: Vec<u32> = old_chain.iter().skip(1).copied().collect();
-
-    // Calculate max rows per page (fixed 12-byte t08 rows)
-    let max_rows_per_page = {
-        let mut cap = 0usize;
-        loop {
-            let next = cap + 1;
-            let footer = footer_size_for_rows(next);
-            if 40 + next * 12 + footer > page_size {
-                break cap;
-            }
-            cap = next;
-        }
-    };
-
-    let total_desired = all_rows.len();
-    let mut row_cursor = 0usize;
-
-    // Distribute evenly across existing data pages
-    for (i, &page_idx) in data_pages.iter().enumerate() {
-        let pages_remaining = data_pages.len() - i;
-        let rows_remaining = total_desired.saturating_sub(row_cursor);
-        let rows_for_this_page = if rows_remaining <= pages_remaining * max_rows_per_page {
-            rows_remaining.div_ceil(pages_remaining)
-        } else {
-            max_rows_per_page
-        };
-        let rows_for_this_page = rows_for_this_page
-            .min(max_rows_per_page)
-            .min(total_desired.saturating_sub(row_cursor));
-
-        let page_rows: Vec<Vec<u8>> = all_rows[row_cursor..row_cursor + rows_for_this_page]
-            .iter()
-            .map(|r| r.to_vec())
-            .collect();
-        rewrite_variable_page_rows_in_place(out, page_idx, &page_rows, page_size);
-        row_cursor += rows_for_this_page;
-    }
-
-    // Append new pages for overflow
-    let mut current_last = old_last;
-    while row_cursor < all_rows.len() {
-        let new_page_idx = (out.len() / page_size) as u32;
-        out.resize(out.len() + page_size, 0u8);
-        let off = new_page_idx as usize * page_size;
-        out[off + 0x04..off + 0x08].copy_from_slice(&new_page_idx.to_le_bytes());
-        out[off + 0x08..off + 0x0c].copy_from_slice(&8u32.to_le_bytes());
-        out[off + 0x10..off + 0x14].copy_from_slice(&1u32.to_le_bytes());
-        out[off + 0x1b] = 0x24;
-
-        if let Some(prev_off) = page_offset(current_last, page_size) {
-            let _ = write_u32_le_at(out, prev_off + 0x0c, new_page_idx);
-        }
-
-        let page_rows: Vec<Vec<u8>> = all_rows[row_cursor..]
-            .iter()
-            .take(max_rows_per_page)
-            .map(|r| r.to_vec())
-            .collect();
-        let n = page_rows.len();
-        if n == 0 {
-            break;
-        }
-        rewrite_variable_page_rows_in_place(out, new_page_idx, &page_rows, page_size);
-        row_cursor += n;
-        current_last = new_page_idx;
-    }
-
-    // Update t08 table pointers if growth happened
-    let new_last = current_last;
-    let new_ec = if new_last != old_last {
-        new_last + 1
-    } else {
-        // ec unchanged
-        table_ptr_fields(out, 8).map(|(ec, _, _)| ec).unwrap_or(0)
-    };
-    set_table_ptr_fields(out, 8, new_ec, old_first, new_last);
-
-    if new_last != old_last {
-        let global_next = read_u32_le_at(out, 0x0c).unwrap_or(0);
-        let file_pages = (out.len() / page_size) as u32;
-        if file_pages > global_next {
-            let _ = write_u32_le_at(out, 0x0c, file_pages);
-        }
-    }
-
     true
 }
 

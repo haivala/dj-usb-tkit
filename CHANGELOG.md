@@ -30,6 +30,29 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** exporting a playlist of more than about 95 tracks to a freshly initialized USB
+  always failed outright with "t19 runtime synthesis: N rows do not fit on page". The exporter
+  fabricated one placeholder history row per track with no cap, which could never fit on a single
+  page past that size. There is no real play history to represent on a never-played device, so it
+  now always ends up with a single placeholder row regardless of library size and matching what a 
+  genuine rekordbox-initialized USB already ships with, by leaving that row untouched when it's already
+  present instead of needlessly rewriting it on every first export.
+- **Fix (CRITICAL):** exporting a single playlist with more than 255 tracks could crash rekordbox
+  desktop outright with no error dialog. Rows were packed onto a page purely by remaining byte
+  space, with no limit on row count — for playlist entries specifically (a small, fixed-size row),
+  a large enough playlist could pack far more than 255 rows onto one page, silently wrapping the
+  page's row-count byte field. Every page is now capped at 255 rows regardless of remaining space,
+  which the format requires but this exporter didn't previously enforce.
+- **Fix (CRITICAL):** a mirror-mode export that removed playlist entries left the rewritten
+  `playlist_entries` pages with every footer group's transaction bitmask set to "all rows",
+  instead of the single-bit convention the from-scratch writer, reference rekordbox exports, and
+  player firmware use — the same footer-shape class of bug as the `tt=19` fix above, which made
+  drives unreadable on a CDJ-2000NXS2. All page rewrites that change a row count now stamp the
+  footer convention through one shared, single source of truth, closing off this whole class of
+  bug rather than fixing it one table at a time.
+
 ## 0.1.31
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

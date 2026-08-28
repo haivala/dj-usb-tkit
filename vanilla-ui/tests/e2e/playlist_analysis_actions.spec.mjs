@@ -280,7 +280,15 @@ test("playlist analyze-missing only targets local non-USB tracks", async ({ page
   await expect(page.locator("#exportPlaylistBtn")).toBeHidden();
 
   await page.locator("#analyzePlaylistMissingBtn").click();
-  await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="local-missing-1"]')).toHaveClass(/is-analyzing/);
+  // A transient loading-state class applied right after the click and cleared
+  // once analysis completes (see the inverse check below) -- the default 5s
+  // expect timeout is tight enough to flake under heavy parallel worker load
+  // (e.g. the full suite at high --workers), even though the underlying
+  // behavior is correct and fast under normal conditions.
+  await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="local-missing-1"]')).toHaveClass(
+    /is-analyzing/,
+    { timeout: 15_000 },
+  );
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="playlist-entry-1"]')).toHaveCount(0);
 
   await page.waitForFunction(() => {

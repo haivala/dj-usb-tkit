@@ -226,7 +226,9 @@ impl std::fmt::Display for PdbPageConventionMismatch {
 /// - `tt=8` (playlist_entries) pages where `u5 != 1` or `num_rl != trc - 1`.
 ///   This is the most strictly consistent table in observed reference output and
 ///   was the one whose mismatch (`u5=trc`) most clearly differentiated the
-///   broken export from the working backup.
+///   broken export from the working backup. Other `(1, trc-1)` tables are NOT
+///   enforced strictly: real rekordbox `tt=0` transaction/tombstone pages carry
+///   a smaller `num_rl`.
 /// - `num_rl > trc` on any data page (impossible row index).
 ///
 /// Sentinel/index pages (`pf=0x64`) and zeroed slots are skipped, as are
@@ -282,6 +284,11 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
             nrs as u16
         };
 
+        // Only `tt=8` (playlist_entries) is enforced strictly. Real rekordbox
+        // exports do NOT keep `num_rl == trc-1` on `tt=0` transaction/tombstone
+        // pages (`flags=0x34` pages mid-chain carry a smaller `num_rl` — the
+        // active-row or last-committed-slot index), so the tracks/dictionary/
+        // artwork family is left to the generic `num_rl > trc` bound below.
         if table_type == 8 {
             let exp_u5 = 1u16;
             let exp_num_rl = trc.saturating_sub(1);

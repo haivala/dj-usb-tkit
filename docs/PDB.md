@@ -331,6 +331,30 @@ or that only the terminal `tt=0` page may carry `flags=0x34`. Treat these flags
 as transaction history unless a more specific cross-validator rejection case is
 confirmed.
 
+### Fresh write vs additive patch: what must match, what may differ
+
+A populated PDB is only ever produced by the in-place additive writer (the
+from-scratch `write_pdb` runs solely for the `initialize_usb` template). For the
+tables whose footer the writer owns (`t00`–`t05`, `t07`, `t08`, `t13`, `t19`), an
+additively-patched page's **footer convention must match what the from-scratch
+writer would emit for the same row set**: `u5` (`0x20`), `num_rl` (`0x22`), and the
+per-16-row-group `rowpf`/`tranrf` bitmasks. `apply_page_footer_convention` in
+`pdb_writer.rs` is the single writer-side source of truth for this — both the
+from-scratch writer (`build_data_page`) and every in-place page rewrite that
+changes a page's row count call it, so the shape can't drift between the two paths.
+
+These differences are expected and legitimate (they are *not* shape violations):
+
+| Aspect | Why it differs |
+| --- | --- |
+| page indices, chain order, blank gap pages | additive appends onto the template; `first_page` is immovable |
+| `seq` (`0x10`), `seqdb` (`0x14`), sentinel `seq` | additive continues the existing file's transaction counter |
+| `page_flags` transaction bits (`0x24`/`0x34`) | additive never re-seals or normalises pre-existing pages |
+| accumulated `tranrf` bits on **reused** `u5=1` heap pages | additive preserves existing footer groups and ORs in only the bits for appended rows (see "Row Footer" below) |
+| `empty_candidate` under torn growth | can legitimately point past the physical file end |
+| header `0x10` compatibility byte | additive copies the pre-export value verbatim |
+| `t16`–`t18` menu pages, seeded `t19` history shape | preserved verbatim from the template |
+
 ## Row Footer
 
 Each data page has a footer at the end of the page. The footer is organized in
@@ -349,9 +373,40 @@ For freshly written pages:
 - tables using `u5=trc` write `tranrf=rowpf`;
 - `tt=19` writes a runtime profile where `rowpf` marks the last row bit and
   `tranrf` carries the last row bit plus the previous row bit when present.
+  This holds across every footer group once a `tt=19` page needs more than
+  one (more than 16 rows): only the group holding the true last row gets
+  the active bit(s); every earlier group is fully zeroed. Confirmed against
+  real rekordbox's own multi-group `tt=19` output (a reference export of 88
+  history rows across 6 groups): `rowpf` has exactly one bit set globally,
+  `tranrf` exactly two, both in the last group. A prior implementation only
+  handled the single-group case (`n<=16`) and left every row in every later
+  group falsely marked active once history accumulated past one group —
+  this produced a PDB that crashed rekordbox desktop on load and caused a
+  CDJ-2000NXS2 mount/eject loop; see `write_t19_runtime_footer_groups` in
+  `pdb_writer.rs`.
 
 For reused pages, the additive writer preserves existing footer groups and ORs
-in only the bits for appended rows.
+in only the bits for appended rows — **except `tt=19`**, whose additive and
+in-place-synthesis paths rewrite every footer group from scratch to preserve the
+single-active-row invariant above; the generic OR-in-bits append path declines to
+handle `tt=19` at all (`append_rows_to_existing_page_preserving_footer_state`
+asserts against it). `apply_page_footer_convention` in `pdb_writer.rs` is the
+single writer-side source of truth for `u5`/`num_rl` and the per-group `tranrf`
+shape; every in-place page rewrite that changes a page's row count funnels
+through it.
+
+### `tt=19` synthesis is a single fixed row
+
+On the first export against a track-less template, the writer seeds exactly
+**one** placeholder `tt=19` row — not one per track. There is no real play
+history to represent on a never-played device, and no reference export (real
+rekordbox or Mixo, an independent working DJ export tool) has ever shown `tt=19`
+needing more than one row for a fresh export. If the existing template already
+has exactly one row (e.g. a genuine rekordbox-initialized template, which ships
+one already), the page is left completely untouched rather than rewritten —
+`compute_additive_diff` only triggers synthesis when the count isn't already
+right, so a real rekordbox template's own footer shape is never needlessly
+clobbered by a first export.
 
 ## Page Footer Conventions
 

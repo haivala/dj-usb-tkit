@@ -17,10 +17,7 @@ pub use crate::edb::{
     resolve_track_release_date_for_export, table_exists, upsert_export_playlist_row,
 };
 pub(crate) use crate::metadata::sanitize_metadata;
-pub use crate::pdb_writer::{
-    T08EntryKey, T08PatchContext, try_patch_t08_with_context, try_patch_t08_with_multi_page_growth,
-    validate_no_empty_data_pages,
-};
+pub use crate::pdb_writer::{T08EntryKey, validate_no_empty_data_pages};
 #[cfg(test)]
 pub use export_paths::canonical_artwork_target_path;
 pub use export_paths::{
@@ -2003,19 +2000,6 @@ fn write_pdb_fresh_with_overrides(
         profile,
     };
 
-    let t08_patch_ctx = T08PatchContext {
-        playlist_id: playlist_pdb_id,
-        desired_entries: pdb_data
-            .playlist_entries
-            .iter()
-            .filter(|e| e.playlist_id == playlist_pdb_id)
-            .map(|e| T08EntryKey {
-                entry_index: e.entry_index,
-                track_id: e.track_id,
-                playlist_id: e.playlist_id,
-            })
-            .collect(),
-    };
     // Topology-locked additive dispatch.
     //
     // Any existing PDB, including the initialize_usb template, must be patched
@@ -2032,7 +2016,16 @@ fn write_pdb_fresh_with_overrides(
                     .into(),
             ));
         }
-        let desired_t08: Vec<T08EntryKey> = t08_patch_ctx.desired_entries.clone();
+        let desired_t08: Vec<T08EntryKey> = pdb_data
+            .playlist_entries
+            .iter()
+            .filter(|e| e.playlist_id == playlist_pdb_id)
+            .map(|e| T08EntryKey {
+                entry_index: e.entry_index,
+                track_id: e.track_id,
+                playlist_id: e.playlist_id,
+            })
+            .collect();
         match crate::pdb_writer::try_write_pdb_additive_in_place(
             before,
             &pdb_data,
@@ -2884,7 +2877,7 @@ mod tests {
 
     #[test]
     fn limit_filename_with_suffix_appends_ordinal_before_extension() {
-        let long_name = "June Rodriguez - Deep Tribal House Music Frequencies - 01 Rktex.wav";
+        let long_name = "Test Artist With A Long Name - A Deliberately Overlong Album Title For Truncation Tests - 01 Track Alpha.wav";
         let plain = limit_contents_file_name_with_suffix(long_name, 48, None);
         let first = limit_contents_file_name_with_suffix(long_name, 48, Some(1));
         let second = limit_contents_file_name_with_suffix(long_name, 48, Some(2));
@@ -2899,11 +2892,11 @@ mod tests {
 
     #[test]
     fn limit_filename_with_suffix_disambiguates_a_seven_way_collision() {
-        // The exact shape of the USB_DISCONNECTS bug: 7 tracks share a
+        // The exact shape of the field corruption report: 7 tracks share a
         // >48-char common prefix and all truncate identically at ordinal
         // None. Assigning ordinals 1..=6 to the collisions must yield 7
         // total distinct names.
-        let long_name = "June Rodriguez - Deep Tribal House Music Frequencies - 07 Rescue.wav";
+        let long_name = "Test Artist With A Long Name - A Deliberately Overlong Album Title For Truncation Tests - 07 Track Golf.wav";
         let mut names = vec![limit_contents_file_name_with_suffix(long_name, 48, None)];
         for n in 1..=6u32 {
             names.push(limit_contents_file_name_with_suffix(long_name, 48, Some(n)));
@@ -4404,23 +4397,31 @@ mod tests {
         assert!(u32le(o19 + 4) >= 41);
         assert_eq!(u32le(o19 + 8), 39);
         assert!(u32le(o19 + 12) >= 40);
-        assert_eq!(bytes[40 * ps + 24], 5);
+        // t19 always ends up with exactly one placeholder row on a first
+        // export, regardless of track count (no real play history exists
+        // yet on a freshly initialized USB, and no reference export -- real
+        // rekordbox or Mixo, an independent working DJ export tool -- has
+        // ever shown tt=19 needing more than one row here). The
+        // `initialize_usb` template already seeds exactly one row, SEALED
+        // (flags=0x24), matching a genuine rekordbox-initialized template
+        // (confirmed via a reference template carrying
+        // rekordbox-only files this app never writes) -- since that's
+        // already the desired end state, the export leaves it untouched
+        // rather than needlessly rewriting it to a different, self-invented
+        // footer shape.
+        assert_eq!(bytes[40 * ps + 24], 1);
         assert_eq!(bytes[40 * ps + 25], 0x20);
-        assert_eq!(bytes[40 * ps + 27], 52);
-        assert_eq!(u16le(40 * ps + ps - 4), 0x0010);
-        assert_eq!(u16le(40 * ps + ps - 2), 0x0018);
+        assert_eq!(bytes[40 * ps + 27], 0x24);
+        assert_eq!(u16le(40 * ps + ps - 4), 0x0001);
+        assert_eq!(u16le(40 * ps + ps - 2), 0x0001);
         // t19 row payload pattern should follow runtime sequence profile:
         // 0x00000280 + i*0x00200000, and second dword = i.
         let p40 = 40 * ps;
         let row_base = p40 + 40;
-        for i in 0..=4usize {
-            let row = row_base + i * 40;
-            let u0 = u32le(row);
-            let u1 = u32le(row + 4);
-            let want_u0 = 0x0000_0280u32 + (i as u32) * 0x0020_0000u32;
-            assert_eq!(u0, want_u0);
-            assert_eq!(u1, i as u32);
-        }
+        let u0 = u32le(row_base);
+        let u1 = u32le(row_base + 4);
+        assert_eq!(u0, 0x0000_0280u32);
+        assert_eq!(u1, 0u32);
 
         // t08 runtime row-index behavior should mirror growth writer contract.
         let o8 = tptr(8);
@@ -4428,7 +4429,7 @@ mod tests {
         assert_eq!(u32le(o8 + 12), 18);
         assert_eq!(bytes[18 * ps + 24], 4);
         assert_eq!(u16le(18 * ps + 34), 3);
-        assert_eq!(u16le(40 * ps + 34), 3);
+        assert_eq!(u16le(40 * ps + 34), 0);
     }
 
     /// t09/t10/t11/t12/t14/t15 are tables this codebase never writes rows
@@ -6219,54 +6220,5 @@ mod tests {
         bytes[off2 + 0x1e..off2 + 0x20].copy_from_slice(&12u16.to_le_bytes()); // used_size = 12
         let result2 = validate_no_empty_data_pages(&bytes, page_size, 8, 1, 2);
         assert!(result2.is_ok(), "should pass with non-empty data page");
-    }
-
-    #[test]
-    fn try_patch_t08_with_multi_page_growth_updates_pointers_and_keeps_pages_non_empty() {
-        let page_size = 4096usize;
-        let mut bytes = vec![0u8; page_size * 3];
-
-        crate::utils::set_table_ptr_fields(&mut bytes, 8, 3, 1, 2);
-
-        let off1 = page_size;
-        bytes[off1 + 0x04..off1 + 0x08].copy_from_slice(&1u32.to_le_bytes());
-        bytes[off1 + 0x08..off1 + 0x0c].copy_from_slice(&8u32.to_le_bytes());
-        bytes[off1 + 0x0c..off1 + 0x10].copy_from_slice(&2u32.to_le_bytes());
-        bytes[off1 + 0x1b] = 0x64;
-
-        let off2 = page_size * 2;
-        bytes[off2 + 0x04..off2 + 0x08].copy_from_slice(&2u32.to_le_bytes());
-        bytes[off2 + 0x08..off2 + 0x0c].copy_from_slice(&8u32.to_le_bytes());
-        bytes[off2 + 0x1b] = 0x24;
-
-        let desired_entries = (0..800u32)
-            .map(|idx| T08EntryKey {
-                entry_index: idx + 1,
-                track_id: idx + 100,
-                playlist_id: 77,
-            })
-            .collect::<Vec<_>>();
-        let ctx = T08PatchContext {
-            playlist_id: 77,
-            desired_entries,
-        };
-
-        let changed =
-            try_patch_t08_with_multi_page_growth(&mut bytes, &[1, 2], 1, 2, page_size, &ctx);
-        assert!(changed, "growth helper should apply");
-
-        let t08_ptr_off = 0x1cusize + 8usize * 16;
-        let last = u32::from_le_bytes(
-            bytes[t08_ptr_off + 12..t08_ptr_off + 16]
-                .try_into()
-                .unwrap(),
-        );
-        assert!(last > 2, "t08 growth should append at least one page");
-
-        let result = validate_no_empty_data_pages(&bytes, page_size, 8, 1, last);
-        assert!(
-            result.is_ok(),
-            "public growth helper should leave no empty t08 data pages: {result:?}"
-        );
     }
 }
