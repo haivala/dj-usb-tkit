@@ -226,6 +226,20 @@ Both modes use the same manifest build path, but they differ in how existing pla
   - eDB path deletes existing `playlist_content` rows for the target playlist ID before relinking manifest members.
   - PDB path removes target playlist-entry rows in place, preserving table chains and inactive/tombstone state.
   - stale export-owned files from previous runs can be pruned when no longer part of the current manifest.
+  - When a track drops out of the exported playlist and the prune step is about to delete its
+    media file, the exporter also removes that track's eDB `content` row and PDB `tt=0` track row
+    in place (plus any `tt=13` artwork row / eDB `image` row that no other track still uses), so
+    the databases don't keep referencing a file that no longer exists (which strict raw-coverage
+    parity would report as "indexed audio file(s) missing from USB"). A dropped track is left
+    fully intact — row and files — when it is still a member of another USB playlist or is
+    referenced by a device play-history entry, matching the guard `remove_playlist_and_tracks_from_pdb`
+    and `filter_prunable_stale_paths_for_playlist` use. Track rows are tombstoned with the same
+    in-place `remove_rows_inplace` + sentinel-rebuild path as the "remove USB playlist" feature;
+    no table chain is relocated.
+  - A reused analysis bundle or artwork asset (one this app wrote on an earlier export and is not
+    regenerating this run) counts as still owned by the exported playlist for prune purposes, so
+    re-exporting an unchanged playlist in mirror mode does not delete its own waveform/artwork
+    files.
 - Additive mode (`pruneStale = false`):
   - existing playlist membership rows are preserved.
   - new manifest members are linked only when not already present.

@@ -32,6 +32,20 @@
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
+- **New feature:** the on-drive USB export log now records which sync mode produced each export
+  (additive or mirror) and the tracks in their actual playlist order, instead of only an
+  alphabetically-sorted list with no mode information. Older log entries are read as before with
+  the mode shown as unknown.
+- **Fix:** a mirror-mode re-export deleted the waveform/beatgrid and cover-art files of
+  every track that was already on the USB from a previous export, because a reused analysis or
+  artwork asset was not recognised as still owned by the exported playlist and the stale-file
+  prune reaped it. Re-importing the drive then showed no waveforms or artwork for those tracks.
+  Reused assets for tracks still in the playlist are now kept.
+- **Fix:** a mirror-mode export that dropped tracks from a playlist deleted their audio files but
+  left the matching eDB `content` and PDB track rows behind, so the strict parity report flagged
+  them as "indexed audio file(s) missing from USB". Mirror export now also removes those rows
+  (and any now-unused artwork rows) when the dropped track is in no other USB playlist and has no
+  device play history — tracks that are still referenced elsewhere are left untouched.
 - **Fix (CRITICAL):** exporting a playlist of more than about 95 tracks to a freshly initialized USB
   always failed outright with "t19 runtime synthesis: N rows do not fit on page". The exporter
   fabricated one placeholder history row per track with no cap, which could never fit on a single

@@ -29,7 +29,8 @@ use super::export_helpers::{
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
     exported_media_target_path, exported_media_target_path_with_ordinal,
     filter_prunable_stale_paths_for_playlist, preview_pdb, prune_stale_export_owned_files,
-    stable_u32_hash, to_usb_relative_path, verify_edb_content, verify_edb_content_with_conn,
+    remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash, to_usb_relative_path,
+    verify_edb_content, verify_edb_content_with_conn,
     verify_pdb_content, write_edb_playlist, write_edb_playlist_with_conn, write_pdb,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
@@ -487,12 +488,22 @@ impl BackendService {
                     .unwrap_or_else(|| target.to_string_lossy().to_string())
             });
             let mut artwork_relative = None;
-            let mut owns_artwork = false;
+            // "This playlist keeps this asset alive on the USB" -- true for a
+            // freshly generated asset AND for one this app placed on a prior
+            // export and is now reusing. For analysis this is kept distinct
+            // from `owns_waveform`, which stays "generated on *this* run"
+            // because it drives app-owned identity assignment in
+            // `resolve_manifest_identity` and must not change here. Without
+            // `retain_*`, a reused asset is absent from `current_owned` and
+            // prune_stale reaps it on the next mirror export even though the
+            // track is still exported.
+            let mut retain_artwork = false;
             if options.include_artwork {
                 if let Some(existing_artwork) =
                     existing_usb_relative_if_file(&usb_root, track.artwork_path.as_deref())
                 {
                     artwork_relative = Some(existing_artwork);
+                    retain_artwork = true;
                 } else if let Some((_, _, _, Some(art_path))) =
                     existing_usb_identity_by_path.get(&canonicalize_playlist_name(&exported_path))
                 {
@@ -500,6 +511,7 @@ impl BackendService {
                     // exported_path (e.g. a fingerprint-matched track already on this
                     // USB under a foreign naming scheme) before minting a new asset.
                     artwork_relative = Some(art_path.clone());
+                    retain_artwork = true;
                 } else if !export_dry_run
                     && let Some(path) = track.artwork_path.as_deref()
                     && let Some(asset_path) =
@@ -508,12 +520,15 @@ impl BackendService {
                     artwork_relative =
                         to_usb_relative_path(&usb_root, &asset_path).or(Some(asset_path));
                     exported_artworks += 1;
-                    owns_artwork = true;
+                    retain_artwork = true;
                 }
             }
 
             let mut analysis_relative = None;
             let mut owns_waveform = false;
+            // See `retain_artwork` above: a reused bundle for a still-exported
+            // track must not be pruned even though it wasn't generated now.
+            let mut retain_waveform = false;
             if options.include_analysis {
                 // Reuse an existing USB-side analysis bundle when the source track
                 // already lives on this stick. Otherwise generate a fresh bundle
@@ -526,6 +541,7 @@ impl BackendService {
                         ensure_analysis_bundle_ppth(&usb_root, &existing_analysis, &exported_path)?;
                     }
                     analysis_relative = Some(existing_analysis);
+                    retain_waveform = true;
                 } else {
                     let exported_key = canonicalize_playlist_name(&exported_path);
                     if let Some(existing_analysis) = existing_analysis_by_path
@@ -541,6 +557,7 @@ impl BackendService {
                             )?;
                         }
                         analysis_relative = Some(existing_analysis);
+                        retain_waveform = true;
                     } else if !export_dry_run
                         && track.waveform_peaks_path.is_some()
                         && let Some(relative) = export_analysis_bundle_for_track(
@@ -553,6 +570,7 @@ impl BackendService {
                         analysis_relative = Some(relative);
                         exported_analysis_files += 3;
                         owns_waveform = true;
+                        retain_waveform = true;
                     }
                 }
             }
@@ -609,8 +627,8 @@ impl BackendService {
                 recorded_date: track.recorded_date.clone(),
                 file_type: track.file_type,
                 owns_exported_media,
-                owns_artwork,
-                owns_waveform,
+                owns_artwork: retain_artwork,
+                owns_waveform: owns_waveform || retain_waveform,
                 artwork_path: artwork_relative,
                 waveform_path: analysis_relative,
                 duration_ms: track.duration_ms,
@@ -837,6 +855,11 @@ impl BackendService {
                     &stale,
                     &mut warnings,
                 )?;
+                // Before deleting the files, drop the eDB/PDB rows for tracks
+                // that fell out of this playlist and are referenced nowhere
+                // else -- otherwise the rows outlive the files and strict
+                // parity reports them as "missing from USB".
+                remove_orphaned_dropped_tracks_from_dbs(&usb_root, &prunable, &mut warnings)?;
                 let prune_result =
                     prune_stale_export_owned_files(&usb_root, &prunable, &mut warnings)?;
                 warnings.push(logging::log(

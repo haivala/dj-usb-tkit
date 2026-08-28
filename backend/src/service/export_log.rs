@@ -28,7 +28,19 @@ pub(crate) struct UsbExportLogRecord {
     pub playlist_name: String,
     pub exported_at: String,
     pub export_date: String,
+    /// "additive" or "mirror" -- which sync mode produced this record (see
+    /// `mirror_playlist_entries`/`options.prune_stale`). `#[serde(default)]`
+    /// so logs written before this field existed still parse.
+    #[serde(default = "default_export_mode")]
+    pub mode: String,
+    /// Track identity fingerprints in actual playlist order (not sorted) --
+    /// this is the manifest's own track sequence, i.e. what was actually
+    /// written to the drive.
     pub track_fingerprints: Vec<String>,
+}
+
+fn default_export_mode() -> String {
+    "unknown".to_string()
 }
 
 impl Default for UsbExportLog {
@@ -195,7 +207,7 @@ pub(crate) fn build_export_log_record(
         .next()
         .unwrap_or(exported_at.as_str())
         .to_string();
-    let track_fingerprints = normalize_fingerprints(manifest.tracks.iter().map(|track| {
+    let track_fingerprints = fingerprints_in_order(manifest.tracks.iter().map(|track| {
         track_identity_key(
             &track.exported_path,
             &track.title,
@@ -203,11 +215,18 @@ pub(crate) fn build_export_log_record(
             Some(&track.id),
         )
     }));
+    let mode = if manifest.options.prune_stale {
+        "mirror"
+    } else {
+        "additive"
+    }
+    .to_string();
     UsbExportLogRecord {
         playlist_id: playlist.id.clone(),
         playlist_name: playlist.name.clone(),
         exported_at,
         export_date,
+        mode,
         track_fingerprints,
     }
 }
@@ -227,13 +246,26 @@ fn normalize_fingerprints<I>(fingerprints: I) -> Vec<String>
 where
     I: IntoIterator<Item = String>,
 {
-    let mut out = fingerprints
+    let mut out = fingerprints_in_order(fingerprints);
+    out.sort();
+    out
+}
+
+/// Same cleanup as `normalize_fingerprints` (trim, drop empty/"unknown"
+/// values) but preserves the caller's order -- used when *writing* a record
+/// so the log reflects actual playlist order. Order-sensitive matching
+/// (`apply_history_dates_from_export_log`, `history_track_fingerprints`)
+/// always re-sorts via `normalize_fingerprints` before comparing, so it
+/// doesn't matter that this list isn't sorted.
+fn fingerprints_in_order<I>(fingerprints: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    fingerprints
         .into_iter()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty() && value != "unknown")
-        .collect::<Vec<_>>();
-    out.sort();
-    out
+        .collect::<Vec<_>>()
 }
 
 #[cfg(test)]
@@ -447,6 +479,97 @@ mod tests {
         assert_eq!(record.export_date, "not-a-timestamp");
     }
 
+    fn manifest_with_prune_stale(
+        generated_at: &str,
+        tracks: Vec<ExportManifestTrack>,
+        prune_stale: bool,
+    ) -> ExportManifest {
+        ExportManifest {
+            version: 1,
+            generated_at: generated_at.to_string(),
+            playlist_id: "pl-1".to_string(),
+            playlist_name: "Warmup".to_string(),
+            usb_root: "/usb".to_string(),
+            options: crate::models::ExportToUsbOptions {
+                include_artwork: true,
+                include_analysis: true,
+                prune_stale,
+                ..Default::default()
+            },
+            exported_tracks: tracks.len(),
+            skipped_tracks: 0,
+            warnings: Vec::new(),
+            tracks,
+        }
+    }
+
+    #[test]
+    fn build_export_log_record_preserves_playlist_order_not_alphabetical() {
+        let playlist = ExportPlaylistData {
+            id: "pl-1".to_string(),
+            name: "Warmup".to_string(),
+            tracks: Vec::new(),
+        };
+        let record = build_export_log_record(
+            &playlist,
+            &manifest(
+                "2026-04-03T10:00:00Z",
+                vec![
+                    manifest_track("1", "Zebra", "Artist", "/Contents/Artist/Album/zebra.mp3"),
+                    manifest_track("2", "Apple", "Artist", "/Contents/Artist/Album/apple.mp3"),
+                    manifest_track("3", "Mango", "Artist", "/Contents/Artist/Album/mango.mp3"),
+                ],
+            ),
+        );
+        assert_eq!(record.track_fingerprints.len(), 3);
+        assert!(
+            record.track_fingerprints[0].contains("zebra"),
+            "expected playlist order (Zebra, Apple, Mango), not alphabetical: {:?}",
+            record.track_fingerprints
+        );
+        assert!(record.track_fingerprints[1].contains("apple"));
+        assert!(record.track_fingerprints[2].contains("mango"));
+    }
+
+    #[test]
+    fn build_export_log_record_reports_additive_or_mirror_mode() {
+        let playlist = ExportPlaylistData {
+            id: "pl-1".to_string(),
+            name: "Warmup".to_string(),
+            tracks: Vec::new(),
+        };
+        let additive = build_export_log_record(
+            &playlist,
+            &manifest_with_prune_stale("2026-04-03T10:00:00Z", vec![], false),
+        );
+        assert_eq!(additive.mode, "additive");
+
+        let mirror = build_export_log_record(
+            &playlist,
+            &manifest_with_prune_stale("2026-04-03T10:00:00Z", vec![], true),
+        );
+        assert_eq!(mirror.mode, "mirror");
+    }
+
+    #[test]
+    fn usb_export_log_record_defaults_mode_when_reading_a_pre_mode_log() {
+        // Logs written before `mode` existed have no such key at all --
+        // confirm deserialization still succeeds and falls back rather than
+        // failing to parse (which `load_export_log` would otherwise treat
+        // as an unreadable log).
+        let legacy_json = r#"{
+            "playlistId": "pl-1",
+            "playlistName": "Warmup",
+            "exportedAt": "2026-04-03T10:00:00+00:00",
+            "exportDate": "2026-04-03",
+            "trackFingerprints": ["fp-1"]
+        }"#;
+        let record: UsbExportLogRecord =
+            serde_json::from_str(legacy_json).expect("legacy record without mode must parse");
+        assert_eq!(record.mode, "unknown");
+        assert_eq!(record.track_fingerprints, vec!["fp-1".to_string()]);
+    }
+
     #[test]
     fn apply_history_dates_from_export_log_prefers_latest_exact_match() {
         let mut histories = vec![UsbHistory {
@@ -468,6 +591,7 @@ mod tests {
                     playlist_name: "Older".to_string(),
                     exported_at: "2026-04-03T09:00:00Z".to_string(),
                     export_date: "2026-04-03".to_string(),
+                    mode: "additive".to_string(),
                     track_fingerprints: build_export_log_record(
                         &ExportPlaylistData {
                             id: "pl".to_string(),
@@ -499,6 +623,7 @@ mod tests {
                     playlist_name: "Newer".to_string(),
                     exported_at: "2026-04-04T11:00:00Z".to_string(),
                     export_date: "2026-04-04".to_string(),
+                    mode: "additive".to_string(),
                     track_fingerprints: build_export_log_record(
                         &ExportPlaylistData {
                             id: "pl".to_string(),
@@ -544,6 +669,7 @@ mod tests {
                 playlist_name: "Warmup".to_string(),
                 exported_at: "2026-04-03T10:00:00+00:00".to_string(),
                 export_date: "2026-04-03".to_string(),
+                mode: "additive".to_string(),
                 track_fingerprints: vec!["fp-1".to_string()],
             }],
         };

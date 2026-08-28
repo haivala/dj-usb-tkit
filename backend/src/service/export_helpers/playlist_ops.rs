@@ -5,7 +5,10 @@ use std::path::Path;
 
 use rusqlite::{OptionalExtension, params};
 
-use super::{ExclusiveTrackInfo, ExportManifest, ExportPlaylistData, PlaylistRemovalPdbResult};
+use super::{
+    ExclusiveTrackInfo, ExportManifest, ExportPlaylistData, PlaylistRemovalPdbResult,
+    normalize_owned_export_path,
+};
 use crate::edb::{
     open_edb_from_usb_root, open_edb_rw, preferred_export_playlist_row_id, table_exists,
 };
@@ -314,6 +317,189 @@ pub fn remove_track_ids_from_pdb_playlist_entries(
 
     std::fs::write(&pdb_path, &pdb_bytes)?;
     Ok(removed)
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MirrorOrphanCleanup {
+    pub removed_edb_content: usize,
+    pub removed_pdb_tracks: usize,
+    pub removed_pdb_artwork: usize,
+}
+
+/// Mirror export only. Given the set of stale media paths the prune step has
+/// already cleared for deletion — i.e. tracks dropped from the exported
+/// playlist that `filter_prunable_stale_paths_for_playlist` confirmed are not
+/// referenced by any other USB playlist and not in device play history —
+/// delete the matching eDB `content` rows and tombstone the matching PDB
+/// `tt=0` track rows in place (plus any now-exclusive `tt=13` artwork rows and
+/// orphaned eDB `image` rows).
+///
+/// Without this the rows outlive the files the prune step removes, and strict
+/// parity then reports "N of M indexed audio file(s) missing from USB".
+///
+/// PDB removal uses the same in-place tombstone path as `remove_playlist_and_
+/// tracks_from_pdb` (`remove_rows_inplace` + `rebuild_sentinel_btrees_inplace`):
+/// row-presence bits are cleared, page layout and table chains are untouched.
+pub fn remove_orphaned_dropped_tracks_from_dbs(
+    usb_root: &Path,
+    prunable_media_paths: &[String],
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<MirrorOrphanCleanup> {
+    let mut result = MirrorOrphanCleanup::default();
+
+    let target_keys: HashSet<String> = prunable_media_paths
+        .iter()
+        .filter_map(|p| normalize_owned_export_path(usb_root, p))
+        .filter(|p| p.starts_with("/Contents/"))
+        .map(|p| canonicalize_playlist_name(&p))
+        .collect();
+    if target_keys.is_empty() {
+        return Ok(result);
+    }
+
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
+    if !pdb_path.is_file() {
+        return Ok(result);
+    }
+    let parsed = parse_pdb(&pdb_path)?;
+
+    // Post-write "still referenced somewhere" guard. After the mirror write the
+    // target playlist's entries are exactly the manifest, so a dropped track
+    // that is still a member of another playlist (or in history) shows up here
+    // and is left alone.
+    let referenced_track_ids: HashSet<u32> = parsed
+        .playlist_entries
+        .iter()
+        .map(|e| e.track_id)
+        .chain(parsed.history_entries.iter().filter_map(|h| h.track_id))
+        .collect();
+
+    let orphan_track_ids: HashSet<u32> = parsed
+        .tracks
+        .iter()
+        .filter(|t| !referenced_track_ids.contains(&t.id))
+        .filter(|t| {
+            normalize_owned_export_path(usb_root, &t.track_file_path)
+                .map(|norm| target_keys.contains(&canonicalize_playlist_name(&norm)))
+                .unwrap_or(false)
+        })
+        .map(|t| t.id)
+        .collect();
+    if orphan_track_ids.is_empty() {
+        return Ok(result);
+    }
+
+    // --- eDB: delete content rows for those paths, then orphaned image rows ---
+    let mut unlock_warnings = Vec::<WarningEntry>::new();
+    if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings) {
+        if table_exists(&conn, "content") {
+            let mut to_delete = Vec::<i64>::new();
+            {
+                let mut stmt = conn.prepare("SELECT content_id, path FROM content")?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+                })?;
+                for row in rows {
+                    let (content_id, path) = row?;
+                    let Some(norm) = path
+                        .as_deref()
+                        .and_then(|p| normalize_owned_export_path(usb_root, p))
+                    else {
+                        continue;
+                    };
+                    if target_keys.contains(&canonicalize_playlist_name(&norm)) {
+                        to_delete.push(content_id);
+                    }
+                }
+            }
+            let has_playlist_content = table_exists(&conn, "playlist_content");
+            for content_id in &to_delete {
+                // Never delete a content row still linked to any playlist. The
+                // mirror write only unlinks dropped tracks from the target
+                // playlist and never touches others, so this should not fire —
+                // it is a guard against a path-normalisation mismatch with the
+                // PDB-side check above.
+                if has_playlist_content {
+                    let still_linked: Option<i64> = conn
+                        .query_row(
+                            "SELECT 1 FROM playlist_content WHERE content_id = ?1 LIMIT 1",
+                            params![content_id],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    if still_linked.is_some() {
+                        continue;
+                    }
+                }
+                result.removed_edb_content += conn
+                    .execute("DELETE FROM content WHERE content_id = ?1", params![content_id])?;
+            }
+            if result.removed_edb_content > 0 && table_exists(&conn, "image") {
+                let _ = conn.execute(
+                    "DELETE FROM image WHERE image_id NOT IN (SELECT DISTINCT image_id FROM content WHERE image_id IS NOT NULL)",
+                    [],
+                );
+            }
+        }
+        drop(conn);
+        crate::service::usb_staging::write_back_if_changed(
+            usb_root,
+            crate::service::usb_staging::DbKind::Edb,
+        )?;
+    } else {
+        warnings.extend(unlock_warnings);
+    }
+
+    // --- PDB: tombstone track rows + now-exclusive artwork rows in place ---
+    use crate::pdb_writer::{
+        extract_artwork_id, extract_track_id, rebuild_sentinel_btrees_inplace, remove_rows_inplace,
+    };
+
+    let exclusive_artwork_ids: HashSet<u32> = {
+        let removed: HashSet<u32> = parsed
+            .tracks
+            .iter()
+            .filter(|t| orphan_track_ids.contains(&t.id) && t.artwork_id != 0)
+            .map(|t| t.artwork_id)
+            .collect();
+        let remaining: HashSet<u32> = parsed
+            .tracks
+            .iter()
+            .filter(|t| !orphan_track_ids.contains(&t.id) && t.artwork_id != 0)
+            .map(|t| t.artwork_id)
+            .collect();
+        removed.difference(&remaining).copied().collect()
+    };
+
+    let mut pdb_bytes = std::fs::read(&pdb_path)?;
+    result.removed_pdb_tracks =
+        remove_rows_inplace(&mut pdb_bytes, 0, &orphan_track_ids, extract_track_id);
+    if !exclusive_artwork_ids.is_empty() {
+        result.removed_pdb_artwork =
+            remove_rows_inplace(&mut pdb_bytes, 13, &exclusive_artwork_ids, extract_artwork_id);
+    }
+    if result.removed_pdb_tracks > 0 || result.removed_pdb_artwork > 0 {
+        rebuild_sentinel_btrees_inplace(&mut pdb_bytes);
+        crate::service::usb_staging::commit_and_write_back(
+            usb_root,
+            crate::service::usb_staging::DbKind::Pdb,
+            &pdb_bytes,
+        )?;
+    }
+
+    if result != MirrorOrphanCleanup::default() {
+        warnings.push(logging::log(
+            Level::Info,
+            "export",
+            "export.orphan-tracks-removed",
+            format!(
+                "mirror export removed {} dropped-track content row(s) from eDB and {} track row(s) ({} artwork row(s)) from PDB — no other playlist or history references them",
+                result.removed_edb_content, result.removed_pdb_tracks, result.removed_pdb_artwork
+            ),
+        ));
+    }
+
+    Ok(result)
 }
 
 pub fn verify_edb_content(

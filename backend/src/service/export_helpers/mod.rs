@@ -42,6 +42,7 @@ pub use pdb_menu::{
     patch_pdb_columns_menu_set_by_kind, patch_pdb_t17_category_snapshot,
 };
 pub use playlist_ops::{
+    MirrorOrphanCleanup, remove_orphaned_dropped_tracks_from_dbs,
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
     remove_track_ids_from_pdb_playlist_entries, verify_edb_content, verify_edb_content_with_conn,
     verify_pdb_content,

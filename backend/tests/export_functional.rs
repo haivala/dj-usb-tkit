@@ -2696,6 +2696,25 @@ fn export_sync_mode_additive_preserves_existing_playlist_entries() {
         mirror_paths[0].contains("beta.aif"),
         "only beta should remain after mirror export"
     );
+
+    // The on-drive export log records the sync mode per export.
+    let log_raw = fs::read_to_string(
+        usb.join(".dj-usb-tkit")
+            .join("dj_usb_tkit_export_log.v1.json"),
+    )
+    .expect("read on-drive export log");
+    let log: serde_json::Value = serde_json::from_str(&log_raw).expect("parse export log json");
+    let modes: Vec<&str> = log["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .map(|r| r["mode"].as_str().expect("record mode string"))
+        .collect();
+    assert_eq!(
+        modes,
+        vec!["additive", "additive", "mirror"],
+        "export log must record the sync mode used for each export"
+    );
 }
 
 #[test]
@@ -3815,6 +3834,44 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
         "eDB playlist_content order must match PDB playlist_entries order exactly"
     );
 
+    // --- Orphan-row cleanup: a track dropped from its only playlist and not in ---
+    // --- history must lose its eDB content row and PDB track row too, so they ---
+    // --- don't outlive the pruned file and trip strict raw-coverage parity. ---
+    let edb_content_row_exists = |path: &str| -> bool {
+        conn.query_row(
+            "SELECT 1 FROM content WHERE path = ?1 LIMIT 1",
+            [path],
+            |row| row.get::<_, i64>(0),
+        )
+        .ok()
+        .is_some()
+    };
+    assert!(
+        !edb_content_row_exists(&plain_removed_path),
+        "mirror export must delete the eDB content row for a track dropped from its only \
+         playlist with no history reference: {plain_removed_path}"
+    );
+    assert!(
+        edb_content_row_exists(&played_removed_path),
+        "mirror export must keep the eDB content row for a dropped track that has device \
+         play history: {played_removed_path}"
+    );
+    let parsed_after_mirror = parse_pdb(&pdb_path).expect("parse pdb after mirror export");
+    assert!(
+        !parsed_after_mirror
+            .tracks
+            .iter()
+            .any(|t| t.track_file_path == plain_removed_path),
+        "mirror export must tombstone the PDB track row for the plain-removed track"
+    );
+    assert!(
+        parsed_after_mirror
+            .tracks
+            .iter()
+            .any(|t| t.track_file_path == played_removed_path),
+        "mirror export must keep the PDB track row for the history-protected track"
+    );
+
     // --- Parity report ---
     let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -3833,6 +3890,15 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
     assert_eq!(target_detail.matched_tracks, 4, "{target_detail:?}");
     assert_eq!(target_detail.only_in_pdb, 0, "{target_detail:?}");
     assert_eq!(target_detail.only_in_edb, 0, "{target_detail:?}");
+    let raw_coverage = parity_data
+        .checks
+        .iter()
+        .find(|c| c.label == "Indexed audio file presence")
+        .expect("indexed audio file presence check present");
+    assert!(
+        matches!(raw_coverage.status, backend::models::DiagStatus::Pass),
+        "mirror export must not leave DB rows pointing at pruned audio files: {raw_coverage:?}"
+    );
     assert!(!target_detail.order_mismatch, "{target_detail:?}");
     assert_eq!(target_detail.pdb_duplicate_entries, 0, "{target_detail:?}");
     for i in 0..10usize {
@@ -3934,6 +4000,147 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
     assert_eq!(
         contents_count_after_second_mirror, contents_count_after_mirror,
         "idempotent mirror re-export must not delete or duplicate exported files"
+    );
+}
+
+/// A mirror re-export with no local changes must not prune the analysis
+/// bundle / artwork files of tracks that are still in the playlist just
+/// because those assets were reused (not regenerated) this run. Regression
+/// for reused `owns_artwork`/`owns_waveform` being left false, which put the
+/// paths outside `current_owned` and let `prune_stale` reap them.
+#[test]
+fn export_mirror_reexport_keeps_reused_analysis_and_artwork_files() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    copy_audio_fixture(&media, "formats/track_format_wav.wav", "Keeper Artist - Alpha.wav");
+    copy_audio_fixture(&media, "formats/track_format_aif.aif", "Keeper Artist - Beta.aif");
+    copy_audio_fixture(&media, "formats/track_format_flac.flac", "Keeper Artist - Gamma.flac");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let track_ids = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect::<Vec<_>>();
+    assert_eq!(track_ids.len(), 3, "expected three scanned tracks");
+    seed_tracks_as_analyzed(&data_dir, &track_ids);
+    let cover = cover_fixture_path();
+    for id in &track_ids {
+        seed_track_artwork_path(&data_dir, id, &cover);
+    }
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Keepers".to_string(),
+    });
+    assert!(created.ok, "create failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: track_ids.clone(),
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added.ok, "add tracks failed: {added:?}");
+
+    let mirror_opts = || {
+        Some(ExportToUsbOptions {
+            include_artwork: true,
+            include_analysis: true,
+            prune_stale: true,
+            backup_before_export: false,
+        })
+    };
+
+    let first = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: mirror_opts(),
+    });
+    assert!(first.ok, "first mirror export failed: {first:?}");
+
+    let pdb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let asset_files = || -> Vec<std::path::PathBuf> {
+        let parsed = parse_pdb(&pdb_path).expect("parse pdb");
+        let mut out = Vec::new();
+        for t in &parsed.tracks {
+            assert!(
+                !t.anlz_path.is_empty(),
+                "track {} lost its anlz_path on export",
+                t.title
+            );
+            let dat = usb.join(t.anlz_path.trim_start_matches('/'));
+            out.push(dat.with_extension("EXT"));
+            out.push(dat.with_extension("2EX"));
+            out.push(dat);
+            let art = parsed
+                .artworks
+                .get(&t.artwork_id)
+                .cloned()
+                .unwrap_or_else(|| panic!("track {} has no artwork row after export", t.title));
+            out.push(usb.join(art.trim_start_matches('/')));
+        }
+        out
+    };
+
+    for f in asset_files() {
+        assert!(f.exists(), "asset missing right after first mirror export: {f:?}");
+    }
+
+    let second = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: mirror_opts(),
+    });
+    assert!(second.ok, "second mirror export failed: {second:?}");
+
+    for f in asset_files() {
+        assert!(
+            f.exists(),
+            "mirror re-export pruned a reused analysis/artwork file for a track still in the \
+             playlist: {f:?}"
+        );
+    }
+
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity.ok, "parity failed: {parity:?}");
+    let coverage = parity
+        .data
+        .expect("parity data")
+        .checks
+        .into_iter()
+        .find(|c| c.label == "Indexed audio file presence")
+        .expect("coverage check present");
+    assert!(
+        matches!(coverage.status, backend::models::DiagStatus::Pass),
+        "reused-asset mirror re-export tripped raw coverage parity: {coverage:?}"
     );
 }
 
