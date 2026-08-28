@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+- **Chore:** functional-test coverage for the mirror-mode purge fix — a dropped track with
+  device play history keeps its full on-drive shape (PDB `anlz_path`/`artwork_id`, analysis +
+  artwork files, eDB `analysisDataFilePath`/`image_id` and `image` row) while a plainly-removed
+  track is fully torn down including its now-exclusive artwork and orphaned image rows; and a
+  track dropped from one playlist but still in another keeps its eDB `content` and PDB track
+  rows, not just its file.
+
 ## 0.1.32
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

@@ -4159,6 +4159,579 @@ fn export_mirror_reexport_keeps_reused_analysis_and_artwork_files() {
     );
 }
 
+/// A mirror export that drops a track which still has device play history must
+/// keep that track's *full shape* on the drive -- not just its audio file and
+/// row presence, but its PDB `tt=0` row's `anlz_path`/`artwork_id`, its analysis
+/// bundle + artwork files, its eDB `content` row's `analysisDataFilePath`/
+/// `image_id`, and its `image` row -- while a plainly-removed track (no history,
+/// no other playlist) is fully torn down: PDB track row, now-exclusive PDB
+/// `tt=13` artwork row, eDB `content` row, orphaned eDB `image` row, and every
+/// asset file. Exercises `remove_orphaned_dropped_tracks_from_dbs`' history
+/// guard and its exclusive-artwork / orphaned-image cleanup with artwork and
+/// analysis enabled (the existing growth test runs with both disabled, so it
+/// only ever checked bare row/file presence for the history-protected track).
+#[test]
+fn export_mirror_prune_keeps_history_protected_track_full_shape() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_wav.wav",
+        "Shape Artist - Alpha.wav",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_aif.aif",
+        "Shape Artist - Beta.aif",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_flac.flac",
+        "Shape Artist - Gamma.flac",
+    );
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let items = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+    let id_by_title = |title: &str| -> String {
+        items
+            .iter()
+            .find(|t| t.title == title)
+            .unwrap_or_else(|| panic!("scanned track titled {title}"))
+            .id
+            .clone()
+    };
+    let keep_id = id_by_title("Alpha");
+    let history_id = id_by_title("Beta");
+    let plain_id = id_by_title("Gamma");
+    let all_ids = vec![keep_id.clone(), history_id.clone(), plain_id.clone()];
+
+    seed_tracks_as_analyzed(&data_dir, &all_ids);
+    let cover = cover_fixture_path();
+    for id in &all_ids {
+        seed_track_artwork_path(&data_dir, id, &cover);
+    }
+
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: "Shape Keepers".to_string(),
+    });
+    assert!(created.ok, "create failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: all_ids.clone(),
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(added.ok, "add tracks failed: {added:?}");
+
+    let mirror_opts = || {
+        Some(ExportToUsbOptions {
+            include_artwork: true,
+            include_analysis: true,
+            prune_stale: true,
+            ..Default::default()
+        })
+    };
+
+    let first = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: mirror_opts(),
+    });
+    assert!(first.ok, "first mirror export failed: {first:?}");
+
+    let pdb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let edb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("exportLibrary.db");
+
+    // Snapshot each track's exported shape after the first mirror export.
+    #[derive(Clone)]
+    struct TrackShape {
+        pdb_id: u32,
+        file_path: String,
+        anlz_path: String,
+        artwork_id: u32,
+        analysis_files: [std::path::PathBuf; 3],
+        artwork_file: std::path::PathBuf,
+        edb_image_id: i64,
+    }
+    let snapshot_shape = |title: &str| -> TrackShape {
+        let parsed = parse_pdb(&pdb_path).expect("parse pdb");
+        let track = parsed
+            .tracks
+            .iter()
+            .find(|t| t.title == title)
+            .unwrap_or_else(|| panic!("pdb track row for {title}"));
+        assert!(
+            !track.anlz_path.is_empty(),
+            "track {title} has no anlz_path after first export"
+        );
+        assert_ne!(track.artwork_id, 0, "track {title} has no artwork_id");
+        let artwork_rel = parsed
+            .artworks
+            .get(&track.artwork_id)
+            .unwrap_or_else(|| panic!("artwork row for {title}"));
+        let conn = open_edb(&edb_path);
+        let (analysis_data, image_id): (Option<String>, Option<i64>) = conn
+            .query_row(
+                "SELECT analysisDataFilePath, image_id FROM content WHERE path = ?1",
+                [&track.track_file_path],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or_else(|e| panic!("eDB content row for {title}: {e}"));
+        assert!(
+            analysis_data.is_some(),
+            "track {title} eDB content row has NULL analysisDataFilePath after first export"
+        );
+        let image_id =
+            image_id.unwrap_or_else(|| panic!("track {title} eDB content row has NULL image_id"));
+        assert!(
+            conn.query_row(
+                "SELECT 1 FROM image WHERE image_id = ?1",
+                [image_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .is_ok(),
+            "track {title} references image_id {image_id} with no image row"
+        );
+        TrackShape {
+            pdb_id: track.id,
+            file_path: track.track_file_path.clone(),
+            anlz_path: track.anlz_path.clone(),
+            artwork_id: track.artwork_id,
+            analysis_files: canonical_usb_analysis_bundle_paths(&usb, &track.track_file_path),
+            artwork_file: usb.join(artwork_rel.trim_start_matches('/')),
+            edb_image_id: image_id,
+        }
+    };
+
+    let keep_shape = snapshot_shape("Alpha");
+    let history_shape = snapshot_shape("Beta");
+    let plain_shape = snapshot_shape("Gamma");
+
+    for shape in [&keep_shape, &history_shape, &plain_shape] {
+        for f in &shape.analysis_files {
+            assert!(
+                f.exists(),
+                "analysis file missing after first export: {f:?}"
+            );
+        }
+        assert!(
+            shape.artwork_file.exists(),
+            "artwork file missing after first export: {:?}",
+            shape.artwork_file
+        );
+    }
+
+    // Inject a device play-history entry for Beta, then drop Beta (history-
+    // protected) and Gamma (plain removal) from the playlist. Alpha stays.
+    append_history_to_pdb(&pdb_path, 1, &[history_shape.pdb_id]);
+
+    let removed = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![history_id.clone(), plain_id.clone()],
+    });
+    assert!(removed.ok, "remove tracks failed: {removed:?}");
+
+    let second = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: mirror_opts(),
+    });
+    assert!(second.ok, "second mirror export failed: {second:?}");
+    let second_data = second.data.expect("second export data");
+    assert!(
+        second_data.warnings.iter().any(|w| w.source == "export"
+            && w.code == "export.orphan-tracks-removed"
+            && !w
+                .message
+                .contains("0 dropped-track content row(s) from eDB and 0 track row(s)")),
+        "expected an export.orphan-tracks-removed info warning with non-zero counts: {:?}",
+        second_data.warnings
+    );
+
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb after second mirror export");
+    let conn = open_edb(&edb_path);
+    let edb_content_exists = |path: &str| {
+        conn.query_row("SELECT 1 FROM content WHERE path = ?1", [path], |r| {
+            r.get::<_, i64>(0)
+        })
+        .is_ok()
+    };
+    let edb_image_exists = |image_id: i64| {
+        conn.query_row("SELECT 1 FROM image WHERE image_id = ?1", [image_id], |r| {
+            r.get::<_, i64>(0)
+        })
+        .is_ok()
+    };
+    let pdb_track = |path: &str| parsed.tracks.iter().find(|t| t.track_file_path == path);
+
+    // --- Beta: history-protected, full shape must survive ---
+    let beta_row = pdb_track(&history_shape.file_path)
+        .expect("history-protected track must keep its PDB tt=0 row");
+    assert_eq!(
+        beta_row.anlz_path, history_shape.anlz_path,
+        "history-protected track lost its anlz_path in the mirror rewrite"
+    );
+    assert_eq!(
+        beta_row.artwork_id, history_shape.artwork_id,
+        "history-protected track lost its artwork_id in the mirror rewrite"
+    );
+    assert!(
+        parsed
+            .artworks
+            .get(&history_shape.artwork_id)
+            .is_some_and(|p| usb.join(p.trim_start_matches('/')) == history_shape.artwork_file),
+        "history-protected track's PDB artwork row was tombstoned"
+    );
+    assert!(
+        parsed
+            .history_entries
+            .iter()
+            .any(|h| h.track_id == Some(history_shape.pdb_id)),
+        "the injected history entry no longer resolves to the track after the in-place \
+         tombstone + sentinel-btree rebuild"
+    );
+    assert!(
+        parsed
+            .history_playlists
+            .iter()
+            .any(|hp| hp.name == "HISTORY 1"),
+        "the history playlist row disappeared from the PDB after the mirror export"
+    );
+    for f in &history_shape.analysis_files {
+        assert!(
+            f.exists(),
+            "mirror export pruned a history-protected track's analysis file: {f:?}"
+        );
+    }
+    assert!(
+        history_shape.artwork_file.exists(),
+        "mirror export pruned a history-protected track's artwork file: {:?}",
+        history_shape.artwork_file
+    );
+    assert!(
+        edb_content_exists(&history_shape.file_path),
+        "mirror export deleted the history-protected track's eDB content row"
+    );
+    let (beta_analysis, beta_image): (Option<String>, Option<i64>) = conn
+        .query_row(
+            "SELECT analysisDataFilePath, image_id FROM content WHERE path = ?1",
+            [&history_shape.file_path],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("history-protected eDB content row");
+    assert!(
+        beta_analysis.is_some(),
+        "history-protected track's eDB content row lost analysisDataFilePath"
+    );
+    assert_eq!(
+        beta_image,
+        Some(history_shape.edb_image_id),
+        "history-protected track's eDB content row lost its image_id"
+    );
+    assert!(
+        edb_image_exists(history_shape.edb_image_id),
+        "history-protected track's eDB image row was GC'd"
+    );
+
+    // --- Gamma: plain removal, everything torn down ---
+    assert!(
+        pdb_track(&plain_shape.file_path).is_none(),
+        "mirror export must tombstone the plain-removed track's PDB tt=0 row"
+    );
+    assert!(
+        !parsed.artworks.contains_key(&plain_shape.artwork_id),
+        "mirror export must tombstone the plain-removed track's now-exclusive PDB artwork row"
+    );
+    assert!(
+        !edb_content_exists(&plain_shape.file_path),
+        "mirror export must delete the plain-removed track's eDB content row"
+    );
+    assert!(
+        !edb_image_exists(plain_shape.edb_image_id),
+        "mirror export must GC the plain-removed track's now-orphaned eDB image row"
+    );
+    for f in &plain_shape.analysis_files {
+        assert!(
+            !f.exists(),
+            "mirror export must prune the plain-removed track's analysis file: {f:?}"
+        );
+    }
+    assert!(
+        !plain_shape.artwork_file.exists(),
+        "mirror export must prune the plain-removed track's artwork file: {:?}",
+        plain_shape.artwork_file
+    );
+
+    // --- Alpha: still in the playlist, untouched ---
+    let alpha_row =
+        pdb_track(&keep_shape.file_path).expect("kept track must keep its PDB tt=0 row");
+    assert_eq!(alpha_row.anlz_path, keep_shape.anlz_path);
+    assert_eq!(alpha_row.artwork_id, keep_shape.artwork_id);
+    assert!(edb_content_exists(&keep_shape.file_path));
+    assert!(edb_image_exists(keep_shape.edb_image_id));
+    for f in &keep_shape.analysis_files {
+        assert!(f.exists(), "kept track's analysis file vanished: {f:?}");
+    }
+    assert!(keep_shape.artwork_file.exists());
+
+    // --- Parity: no dangling rows, and the drives still agree ---
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity.ok, "parity failed: {parity:?}");
+    let coverage = parity
+        .data
+        .expect("parity data")
+        .checks
+        .into_iter()
+        .find(|c| c.label == "Indexed audio file presence")
+        .expect("coverage check present");
+    assert!(
+        matches!(coverage.status, backend::models::DiagStatus::Pass),
+        "mirror export left DB rows pointing at pruned files: {coverage:?}"
+    );
+}
+
+/// The flip side of `remove_orphaned_dropped_tracks_from_dbs`' "still
+/// referenced somewhere" guard, at DB-row granularity: a track dropped from
+/// one playlist by a mirror export but still a member of another USB playlist
+/// must keep its eDB `content` row and PDB `tt=0` track row, not just its audio
+/// file. The existing shared-reference tests in `lib_integration.rs` only
+/// assert the file survives.
+#[test]
+fn export_mirror_prune_keeps_dropped_track_rows_when_shared_by_another_playlist() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_wav.wav",
+        "Share Artist - Shared.wav",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_aif.aif",
+        "Share Artist - Only A.aif",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_flac.flac",
+        "Share Artist - Only B.flac",
+    );
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let items = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+    let id_by_title = |title: &str| -> String {
+        items
+            .iter()
+            .find(|t| t.title == title)
+            .unwrap_or_else(|| panic!("scanned track titled {title}"))
+            .id
+            .clone()
+    };
+    let shared_id = id_by_title("Shared");
+    let only_a_id = id_by_title("Only A");
+    let only_b_id = id_by_title("Only B");
+    seed_tracks_as_analyzed(
+        &data_dir,
+        &[shared_id.clone(), only_a_id.clone(), only_b_id.clone()],
+    );
+
+    let make_playlist = |name: &str, track_ids: Vec<String>| -> String {
+        let created = backend.create_playlist(CreatePlaylistRequest {
+            name: name.to_string(),
+        });
+        assert!(created.ok, "create playlist {name} failed: {created:?}");
+        let pid = created.data.expect("playlist data").playlist_id;
+        let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: pid.clone(),
+            track_ids,
+            dedupe: DedupeMode::Skip,
+        });
+        assert!(added.ok, "add tracks to {name} failed: {added:?}");
+        pid
+    };
+    let playlist_a = make_playlist(
+        "Shared Mirror A",
+        vec![shared_id.clone(), only_a_id.clone()],
+    );
+    let playlist_b = make_playlist(
+        "Shared Mirror B",
+        vec![shared_id.clone(), only_b_id.clone()],
+    );
+
+    let additive_opts = || {
+        Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        })
+    };
+    for (name, pid) in [("A", &playlist_a), ("B", &playlist_b)] {
+        let exported = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: pid.clone(),
+            options: additive_opts(),
+        });
+        assert!(exported.ok, "additive export {name} failed: {exported:?}");
+    }
+
+    let pdb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let edb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("exportLibrary.db");
+    let shared_usb_path = parse_pdb(&pdb_path)
+        .expect("parse pdb")
+        .tracks
+        .iter()
+        .find(|t| t.title == "Shared")
+        .expect("shared track pdb row")
+        .track_file_path
+        .clone();
+    let shared_file = usb.join(shared_usb_path.trim_start_matches('/'));
+    assert!(shared_file.is_file(), "shared file missing before prune");
+
+    let removed = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
+        playlist_id: playlist_a.clone(),
+        track_ids: vec![shared_id.clone()],
+    });
+    assert!(removed.ok, "remove shared from A failed: {removed:?}");
+
+    let mirror = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_a,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: true,
+            ..Default::default()
+        }),
+    });
+    assert!(mirror.ok, "mirror export A failed: {mirror:?}");
+    let mirror_data = mirror.data.expect("mirror export data");
+    assert!(
+        !mirror_data
+            .warnings
+            .iter()
+            .any(|w| w.code == "export.orphan-tracks-removed"),
+        "nothing was actually orphaned (playlist B still references the shared track), so no \
+         orphan-tracks-removed warning should be emitted: {:?}",
+        mirror_data.warnings
+    );
+
+    // Shared track: file + both DB rows survive because playlist B still holds it.
+    assert!(
+        shared_file.is_file(),
+        "mirror export pruned a track still referenced by another playlist: {shared_file:?}"
+    );
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb after mirror");
+    assert!(
+        parsed
+            .tracks
+            .iter()
+            .any(|t| t.track_file_path == shared_usb_path),
+        "mirror export tombstoned the PDB tt=0 row of a track still in another playlist"
+    );
+    let conn = open_edb(&edb_path);
+    assert!(
+        conn.query_row(
+            "SELECT 1 FROM content WHERE path = ?1",
+            [&shared_usb_path],
+            |r| r.get::<_, i64>(0),
+        )
+        .is_ok(),
+        "mirror export deleted the eDB content row of a track still in another playlist"
+    );
+    assert!(
+        usb_playlist_track_paths(&usb, "Shared Mirror B")
+            .iter()
+            .any(|p| p == &shared_usb_path.to_lowercase()),
+        "playlist B lost the shared track after playlist A's mirror prune"
+    );
+    assert!(
+        !usb_playlist_track_paths(&usb, "Shared Mirror A")
+            .iter()
+            .any(|p| p == &shared_usb_path.to_lowercase()),
+        "playlist A must no longer list the shared track after the mirror prune"
+    );
+
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity.ok, "parity failed: {parity:?}");
+    let coverage = parity
+        .data
+        .expect("parity data")
+        .checks
+        .into_iter()
+        .find(|c| c.label == "Indexed audio file presence")
+        .expect("coverage check present");
+    assert!(
+        matches!(coverage.status, backend::models::DiagStatus::Pass),
+        "shared-reference mirror prune tripped raw coverage parity: {coverage:?}"
+    );
+}
+
 /// Appends synthetic PDB history-playlist (t11) and history-entry (t12) pages
 /// directly onto a real exported PDB, since there is no in-app command to
 /// create device play history -- it only ever originates from actual CDJ
