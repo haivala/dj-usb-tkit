@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.32
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **New feature:** the on-drive USB export log now records which sync mode produced each export
