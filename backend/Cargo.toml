@@ -11,7 +11,7 @@ tauri = ["dep:tauri", "dep:reqwest", "dep:flate2", "dep:tar", "dep:futures-util"
 dev-tools = []
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 lofty = "0.22"

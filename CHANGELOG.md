@@ -36,6 +36,8 @@
   track is fully torn down including its now-exclusive artwork and orphaned image rows; and a
   track dropped from one playlist but still in another keeps its eDB `content` and PDB track
   rows, not just its file.
+- **Chore:** refreshed `Cargo.lock` to latest semver-compatible dependency versions and bumped
+  `base64` to 0.23.
 
 ## 0.1.32
 
