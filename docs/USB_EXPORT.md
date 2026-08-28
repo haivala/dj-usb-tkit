@@ -220,7 +220,29 @@ failure handling straightforward across USB devices.
 
 ### Mirror vs additive behavior
 
-Both modes use the same manifest build path, but they differ in how existing playlist membership is handled.
+Mirror and additive are the same export path with one boolean flipped
+(`pruneStale` / `mirror_playlist_entries`). Both run through the same manifest
+build, the same eDB writer (`write_edb_playlist`) and PDB writer (`write_pdb`),
+and the same page/footer conventions; for a USB that already has a PDB, both take
+the topology-locked in-place additive patch and neither falls back to a full PDB
+rebuild. The resulting databases are the same shape, and both are expected to
+pass the strict parity report — the 0.1.32 fixes closed the last case where a
+mirror drop left eDB `content` / PDB `tt=0` rows behind after their file was
+pruned (which strict raw-coverage parity flagged as "indexed audio file(s)
+missing from USB").
+
+They differ only in:
+
+- **Membership** — mirror replaces the target playlist's existing USB membership
+  with the local playlist; additive unions the two (new local tracks appended,
+  tracks already on the USB kept).
+- **Entry order** — mirror writes entry order from the local playlist; additive
+  keeps the existing on-USB order and appends new tracks after it.
+- **Pruning** — only mirror deletes anything (stale export-owned files, plus the
+  eDB/PDB rows for tracks dropped from the playlist and referenced nowhere else).
+  Additive never removes a row or a file.
+
+The mechanics of each difference:
 
 - Mirror mode (`pruneStale = true`):
   - eDB path deletes existing `playlist_content` rows for the target playlist ID before relinking manifest members.
@@ -229,8 +251,7 @@ Both modes use the same manifest build path, but they differ in how existing pla
   - When a track drops out of the exported playlist and the prune step is about to delete its
     media file, the exporter also removes that track's eDB `content` row and PDB `tt=0` track row
     in place (plus any `tt=13` artwork row / eDB `image` row that no other track still uses), so
-    the databases don't keep referencing a file that no longer exists (which strict raw-coverage
-    parity would report as "indexed audio file(s) missing from USB"). A dropped track is left
+    the databases don't keep referencing a file that no longer exists. A dropped track is left
     fully intact — row and files — when it is still a member of another USB playlist or is
     referenced by a device play-history entry, matching the guard `remove_playlist_and_tracks_from_pdb`
     and `filter_prunable_stale_paths_for_playlist` use. Track rows are tombstoned with the same
