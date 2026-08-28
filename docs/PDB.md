@@ -436,6 +436,14 @@ The parser handles two compatibility cases:
 The writer cannot rely on the parser's tolerance. It must emit page footer
 values accepted by players.
 
+Because `nrs` (offset `0x18`) is a single byte, no page may hold more than 255
+rows. The writer enforces this as a hard cap (`MAX_ROWS_PER_PAGE` in
+`pdb_writer.rs`), independent of remaining byte capacity, in both the from-scratch
+writer and in-place chain appends. The cap is reached first by tables with small
+fixed-size rows: `t08` playlist_entries rows are 12 bytes, so byte capacity alone
+would allow well over 255 on a single 4096-byte page. A page at 255 rows spills to
+the next page in the chain, the same as a byte-full page.
+
 ## Sentinel B-Tree
 
 Sentinel pages anchor table chains. The current `rebuild_sentinel_btrees_inplace`
