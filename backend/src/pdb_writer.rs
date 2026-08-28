@@ -497,7 +497,8 @@ fn pack_rows_into_pages(
         let new_footer = footer_size(current_rows.len() + 1);
         let needed = HEAP_START + current_heap_used + aligned_len + new_footer;
 
-        if (needed > PAGE_SIZE || current_rows.len() >= MAX_ROWS_PER_PAGE) && !current_rows.is_empty()
+        if (needed > PAGE_SIZE || current_rows.len() >= MAX_ROWS_PER_PAGE)
+            && !current_rows.is_empty()
         {
             // First flushed page keeps the active flag (reference exporter convention:
             // the baseline/template page stays ACTV). All subsequent overflow flushes
@@ -6170,9 +6171,8 @@ mod additive_tests {
             if page[0x1b] == 0x64 {
                 continue; // sentinel/blank
             }
-            let packed = (page[0x18] as u32)
-                | ((page[0x19] as u32) << 8)
-                | ((page[0x1a] as u32) << 16);
+            let packed =
+                (page[0x18] as u32) | ((page[0x19] as u32) << 8) | ((page[0x1a] as u32) << 16);
             let row_count = ((packed >> 13) & 0x7FF) as usize;
             assert!(
                 row_count <= MAX_ROWS_PER_PAGE,
@@ -6180,7 +6180,10 @@ mod additive_tests {
             );
             total_rows += row_count;
         }
-        assert_eq!(total_rows, 600, "all 600 rows must be present across the chain");
+        assert_eq!(
+            total_rows, 600,
+            "all 600 rows must be present across the chain"
+        );
     }
 
     #[test]
@@ -7923,7 +7926,10 @@ mod additive_tests {
         let rowpf = u16::from_le_bytes([out[off + PAGE_SIZE - 4], out[off + PAGE_SIZE - 3]]);
         let tranrf = u16::from_le_bytes([out[off + PAGE_SIZE - 2], out[off + PAGE_SIZE - 1]]);
         assert_eq!(rowpf, 0b1, "the single row must be marked active");
-        assert_eq!(tranrf, 0b1, "no preceding row exists to also mark in tranrf");
+        assert_eq!(
+            tranrf, 0b1,
+            "no preceding row exists to also mark in tranrf"
+        );
     }
 
     #[test]

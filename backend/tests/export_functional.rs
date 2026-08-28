@@ -4016,9 +4016,21 @@ fn export_mirror_reexport_keeps_reused_analysis_and_artwork_files() {
     fs::create_dir_all(&media).expect("create media dir");
     fs::create_dir_all(&usb).expect("create usb dir");
 
-    copy_audio_fixture(&media, "formats/track_format_wav.wav", "Keeper Artist - Alpha.wav");
-    copy_audio_fixture(&media, "formats/track_format_aif.aif", "Keeper Artist - Beta.aif");
-    copy_audio_fixture(&media, "formats/track_format_flac.flac", "Keeper Artist - Gamma.flac");
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_wav.wav",
+        "Keeper Artist - Alpha.wav",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_aif.aif",
+        "Keeper Artist - Beta.aif",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_flac.flac",
+        "Keeper Artist - Gamma.flac",
+    );
 
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
@@ -4109,7 +4121,10 @@ fn export_mirror_reexport_keeps_reused_analysis_and_artwork_files() {
     };
 
     for f in asset_files() {
-        assert!(f.exists(), "asset missing right after first mirror export: {f:?}");
+        assert!(
+            f.exists(),
+            "asset missing right after first mirror export: {f:?}"
+        );
     }
 
     let second = backend.export_to_usb(ExportToUsbRequest {

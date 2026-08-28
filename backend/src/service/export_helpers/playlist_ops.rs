@@ -431,8 +431,10 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
                         continue;
                     }
                 }
-                result.removed_edb_content += conn
-                    .execute("DELETE FROM content WHERE content_id = ?1", params![content_id])?;
+                result.removed_edb_content += conn.execute(
+                    "DELETE FROM content WHERE content_id = ?1",
+                    params![content_id],
+                )?;
             }
             if result.removed_edb_content > 0 && table_exists(&conn, "image") {
                 let _ = conn.execute(
@@ -475,8 +477,12 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     result.removed_pdb_tracks =
         remove_rows_inplace(&mut pdb_bytes, 0, &orphan_track_ids, extract_track_id);
     if !exclusive_artwork_ids.is_empty() {
-        result.removed_pdb_artwork =
-            remove_rows_inplace(&mut pdb_bytes, 13, &exclusive_artwork_ids, extract_artwork_id);
+        result.removed_pdb_artwork = remove_rows_inplace(
+            &mut pdb_bytes,
+            13,
+            &exclusive_artwork_ids,
+            extract_artwork_id,
+        );
     }
     if result.removed_pdb_tracks > 0 || result.removed_pdb_artwork > 0 {
         rebuild_sentinel_btrees_inplace(&mut pdb_bytes);
