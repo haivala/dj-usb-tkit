@@ -34,6 +34,12 @@
   open playlist immediately instead of waiting for the next USB scan — mirror mode unlocks
   drag/column-sort right away, and switching back to additive re-locks a playlist that
   already exists on the USB (committing any active column sort first).
+- **Fix:** when switching to additive mode with an unsaved track sort, the app now tries to
+  save that sort before locking the playlist and says so in the status line if the save
+  fails (previously it silently claimed the order was kept).
+- **Fix:** a USB playlist nested inside a folder now matches a local playlist of the same
+  name consistently — the USB playlists view and USB diagnostics previously disagreed on
+  whether additive export would lock its track order.
 - **Chore:** functional-test coverage for the mirror-mode purge fix — a dropped track with
   device play history keeps its full on-drive shape (PDB `anlz_path`/`artwork_id`, analysis +
   artwork files, eDB `analysisDataFilePath`/`image_id` and `image` row) while a plainly-removed

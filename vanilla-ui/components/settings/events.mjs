@@ -150,14 +150,17 @@ export function bindSettingsEvents(ctx) {
       && !state.exportPruneStale
       && !!state.playlistUsbExportStatusById?.get(openPlaylist.id)?.sameNameExistsOnUsb;
 
-    // Switching mirror -> additive freezes an in-progress column sort in a state
-    // where it can never be committed. Commit it first (while still unlocked),
-    // same as navigating away would.
+    // Switching mirror -> additive would freeze an in-progress column sort where
+    // it can never be committed, so commit it first, while still unlocked. The
+    // mode change is a global preference and always goes through -- if the save
+    // fails we just say so and carry on (the sort was only a view).
+    let sortSaveFailed = false;
     if (willLock && isPlaylistSortActive?.()) {
       try {
         await commitActivePlaylistSort(openPlaylist.id);
       } catch (err) {
         console.error(err);
+        sortSaveFailed = true;
       }
     }
 
@@ -177,7 +180,7 @@ export function bindSettingsEvents(ctx) {
 
     setStatus(
       willLock
-        ? `Export sync mode: additive — "${openPlaylist.name}" already exists on USB, so its track order is locked here (current order kept).`
+        ? `Export sync mode: additive — "${openPlaylist.name}" already exists on USB, so its track order is locked here (${sortSaveFailed ? "couldn't save the current sort first" : "current order kept"}).`
         : state.exportPruneStale
           ? "Export sync mode: mirror (exact match)"
           : "Export sync mode: additive"

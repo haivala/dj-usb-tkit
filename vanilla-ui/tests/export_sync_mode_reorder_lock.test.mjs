@@ -34,7 +34,7 @@ const CONSTANTS = {
   FRONTEND_DB_KEY_ANALYSIS_ENGINE: "ui_analysis_engine_v1"
 };
 
-function setup({ sortActive = false } = {}) {
+function setup({ sortActive = false, commitThrows = false } = {}) {
   const dom = new JSDOM(HTML);
   const doc = dom.window.document;
   const el = {
@@ -54,6 +54,7 @@ function setup({ sortActive = false } = {}) {
   };
   const statuses = [];
   const commitCalls = [];
+  const persistCalls = [];
   const getCurrentPlaylist = () => state.playlists.find((p) => p.id === state.currentPlaylistId) || null;
 
   bindSettingsEvents({
@@ -63,7 +64,7 @@ function setup({ sortActive = false } = {}) {
     window: dom.window,
     navigator: {},
     constants: CONSTANTS,
-    persistSetting: () => {},
+    persistSetting: (storageKey, dbKey, value) => persistCalls.push({ dbKey, value }),
     setStatus: (message) => statuses.push(message),
     command: async () => {},
     getTauriEventListen: async () => null,
@@ -86,6 +87,7 @@ function setup({ sortActive = false } = {}) {
     commitActivePlaylistSort: async (id) => {
       // Capture that the commit runs while the playlist is still unlocked.
       commitCalls.push({ id, locksReorderAtCommit: state.playlistUsbExportStatusById.get(id)?.locksReorder });
+      if (commitThrows) throw new Error("disk full");
     },
     isPlaylistSortActive: () => sortActive
   });
@@ -100,7 +102,7 @@ function setup({ sortActive = false } = {}) {
     return new Promise((resolve) => setTimeout(resolve, 0));
   };
 
-  return { state, statuses, commitCalls, grid, headers, fire };
+  return { state, el, statuses, commitCalls, persistCalls, grid, headers, fire };
 }
 
 test("switching to mirror mode releases the open playlist's reorder lock", async () => {
@@ -137,6 +139,20 @@ test("engaging the lock commits an active column sort first, while still unlocke
   assert.equal(commitCalls.length, 1);
   assert.equal(commitCalls[0].id, "p1");
   assert.equal(commitCalls[0].locksReorderAtCommit, false);
+});
+
+test("the mode change still goes through when the pre-lock sort commit fails", async () => {
+  const { state, statuses, persistCalls, grid, fire } = setup({ sortActive: true, commitThrows: true });
+
+  await fire("mirror"); // unlock -> succeeds (no commit needed)
+  persistCalls.length = 0;
+  await fire("additive"); // would lock -> commit throws -> mode change proceeds anyway
+
+  assert.equal(state.exportPruneStale, false, "additive mode applied");
+  assert.ok(persistCalls.some((c) => c.value === "0"), "additive is persisted");
+  assert.equal(state.playlistUsbExportStatusById.get("p1").locksReorder, true, "lock engaged");
+  assert.equal(grid.dataset.sortLocked, "true");
+  assert.ok(statuses.some((m) => /couldn't save the current sort first/.test(m)));
 });
 
 test("no open playlist: mode change still recomputes the map without touching the DOM", async () => {

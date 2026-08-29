@@ -1119,6 +1119,7 @@ const refreshUsb = async () => usb.refreshUsb(state, el, {
     normalizeUsbPlaylist,
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
+    renderCurrentPlaylistTracksFromState,
     updatePlaylistExportButtons,
     countWarningsForStatus: eventLog.countWarningsForStatus,
     logWarnings,
@@ -1152,6 +1153,7 @@ const usbJobBaseDeps = {
 const runUsbDiagnostics = async () => usb.runUsbDiagnostics(state, {
     ...usbJobBaseDeps,
     updatePlaylistExportButtons,
+    renderCurrentPlaylistTracksFromState,
     renderDiagnosticsReport,
   });
 const runUsbParityReport = async () => usb.runUsbParityReport(state, {
@@ -1166,6 +1168,7 @@ const applyUsbRepairs = async () => usb.applyUsbRepairs(state, {
     ...usbJobBaseDeps,
     resetUsbStateViews,
     updatePlaylistExportButtons,
+    renderCurrentPlaylistTracksFromState,
     renderDiagnosticsReport,
   });
 const refreshHistory = async () => usb.refreshHistory(state, el, {

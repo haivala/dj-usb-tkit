@@ -26,7 +26,7 @@ use crate::pdb_reader::{
 };
 
 use super::analysis::normalize_text;
-use super::export::{compute_playlist_usb_export_status, normalize_playlist_name_for_compare};
+use super::export::{compute_playlist_usb_export_status, usb_playlist_names_for_export_compare};
 use super::export_helpers::{
     analysis_bundle_path_variants, prune_stale_export_owned_files,
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
@@ -874,10 +874,13 @@ impl BackendService {
             ));
         }
 
-        let usb_playlist_names: HashSet<String> = items
-            .iter()
-            .map(|playlist| normalize_playlist_name_for_compare(&playlist.name))
-            .collect();
+        let usb_playlist_names = usb_playlist_names_for_export_compare(
+            parsed.as_ref(),
+            edb_playlists
+                .as_ref()
+                .into_iter()
+                .flat_map(|m| m.keys().cloned()),
+        );
         let local_playlists = self.list_playlists()?.items;
         let conn = self.db.connect()?;
         let prune_stale = export_prune_stale_setting(&conn)?;

@@ -23,7 +23,7 @@ use crate::utils::{
 };
 
 use super::BackendService;
-use super::export::{compute_playlist_usb_export_status, normalize_playlist_name_for_compare};
+use super::export::{compute_playlist_usb_export_status, usb_playlist_names_for_export_compare};
 use super::export_helpers::{load_table_columns, table_exists};
 use super::export_prune_stale_setting;
 use super::usb_helpers::is_named_history_playlist;
@@ -795,10 +795,13 @@ impl BackendService {
         let cdj_counter_snapshot = parsed_opt
             .as_ref()
             .and_then(|(parsed, _)| compute_player_counter_snapshot(&pdb_path, parsed));
-        let usb_playlist_names: HashSet<String> = playlist_details
-            .iter()
-            .map(|entry| normalize_playlist_name_for_compare(&entry.name))
-            .collect();
+        let usb_playlist_names = usb_playlist_names_for_export_compare(
+            parsed_opt.as_ref().map(|p| &p.0),
+            edb_playlist_tracks
+                .as_ref()
+                .into_iter()
+                .flat_map(|m| m.keys().cloned()),
+        );
         let local_playlists = self.list_playlists()?.items;
         let conn = self.db.connect()?;
         let prune_stale = export_prune_stale_setting(&conn)?;

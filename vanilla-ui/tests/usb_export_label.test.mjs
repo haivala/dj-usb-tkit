@@ -32,6 +32,10 @@ test("playlistUsbExportStatusById indexes the backend's per-playlist status by p
   assert.equal(statusById.get("missing"), undefined);
 });
 
+// Counterpart of the backend test
+// `playlist_locks_reorder_on_export_only_when_additive_and_same_name_exists`
+// in backend/src/service/export.rs -- if the rule changes on one side, one of
+// these two tests fails.
 test("playlistLocksReorderOnExport locks only in additive mode with a same-named USB playlist", () => {
   assert.equal(playlistLocksReorderOnExport(true, true), false); // mirror
   assert.equal(playlistLocksReorderOnExport(false, true), true); // additive + collision

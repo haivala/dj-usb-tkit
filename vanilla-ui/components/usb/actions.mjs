@@ -985,6 +985,7 @@ export async function refreshUsb(state, el, deps) {
     normalizeUsbPlaylist,
     renderUsbPlaylists,
     renderUsbPlaylistTracks,
+    renderCurrentPlaylistTracksFromState,
     updatePlaylistExportButtons,
     countWarningsForStatus,
     logWarnings
@@ -1036,6 +1037,8 @@ export async function refreshUsb(state, el, deps) {
   renderUsbPlaylists();
   renderUsbPlaylistTracks();
   updatePlaylistExportButtons();
+  // The freshly scanned status may flip an open local playlist's reorder lock.
+  await renderCurrentPlaylistTracksFromState?.();
 
   const warningCount = countWarningsForStatus(data.warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
@@ -1050,6 +1053,7 @@ export async function runUsbDiagnostics(state, deps) {
     setStatus,
     command,
     updatePlaylistExportButtons,
+    renderCurrentPlaylistTracksFromState,
     renderDiagnosticsReport,
     logWarnings
   } = deps;
@@ -1070,6 +1074,7 @@ export async function runUsbDiagnostics(state, deps) {
   });
   state.playlistUsbExportStatusById = playlistUsbExportStatusById(data?.playlistUsbExportStatus);
   updatePlaylistExportButtons();
+  await renderCurrentPlaylistTracksFromState?.();
   renderDiagnosticsReport(data);
   logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
   emitStatus(`Diagnostics complete (${data.durationMs}ms)`);
@@ -1124,6 +1129,7 @@ export async function applyUsbRepairs(state, deps) {
     logWarnings,
     resetUsbStateViews = () => {},
     updatePlaylistExportButtons = () => {},
+    renderCurrentPlaylistTracksFromState = () => {},
     renderDiagnosticsReport = () => {}
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
@@ -1156,6 +1162,7 @@ export async function applyUsbRepairs(state, deps) {
       data.diagnostics.playlistUsbExportStatus
     );
     updatePlaylistExportButtons();
+    await renderCurrentPlaylistTracksFromState();
     renderDiagnosticsReport(data.diagnostics);
     logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
   }

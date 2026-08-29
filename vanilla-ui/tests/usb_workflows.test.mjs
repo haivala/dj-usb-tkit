@@ -7,11 +7,54 @@ import {
   exportPlaylistToUsb,
   handleUsbPlayerMenuListClick,
   refreshHistory,
+  refreshUsb,
   renderUsbPlayerMenuEditor,
   runUsbDiagnostics,
   sanitizeTracklistFileName,
   syncUsbPlayerMenuEditorControls,
 } from "../components/usb/actions.mjs";
+
+test("runUsbDiagnostics refreshes the open playlist's reorder lock from the new status", async () => {
+  const state = { usbRoot: "/USB", playlistUsbExportStatusById: new Map() };
+  let renderOpenPlaylist = 0;
+  await runUsbDiagnostics(state, {
+    setStatus: () => {},
+    command: async () => ({
+      durationMs: 1,
+      warnings: [],
+      playlistUsbExportStatus: [
+        { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true }
+      ]
+    }),
+    updatePlaylistExportButtons: () => {},
+    renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; },
+    renderDiagnosticsReport: () => {},
+    logWarnings: () => {}
+  });
+  assert.equal(renderOpenPlaylist, 1);
+  assert.equal(state.playlistUsbExportStatusById.get("p1").locksReorder, true);
+});
+
+test("refreshUsb re-renders the open playlist after replacing the export status map", async () => {
+  const state = { usbRoot: "/USB", usbPlaylists: [], usbPlaylistTracks: [] };
+  const el = { usbCountsText: { textContent: "" } };
+  let renderOpenPlaylist = 0;
+  await refreshUsb(state, el, {
+    setStatus: () => {},
+    command: async () => ({ items: [], warnings: [], playlistUsbExportStatus: [] }),
+    setProgress: () => {},
+    startProgressHeartbeat: () => {},
+    stopProgressHeartbeat: () => {},
+    normalizeUsbPlaylist: (p) => p,
+    renderUsbPlaylists: () => {},
+    renderUsbPlaylistTracks: () => {},
+    renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; },
+    updatePlaylistExportButtons: () => {},
+    countWarningsForStatus: () => 0,
+    logWarnings: () => {}
+  });
+  assert.equal(renderOpenPlaylist, 1);
+});
 
 test("diagnostics guard, history refresh, and tracklist filename sanitizing stay stable", async () => {
   let status = "";

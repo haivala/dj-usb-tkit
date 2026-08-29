@@ -232,11 +232,47 @@ pub(crate) fn normalize_playlist_name_for_compare(value: &str) -> String {
 /// additive export never rewrites the order of entries already on the
 /// device. Kept as one function -- alongside `mirror_playlist_entries` --
 /// so the two can't silently drift apart.
+///
+/// The frontend mirrors this expression in
+/// `vanilla-ui/components/shared/export_reorder_lock.mjs`
+/// (`playlistLocksReorderOnExport`) so it can re-derive the lock immediately
+/// when the user toggles the export mode, without a USB rescan. That copy is
+/// optimistic between scans; this backend result is authoritative -- recomputed
+/// on every `fetch_usb_playlists` / `run_usb_diagnostics`, and the export itself
+/// enforces the same `prune_stale` flag via `mirror_playlist_entries` below.
 pub(crate) fn playlist_locks_reorder_on_export(
     prune_stale: bool,
     same_name_exists_on_usb: bool,
 ) -> bool {
     !prune_stale && same_name_exists_on_usb
+}
+
+/// The set of playlist names present on the connected USB, for matching against
+/// local playlist names in `compute_playlist_usb_export_status`: every PDB
+/// playlist-tree leaf by its **bare** leaf name (never folder-prefixed -- local
+/// playlist names are bare), unioned with eDB-only playlist names, each
+/// normalized via `normalize_playlist_name_for_compare`.
+///
+/// Single source for `fetch_usb_playlists` and `run_usb_diagnostics` -- they
+/// previously built this set independently and disagreed on folder-nested
+/// playlists (one used `"folder / leaf"`, the other bare `leaf`).
+pub(crate) fn usb_playlist_names_for_export_compare(
+    parsed: Option<&crate::pdb_reader::ParsedPdb>,
+    edb_playlist_names: impl IntoIterator<Item = String>,
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+    if let Some(parsed) = parsed {
+        for node in &parsed.playlist_tree {
+            if node.row_is_folder {
+                continue;
+            }
+            names.insert(normalize_playlist_name_for_compare(&node.name));
+        }
+    }
+    for name in edb_playlist_names {
+        names.insert(normalize_playlist_name_for_compare(&name));
+    }
+    names
 }
 
 /// Join every local playlist against the set of playlist names already known
@@ -1311,8 +1347,9 @@ mod tests {
         ensure_playlist_tracks_analysis_ready, existing_usb_relative_if_file,
         existing_usb_relative_if_present, has_required_analysis, has_required_analysis_fields,
         normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
-        resolve_collision_free_media_target,
+        resolve_collision_free_media_target, usb_playlist_names_for_export_compare,
     };
+    use crate::pdb_reader::{ParsedPdb, PdbPlaylistTreeRow};
     use crate::error::BackendError;
     use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, Playlist};
     use crate::service::export_helpers::{
@@ -2060,6 +2097,46 @@ mod tests {
         assert!(!playlist_locks_reorder_on_export(true, false));
         assert!(!playlist_locks_reorder_on_export(false, false));
         assert!(playlist_locks_reorder_on_export(false, true));
+    }
+
+    fn tree_row(id: u32, parent_id: u32, is_folder: bool, name: &str) -> PdbPlaylistTreeRow {
+        PdbPlaylistTreeRow {
+            id,
+            parent_id,
+            sort_order: 0,
+            row_is_folder: is_folder,
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn usb_playlist_names_for_export_compare_uses_bare_leaf_names_and_merges_edb() {
+        let parsed = ParsedPdb {
+            playlist_tree: vec![
+                tree_row(1, 0, true, "My Folder"),
+                tree_row(2, 1, false, "  Nested Set  "),
+                tree_row(3, 0, false, "Top Level"),
+            ],
+            ..Default::default()
+        };
+
+        let names = usb_playlist_names_for_export_compare(
+            Some(&parsed),
+            ["Only In eDB".to_string(), "top level".to_string()],
+        );
+
+        // folder row excluded; leaf name is bare (not "My Folder / Nested Set")
+        // and normalized (trim + lowercase); eDB names merged and de-duped.
+        assert!(names.contains("nested set"));
+        assert!(names.contains("top level"));
+        assert!(names.contains("only in edb"));
+        assert!(!names.contains("my folder"));
+        assert_eq!(names.len(), 3);
+
+        // No PDB -> just the eDB names.
+        let edb_only = usb_playlist_names_for_export_compare(None, ["A".to_string()]);
+        assert_eq!(edb_only.len(), 1);
+        assert!(edb_only.contains("a"));
     }
 
     fn make_playlist(id: &str, name: &str) -> Playlist {
