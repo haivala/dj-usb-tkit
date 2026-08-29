@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { bindSettingsEvents } from "../components/settings/events.mjs";
 import { applyPlaylistReorderLockToGrid } from "../components/shared/export_reorder_lock.mjs";
+import { withSilencedConsole } from "./test_helpers.mjs";
 
 // Regression: changing the export-sync mode must release/engage the reorder lock
 // on the currently open playlist immediately, without waiting for a USB rescan.
@@ -146,7 +147,8 @@ test("the mode change still goes through when the pre-lock sort commit fails", a
 
   await fire("mirror"); // unlock -> succeeds (no commit needed)
   persistCalls.length = 0;
-  await fire("additive"); // would lock -> commit throws -> mode change proceeds anyway
+  // The events handler logs the caught commit error via console.error -- expected.
+  await withSilencedConsole(() => fire("additive")); // would lock -> commit throws -> mode change proceeds anyway
 
   assert.equal(state.exportPruneStale, false, "additive mode applied");
   assert.ok(persistCalls.some((c) => c.value === "0"), "additive is persisted");
