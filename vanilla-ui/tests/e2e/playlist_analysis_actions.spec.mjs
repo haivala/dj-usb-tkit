@@ -741,6 +741,56 @@ test("playlist header sort is disabled with a tooltip when additive export won't
   await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t3");
 });
 
+test("changing the export sync mode releases and re-engages the open playlist's reorder lock without a USB rescan", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });
+  await page.goto("/");
+
+  await connectUsbAndFetchPlaylists(page);
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+
+  const grid = page.locator('[data-track-grid][data-body-id="playlistTracksBody"]');
+  const dragHandles = page.locator("#playlistTracksBody [data-playlist-track-drag-handle]");
+  const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
+  const lockedTooltip =
+    "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.";
+
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+
+  // additive + same name on USB -> locked
+  await expect(grid).toHaveAttribute("data-sort-locked", "true");
+  await expect(dragHandles).toHaveCount(0);
+  await expect(artistHeader).toHaveAttribute("data-tooltip", lockedTooltip);
+  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
+
+  // switch to mirror -> lock releases immediately (no fetch_usb_playlists rerun)
+  await page.locator("#settingsBtn").click();
+  await page.locator("#exportSyncModeMirror").check({ force: true });
+  await page.locator("#settingsCloseBtn").click();
+
+  await expect(grid).toHaveAttribute("data-sort-locked", "false");
+  await expect(dragHandles).toHaveCount(3);
+  await expect(artistHeader).not.toHaveAttribute("data-tooltip", /.+/);
+  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Export to USB: USB");
+
+  // a view-only column sort is now allowed
+  await artistHeader.click();
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+
+  // switch back to additive -> lock re-engages, active sort committed
+  await page.locator("#settingsBtn").click();
+  await page.locator("#exportSyncModeAdditive").check({ force: true });
+  await page.locator("#settingsCloseBtn").click();
+
+  await expect(grid).toHaveAttribute("data-sort-locked", "true");
+  await expect(dragHandles).toHaveCount(0);
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
+
+  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(calls.length).toBe(1);
+  expect(calls[0]).toEqual(["t1", "t2", "t3"]);
+});
+
 test("playlist track drag handle stays enabled in additive mode when no same-name USB playlist exists", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Some Other Playlist", exportPruneStale: false });
   await page.goto("/");

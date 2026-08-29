@@ -1,4 +1,5 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
+import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
 import { loadMoreIfNearBottom } from "../../track_utils.mjs";
 import { formatDurationMs } from "../../track_utils.mjs";
 
@@ -680,24 +681,12 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
   // Row click handlers resolve data-id back into this array, so it has to
   // match rendered order (see components/usb/actions.mjs for the same rule).
   state.currentPlaylistTracksView = sortedPlaylist;
-  const searchActive = !!state.playlistTrackSearch;
-  const exportBlocksReorder = !!state.playlistUsbExportStatusById?.get(playlist.id)?.locksReorder;
-  const enableDragReorder = !searchActive && !exportBlocksReorder;
-  const exportLockedTooltip = exportBlocksReorder
-    ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
-    : null;
-  const dragDisabledTooltip = !searchActive ? exportLockedTooltip : null;
-  const sortGrid = el.playlistTracksBody?.closest("[data-track-grid]");
-  if (sortGrid) {
-    sortGrid.dataset.sortLocked = exportBlocksReorder ? "true" : "false";
-    sortGrid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
-      if (exportLockedTooltip) {
-        h.setAttribute("data-tooltip", exportLockedTooltip);
-      } else {
-        h.removeAttribute("data-tooltip");
-      }
-    });
-  }
+  const { enableDragReorder, dragDisabledTooltip } = applyPlaylistReorderLockToGrid(
+    el,
+    playlist,
+    { searchActive: !!state.playlistTrackSearch },
+    state.playlistUsbExportStatusById
+  );
   await renderTrackTable(el.playlistTracksBody, sortedPlaylist, {
     withCheckbox: false,
     origin: "local",

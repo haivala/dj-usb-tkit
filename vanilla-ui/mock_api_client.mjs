@@ -1,9 +1,12 @@
 // Browser/dev mock backend. Production API wiring lives in api_client.mjs.
 
+import { playlistLocksReorderOnExport } from "./components/shared/export_reorder_lock.mjs";
+
 // Mirrors the backend's PlaylistUsbExportStatus join (see
-// backend/src/service/export.rs's compute_playlist_usb_export_status) so
-// e2e tests exercise the same reorder-lock/append-label logic the real
-// backend computes, not a frontend-side reimplementation of it.
+// backend/src/service/export.rs's compute_playlist_usb_export_status). The
+// reorder-lock rule itself lives in one place (playlistLocksReorderOnExport in
+// components/shared/export_reorder_lock.mjs) that both this mock and the live UI
+// import, so e2e tests exercise the same logic the real backend computes.
 function computeMockPlaylistUsbExportStatus(localPlaylists, usbPlaylistNames, pruneStale) {
   const normalize = (value) => String(value || "").trim().toLowerCase();
   const knownUsbNames = new Set((usbPlaylistNames || []).map(normalize));
@@ -13,7 +16,7 @@ function computeMockPlaylistUsbExportStatus(localPlaylists, usbPlaylistNames, pr
       playlistId: playlist.id,
       playlistName: playlist.name,
       sameNameExistsOnUsb,
-      locksReorder: !pruneStale && sameNameExistsOnUsb
+      locksReorder: playlistLocksReorderOnExport(pruneStale, sameNameExistsOnUsb)
     };
   });
 }

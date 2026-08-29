@@ -1,3 +1,5 @@
+import { recomputeReorderLocks } from "../shared/export_reorder_lock.mjs";
+
 const NODE_JS_URL = "https://nodejs.org/";
 const WEBSITE_URL = "https://chiph.art?utm_source=djtkit&utm_medium=app&utm_campaign=sidebar";
 const SUPPORT_URL = "https://chiph.art/en/dj-usb-tkit/support?utm_source=djtkit&utm_medium=app&utm_campaign=support";
@@ -74,7 +76,11 @@ export function bindSettingsEvents(ctx) {
     closeSettingsDrawer,
     switchView,
     normalizeAnalysisBpmRange,
-    updatePlaylistExportButtons
+    updatePlaylistExportButtons,
+    getCurrentPlaylist,
+    renderCurrentPlaylistTracksFromState,
+    commitActivePlaylistSort,
+    isPlaylistSortActive
   } = ctx;
   const {
     STORAGE_KEY_HELP_SEEN,
@@ -127,7 +133,7 @@ export function bindSettingsEvents(ctx) {
     });
   });
 
-  el.exportSyncModeGroup?.addEventListener("change", (event) => {
+  el.exportSyncModeGroup?.addEventListener("change", async (event) => {
     const mode = String(event?.target?.value || "").toLowerCase();
     state.exportPruneStale = mode !== "additive";
     persistSetting(
@@ -135,12 +141,47 @@ export function bindSettingsEvents(ctx) {
       FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
       state.exportPruneStale ? "1" : "0"
     );
-    setStatus(
+
+    // The reorder lock is derived from (export mode, same-named playlist on USB).
+    // Re-derive it for the open playlist now so the track list unlocks/locks
+    // immediately -- otherwise it stays stale until the next USB scan.
+    const openPlaylist = getCurrentPlaylist?.() || null;
+    const willLock = !!openPlaylist
+      && !state.exportPruneStale
+      && !!state.playlistUsbExportStatusById?.get(openPlaylist.id)?.sameNameExistsOnUsb;
+
+    // Switching mirror -> additive freezes an in-progress column sort in a state
+    // where it can never be committed. Commit it first (while still unlocked),
+    // same as navigating away would.
+    if (willLock && isPlaylistSortActive?.()) {
+      try {
+        await commitActivePlaylistSort(openPlaylist.id);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    state.playlistUsbExportStatusById = recomputeReorderLocks(
+      state.playlistUsbExportStatusById,
       state.exportPruneStale
-        ? "Export sync mode: mirror (exact match)"
-        : "Export sync mode: additive"
     );
+
+    if (openPlaylist) {
+      try {
+        await renderCurrentPlaylistTracksFromState();
+      } catch (err) {
+        console.error(err);
+      }
+    }
     updatePlaylistExportButtons();
+
+    setStatus(
+      willLock
+        ? `Export sync mode: additive — "${openPlaylist.name}" already exists on USB, so its track order is locked here (current order kept).`
+        : state.exportPruneStale
+          ? "Export sync mode: mirror (exact match)"
+          : "Export sync mode: additive"
+    );
   });
 
   el.exportBackupCheckbox?.addEventListener("change", (event) => {
