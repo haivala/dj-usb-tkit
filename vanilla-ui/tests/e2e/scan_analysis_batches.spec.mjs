@@ -136,6 +136,9 @@ function installScanAnalysisMock(page, opts = {}) {
       return { totalMs, knownCount };
     };
 
+    // Backend stamps analysisReady on every Track row (has_core_analysis_fields).
+    const withAnalysisReady = (list) => list.map((t) => ({ ...t, analysisReady: isCountable(t) }));
+
     // Simulates the real backend's analyze_new_tracks_with_progress worker:
     // for each requested track id, emits 4 progressive partial job:event
     // updates (duration, artwork, waveform, bpm_key - trackReady:false, one
@@ -201,7 +204,7 @@ function installScanAnalysisMock(page, opts = {}) {
             analyzed,
             failed,
             warnings: [`Analysis cancelled: ${analyzed} of ${total} tracks analyzed`],
-            items: tracks.filter((track) => ids.includes(String(track.id)))
+            items: withAnalysisReady(tracks.filter((track) => ids.includes(String(track.id))))
           };
         }
 
@@ -283,6 +286,7 @@ function installScanAnalysisMock(page, opts = {}) {
           message: `Analyzing ${i + 1}/${ids.length}: ${track.title}`,
           trackReady: true,
           failed: false,
+          analysisReady: isCountable(track),
           timestamp: nowIso(),
           ...basePayload,
           bpm: track.bpm,
@@ -314,7 +318,7 @@ function installScanAnalysisMock(page, opts = {}) {
         analyzed,
         failed,
         warnings: [],
-        items: tracks.filter((track) => ids.includes(String(track.id)))
+        items: withAnalysisReady(tracks.filter((track) => ids.includes(String(track.id))))
       };
     };
 
@@ -345,17 +349,17 @@ function installScanAnalysisMock(page, opts = {}) {
             const { totalMs, knownCount } = computeDurationTotals(filtered);
             return {
               ok: true,
-              data: { total: filtered.length, items: filtered, totalDurationMs: totalMs, durationKnownCount: knownCount }
+              data: { total: filtered.length, items: withAnalysisReady(filtered), totalDurationMs: totalMs, durationKnownCount: knownCount }
             };
           }
           if (command === "list_tracks") {
-            return { ok: true, data: { total: tracks.length, items: tracks } };
+            return { ok: true, data: { total: tracks.length, items: withAnalysisReady(tracks) } };
           }
           if (command === "get_tracks_by_ids_with_previews") {
             const ids = Array.isArray(payload?.request?.trackIds)
               ? payload.request.trackIds.map((v) => String(v))
               : [];
-            const items = tracks.filter((t) => ids.includes(String(t.id)));
+            const items = withAnalysisReady(tracks.filter((t) => ids.includes(String(t.id))));
             return { ok: true, data: { items } };
           }
           if (command === "analyze_new_tracks") {
@@ -484,7 +488,9 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         waveformPeaksPath: row.waveformPeaksPath,
         waveformPreview: row.waveformPreview,
         createdAt: row.createdAt,
-        updatedAt: row.updatedAt
+        updatedAt: row.updatedAt,
+        // Backend computes analysisReady from DB fields (has_core_analysis_fields).
+        analysisReady: isCountable(row)
       };
     };
 
@@ -633,6 +639,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           message: `Analyzing ${i + 1}/${ids.length}: ${row.title}`,
           trackReady: true,
           failed: false,
+          analysisReady: isCountable(row),
           timestamp: nowIso(),
           ...basePayload,
           bpm: row.bpm,

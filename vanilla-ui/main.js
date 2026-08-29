@@ -321,11 +321,6 @@ const normalizeTrack = (track, fallbackIdPrefix = "t") => library.normalizeTrack
 const buildCoverSrcCandidates = (track) => library.buildCoverSrcCandidates(track, { toPlayableUrl });
 const attachCoverFallbackHandlers = (root = document) => library.attachCoverFallbackHandlers(root, { document });
 
-const trackHasCoreAnalysis = (track) => library.trackHasCoreAnalysis(track, {
-    trackHasRenderableWaveform: library.trackHasRenderableWaveform,
-    trackHasBpm: library.trackHasBpm,
-  });
-
 const usbTrackNeedsHydration = (track) => library.usbTrackNeedsHydration(track, {
     trackHasRenderableWaveform: library.trackHasRenderableWaveform,
     trackHasArtwork: library.trackHasArtwork,
@@ -436,7 +431,6 @@ function updatePlaylistExportButtons() {
   playlist.updatePlaylistExportButtons(state, el, {
     getCurrentPlaylist,
     computeExportButtonState: usb.computeExportButtonState,
-    trackHasCoreAnalysis,
     isUsbRootChangeBlocked: usb.isUsbRootChangeBlocked,
   });
 }
@@ -446,7 +440,6 @@ const createTrackRow = (track, options) => trackTable.createTrackRow(track, opti
     buildCoverSrcCandidates,
     isTrackCurrentlyPlaying,
     escapeHtml,
-    trackHasCoreAnalysis,
     getKeyHue,
   });
 
@@ -572,7 +565,6 @@ const patchRowCellDeps = {
   buildCoverSrcCandidates,
   attachCoverFallbackHandlers,
   drawWaveformCanvas,
-  trackHasCoreAnalysis,
   invalidateWaveformCache,
   setWaveformColorData,
 };
@@ -630,8 +622,6 @@ function renderSourceChips() {
   library.renderSourceChips(state, el, {
     documentObj: document,
     escapeHtml,
-    trackPathMatchesAnyRoot: library.trackPathMatchesAnyRoot,
-    trackHasCoreAnalysis,
     persistSourceRootEnabled,
     updateScanLibraryButtonLabel,
     updateSourceFilterIndicator,
@@ -772,7 +762,6 @@ const scanLibrary = async () => library.scanLibrary(state, {
         fp,
         library.enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots)
       ),
-    trackHasCoreAnalysis,
     analyzeTrackIds,
     refreshCurrentPlaylistTracks,
     countWarningsForStatus: eventLog.countWarningsForStatus,
@@ -831,7 +820,6 @@ const analyzeSingleTrack = async (track, modeLabel = null) => library.analyzeSin
     resolveLocalTrackIdAsync,
     setStatus,
     emitStatus,
-    trackHasCoreAnalysis,
     analyzeTrackIds,
   });
 
@@ -1492,7 +1480,6 @@ function bindEvents() {
     loadPlaylists,
     updateModeText,
     exportPlaylistToUsb,
-    trackHasCoreAnalysis,
     analyzeTrackIds,
     resolveLocalTrackId,
     handleSortHeaderClick,

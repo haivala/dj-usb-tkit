@@ -21,6 +21,14 @@ function computeMockPlaylistUsbExportStatus(localPlaylists, usbPlaylistNames, pr
   });
 }
 
+// Mirrors the backend's has_core_analysis_fields (backend/src/service/mod.rs):
+// the mock stands in for the backend, which stamps analysisReady on every
+// Track row it returns.
+const mockAnalysisReady = (t) => !!t?.waveformPeaksPath
+  && Number(t?.bpm || 0) > 0
+  && Number(t?.durationMs || 0) > 0;
+const withAnalysisReady = (items) => (items || []).map((t) => ({ ...t, analysisReady: mockAnalysisReady(t) }));
+
 export function createMockInvoke({ state, normalizePath, constants }) {
   const { LIBRARY_LOAD_LIMIT_DEFAULT, LIBRARY_LOAD_LIMIT_POST_SCAN } = constants;
 
@@ -181,7 +189,7 @@ export function createMockInvoke({ state, normalizePath, constants }) {
         ok: true,
         data: {
           total: filtered.length,
-          items,
+          items: withAnalysisReady(items),
           nextCursor: nextOffset < filtered.length ? String(nextOffset) : null,
           hasMore: nextOffset < filtered.length,
           sourceRootAnalysis
@@ -256,7 +264,7 @@ export function createMockInvoke({ state, normalizePath, constants }) {
         ok: true,
         data: {
           total: filtered.length,
-          items: pageItems,
+          items: withAnalysisReady(pageItems),
           nextCursor: nextOffset < filtered.length ? String(nextOffset) : null,
           hasMore: nextOffset < filtered.length
         }
@@ -464,7 +472,7 @@ export function createMockInvoke({ state, normalizePath, constants }) {
 
     if (command === "get_playlist_tracks") {
       const p = state.playlists.find((x) => x.id === payload?.request?.playlistId);
-      return { ok: true, data: { playlistId: payload?.request?.playlistId || "", items: p?.tracks || [] } };
+      return { ok: true, data: { playlistId: payload?.request?.playlistId || "", items: withAnalysisReady(p?.tracks || []) } };
     }
 
     if (command === "add_tracks_to_playlist") {

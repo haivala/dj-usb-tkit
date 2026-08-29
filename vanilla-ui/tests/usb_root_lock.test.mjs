@@ -150,7 +150,6 @@ test("updatePlaylistExportButtons respects USB-root lock state", () => {
     updatePlaylistExportButtons(state, el, {
       getCurrentPlaylist: () => ({ name: "My Playlist", tracks: [] }),
       computeExportButtonState: () => ({ text: "Export", title: "" }),
-      trackHasCoreAnalysis: () => true,
       isUsbRootChangeBlocked
     });
     assert.equal(el.exportPlaylistBtn.disabled, expectedDisabled);

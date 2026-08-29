@@ -33,7 +33,6 @@ function rowDeps(overrides = {}) {
     buildCoverSrcCandidates: () => [],
     isTrackCurrentlyPlaying: () => false,
     escapeHtml,
-    trackHasCoreAnalysis: () => false,
     getKeyHue: () => 180,
     ...overrides
   };
@@ -67,7 +66,6 @@ function formatBadgeRow(track) {
     secondaryActionType: undefined
   }, {
     state: {},
-    trackHasCoreAnalysis: () => false,
     getKeyHue: () => 0
   });
 }
@@ -79,14 +77,22 @@ test("createTrackRow disables add with a helpful tooltip when no playlist is act
   assert.ok(html.includes("disabled"));
 });
 
+test("createTrackRow analyze button reflects backend track.analysisReady", () => {
+  const notReady = renderRow({ id: "a-1", analysisReady: false }, { enableAnalyzeActions: true });
+  assert.ok(notReady.includes(">Analyze</button>"));
+  assert.ok(notReady.includes("Analyze missing waveform/BPM/key"));
+
+  const ready = renderRow({ id: "a-2", analysisReady: true }, { enableAnalyzeActions: true });
+  assert.ok(ready.includes(">Reanalyze</button>"));
+  assert.ok(ready.includes("Recompute waveform/BPM/key"));
+});
+
 test("createTrackRow renders a canvas for PWV4-only waveform data", () => {
   const html = renderRow({
     id: "t-pwv4",
     waveformColorData: [1, 2, 3, 4, 5, 6],
     waveformPeaksPath: "/tmp/ANLZ0000.EXT"
-  }, {}, {
-    trackHasCoreAnalysis: () => true
-  });
+  }, {}, {});
 
   assert.ok(html.includes("waveform waveform-canvas"));
   assert.ok(html.includes("waveform-canvas-el"));
@@ -114,9 +120,7 @@ test("renderTrackTable attaches PWV4 color data before drawing", () => {
   };
 
   renderTrackTable(tbody, [track], { origin: "lib" }, tableDeps({
-    createTrackRow: (row, options) => createTrackRow(row, options, rowDeps({
-      trackHasCoreAnalysis: () => true
-    })),
+    createTrackRow: (row, options) => createTrackRow(row, options, rowDeps()),
     renderWaveformsIn: () => { rendered = true; },
     setWaveformColorData: (element, data) => { attached = { element, data }; }
   }));

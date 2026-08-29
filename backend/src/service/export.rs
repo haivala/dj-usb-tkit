@@ -44,7 +44,7 @@ use super::usb_utils::{
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
 use super::usb_vendor_compat::{USB_ANALYSIS_PREFIX, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX};
-use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, now};
+use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, has_core_analysis_fields, now};
 use uuid::Uuid;
 
 fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<String> {
@@ -360,14 +360,11 @@ fn validate_export_manifest_before_db_write(
 }
 
 fn has_required_analysis_fields(track: &ExportTrackData) -> bool {
-    let has_waveform_path = track
-        .waveform_peaks_path
-        .as_deref()
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false);
-    let has_bpm = track.bpm.map(|v| v > 0.0).unwrap_or(false);
-    let has_duration = track.duration_ms.map(|v| v > 0).unwrap_or(false);
-    has_waveform_path && has_bpm && has_duration
+    has_core_analysis_fields(
+        track.waveform_peaks_path.as_deref(),
+        track.bpm,
+        track.duration_ms,
+    )
 }
 
 fn has_analysis_bundle(usb_root: &Path, track: &ExportTrackData) -> bool {

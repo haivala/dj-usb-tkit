@@ -31,9 +31,14 @@
 ## Unreleased
 
 - **Fix:** the playlist panel again offers "Analyze Missing Tracks" for every track missing
-  waveform/BPM/duration, including tracks imported into the library from a 
+  waveform/BPM/duration, including tracks imported into the library from a
   USB drive — previously the button was hidden for those and the export failed later at the
   backend analysis gate instead.
+- **Improvement:** whether a track still needs analysis is now decided entirely by the backend
+  (a single rule shared with the pre-export gate) and sent on every track row and analysis
+  progress event as `analysisReady`. The frontend no longer re-derives it, so the
+  "Analyze"/"Reanalyze" labels, the playlist "Analyze Missing" button, and the green
+  "fully analyzed" source chip can no longer disagree with the backend.
 
 ## 0.1.33
 

@@ -43,7 +43,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           waveformPreview: [],
           durationMs: null,
           bpm: null,
-          key: null
+          key: null,
+          analysisReady: false
         },
         {
           id: "usb-track-1",
@@ -57,7 +58,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           waveformPreview: [10, 20, 30],
           durationMs: 180000,
           bpm: 128,
-          key: null
+          key: null,
+          analysisReady: true
         }
       ]
     };
@@ -73,7 +75,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
         waveformPreview: [],
         durationMs: null,
         bpm: null,
-        key: null
+        key: null,
+        analysisReady: false
       }
     ];
 
@@ -170,10 +173,12 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               playlistTracks["pl-1"][0].waveformPeaksPath = "/tmp/local-missing.DAT";
               playlistTracks["pl-1"][0].waveformPreview = [5, 10, 20];
               playlistTracks["pl-1"][0].bpm = 128;
+              playlistTracks["pl-1"][0].analysisReady = true;
               libraryTracks[0].durationMs = 180000;
               libraryTracks[0].waveformPeaksPath = "/tmp/local-missing.DAT";
               libraryTracks[0].waveformPreview = [5, 10, 20];
               libraryTracks[0].bpm = 128;
+              libraryTracks[0].analysisReady = true;
               emitJobEvent({
                 event: "job.progress",
                 jobId,
@@ -188,6 +193,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
                 message: "Analyzing 1/1: Local Missing",
                 trackReady: true,
                 failed: false,
+                analysisReady: true,
                 bpm: 128,
                 bpmAnalyzer: "mock-analyzer",
                 durationMs: 180000,
@@ -334,7 +340,8 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
           waveformPreview: [10, 20, 30],
           durationMs: 180000,
           bpm: 128,
-          key: "8A"
+          key: "8A",
+          analysisReady: true
         }
       ]
     };
@@ -454,7 +461,8 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
           waveformPreview: [10, 20, 30],
           durationMs: 180000,
           bpm: 128,
-          key: "8A"
+          key: "8A",
+          analysisReady: true
         },
         {
           id: "usb-import-entry",
@@ -468,7 +476,8 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
           waveformPreview: [],
           durationMs: null,
           bpm: null,
-          key: null
+          key: null,
+          analysisReady: false
         }
       ]
     };

@@ -15,7 +15,6 @@ export function bindPlaylistEvents(ctx) {
     loadPlaylists,
     updateModeText,
     exportPlaylistToUsb,
-    trackHasCoreAnalysis,
     analyzeTrackIds,
     resolveLocalTrackId,
     refreshCurrentPlaylistTracks,
@@ -117,7 +116,7 @@ export function bindPlaylistEvents(ctx) {
     const playlist = getCurrentPlaylist();
     if (!playlist) return;
     const trackIds = (playlist.tracks || [])
-      .filter((track) => !trackHasCoreAnalysis(track))
+      .filter((track) => !track.analysisReady)
       .map((track) => String(resolveLocalTrackId(track) || track.localTrackId || track.id || "").trim())
       .filter(Boolean);
     if (!trackIds.length) {

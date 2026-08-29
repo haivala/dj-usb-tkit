@@ -25,8 +25,6 @@ function makeChipHarness(state, { includeSearch = false, deps = {} } = {}) {
   const mergedDeps = {
     documentObj: document,
     escapeHtml: (value) => String(value),
-    trackPathMatchesAnyRoot: (filePath, roots) => String(filePath).startsWith(String(roots[0])),
-    trackHasCoreAnalysis: (track) => !!track.analyzed,
     persistSourceRootEnabled: (map) => { calls.persisted = { ...map }; },
     updateScanLibraryButtonLabel: () => { calls.scanLabels += 1; },
     updateSourceFilterIndicator: () => { calls.indicators += 1; },
@@ -153,13 +151,14 @@ test("loadTracks uses one browse request for enabled folders and master.db", asy
 });
 
 test("renderSourceChips renders analyzed, missing, and disabled chip states", () => {
+  // "Fully analyzed" per root is owned by the backend (state.sourceRootAnalysisStatus,
+  // populated from `sourceRootAnalysis` in browse responses). renderSourceChips
+  // only renders it -- it never inspects individual tracks.
   const state = {
     sourceRoots: ["/music/a", "/music/b"],
     sourceRootEnabled: {},
-    tracks: [
-      { filePath: "/music/a/1.mp3", durationMs: 120000, analyzed: true },
-      { filePath: "/music/b/2.mp3", durationMs: 120000, analyzed: false }
-    ]
+    sourceRootAnalysisStatus: { "/music/a": true, "/music/b": false },
+    tracks: []
   };
   const harness = makeChipHarness(state);
   harness.render();
@@ -173,7 +172,6 @@ test("renderSourceChips renders analyzed, missing, and disabled chip states", ()
   assert.equal(harness.calls.indicators, 1);
 
   state.sourceRootEnabled["/music/b"] = false;
-  state.tracks = [{ filePath: "/music/a/1.mp3", durationMs: 120000, analyzed: true }];
   harness.render();
   chips = harness.chips();
   assert.equal(chips[0].classList.contains("source-chip-analyzed"), true);
@@ -202,59 +200,29 @@ test("renderSourceChips renders missing source roots as unchecked relocation chi
   assert.match(chip.querySelector(".source-chip-path").getAttribute("data-tooltip"), /Click to relocate/);
 });
 
-test("renderSourceChips preserves cached analysis status across filtered or incomplete pages", () => {
-  const analyzedState = {
+test("renderSourceChips renders sourceRootAnalysisStatus verbatim and never recomputes it", () => {
+  // No client-side recompute: whatever the backend put in
+  // sourceRootAnalysisStatus is what renders, regardless of the loaded tracks
+  // (a partial page, an active query, etc. can't flip it).
+  const state = {
     sourceRoots: ["/music/a", "/music/b"],
     sourceRootEnabled: { "/music/a": true, "/music/b": true },
-    sourceRootAnalysisStatus: {},
+    sourceRootAnalysisStatus: { "/music/a": true, "/music/b": false },
     tracks: [
-      { filePath: "/music/a/1.mp3", durationMs: 120000, analyzed: true },
-      { filePath: "/music/b/2.mp3", durationMs: 120000, analyzed: true }
-    ]
-  };
-  const analyzed = makeChipHarness(analyzedState);
-  analyzed.render();
-  assert.equal(analyzed.chips()[0].classList.contains("source-chip-analyzed"), true);
-  assert.equal(analyzed.chips()[1].classList.contains("source-chip-analyzed"), true);
-
-  analyzedState.sourceRootEnabled["/music/b"] = false;
-  analyzedState.tracks = [{ filePath: "/music/a/1.mp3", durationMs: 120000, analyzed: true }];
-  analyzed.render();
-  assert.equal(analyzed.chips()[0].classList.contains("source-chip-analyzed"), true);
-  assert.equal(analyzed.chips()[1].classList.contains("source-chip-analyzed"), true);
-  assert.equal(analyzed.chips()[1].querySelector(".source-chip-toggle").checked, false);
-
-  const mixedState = {
-    sourceRoots: ["/music/a", "/music/b"],
-    sourceRootEnabled: { "/music/a": true, "/music/b": true },
-    sourceRootAnalysisStatus: {},
-    tracks: [
-      { filePath: "/music/a/1.mp3", durationMs: 120000, analyzed: true },
-      { filePath: "/music/b/2.mp3", durationMs: 120000, analyzed: false }
-    ]
-  };
-  const mixed = makeChipHarness(mixedState);
-  mixed.render();
-  assert.equal(mixed.chips()[1].classList.contains("source-chip-analyzed"), false);
-
-  mixedState.sourceRootEnabled["/music/a"] = false;
-  mixedState.tracks = [{ filePath: "/music/b/3.mp3", durationMs: 120000, analyzed: true }];
-  mixed.render();
-  assert.equal(mixed.chips()[1].classList.contains("source-chip-analyzed"), false);
-
-  const pagedState = {
-    sourceRoots: ["/music/a"],
-    sourceRootEnabled: { "/music/a": true },
-    sourceRootAnalysisStatus: { "/music/a": true },
-    tracks: [{ filePath: "/music/a/1.mp3", durationMs: null, analyzed: false }],
+      // Deliberately "analyzed-looking" tracks under /music/b -- must NOT flip
+      // its chip, because the backend said it's not fully analyzed.
+      { filePath: "/music/b/1.mp3", durationMs: 120000, analysisReady: true }
+    ],
     libraryHasMore: true,
-    libraryLoadedTotal: 10,
+    libraryLoadedTotal: 999,
     libraryQuery: ""
   };
-  const paged = makeChipHarness(pagedState, { includeSearch: true });
-  paged.render();
-  assert.equal(paged.chips()[0].classList.contains("source-chip-analyzed"), true);
-  assert.equal(pagedState.sourceRootAnalysisStatus["/music/a"], true);
+  const harness = makeChipHarness(state, { includeSearch: true });
+  harness.render();
+  assert.equal(harness.chips()[0].classList.contains("source-chip-analyzed"), true);
+  assert.equal(harness.chips()[1].classList.contains("source-chip-analyzed"), false);
+  // Map is untouched by rendering.
+  assert.deepEqual(state.sourceRootAnalysisStatus, { "/music/a": true, "/music/b": false });
 });
 
 test("relocateSourceRoot replaces source and preserves playlist track identity state", async () => {

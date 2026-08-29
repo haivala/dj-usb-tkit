@@ -6,8 +6,6 @@ import {
   trackArtworkChecked,
   trackHasBpm,
   trackHasKey,
-  trackHasCoreAnalysis,
-  isUsbOriginTrack,
   usbTrackNeedsHydration
 } from "../components/library/actions.mjs";
 
@@ -27,20 +25,6 @@ test("waveform/artwork/bpm/key checks classify correctly", () => {
 
   assert.equal(trackHasKey({ key: "8A" }), true);
   assert.equal(trackHasKey({ key: "" }), false);
-});
-
-test("trackHasCoreAnalysis requires waveform+bpm+duration", () => {
-  assert.equal(trackHasCoreAnalysis({ waveformPreview: [1], bpm: 120, durationMs: 1000 }), true);
-  assert.equal(trackHasCoreAnalysis({ waveformPreview: [1], bpm: 0, durationMs: 1000 }), false);
-  assert.equal(trackHasCoreAnalysis({ waveformPreview: [1], bpm: 120, durationMs: 0 }), false);
-});
-
-test("isUsbOriginTrack reads the backend-authoritative usbAnalysisPath/isUsbPath fields", () => {
-  assert.equal(isUsbOriginTrack({ usbAnalysisPath: "/USBANLZ/1.DAT" }), true);
-  assert.equal(isUsbOriginTrack({ isUsbPath: true, filePath: "/usb/Contents/a.mp3" }), true);
-  assert.equal(isUsbOriginTrack({ filePath: "/usb/Contents/a.mp3" }), false);
-  assert.equal(isUsbOriginTrack({ filePath: "/music/a.mp3" }), false);
-  assert.equal(isUsbOriginTrack(null), false);
 });
 
 test("usbTrackNeedsHydration true until all core pieces exist", () => {

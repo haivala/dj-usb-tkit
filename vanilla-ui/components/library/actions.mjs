@@ -44,25 +44,10 @@ export function trackHasKey(track) {
   return typeof track?.key === "string" && track.key.trim().length > 0;
 }
 
-export function trackHasCoreAnalysis(track, deps = {}) {
-  const hasWaveform = deps.trackHasRenderableWaveform || trackHasRenderableWaveform;
-  const hasBpm = deps.trackHasBpm || trackHasBpm;
-  const durationMs = Number(track?.durationMs);
-  return hasWaveform(track)
-    && hasBpm(track)
-    && Number.isFinite(durationMs)
-    && durationMs > 0;
-}
-
-// Authoritative: `isUsbPath` is computed backend-side (see apply_is_usb_path
-// in backend/src/service/mod.rs) against the full known USB-device
-// registry, not just whichever root happens to be selected in this session.
-// `usbAnalysisPath` is a separate, still-legitimate signal for USB-browse-
-// origin tracks (fetch_usb_playlists/fetch_usb_histories).
-export function isUsbOriginTrack(track) {
-  if (!track) return false;
-  return !!track.usbAnalysisPath || !!track.isUsbPath;
-}
+// Whether a track still needs core analysis is owned entirely by the backend
+// (`Track.analysisReady` / the analysis job-progress payload -- see
+// `has_core_analysis_fields` in backend/src/service/mod.rs). The frontend
+// reads `track.analysisReady` directly and never recomputes it.
 
 export function usbTrackNeedsHydration(track, deps = {}) {
   const hasWaveform = deps.trackHasRenderableWaveform || trackHasRenderableWaveform;
@@ -139,7 +124,8 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     updatedAt: track?.updatedAt || track?.updated_at || "",
     searchText: `${title} ${artist} ${album}`.toLowerCase(),
     masterDbSource: !!(track?.masterDbSource ?? track?.master_db_source),
-    isUsbPath: !!(track?.isUsbPath ?? track?.is_usb_path)
+    isUsbPath: !!(track?.isUsbPath ?? track?.is_usb_path),
+    analysisReady: !!(track?.analysisReady ?? track?.analysis_ready)
   };
 }
 
@@ -180,6 +166,9 @@ function mergeTrackPreservingBestFields(existing, normalized) {
   if (!normalized.waveformPeaksPath && existing.waveformPeaksPath) merged.waveformPeaksPath = existing.waveformPeaksPath;
   if (!normalized.bpm && existing.bpm) merged.bpm = existing.bpm;
   if (!normalized.key && existing.key) merged.key = existing.key;
+  // Backend-owned readiness only ever moves false -> true; a partial merge that
+  // lacks the flag must not drop a previously-analyzed row back to "needs analysis".
+  merged.analysisReady = !!(existing.analysisReady || normalized.analysisReady);
   return merged;
 }
 
@@ -567,8 +556,6 @@ export function renderSourceChips(state, el, deps = {}) {
   const {
     documentObj = typeof document !== "undefined" ? document : null,
     escapeHtml = (value) => String(value || ""),
-    trackPathMatchesAnyRoot = () => false,
-    trackHasCoreAnalysis = () => false,
     persistSourceRootEnabled = () => {},
     updateScanLibraryButtonLabel = () => {},
     updateSourceFilterIndicator = () => {}
@@ -589,13 +576,6 @@ export function renderSourceChips(state, el, deps = {}) {
   if (retainedMissingRoots.length !== missingSourceRootsArray(state).length) {
     setMissingSourceRoots(state, retainedMissingRoots);
   }
-  const allFolderSourcesEnabled = (state.sourceRoots || [])
-    .every((root) => state.sourceRootEnabled[root] !== false);
-  const queryActive = String(el.librarySearch?.value || state.libraryQuery || "").trim().length > 0;
-  const loadedTrackCount = Array.isArray(state.tracks) ? state.tracks.length : 0;
-  const loadedTotal = Number(state.libraryLoadedTotal || loadedTrackCount || 0);
-  const loadedLibraryComplete = !state.libraryHasMore && loadedTotal <= loadedTrackCount;
-
   // master.db chip - shown when detected, positioned before filesystem chips
   if (state.externalMasterDbPath) {
     const chip = documentObj.createElement("span");
@@ -609,17 +589,9 @@ export function renderSourceChips(state, el, deps = {}) {
       state.sourceRootEnabled[path] = true;
     }
     const missing = sourceRootIsMissing(state, path);
-    const scopedTracks = state.tracks.filter((track) => trackPathMatchesAnyRoot(track.filePath, [path]));
-    const canRefreshAnalysisStatus = allFolderSourcesEnabled
-      && !queryActive
-      && loadedLibraryComplete
-      && scopedTracks.length > 0;
-    if (!missing && canRefreshAnalysisStatus) {
-      state.sourceRootAnalysisStatus[path] = scopedTracks.every((track) => {
-        const durationMs = Number(track?.durationMs || 0);
-        return trackHasCoreAnalysis(track) && Number.isFinite(durationMs) && durationMs > 0;
-      });
-    }
+    // Per-root "fully analyzed" is computed by the backend over the complete,
+    // unfiltered track set and delivered as `sourceRootAnalysis` (see
+    // applySourceRootAnalysisFromBrowseData). Just render what it told us.
     const fullyAnalyzed = state.sourceRootAnalysisStatus[path] === true;
 
     const chip = documentObj.createElement("span");
@@ -948,7 +920,6 @@ export async function scanLibrary(state, deps) {
     resetAndLoadLibraryTracks,
     LIBRARY_LOAD_LIMIT_POST_SCAN,
     trackPathIsInsideSelectedRoots,
-    trackHasCoreAnalysis,
     analyzeTrackIds,
     refreshCurrentPlaylistTracks,
     countWarningsForStatus,
@@ -996,7 +967,7 @@ export async function scanLibrary(state, deps) {
       .filter(Boolean)
   ).size;
   const pendingTrackIds = scopedTracks
-    .filter((track) => !(state.masterDbEnabled && track.masterDbSource) && !trackHasCoreAnalysis(track))
+    .filter((track) => !(state.masterDbEnabled && track.masterDbSource) && !track.analysisReady)
     .map((track) => track.id)
     .filter(Boolean);
 
@@ -1202,7 +1173,6 @@ export async function analyzeSingleTrack(state, track, modeLabel = null, deps) {
     resolveLocalTrackId,
     resolveLocalTrackIdAsync,
     setStatus,
-    trackHasCoreAnalysis,
     analyzeTrackIds
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
@@ -1215,7 +1185,7 @@ export async function analyzeSingleTrack(state, track, modeLabel = null, deps) {
     return;
   }
   const localTrack = state.tracks.find((t) => t.id === localId) || track;
-  const label = modeLabel || (trackHasCoreAnalysis(localTrack) ? "Reanalyze" : "Analyze missing");
+  const label = modeLabel || (localTrack.analysisReady ? "Reanalyze" : "Analyze missing");
   await analyzeTrackIds([localId], label);
 }
 
@@ -1397,12 +1367,16 @@ export function patchTrackAnalysisFields(track, payload, deps) {
       changed = true;
     }
   }
+  // Backend-owned readiness; only ever flips false -> true on a progress event.
+  if (payload.analysisReady === true) {
+    setIfChanged("analysisReady", true);
+  }
   return changed;
 }
 
 export function patchLibraryRowCells(row, track, deps) {
   if (!row || !track) return false;
-  const { escapeHtml, getKeyHue, buildCoverSrcCandidates, attachCoverFallbackHandlers, drawWaveformCanvas, trackHasCoreAnalysis, invalidateWaveformCache, setWaveformColorData } = deps;
+  const { escapeHtml, getKeyHue, buildCoverSrcCandidates, attachCoverFallbackHandlers, drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } = deps;
 
   const cells = row.querySelectorAll('[role="cell"]');
   if (cells.length < 3) return false;
@@ -1483,7 +1457,7 @@ export function patchLibraryRowCells(row, track, deps) {
   const actionTd = row.querySelector(".td-action");
   if (actionTd) {
     const analyzeBtn = actionTd.querySelector("[data-action='analyze-track']");
-    if (analyzeBtn && trackHasCoreAnalysis(track)) {
+    if (analyzeBtn && track.analysisReady) {
       analyzeBtn.textContent = "Reanalyze";
       analyzeBtn.dataset.tooltip = "Recompute waveform/BPM/key";
     }

@@ -35,7 +35,7 @@ use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_wit
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
 use super::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash};
 use super::{
-    BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, now,
+    BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, has_core_analysis_fields, now,
     track_has_core_analysis_for_source_status,
 };
 
@@ -169,6 +169,10 @@ pub struct AnalyzeTrackProgress {
     pub duration_ms: Option<u64>,
     pub track_ready: bool,
     pub failed: bool,
+    /// Authoritative "this track now has its core analysis" -- same rule as
+    /// `Track::analysis_ready`. The frontend patches rows from this and never
+    /// recomputes readiness itself.
+    pub analysis_ready: bool,
     pub error_message: Option<String>,
     pub library_total_duration_ms: Option<u64>,
     pub library_duration_unknown_count: Option<usize>,
@@ -208,6 +212,7 @@ fn build_partial_progress(
         duration_ms: update.duration_ms,
         track_ready: false,
         failed: false,
+        analysis_ready: false,
         error_message: None,
         library_total_duration_ms: None,
         library_duration_unknown_count: None,
@@ -235,6 +240,11 @@ fn build_done_progress_success(
         duration_ms: local.duration_ms,
         track_ready: true,
         failed: false,
+        analysis_ready: has_core_analysis_fields(
+            local.waveform_peaks_path.as_deref(),
+            local.bpm,
+            local.duration_ms,
+        ),
         error_message: None,
         library_total_duration_ms: None,
         library_duration_unknown_count: None,
@@ -262,6 +272,7 @@ fn build_done_progress_error(
         duration_ms: None,
         track_ready: true,
         failed: true,
+        analysis_ready: false,
         error_message: Some(error_message),
         library_total_duration_ms: None,
         library_duration_unknown_count: None,
@@ -1017,18 +1028,14 @@ fn persist_done_result(
             *analyzed += 1;
             if let Some(ctx) = library_context.as_deref_mut()
                 && ctx.visible_track_ids.contains(&track.id)
+                && has_core_analysis_fields(
+                    local.waveform_peaks_path.as_deref(),
+                    local.bpm,
+                    local.duration_ms,
+                )
             {
-                let has_waveform_path = local
-                    .waveform_peaks_path
-                    .as_deref()
-                    .map(|path| !path.trim().is_empty())
-                    .unwrap_or(false);
-                let has_bpm = local.bpm.map(|bpm| bpm > 0.0).unwrap_or(false);
-                let has_duration = local.duration_ms.map(|d| d > 0).unwrap_or(false);
-                if has_waveform_path && has_bpm && has_duration {
-                    ctx.total_ms += local.duration_ms.unwrap_or(0);
-                    ctx.known_count += 1;
-                }
+                ctx.total_ms += local.duration_ms.unwrap_or(0);
+                ctx.known_count += 1;
             }
             let mut progress = build_done_progress_success(*completed_count, total, &track, &local);
             if let Some(ctx) = library_context.as_deref() {

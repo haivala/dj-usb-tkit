@@ -171,7 +171,18 @@ function installSourceChipAnalysisMock(page) {
             return { ok: true, data: { indexed: 1, updated: 0, removed: 0 } };
           }
           if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
-            return { ok: true, data: { total: tracks.length, items: tracks } };
+            return {
+              ok: true,
+              data: {
+                total: tracks.length,
+                items: tracks,
+                // Per-root readiness is backend-computed and delivered here.
+                sourceRootAnalysis: [
+                  { sourceRoot: "/music", total: 1, analyzed: 1, fullyAnalyzed: true },
+                  { sourceRoot: "/music2", total: 1, analyzed: 1, fullyAnalyzed: true }
+                ]
+              }
+            };
           }
           if (command === "get_tracks_by_ids_with_previews") {
             return { ok: true, data: { items: tracks } };

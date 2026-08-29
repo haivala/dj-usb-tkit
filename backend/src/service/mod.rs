@@ -312,18 +312,27 @@ fn relocated_source_path(new_root: &Path, relative_path: &str) -> PathBuf {
     out
 }
 
-fn track_has_core_analysis_for_source_status(track: &Track) -> bool {
-    let has_waveform_path = track
-        .waveform_peaks_path
-        .as_deref()
+/// The single source of truth for "this track has its core analysis": a
+/// non-empty waveform-peaks path, a positive BPM, and a positive duration.
+/// DB fields only -- deliberately no filesystem check (the export gate's
+/// DAT/EXT/2EX bundle verification is separate, see
+/// `service::export::has_required_analysis`). Every wrapper below and the
+/// `Track::analysis_ready` flag route through this.
+pub(crate) fn has_core_analysis_fields(
+    waveform_peaks_path: Option<&str>,
+    bpm: Option<f64>,
+    duration_ms: Option<u64>,
+) -> bool {
+    let has_waveform_path = waveform_peaks_path
         .map(|path| !path.trim().is_empty())
         .unwrap_or(false);
-    let has_bpm = track.bpm.map(|bpm| bpm > 0.0).unwrap_or(false);
-    let has_duration = track
-        .duration_ms
-        .map(|duration| duration > 0)
-        .unwrap_or(false);
+    let has_bpm = bpm.map(|bpm| bpm > 0.0).unwrap_or(false);
+    let has_duration = duration_ms.map(|duration| duration > 0).unwrap_or(false);
     has_waveform_path && has_bpm && has_duration
+}
+
+fn track_has_core_analysis_for_source_status(track: &Track) -> bool {
+    has_core_analysis_fields(track.waveform_peaks_path.as_deref(), track.bpm, track.duration_ms)
 }
 
 fn non_empty_db_value(value: &str) -> Option<&str> {
@@ -1579,6 +1588,8 @@ impl BackendService {
                         updated_at: now,
                         master_db_source: false,
                         is_usb_path: false,
+                        // Freshly scanned, not yet indexed -- no analysis.
+                        analysis_ready: false,
                     }
                 }
             })
@@ -3066,13 +3077,19 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
     };
     let artwork_data_url: Option<String> = None;
 
+    let bpm: Option<f64> = row.get(5)?;
+    let duration_ms: Option<u64> = row.get(13)?;
+    // Pure DB-column math, correct for every caller (no separate pass).
+    let analysis_ready =
+        has_core_analysis_fields(waveform_peaks_path.as_deref(), bpm, duration_ms);
+
     Ok(Track {
         id: row.get(0)?,
         title: row.get(1)?,
         artist: row.get(2)?,
         album: row.get(3)?,
         track_number: row.get(4)?,
-        bpm: row.get(5)?,
+        bpm,
         bpm_analyzer,
         key: row.get(6)?,
         file_path: row.get(7)?,
@@ -3084,7 +3101,7 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
         // Looked up by name (not position) since callers select the tracks
         // columns with varying shapes; some queries omit this column.
         wav_extensible_kind: row.get("wav_extensible_kind").unwrap_or(None),
-        duration_ms: row.get(13)?,
+        duration_ms,
         artwork_path,
         artwork_data_url,
         waveform_peaks_path,
@@ -3096,6 +3113,7 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
         // Filled in by callers that expose Track to the frontend (see
         // apply_is_usb_path); internal-only callers leave this false.
         is_usb_path: false,
+        analysis_ready,
     })
 }
 
@@ -3739,6 +3757,20 @@ mod tests {
     }
 
     #[test]
+    fn has_core_analysis_fields_requires_waveform_bpm_and_positive_duration() {
+        assert!(has_core_analysis_fields(Some("/data/a.dat"), Some(120.0), Some(200_000)));
+        // missing / blank waveform path
+        assert!(!has_core_analysis_fields(None, Some(120.0), Some(200_000)));
+        assert!(!has_core_analysis_fields(Some("   "), Some(120.0), Some(200_000)));
+        // non-positive bpm
+        assert!(!has_core_analysis_fields(Some("/data/a.dat"), Some(0.0), Some(200_000)));
+        assert!(!has_core_analysis_fields(Some("/data/a.dat"), None, Some(200_000)));
+        // non-positive / missing duration
+        assert!(!has_core_analysis_fields(Some("/data/a.dat"), Some(120.0), Some(0)));
+        assert!(!has_core_analysis_fields(Some("/data/a.dat"), Some(120.0), None));
+    }
+
+    #[test]
     fn non_empty_db_value_filters_blank_and_trims() {
         assert_eq!(non_empty_db_value("  hello  "), Some("hello"));
         assert_eq!(non_empty_db_value("   "), None);
@@ -3860,6 +3892,7 @@ mod tests {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             master_db_source: false,
             is_usb_path: false,
+            analysis_ready: false,
         }
     }
 
@@ -4625,6 +4658,40 @@ mod tests {
         assert_eq!(result.total, 3);
         assert_eq!(result.duration_known_count, 2);
         assert_eq!(result.total_duration_ms, 300_000);
+    }
+
+    #[test]
+    fn track_rows_carry_analysis_ready_computed_from_db_fields() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        // Fully core-analyzed: bpm + waveform path + duration.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES ('ready', 'Ready', 'Artist', '/master/ready.mp3', 200000, 120.0, '/data/ready.dat', ?1, 1, datetime('now'), datetime('now'))",
+            params![build_track_match_fingerprint("Ready", "Artist", None)],
+        )
+        .expect("insert ready");
+        // Has duration + bpm but no waveform path -> still needs analysis.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES ('missing', 'Missing', 'Artist', '/master/missing.mp3', 200000, 120.0, ?1, 1, datetime('now'), datetime('now'))",
+            params![build_track_match_fingerprint("Missing", "Artist", None)],
+        )
+        .expect("insert missing");
+        drop(conn);
+
+        let result = service
+            .browse_source_files(BrowseSourceFilesRequest {
+                source_roots: Vec::new(),
+                include_master_db: true,
+                query: String::new(),
+                limit: 100,
+                cursor: None,
+            })
+            .expect("browse source files");
+        let by_id = |id: &str| result.items.iter().find(|t| t.id == id).unwrap().analysis_ready;
+        assert!(by_id("ready"));
+        assert!(!by_id("missing"));
     }
 
     #[test]

@@ -74,6 +74,11 @@ pub struct JobEventPayload {
     pub track_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed: Option<bool>,
+    /// Authoritative "this track now has its core analysis" (see
+    /// `Track::analysis_ready`). Present on analysis progress events; the
+    /// frontend patches rows from it and never recomputes readiness.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,6 +120,12 @@ pub struct Track {
     /// against the `usb_devices` registry -- not stored. See
     /// `untainted_usb_root_paths`/`browse_path_matches_root`.
     pub is_usb_path: bool,
+    /// Authoritative: true when the track has its core analysis (waveform
+    /// peaks path + BPM > 0 + duration > 0). Computed fresh on every read
+    /// from the DB row -- not stored, no filesystem check. The frontend
+    /// treats this as the only signal for "needs analysis". See
+    /// `service::has_core_analysis_fields`.
+    pub analysis_ready: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

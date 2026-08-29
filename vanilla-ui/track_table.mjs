@@ -6,7 +6,6 @@ export function createTrackRow(track, options, deps) {
     buildCoverSrcCandidates,
     isTrackCurrentlyPlaying,
     escapeHtml,
-    trackHasCoreAnalysis,
     getKeyHue,
   } = deps;
 
@@ -69,7 +68,7 @@ export function createTrackRow(track, options, deps) {
         : `<button data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} data-tooltip="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`)
       : "";
     const analysisButtons = options.enableAnalyzeActions
-      ? `<button data-action="analyze-track" data-id="${escapeHtml(renderTrackId)}" data-tooltip="${trackHasCoreAnalysis(track) ? "Recompute waveform/BPM/key" : "Analyze missing waveform/BPM/key"}">${trackHasCoreAnalysis(track) ? "Reanalyze" : "Analyze"}</button>`
+      ? `<button data-action="analyze-track" data-id="${escapeHtml(renderTrackId)}" data-tooltip="${track.analysisReady ? "Recompute waveform/BPM/key" : "Analyze missing waveform/BPM/key"}">${track.analysisReady ? "Reanalyze" : "Analyze"}</button>`
       : "";
     actionCell = `<div role="cell" class="track-grid-cell td-action"><div class="action-buttons">${primary}${analysisButtons}</div></div>`;
   }

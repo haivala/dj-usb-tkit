@@ -50,7 +50,6 @@ function bindDeps(overrides) {
     playTrackFromOrigin: async () => {},
     scrubRatioFromPointer: () => 0,
     exportPlaylistToUsb: async () => {},
-    trackHasCoreAnalysis: () => false,
     analyzeTrackIds: async () => {},
     resolveLocalTrackId: () => null,
     refreshCurrentPlaylistTracks: async () => {},
