@@ -30,6 +30,11 @@
 
 ## Unreleased
 
+- **Fix:** the playlist panel again offers "Analyze Missing Tracks" for every track missing
+  waveform/BPM/duration, including tracks imported into the library from a 
+  USB drive — previously the button was hidden for those and the export failed later at the
+  backend analysis gate instead.
+
 ## 0.1.33
 
 - **Improvement:** switching the export sync mode now updates the track-reorder lock on the

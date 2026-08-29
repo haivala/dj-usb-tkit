@@ -326,8 +326,6 @@ const trackHasCoreAnalysis = (track) => library.trackHasCoreAnalysis(track, {
     trackHasBpm: library.trackHasBpm,
   });
 
-const isUsbOriginTrack = (track) => library.isUsbOriginTrack(track);
-
 const usbTrackNeedsHydration = (track) => library.usbTrackNeedsHydration(track, {
     trackHasRenderableWaveform: library.trackHasRenderableWaveform,
     trackHasArtwork: library.trackHasArtwork,
@@ -438,7 +436,6 @@ function updatePlaylistExportButtons() {
   playlist.updatePlaylistExportButtons(state, el, {
     getCurrentPlaylist,
     computeExportButtonState: usb.computeExportButtonState,
-    isUsbOriginTrack,
     trackHasCoreAnalysis,
     isUsbRootChangeBlocked: usb.isUsbRootChangeBlocked,
   });
@@ -1495,7 +1492,6 @@ function bindEvents() {
     loadPlaylists,
     updateModeText,
     exportPlaylistToUsb,
-    isUsbOriginTrack,
     trackHasCoreAnalysis,
     analyzeTrackIds,
     resolveLocalTrackId,

@@ -380,7 +380,6 @@ export function updatePlaylistExportButtons(state, el, deps) {
   const {
     getCurrentPlaylist,
     computeExportButtonState,
-    isUsbOriginTrack,
     trackHasCoreAnalysis,
     isUsbRootChangeBlocked
   } = deps;
@@ -397,8 +396,14 @@ export function updatePlaylistExportButtons(state, el, deps) {
   el.exportPlaylistBtn.textContent = buttonState.text;
   el.exportPlaylistBtn.dataset.tooltip = buttonState.title;
 
+  // Offer analysis for any playlist track still missing waveform/BPM/duration,
+  // regardless of where the file lives. Tracks imported into the library from a
+  // folder on a USB stick get is_usb_path=true from the backend, but they are
+  // real library tracks and are just as analyzable as any local file -- see the
+  // Library view, which gates only on trackHasCoreAnalysis. The backend export
+  // gate (ensure_playlist_tracks_analysis_ready) is the hard safety net.
   const analyzeCandidates = Array.isArray(current?.tracks)
-    ? current.tracks.filter((track) => !isUsbOriginTrack(track) && !trackHasCoreAnalysis(track))
+    ? current.tracks.filter((track) => !trackHasCoreAnalysis(track))
     : [];
   const showAnalyzeMissing = analyzeCandidates.length > 0;
   if (el.analyzePlaylistMissingBtn) {
@@ -408,8 +413,8 @@ export function updatePlaylistExportButtons(state, el, deps) {
       ? `Analyze Missing Tracks (${analyzeCandidates.length})`
       : "Analyze Missing Tracks";
     el.analyzePlaylistMissingBtn.dataset.tooltip = showAnalyzeMissing
-      ? "Analyze missing waveform, BPM, and duration for local non-USB tracks in this playlist"
-      : "No local non-USB tracks in this playlist need analysis";
+      ? "Analyze missing waveform, BPM, and duration for tracks in this playlist"
+      : "No tracks in this playlist need analysis";
   }
   if (el.exportPlaylistBtn) {
     el.exportPlaylistBtn.hidden = showAnalyzeMissing;

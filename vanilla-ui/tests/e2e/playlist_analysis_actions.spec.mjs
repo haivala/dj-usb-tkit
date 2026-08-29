@@ -1,6 +1,6 @@
 import { test, expect } from "./coverage-fixture.mjs";
 
-test("playlist analyze-missing only targets local non-USB tracks", async ({ page }) => {
+test("playlist analyze-missing skips already-analyzed tracks and targets the rest", async ({ page }) => {
   await page.addInitScript(() => {
     // registerBackendJobEvents() only calls listen("job:event", ...) when
     // window.isTauri is truthy (see components/playback/actions.mjs). Without
@@ -415,6 +415,152 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeHidden();
   await expect(page.locator("#exportPlaylistBtn")).toBeVisible();
   await expect(page.locator("#exportPlaylistBtn")).toHaveText("Select USB first");
+});
+
+test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive", async ({ page }) => {
+  // Regression: a track imported into the media library from an MP3 folder on a
+  // USB stick gets is_usb_path=true from the backend. It is still a real,
+  // analyzable library track -- the playlist must offer "Analyze Missing Tracks"
+  // for it, not hide the button and let the backend export gate reject it later.
+  await page.addInitScript(() => {
+    window.isTauri = true;
+    window.__TAURI_INTERNALS__ = {
+      invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
+    };
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+
+    const playlists = [{
+      id: "pl-1",
+      name: "USB Import Playlist",
+      source: "local",
+      lastExportedAt: null,
+      lastExportedUsbRoot: null,
+      lastExportedTrackCount: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }];
+
+    const playlistTracks = {
+      "pl-1": [
+        {
+          id: "local-ready-entry",
+          localTrackId: "local-ready-1",
+          title: "Local Ready",
+          artist: "Artist A",
+          album: "Album A",
+          filePath: "/music/local-ready.mp3",
+          waveformPeaksPath: "/tmp/local-ready.dat",
+          waveformPreview: [10, 20, 30],
+          durationMs: 180000,
+          bpm: 128,
+          key: "8A"
+        },
+        {
+          id: "usb-import-entry",
+          localTrackId: "usb-import-1",
+          title: "USB Import",
+          artist: "Artist B",
+          album: "Album B",
+          filePath: "/USB/MP3/usb-import.mp3",
+          isUsbPath: true,
+          waveformPeaksPath: "",
+          waveformPreview: [],
+          durationMs: null,
+          bpm: null,
+          key: null
+        }
+      ]
+    };
+
+    const analyzedRequests = [];
+    const listeners = new Map();
+    const listen = async (eventName, callback) => {
+      const key = String(eventName || "");
+      const arr = listeners.get(key) || [];
+      arr.push(callback);
+      listeners.set(key, arr);
+      return () => {
+        const current = listeners.get(key) || [];
+        listeners.set(key, current.filter((fn) => fn !== callback));
+      };
+    };
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request || payload;
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "detect_external_master_db") {
+            return { ok: true, data: { found: false, path: null } };
+          }
+          if (command === "list_playlists") {
+            return { ok: true, data: { items: playlists } };
+          }
+          if (command === "get_playlist_tracks") {
+            const items = playlistTracks[request.playlistId] || [];
+            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
+            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+          }
+          if (command === "search_tracks" || command === "list_tracks") {
+            return { ok: true, data: { total: 0, items: [] } };
+          }
+          if (command === "browse_source_files") {
+            return { ok: true, data: { total: 0, items: [] } };
+          }
+          if (command === "analyze_new_tracks") {
+            analyzedRequests.push({ trackIds: request.trackIds || [] });
+            return {
+              ok: true,
+              data: { jobId: "job-mock", analyzed: (request.trackIds || []).length, failed: 0, warnings: [], items: [] }
+            };
+          }
+          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
+            return command === "get_frontend_settings"
+              ? { ok: true, data: { settings: {} } }
+              : { ok: true, data: { key: request.key, value: request.value } };
+          }
+          if (command === "resolve_playback_source") {
+            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
+          }
+          if (command === "validate_usb_root") {
+            return {
+              ok: true,
+              data: {
+                valid: false,
+                hasWriteAccess: false,
+                normalizedRoot: "",
+                hasVendorRoot: false,
+                hasContents: false,
+                hasPdb: false,
+                hasEdb: false,
+                warnings: []
+              }
+            };
+          }
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        }
+      },
+      event: { listen }
+    };
+
+    window.__playlistAnalysisTest = { analyzedRequests };
+  });
+
+  await page.goto("/");
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+
+  await expect(page.locator("#analyzePlaylistMissingBtn")).toHaveText("Analyze Missing Tracks (1)");
+  await expect(page.locator("#analyzePlaylistMissingBtn")).toBeVisible();
+  await expect(page.locator("#exportPlaylistBtn")).toBeHidden();
+
+  await page.locator("#analyzePlaylistMissingBtn").click();
+  await page.waitForFunction(() => (window.__playlistAnalysisTest?.analyzedRequests || []).length === 1);
+  const analyzedRequests = await page.evaluate(() => window.__playlistAnalysisTest.analyzedRequests);
+  expect(analyzedRequests.map((item) => item.trackIds)).toEqual([["usb-import-1"]]);
 });
 
 function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneStale } = {}) {
