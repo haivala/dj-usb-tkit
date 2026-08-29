@@ -1518,6 +1518,115 @@ fn export_to_usb_skips_missing_source_files_and_reports_warning() {
 }
 
 #[test]
+fn export_to_usb_blocks_mirror_prune_when_source_files_are_missing() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    let keep_path = media.join("Artist 1 - Keep.mp3");
+    let missing_path = media.join("Artist 2 - Missing.mp3");
+    fs::write(&keep_path, b"audio-keep").expect("write keep track");
+    fs::write(&missing_path, b"audio-missing").expect("write missing track");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let track_ids = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items
+        .into_iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    assert_eq!(track_ids.len(), 2, "expected two tracks after scan");
+
+    let playlist_name = "Mirror Missing Source Guard";
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: playlist_name.to_string(),
+    });
+    assert!(created.ok, "create failed: {created:?}");
+    let playlist_id = created.data.expect("playlist data").playlist_id;
+
+    let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: track_ids.clone(),
+        dedupe: DedupeMode::Skip,
+    });
+    assert!(add.ok, "add failed: {add:?}");
+    seed_tracks_as_analyzed(&data_dir, &track_ids);
+
+    let first_export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: true,
+            ..Default::default()
+        }),
+    });
+    assert!(
+        first_export.ok,
+        "initial mirror export failed: {first_export:?}"
+    );
+    assert_eq!(usb_playlist_track_paths(&usb, playlist_name).len(), 2);
+
+    fs::remove_file(&missing_path).expect("remove one source file before mirror re-export");
+
+    let blocked = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: true,
+            ..Default::default()
+        }),
+    });
+    assert!(
+        !blocked.ok,
+        "mirror export should fail when a source file was skipped: {blocked:?}"
+    );
+    let err = blocked.error.expect("blocked export error");
+    assert!(matches!(err.code, ErrorCode::ValidationError));
+    let details = err.details.expect("structured validation details");
+    assert_eq!(details["validationType"], "export_manifest_invariant");
+    assert!(
+        details["issues"]
+            .as_array()
+            .expect("issues array")
+            .iter()
+            .any(|issue| issue
+                .as_str()
+                .unwrap_or_default()
+                .contains("mirror export cannot safely prune"))
+    );
+    assert_eq!(
+        usb_playlist_track_paths(&usb, playlist_name).len(),
+        2,
+        "failed mirror export must leave existing USB playlist membership intact"
+    );
+}
+
+#[test]
 fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_or_artwork() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");

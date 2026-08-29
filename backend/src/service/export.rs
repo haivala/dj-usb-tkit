@@ -28,7 +28,8 @@ use super::export_helpers::{
     copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
     exported_media_target_path, exported_media_target_path_with_ordinal,
-    filter_prunable_stale_paths_for_playlist, preview_pdb, prune_stale_export_owned_files,
+    filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path,
+    normalize_owned_export_path, preview_pdb, prune_stale_export_owned_files,
     remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash, to_usb_relative_path,
     verify_edb_content, verify_edb_content_with_conn, verify_pdb_content, write_edb_playlist,
     write_edb_playlist_with_conn, write_pdb,
@@ -41,6 +42,7 @@ use super::usb_utils::{
     load_existing_analysis_paths_by_content_path_with_conn,
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
+use super::usb_vendor_compat::{USB_ANALYSIS_PREFIX, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX};
 use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, now};
 use uuid::Uuid;
 
@@ -153,10 +155,191 @@ fn existing_usb_relative_if_present(usb_root: &Path, relative: &str) -> Option<S
     }
     let abs = resolve_usb_side_path(usb_root, trimmed)?;
     if Path::new(&abs).is_file() {
-        Some(trimmed.to_string())
+        to_usb_relative_path(usb_root, &abs)
     } else {
         None
     }
+}
+
+struct ManifestValidationIssues {
+    samples: Vec<String>,
+    total: usize,
+}
+
+impl ManifestValidationIssues {
+    fn new() -> Self {
+        Self {
+            samples: Vec::new(),
+            total: 0,
+        }
+    }
+
+    fn record(&mut self, issue: String) {
+        self.total += 1;
+        if self.samples.len() < 20 {
+            self.samples.push(issue);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.total == 0
+    }
+}
+
+fn validate_manifest_path(
+    usb_root: &Path,
+    raw_path: &str,
+    label: &str,
+    track_id: &str,
+    expected_prefix: &str,
+    require_file: bool,
+    issues: &mut ManifestValidationIssues,
+) -> Option<String> {
+    let Some(normalized) = normalize_owned_export_path(usb_root, raw_path) else {
+        issues.record(format!(
+            "{label} path for track '{track_id}' is invalid: {raw_path}"
+        ));
+        return None;
+    };
+
+    if !is_safe_export_owned_path(&normalized) || !normalized.starts_with(expected_prefix) {
+        issues.record(format!(
+            "{label} path for track '{track_id}' is outside {expected_prefix}: {normalized}"
+        ));
+        return Some(normalized);
+    }
+
+    if require_file {
+        let Some(abs) = resolve_usb_side_path(usb_root, &normalized) else {
+            issues.record(format!(
+                "{label} path for track '{track_id}' does not resolve: {normalized}"
+            ));
+            return Some(normalized);
+        };
+        if !Path::new(&abs).is_file() {
+            issues.record(format!(
+                "{label} file for track '{track_id}' is missing: {normalized}"
+            ));
+        }
+    }
+
+    Some(normalized)
+}
+
+fn validate_export_manifest_before_db_write(
+    usb_root: &Path,
+    manifest: &ExportManifest,
+    require_files: bool,
+) -> BackendResult<()> {
+    let mut issues = ManifestValidationIssues::new();
+
+    if manifest.exported_tracks != manifest.tracks.len() {
+        issues.record(format!(
+            "manifest exported_tracks mismatch: counted {}, tracks array has {}",
+            manifest.exported_tracks,
+            manifest.tracks.len()
+        ));
+    }
+
+    if manifest.tracks.is_empty() {
+        issues.record("export has no exportable tracks after source-file checks".to_string());
+    }
+
+    if manifest.options.prune_stale && manifest.skipped_tracks > 0 {
+        issues.record(format!(
+            "mirror export cannot safely prune while {} playlist track(s) were skipped",
+            manifest.skipped_tracks
+        ));
+    }
+
+    let mut owner_by_media_path = HashMap::<String, String>::new();
+    for track in &manifest.tracks {
+        let media_path = validate_manifest_path(
+            usb_root,
+            &track.exported_path,
+            "media",
+            &track.id,
+            USB_CONTENTS_PREFIX,
+            require_files,
+            &mut issues,
+        );
+        if let Some(media_path) = media_path {
+            let key = media_path.to_ascii_lowercase();
+            if let Some(previous_track_id) = owner_by_media_path.get(&key) {
+                if previous_track_id != &track.id {
+                    issues.record(format!(
+                        "media path collision: tracks '{}' and '{}' both target {}",
+                        previous_track_id, track.id, media_path
+                    ));
+                }
+            } else {
+                owner_by_media_path.insert(key, track.id.clone());
+            }
+        }
+
+        if let Some(path) = track
+            .artwork_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+        {
+            validate_manifest_path(
+                usb_root,
+                path,
+                "artwork",
+                &track.id,
+                USB_ARTWORK_PREFIX,
+                require_files && track.owns_artwork,
+                &mut issues,
+            );
+        }
+
+        if let Some(path) = track
+            .waveform_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+        {
+            let analysis_path = validate_manifest_path(
+                usb_root,
+                path,
+                "analysis",
+                &track.id,
+                USB_ANALYSIS_PREFIX,
+                require_files && track.owns_waveform,
+                &mut issues,
+            );
+            if require_files
+                && track.owns_waveform
+                && let Some(analysis_path) = analysis_path
+            {
+                for variant in
+                    crate::service::export_helpers::analysis_bundle_path_variants(&analysis_path)
+                {
+                    let missing = resolve_usb_side_path(usb_root, &variant)
+                        .map(|abs| !Path::new(&abs).is_file())
+                        .unwrap_or(true);
+                    if missing {
+                        issues.record(format!(
+                            "analysis bundle file for track '{}' is missing: {variant}",
+                            track.id
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if issues.is_empty() {
+        return Ok(());
+    }
+
+    Err(BackendError::ValidationWithDetails(
+        "export blocked: manifest invariant check failed".to_string(),
+        json!({
+            "validationType": "export_manifest_invariant",
+            "issueCount": issues.total,
+            "issues": issues.samples,
+        }),
+    ))
 }
 
 fn has_required_analysis_fields(track: &ExportTrackData) -> bool {
@@ -687,6 +870,7 @@ impl BackendService {
         // Same flag `playlist_locks_reorder_on_export` (above) keys off of --
         // see that function's doc comment.
         let mirror_playlist_entries = options.prune_stale;
+        validate_export_manifest_before_db_write(&usb_root, &manifest, !export_dry_run)?;
         let skip_pdb_write = std::env::var("PDB_WRITE_MODE")
             .ok()
             .map(|v| v.eq_ignore_ascii_case("skip"))
@@ -1348,10 +1532,11 @@ mod tests {
         existing_usb_relative_if_present, has_required_analysis, has_required_analysis_fields,
         normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
         resolve_collision_free_media_target, usb_playlist_names_for_export_compare,
+        validate_export_manifest_before_db_write,
     };
-    use crate::pdb_reader::{ParsedPdb, PdbPlaylistTreeRow};
     use crate::error::BackendError;
     use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, Playlist};
+    use crate::pdb_reader::{ParsedPdb, PdbPlaylistTreeRow};
     use crate::service::export_helpers::{
         ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
     };
@@ -1721,6 +1906,30 @@ mod tests {
         assert!(existing_usb_relative_if_present(dir.path(), "   ").is_none());
     }
 
+    #[test]
+    fn existing_usb_relative_if_present_none_for_absolute_file_outside_usb_root() {
+        let usb_dir = tempdir().expect("usb dir");
+        let outside_dir = tempdir().expect("outside dir");
+        let outside_file = outside_dir.path().join("outside.mp3");
+        std::fs::write(&outside_file, b"data").expect("write outside file");
+
+        let result = existing_usb_relative_if_present(
+            usb_dir.path(),
+            outside_file.to_string_lossy().as_ref(),
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn existing_usb_relative_if_present_normalizes_pdb_relative_without_leading_slash() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("Contents")).expect("create contents dir");
+        std::fs::write(dir.path().join("Contents/track.mp3"), b"data").expect("write file");
+
+        let result = existing_usb_relative_if_present(dir.path(), "Contents/track.mp3");
+        assert_eq!(result.as_deref(), Some("/Contents/track.mp3"));
+    }
+
     // --- file_type_from_extension ---
 
     #[test]
@@ -2029,6 +2238,180 @@ mod tests {
                 .any(|w| w.code == "export.verify-analysis-missing")
         );
         assert!(warnings.iter().any(|w| w.code == "export.verify-passed"));
+    }
+
+    #[test]
+    fn manifest_validation_accepts_valid_usb_relative_assets() {
+        let usb_dir = tempdir().expect("usb dir");
+        std::fs::create_dir_all(usb_dir.path().join("Contents")).expect("create contents dir");
+        std::fs::write(usb_dir.path().join("Contents/track.mp3"), b"data").expect("write media");
+        std::fs::create_dir_all(usb_dir.path().join("PIONEER/Artwork/00001"))
+            .expect("create artwork dir");
+        std::fs::write(usb_dir.path().join("PIONEER/Artwork/00001/a1.jpg"), b"jpg")
+            .expect("write artwork");
+        std::fs::create_dir_all(usb_dir.path().join("PIONEER/USBANLZ/P001/00000001"))
+            .expect("create analysis dir");
+        for ext in ["DAT", "EXT", "2EX"] {
+            std::fs::write(
+                usb_dir
+                    .path()
+                    .join(format!("PIONEER/USBANLZ/P001/00000001/ANLZ0000.{ext}")),
+                b"anlz",
+            )
+            .expect("write analysis");
+        }
+
+        let mut track = manifest_track("/Contents/track.mp3");
+        track.owns_artwork = true;
+        track.artwork_path = Some("/PIONEER/Artwork/00001/a1.jpg".to_string());
+        track.owns_waveform = true;
+        track.waveform_path = Some("/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT".to_string());
+        let manifest = minimal_manifest(usb_dir.path(), track);
+
+        validate_export_manifest_before_db_write(usb_dir.path(), &manifest, true)
+            .expect("valid manifest should pass");
+    }
+
+    #[test]
+    fn manifest_validation_rejects_unsafe_media_path_before_db_write() {
+        let usb_dir = tempdir().expect("usb dir");
+        let track = manifest_track("../outside.mp3");
+        let manifest = minimal_manifest(usb_dir.path(), track);
+
+        let err =
+            validate_export_manifest_before_db_write(usb_dir.path(), &manifest, false).unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(msg, details) => {
+                assert!(msg.contains("manifest invariant"));
+                assert_eq!(details["validationType"], "export_manifest_invariant");
+                assert!(
+                    details["issues"]
+                        .as_array()
+                        .expect("issues array")
+                        .iter()
+                        .any(|issue| issue.as_str().unwrap_or_default().contains("media path"))
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manifest_validation_rejects_missing_media_when_files_are_required() {
+        let usb_dir = tempdir().expect("usb dir");
+        let track = manifest_track("/Contents/missing.mp3");
+        let manifest = minimal_manifest(usb_dir.path(), track);
+
+        let err =
+            validate_export_manifest_before_db_write(usb_dir.path(), &manifest, true).unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(_, details) => {
+                assert!(
+                    details["issues"]
+                        .as_array()
+                        .expect("issues array")
+                        .iter()
+                        .any(|issue| issue.as_str().unwrap_or_default().contains("media file"))
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manifest_validation_rejects_media_path_collisions_for_distinct_tracks() {
+        let usb_dir = tempdir().expect("usb dir");
+        let first = manifest_track("/Contents/Artist/track.mp3");
+        let mut second = manifest_track("/Contents/Artist/track.mp3");
+        second.id = "t2".to_string();
+        let mut manifest = minimal_manifest(usb_dir.path(), first);
+        manifest.exported_tracks = 2;
+        manifest.tracks.push(second);
+
+        let err =
+            validate_export_manifest_before_db_write(usb_dir.path(), &manifest, false).unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(_, details) => {
+                assert!(
+                    details["issues"]
+                        .as_array()
+                        .expect("issues array")
+                        .iter()
+                        .any(|issue| issue
+                            .as_str()
+                            .unwrap_or_default()
+                            .contains("media path collision"))
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manifest_validation_allows_same_track_repeated_in_playlist() {
+        let usb_dir = tempdir().expect("usb dir");
+        let first = manifest_track("/Contents/Artist/track.mp3");
+        let second = manifest_track("/Contents/Artist/track.mp3");
+        let mut manifest = minimal_manifest(usb_dir.path(), first);
+        manifest.exported_tracks = 2;
+        manifest.tracks.push(second);
+
+        validate_export_manifest_before_db_write(usb_dir.path(), &manifest, false)
+            .expect("same track repeated at the same path should remain exportable");
+    }
+
+    #[test]
+    fn manifest_validation_blocks_mirror_prune_when_tracks_were_skipped() {
+        let usb_dir = tempdir().expect("usb dir");
+        let track = manifest_track("/Contents/track.mp3");
+        let mut manifest = minimal_manifest(usb_dir.path(), track);
+        manifest.options.prune_stale = true;
+        manifest.skipped_tracks = 1;
+
+        let err =
+            validate_export_manifest_before_db_write(usb_dir.path(), &manifest, false).unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(_, details) => {
+                assert!(
+                    details["issues"]
+                        .as_array()
+                        .expect("issues array")
+                        .iter()
+                        .any(|issue| issue
+                            .as_str()
+                            .unwrap_or_default()
+                            .contains("mirror export cannot safely prune"))
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manifest_validation_rejects_empty_manifest_after_all_tracks_skipped() {
+        let usb_dir = tempdir().expect("usb dir");
+        let mut manifest = minimal_manifest(usb_dir.path(), manifest_track("/Contents/track.mp3"));
+        manifest.exported_tracks = 0;
+        manifest.skipped_tracks = 1;
+        manifest.tracks.clear();
+
+        let err =
+            validate_export_manifest_before_db_write(usb_dir.path(), &manifest, false).unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(_, details) => {
+                assert!(
+                    details["issues"]
+                        .as_array()
+                        .expect("issues array")
+                        .iter()
+                        .any(|issue| issue
+                            .as_str()
+                            .unwrap_or_default()
+                            .contains("no exportable tracks"))
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 
     // --- export_to_usb validation paths ---
