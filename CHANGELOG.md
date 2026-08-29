@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.33
+
 - **Improvement:** switching the export sync mode now updates the track-reorder lock on the
   open playlist immediately instead of waiting for the next USB scan — mirror mode unlocks
   drag/column-sort right away, and switching back to additive re-locks a playlist that

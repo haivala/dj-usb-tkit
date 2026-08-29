@@ -249,7 +249,7 @@ fn validate_topology_locked_export_bytes(before: &[u8], after: &[u8]) -> Backend
     }
 }
 
-fn canonicalize_track_path_identity(value: &str) -> String {
+pub(crate) fn canonicalize_track_path_identity(value: &str) -> String {
     let normalized = repair_utf8_mojibake(value.trim()).replace('\\', "/");
     if normalized.is_empty() {
         return String::new();

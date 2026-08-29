@@ -24,8 +24,9 @@ type ContentFingerprint = (u32, String, String);
 
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
-    WriteExportLibraryDbResult, WriteExportPdbResult, collect_manifest_owned_paths,
-    copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
+    WriteExportLibraryDbResult, WriteExportPdbResult, canonicalize_track_path_identity,
+    collect_manifest_owned_paths, copy_if_different, copy_wav_normalized_if_needed,
+    ensure_analysis_bundle_ppth,
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
     exported_media_target_path, exported_media_target_path_with_ordinal,
     filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path,
@@ -74,6 +75,22 @@ fn content_fingerprint_key(
         return None;
     }
     Some((size, title_key, canonicalize_playlist_name(artist)))
+}
+
+fn record_existing_usb_path_by_fingerprint(
+    lookup: &mut HashMap<ContentFingerprint, Option<String>>,
+    fingerprint: ContentFingerprint,
+    path: &str,
+) {
+    let path_key = canonicalize_track_path_identity(path);
+    lookup
+        .entry(fingerprint)
+        .and_modify(|existing| {
+            if existing.as_deref().map(canonicalize_track_path_identity) != Some(path_key.clone()) {
+                *existing = None;
+            }
+        })
+        .or_insert_with(|| Some(path.to_string()));
 }
 
 /// Resolves the on-disk media target path for one track within a single
@@ -569,7 +586,8 @@ impl BackendService {
         // already inside this USB's Contents tree, but the same content already is —
         // under a path this app didn't write. See `content_fingerprint_key`.
         let mut existing_usb_identity_by_path = HashMap::<String, UsbTrackIdentity>::new();
-        let mut existing_usb_path_by_fingerprint = HashMap::<ContentFingerprint, String>::new();
+        let mut existing_usb_path_by_fingerprint =
+            HashMap::<ContentFingerprint, Option<String>>::new();
         if let Ok(parsed) = usb_utils::parse_staged_pdb(&usb_root) {
             for track in &parsed.tracks {
                 let path_key = canonicalize_playlist_name(&track.track_file_path);
@@ -593,13 +611,15 @@ impl BackendService {
                     &track.title,
                     artist_name,
                 ) {
-                    // First match wins: if the USB already has more than one file
-                    // sharing this fingerprint (e.g. an earlier, still-unresolved
-                    // duplicate pair), don't thrash between them on repeated
-                    // additive exports — just stop making it worse.
-                    existing_usb_path_by_fingerprint
-                        .entry(fingerprint)
-                        .or_insert_with(|| track.track_file_path.clone());
+                    // Fingerprints are deliberately coarse. Reuse by fingerprint
+                    // only when it points at exactly one existing USB path; if
+                    // multiple same-size/same-title tracks exist, path reuse
+                    // would collapse distinct manifest rows into one DB track.
+                    record_existing_usb_path_by_fingerprint(
+                        &mut existing_usb_path_by_fingerprint,
+                        fingerprint,
+                        &track.track_file_path,
+                    );
                 }
             }
         }
@@ -682,7 +702,9 @@ impl BackendService {
                             &track.title,
                             &track.artist,
                         )?;
-                        let candidate = existing_usb_path_by_fingerprint.get(&fingerprint)?;
+                        let candidate = existing_usb_path_by_fingerprint
+                            .get(&fingerprint)
+                            .and_then(|path| path.as_deref())?;
                         if computed_target_relative
                             .as_deref()
                             .map(canonicalize_playlist_name)
@@ -1527,10 +1549,11 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendService, compute_playlist_usb_export_status, content_fingerprint_key,
-        ensure_playlist_tracks_analysis_ready, existing_usb_relative_if_file,
-        existing_usb_relative_if_present, has_required_analysis, has_required_analysis_fields,
-        normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
+        BackendService, ContentFingerprint, compute_playlist_usb_export_status,
+        content_fingerprint_key, ensure_playlist_tracks_analysis_ready,
+        existing_usb_relative_if_file, existing_usb_relative_if_present, has_required_analysis,
+        has_required_analysis_fields, normalize_playlist_name_for_compare,
+        playlist_locks_reorder_on_export, record_existing_usb_path_by_fingerprint,
         resolve_collision_free_media_target, usb_playlist_names_for_export_compare,
         validate_export_manifest_before_db_write,
     };
@@ -1759,6 +1782,40 @@ mod tests {
         assert_ne!(
             base,
             content_fingerprint_key(Some(1234), "Title", "Other").unwrap()
+        );
+    }
+
+    #[test]
+    fn existing_usb_fingerprint_lookup_marks_duplicate_fingerprints_ambiguous() {
+        let fingerprint = content_fingerprint_key(Some(1234), "Title", "Artist").unwrap();
+        let mut lookup = HashMap::<ContentFingerprint, Option<String>>::new();
+
+        record_existing_usb_path_by_fingerprint(
+            &mut lookup,
+            fingerprint.clone(),
+            "/Contents/Artist/Title A.mp3",
+        );
+        assert_eq!(
+            lookup.get(&fingerprint).and_then(|path| path.as_deref()),
+            Some("/Contents/Artist/Title A.mp3")
+        );
+
+        record_existing_usb_path_by_fingerprint(
+            &mut lookup,
+            fingerprint.clone(),
+            "/Contents/Artist/Title B.mp3",
+        );
+        assert_eq!(lookup.get(&fingerprint), Some(&None));
+
+        record_existing_usb_path_by_fingerprint(
+            &mut lookup,
+            fingerprint.clone(),
+            "/Contents/Artist/Title A.mp3",
+        );
+        assert_eq!(
+            lookup.get(&fingerprint),
+            Some(&None),
+            "ambiguous fingerprints must stay disabled rather than flipping between paths"
         );
     }
 
