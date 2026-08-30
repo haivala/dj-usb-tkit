@@ -1168,6 +1168,44 @@ pub struct InspectUsbTracksData {
     pub warnings: Vec<WarningEntry>,
 }
 
+/// One paginated/searched/sorted page of a USB playlist or history session,
+/// with waveform-preview bytes + artwork data URLs already hydrated server-side.
+/// See the "Paginated track lists" envelope in `docs/COMMANDS.md`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchUsbTracksRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    /// `UsbPlaylist.id` or `UsbHistory.id`, depending on the command.
+    pub id: String,
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub sort_by: Option<String>,
+    #[serde(default)]
+    pub sort_dir: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// `0` ⇒ the whole (filtered) list.
+    #[serde(default)]
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchUsbTracksData {
+    pub items: Vec<UsbTrack>,
+    /// Count matching `query`, before pagination.
+    pub total: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+    /// Sum over the whole filtered list, not just the page.
+    pub total_duration_ms: u64,
+    pub duration_known_count: usize,
+    pub warnings: Vec<WarningEntry>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzeNewTracksRequest {

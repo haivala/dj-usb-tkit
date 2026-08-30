@@ -672,6 +672,49 @@ export function createMockInvoke({ state, normalizePath, constants }) {
       };
     }
 
+    if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") {
+      const req = payload?.request || {};
+      const listCmd = command === "fetch_usb_playlist_tracks" ? "fetch_usb_playlists" : "fetch_usb_histories";
+      const list = await invoke(listCmd, {});
+      const src = (list?.data?.items || []).find((x) => x.id === req.id);
+      if (!src) return { ok: false, error: { code: "NOT_FOUND", message: `not found: ${req.id}` } };
+      let rows = withDerivedFields(src.tracks || []).map((t, i) => ({
+        ...t,
+        id: t.id || String(i),
+        // "hydrated" page fields the list command omits
+        waveformPreview: t.waveformPreview || [10, 40, 80, 30],
+        artworkDataUrl: t.artworkDataUrl || null
+      }));
+      const q = String(req.query || "").trim().toLowerCase();
+      if (q) rows = rows.filter((t) => `${t.title || ""} ${t.artist || ""} ${t.album || ""}`.toLowerCase().includes(q));
+      if (req.sortBy) {
+        const dir = req.sortDir === "desc" ? -1 : 1;
+        const val = (t) => req.sortBy === "bpm" || req.sortBy === "durationMs"
+          ? Number(t[req.sortBy] || 0)
+          : String(t[req.sortBy === "format" ? "formatExt" : req.sortBy] || "").toLowerCase();
+        rows = [...rows].sort((a, b) => (val(a) < val(b) ? -dir : val(a) > val(b) ? dir : 0));
+      }
+      const total = rows.length;
+      const totalDurationMs = rows.reduce((s, t) => s + (Number(t.durationMs) > 0 ? Number(t.durationMs) : 0), 0);
+      const durationKnownCount = rows.filter((t) => Number(t.durationMs) > 0).length;
+      const offset = Number(req.cursor || 0);
+      const limit = Number(req.limit || 0) || total;
+      const page = rows.slice(offset, offset + limit);
+      const nextOffset = offset + page.length;
+      return {
+        ok: true,
+        data: {
+          items: page,
+          total,
+          hasMore: nextOffset < total,
+          nextCursor: nextOffset < total ? String(nextOffset) : null,
+          totalDurationMs,
+          durationKnownCount,
+          warnings: []
+        }
+      };
+    }
+
     if (command === "remove_usb_playlist") {
       return {
         ok: true,

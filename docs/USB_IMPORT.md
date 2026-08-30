@@ -45,23 +45,23 @@ real install path exists to check there.
 
 See `external_master_db_candidates` in `backend/src/service/usb_utils.rs`.
 
-The import service deliberately favors responsiveness over eager payload loading. `fetch_usb_playlists` and `fetch_usb_histories` focus on metadata and membership, while expensive payload hydration (waveform preview bytes, artwork data URLs) is deferred. This keeps initial USB imports fast on large drives.
+The import service deliberately favors responsiveness over eager payload loading. `fetch_usb_playlists` and `fetch_usb_histories` resolve the playlist/history **list** and its counts, not per-track payloads. Expensive per-track hydration (waveform preview bytes, artwork data URLs) is deferred and paid one page at a time.
 
-Hydration is explicitly split into two surfaces:
+Hydration is split into two surfaces, both server-side:
 
-- list commands return track rows with path metadata and optional preview fields often unset
-- `inspect_usb_track`/`inspect_usb_tracks` perform detailed hydration (waveform/BPM/key/artwork)
-  when the UI needs it
+- `fetch_usb_playlists` / `fetch_usb_histories` return the list of playlists/sessions with
+  metadata + counts.
+- `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks` return one
+  paginated/searched/sorted page of a selected list's tracks, with waveform/artwork **hydrated
+  for that page only** (see the "Paginated track lists" envelope in `docs/COMMANDS.md`). The
+  frontend renders the page directly.
 
-This split also keeps table scrolling and batch rendering predictable because the UI can hydrate only visible rows rather than all imported rows.
+This keeps table scrolling predictable because only the visible page pays the hydration I/O,
+and filtering/sorting run over the whole list server-side rather than only the loaded rows.
 
-Selecting a playlist or history session hydrates its tracks through `inspect_usb_tracks`, the
-batched form of `inspect_usb_track`: instead of one backend call per track — each re-parsing the
-PDB and re-opening/re-keying the SQLCipher eDB connection from scratch — it hydrates a chunk of
-tracks per call, parsing the PDB and opening the eDB once per chunk. The frontend issues chunks
-sequentially and stops issuing further chunks (and patching already-fetched rows into the UI) the
-moment the user selects a different playlist/history, so switching away mid-load doesn't waste
-backend work on a stale selection.
+`inspect_usb_track` (singular) survives for the resolve-one-row-before-playback path.
+`inspect_usb_tracks` (batch) is retained for compatibility but the paginated fetch commands
+have replaced its use as the list-selection hydration path.
 
 Parser hardening includes compatibility behavior observed in real exports:
 

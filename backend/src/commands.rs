@@ -10,7 +10,8 @@ use crate::models::{
     CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
     DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData,
     ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
+    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
+    GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, GetUsbDeviceNameData,
     GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
     InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
@@ -379,6 +380,20 @@ impl BackendCommands {
         req: InspectUsbTracksRequest,
     ) -> ApiResponse<InspectUsbTracksData> {
         wrap(self.service.inspect_usb_tracks(req))
+    }
+
+    pub fn fetch_usb_playlist_tracks(
+        &self,
+        req: FetchUsbTracksRequest,
+    ) -> ApiResponse<FetchUsbTracksData> {
+        wrap(self.service.fetch_usb_playlist_tracks(req))
+    }
+
+    pub fn fetch_usb_history_tracks(
+        &self,
+        req: FetchUsbTracksRequest,
+    ) -> ApiResponse<FetchUsbTracksData> {
+        wrap(self.service.fetch_usb_history_tracks(req))
     }
 
     pub fn analyze_new_tracks(

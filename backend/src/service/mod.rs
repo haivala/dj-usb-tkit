@@ -3376,11 +3376,59 @@ struct TrackPageCursor {
     id: String,
 }
 
-fn build_track_cursor_signature(parts: &[&str]) -> String {
+pub(crate) fn build_track_cursor_signature(parts: &[&str]) -> String {
     let joined = parts.join("|");
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     joined.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+/// Offset-based page cursor for the fully-in-memory list producers (the USB
+/// per-list track commands): the source list is rebuilt deterministically per
+/// request, so a plain offset is a stable boundary. Bound to its query/sort by
+/// `signature` -- a stale cursor is rejected, and the frontend restarts from
+/// page 1.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OffsetPageCursor {
+    version: String,
+    signature: String,
+    offset: usize,
+}
+
+pub(crate) fn encode_offset_cursor(signature: &str, offset: usize) -> String {
+    let payload = OffsetPageCursor {
+        version: TRACK_CURSOR_VERSION.to_string(),
+        signature: signature.to_string(),
+        offset,
+    };
+    let json = serde_json::to_vec(&payload).unwrap_or_default();
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json)
+}
+
+pub(crate) fn decode_offset_cursor(
+    raw_cursor: Option<&str>,
+    expected_signature: &str,
+) -> BackendResult<Option<usize>> {
+    let raw = match raw_cursor {
+        Some(value) if !value.trim().is_empty() => value.trim(),
+        _ => return Ok(None),
+    };
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(raw)
+        .map_err(|_| BackendError::Validation("invalid cursor token".to_string()))?;
+    let cursor: OffsetPageCursor = serde_json::from_slice(&decoded)
+        .map_err(|_| BackendError::Validation("invalid cursor payload".to_string()))?;
+    if cursor.version != TRACK_CURSOR_VERSION {
+        return Err(BackendError::Validation(
+            "unsupported cursor version".to_string(),
+        ));
+    }
+    if cursor.signature != expected_signature {
+        return Err(BackendError::Validation(
+            "cursor does not match current query".to_string(),
+        ));
+    }
+    Ok(Some(cursor.offset))
 }
 
 fn encode_track_page_cursor(signature: &str, file_path: &str, id: &str) -> Option<String> {

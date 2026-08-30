@@ -15,11 +15,11 @@ use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
     FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTrackResult,
-    InspectUsbTracksData, InspectUsbTracksRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts,
-    UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest,
-    WarningEntry,
+    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, InspectUsbTrackData,
+    InspectUsbTrackRequest, InspectUsbTrackResult, InspectUsbTracksData, InspectUsbTracksRequest,
+    RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, ReorderUsbPlaylistsData,
+    ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts, UsbImportStats, UsbPlaylist, UsbTrack,
+    ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry,
 };
 use crate::pdb_reader::{
     ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, count_pdb_playlists, parse_pdb,
@@ -268,6 +268,120 @@ fn sum_usb_track_durations(tracks: &[UsbTrack]) -> (u64, usize) {
         }
     }
     (total_ms, known_count)
+}
+
+fn usb_track_matches_query(track: &UsbTrack, query_lower: &str) -> bool {
+    track.title.to_lowercase().contains(query_lower)
+        || track.artist.to_lowercase().contains(query_lower)
+        || track
+            .album
+            .as_deref()
+            .map(|album| album.to_lowercase().contains(query_lower))
+            .unwrap_or(false)
+}
+
+/// Stable in-place sort mirroring `sort_tracks` (`service::mod`) and the
+/// frontend `sortTracks`, for `UsbTrack`. Unknown/absent `sort_by` leaves the
+/// caller's order (PDB entry order) untouched.
+fn sort_usb_tracks(items: &mut [UsbTrack], sort_by: Option<&str>, sort_dir: Option<&str>) {
+    let Some(key) = sort_by.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let desc = matches!(sort_dir.map(str::trim), Some("desc"));
+    let ci = |value: &str| value.to_lowercase();
+    items.sort_by(|a, b| {
+        let ord = match key {
+            "title" => ci(&a.title).cmp(&ci(&b.title)),
+            "artist" => ci(&a.artist)
+                .cmp(&ci(&b.artist))
+                .then_with(|| ci(&a.title).cmp(&ci(&b.title))),
+            "album" => ci(a.album.as_deref().unwrap_or_default())
+                .cmp(&ci(b.album.as_deref().unwrap_or_default())),
+            "format" => ci(a.format_ext.as_deref().unwrap_or_default())
+                .cmp(&ci(b.format_ext.as_deref().unwrap_or_default())),
+            "bpm" => a
+                .bpm
+                .unwrap_or(0.0)
+                .partial_cmp(&b.bpm.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal),
+            "durationMs" => a.duration_ms.unwrap_or(0).cmp(&b.duration_ms.unwrap_or(0)),
+            "key" => ci(a.key.as_deref().unwrap_or_default())
+                .cmp(&ci(b.key.as_deref().unwrap_or_default())),
+            _ => std::cmp::Ordering::Equal,
+        };
+        if desc { ord.reverse() } else { ord }
+    });
+}
+
+/// Fills in the expensive payload fields (waveform-preview bytes, artwork data
+/// URL) on an already-resolved cheap `UsbTrack`. Called only for the tracks on
+/// the returned page.
+fn hydrate_usb_track_in_place(track: &mut UsbTrack) {
+    if track.waveform_preview.is_none() {
+        track.waveform_preview = track
+            .usb_analysis_path
+            .as_deref()
+            .and_then(load_waveform_preview_from_analysis_path);
+    }
+    if track.artwork_data_url.is_none() {
+        track.artwork_data_url = track.artwork_path.as_deref().and_then(artwork_path_to_data_url);
+    }
+}
+
+/// Filter → whole-list aggregates → sort → offset-slice → hydrate the page.
+/// Shared by `fetch_usb_playlist_tracks` and `fetch_usb_history_tracks`.
+fn paginate_and_hydrate_usb_tracks(
+    command: &str,
+    scope_id: &str,
+    mut tracks: Vec<UsbTrack>,
+    req: &crate::models::FetchUsbTracksRequest,
+    warnings: Vec<WarningEntry>,
+) -> BackendResult<crate::models::FetchUsbTracksData> {
+    let query = req.query.trim().to_lowercase();
+    if !query.is_empty() {
+        tracks.retain(|track| usb_track_matches_query(track, &query));
+    }
+    let (total_duration_ms, duration_known_count) = sum_usb_track_durations(&tracks);
+    let total = tracks.len();
+
+    sort_usb_tracks(&mut tracks, req.sort_by.as_deref(), req.sort_dir.as_deref());
+
+    let sort_by = req.sort_by.as_deref().map(str::trim).unwrap_or_default();
+    let sort_dir = req.sort_dir.as_deref().map(str::trim).unwrap_or_default();
+    let signature = super::build_track_cursor_signature(&[
+        "track_cursor_v1",
+        command,
+        scope_id,
+        &query,
+        sort_by,
+        sort_dir,
+    ]);
+    let start = super::decode_offset_cursor(req.cursor.as_deref(), &signature)?.unwrap_or(0);
+    let start = start.min(total);
+    let limit = if req.limit == 0 {
+        total.saturating_sub(start).max(1)
+    } else {
+        req.limit.clamp(1, 5000)
+    };
+
+    let mut page: Vec<UsbTrack> = tracks.into_iter().skip(start).take(limit).collect();
+    let next_offset = start + page.len();
+    let has_more = next_offset < total;
+    let next_cursor = has_more.then(|| super::encode_offset_cursor(&signature, next_offset));
+
+    for track in &mut page {
+        hydrate_usb_track_in_place(track);
+    }
+
+    Ok(crate::models::FetchUsbTracksData {
+        items: page,
+        total,
+        next_cursor,
+        has_more,
+        total_duration_ms,
+        duration_known_count,
+        warnings,
+    })
 }
 
 fn build_history_track_date_index(
@@ -2039,6 +2153,64 @@ impl BackendService {
 
         Ok(InspectUsbTracksData { items, warnings })
     }
+
+    /// One paginated/searched/sorted page of a USB playlist's tracks, with the
+    /// waveform-preview bytes + artwork data URLs hydrated server-side for that
+    /// page. The playlist list (`fetch_usb_playlists`) is resolved once here to
+    /// get the ordered cheap-metadata track list; only the returned page pays
+    /// the per-track hydration I/O.
+    pub fn fetch_usb_playlist_tracks(
+        &self,
+        req: FetchUsbTracksRequest,
+    ) -> BackendResult<FetchUsbTracksData> {
+        let all = self.fetch_usb_playlists_with_progress(
+            FetchUsbPlaylistsRequest {
+                usb_root: req.usb_root.clone(),
+            },
+            |_, _, _| {},
+        )?;
+        let playlist = all
+            .items
+            .into_iter()
+            .find(|playlist| playlist.id == req.id)
+            .ok_or_else(|| {
+                BackendError::NotFound(format!("USB playlist not found: {}", req.id))
+            })?;
+        paginate_and_hydrate_usb_tracks(
+            "fetch_usb_playlist_tracks",
+            &req.id,
+            playlist.tracks,
+            &req,
+            all.warnings,
+        )
+    }
+
+    /// USB-history counterpart to `fetch_usb_playlist_tracks`.
+    pub fn fetch_usb_history_tracks(
+        &self,
+        req: FetchUsbTracksRequest,
+    ) -> BackendResult<FetchUsbTracksData> {
+        let all = self.fetch_usb_histories_with_progress(
+            FetchUsbHistoriesRequest {
+                usb_root: req.usb_root.clone(),
+            },
+            |_, _, _| {},
+        )?;
+        let history = all
+            .items
+            .into_iter()
+            .find(|history| history.id == req.id)
+            .ok_or_else(|| {
+                BackendError::NotFound(format!("USB history not found: {}", req.id))
+            })?;
+        paginate_and_hydrate_usb_tracks(
+            "fetch_usb_history_tracks",
+            &req.id,
+            history.tracks,
+            &req,
+            all.warnings,
+        )
+    }
 }
 
 /// Hints used to disambiguate PDB rows that share a track id (rare, but the
@@ -3282,6 +3454,100 @@ mod tests {
         // duration, so two tracks should sum to 400_000ms with both known.
         assert_eq!(result.items[0].total_duration_ms, 400_000);
         assert_eq!(result.items[0].duration_known_count, 2);
+    }
+
+    #[test]
+    fn fetch_usb_playlist_tracks_paginates_filters_sorts_and_hydrates_the_page() {
+        let (_dir, usb_root) = seeded_playlist_usb_with_tracks(&[
+            ("t1", "Charlie", "c.mp3"),
+            ("t2", "Alpha", "a.flac"),
+            ("t3", "Bravo", "b.wav"),
+        ]);
+        let (_dir2, service) = test_service();
+        let root = usb_root.to_string_lossy().to_string();
+        let list = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(root.clone()),
+            })
+            .expect("fetch playlists");
+        let playlist_id = list.items[0].id.clone();
+
+        let req = |over: crate::models::FetchUsbTracksRequest| crate::models::FetchUsbTracksRequest {
+            usb_root: Some(root.clone()),
+            id: playlist_id.clone(),
+            ..over
+        };
+
+        // Page 1 of 2 in PDB entry order; whole-list totals.
+        let page1 = service
+            .fetch_usb_playlist_tracks(req(crate::models::FetchUsbTracksRequest {
+                limit: 2,
+                ..Default::default()
+            }))
+            .expect("page 1");
+        assert_eq!(page1.total, 3);
+        assert_eq!(page1.items.len(), 2);
+        assert!(page1.has_more);
+        assert_eq!(page1.total_duration_ms, 600_000);
+        // The page is hydrated: format is populated (from Stage A) ...
+        assert_eq!(page1.items[0].format_ext.as_deref(), Some("mp3"));
+
+        let page2 = service
+            .fetch_usb_playlist_tracks(req(crate::models::FetchUsbTracksRequest {
+                limit: 2,
+                cursor: page1.next_cursor.clone(),
+                ..Default::default()
+            }))
+            .expect("page 2");
+        assert_eq!(page2.items.len(), 1);
+        assert!(!page2.has_more);
+
+        // Server-side title sort spans the whole playlist.
+        let sorted = service
+            .fetch_usb_playlist_tracks(req(crate::models::FetchUsbTracksRequest {
+                sort_by: Some("title".to_string()),
+                ..Default::default()
+            }))
+            .expect("sorted");
+        assert_eq!(
+            sorted.items.iter().map(|t| t.title.clone()).collect::<Vec<_>>(),
+            ["Alpha", "Bravo", "Charlie"]
+        );
+
+        // A cursor is rejected once the sort changes.
+        let err = service
+            .fetch_usb_playlist_tracks(req(crate::models::FetchUsbTracksRequest {
+                cursor: page1.next_cursor,
+                sort_by: Some("title".to_string()),
+                ..Default::default()
+            }))
+            .unwrap_err();
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+
+        // Query filters server-side.
+        let filtered = service
+            .fetch_usb_playlist_tracks(req(crate::models::FetchUsbTracksRequest {
+                query: "alph".to_string(),
+                ..Default::default()
+            }))
+            .expect("filtered");
+        assert_eq!(filtered.total, 1);
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].title, "Alpha");
+    }
+
+    #[test]
+    fn fetch_usb_playlist_tracks_rejects_unknown_playlist_id() {
+        let (_dir, usb_root) = seeded_playlist_usb();
+        let (_dir2, service) = test_service();
+        let err = service
+            .fetch_usb_playlist_tracks(crate::models::FetchUsbTracksRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+                id: "usb-pl-does-not-exist".to_string(),
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert!(matches!(err, crate::error::BackendError::NotFound(_)));
     }
 
     #[test]

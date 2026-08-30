@@ -105,6 +105,8 @@ drive selection from being rendered against a newer selected drive.
 - `merge_orphaned_usb_placeholder_tracks`
 - `fetch_usb_playlists`
 - `fetch_usb_histories`
+- `fetch_usb_playlist_tracks`
+- `fetch_usb_history_tracks`
 - `get_usb_player_menu_config`
 - `update_usb_player_menu_config`
 - `sync_usb_player_menu_edb_to_pdb`
@@ -129,7 +131,16 @@ best-effort `suggestedName` drawn from the OS filesystem label when the drive is
 
 `inspect_usb_tracks` is the batched form of `inspect_usb_track`: it hydrates waveform/BPM/
 key/artwork metadata for a chunk of USB tracks in one call (parsing the PDB and opening the eDB
-once per chunk) instead of one backend call per track.
+once per chunk) instead of one backend call per track. It is now used only for the
+resolve-one-row-before-playback path.
+
+`fetch_usb_playlist_tracks` / `fetch_usb_history_tracks` return one
+paginated/searched/sorted page of a selected USB playlist or history session
+(see the "Paginated track lists" envelope above), with the waveform-preview
+bytes and artwork data URLs already hydrated server-side **for that page only** —
+the frontend renders the page directly, no follow-up hydration round-trip.
+`fetch_usb_playlists` / `fetch_usb_histories` still resolve the playlist/session
+list and its counts.
 
 `list_usb_backups`/`restore_usb_backup`/`delete_usb_backup` back the Backups panel described in
 `docs/USB_EXPORT.md`'s "Backup" section — listing, restoring, and deleting the timestamped

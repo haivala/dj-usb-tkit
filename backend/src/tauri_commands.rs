@@ -17,7 +17,8 @@ use crate::models::{
     CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
     DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData,
     ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, GetFrontendSettingsData, GetPlaylistTracksData,
+    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
+    GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, GetUsbDeviceNameData,
     GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
     InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
@@ -1134,6 +1135,30 @@ pub async fn inspect_usb_tracks(
     let commands = state.inner().clone();
     Ok(run_blocking_command("inspect_usb_tracks", move || {
         commands.inspect_usb_tracks(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn fetch_usb_playlist_tracks(
+    state: State<'_, BackendCommands>,
+    request: FetchUsbTracksRequest,
+) -> Result<ApiResponse<FetchUsbTracksData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("fetch_usb_playlist_tracks", move || {
+        commands.fetch_usb_playlist_tracks(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn fetch_usb_history_tracks(
+    state: State<'_, BackendCommands>,
+    request: FetchUsbTracksRequest,
+) -> Result<ApiResponse<FetchUsbTracksData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("fetch_usb_history_tracks", move || {
+        commands.fetch_usb_history_tracks(request)
     })
     .await)
 }
