@@ -27,7 +27,19 @@ function computeMockPlaylistUsbExportStatus(localPlaylists, usbPlaylistNames, pr
 const mockAnalysisReady = (t) => !!t?.waveformPeaksPath
   && Number(t?.bpm || 0) > 0
   && Number(t?.durationMs || 0) > 0;
-const withAnalysisReady = (items) => (items || []).map((t) => ({ ...t, analysisReady: mockAnalysisReady(t) }));
+// Mirrors the backend's format_ext_from_path fallback (backend/src/utils.rs):
+// every track-returning command guarantees formatExt on the wire.
+const mockFormatExt = (t) => {
+  if (t?.formatExt) return String(t.formatExt).toLowerCase();
+  const m = String(t?.filePath || "").match(/\.([a-zA-Z0-9]+)$/);
+  return m ? m[1].toLowerCase() : null;
+};
+const withDerivedFields = (items) => (items || []).map((t) => ({
+  ...t,
+  analysisReady: mockAnalysisReady(t),
+  formatExt: mockFormatExt(t)
+}));
+const withAnalysisReady = withDerivedFields;
 
 export function createMockInvoke({ state, normalizePath, constants }) {
   const { LIBRARY_LOAD_LIMIT_DEFAULT, LIBRARY_LOAD_LIMIT_POST_SCAN } = constants;
@@ -328,7 +340,7 @@ export function createMockInvoke({ state, normalizePath, constants }) {
         key: req.key || null,
         filePath,
         fileSizeBytes: req.fileSizeBytes || null,
-        formatExt: req.formatExt || null,
+        formatExt: mockFormatExt({ formatExt: req.formatExt, filePath }),
         sampleRateHz: req.sampleRateHz || null,
         bitDepth: req.bitDepth || null,
         bitrateKbps: req.bitrateKbps || null,
@@ -590,8 +602,8 @@ export function createMockInvoke({ state, normalizePath, constants }) {
               source: "mock",
               trackCount: 2,
               tracks: [
-                { title: "Track A", artist: "Artist 1", album: "Album X", bpm: 124, key: "8A" },
-                { title: "Track D", artist: "Artist 4", album: "Album Z", bpm: 126, key: "10A" }
+                { title: "Track A", artist: "Artist 1", album: "Album X", bpm: 124, key: "8A", filePath: "/Contents/Artist 1/Track A.mp3", formatExt: "mp3" },
+                { title: "Track D", artist: "Artist 4", album: "Album Z", bpm: 126, key: "10A", filePath: "/Contents/Artist 4/Track D.aiff", formatExt: "aiff" }
               ]
             }
           ],
@@ -620,7 +632,7 @@ export function createMockInvoke({ state, normalizePath, constants }) {
               name: "History 2026-02-20",
               createdAt: "2026-02-20 22:10",
               tracks: [
-                { title: "Track A", artist: "Artist 1", album: "Album X", bpm: 124, key: "8A" }
+                { title: "Track A", artist: "Artist 1", album: "Album X", bpm: 124, key: "8A", filePath: "/Contents/Artist 1/Track A.mp3", formatExt: "mp3" }
               ]
             }
           ],
@@ -916,7 +928,8 @@ export function createMockInvoke({ state, normalizePath, constants }) {
             album: "Mock Album",
             bpm: 128,
             key: "8A",
-            filePath: "",
+            filePath: "/Contents/Mock Artist/Mock USB Track.mp3",
+            formatExt: "mp3",
             artworkPath: null,
             artworkDataUrl: null,
             waveformPeaksPath: null,

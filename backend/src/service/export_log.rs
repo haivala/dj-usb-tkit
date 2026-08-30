@@ -364,6 +364,7 @@ mod tests {
             bpm: None,
             key: None,
             file_path: usb_media_path.to_string(),
+            format_ext: crate::utils::format_ext_from_path(usb_media_path),
             usb_media_path: Some(usb_media_path.to_string()),
             artwork_path: None,
             artwork_data_url: None,

@@ -111,10 +111,7 @@ pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTra
                 tonality: meta.tonality,
                 file_size_bytes: i64::try_from(metadata.len()).ok(),
                 file_modified_at: modified,
-                format_ext: path
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .map(|s| s.to_ascii_lowercase()),
+                format_ext: crate::utils::format_ext_from_path(&path.to_string_lossy()),
                 sample_rate_hz,
                 bit_depth,
                 bitrate_kbps,
@@ -669,6 +666,7 @@ mod tests {
         assert_eq!(track.track_number, Some(3));
         assert!(track.file_size_bytes.unwrap() > 0);
         assert!(track.file_modified_at.is_some());
+        assert_eq!(track.format_ext.as_deref(), Some("wav"));
     }
 
     // --- unique_paths ---

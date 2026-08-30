@@ -1276,6 +1276,7 @@ impl BackendService {
                         duration_ms = COALESCE(duration_ms, ?6),
                         waveform_peaks_path = COALESCE(?7, waveform_peaks_path),
                         artwork_path = COALESCE(?8, artwork_path),
+                        format_ext = COALESCE(format_ext, ?12),
                         match_fingerprint = ?9,
                         master_db_source = 1,
                         updated_at = ?10
@@ -1295,17 +1296,18 @@ impl BackendService {
                         artwork_path,
                         fingerprint,
                         now,
-                        track_id
+                        track_id,
+                        crate::utils::format_ext_from_path(&t.file_path)
                     ],
                 )?;
                 updated += 1;
             } else {
                 tx.execute(
                     r#"INSERT INTO tracks (
-                        id, title, artist, album, bpm, tonality, file_path,
+                        id, title, artist, album, bpm, tonality, file_path, format_ext,
                         duration_ms, waveform_peaks_path, artwork_path, match_fingerprint,
                         master_db_source, created_at, updated_at
-                       ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?12)"#,
+                       ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13)"#,
                     params![
                         track_id,
                         t.title,
@@ -1318,6 +1320,7 @@ impl BackendService {
                         t.bpm,
                         t.tonality,
                         t.file_path,
+                        crate::utils::format_ext_from_path(&t.file_path),
                         t.duration_ms,
                         waveform_path,
                         artwork_path,
@@ -1901,10 +1904,13 @@ impl BackendService {
             let trimmed = value.trim().to_string();
             (!trimmed.is_empty()).then_some(trimmed)
         });
-        let format_ext = req.format_ext.and_then(|value| {
-            let trimmed = value.trim().to_string();
-            (!trimmed.is_empty()).then_some(trimmed)
-        });
+        let format_ext = req
+            .format_ext
+            .and_then(|value| {
+                let trimmed = value.trim().to_string();
+                (!trimmed.is_empty()).then_some(trimmed)
+            })
+            .or_else(|| crate::utils::format_ext_from_path(file_path));
         let key = req.key.and_then(|value| {
             let trimmed = value.trim().to_string();
             (!trimmed.is_empty()).then_some(trimmed)
@@ -3047,6 +3053,7 @@ fn check_node_available() -> bool {
 }
 
 fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Result<Track> {
+    let file_path: String = row.get(7)?;
     let artwork_path: Option<String> = row.get(14)?;
     let waveform_peaks_path: Option<String> = row.get(15)?;
     let bpm_analyzer: Option<String> = row.get(16)?;
@@ -3095,9 +3102,14 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
         bpm,
         bpm_analyzer,
         key: row.get(6)?,
-        file_path: row.get(7)?,
         file_size_bytes: row.get(8)?,
-        format_ext: row.get(9)?,
+        // Backend-owned: every track-returning command guarantees a format on
+        // the wire. Fall back to the file-path extension for legacy NULL rows
+        // and import paths that don't set the column (master.db, USB merge).
+        format_ext: row
+            .get::<_, Option<String>>(9)?
+            .or_else(|| crate::utils::format_ext_from_path(&file_path)),
+        file_path,
         sample_rate_hz: row.get(10)?,
         bit_depth: row.get(11)?,
         bitrate_kbps: row.get(12)?,
@@ -4712,6 +4724,54 @@ mod tests {
         let by_id = |id: &str| result.items.iter().find(|t| t.id == id).unwrap().analysis_ready;
         assert!(by_id("ready"));
         assert!(!by_id("missing"));
+    }
+
+    #[test]
+    fn track_rows_derive_format_ext_from_path_when_the_column_is_null() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        // master.db import path leaves format_ext NULL.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, master_db_source, created_at, updated_at)
+             VALUES ('m1', 'Song', 'Artist', '/master/Artist/Song.FLAC', ?1, 1, datetime('now'), datetime('now'))",
+            params![build_track_match_fingerprint("Song", "Artist", None)],
+        )
+        .expect("insert null-format row");
+        drop(conn);
+
+        let browsed = service
+            .browse_source_files(BrowseSourceFilesRequest {
+                source_roots: Vec::new(),
+                include_master_db: true,
+                query: String::new(),
+                limit: 100,
+                cursor: None,
+            })
+            .expect("browse source files");
+        assert_eq!(
+            browsed.items.iter().find(|t| t.id == "m1").unwrap().format_ext.as_deref(),
+            Some("flac"),
+            "row_to_track must fall back to the file-path extension"
+        );
+
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
+            .expect("create playlist");
+        service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["m1".to_string()],
+                dedupe: DedupeMode::Allow,
+            })
+            .expect("add track");
+        let tracks = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id,
+            })
+            .expect("get playlist tracks");
+        assert_eq!(tracks.items[0].format_ext.as_deref(), Some("flac"));
     }
 
     #[test]

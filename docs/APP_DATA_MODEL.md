@@ -12,6 +12,8 @@ Represents a local library track. Core fields include identity, display metadata
 
 `isUsbPath` is derived, not stored: every command that returns `Track` rows to the frontend (`list_tracks`, `search_tracks`, `get_tracks_by_ids_with_previews`, `get_playlist_tracks`, `browse_source_files`) computes it fresh via `apply_is_usb_path`, matching `file_path` against every known USB device root in the `usb_devices` registry (including pruned ones — same `untainted_usb_root_paths`/`browse_path_matches_root` logic `resolve_playback_source` already uses for playback safety). This replaced a frontend heuristic that only checked the currently-selected USB root.
 
+`formatExt` is always populated on the wire, never inferred by the frontend. The scanner sets it from the file extension at index time; `row_to_track` falls back to `utils::format_ext_from_path(file_path)` for rows whose column is `NULL` (legacy rows, master.db import, USB placeholder merge). `UsbTrack` carries the same field, derived from the PDB track path. This replaced a frontend `describeTrackFormat` path-inference branch.
+
 ### Playlist and PlaylistTrack
 
 `Playlist` is the user-managed container. `PlaylistTrack` stores ordered membership and position within the playlist.
@@ -22,7 +24,7 @@ These entities represent USB-side discovered state:
 
 - connected USB root and identity
 - imported playlist and history metadata
-- USB track metadata and optional preview payload fields
+- USB track metadata (including `formatExt`, derived from the PDB path) and optional preview payload fields
 
 `UsbDevice` state is backed by the local `usb_devices` table, keyed by a
 normalized root path and carrying mount/first-seen/last-seen state. It

@@ -164,6 +164,22 @@ pub fn collect_chain_lenient(bytes: &[u8], page_size: usize, first: u32, last: u
 }
 
 // ---------------------------------------------------------------------------
+// Path helpers
+// ---------------------------------------------------------------------------
+
+/// The lowercase file extension of `path`'s last segment, or `None` when it has
+/// none. Shared by the scanner, `row_to_track`, and USB track building so a
+/// track's format is always known on the wire even when the DB column or PDB
+/// row omits it.
+pub fn format_ext_from_path(path: &str) -> Option<String> {
+    std::path::Path::new(path.trim())
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.trim().to_ascii_lowercase())
+        .filter(|ext| !ext.is_empty())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -175,6 +191,21 @@ mod tests {
     fn read_u8_in_bounds() {
         assert_eq!(read_u8_at(&[0xAB, 0xCD], 0), Some(0xAB));
         assert_eq!(read_u8_at(&[0xAB, 0xCD], 1), Some(0xCD));
+    }
+
+    #[test]
+    fn format_ext_from_path_lowercases_and_handles_missing() {
+        assert_eq!(
+            format_ext_from_path("/Contents/Artist/Song.MP3").as_deref(),
+            Some("mp3")
+        );
+        assert_eq!(
+            format_ext_from_path("relative/Track.FlAc").as_deref(),
+            Some("flac")
+        );
+        assert_eq!(format_ext_from_path("/no/extension/here"), None);
+        assert_eq!(format_ext_from_path(""), None);
+        assert_eq!(format_ext_from_path("  /x/y.wav  ").as_deref(), Some("wav"));
     }
 
     #[test]

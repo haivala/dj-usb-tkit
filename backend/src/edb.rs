@@ -418,6 +418,7 @@ pub fn try_read_track_index_from_edb_with_conn(
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
                 key: key_name,
                 file_path: resolved_file_path,
+                format_ext: path.as_deref().and_then(crate::utils::format_ext_from_path),
                 usb_media_path: path,
                 artwork_path: image_path
                     .as_deref()
@@ -778,6 +779,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
                 key: key_name,
                 file_path: resolved_file_path,
+                format_ext: path.as_deref().and_then(crate::utils::format_ext_from_path),
                 usb_media_path: path,
                 artwork_data_url: None,
                 artwork_path: resolved_image_path,

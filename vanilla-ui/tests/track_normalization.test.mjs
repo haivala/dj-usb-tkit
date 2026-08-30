@@ -62,17 +62,25 @@ test("normalizeTrack maps camelCase bpmAnalyzer", () => {
   assert.equal(normalized.bpmAnalyzer, "essentia");
 });
 
-test("normalizeTrack creates fallback id when missing", () => {
+test("normalizeTrack creates fallback id when missing and passes formatExt through verbatim", () => {
   const normalized = normalizeTrack({
     title: "Song",
     artist: "Artist",
-    filePath: "/music/song.flac"
+    filePath: "/music/song.flac",
+    formatExt: "flac"
   }, "lib", {
     randomId: () => "abc1234",
     normalizeDurationMs: () => null
   });
   assert.equal(normalized.id, "lib-abc1234");
   assert.equal(normalized.formatExt, "flac");
+  // The frontend no longer infers format from the path -- the backend always
+  // populates formatExt, so an absent value stays empty.
+  const noFormat = normalizeTrack({ title: "X", artist: "Y", filePath: "/a/b.mp3" }, "lib", {
+    randomId: () => "z",
+    normalizeDurationMs: () => null
+  });
+  assert.equal(noFormat.formatExt, "");
 });
 
 test("normalizeUsbPlaylist normalizes tracks and keeps max trackCount", () => {

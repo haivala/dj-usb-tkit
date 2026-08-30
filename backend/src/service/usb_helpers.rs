@@ -238,6 +238,7 @@ mod tests {
             bpm: None,
             key: None,
             file_path: file_path.to_string(),
+            format_ext: crate::utils::format_ext_from_path(file_path),
             usb_media_path: None,
             artwork_path: None,
             artwork_data_url: None,

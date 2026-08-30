@@ -229,14 +229,9 @@ function formatTrackFormatDetail(sampleRate, bitDepth, bitrate) {
 }
 
 function describeTrackFormat(track) {
-  const direct = String(track?.formatExt || "").trim().toLowerCase();
-  const inferred = (() => {
-    const filePath = String(track?.filePath || "").trim();
-    if (!filePath) return "";
-    const match = filePath.match(/\.([a-zA-Z0-9]+)$/);
-    return match ? String(match[1] || "").toLowerCase() : "";
-  })();
-  const ext = direct || inferred;
+  // Backend-owned: every track-returning command populates `formatExt` (falling
+  // back to the file-path extension server-side), so the frontend never infers.
+  const ext = String(track?.formatExt || "").trim().toLowerCase();
   const label = ext ? ext.toUpperCase() : "Unknown";
   const sampleRate = Number(track?.sampleRateHz || 0) || null;
   const bitDepth = Number(track?.bitDepth || 0) || null;

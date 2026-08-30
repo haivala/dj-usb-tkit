@@ -95,6 +95,13 @@ fn build_usb_track_index(
                     },
                     key,
                     file_path: resolved_file_path,
+                    format_ext: crate::utils::format_ext_from_path(&t.track_file_path).or_else(
+                        || {
+                            t.file_name
+                                .as_deref()
+                                .and_then(crate::utils::format_ext_from_path)
+                        },
+                    ),
                     usb_media_path: Some(t.track_file_path.clone()),
                     artwork_data_url: None,
                     artwork_path,
@@ -1443,6 +1450,7 @@ impl BackendService {
                                         bpm: None,
                                         key: None,
                                         file_path: String::new(),
+                                        format_ext: None,
                                         usb_media_path: None,
                                         artwork_path: None,
                                         artwork_data_url: None,
@@ -1691,8 +1699,8 @@ impl BackendService {
                 r#"
                 INSERT INTO tracks (
                   id, title, artist, album, track_number, bpm, tonality, file_path, file_size_bytes,
-                  file_modified_at, artwork_path, waveform_peaks_path, duration_ms, match_fingerprint, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13, ?14, ?14)
+                  file_modified_at, artwork_path, waveform_peaks_path, duration_ms, match_fingerprint, format_ext, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13, ?15, ?14, ?14)
                 ON CONFLICT(file_path) DO UPDATE SET
                   title = excluded.title,
                   artist = excluded.artist,
@@ -1705,6 +1713,7 @@ impl BackendService {
                   waveform_peaks_path = COALESCE(tracks.waveform_peaks_path, excluded.waveform_peaks_path),
                   duration_ms = COALESCE(excluded.duration_ms, tracks.duration_ms),
                   match_fingerprint = COALESCE(excluded.match_fingerprint, tracks.match_fingerprint),
+                  format_ext = COALESCE(tracks.format_ext, excluded.format_ext),
                   updated_at = excluded.updated_at
                 "#,
                 params![
@@ -1721,7 +1730,8 @@ impl BackendService {
                     track.waveform_peaks_path,
                     track.duration_ms,
                     fingerprint,
-                    now_ts
+                    now_ts,
+                    crate::utils::format_ext_from_path(file_path)
                 ],
             )?;
             id
@@ -2157,6 +2167,13 @@ fn resolve_usb_track_from_sources(
                         },
                         key,
                         file_path: resolved_file_path,
+                        format_ext: crate::utils::format_ext_from_path(&t.track_file_path).or_else(
+                            || {
+                                t.file_name
+                                    .as_deref()
+                                    .and_then(crate::utils::format_ext_from_path)
+                            },
+                        ),
                         usb_media_path: Some(t.track_file_path.clone()),
                         artwork_data_url: include_artwork_data_url
                             .then(|| artwork_path.as_deref().and_then(artwork_path_to_data_url))
@@ -2221,6 +2238,7 @@ mod tests {
             bpm: None,
             key: None,
             file_path: file_path.to_string(),
+            format_ext: crate::utils::format_ext_from_path(file_path),
             usb_media_path: None,
             artwork_path: None,
             artwork_data_url: None,
@@ -2702,6 +2720,7 @@ mod tests {
         assert_eq!(track.bpm, Some(125.0));
         assert!(track.artwork_path.is_some());
         assert!(track.file_path.ends_with("Song One.mp3"));
+        assert_eq!(track.format_ext.as_deref(), Some("mp3"));
         assert!(track.usb_analysis_path.is_some());
         assert_eq!(
             track.usb_analysis_path_raw.as_deref(),

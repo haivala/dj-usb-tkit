@@ -803,6 +803,10 @@ pub struct UsbTrack {
     pub bpm: Option<f64>,
     pub key: Option<String>,
     pub file_path: String,
+    /// Lowercase file extension, derived from the PDB track path so the
+    /// frontend never has to infer the format badge (mirrors `Track.format_ext`).
+    #[serde(default)]
+    pub format_ext: Option<String>,
     #[serde(default)]
     pub usb_media_path: Option<String>,
     pub artwork_path: Option<String>,

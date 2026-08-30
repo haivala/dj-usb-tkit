@@ -60,12 +60,6 @@ export function usbTrackNeedsHydration(track, deps = {}) {
   const artworkResolved = hasArtwork(track) || artworkChecked(track);
   return needsPreviewHydration(track) || !(hasWaveform(track) && artworkResolved && hasBpm(track) && hasKey(track));
 }
-function inferFormatFromPath(filePath) {
-  if (!filePath) return "";
-  const match = filePath.match(/\.([a-zA-Z0-9]+)$/);
-  return match ? String(match[1] || "").toLowerCase() : "";
-}
-
 function clampWaveformPreview(value) {
   if (!Array.isArray(value)) return [];
   return value.map((v) => Math.max(0, Math.min(100, Number(v) || 0)));
@@ -88,7 +82,6 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
   const artworkRevision = track?.updatedAt || "";
   const convertedArtwork = appendUrlRevision(toPlayableUrl(rawArtwork) || "", artworkRevision);
   const filePath = String(track?.filePath || "").trim();
-  const inferredFormat = inferFormatFromPath(filePath);
   const waveformPreview = clampWaveformPreview(track?.waveformPreview);
   const title = track?.title || "Unknown Title";
   const artist = track?.artist || "Unknown Artist";
@@ -113,10 +106,9 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     durationMs,
     waveformPeaksPath: track?.waveformPeaksPath || "",
     usbAnalysisPath: track?.usbAnalysisPath || "",
-    // `formatExt` is genuinely absent on some rows (nullable DB column; USB
-    // tracks carry no format at all) -- inferring from the path is a real
-    // fallback, not a re-derivation of a rule the backend owns.
-    formatExt: track?.formatExt || inferredFormat,
+    // Backend-owned on every track-returning command (derived from the file
+    // path server-side when the DB column / PDB row omits it).
+    formatExt: track?.formatExt || "",
     sampleRateHz: toFiniteOrNull(track?.sampleRateHz),
     bitDepth: toFiniteOrNull(track?.bitDepth),
     bitrateKbps: toFiniteOrNull(track?.bitrateKbps),

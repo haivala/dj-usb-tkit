@@ -64,6 +64,11 @@
   the extra branches were dead code that could only mask a real contract drift. Every
   track-list footer ("Total time" for the app playlist, library, and USB playlist/history) now
   renders through one shared helper instead of three near-identical copies.
+- **Improvement:** a track's format badge is now always resolved by the backend — every
+  track-returning command guarantees `formatExt` on the wire (the scanner sets it, and
+  reads fall back to the file-path extension for legacy / master.db / USB-merge rows), and
+  USB tracks carry it too, derived from the PDB path. The frontend no longer infers the
+  format from the file path.
 
 ## 0.1.33
 
