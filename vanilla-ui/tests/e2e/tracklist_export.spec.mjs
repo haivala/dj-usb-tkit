@@ -75,6 +75,20 @@ function installTauriMock(page) {
               }
             };
           }
+          if (command === "fetch_usb_history_tracks") {
+            return {
+              ok: true,
+              data: {
+                items: historyTracks.map((t) => ({ ...t, bpm: 120, key: "8A", waveformPreview: [10, 20, 10] })),
+                total: historyTracks.length,
+                hasMore: false,
+                nextCursor: null,
+                totalDurationMs: historyTracks.reduce((s, t) => s + (t.durationMs || 0), 0),
+                durationKnownCount: historyTracks.length,
+                warnings: []
+              }
+            };
+          }
           return { ok: true, data: {} };
         },
         convertFileSrc: (path) => path

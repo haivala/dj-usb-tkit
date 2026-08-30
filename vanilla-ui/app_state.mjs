@@ -47,15 +47,12 @@ export function createInitialState() {
     // re-derives the "does this collide with an existing USB playlist, and
     // would an additive export leave its order untouched" rule itself.
     playlistUsbExportStatusById: new Map(),
-    // The USB-playlist track table's fetch/pagination/search/sort state lives in
-    // its TrackListController (main.js), not here.
+    // The USB playlist/history track tables' fetch/pagination/search/sort state
+    // lives in their TrackListControllers (main.js), not here.
     histories: [],
     selectedHistoryIndex: null,
+    // Whole selected session, kept only for the "Export Tracklist" text feature.
     historyTracks: [],
-    historyTracksView: [],
-    historyTrackSearch: "",
-    historyPagedCount: 0,
-    historyLoadingMore: false,
     usbPlayerMenuCurrent: [],
     usbPlayerMenuAvailable: [],
     usbPlayerMenuCurrentSelectedKind: null,

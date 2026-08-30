@@ -974,21 +974,34 @@ async function renderUsbPlaylistTracks() {
 function renderHistoryList() {
   usb.renderHistoryList(state, el, { escapeHtml, getHistoryDateValue });
 }
+
+// USB-history track table -- same shared controller over fetch_usb_history_tracks.
+const usbHistoryTracksCtl = createTrackListController({
+  bodyId: "historyTracks",
+  getElements: () => ({
+    body: el.historyTracks,
+    wrap: el.historyTracks?.closest?.(".table-wrap"),
+    durationTarget: el.historyTotalDuration,
+  }),
+  fetchPage: ({ scopeId, query, sortBy, sortDir, cursor, limit }) =>
+    command("fetch_usb_history_tracks", {
+      usbRoot: state.usbRoot || null,
+      id: scopeId,
+      query,
+      sortBy: sortBy || null,
+      sortDir: sortDir || null,
+      cursor: cursor || null,
+      limit,
+    }),
+  normalize: (track) => normalizeTrack(track, "hist"),
+  rowOptions: usb.usbHistoryRowOptions,
+  renderTrackTable,
+  renderDurationSummary: (target, summary) =>
+    renderTrackListDurationSummary(target, summary, formatDurationMs),
+  getTableSortState: () => tableSortState,
+});
 async function renderHistoryTracks() {
-  await usb.renderHistoryTracks(state, el, {
-    filterTracksByQuery,
-    applySortToTracks,
-    renderTrackTable,
-    hydrateUsbTrackMetadataBatch,
-    patchHistoryTrackRow,
-  });
-}
-async function loadMoreHistoryTracks(pageSize) {
-  return usb.loadMoreHistoryTracks(state, el, pageSize, {
-    renderTrackTable,
-    hydrateUsbTrackMetadataBatch,
-    patchHistoryTrackRow,
-  });
+  await usbHistoryTracksCtl.applyHeaderSort();
 }
 function renderUsbPlayerMenuEditor() {
   usb.renderUsbPlayerMenuEditor(state, el, { documentObj: document });
@@ -1004,7 +1017,7 @@ function resetUsbStateViews({ hideDiagnostics = true } = {}) {
     renderUsbPlaylists,
     clearUsbPlaylistTracks: () => usbPlaylistTracksCtl.clear(),
     renderHistoryList,
-    renderHistoryTracks,
+    clearHistoryTracks: () => usbHistoryTracksCtl.clear(),
     renderUsbPlayerMenuEditor,
     hideDiagnostics,
   });
@@ -1016,11 +1029,6 @@ function showDiagRepairView() {
   usb.showDiagRepairView(el);
 }
 const hydrateUsbTrackMetadata = (track) => usb.hydrateUsbTrackMetadata(state, track, {
-    usbTrackNeedsHydration,
-    command,
-    normalizeTrack,
-  });
-const hydrateUsbTrackMetadataBatch = (tracks) => usb.hydrateUsbTrackMetadataBatch(state, tracks, {
     usbTrackNeedsHydration,
     command,
     normalizeTrack,
@@ -1179,7 +1187,7 @@ const refreshHistory = async () => usb.refreshHistory(state, el, {
     countWarningsForStatus: eventLog.countWarningsForStatus,
     logWarnings,
     renderHistoryList,
-    renderHistoryTracks,
+    clearHistoryTracks: () => usbHistoryTracksCtl.clear(),
   });
 const exportHistoryTracklist = async () => usb.exportHistoryTracklist(state, el, {
     setStatus,
@@ -1463,8 +1471,7 @@ function bindEvents() {
     syncUsbPlayerMenusEdbToPdb,
     scheduleApplySearchLocalFilter,
     usbPlaylistTracksCtl,
-    renderHistoryTracks,
-    loadMoreHistoryTracks,
+    usbHistoryTracksCtl,
     patchUsbTrackRow,
     patchHistoryTrackRow,
     addTracksToCurrentPlaylist,
@@ -1482,8 +1489,6 @@ function bindEvents() {
     moveArrayItem: usb.moveArrayItem,
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
-    hydrateUsbTrackMetadataBatch,
-    applyUsbDurationSummary: usb.applyUsbDurationSummary,
     formatDurationMs,
     setActiveListItem: shell.setActiveListItem,
     getHistoryDateDisplay,

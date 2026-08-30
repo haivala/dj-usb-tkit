@@ -79,7 +79,7 @@ test("diagnostics guard, history refresh, and tracklist filename sanitizing stay
     countWarningsForStatus: () => 1,
     logWarnings: () => {},
     renderHistoryList: () => { renderedLists += 1; },
-    renderHistoryTracks: () => { renderedTracks += 1; }
+    clearHistoryTracks: () => { renderedTracks += 1; }
   });
 
   assert.equal(state.histories[0].tracks[0].normalizedWith, "hist");

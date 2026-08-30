@@ -54,7 +54,7 @@ test("resetUsbStateViews clears lists and rerenders", () => {
     renderUsbPlaylists: () => { renders += 1; },
     clearUsbPlaylistTracks: () => { renders += 1; },
     renderHistoryList: () => { renders += 1; },
-    renderHistoryTracks: () => { renders += 1; }
+    clearHistoryTracks: () => { renders += 1; }
   });
   assert.equal(state.usbPlaylists.length, 0);
   assert.equal(state.histories.length, 0);

@@ -1,5 +1,4 @@
 import { catchErr, handleTrackAction, trackMetaFingerprint, resolveEmitStatus } from "../shared/track_actions.mjs";
-import { loadMoreIfNearBottom } from "../../track_utils.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 
 export function bindUsbEvents(ctx) {
@@ -27,19 +26,15 @@ export function bindUsbEvents(ctx) {
     moveUsbPlayerMenuItems,
     syncUsbPlayerMenusEdbToPdb,
     usbPlaylistTracksCtl,
-    renderHistoryTracks,
-    loadMoreHistoryTracks,
+    usbHistoryTracksCtl,
     removeUsbPlaylist,
     reorderUsbPlaylists,
     moveArrayItem,
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
     setActiveListItem,
-    getHistoryDateDisplay,
     addTracksToCurrentPlaylist,
     pruneUsbDevice,
-    applyUsbDurationSummary,
-    formatDurationMs,
   } = ctx;
   const patchUsbTrackRow = typeof ctx.patchUsbTrackRow === "function"
     ? ctx.patchUsbTrackRow
@@ -47,9 +42,6 @@ export function bindUsbEvents(ctx) {
   const patchHistoryTrackRow = typeof ctx.patchHistoryTrackRow === "function"
     ? ctx.patchHistoryTrackRow
     : () => false;
-  const applyDurationSummary = typeof applyUsbDurationSummary === "function"
-    ? applyUsbDurationSummary
-    : () => {};
   const emitStatus = resolveEmitStatus(ctx);
   const syncPlayerMenuControls = typeof syncUsbPlayerMenuEditorControls === "function"
     ? syncUsbPlayerMenuEditorControls
@@ -57,90 +49,12 @@ export function bindUsbEvents(ctx) {
   const onPlayerMenuListClick = typeof handleUsbPlayerMenuListClick === "function"
     ? handleUsbPlayerMenuListClick
     : () => {};
-  let historySelectionHydrationToken = 0;
-
-  // USB_SELECTION_PAGE_SIZE does double duty as both the batched-hydration
-  // chunk size (how many ids one inspect_usb_tracks call resolves) and the
-  // DOM pagination page size (how many rows one render pass builds) -- see
-  // LARGE_USB_SELECTION_THRESHOLD below for why the two were merged into one
-  // constant. Sizing it balances two costs that pull in opposite directions:
-  //  - A FIXED per-call cost (re-parsing the PDB, re-opening and
-  //    re-decrypting the SQLCipher eDB, loading its full track index) paid
-  //    once per inspect_usb_tracks call no matter how many ids are in it.
-  //    A large playlist (rekordbox caps these at 9999 tracks) used to pay
-  //    this ~250 times over at a chunk size of 40 -- visible as ~250
-  //    repeated "eDB unlocked"/"loaded N track metadata rows" log lines --
-  //    which argues for making chunks as large as possible.
-  //  - A PER-ITEM cost proportional to chunk size: each track's
-  //    waveform-preview analysis file has to be read from the USB device,
-  //    and (for DOM pagination) each row is a real DOM node with a cover
-  //    image, waveform canvas, etc. (Cover art used to also be read+
-  //    base64-encoded per item here, which at a chunk size of 2000 produced
-  //    IPC responses bloated enough to block the frontend's main thread for
-  //    a very long time while parsing a single response -- that's been
-  //    removed; see `include_artwork_data_url` in
-  //    `resolve_usb_track_from_sources`.) This argues for keeping chunks
-  //    small enough that one round trip's I/O and render finish and paint
-  //    in a reasonable time, so both hydration and DOM growth stay visibly
-  //    progressive instead of one long silent wait.
-  // 150 balances the two: a 9993-track playlist needs ~67 round trips
-  // (still far fewer than the original 40-per-chunk's ~250) while keeping
-  // each round trip's file I/O, DOM growth, and response size bounded.
-  const USB_SELECTION_PAGE_SIZE = 150;
-
-  // Very large selections (rekordbox caps a playlist at 9999 tracks; a
-  // typical playlist is ~80) render/hydrate one page at a time instead of
-  // all at once -- rendering ~10k DOM rows in one go is what caused a
-  // reported total UI freeze, including the table becoming unresponsive
-  // just from moving the mouse over it (the browser's hit-testing/style/
-  // paint cost scales with total DOM node count, independent of how well
-  // the data-fetching side is optimized). Selections at/under the threshold
-  // are entirely unaffected -- see usbPlaylistPagedCount/historyPagedCount
-  // in renderUsbPlaylistTracks/renderHistoryTracks (components/usb/actions.mjs) --
-  // but still hydrate in USB_SELECTION_PAGE_SIZE-sized chunks below this
-  // threshold too, same as they always have.
-  const LARGE_USB_SELECTION_THRESHOLD = 300;
-  const USB_SCROLL_FETCH_THRESHOLD_PX = 120;
-
-  // Renders+hydrates the next page of an already-paginated large selection
-  // on scroll-near-bottom (loadMoreFn -- loadMoreUsbPlaylistTracks/
-  // loadMoreHistoryTracks in usb/actions.mjs -- appends to the table and
-  // hydrates what it just appended in one step; see hydrateUsbTrackPage
-  // there). Shared between USB playlist and USB history scroll handlers
-  // below -- only which state/elements/loader they use differs.
-  // isSelectionCurrent gates against issuing a wasted round trip for a
-  // selection the user has since switched away from -- actual correctness
-  // against a stale in-flight call finishing late is independently handled
-  // by loadMoreFn's own per-container render/hydration tokens.
-  const loadNextPage = async (loadMoreFn, isSelectionCurrent, setLoading) => {
-    if (!isSelectionCurrent()) return;
-    setLoading(true);
-    try {
-      await loadMoreFn(USB_SELECTION_PAGE_SIZE);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // USB-playlist tracks: fetch/paginate/search/sort/scroll are owned by the
-  // shared track-list controller (see main.js). Scroll-load wires itself here.
+  // USB-playlist and USB-history track tables: fetch / paginate / search /
+  // sort / scroll-load are owned by their shared track-list controllers (see
+  // main.js), which fetch pre-hydrated pages from the backend. Scroll-load
+  // wires itself here.
   usbPlaylistTracksCtl?.attachScroll?.();
-
-  const historyTableWrap = el.historyTracks?.closest?.(".table-wrap");
-  historyTableWrap?.addEventListener("scroll", () => {
-    const token = historySelectionHydrationToken;
-    loadMoreIfNearBottom(
-      historyTableWrap,
-      USB_SCROLL_FETCH_THRESHOLD_PX,
-      () => state.historyLoadingMore,
-      () => state.historyPagedCount > 0 && state.historyPagedCount < state.historyTracksView.length,
-      () => loadNextPage(
-        loadMoreHistoryTracks,
-        () => historySelectionHydrationToken === token,
-        (loading) => { state.historyLoadingMore = loading; }
-      ).catch((err) => console.warn("USB history page load failed:", err))
-    );
-  }, { passive: true });
+  usbHistoryTracksCtl?.attachScroll?.();
 
   el.refreshUsbBtn.addEventListener("click", () => {
     refreshUsb().catch(catchErr(emitStatus));
@@ -254,9 +168,8 @@ export function bindUsbEvents(ctx) {
   });
 
   el.historyTrackSearch?.addEventListener("input", () => {
-    state.historyTrackSearch = String(el.historyTrackSearch.value || "");
-    if (state.historyPagedCount > 0) state.historyPagedCount = USB_SELECTION_PAGE_SIZE;
-    renderHistoryTracks();
+    usbHistoryTracksCtl.setSearch(el.historyTrackSearch.value)
+      .catch((err) => console.warn("USB history search failed:", err));
   });
 
   el.usbPlaylists.addEventListener("click", (event) => {
@@ -390,30 +303,19 @@ export function bindUsbEvents(ctx) {
 
     state.selectedHistoryIndex = Number(index);
     const history = state.histories[Number(index)];
+    // Kept for the "Export Tracklist" text feature, which needs the whole
+    // session's tracks; the table itself is paginated by the controller.
     state.historyTracks = history?.tracks || [];
-    state.historyPagedCount = state.historyTracks.length > LARGE_USB_SELECTION_THRESHOLD
-      ? USB_SELECTION_PAGE_SIZE
-      : 0;
-    state.historyLoadingMore = false;
     if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = !state.historyTracks.length;
     setActiveListItem(el.historyList, btn);
-    // renderHistoryTracks() renders AND hydrates whatever page it renders
-    // (see components/usb/actions.mjs) -- no separate hydration call
-    // needed here. Bumping the token still matters: it's what lets the
-    // historyTableWrap scroll listener below tell a stale load-more
-    // continuation from a previous selection to stop.
-    renderHistoryTracks().catch((err) => {
-      console.warn("USB history render/hydration failed:", err);
+    if (!history) {
+      usbHistoryTracksCtl.clear();
+      return;
+    }
+    usbHistoryTracksCtl.load({ scopeId: history.id }).catch((err) => {
+      console.warn("USB history load failed:", err);
+      emitStatus(`Failed to load USB history: ${err.message}`);
     });
-    const historyTrackCount = history?.tracks?.length ?? state.historyTracks.length;
-    const historyKnownCount = history?.durationKnownCount ?? 0;
-    applyDurationSummary(
-      el.historyTotalDuration,
-      history?.totalDurationMs ?? 0,
-      Math.max(0, historyTrackCount - historyKnownCount),
-      { formatDurationMs }
-    );
-    historySelectionHydrationToken += 1;
   });
 
   el.historyTracks.addEventListener("click", async (event) => {
@@ -425,14 +327,14 @@ export function bindUsbEvents(ctx) {
       ? Number(target?.dataset?.index)
       : rowIndex;
     const rowKey = row?.dataset?.playbackRow || null;
-    const track = state.historyTracksView[index];
+    const track = usbHistoryTracksCtl.items[index];
     if (!track) return;
 
     if (!action) {
       const before = trackMetaFingerprint(track);
       await hydrateUsbTrackMetadata(track);
       if (trackMetaFingerprint(track) !== before && !patchHistoryTrackRow(track)) {
-        renderHistoryTracks();
+        usbHistoryTracksCtl.rerender();
       }
       return;
     }

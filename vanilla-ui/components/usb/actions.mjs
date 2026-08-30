@@ -3,8 +3,7 @@ import {
   playlistTracksAffectedByMissingRoots,
   warningEntryText
 } from "../library/actions.mjs";
-import { resolveEmitStatus, trackMetaFingerprint } from "../shared/track_actions.mjs";
-import { renderTrackListDurationSummary } from "../../track_utils.mjs";
+import { resolveEmitStatus } from "../shared/track_actions.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
 // these is running, the currently-selected root must not change underneath
@@ -568,7 +567,7 @@ export function resetUsbStateViews(state, el, deps = {}) {
     renderUsbPlaylists = () => {},
     clearUsbPlaylistTracks = () => {},
     renderHistoryList = () => {},
-    renderHistoryTracks = () => {},
+    clearHistoryTracks = () => {},
     renderUsbPlayerMenuEditor = () => {},
     hideDiagnostics = true
   } = deps;
@@ -578,9 +577,6 @@ export function resetUsbStateViews(state, el, deps = {}) {
   state.histories = [];
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
-  state.historyTracksView = [];
-  state.historyPagedCount = 0;
-  state.historyLoadingMore = false;
   state.usbPlayerMenuCurrent = [];
   state.usbPlayerMenuAvailable = [];
   state.usbPlayerMenuCurrentSelectedKind = null;
@@ -597,7 +593,7 @@ export function resetUsbStateViews(state, el, deps = {}) {
   renderUsbPlaylists();
   clearUsbPlaylistTracks();
   renderHistoryList();
-  renderHistoryTracks();
+  clearHistoryTracks();
   renderUsbPlayerMenuEditor();
 }
 
@@ -1166,7 +1162,7 @@ export async function applyUsbRepairs(state, deps) {
 }
 
 export async function refreshHistory(state, el, deps) {
-  const { setStatus, command, normalizeTrack, countWarningsForStatus, logWarnings, renderHistoryList, renderHistoryTracks } = deps;
+  const { setStatus, command, normalizeTrack, countWarningsForStatus, logWarnings, renderHistoryList, clearHistoryTracks = () => {} } = deps;
   const emitStatus = resolveEmitStatus(deps);
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
@@ -1189,7 +1185,7 @@ export async function refreshHistory(state, el, deps) {
   state.historyTracks = [];
   if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList();
-  renderHistoryTracks();
+  clearHistoryTracks();
   const warningCount = countWarningsForStatus(data.warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   logWarnings("usb-import", data.warnings, "fetch_usb_histories");
@@ -1694,57 +1690,6 @@ export function renderUsbPlaylists(state, el, deps = {}) {
   });
 }
 
-// Same chunk size reasoning as USB_SELECTION_PAGE_SIZE in
-// components/usb/events.mjs (they were originally one shared constant) --
-// kept in sync manually since the two live in different modules for
-// independent reasons (this one bounds a single inspect_usb_tracks call;
-// events.mjs's bounds a single DOM render pass).
-const USB_HYDRATION_CHUNK_SIZE = 150;
-
-const usbHydrationTokens = new WeakMap();
-
-// Hydrates a page of already-rendered tracks (bpm/key/waveform/artwork),
-// patching each row in place as its data arrives, in
-// USB_HYDRATION_CHUNK_SIZE-sized batches. Self-contained per-container
-// cancellation, mirroring trackTableRenderTokens in track_table.mjs: if
-// this is called again for the same container before a previous call
-// finishes, the previous call's remaining chunks are abandoned instead of
-// racing with the new one. That makes it safe to call unconditionally from
-// every render path (initial selection, search, sort, scroll-load-more)
-// without each caller needing its own cancellation bookkeeping -- which is
-// exactly what was missing before: hydration used to be triggered by hand
-// at only two of those call sites (selection and scroll-load-more, both
-// living in one closure in events.mjs), so search and sort -- sort
-// especially, which is handled by a completely separate generic delegated
-// click handler with no access to that closure -- never hydrated newly
-// -visible tracks at all.
-async function hydrateUsbTrackPage(container, tracks, deps = {}) {
-  const {
-    hydrateUsbTrackMetadataBatch = async () => {},
-    patchRow = () => false,
-    renderFallback = () => {}
-  } = deps;
-  const myToken = (usbHydrationTokens.get(container) || 0) + 1;
-  usbHydrationTokens.set(container, myToken);
-  const isCurrent = () => usbHydrationTokens.get(container) === myToken;
-
-  const pending = (tracks || []).filter(Boolean);
-  let missedPatch = false;
-  for (let i = 0; i < pending.length; i += USB_HYDRATION_CHUNK_SIZE) {
-    if (!isCurrent()) return;
-    const chunk = pending.slice(i, i + USB_HYDRATION_CHUNK_SIZE);
-    const before = new Map(chunk.map((track) => [track, trackMetaFingerprint(track)]));
-    await hydrateUsbTrackMetadataBatch(chunk);
-    if (!isCurrent()) return;
-    for (const track of chunk) {
-      if (trackMetaFingerprint(track) !== before.get(track)) {
-        if (!patchRow(track)) missedPatch = true;
-      }
-    }
-  }
-  if (missedPatch) renderFallback();
-}
-
 export function usbPlaylistRowOptions() {
   return {
     withCheckbox: false,
@@ -1756,14 +1701,6 @@ export function usbPlaylistRowOptions() {
     secondaryActionLabel: "Play",
     secondaryActionType: "play-usb"
   };
-}
-
-// Pure setter -- see the comment on renderUsbPlaylistTracks above. Shared by
-// the USB playlist and USB history views (each just passes its own target
-// element and the totals already present on the selected playlist/history
-// object from fetch_usb_playlists/fetch_usb_histories).
-export function applyUsbDurationSummary(el, totalMs, unknownCount, deps = {}) {
-  renderTrackListDurationSummary(el, { totalDurationMs: totalMs, unknownCount }, deps.formatDurationMs);
 }
 
 export function renderHistoryList(state, el, deps = {}) {
@@ -1790,7 +1727,7 @@ export function renderHistoryList(state, el, deps = {}) {
   });
 }
 
-function usbHistoryRowOptions() {
+export function usbHistoryRowOptions() {
   return {
     withCheckbox: false,
     actionLabel: "+",
@@ -1801,52 +1738,6 @@ function usbHistoryRowOptions() {
     secondaryActionLabel: "Play",
     secondaryActionType: "play-history"
   };
-}
-
-// See renderUsbPlaylistTracks above -- same pagination/duration-summary/
-// self-hydrating-render approach, applied to USB history sessions.
-export async function renderHistoryTracks(state, el, deps = {}) {
-  const {
-    filterTracksByQuery = (tracks) => tracks,
-    applySortToTracks = (tracks) => tracks,
-    renderTrackTable = () => {},
-    hydrateUsbTrackMetadataBatch,
-    patchHistoryTrackRow
-  } = deps;
-  const filtered = filterTracksByQuery(state.historyTracks, state.historyTrackSearch);
-  state.historyTracksView = applySortToTracks(filtered, "historyTracks");
-  const view = state.historyTracksView;
-  const pageCount = state.historyPagedCount > 0
-    ? Math.min(state.historyPagedCount, view.length)
-    : view.length;
-  const pageTracks = view.slice(0, pageCount);
-  await renderTrackTable(el.historyTracks, pageTracks, usbHistoryRowOptions());
-  await hydrateUsbTrackPage(el.historyTracks, pageTracks, {
-    hydrateUsbTrackMetadataBatch,
-    patchRow: patchHistoryTrackRow,
-    renderFallback: () => renderHistoryTracks(state, el, deps)
-  });
-}
-
-export async function loadMoreHistoryTracks(state, el, pageSize, deps = {}) {
-  const { renderTrackTable = () => {}, hydrateUsbTrackMetadataBatch, patchHistoryTrackRow } = deps;
-  const view = state.historyTracksView;
-  const start = state.historyPagedCount;
-  if (start >= view.length) return [];
-  const end = Math.min(view.length, start + pageSize);
-  const pageTracks = view.slice(start, end);
-  await renderTrackTable(el.historyTracks, pageTracks, {
-    ...usbHistoryRowOptions(),
-    append: true,
-    indexOffset: start
-  });
-  state.historyPagedCount = end;
-  await hydrateUsbTrackPage(el.historyTracks, pageTracks, {
-    hydrateUsbTrackMetadataBatch,
-    patchRow: patchHistoryTrackRow,
-    renderFallback: () => renderHistoryTracks(state, el, deps)
-  });
-  return pageTracks;
 }
 
 export async function initializeUsb(state, el, deps = {}) {
@@ -1922,49 +1813,6 @@ function applyHydratedTrackResult(track, inspectedTrack, normalizeTrack) {
   normalized.artworkChecked = true;
   Object.assign(track, normalized);
 }
-
-// Batched counterpart to hydrateUsbTrackMetadata: resolves metadata for many
-// tracks in a single "inspect_usb_tracks" call instead of one call per track,
-// so the backend parses the PDB and opens the eDB connection once for the
-// whole batch rather than once per track.
-export async function hydrateUsbTrackMetadataBatch(state, tracks, deps = {}) {
-  const {
-    usbTrackNeedsHydration = () => false,
-    command = async () => ({}),
-    normalizeTrack = (t) => t
-  } = deps;
-  const candidates = (tracks || []).filter((track) => {
-    if (!track || !usbTrackNeedsHydration(track)) return false;
-    return /^\d+$/.test(String(track.id || "").trim());
-  });
-  if (!candidates.length) return tracks;
-
-  const items = candidates.map((track) => ({
-    trackId: String(track.id).trim(),
-    filePath: track.filePath || "",
-    title: track.title || "",
-    artist: track.artist || ""
-  }));
-
-  try {
-    const inspected = await command("inspect_usb_tracks", {
-      usbRoot: state.usbRoot,
-      items
-    });
-    const resultsById = new Map(
-      (inspected?.items || []).map((item) => [String(item?.trackId || ""), item])
-    );
-    for (const track of candidates) {
-      const trackId = String(track.id).trim();
-      const item = resultsById.get(trackId);
-      applyHydratedTrackResult(track, item?.track, normalizeTrack);
-    }
-  } catch (err) {
-    console.warn(`inspect_usb_tracks failed for ${candidates.length} track(s):`, err);
-  }
-  return tracks;
-}
-
 
 // Replaces the old localStorage/app_settings "recent USB roots" list with a
 // live query against the usb_devices table -- so mount state and pruning
