@@ -500,6 +500,7 @@ export function createMockInvoke({ state, normalizePath, constants }) {
       const total = rows.length;
       const totalDurationMs = rows.reduce((sum, t) => sum + (Number(t.durationMs) > 0 ? Number(t.durationMs) : 0), 0);
       const durationKnownCount = rows.filter((t) => Number(t.durationMs) > 0).length;
+      const unanalyzedCount = rows.filter((t) => !t.analysisReady).length;
       const offset = Number(req.cursor || 0);
       const limit = Number(req.limit || 0) || total;
       const page = rows.slice(offset, offset + limit);
@@ -513,7 +514,8 @@ export function createMockInvoke({ state, normalizePath, constants }) {
           hasMore: nextOffset < total,
           nextCursor: nextOffset < total ? String(nextOffset) : null,
           totalDurationMs,
-          durationKnownCount
+          durationKnownCount,
+          unanalyzedCount
         }
       };
     }
@@ -576,20 +578,31 @@ export function createMockInvoke({ state, normalizePath, constants }) {
     }
 
     if (command === "reorder_playlist_tracks") {
-      const playlistId = payload?.request?.playlistId || "";
-      const orderedTrackIds = payload?.request?.orderedTrackIds || [];
+      const req = payload?.request || {};
+      const playlistId = req.playlistId || "";
       const playlist = state.playlists.find((p) => String(p.id) === String(playlistId));
-      if (playlist?.tracks?.length) {
-        const byId = new Map(playlist.tracks.map((t) => [String(t.id), t]));
-        playlist.tracks = orderedTrackIds.map((id) => byId.get(String(id))).filter(Boolean);
+      const cur = playlist?.tracks || [];
+      let ids;
+      if (Array.isArray(req.orderedTrackIds) && req.orderedTrackIds.length) {
+        ids = req.orderedTrackIds.map(String);
+      } else if (req.sortBy) {
+        const dir = req.sortDir === "desc" ? -1 : 1;
+        const val = (t) => req.sortBy === "bpm" || req.sortBy === "durationMs"
+          ? Number(t[req.sortBy] || 0)
+          : String(t[req.sortBy === "format" ? "formatExt" : req.sortBy] || "").toLowerCase();
+        ids = [...cur].sort((a, b) => (val(a) < val(b) ? -dir : val(a) > val(b) ? dir : 0)).map((t) => String(t.id));
+      } else if (req.moveTrackId) {
+        ids = cur.map((t) => String(t.id)).filter((id) => id !== String(req.moveTrackId));
+        const at = req.beforeTrackId ? ids.indexOf(String(req.beforeTrackId)) : -1;
+        ids.splice(at < 0 ? ids.length : at, 0, String(req.moveTrackId));
+      } else {
+        ids = cur.map((t) => String(t.id));
       }
-      return {
-        ok: true,
-        data: {
-          playlistId,
-          reordered: orderedTrackIds.length
-        }
-      };
+      if (playlist?.tracks?.length) {
+        const byId = new Map(cur.map((t) => [String(t.id), t]));
+        playlist.tracks = ids.map((id) => byId.get(id)).filter(Boolean);
+      }
+      return { ok: true, data: { playlistId, reordered: ids.length } };
     }
 
     if (command === "validate_usb_root") {
