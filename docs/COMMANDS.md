@@ -28,6 +28,19 @@ Failure responses follow:
 }
 ```
 
+### Paginated track lists
+
+`browse_source_files` and `get_playlist_tracks` (and, when they land, the USB
+per-list track commands) share a keyset-pagination shape: the request carries
+`query`, `sortBy` (`title` | `artist` | `album` | `format` | `bpm` |
+`durationMs` | `key`; absent ⇒ natural order), `sortDir` (`asc` | `desc`),
+`cursor`, and `limit` (`0` ⇒ unpaginated). The response carries `items`,
+`total` (filtered count), `nextCursor`, `hasMore`, plus any whole-set
+aggregates (`totalDurationMs`, `sourceRootAnalysis`). Filtering and sorting are
+server-side so they span the entire list, not just the loaded page. A `cursor`
+is bound by signature to its exact `query`/`sortBy`/`sortDir`/scope and is
+rejected with a validation error if any of those changed.
+
 ## Event model
 
 Long-running commands emit job lifecycle events:

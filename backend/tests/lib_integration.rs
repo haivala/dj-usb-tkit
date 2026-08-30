@@ -523,6 +523,7 @@ fn milestone_one_flow_works() {
 
     let tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest {
         playlist_id: playlist_id.clone(),
+        ..Default::default()
     });
     assert!(tracks.ok, "get playlist tracks failed: {tracks:?}");
     assert_eq!(tracks.data.expect("tracks data").items.len(), 2);
@@ -630,7 +631,7 @@ fn playlist_tracks_persist_across_backend_restart() {
     assert_eq!(playlists.len(), 1, "expected playlist to persist");
     let playlist_id = playlists[0].id.clone();
 
-    let tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest { playlist_id });
+    let tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest { playlist_id, ..Default::default() });
     assert!(tracks.ok, "tracks failed after restart: {tracks:?}");
     let items = tracks.data.expect("tracks data").items;
     assert_eq!(items.len(), 2, "expected playlist tracks to persist");

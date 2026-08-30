@@ -1668,6 +1668,8 @@ impl BackendService {
 
         let limit = req.limit.clamp(1, 5000);
         let query = req.query.trim().to_lowercase();
+        let sort_by = req.sort_by.as_deref().map(str::trim).unwrap_or_default();
+        let sort_dir = req.sort_dir.as_deref().map(str::trim).unwrap_or_default();
         let roots_signature = source_roots.join("\u{1F}");
         let signature = build_track_cursor_signature(&[
             TRACK_CURSOR_VERSION,
@@ -1679,6 +1681,8 @@ impl BackendService {
             } else {
                 "no_master_db"
             },
+            sort_by,
+            sort_dir,
         ]);
         let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
 
@@ -1718,6 +1722,10 @@ impl BackendService {
         if !query.is_empty() {
             items.retain(|track| track_matches_query(track, &query));
         }
+        // Client-driven column sort, applied server-side so it spans the whole
+        // library, not just the page already loaded. Stable, so equal keys keep
+        // the natural file-path order from compute_all_library_tracks.
+        sort_tracks(&mut items, req.sort_by.as_deref(), req.sort_dir.as_deref());
 
         let mut total_duration_ms: u64 = 0;
         let mut duration_known_count: usize = 0;
@@ -2335,9 +2343,13 @@ impl BackendService {
         let mut items = rows.collect::<Result<Vec<_>, _>>()?;
         apply_is_usb_path(&conn, &mut items)?;
 
-        // Computed once server-side (here) instead of by the frontend summing
-        // whatever tracks it happens to have loaded -- see
-        // `GetPlaylistTracksData::total_duration_ms`.
+        let query = req.query.trim().to_lowercase();
+        if !query.is_empty() {
+            items.retain(|track| track_matches_query(track, &query));
+        }
+
+        // Computed once server-side (here) over the whole filtered playlist, not
+        // just the returned page -- see `GetPlaylistTracksData::total_duration_ms`.
         let mut total_duration_ms: u64 = 0;
         let mut duration_known_count: usize = 0;
         for track in &items {
@@ -2348,10 +2360,41 @@ impl BackendService {
                 duration_known_count += 1;
             }
         }
+        let total = items.len();
+
+        // Default order is playlist position (the SQL `ORDER BY`); a client
+        // column sort overrides it, applied server-side so it spans the whole
+        // playlist.
+        sort_tracks(&mut items, req.sort_by.as_deref(), req.sort_dir.as_deref());
+
+        let sort_by = req.sort_by.as_deref().map(str::trim).unwrap_or_default();
+        let sort_dir = req.sort_dir.as_deref().map(str::trim).unwrap_or_default();
+        let signature = build_track_cursor_signature(&[
+            TRACK_CURSOR_VERSION,
+            "get_playlist_tracks",
+            &req.playlist_id,
+            &query,
+            sort_by,
+            sort_dir,
+        ]);
+        let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
+        let start_idx = cursor_start_index(&items, cursor.as_ref());
+        // `limit == 0` ⇒ return the whole (filtered) playlist, for callers that
+        // predate pagination.
+        let limit = if req.limit == 0 {
+            items.len().saturating_sub(start_idx).max(1)
+        } else {
+            req.limit.clamp(1, TRACK_QUERY_LIMIT_MAX)
+        };
+        let mut page: Vec<Track> = items.into_iter().skip(start_idx).take(limit + 1).collect();
+        let (has_more, next_cursor) = paginate_tracks(&mut page, limit, &signature);
 
         Ok(GetPlaylistTracksData {
             playlist_id: req.playlist_id,
-            items,
+            items: page,
+            total,
+            next_cursor,
+            has_more,
             total_duration_ms,
             duration_known_count,
         })
@@ -3197,6 +3240,58 @@ fn best_candidate(candidates: Vec<Track>, req: &ResolvePlaybackSourceRequest) ->
         }
     }
     best.filter(|_| best_score >= 24)
+}
+
+/// Stable in-place sort of a track page by one of the frontend column keys.
+/// Mirrors `sortTracks` in `vanilla-ui/track_table.mjs` so a client-driven
+/// column sort produces the same order server-side (case-insensitive strings,
+/// missing bpm/duration treated as 0, `artist` tie-broken by title). Unknown
+/// or absent `sort_by` leaves the caller's order untouched.
+fn sort_tracks(items: &mut [Track], sort_by: Option<&str>, sort_dir: Option<&str>) {
+    let Some(key) = sort_by
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let desc = matches!(sort_dir.map(str::trim), Some("desc"));
+    let ci = |value: &str| value.to_lowercase();
+    items.sort_by(|a, b| {
+        let ord = match key {
+            "title" => ci(&a.title).cmp(&ci(&b.title)),
+            "artist" => ci(&a.artist)
+                .cmp(&ci(&b.artist))
+                .then_with(|| ci(&a.title).cmp(&ci(&b.title))),
+            "album" => ci(a.album.as_deref().unwrap_or_default())
+                .cmp(&ci(b.album.as_deref().unwrap_or_default())),
+            "format" => ci(a.format_ext.as_deref().unwrap_or_default())
+                .cmp(&ci(b.format_ext.as_deref().unwrap_or_default())),
+            "bpm" => a
+                .bpm
+                .unwrap_or(0.0)
+                .partial_cmp(&b.bpm.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal),
+            "durationMs" => a.duration_ms.unwrap_or(0).cmp(&b.duration_ms.unwrap_or(0)),
+            "key" => ci(a.key.as_deref().unwrap_or_default())
+                .cmp(&ci(b.key.as_deref().unwrap_or_default())),
+            _ => std::cmp::Ordering::Equal,
+        };
+        if desc { ord.reverse() } else { ord }
+    });
+}
+
+/// Resolve a decoded page cursor to the index the next page starts at, over an
+/// already-sorted+filtered `items` slice. `id` is unique, so it alone
+/// identifies the boundary row regardless of the active sort.
+fn cursor_start_index(items: &[Track], cursor: Option<&TrackPageCursor>) -> usize {
+    match cursor {
+        Some(cursor) => items
+            .iter()
+            .position(|track| track.id == cursor.id)
+            .map(|idx| idx + 1)
+            .unwrap_or(0),
+        None => 0,
+    }
 }
 
 fn paginate_tracks(
@@ -4055,6 +4150,7 @@ mod tests {
         let tracks = service
             .get_playlist_tracks(GetPlaylistTracksRequest {
                 playlist_id: playlist.playlist_id,
+                ..Default::default()
             })
             .expect("get playlist tracks");
         assert_eq!(tracks.items.len(), 1);
@@ -4111,6 +4207,7 @@ mod tests {
         let tracks = service
             .get_playlist_tracks(GetPlaylistTracksRequest {
                 playlist_id: playlist.playlist_id,
+                ..Default::default()
             })
             .expect("get playlist tracks");
         assert!(tracks.items.is_empty());
@@ -4172,6 +4269,7 @@ mod tests {
         let tracks = service
             .get_playlist_tracks(GetPlaylistTracksRequest {
                 playlist_id: playlist.playlist_id,
+                ..Default::default()
             })
             .expect("get playlist tracks");
         assert_eq!(
@@ -4240,6 +4338,7 @@ mod tests {
         let tracks = service
             .get_playlist_tracks(GetPlaylistTracksRequest {
                 playlist_id: playlist.playlist_id,
+                ..Default::default()
             })
             .expect("get playlist tracks");
         assert_eq!(tracks.total_duration_ms, 300_000);
@@ -4257,6 +4356,86 @@ mod tests {
             "master_db_source must survive get_playlist_tracks"
         );
         assert!(!by_id("t1").master_db_source);
+    }
+
+    #[test]
+    fn get_playlist_tracks_paginates_filters_and_sorts_server_side() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        for (id, title) in [("t1", "Charlie"), ("t2", "Alpha"), ("t3", "Bravo")] {
+            insert_full_track(&conn, id, title, "Artist", &format!("/m/{id}.mp3"), None, None, false);
+        }
+        drop(conn);
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest { name: "PL".to_string() })
+            .expect("create playlist");
+        let pid = playlist.playlist_id.clone();
+        service
+            .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                playlist_id: pid.clone(),
+                track_ids: vec!["t1".into(), "t2".into(), "t3".into()],
+                dedupe: DedupeMode::Allow,
+            })
+            .expect("add tracks");
+
+        // Default order is playlist position; totals span the whole playlist.
+        let page1 = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: pid.clone(),
+                limit: 2,
+                ..Default::default()
+            })
+            .expect("page 1");
+        assert_eq!(page1.total, 3);
+        assert_eq!(page1.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(), ["t1", "t2"]);
+        assert!(page1.has_more);
+        let page2 = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: pid.clone(),
+                limit: 2,
+                cursor: page1.next_cursor.clone(),
+                ..Default::default()
+            })
+            .expect("page 2");
+        assert_eq!(page2.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(), ["t3"]);
+        assert!(!page2.has_more);
+
+        // Server-side title sort spans the whole playlist.
+        let sorted = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: pid.clone(),
+                sort_by: Some("title".into()),
+                ..Default::default()
+            })
+            .expect("sorted");
+        assert_eq!(
+            sorted.items.iter().map(|t| t.title.clone()).collect::<Vec<_>>(),
+            ["Alpha", "Bravo", "Charlie"]
+        );
+
+        // A cursor from one sort/query is rejected under another.
+        let err = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: pid.clone(),
+                cursor: page1.next_cursor,
+                sort_by: Some("title".into()),
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+
+        // Query filters and still reports whole-playlist... no -- total is the
+        // filtered count, duration spans the filtered set.
+        let filtered = service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: pid,
+                query: "alph".into(),
+                ..Default::default()
+            })
+            .expect("filtered");
+        assert_eq!(filtered.total, 1);
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].id, "t2");
     }
 
     #[test]
@@ -4319,6 +4498,7 @@ mod tests {
         let tracks = service
             .get_playlist_tracks(GetPlaylistTracksRequest {
                 playlist_id: playlist.playlist_id,
+                ..Default::default()
             })
             .expect("get playlist tracks");
         assert_eq!(
@@ -4391,6 +4571,7 @@ mod tests {
         let tracks = service
             .get_playlist_tracks(GetPlaylistTracksRequest {
                 playlist_id: playlist.playlist_id,
+                ..Default::default()
             })
             .expect("get playlist tracks");
         assert_eq!(
@@ -4612,6 +4793,7 @@ mod tests {
                 query: String::new(),
                 limit: 100,
                 cursor: None,
+                ..Default::default()
             })
             .expect("browse source files");
         assert_eq!(result.total, 0);
@@ -4641,6 +4823,7 @@ mod tests {
                 query: String::new(),
                 limit: 100,
                 cursor: None,
+                ..Default::default()
             })
             .expect("browse source files");
         assert_eq!(result.total, 1);
@@ -4685,11 +4868,46 @@ mod tests {
                 query: String::new(),
                 limit: 100,
                 cursor: None,
+                ..Default::default()
             })
             .expect("browse source files");
         assert_eq!(result.total, 3);
         assert_eq!(result.duration_known_count, 2);
         assert_eq!(result.total_duration_ms, 300_000);
+    }
+
+    #[test]
+    fn browse_source_files_sorts_server_side_across_pages() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        for (id, title) in [("m1", "Zeta"), ("m2", "Alpha"), ("m3", "Mu")] {
+            conn.execute(
+                "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, master_db_source, created_at, updated_at)
+                 VALUES (?1, ?2, 'Artist', ?3, ?4, 1, datetime('now'), datetime('now'))",
+                params![id, title, format!("/master/{id}.mp3"), build_track_match_fingerprint(title, "Artist", None)],
+            )
+            .expect("insert");
+        }
+        drop(conn);
+
+        let req = |cursor: Option<String>| BrowseSourceFilesRequest {
+            include_master_db: true,
+            limit: 2,
+            cursor,
+            sort_by: Some("title".to_string()),
+            sort_dir: Some("desc".to_string()),
+            ..Default::default()
+        };
+        let page1 = service.browse_source_files(req(None)).expect("page 1");
+        assert_eq!(
+            page1.items.iter().map(|t| t.title.clone()).collect::<Vec<_>>(),
+            ["Zeta", "Mu"]
+        );
+        assert!(page1.has_more);
+        let page2 = service
+            .browse_source_files(req(page1.next_cursor))
+            .expect("page 2");
+        assert_eq!(page2.items.iter().map(|t| t.title.clone()).collect::<Vec<_>>(), ["Alpha"]);
     }
 
     #[test]
@@ -4719,6 +4937,7 @@ mod tests {
                 query: String::new(),
                 limit: 100,
                 cursor: None,
+                ..Default::default()
             })
             .expect("browse source files");
         let by_id = |id: &str| result.items.iter().find(|t| t.id == id).unwrap().analysis_ready;
@@ -4746,6 +4965,7 @@ mod tests {
                 query: String::new(),
                 limit: 100,
                 cursor: None,
+                ..Default::default()
             })
             .expect("browse source files");
         assert_eq!(
@@ -4769,6 +4989,7 @@ mod tests {
         let tracks = service
             .get_playlist_tracks(GetPlaylistTracksRequest {
                 playlist_id: playlist.playlist_id,
+                ..Default::default()
             })
             .expect("get playlist tracks");
         assert_eq!(tracks.items[0].format_ext.as_deref(), Some("flac"));
@@ -4818,6 +5039,7 @@ mod tests {
                 query: "Findable".to_string(),
                 limit: 100,
                 cursor: None,
+                ..Default::default()
             })
             .expect("browse source files");
 

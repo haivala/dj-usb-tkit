@@ -229,7 +229,7 @@ pub struct ListTracksData {
     pub has_more: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowseSourceFilesRequest {
     pub source_roots: Vec<String>,
@@ -239,6 +239,13 @@ pub struct BrowseSourceFilesRequest {
     pub limit: usize,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// One of `title` | `artist` | `album` | `format` | `bpm` | `durationMs` |
+    /// `key`. Absent ⇒ the natural file-path order. See `sort_tracks`.
+    #[serde(default)]
+    pub sort_by: Option<String>,
+    /// `asc` (default) | `desc`.
+    #[serde(default)]
+    pub sort_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -452,10 +459,23 @@ pub struct ListPlaylistsData {
     pub items: Vec<Playlist>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetPlaylistTracksRequest {
     pub playlist_id: String,
+    /// Substring match on title/artist/album. Empty ⇒ no filter.
+    #[serde(default)]
+    pub query: String,
+    /// See `BrowseSourceFilesRequest::sort_by`. Absent ⇒ playlist position order.
+    #[serde(default)]
+    pub sort_by: Option<String>,
+    #[serde(default)]
+    pub sort_dir: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// `0` ⇒ unpaginated (the whole playlist), for backward compatibility.
+    #[serde(default)]
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -463,6 +483,14 @@ pub struct GetPlaylistTracksRequest {
 pub struct GetPlaylistTracksData {
     pub playlist_id: String,
     pub items: Vec<Track>,
+    /// Count of tracks matching `query` (before pagination).
+    #[serde(default)]
+    pub total: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    #[serde(default)]
+    pub has_more: bool,
+    /// Sum over the whole filtered playlist (not just the returned page).
     #[serde(default)]
     pub total_duration_ms: u64,
     #[serde(default)]

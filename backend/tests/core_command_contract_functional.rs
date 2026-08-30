@@ -172,6 +172,7 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
     let after_remove_titles = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
             playlist_id: playlist_id.clone(),
+            ..Default::default()
         })
         .data
         .expect("after remove data")
@@ -190,7 +191,7 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
     assert_eq!(readd.data.expect("re-add data").added, 1);
 
     let final_titles = backend
-        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id })
+        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id, ..Default::default() })
         .data
         .expect("final tracks data")
         .items
@@ -263,7 +264,7 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
     assert_eq!(reorder.data.expect("reorder data").reordered, 3);
 
     let reordered_titles = backend
-        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id })
+        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id, ..Default::default() })
         .data
         .expect("reordered tracks data")
         .items

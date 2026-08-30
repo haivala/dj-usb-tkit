@@ -1782,6 +1782,7 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
 
     let target_tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest {
         playlist_id: target_playlist_id,
+        ..Default::default()
     });
     assert!(target_tracks.ok, "get target playlist tracks failed");
     let target_items = target_tracks.data.expect("target playlist data").items;

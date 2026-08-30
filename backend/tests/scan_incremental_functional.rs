@@ -190,6 +190,7 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     let playlist_tracks = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
             playlist_id: playlist.playlist_id,
+            ..Default::default()
         })
         .data
         .expect("playlist tracks data");

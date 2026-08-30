@@ -261,6 +261,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
 
     let target_tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest {
         playlist_id: target_playlist_id,
+        ..Default::default()
     });
     assert!(target_tracks.ok, "get target playlist tracks failed");
     let target_items = target_tracks.data.expect("target tracks data").items;
@@ -722,6 +723,7 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("browse data")
@@ -766,7 +768,7 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
     assert_eq!(added.data.expect("add data").added, 1);
 
     let playlist_tracks = backend
-        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id })
+        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id, ..Default::default() })
         .data
         .expect("playlist tracks")
         .items;

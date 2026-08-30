@@ -26,6 +26,7 @@ fn main() {
 
     let tracks_resp = backend.get_playlist_tracks(GetPlaylistTracksRequest {
         playlist_id: playlist_id.clone(),
+        ..Default::default()
     });
     if !tracks_resp.ok {
         fail(format!(

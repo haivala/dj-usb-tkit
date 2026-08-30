@@ -81,7 +81,7 @@ fn add_tracks_to_playlist_honors_skip_and_allow_dedupe_modes() {
     assert_eq!(add_allow_data.skipped, 0);
 
     let playlist_tracks = backend
-        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id })
+        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id, ..Default::default() })
         .data
         .expect("playlist tracks data")
         .items;

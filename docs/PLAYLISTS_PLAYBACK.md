@@ -20,7 +20,11 @@ Playlist state is modeled as local entities with ordered mapping rows. In practi
 The playlist command layer is intentionally CRUD-oriented:
 
 - `create_playlist`, `rename_playlist`, `delete_playlist` change container metadata
-- `list_playlists`, `get_playlist_tracks` read container and ordered membership state
+- `list_playlists` reads container metadata; `get_playlist_tracks` reads ordered
+  membership, paginated/searched/sorted server-side (see the "Paginated track
+  lists" envelope in `docs/COMMANDS.md`; `limit: 0` returns the whole playlist).
+  The whole-playlist `totalDurationMs` is computed over the filtered set, not the
+  page.
 - `add_track_candidates_to_playlist` resolves frontend row candidates and delegates to `add_tracks_to_playlist`
 - `add_tracks_to_playlist`, `remove_tracks_from_playlist` mutate membership rows
 - `reorder_playlist_tracks` persists a user drag-reorder to `playlist_tracks.position`

@@ -483,8 +483,39 @@ export function createMockInvoke({ state, normalizePath, constants }) {
     }
 
     if (command === "get_playlist_tracks") {
-      const p = state.playlists.find((x) => x.id === payload?.request?.playlistId);
-      return { ok: true, data: { playlistId: payload?.request?.playlistId || "", items: withAnalysisReady(p?.tracks || []) } };
+      const req = payload?.request || {};
+      const p = state.playlists.find((x) => x.id === req.playlistId);
+      let rows = withDerivedFields(p?.tracks || []);
+      const q = String(req.query || "").trim().toLowerCase();
+      if (q) {
+        rows = rows.filter((t) => `${t.title || ""} ${t.artist || ""} ${t.album || ""}`.toLowerCase().includes(q));
+      }
+      if (req.sortBy) {
+        const dir = req.sortDir === "desc" ? -1 : 1;
+        const val = (t) => req.sortBy === "bpm" || req.sortBy === "durationMs"
+          ? Number(t[req.sortBy === "durationMs" ? "durationMs" : "bpm"] || 0)
+          : String(t[req.sortBy === "format" ? "formatExt" : req.sortBy] || "").toLowerCase();
+        rows = [...rows].sort((a, b) => (val(a) < val(b) ? -dir : val(a) > val(b) ? dir : 0));
+      }
+      const total = rows.length;
+      const totalDurationMs = rows.reduce((sum, t) => sum + (Number(t.durationMs) > 0 ? Number(t.durationMs) : 0), 0);
+      const durationKnownCount = rows.filter((t) => Number(t.durationMs) > 0).length;
+      const offset = Number(req.cursor || 0);
+      const limit = Number(req.limit || 0) || total;
+      const page = rows.slice(offset, offset + limit);
+      const nextOffset = offset + limit;
+      return {
+        ok: true,
+        data: {
+          playlistId: req.playlistId || "",
+          items: page,
+          total,
+          hasMore: nextOffset < total,
+          nextCursor: nextOffset < total ? String(nextOffset) : null,
+          totalDurationMs,
+          durationKnownCount
+        }
+      };
     }
 
     if (command === "add_tracks_to_playlist") {
