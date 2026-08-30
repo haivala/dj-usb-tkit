@@ -94,7 +94,7 @@ export function createTrackListController(config = {}) {
     enumerable: true,
   });
 
-  async function run(cursor, { append }) {
+  async function run(cursor, { append, limit }) {
     const seq = append ? ctl.seq : (ctl.seq += 1);
     ctl.loading = true;
     try {
@@ -104,7 +104,7 @@ export function createTrackListController(config = {}) {
         sortBy: ctl.sortBy,
         sortDir: ctl.sortDir,
         cursor,
-        limit: pageSize,
+        limit: Number.isFinite(limit) && limit > 0 ? limit : pageSize,
       })) || {};
       if (seq !== ctl.seq) return;
 
@@ -149,7 +149,10 @@ export function createTrackListController(config = {}) {
     ctl.items = [];
     ctl.nextCursor = null;
     ctl.hasMore = false;
-    await run(null, { append: false });
+    // Optional one-shot page-size override for this first fetch (e.g. the
+    // library loads a bigger first page right after a scan). loadMore() keeps
+    // using the configured pageSize.
+    await run(null, { append: false, limit: opts.limit });
   };
 
   // Re-fetch page 1 with the current scope/query/sort (search or sort change).

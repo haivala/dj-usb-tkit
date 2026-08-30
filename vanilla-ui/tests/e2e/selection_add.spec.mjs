@@ -25,8 +25,16 @@ function installSelectionMock(page) {
           if (command === "show_window") return null;
           if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+          if (command === "list_tracks" || command === "search_tracks") {
             return { ok: true, data: { total: tracks.length, items: tracks } };
+          }
+          if (command === "browse_source_files") {
+            // Library search is a backend query param now (shared TrackListController).
+            const q = String(payload?.request?.query || "").trim().toLowerCase();
+            const rows = q
+              ? tracks.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q))
+              : tracks;
+            return { ok: true, data: { total: rows.length, items: rows, nextCursor: null, hasMore: false } };
           }
           if (command === "create_playlist") {
             const name = String(payload?.request?.name || "Untitled");

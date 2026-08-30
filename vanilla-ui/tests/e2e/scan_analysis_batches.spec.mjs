@@ -512,21 +512,30 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
       return { totalMs, knownCount };
     };
 
-    const listPage = (cursorValue, query = "") => {
+    const listPage = (cursorValue, query = "", sortBy = null, sortDir = null) => {
       const q = String(query || "").toLowerCase().trim();
-      const filtered = q
+      let rows = q
         ? tracks.filter((t) => `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(q))
         : tracks.slice();
+      if (sortBy) {
+        // Mirrors the backend sort (frontend sortTracks): "artist" ties break by title.
+        const m = sortDir === "desc" ? -1 : 1;
+        rows = rows.slice().sort((a, b) => {
+          const av = sortBy === "artist" ? `${a.artist} ${a.title}` : String(a[sortBy] ?? "");
+          const bv = sortBy === "artist" ? `${b.artist} ${b.title}` : String(b[sortBy] ?? "");
+          return av < bv ? -m : av > bv ? m : 0;
+        });
+      }
       const offset = Number(String(cursorValue || "0")) || 0;
-      const items = filtered.slice(offset, offset + pageSize).map(toTrackDto);
+      const items = rows.slice(offset, offset + pageSize).map(toTrackDto);
       const nextOffset = offset + items.length;
-      const hasMore = nextOffset < filtered.length;
-      const { totalMs, knownCount } = computeDurationTotals(filtered);
+      const hasMore = nextOffset < rows.length;
+      const { totalMs, knownCount } = computeDurationTotals(rows);
       return {
-        total: filtered.length,
+        total: rows.length,
         items,
-        next_cursor: hasMore ? String(nextOffset) : null,
-        has_more: hasMore,
+        nextCursor: hasMore ? String(nextOffset) : null,
+        hasMore,
         totalDurationMs: totalMs,
         durationKnownCount: knownCount
       };
@@ -707,7 +716,9 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
             searchQueryCount += 1;
             const query = payload?.request?.query ?? "";
             const cursor = payload?.request?.cursor ?? null;
-            return { ok: true, data: listPage(cursor, query) };
+            const sortBy = payload?.request?.sortBy ?? null;
+            const sortDir = payload?.request?.sortDir ?? null;
+            return { ok: true, data: listPage(cursor, query, sortBy, sortDir) };
           }
           if (command === "resolve_track_identity") {
             materializeCalls += 1;

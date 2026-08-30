@@ -62,6 +62,7 @@ import {
   formatTimestampLocal,
   filterTracksByQuery,
   buildTracklistText,
+  loadMoreIfNearBottom,
 } from "./track_utils.mjs";
 import { createApiClient } from "./api_client.mjs";
 import * as jobMgr from "./job_manager.mjs";
@@ -80,7 +81,6 @@ const LIBRARY_LOAD_LIMIT_INIT = 200;
 const LIBRARY_LOAD_LIMIT_DEFAULT = 200;
 const LIBRARY_LOAD_LIMIT_POST_SCAN = 1000;
 const LIBRARY_SCROLL_FETCH_THRESHOLD_PX = 120;
-const LIBRARY_AUTOFILL_MAX_PAGES = 0;
 const APP_VERSION_FALLBACK = "Not set";
 const MOCK_API_CLIENT_MODULE = "./mock_api_client.mjs";
 
@@ -574,13 +574,13 @@ function renderPlaylistPanelChrome() {
 function handleSortHeaderClick(e) {
   shell.handleSortHeaderClick(tableSortState, e, {
     renderMap: {
-      renderLibraryRows,
+      applyLibrarySort,
       renderUsbPlaylistTracks,
       renderHistoryTracks,
       renderCurrentPlaylistTracksFromState,
     },
     bodyToRendererMap: {
-      libraryTableBody: "renderLibraryRows",
+      libraryTableBody: "applyLibrarySort",
       usbPlaylistTracks: "renderUsbPlaylistTracks",
       historyTracks: "renderHistoryTracks",
       playlistTracksBody: "renderCurrentPlaylistTracksFromState",
@@ -702,19 +702,117 @@ function setTrackAnalyzingState(trackId, active) {
 
 // --- Library closures ---
 
-const getLibraryVisibleTracks = () => library.getLibraryVisibleTracks(state);
+// The library track table's data layer: server-paginated + searched + sorted
+// via `browse_source_files`, rendered through the shared TrackListController.
+// `ctl.items` is backed by `state.tracks` (read by playback resolution,
+// analysis patching, and selection) so those stay consistent as pages load.
+// `libraryPrevById` is rebuilt before every page's normalize() so a lazily
+// hydrated waveform preview survives a reload / filter / sort change.
+let libraryPrevById = new Map();
 
-async function renderLibraryRows() {
-  await library.renderLibraryRows(state, el, {
-    getLibraryVisibleTracks,
+const libraryTracksCtl = createTrackListController({
+  bodyId: "libraryTableBody",
+  pageSize: LIBRARY_LOAD_LIMIT_DEFAULT,
+  getElements: () => ({
+    body: el.libraryTableBody,
+    wrap: el.libraryTableWrap,
+    durationTarget: el.libraryTotalDuration,
+  }),
+  fetchPage: ({ query, sortBy, sortDir, cursor, limit }) => {
+    const enabledRoots = (state.sourceRoots || []).filter(
+      (root) => state.sourceRootEnabled?.[root] !== false && !library.sourceRootIsMissing(state, root),
+    );
+    const includeMasterDb = state.masterDbEnabled === true;
+    state.libraryQuery = String(query || "").trim();
+    if (!enabledRoots.length && !includeMasterDb) {
+      return { total: 0, items: [], nextCursor: null, hasMore: false, totalDurationMs: 0, durationKnownCount: 0 };
+    }
+    return command("browse_source_files", {
+      sourceRoots: enabledRoots,
+      includeMasterDb,
+      query: state.libraryQuery,
+      sortBy: sortBy || null,
+      sortDir: sortDir || null,
+      cursor: cursor || null,
+      limit,
+    });
+  },
+  normalize: (track) => {
+    const normalized = normalizeTrack(track, "lib");
+    const prev = libraryPrevById.get(String(normalized.id));
+    return prev ? library.mergeTrackPreservingBestFields(prev, normalized) : normalized;
+  },
+  getItems: () => state.tracks,
+  setItems: (value) => { state.tracks = value; },
+  rowOptions: () => ({
+    withCheckbox: true,
+    selectedIds: state.selectedTrackIds,
+    actionLabel: "+",
+    actionType: "add-library",
+    compactAddButton: true,
+    enableAnalyzeActions: true,
+    origin: "local",
+    secondaryActionLabel: "Play",
+    secondaryActionType: "play-library",
+  }),
+  renderTrackTable,
+  renderDurationSummary: (_target, summary) =>
+    applyLibraryDurationSummary(
+      summary.totalDurationMs,
+      Number(summary.trackCount || 0) - Number(summary.durationKnownCount || 0),
+    ),
+  getTableSortState: () => tableSortState,
+  onResponse: (data) => {
+    // On a re-query (search / sort) state.tracks still holds the previous list;
+    // snapshot it so surviving tracks keep their lazily hydrated previews. On a
+    // full reload (source-filter change) state.tracks is already cleared and
+    // resetAndLoadLibraryTracks took the snapshot before clearing.
+    if ((state.tracks || []).length) {
+      libraryPrevById = new Map(state.tracks.map((t) => [String(t.id), t]));
+    }
+    library.applySourceRootAnalysisFromBrowseData(state, data);
+    renderSourceChips();
+  },
+  onPage: (_page, { first }) => {
+    if (first) {
+      const loadedIds = new Set((state.tracks || []).map((t) => t.id));
+      state.selectedTrackIds = new Set(
+        [...state.selectedTrackIds].filter((id) => loadedIds.has(id)),
+      );
+      updateSelectionCount();
+    }
+    renderLibraryChrome();
+    void hydrateLoadedTracksPreviewsInBackground();
+  },
+});
+
+function renderLibraryChrome() {
+  library.renderLibraryChrome(state, el, {
     renderEmptyState,
     syncLibraryOnboardingMode,
-    applySortToTracks,
-    renderTrackTable,
     cssEscape,
     onEnableMasterDb: () => scanMasterDb(),
   });
 }
+
+// Re-render the loaded library rows (no fetch) + chrome -- used after an
+// in-place mutation of `state.tracks` (analysis patch, bg preview hydration)
+// or a selection change.
+async function renderLibraryRows() {
+  await libraryTracksCtl.rerender();
+  renderLibraryChrome();
+}
+const getLibraryVisibleTracks = () => libraryTracksCtl.view;
+// Kept name: callers use this to "re-render the library after mutating
+// state.tracks in place" -- search itself is now a backend query.
+const applySearchLocalFilter = () => renderLibraryRows();
+// Library column-header sort -> re-query page 1 with the new sortBy (spans the
+// whole library, not just the loaded rows). Wired via bodyToRendererMap.
+const applyLibrarySort = async () => {
+  await libraryTracksCtl.applyHeaderSort();
+  renderLibraryChrome();
+};
+
 function renderSourceChips() {
   library.renderSourceChips(state, el, {
     documentObj: document,
@@ -734,22 +832,21 @@ const checkSourceRoots = async (options = {}) => library.refreshMissingSourceRoo
     emitStatus,
     silent: options?.silent !== false,
   });
-function applySearchLocalFilter() {
-  library.applySearchLocalFilter(state, el, {
-    renderLibraryRows,
-    updateSelectionCount,
-  });
-}
+// Debounced library search. Goes through the controller's setSearch (a
+// re-query of page 1 that does NOT pre-clear state.tracks), so lazily hydrated
+// waveform previews on tracks that survive the filter aren't flashed away.
+let librarySearchDebounceTimer = null;
 function scheduleApplySearchLocalFilter() {
-  library.scheduleApplySearchLocalFilter(state, el, {
-    clearTimeoutFn: window.clearTimeout.bind(window),
-    setTimeoutFn: window.setTimeout.bind(window),
-    resetAndLoadLibraryTracks,
-    setStatus,
-    emitStatus,
-    logError: (e) => console.error(e),
-    debounceMs: LIBRARY_SEARCH_DEBOUNCE_MS,
-  });
+  if (librarySearchDebounceTimer) window.clearTimeout(librarySearchDebounceTimer);
+  librarySearchDebounceTimer = window.setTimeout(() => {
+    librarySearchDebounceTimer = null;
+    Promise.resolve(libraryTracksCtl.setSearch(el.librarySearch?.value || ""))
+      .then(renderLibraryChrome)
+      .catch((err) => {
+        console.error(err);
+        emitStatus(err.message || String(err));
+      });
+  }, LIBRARY_SEARCH_DEBOUNCE_MS);
 }
 function applyLibraryDurationSummary(totalMs, unknownCount) {
   library.applyLibraryDurationSummary(el, state, totalMs, unknownCount, { formatDurationMs });
@@ -780,69 +877,42 @@ const hydrateTrackPreviewFromBackend = async (trackId) => library.hydrateTrackPr
     patchLibraryRowByTrackId,
   });
 const hydrateLoadedTracksPreviewsInBackground = async () => library.hydrateLoadedTracksPreviewsInBackground(state, {
-    getLibraryVisibleTracks,
+    getLoadedTracks: () => state.tracks,
     command,
     mergeHydratedTrackIntoState,
     patchLibraryRowByTrackId,
     nextPaint: jobMgr.nextPaint,
-    applySearchLocalFilter,
+    rerenderLibrary: renderLibraryRows,
     renderCurrentPlaylistTracksFromState,
     renderSourceChips,
     batchSize: 48,
   });
-async function loadTracks(
-  query = "",
-  limit = LIBRARY_LOAD_LIMIT_DEFAULT,
-  cursor = null,
-  options = {},
-) {
-  return library.loadTracks(state, query, limit, cursor, options, {
-    command,
-    normalizeTrack,
-    readLibraryPagination: library.readLibraryPagination,
-    renderSourceChips,
-    applySearchLocalFilter,
-    applyLibraryDurationSummary,
-    hydrateLoadedTracksPreviewsInBackground,
-  });
-}
+// Fetch the library from page 1 (source-filter / search / post-scan reload).
+// `state.libraryQuery` is the persisted search text; a bigger `limit` (post
+// scan) is a one-shot override, otherwise the controller's page size is used.
 async function resetAndLoadLibraryTracks(
   query = "",
   limit = LIBRARY_LOAD_LIMIT_DEFAULT,
-  options = {},
 ) {
-  return library.resetAndLoadLibraryTracks(state, query, limit, {
-    renderLibraryRows,
-    loadTracks,
-    ensureLibraryContainerFilled,
-  }, options);
+  state.libraryQuery = String(query || "").trim();
+  libraryTracksCtl.query = state.libraryQuery;
+  // Snapshot for waveform-preview preservation before ctl.load() clears state.tracks.
+  libraryPrevById = new Map((state.tracks || []).map((t) => [String(t.id), t]));
+  const opts = Number.isFinite(limit) && limit > LIBRARY_LOAD_LIMIT_DEFAULT ? { limit } : {};
+  await libraryTracksCtl.load(opts);
 }
-const loadMoreLibraryTracks = async (limit = LIBRARY_LOAD_LIMIT_DEFAULT) => library.loadMoreLibraryTracks(state, limit, { loadTracks });
-async function ensureLibraryContainerFilled(
-  limit = LIBRARY_LOAD_LIMIT_DEFAULT,
-) {
-  return library.ensureLibraryContainerFilled(state, el, limit, {
-    loadMoreLibraryTracks,
-    LIBRARY_AUTOFILL_MAX_PAGES,
-  });
-}
+const loadMoreLibraryTracks = async () => libraryTracksCtl.loadMore();
 function handleLibraryTableWrapScroll() {
-  library.handleLibraryTableWrapScroll(state, el, {
+  loadMoreIfNearBottom(
+    el.libraryTableWrap,
     LIBRARY_SCROLL_FETCH_THRESHOLD_PX,
-    LIBRARY_LOAD_LIMIT_DEFAULT,
-    loadMoreLibraryTracks,
-    setStatus,
-    emitStatus,
-  });
-}
-function handleWindowLibraryScroll() {
-  library.handleWindowLibraryScroll(state, el, window, {
-    LIBRARY_SCROLL_FETCH_THRESHOLD_PX,
-    LIBRARY_LOAD_LIMIT_DEFAULT,
-    loadMoreLibraryTracks,
-    setStatus,
-    emitStatus,
-  });
+    () => libraryTracksCtl.loading,
+    () => libraryTracksCtl.hasMore,
+    () => libraryTracksCtl.loadMore().catch((err) => {
+      console.error(err);
+      emitStatus(err.message || String(err));
+    }),
+  );
 }
 const scanLibrary = async () => library.scanLibrary(state, {
     setStatus,
@@ -1593,8 +1663,8 @@ function bindEvents() {
     resolveLocalTrackId,
     handleSortHeaderClick,
     handleLibraryTableWrapScroll,
-    handleWindowLibraryScroll,
     renderLibraryRows,
+    libraryTracksCtl,
     hydrateLoadedTracksPreviewsInBackground,
   });
   return uiCtrl.bindEvents(bindCtx);

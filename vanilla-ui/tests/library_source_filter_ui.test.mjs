@@ -2,10 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
-  applySearchLocalFilter,
-  getLibraryVisibleTracks,
-  loadTracks,
-  normalizeTrack,
   refreshSourceRootAnalysisStatus,
   relocateSourceRoot,
   renderSourceChips,
@@ -55,100 +51,12 @@ async function runScanMasterDb(command) {
   return { statuses, logged };
 }
 
-test("getLibraryVisibleTracks returns filtered list", () => {
-  assert.deepEqual(getLibraryVisibleTracks({ filteredTracks: [{ id: 1 }] }), [{ id: 1 }]);
-});
-
-test("applySearchLocalFilter handles empty sources, query filtering, and selection pruning", () => {
-  const emptyState = {
-    sourceRoots: [],
-    masterDbEnabled: false,
-    tracks: [{ id: "a" }],
-    selectedTrackIds: new Set(["a"]),
-    filteredTracks: [{ id: "a" }]
-  };
-  let renders = 0;
-  let selectionUpdates = 0;
-  applySearchLocalFilter(emptyState, { librarySearch: { value: "" } }, {
-    enabledSourceRoots: (roots) => roots,
-    trackPathMatchesAnyRoot: () => false,
-    renderLibraryRows: () => { renders += 1; },
-    updateSelectionCount: () => { selectionUpdates += 1; }
-  });
-  assert.equal(emptyState.filteredTracks.length, 0);
-  assert.equal(emptyState.selectedTrackIds.size, 0);
-  assert.equal(renders, 1);
-  assert.equal(selectionUpdates, 1);
-
-  const tracks = [
-    { id: "1", title: "Alpha", artist: "A", album: "One", searchText: "alpha a one", filePath: "/music/alpha.mp3", masterDbSource: false },
-    { id: "2", title: "Beta", artist: "B", album: "Two", searchText: "beta b two", filePath: "/music/beta.mp3", masterDbSource: false }
-  ];
-  const state = {
-    sourceRoots: ["/music"],
-    sourceRootEnabled: { "/music": true },
-    masterDbEnabled: false,
-    tracks,
-    selectedTrackIds: new Set(["1", "2"]),
-    filteredTracks: [],
-    libraryQuery: ""
-  };
-  applySearchLocalFilter(state, { librarySearch: { value: "alpha" } }, {
-    enabledSourceRoots: (roots, enabled) => roots.filter((root) => enabled[root] !== false),
-    trackPathMatchesAnyRoot: (filePath, roots) => roots.some((root) => String(filePath).startsWith(root)),
-    renderLibraryRows: () => {},
-    updateSelectionCount: () => {}
-  });
-  assert.deepEqual(state.filteredTracks.map((track) => track.id), ["1"]);
-  assert.deepEqual(Array.from(state.selectedTrackIds), ["1"]);
-});
-
-test("loadTracks uses one browse request for enabled folders and master.db", async () => {
-  const state = {
-    sourceRoots: ["/music/a", "/music/b"],
-    sourceRootEnabled: { "/music/a": true, "/music/b": false },
-    masterDbEnabled: true,
-    tracks: [],
-    filteredTracks: [],
-    libraryRequestSeq: 1,
-    libraryLoading: false
-  };
-  const calls = [];
-
-  await loadTracks(state, "alpha", 25, "cursor-1", { requestSeq: 1 }, {
-    command: async (name, payload) => {
-      calls.push({ name, payload });
-      return {
-        total: 2,
-        items: [
-          { id: "folder-1", title: "Alpha", artist: "A", filePath: "/music/a/alpha.mp3" },
-          { id: "db-1", title: "Desktop Alpha", artist: "Desktop", filePath: "/library/alpha.mp3", masterDbSource: true }
-        ],
-        nextCursor: "cursor-2",
-        hasMore: true,
-        sourceRootAnalysis: [{ sourceRoot: "/music/a", total: 1, analyzed: 1, fullyAnalyzed: true }]
-      };
-    },
-    normalizeTrack,
-    readLibraryPagination: (data) => ({ nextCursor: data.nextCursor, hasMore: data.hasMore }),
-    renderSourceChips: () => {},
-    applySearchLocalFilter: () => { state.filteredTracks = [...state.tracks]; },
-    hydrateLoadedTracksPreviewsInBackground: async () => {}
-  });
-
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].name, "browse_source_files");
-  assert.deepEqual(calls[0].payload.sourceRoots, ["/music/a"]);
-  assert.equal(calls[0].payload.includeMasterDb, true);
-  assert.equal(calls[0].payload.query, "alpha");
-  assert.equal(calls[0].payload.limit, 25);
-  assert.equal(calls[0].payload.cursor, "cursor-1");
-  assert.deepEqual(state.tracks.map((track) => track.id), ["folder-1", "db-1"]);
-  assert.equal(state.libraryLoadedTotal, 2);
-  assert.equal(state.libraryNextCursor, "cursor-2");
-  assert.equal(state.libraryHasMore, true);
-  assert.equal(state.sourceRootAnalysisStatus["/music/a"], true);
-});
+// NOTE: library list fetch/pagination/search/sort + the "enabled folders +
+// master.db -> one browse_source_files request" behaviour now live in the
+// shared TrackListController (components/shared/track_list_controller.mjs, wired
+// in main.js) and are covered by tests/track_list_controller.test.mjs plus the
+// e2e specs (sort_cycling, selection_add, scan_analysis_batches,
+// source_root_removal, waveform_startup_hydration).
 
 test("renderSourceChips renders analyzed, missing, and disabled chip states", () => {
   // "Fully analyzed" per root is owned by the backend (state.sourceRootAnalysisStatus,

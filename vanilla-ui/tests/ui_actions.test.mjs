@@ -1,36 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
-import {
-  scheduleApplySearchLocalFilter
-} from "../components/library/actions.mjs";
 import {
   initializeUsb,
   pickUsbFolder
 } from "../components/usb/actions.mjs";
 
-test("scheduleApplySearchLocalFilter debounces and triggers reload", async () => {
-  const dom = new JSDOM(`<!doctype html><body><input id="q" value="house" /></body>`);
-  const state = { librarySearchDebounceTimer: null };
-  const el = { librarySearch: dom.window.document.querySelector("#q") };
-  let loaded = 0;
-  scheduleApplySearchLocalFilter(state, el, {
-    clearTimeoutFn: () => {},
-    setTimeoutFn: (cb) => {
-      cb();
-      return 1;
-    },
-    resetAndLoadLibraryTracks: async (q) => {
-      assert.equal(q, "house");
-      loaded += 1;
-    },
-    setStatus: () => {},
-    logError: () => {},
-    debounceMs: 1
-  });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(loaded, 1);
-});
+// NOTE: library search debouncing moved to a main.js closure over
+// libraryTracksCtl.setSearch (shared TrackListController) -- see
+// tests/track_list_controller.test.mjs and the e2e library specs.
 
 test("initializeUsb initializes and revalidates root", async () => {
   const state = { usbRoot: "/usb" };

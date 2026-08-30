@@ -48,7 +48,7 @@ test("hydrateLoadedTracksPreviewsInBackground batches and patches", async () => 
   const state = { loadedPreviewHydrationSeq: 0 };
   const patched = [];
   await hydrateLoadedTracksPreviewsInBackground(state, {
-    getLibraryVisibleTracks: () => [
+    getLoadedTracks: () => [
       { id: "1", waveformPreview: [], waveformPeaksPath: "/a" },
       { id: "2", waveformPreview: [], waveformPeaksPath: "/b" }
     ],
@@ -56,7 +56,7 @@ test("hydrateLoadedTracksPreviewsInBackground batches and patches", async () => 
     mergeHydratedTrackIntoState: () => true,
     patchLibraryRowByTrackId: (id) => patched.push(id),
     nextPaint: async () => {},
-    applySearchLocalFilter: () => {},
+    rerenderLibrary: () => {},
     renderCurrentPlaylistTracksFromState: () => {},
     renderSourceChips: () => {},
     batchSize: 10

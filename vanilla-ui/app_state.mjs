@@ -27,14 +27,11 @@ export function createInitialState() {
     essentiaInstalled: false,
     essentiaDownloading: false,
     updateCheck: null,
+    // The loaded library page(s); owned by the library TrackListController
+    // (main.js) via getItems/setItems, but read directly by playback
+    // resolution, analysis patching, and selection.
     tracks: [],
-    filteredTracks: [],
     libraryQuery: "",
-    libraryLoadedTotal: 0,
-    libraryNextCursor: null,
-    libraryHasMore: false,
-    libraryLoading: false,
-    libraryRequestSeq: 0,
     selectedTrackIds: new Set(),
     playlists: [],
     currentPlaylistId: null,

@@ -33,6 +33,7 @@ export function bindLibraryEvents(ctx) {
     hydrateLoadedTracksPreviewsInBackground = async () => {},
     LIBRARY_LOAD_LIMIT_DEFAULT,
     loadMoreLibraryTracks,
+    libraryTracksCtl,
   } = ctx;
   const emitStatus = resolveEmitStatus(ctx);
 
@@ -206,11 +207,11 @@ export function bindLibraryEvents(ctx) {
       return;
     }
     (async () => {
-      if (state.libraryHasMore) {
+      if (libraryTracksCtl?.hasMore) {
         await withProgress("Loading all matching tracks", async (progress) => {
-          while (state.libraryHasMore) {
+          while (libraryTracksCtl.hasMore) {
             await loadMoreLibraryTracks(LIBRARY_LOAD_LIMIT_DEFAULT);
-            const total = state.libraryLoadedTotal || state.tracks.length || 1;
+            const total = libraryTracksCtl.total || state.tracks.length || 1;
             progress(
               Math.min(90, Math.round((state.tracks.length / total) * 90)),
               `Loaded ${state.tracks.length} of ${total}...`
@@ -220,7 +221,7 @@ export function bindLibraryEvents(ctx) {
       }
       if (!checkbox.checked) return;
       state.selectedTrackIds.clear();
-      state.filteredTracks.forEach((track) => state.selectedTrackIds.add(track.id));
+      state.tracks.forEach((track) => state.selectedTrackIds.add(track.id));
       ctx.renderLibraryRows();
       updateSelectionCount();
     })().catch(catchErr(emitStatus));

@@ -52,7 +52,23 @@ test("Library: scrub-play after column sort plays the clicked row's track, not t
       list_playlists: async () => ({ ok: true, data: { items: [] } }),
       list_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
       search_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
-      browse_source_files: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
+      // Library column sort is a backend query param now (shared TrackListController).
+      browse_source_files: async (request = {}) => {
+        let rows = tracks.slice();
+        const q = String(request.query || "").trim().toLowerCase();
+        if (q) rows = rows.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q));
+        if (request.sortBy) {
+          const m = request.sortDir === "desc" ? -1 : 1;
+          const key = request.sortBy;
+          rows = rows.slice().sort((a, b) => {
+            if (key === "bpm" || key === "durationMs") return m * ((Number(a[key]) || 0) - (Number(b[key]) || 0));
+            const av = key === "artist" ? `${a.artist} ${a.title}` : String(a[key] ?? "");
+            const bv = key === "artist" ? `${b.artist} ${b.title}` : String(b[key] ?? "");
+            return av < bv ? -m : av > bv ? m : 0;
+          });
+        }
+        return { ok: true, data: { total: rows.length, items: rows, nextCursor: null, hasMore: false } };
+      },
       play_resolved_track: async (request) => {
         window.__playResolvedCalls.push(request);
         return { ok: true, data: { path: request.filePath, trackId: request.trackId, durationMs: 0, positionMs: 0 } };
@@ -280,7 +296,20 @@ test("Library: sorting by BPM column actually orders rows by numeric BPM value",
       list_playlists: async () => ({ ok: true, data: { items: [] } }),
       list_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
       search_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
-      browse_source_files: async () => ({ ok: true, data: { total: tracks.length, items: tracks } })
+      browse_source_files: async (request = {}) => {
+        let rows = tracks.slice();
+        if (request.sortBy) {
+          const m = request.sortDir === "desc" ? -1 : 1;
+          const key = request.sortBy;
+          rows = rows.slice().sort((a, b) => {
+            if (key === "bpm" || key === "durationMs") return m * ((Number(a[key]) || 0) - (Number(b[key]) || 0));
+            const av = key === "artist" ? `${a.artist} ${a.title}` : String(a[key] ?? "");
+            const bv = key === "artist" ? `${b.artist} ${b.title}` : String(b[key] ?? "");
+            return av < bv ? -m : av > bv ? m : 0;
+          });
+        }
+        return { ok: true, data: { total: rows.length, items: rows, nextCursor: null, hasMore: false } };
+      }
     };
 
     window.__TAURI__ = {

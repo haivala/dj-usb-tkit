@@ -80,6 +80,12 @@
   playlist's real order on navigate-away/export). `get_playlist_tracks` also gained the
   shared cursor-paginated request/response shape for future use. Two near-duplicate
   playlist-render code paths collapsed into one.
+- **Improvement:** sorting the library by a column now spans the whole library, not just the
+  rows already scrolled into view — the sort (and the search) run server-side via
+  `browse_source_files`. The library track list moved onto the shared controller as well, so
+  all four track-list views (library, app playlist, USB playlist, USB history) now share one
+  fetch/paginate/search/sort/scroll data layer. The `state.filteredTracks` client-search
+  overlay and the library's bespoke pagination/scroll bookkeeping are gone.
 
 ## 0.1.33
 

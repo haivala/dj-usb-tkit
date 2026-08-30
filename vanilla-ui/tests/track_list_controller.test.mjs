@@ -50,6 +50,14 @@ test("load fetches page 1, replaces items, renders, and reports the whole-list t
   assert.deepEqual(calls.pages[0], { n: 2, first: true });
 });
 
+test("load({ limit }) overrides the page size for the first fetch only", async () => {
+  const { ctl, calls } = harness();
+  await ctl.load({ scopeId: "pl-1", limit: 500 });
+  assert.equal(calls.fetch[0].limit, 500);
+  await ctl.loadMore();
+  assert.equal(calls.fetch[1].limit, 2); // back to configured pageSize
+});
+
 test("loadMore appends the next page with the cursor and an index offset", async () => {
   const { ctl, calls } = harness();
   await ctl.load({ scopeId: "pl-1" });

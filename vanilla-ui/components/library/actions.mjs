@@ -1,5 +1,4 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
-import { loadMoreIfNearBottom } from "../../track_utils.mjs";
 import { formatDurationMs, renderTrackListDurationSummary } from "../../track_utils.mjs";
 
 export function trackHasRenderableWaveform(track) {
@@ -141,7 +140,7 @@ export function normalizeUsbPlaylist(playlist, deps = {}) {
     trackCount: Math.max(Number.isFinite(declared) ? declared : 0, tracks.length)
   };
 }
-function mergeTrackPreservingBestFields(existing, normalized) {
+export function mergeTrackPreservingBestFields(existing, normalized) {
   const merged = { ...existing, ...normalized };
   if ((!Array.isArray(normalized.waveformPreview) || normalized.waveformPreview.length === 0)
     && Array.isArray(existing.waveformPreview)
@@ -166,7 +165,7 @@ function mergeTrackPreservingBestFields(existing, normalized) {
   return merged;
 }
 
-function applySourceRootAnalysisFromBrowseData(state, data) {
+export function applySourceRootAnalysisFromBrowseData(state, data) {
   const rows = Array.isArray(data?.sourceRootAnalysis)
     ? data.sourceRootAnalysis
     : (Array.isArray(data?.source_root_analysis) ? data.source_root_analysis : []);
@@ -189,8 +188,8 @@ export async function refreshSourceRootAnalysisStatus(state, deps = {}) {
   // Analysis status is a property of the folder itself, not of whether it's
   // currently toggled on in the library filter, so this intentionally
   // queries every configured root (enabled or not) rather than reusing the
-  // enabled-only filter that loadTracks/browse_source_files use for the
-  // visible library. Missing roots are skipped since there's nothing on
+  // enabled-only filter the visible library's browse_source_files query uses.
+  // Missing roots are skipped since there's nothing on
   // disk to scan.
   const roots = (state.sourceRoots || []).filter((root) => !sourceRootIsMissing(state, root));
   if (!roots.length) return;
@@ -391,19 +390,19 @@ export async function hydrateTrackPreviewFromBackend(state, trackId, deps) {
 
 export async function hydrateLoadedTracksPreviewsInBackground(state, deps) {
   const {
-    getLibraryVisibleTracks,
+    getLoadedTracks = () => state.tracks || [],
     command,
     mergeHydratedTrackIntoState,
     patchLibraryRowByTrackId,
     nextPaint,
-    applySearchLocalFilter,
+    rerenderLibrary = () => {},
     renderCurrentPlaylistTracksFromState,
     renderSourceChips,
     batchSize = 48
   } = deps;
 
   const hydrationSeq = ++state.loadedPreviewHydrationSeq;
-  const targetTracks = getLibraryVisibleTracks();
+  const targetTracks = getLoadedTracks();
   const pendingIds = targetTracks
     .filter((track) => trackNeedsPreviewHydration(track))
     .map((track) => String(track.id || "").trim())
@@ -435,47 +434,10 @@ export async function hydrateLoadedTracksPreviewsInBackground(state, deps) {
 
   if (hydrationSeq !== state.loadedPreviewHydrationSeq) return;
   if (anyChanged) {
-    applySearchLocalFilter();
+    rerenderLibrary();
     renderCurrentPlaylistTracksFromState();
     renderSourceChips();
   }
-}
-export function getLibraryVisibleTracks(state) {
-  return state.filteredTracks;
-}
-
-export function applySearchLocalFilter(state, el, deps = {}) {
-  const {
-    renderLibraryRows = () => {},
-    updateSelectionCount = () => {}
-  } = deps;
-
-  const noSources = !state.sourceRoots.length && !state.masterDbEnabled;
-  if (noSources) {
-    state.filteredTracks = [];
-    state.selectedTrackIds = new Set();
-    renderLibraryRows();
-    updateSelectionCount();
-    return;
-  }
-
-  const query = String(el.librarySearch?.value || state.libraryQuery || "").trim().toLowerCase();
-  state.filteredTracks = query
-    ? state.tracks.filter((track) => {
-      if (typeof track.searchText === "string" && track.searchText.length > 0) {
-        return track.searchText.includes(query);
-      }
-      const fallback = `${track.title || ""} ${track.artist || ""} ${track.album || ""}`.toLowerCase();
-      return fallback.includes(query);
-    })
-    : [...state.tracks];
-
-  const visibleIds = new Set(state.filteredTracks.map((track) => track.id));
-  state.selectedTrackIds = new Set(
-    Array.from(state.selectedTrackIds).filter((id) => visibleIds.has(id))
-  );
-  renderLibraryRows();
-  updateSelectionCount();
 }
 
 export async function relocateSourceRoot(state, oldRoot, deps = {}) {
@@ -615,8 +577,8 @@ export function renderSourceChips(state, el, deps = {}) {
 // The library's duration total/unknown-count are computed entirely by the
 // backend (which knows the true filtered library, not just whatever page
 // happens to be loaded client-side) and pushed here: once per fresh
-// browse_source_files response (loadTracks), and live per track via
-// job.progress events during an analysis batch (job_manager.mjs). This is
+// browse_source_files response (the library TrackListController), and live per
+// track via job.progress events during an analysis batch (job_manager.mjs). This is
 // a pure setter -- no track iteration, no countability logic, no filtering.
 export function applyLibraryDurationSummary(el, state, totalMs, unknownCount, deps = {}) {
   state.libraryDurationTotalMs = Number(totalMs) || 0;
@@ -628,20 +590,19 @@ export function applyLibraryDurationSummary(el, state, totalMs, unknownCount, de
   );
 }
 
-export async function renderLibraryRows(state, el, deps = {}) {
+// The library track table is fetched/paginated/searched/sorted by the shared
+// TrackListController (built in main.js over `browse_source_files`). This
+// renders only the chrome the controller does not own: the "add a folder"
+// empty state / onboarding mode, and re-applying the transient `is-analyzing`
+// row class after a (re)render. The table itself is drawn by the controller.
+export function renderLibraryChrome(state, el, deps = {}) {
   const {
-    getLibraryVisibleTracks = () => [],
     renderEmptyState = () => {},
     syncLibraryOnboardingMode = () => {},
-    applySortToTracks = (tracks) => tracks,
-    renderTrackTable = () => {},
     cssEscape = (value) => String(value || "")
   } = deps;
 
   const noSources = !state.sourcesEverConfigured;
-  const visibleTracks = getLibraryVisibleTracks();
-  const empty = noSources;
-
   if (el.libraryEmptyState) {
     el.libraryEmptyState.innerHTML = "";
     if (noSources) {
@@ -658,189 +619,15 @@ export async function renderLibraryRows(state, el, deps = {}) {
     }
   }
   if (el.libraryContent) {
-    el.libraryContent.classList.toggle("hidden", empty);
+    el.libraryContent.classList.toggle("hidden", noSources);
   }
   syncLibraryOnboardingMode();
 
-  const sortedLibrary = applySortToTracks(visibleTracks, "libraryTableBody");
-  await renderTrackTable(el.libraryTableBody, sortedLibrary, {
-    withCheckbox: true,
-    selectedIds: state.selectedTrackIds,
-    actionLabel: "+",
-    actionType: "add-library",
-    compactAddButton: true,
-    enableAnalyzeActions: true,
-    origin: "local",
-    secondaryActionLabel: "Play",
-    secondaryActionType: "play-library"
-  });
   for (const id of state.analyzingTrackIds) {
     const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
-    const row = el.libraryTableBody.querySelector(selector);
+    const row = el.libraryTableBody?.querySelector(selector);
     if (row) row.classList.add("is-analyzing");
   }
-}
-// Library loading and analysis workflows extracted from main.js.
-
-export async function loadTracks(state, query, limit, cursor, options = {}, deps) {
-  const {
-    command,
-    normalizeTrack,
-    readLibraryPagination,
-    renderSourceChips,
-    applySearchLocalFilter,
-    applyLibraryDurationSummary = () => {},
-    hydrateLoadedTracksPreviewsInBackground
-  } = deps;
-  const requestSeq = Number(options.requestSeq || 0);
-  const append = options.append === true;
-  const previousById = new Map(
-    (state.tracks || []).map((track) => [String(track.id), track])
-  );
-  const trimmed = String(query || "").trim();
-  state.libraryLoading = true;
-  try {
-    const enabledRoots = (state.sourceRoots || []).filter(
-      (root) => state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(state, root)
-    );
-    const includeMasterDb = state.masterDbEnabled === true;
-    const hasEnabledSources = enabledRoots.length > 0 || includeMasterDb;
-    const data = hasEnabledSources
-      ? await command("browse_source_files", {
-        sourceRoots: enabledRoots,
-        includeMasterDb,
-        query: trimmed,
-        limit,
-        cursor
-      })
-      : { total: 0, items: [], nextCursor: null, hasMore: false };
-    applySourceRootAnalysisFromBrowseData(state, data);
-    const rawItems = data.items || [];
-
-    if (requestSeq && requestSeq !== state.libraryRequestSeq) {
-      return;
-    }
-    const normalizedItems = rawItems.map((t) => {
-      const normalized = normalizeTrack(t, "lib");
-      const prev = previousById.get(String(normalized.id));
-      return prev ? mergeTrackPreservingBestFields(prev, normalized) : normalized;
-    });
-    if (append) {
-      const mergedById = new Map(
-        (state.tracks || []).map((track) => [String(track.id), track])
-      );
-      for (const track of normalizedItems) {
-        mergedById.set(String(track.id), track);
-      }
-      state.tracks = Array.from(mergedById.values());
-    } else {
-      state.tracks = normalizedItems;
-    }
-    state.libraryQuery = trimmed;
-    state.libraryLoadedTotal = Number(data.total || state.tracks.length || 0);
-    const paging = readLibraryPagination(data);
-    state.libraryNextCursor = paging.nextCursor;
-    state.libraryHasMore = paging.hasMore;
-    renderSourceChips();
-    applySearchLocalFilter();
-    if (typeof data.totalDurationMs === "number") {
-      applyLibraryDurationSummary(data.totalDurationMs, Number(data.total || 0) - Number(data.durationKnownCount || 0));
-    }
-    void hydrateLoadedTracksPreviewsInBackground();
-  } finally {
-    if (!requestSeq || requestSeq === state.libraryRequestSeq) {
-      state.libraryLoading = false;
-    }
-  }
-}
-
-export async function resetAndLoadLibraryTracks(state, query, limit, deps) {
-  const { renderLibraryRows, loadTracks, ensureLibraryContainerFilled } = deps;
-  state.libraryRequestSeq += 1;
-  const requestSeq = state.libraryRequestSeq;
-  state.libraryQuery = String(query || "").trim();
-  state.libraryLoadedTotal = 0;
-  state.libraryNextCursor = null;
-  state.libraryHasMore = false;
-  state.libraryLoading = true;
-  const prevPreviews = new Map(
-    (state.tracks || []).map((t) => [String(t.id || ""), { p: t.waveformPreview, c: t.waveformColorData }])
-  );
-  state.tracks = [];
-  state.filteredTracks = [];
-  renderLibraryRows();
-  await loadTracks(state.libraryQuery, limit, null, { append: false, requestSeq });
-  for (const track of state.tracks) {
-    const id = String(track.id || "");
-    const prev = prevPreviews.get(id);
-    if (prev) {
-      if ((!Array.isArray(track.waveformPreview) || track.waveformPreview.length === 0)
-        && Array.isArray(prev.p) && prev.p.length > 0) {
-        track.waveformPreview = prev.p;
-      }
-      if ((!Array.isArray(track.waveformColorData) || track.waveformColorData.length === 0)
-        && Array.isArray(prev.c) && prev.c.length > 0) {
-        track.waveformColorData = prev.c;
-      }
-    }
-  }
-  await ensureLibraryContainerFilled(limit);
-}
-
-export async function loadMoreLibraryTracks(state, limit, deps) {
-  const { loadTracks } = deps;
-  if (state.libraryLoading || !state.libraryHasMore) return;
-  await loadTracks(state.libraryQuery, limit, state.libraryNextCursor, {
-    append: true,
-    requestSeq: state.libraryRequestSeq
-  });
-}
-
-export async function ensureLibraryContainerFilled(state, el, limit, deps) {
-  const { loadMoreLibraryTracks, LIBRARY_AUTOFILL_MAX_PAGES } = deps;
-  const wrap = el.libraryTableWrap;
-  if (!wrap) return;
-  let guard = 0;
-  while (
-    state.libraryHasMore
-    && !state.libraryLoading
-    && wrap.scrollHeight <= wrap.clientHeight + 4
-    && guard < LIBRARY_AUTOFILL_MAX_PAGES
-  ) {
-    await loadMoreLibraryTracks(limit);
-    guard += 1;
-  }
-}
-
-export function handleLibraryTableWrapScroll(state, el, deps) {
-  const { LIBRARY_SCROLL_FETCH_THRESHOLD_PX, LIBRARY_LOAD_LIMIT_DEFAULT, loadMoreLibraryTracks, setStatus } = deps;
-  const emitStatus = resolveEmitStatus(deps);
-  loadMoreIfNearBottom(
-    el.libraryTableWrap,
-    LIBRARY_SCROLL_FETCH_THRESHOLD_PX,
-    () => state.libraryLoading,
-    () => state.libraryHasMore,
-    () => loadMoreLibraryTracks(LIBRARY_LOAD_LIMIT_DEFAULT).catch((err) => {
-      console.error(err);
-      emitStatus(err.message || String(err));
-    })
-  );
-}
-
-export function handleWindowLibraryScroll(state, el, windowObj, deps) {
-  const { LIBRARY_SCROLL_FETCH_THRESHOLD_PX, LIBRARY_LOAD_LIMIT_DEFAULT, loadMoreLibraryTracks, setStatus } = deps;
-  const emitStatus = resolveEmitStatus(deps);
-  if (state.activeTab !== "library") return;
-  if (state.libraryLoading || !state.libraryHasMore) return;
-  const wrap = el.libraryTableWrap;
-  if (!wrap) return;
-  const rect = wrap.getBoundingClientRect();
-  const remaining = rect.bottom - windowObj.innerHeight;
-  if (remaining > LIBRARY_SCROLL_FETCH_THRESHOLD_PX) return;
-  loadMoreLibraryTracks(LIBRARY_LOAD_LIMIT_DEFAULT).catch((err) => {
-    console.error(err);
-    emitStatus(err.message || String(err));
-  });
 }
 
 export async function scanLibrary(state, deps) {
@@ -961,8 +748,8 @@ export async function scanMasterDb(state, deps) {
     return;
   }
 
-  // Mark master.db as enabled and configured so loadTracks includes it in the
-  // same browse path used for folder sources.
+  // Mark master.db as enabled and configured so the library's browse query
+  // includes it alongside the folder sources.
   state.masterDbEnabled = true;
   state.sourcesEverConfigured = true;
   persistMasterDbEnabled?.(true);
@@ -1120,28 +907,6 @@ export async function analyzeSingleTrack(state, track, modeLabel = null, deps) {
   await analyzeTrackIds([localId], label);
 }
 
-export function scheduleApplySearchLocalFilter(state, el, deps = {}) {
-  const {
-    clearTimeoutFn = (id) => clearTimeout(id),
-    setTimeoutFn = (cb, ms) => setTimeout(cb, ms),
-    resetAndLoadLibraryTracks = async () => {},
-    setStatus = () => {},
-    logError = () => {},
-    debounceMs = 180
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
-
-  if (state.librarySearchDebounceTimer) {
-    clearTimeoutFn(state.librarySearchDebounceTimer);
-  }
-  state.librarySearchDebounceTimer = setTimeoutFn(() => {
-    state.librarySearchDebounceTimer = null;
-    resetAndLoadLibraryTracks(el.librarySearch?.value || "").catch((err) => {
-      logError(err);
-      emitStatus(err.message || String(err));
-    });
-  }, debounceMs);
-}
 
 export function patchLibraryRowByTrackId(state, el, trackId, deps) {
   const {
@@ -1436,19 +1201,6 @@ export function normalizeAnalysisBpmRange(range) {
   return ANALYSIS_BPM_RANGE_PRESETS.includes(parsed.label)
     ? parsed.label
     : DEFAULT_ANALYSIS_BPM_RANGE;
-}
-
-// --- library_pagination.mjs ---
-
-export function readLibraryPagination(data) {
-  const nextCursor = data?.nextCursor ?? data?.next_cursor ?? null;
-  if (typeof data?.hasMore === "boolean") {
-    return { nextCursor, hasMore: data.hasMore };
-  }
-  if (typeof data?.has_more === "boolean") {
-    return { nextCursor, hasMore: data.has_more };
-  }
-  return { nextCursor, hasMore: !!nextCursor };
 }
 
 // --- source_root_filter.mjs ---

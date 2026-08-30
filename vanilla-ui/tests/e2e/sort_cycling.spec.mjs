@@ -14,14 +14,31 @@ function installSortMock(page) {
 
     window.__TAURI__ = {
       core: {
-        invoke: async (command) => {
+        invoke: async (command, payload = {}) => {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
           if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+          if (command === "list_tracks" || command === "search_tracks") {
             return { ok: true, data: { total: tracks.length, items: tracks } };
+          }
+          if (command === "browse_source_files") {
+            // Library search + column sort are backend query params now
+            // (shared TrackListController) -- mirror the server here.
+            const req = payload?.request || {};
+            let rows = tracks.slice();
+            const q = String(req.query || "").trim().toLowerCase();
+            if (q) rows = rows.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q));
+            if (req.sortBy) {
+              const m = req.sortDir === "desc" ? -1 : 1;
+              rows = rows.slice().sort((a, b) => {
+                const av = req.sortBy === "artist" ? `${a.artist} ${a.title}` : String(a[req.sortBy] ?? "");
+                const bv = req.sortBy === "artist" ? `${b.artist} ${b.title}` : String(b[req.sortBy] ?? "");
+                return av < bv ? -m : av > bv ? m : 0;
+              });
+            }
+            return { ok: true, data: { total: rows.length, items: rows, nextCursor: null, hasMore: false } };
           }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
