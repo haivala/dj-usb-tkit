@@ -7,7 +7,6 @@ import {
   createPlaylist,
   formatPlaylistExportStatus,
   loadPlaylists,
-  refreshCurrentPlaylistTracks,
   renderPlaylistList
 } from "../components/playlist/actions.mjs";
 import { bindPlaylistEvents } from "../components/playlist/events.mjs";
@@ -53,6 +52,7 @@ function bindDeps(overrides) {
     analyzeTrackIds: async () => {},
     resolveLocalTrackId: () => null,
     refreshCurrentPlaylistTracks: async () => {},
+    playlistTracksCtl: { view: [], setSearch: () => {}, rerender: async () => {} },
     ...overrides
   };
 }
@@ -107,38 +107,6 @@ test("playlist commands format export status, load lists, and select newly loade
   });
   assert.equal(state.currentPlaylistId, "p2");
   assert.deepEqual(createCalls, ["load", "mode", "tab:p2", "status:Playlist created: Fresh"]);
-});
-
-test("refreshCurrentPlaylistTracks updates table state and refresh hooks", async () => {
-  const { document } = makeDom().window;
-  const playlist = { id: "p1", name: "One", tracks: [] };
-  const state = { playlistTrackSearch: "", currentPlaylistTracksView: [] };
-  const calls = [];
-
-  await refreshCurrentPlaylistTracks(state, elements(document, [
-    "playlistSearchInput",
-    "playlistEmptyState",
-    "playlistTableWrap",
-    "playlistTracksBody",
-    "playlistTotalDuration"
-  ]), {
-    getCurrentPlaylist: () => playlist,
-    command: async () => ({ items: [{ id: "t1", title: "Track" }] }),
-    normalizeTrack: (track) => track,
-    filterTracksByQuery: (tracks) => tracks,
-    renderEmptyState: (_container, payload) => calls.push(payload.heading),
-    applySortToTracks: (tracks) => tracks,
-    renderTrackTable: (_tbody, tracks) => calls.push(`rows:${tracks.length}`),
-    renderTrackListDurationSummary: (_node, summary) => calls.push(`duration:${summary.trackCount}`),
-    updatePlaylistPanelTitle: (item) => calls.push(`title:${item.id}`),
-    updatePlaylistExportButtons: () => calls.push("buttons"),
-    renderPlaylistList: () => calls.push("list")
-  });
-
-  assert.equal(playlist.tracks.length, 1);
-  assert.equal(state.currentPlaylistTracksView.length, 1);
-  assert.equal(document.getElementById("playlistTableWrap").classList.contains("hidden"), false);
-  assert.deepEqual(calls, ["rows:1", "duration:1", "title:p1", "buttons", "list"]);
 });
 
 function commitDeps(overrides = {}) {
@@ -218,7 +186,7 @@ test("bindPlaylistEvents ignores playlist selection clicks while new playlist in
   const switched = [];
 
   bindPlaylistEvents(bindDeps({
-    state: { currentPlaylistId: "p0", currentPlaylistTracksView: [], selectedTrackIds: new Set() },
+    state: { currentPlaylistId: "p0", selectedTrackIds: new Set() },
     el,
     switchView: async (view) => { switched.push(view); }
   }));

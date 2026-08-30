@@ -1,5 +1,4 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
-import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
 import { loadMoreIfNearBottom } from "../../track_utils.mjs";
 import { formatDurationMs, renderTrackListDurationSummary } from "../../track_utils.mjs";
 
@@ -611,72 +610,6 @@ export function renderSourceChips(state, el, deps = {}) {
   }
   updateScanLibraryButtonLabel();
   updateSourceFilterIndicator();
-}
-export async function renderCurrentPlaylistTracksFromState(state, el, deps = {}) {
-  const {
-    getCurrentPlaylist = () => null,
-    filterTracksByQuery = (tracks) => tracks,
-    renderEmptyState = () => {},
-    applySortToTracks = (tracks) => tracks,
-    renderTrackTable = () => {},
-    cssEscape = (value) => String(value || ""),
-    renderTrackListDurationSummary = () => {}
-  } = deps;
-
-  const playlist = getCurrentPlaylist();
-  if (!playlist) return;
-  state.currentPlaylistTracksView = filterTracksByQuery(playlist.tracks, state.playlistTrackSearch);
-
-  const playlistEmpty = !playlist.tracks.length;
-  if (el.playlistEmptyState) {
-    el.playlistEmptyState.innerHTML = "";
-    if (playlistEmpty) {
-      renderEmptyState(el.playlistEmptyState, {
-        icon: "♫",
-        heading: "Browse Library or USB to add tracks"
-      });
-    }
-  }
-  if (el.playlistTableWrap) {
-    el.playlistTableWrap.classList.toggle("hidden", playlistEmpty);
-  }
-  el.playlistSearchInput?.closest(".search-row")?.classList.toggle("hidden", playlistEmpty);
-  el.playlistTotalDuration?.classList.toggle("hidden", playlistEmpty);
-  el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", playlistEmpty);
-
-  const sortedPlaylist = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
-  // Row click handlers resolve data-id back into this array, so it has to
-  // match rendered order (see components/usb/actions.mjs for the same rule).
-  state.currentPlaylistTracksView = sortedPlaylist;
-  const { enableDragReorder, dragDisabledTooltip } = applyPlaylistReorderLockToGrid(
-    el,
-    playlist,
-    { searchActive: !!state.playlistTrackSearch },
-    state.playlistUsbExportStatusById
-  );
-  await renderTrackTable(el.playlistTracksBody, sortedPlaylist, {
-    withCheckbox: false,
-    origin: "local",
-    secondaryActionLabel: "Play",
-    secondaryActionType: "play-library",
-    enableAnalyzeActions: false,
-    actionLabel: "×",
-    actionType: "remove-playlist-track",
-    compactAddButton: true,
-    reservesDragColumn: true,
-    enableDragReorder,
-    dragDisabledTooltip
-  });
-  for (const id of state.analyzingTrackIds) {
-    const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
-    const row = el.playlistTracksBody.querySelector(selector);
-    if (row) row.classList.add("is-analyzing");
-  }
-  renderTrackListDurationSummary(el.playlistTotalDuration, {
-    totalDurationMs: playlist.totalDurationMs,
-    durationKnownCount: playlist.durationKnownCount,
-    trackCount: playlist.tracks.length
-  });
 }
 
 // The library's duration total/unknown-count are computed entirely by the

@@ -16,6 +16,7 @@ import * as library from "./components/library/actions.mjs";
 import * as settings from "./components/settings/actions.mjs";
 import * as shell from "./components/shell/actions.mjs";
 import { createTrackListController } from "./components/shared/track_list_controller.mjs";
+import { applyPlaylistReorderLockToGrid } from "./components/shared/export_reorder_lock.mjs";
 import {
   createInitialState,
   createTableSortState,
@@ -473,6 +474,103 @@ const commitActivePlaylistSort = (playlistId) => playlist.commitActivePlaylistSo
   applySortToTracks,
 });
 
+// The app-playlist track table's data layer. Unlike the other three views its
+// list is not paginated (get_playlist_tracks returns the whole playlist) and
+// its column sort + search are *client-side view ops* -- the sort only becomes
+// the playlist's real order when committed on navigate-away/export
+// (commitActivePlaylistSort), and search must not shrink `playlist.tracks`
+// (which drag-reorder and the commit both operate on in full). So this runs in
+// sortMode "client": `ctl.items` is the whole playlist (backed by
+// `getCurrentPlaylist().tracks`), `ctl.view` is the filtered+sorted render.
+const playlistTracksCtl = createTrackListController({
+  bodyId: "playlistTracksBody",
+  pageSize: 0,
+  getElements: () => ({
+    body: el.playlistTracksBody,
+    wrap: el.playlistTableWrap,
+    durationTarget: el.playlistTotalDuration,
+  }),
+  fetchPage: ({ scopeId, cursor, limit }) =>
+    command("get_playlist_tracks", { playlistId: scopeId, cursor: cursor || null, limit }),
+  normalize: (track) => normalizeTrack(track, "plt"),
+  getItems: () => getCurrentPlaylist()?.tracks || [],
+  setItems: (value) => {
+    const p = getCurrentPlaylist();
+    if (p) p.tracks = value;
+  },
+  sortMode: "client",
+  sortItems: (items) => applySortToTracks(items, "playlistTracksBody"),
+  filterItems: (items) => filterTracksByQuery(items, playlistTracksCtl.query),
+  rowOptions: () => {
+    const playlist = getCurrentPlaylist();
+    const lock = playlist
+      ? applyPlaylistReorderLockToGrid(
+        el,
+        playlist,
+        { searchActive: !!playlistTracksCtl.query },
+        state.playlistUsbExportStatusById,
+      )
+      : {};
+    return {
+      withCheckbox: false,
+      origin: "local",
+      secondaryActionLabel: "Play",
+      secondaryActionType: "play-library",
+      enableAnalyzeActions: false,
+      actionLabel: "×",
+      actionType: "remove-playlist-track",
+      compactAddButton: true,
+      reservesDragColumn: true,
+      enableDragReorder: lock.enableDragReorder,
+      dragDisabledTooltip: lock.dragDisabledTooltip,
+    };
+  },
+  renderTrackTable,
+  renderDurationSummary: (target, summary) =>
+    renderTrackListDurationSummary(target, summary, formatDurationMs),
+  getTableSortState: () => tableSortState,
+  onResponse: (data) => {
+    const p = getCurrentPlaylist();
+    if (!p) return;
+    p.totalDurationMs = Number(data.totalDurationMs) || 0;
+    p.durationKnownCount = Number(data.durationKnownCount) || 0;
+  },
+});
+
+// Panel glue around the playlist track table that the controller does not own:
+// empty state, section visibility, search-input restore, is-analyzing pulse,
+// title, export buttons, sidebar. Run after every (re)render of the list.
+function renderPlaylistPanelChrome() {
+  const playlist = getCurrentPlaylist();
+  if (!playlist) return;
+  const empty = !(playlist.tracks || []).length;
+  if (el.playlistEmptyState) {
+    el.playlistEmptyState.innerHTML = "";
+    if (empty) {
+      renderEmptyState(el.playlistEmptyState, {
+        icon: "♫",
+        heading: "Browse Library or USB to add tracks",
+      });
+    }
+  }
+  el.playlistTableWrap?.classList.toggle("hidden", empty);
+  el.playlistTotalDuration?.classList.toggle("hidden", empty);
+  el.playlistSearchInput?.closest(".search-row")?.classList.toggle("hidden", empty);
+  el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", empty);
+  if (el.playlistSearchInput && el.playlistSearchInput.value !== (state.playlistTrackSearch || "")) {
+    el.playlistSearchInput.value = state.playlistTrackSearch || "";
+  }
+  for (const id of state.analyzingTrackIds) {
+    const row = el.playlistTracksBody?.querySelector(
+      `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`,
+    );
+    if (row) row.classList.add("is-analyzing");
+  }
+  updatePlaylistPanelTitle(playlist);
+  updatePlaylistExportButtons();
+  renderPlaylistList();
+}
+
 function handleSortHeaderClick(e) {
   shell.handleSortHeaderClick(tableSortState, e, {
     renderMap: {
@@ -656,16 +754,13 @@ function scheduleApplySearchLocalFilter() {
 function applyLibraryDurationSummary(totalMs, unknownCount) {
   library.applyLibraryDurationSummary(el, state, totalMs, unknownCount, { formatDurationMs });
 }
+// Re-render the open playlist's track table from the already-loaded
+// `playlist.tracks` (no fetch) -- used when only the view changed: a column
+// sort, a reorder-lock flip after a USB scan, a cross-view analysis patch.
 async function renderCurrentPlaylistTracksFromState() {
-  await library.renderCurrentPlaylistTracksFromState(state, el, {
-    getCurrentPlaylist,
-    filterTracksByQuery,
-    renderEmptyState,
-    applySortToTracks,
-    renderTrackTable,
-    cssEscape,
-    renderTrackListDurationSummary,
-  });
+  if (!getCurrentPlaylist()) return;
+  await playlistTracksCtl.rerender();
+  renderPlaylistPanelChrome();
 }
 const mergeHydratedTrackIntoState = (rawTrack) => library.mergeHydratedTrackIntoState(state, rawTrack, {
     normalizeTrack,
@@ -886,20 +981,14 @@ const loadPlaylists = async () => playlist.loadPlaylists(state, {
     renderPlaylistTabsAndPanels: renderPlaylistList,
     updatePlaylistExportButtons,
   });
+// Fetch the open playlist's tracks from the backend and render. `ctl.load`
+// replaces `getCurrentPlaylist().tracks` via setItems.
 async function refreshCurrentPlaylistTracks() {
-  await playlist.refreshCurrentPlaylistTracks(state, el, {
-    getCurrentPlaylist,
-    command,
-    normalizeTrack,
-    filterTracksByQuery,
-    renderEmptyState,
-    applySortToTracks,
-    renderTrackTable,
-    renderTrackListDurationSummary,
-    updatePlaylistPanelTitle,
-    updatePlaylistExportButtons,
-    renderPlaylistList,
-  });
+  const playlist = getCurrentPlaylist();
+  if (!playlist) return;
+  playlistTracksCtl.query = String(state.playlistTrackSearch || "");
+  await playlistTracksCtl.load({ scopeId: playlist.id });
+  renderPlaylistPanelChrome();
 }
 const createPlaylist = async (name) => playlist.createPlaylist(name, {
     setStatus,
@@ -1472,6 +1561,7 @@ function bindEvents() {
     scheduleApplySearchLocalFilter,
     usbPlaylistTracksCtl,
     usbHistoryTracksCtl,
+    playlistTracksCtl,
     patchUsbTrackRow,
     patchHistoryTrackRow,
     addTracksToCurrentPlaylist,

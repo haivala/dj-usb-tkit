@@ -39,7 +39,6 @@ export function createInitialState() {
     playlists: [],
     currentPlaylistId: null,
     playlistTrackSearch: "",
-    currentPlaylistTracksView: [],
     usbPlaylists: [],
     // Keyed by local playlist id -- { sameNameExistsOnUsb, locksReorder },
     // computed server-side (see backend's PlaylistUsbExportStatus) whenever a

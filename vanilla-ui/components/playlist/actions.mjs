@@ -1,5 +1,4 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
-import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
 
 // Builds the wire payload for add_track_candidates_to_playlist from a UI track object,
 // keeping only the fields AddTrackCandidate (backend/src/models.rs) declares so UI-display
@@ -283,81 +282,6 @@ export async function loadPlaylists(state, deps) {
   state.playlists = (data.items || []).map((playlist) => ({ ...playlist, tracks: [] }));
   renderPlaylistTabsAndPanels();
   updatePlaylistExportButtons();
-}
-
-export async function refreshCurrentPlaylistTracks(state, el, deps) {
-  const {
-    getCurrentPlaylist,
-    command,
-    normalizeTrack,
-    filterTracksByQuery,
-    renderEmptyState,
-    applySortToTracks,
-    renderTrackTable,
-    renderTrackListDurationSummary,
-    updatePlaylistPanelTitle,
-    updatePlaylistExportButtons,
-    renderPlaylistList
-  } = deps;
-  const playlist = getCurrentPlaylist();
-  if (!playlist) return;
-
-  const data = await command("get_playlist_tracks", { playlistId: playlist.id });
-  playlist.tracks = (data.items || []).map((track) => normalizeTrack(track, "plt"));
-  playlist.totalDurationMs = Number(data.totalDurationMs) || 0;
-  playlist.durationKnownCount = Number(data.durationKnownCount) || 0;
-  state.currentPlaylistTracksView = filterTracksByQuery(playlist.tracks, state.playlistTrackSearch);
-  if (el.playlistSearchInput && el.playlistSearchInput.value !== state.playlistTrackSearch) {
-    el.playlistSearchInput.value = state.playlistTrackSearch;
-  }
-
-  const playlistEmpty = !playlist.tracks.length;
-  if (el.playlistEmptyState) {
-    el.playlistEmptyState.innerHTML = "";
-    if (playlistEmpty) {
-      renderEmptyState(el.playlistEmptyState, {
-        icon: "\u266B",
-        heading: "Browse Library or USB to add tracks"
-      });
-    }
-  }
-  if (el.playlistTableWrap) {
-    el.playlistTableWrap.classList.toggle("hidden", playlistEmpty);
-  }
-  el.playlistTotalDuration?.classList.toggle("hidden", playlistEmpty);
-  el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", playlistEmpty);
-
-  const sortedTracks = applySortToTracks(state.currentPlaylistTracksView, "playlistTracksBody");
-  // Row click handlers resolve data-id back into this array, so it has to
-  // match rendered order (see components/usb/actions.mjs for the same rule).
-  state.currentPlaylistTracksView = sortedTracks;
-  const { enableDragReorder, dragDisabledTooltip } = applyPlaylistReorderLockToGrid(
-    el,
-    playlist,
-    { searchActive: !!state.playlistTrackSearch },
-    state.playlistUsbExportStatusById
-  );
-  await renderTrackTable(el.playlistTracksBody, sortedTracks, {
-    withCheckbox: false,
-    origin: "local",
-    secondaryActionLabel: "Play",
-    secondaryActionType: "play-library",
-    enableAnalyzeActions: false,
-    actionLabel: "\u00d7",
-    actionType: "remove-playlist-track",
-    compactAddButton: true,
-    reservesDragColumn: true,
-    enableDragReorder,
-    dragDisabledTooltip
-  });
-  renderTrackListDurationSummary(el.playlistTotalDuration, {
-    totalDurationMs: playlist.totalDurationMs,
-    durationKnownCount: playlist.durationKnownCount,
-    trackCount: playlist.tracks.length
-  });
-  updatePlaylistPanelTitle(playlist);
-  updatePlaylistExportButtons();
-  renderPlaylistList();
 }
 
 // Column-sort on the app playlist tracklist is a free, reversible view-only

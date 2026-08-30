@@ -18,6 +18,7 @@ export function bindPlaylistEvents(ctx) {
     analyzeTrackIds,
     resolveLocalTrackId,
     refreshCurrentPlaylistTracks,
+    playlistTracksCtl,
     clearPlaylistTrackSort = () => {}
   } = ctx;
   const emitStatus = resolveEmitStatus(ctx);
@@ -58,7 +59,8 @@ export function bindPlaylistEvents(ctx) {
 
   el.playlistSearchInput?.addEventListener("input", () => {
     state.playlistTrackSearch = String(el.playlistSearchInput.value || "");
-    ctx.refreshCurrentPlaylistTracks().catch(catchErr(emitStatus));
+    // Client-side filter of the already-loaded playlist -- no refetch.
+    Promise.resolve(playlistTracksCtl.setSearch(state.playlistTrackSearch)).catch(catchErr(emitStatus));
   });
 
   el.panels.playlist.addEventListener("click", (event) => {
@@ -66,7 +68,7 @@ export function bindPlaylistEvents(ctx) {
     if (actionTarget?.dataset?.action === "remove-playlist-track") {
       const id = actionTarget.dataset.id;
       const playlist = getCurrentPlaylist();
-      const track = state.currentPlaylistTracksView.find((item) => String(item.id) === String(id))
+      const track = playlistTracksCtl.view.find((item) => String(item.id) === String(id))
         || playlist?.tracks?.find((item) => String(item.id) === String(id));
       if (!playlist || !track?.id) return;
       command("remove_tracks_from_playlist", {
@@ -91,7 +93,7 @@ export function bindPlaylistEvents(ctx) {
     if (action === "play-library" || action === "scrub-play") {
       const id = actionTarget.dataset.id;
       const playlist = getCurrentPlaylist();
-      const track = state.currentPlaylistTracksView.find((item) => String(item.id) === String(id))
+      const track = playlistTracksCtl.view.find((item) => String(item.id) === String(id))
         || playlist?.tracks?.find((item) => String(item.id) === String(id));
       if (!track) return;
       const rowKey = actionTarget?.closest(".track-grid-row")?.dataset?.playbackRow || null;

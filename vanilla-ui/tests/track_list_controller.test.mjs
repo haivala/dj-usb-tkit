@@ -28,6 +28,11 @@ function harness(overrides = {}) {
     onPage: (page, meta) => { calls.pages.push({ n: page.length, ...meta }); },
     getTableSortState: () => overrides.tableSortState || {},
     normalize: overrides.normalize,
+    getItems: overrides.getItems,
+    setItems: overrides.setItems,
+    sortMode: overrides.sortMode,
+    sortItems: overrides.sortItems,
+    filterItems: overrides.filterItems,
   });
   return { ctl, calls, resetPageIdx: () => { pageIdx = 0; } };
 }
@@ -132,4 +137,54 @@ test("clear empties the list, renders an empty table, and zeroes the footer", as
   assert.equal(ctl.hasMore, false);
   assert.equal(calls.renders.at(-1).n, 0);
   assert.deepEqual(calls.duration.at(-1), { totalDurationMs: 0, durationKnownCount: 0, trackCount: 0 });
+});
+
+test("items are backed by an external store when getItems/setItems are given", async () => {
+  const store = { list: [] };
+  const { ctl } = harness({
+    getItems: () => store.list,
+    setItems: (v) => { store.list = v; },
+  });
+  await ctl.load({ scopeId: "x" });
+  assert.deepEqual(store.list.map((t) => t.id), ["1", "2"]);
+  assert.equal(ctl.items, store.list);
+  // an in-place mutation of the external store is visible through ctl.items
+  store.list[0].tag = "patched";
+  assert.equal(ctl.items[0].tag, "patched");
+});
+
+test("client sort mode re-sorts the loaded list in place without fetching", async () => {
+  const sortState = { body: null };
+  const { ctl, calls } = harness({
+    sortMode: "client",
+    tableSortState: sortState,
+    sortItems: (items, key, dir) => {
+      if (!key) return items;
+      const m = dir === "desc" ? -1 : 1;
+      return [...items].sort((a, b) => m * String(a[key]).localeCompare(String(b[key])));
+    },
+    pages: [{ items: [{ id: "b", title: "B" }, { id: "a", title: "A" }], total: 2, hasMore: false }],
+  });
+  await ctl.load({ scopeId: "pl" });
+  assert.deepEqual(calls.renders.at(-1).options.append, undefined);
+  const fetchCount = calls.fetch.length;
+  sortState.body = { key: "title", dir: "asc" };
+  await ctl.applyHeaderSort();
+  assert.equal(calls.fetch.length, fetchCount, "client sort must not fetch");
+  assert.deepEqual(ctl.view.map((t) => t.id), ["a", "b"]);
+});
+
+test("client sort mode filters the view by the search query without fetching or shrinking items", async () => {
+  const { ctl, calls } = harness({
+    sortMode: "client",
+    filterItems: (items) => items.filter((t) => t.title.toLowerCase().includes(String(ctl.query).toLowerCase())),
+    pages: [{ items: [{ id: "1", title: "House Groove" }, { id: "2", title: "Techno Beat" }], total: 2, hasMore: false }],
+  });
+  await ctl.load({ scopeId: "pl" });
+  const fetchCount = calls.fetch.length;
+  await ctl.setSearch("house");
+  assert.equal(calls.fetch.length, fetchCount, "client search must not fetch");
+  assert.deepEqual(ctl.view.map((t) => t.id), ["1"]);
+  assert.deepEqual(ctl.items.map((t) => t.id), ["1", "2"], "the loaded list itself is untouched");
+  assert.equal(calls.renders.at(-1).n, 1, "only the filtered rows are rendered");
 });

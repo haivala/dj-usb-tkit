@@ -69,6 +69,17 @@
   reads fall back to the file-path extension for legacy / master.db / USB-merge rows), and
   USB tracks carry it too, derived from the PDB path. The frontend no longer infers the
   format from the file path.
+- **Improvement:** selecting a large USB playlist or history session is faster and simpler —
+  the backend now returns one already-hydrated page at a time (waveform/BPM/key/artwork) via
+  `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks`, and searching or sorting the list
+  re-queries the backend so it covers every track, not only the visible page. The frontend's
+  separate per-page hydration round-trip and its bespoke pagination bookkeeping are gone,
+  replaced by one shared track-list controller.
+- **Chore:** the app-playlist track list moved onto that same shared controller (its search
+  and column sort stay client-side view ops, as before — the sort still only becomes the
+  playlist's real order on navigate-away/export). `get_playlist_tracks` also gained the
+  shared cursor-paginated request/response shape for future use. Two near-duplicate
+  playlist-render code paths collapsed into one.
 
 ## 0.1.33
 

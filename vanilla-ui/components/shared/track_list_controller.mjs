@@ -41,12 +41,30 @@ export function createTrackListController(config = {}) {
     onResponse = () => {},
     // () => tableSortState  (the shell's per-body { key, dir } sort map)
     getTableSortState = () => ({}),
+    // Optional external backing for `ctl.items` -- the library points these at
+    // `state.tracks` so playback resolution / analysis patching / selection,
+    // which all read `state.tracks`, stay consistent. Default: internal array.
+    getItems = null,
+    setItems = null,
+    // "backend" (default): a column-header sort reloads page 1 with sortBy,
+    // and `setSearch` reloads page 1 with the query.
+    // "client": re-sort / re-filter the loaded items in place, no fetch (used
+    // by the editable app playlist, whose sort is a reversible view op
+    // committed elsewhere and whose search must not shrink the loaded list --
+    // `commitActivePlaylistSort` reorders the whole list, not the filtered
+    // view).
+    sortMode = "backend",
+    sortItems = (items) => items, // client mode: (items, key, dir) -> sorted
+    filterItems = (items) => items, // client mode: (items) -> filtered by ctl.query
   } = config;
+
+  let internalItems = [];
+  const readItems = getItems || (() => internalItems);
+  const writeItems = setItems || ((value) => { internalItems = value; });
 
   const ctl = {
     bodyId,
     scopeId: null,
-    items: [],
     total: 0,
     nextCursor: null,
     hasMore: false,
@@ -60,6 +78,21 @@ export function createTrackListController(config = {}) {
     seq: 0,
     _scrollBound: false,
   };
+  Object.defineProperty(ctl, "items", {
+    get: readItems,
+    set: writeItems,
+    enumerable: true,
+  });
+
+  // What the table currently shows / row clicks resolve against. In backend
+  // sort mode this is just `items`; in client sort mode it is the
+  // query-filtered, column-sorted view of `items`.
+  Object.defineProperty(ctl, "view", {
+    get: () => (sortMode === "client"
+      ? sortItems(filterItems(readItems()), getTableSortState()[bodyId]?.key, getTableSortState()[bodyId]?.dir)
+      : readItems()),
+    enumerable: true,
+  });
 
   async function run(cursor, { append }) {
     const seq = append ? ctl.seq : (ctl.seq += 1);
@@ -77,18 +110,23 @@ export function createTrackListController(config = {}) {
 
       onResponse(data);
       const page = (data.items || []).map((item) => normalize(item));
-      ctl.items = append ? ctl.items.concat(page) : page;
-      ctl.total = Number.isFinite(Number(data.total)) ? Number(data.total) : ctl.items.length;
+      ctl.items = append ? readItems().concat(page) : page;
+      ctl.total = Number.isFinite(Number(data.total)) ? Number(data.total) : readItems().length;
       ctl.nextCursor = data.nextCursor ?? null;
       ctl.hasMore = !!data.hasMore;
 
       const { body, durationTarget } = getElements();
-      const indexOffset = append ? ctl.items.length - page.length : 0;
-      await renderTrackTable(
-        body,
-        page,
-        append ? { ...rowOptions(), append: true, indexOffset } : rowOptions()
-      );
+      if (sortMode === "client") {
+        // Not paginated: render the whole (client-sorted) view.
+        await renderTrackTable(body, ctl.view, rowOptions());
+      } else {
+        const indexOffset = append ? readItems().length - page.length : 0;
+        await renderTrackTable(
+          body,
+          page,
+          append ? { ...rowOptions(), append: true, indexOffset } : rowOptions()
+        );
+      }
       if (seq !== ctl.seq) return;
 
       renderDurationSummary(durationTarget, {
@@ -122,7 +160,7 @@ export function createTrackListController(config = {}) {
   // patch) but the in-place row patch couldn't find its DOM node.
   ctl.rerender = async () => {
     const { body } = getElements();
-    if (body) await renderTrackTable(body, ctl.items, rowOptions());
+    if (body) await renderTrackTable(body, ctl.view, rowOptions());
   };
 
   // Drop the current list without fetching (view deselected / USB disconnected).
@@ -149,12 +187,16 @@ export function createTrackListController(config = {}) {
     const next = String(value || "");
     if (next === ctl.query) return Promise.resolve();
     ctl.query = next;
-    return ctl.reload();
+    // Client mode filters the already-loaded list -- no refetch.
+    return sortMode === "client" ? ctl.rerender() : ctl.reload();
   };
 
   // Wired as this view's entry in `bodyToRendererMap` -- the shell's sort
-  // header click updates `tableSortState[bodyId]` then calls this.
+  // header click updates `tableSortState[bodyId]` then calls this. Backend mode
+  // reloads page 1 with the new sortBy; client mode just re-renders the sorted
+  // view (the loaded list is the whole list).
   ctl.applyHeaderSort = () => {
+    if (sortMode === "client") return ctl.rerender();
     const st = getTableSortState()[bodyId] || null;
     const by = st?.key || null;
     const dir = st?.dir || null;
