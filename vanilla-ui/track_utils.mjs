@@ -32,16 +32,21 @@ export function formatDurationMs(value) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-// Pure setter -- the playlist total is computed by the backend
-// (GetPlaylistTracksData::total_duration_ms / duration_known_count, over the
-// full playlist) and passed straight through here, matching the library and
-// USB footers. It intentionally does not react to the client-side track search
-// filter, same as the USB playlist/history footers.
-export function renderTrackListDurationSummary(target, { totalDurationMs, durationKnownCount, trackCount } = {}, formatDurationMsFn = formatDurationMs) {
+// The single "Total time: … (N without length)" renderer for every track-list
+// footer (app playlist, library, USB playlist/history). The totals are always
+// backend-computed and passed straight through -- no client-side summing, and
+// no reaction to a client-side search filter. Callers give the unknown count
+// either directly as `unknownCount`, or as `trackCount` - `durationKnownCount`.
+export function renderTrackListDurationSummary(
+  target,
+  { totalDurationMs, unknownCount, durationKnownCount, trackCount } = {},
+  formatDurationMsFn = formatDurationMs
+) {
   if (!target) return;
   const total = Math.max(0, Number(totalDurationMs) || 0);
-  const known = Math.max(0, Number(durationKnownCount) || 0);
-  const unknown = Math.max(0, (Number(trackCount) || 0) - known);
+  const unknown = Number.isFinite(Number(unknownCount))
+    ? Math.max(0, Number(unknownCount))
+    : Math.max(0, (Number(trackCount) || 0) - Math.max(0, Number(durationKnownCount) || 0));
   const suffix = unknown > 0 ? ` (${unknown} without length)` : "";
   target.textContent = `Total time: ${formatDurationMsFn(total)}${suffix}`;
 }

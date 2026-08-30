@@ -50,7 +50,8 @@
 - **Fix:** the playback status line no longer changes its source label ("Library (matched)",
   "USB", …) after the first seek — the label the backend resolved at play time is now reused
   as-is for later playback events instead of being re-derived in the frontend, which could not
-  reproduce every backend label.
+  reproduce every backend label. Stopping playback also clears that stashed label now, so a
+  stray late event can't reprint it for a track that already ended.
 - **Fix:** every track in an opened playlist is now correctly flagged as coming from the
   external master database (or not) — a mismatched column list in the playlist-tracks query
   made them all look non-master-db.
@@ -60,7 +61,9 @@
   the library and USB playlist/history footers already had.
 - **Chore:** dropped the frontend's defensive snake_case / seconds-vs-milliseconds track-field
   coalescing — the backend response contract is camelCase with a single `durationMs` field, so
-  the extra branches were dead code that could only mask a real contract drift.
+  the extra branches were dead code that could only mask a real contract drift. Every
+  track-list footer ("Total time" for the app playlist, library, and USB playlist/history) now
+  renders through one shared helper instead of three near-identical copies.
 
 ## 0.1.33
 

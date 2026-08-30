@@ -4,6 +4,7 @@ import {
   warningEntryText
 } from "../library/actions.mjs";
 import { resolveEmitStatus, trackMetaFingerprint } from "../shared/track_actions.mjs";
+import { renderTrackListDurationSummary } from "../../track_utils.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
 // these is running, the currently-selected root must not change underneath
@@ -1835,10 +1836,7 @@ export async function loadMoreUsbPlaylistTracks(state, el, pageSize, deps = {}) 
 // element and the totals already present on the selected playlist/history
 // object from fetch_usb_playlists/fetch_usb_histories).
 export function applyUsbDurationSummary(el, totalMs, unknownCount, deps = {}) {
-  const { formatDurationMs = () => "" } = deps;
-  if (!el) return;
-  const suffix = unknownCount > 0 ? ` (${unknownCount} without length)` : "";
-  el.textContent = `Total time: ${formatDurationMs(totalMs)}${suffix}`;
+  renderTrackListDurationSummary(el, { totalDurationMs: totalMs, unknownCount }, deps.formatDurationMs);
 }
 
 export function renderHistoryList(state, el, deps = {}) {

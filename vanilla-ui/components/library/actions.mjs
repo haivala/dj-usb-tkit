@@ -1,7 +1,7 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
 import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
 import { loadMoreIfNearBottom } from "../../track_utils.mjs";
-import { formatDurationMs } from "../../track_utils.mjs";
+import { formatDurationMs, renderTrackListDurationSummary } from "../../track_utils.mjs";
 
 export function trackHasRenderableWaveform(track) {
   const hasPreview = Array.isArray(track?.waveformPreview)
@@ -694,14 +694,13 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
 // job.progress events during an analysis batch (job_manager.mjs). This is
 // a pure setter -- no track iteration, no countability logic, no filtering.
 export function applyLibraryDurationSummary(el, state, totalMs, unknownCount, deps = {}) {
-  const { formatDurationMs = () => "" } = deps;
   state.libraryDurationTotalMs = Number(totalMs) || 0;
   state.libraryDurationUnknownCount = Math.max(0, Number(unknownCount) || 0);
-  if (!el?.libraryTotalDuration) return;
-  const suffix = state.libraryDurationUnknownCount > 0
-    ? ` (${state.libraryDurationUnknownCount} without length)`
-    : "";
-  el.libraryTotalDuration.textContent = `Total time: ${formatDurationMs(state.libraryDurationTotalMs)}${suffix}`;
+  renderTrackListDurationSummary(
+    el?.libraryTotalDuration,
+    { totalDurationMs: state.libraryDurationTotalMs, unknownCount: state.libraryDurationUnknownCount },
+    deps.formatDurationMs
+  );
 }
 
 export async function renderLibraryRows(state, el, deps = {}) {

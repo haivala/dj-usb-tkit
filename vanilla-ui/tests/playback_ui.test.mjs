@@ -72,7 +72,8 @@ test("stopPlaybackFromUi clears playback state and updates UI", async () => {
     playbackTrackId: "t1",
     playbackPath: "/music/t1.mp3",
     playbackRowKey: "row:1",
-    activeWaveform: {}
+    activeWaveform: {},
+    playbackLabelContext: { sourceLabel: "Library", title: "Artist - Track" }
   };
   const calls = [];
 
@@ -87,6 +88,9 @@ test("stopPlaybackFromUi clears playback state and updates UI", async () => {
   assert.equal(state.playbackActive, false);
   assert.equal(state.playbackTrackId, null);
   assert.equal(state.playbackStopPromise, null);
+  // A stale label context must not survive a stop -- a later stray
+  // playback.started would otherwise reprint a label for a track that ended.
+  assert.equal(state.playbackLabelContext, null);
 });
 
 function startHarness({ waveformEl = { id: "wf" }, durationMs = 20000 } = {}) {

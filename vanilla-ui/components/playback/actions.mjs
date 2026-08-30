@@ -161,6 +161,7 @@ export async function stopPlaybackFromUi(state, deps) {
       state.playbackPath = null;
       state.playbackRowKey = null;
       state.activeWaveform = null;
+      state.playbackLabelContext = null;
       stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
       clearAllWaveformPlayheads();
       clearPlaybackIntentIfCurrent(state, generation);
@@ -481,6 +482,7 @@ export async function stopPlaybackIfActive(state, deps) {
       state.playbackPath = null;
       state.playbackRowKey = null;
       state.activeWaveform = null;
+      state.playbackLabelContext = null;
       stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
       clearAllWaveformPlayheads();
       clearPlaybackIntentIfCurrent(state, generation);
