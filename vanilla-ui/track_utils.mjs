@@ -82,11 +82,3 @@ export function formatTimestampLocal(value) {
   return date.toLocaleString();
 }
 
-export function filterTracksByQuery(tracks, query) {
-  const q = String(query || "").trim().toLowerCase();
-  if (!q) return tracks.slice();
-  return tracks.filter((track) => {
-    const row = `${track.title || ""} ${track.artist || ""} ${track.album || ""}`.toLowerCase();
-    return row.includes(q);
-  });
-}

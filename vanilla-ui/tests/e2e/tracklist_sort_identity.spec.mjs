@@ -40,9 +40,9 @@ test("Library: scrub-play after column sort plays the clicked row's track, not t
     // Insertion order deliberately differs from album-sorted order, so a
     // stale index lookup after sorting resolves to the wrong track.
     const tracks = [
-      { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-      { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-      { id: "t3", title: "Song Three", artist: "Artist", album: "Mike Album", filePath: "/music/three.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+      { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+      { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+      { id: "t3", title: "Song Three", artist: "Artist", album: "Mike Album", filePath: "/music/three.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
     ];
 
     window.__playResolvedCalls = [];
@@ -127,9 +127,9 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
 
     const playlistTracks = {
       "pl-1": [
-        { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t3", title: "Song Three", artist: "Artist", album: "Mike Album", filePath: "/music/three.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+        { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t3", title: "Song Three", artist: "Artist", album: "Mike Album", filePath: "/music/three.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
       ]
     };
 
@@ -140,10 +140,28 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
       ...base,
       list_playlists: async () => ({ ok: true, data: { items: playlists } }),
       get_playlist_tracks: async (request) => {
-        const items = playlistTracks[request.playlistId] || [];
+        // App playlist list is server-sorted/paginated now (shared controller).
+        let items = (playlistTracks[request.playlistId] || []).slice();
+        if (request.sortBy) {
+          const m = request.sortDir === "desc" ? -1 : 1;
+          const k = request.sortBy;
+          items = items.sort((a, b) => {
+            if (k === "bpm" || k === "durationMs") return m * ((Number(a[k]) || 0) - (Number(b[k]) || 0));
+            const av = k === "artist" ? `${a.artist} ${a.title}` : String(a[k] ?? "");
+            const bv = k === "artist" ? `${b.artist} ${b.title}` : String(b[k] ?? "");
+            return av < bv ? -m : av > bv ? m : 0;
+          });
+        }
         const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
         const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
-        return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+        return {
+          ok: true,
+          data: {
+            playlistId: request.playlistId, items, total: items.length,
+            nextCursor: null, hasMore: false, totalDurationMs, durationKnownCount,
+            unanalyzedCount: items.filter((t) => !t.analysisReady).length,
+          },
+        };
       },
       list_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
       search_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
@@ -219,8 +237,8 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
 
     const playlistTracks = {
       "pl-1": [
-        { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+        { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
       ]
     };
 
@@ -228,10 +246,28 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
       ...base,
       list_playlists: async () => ({ ok: true, data: { items: playlists } }),
       get_playlist_tracks: async (request) => {
-        const items = playlistTracks[request.playlistId] || [];
+        // App playlist list is server-sorted/paginated now (shared controller).
+        let items = (playlistTracks[request.playlistId] || []).slice();
+        if (request.sortBy) {
+          const m = request.sortDir === "desc" ? -1 : 1;
+          const k = request.sortBy;
+          items = items.sort((a, b) => {
+            if (k === "bpm" || k === "durationMs") return m * ((Number(a[k]) || 0) - (Number(b[k]) || 0));
+            const av = k === "artist" ? `${a.artist} ${a.title}` : String(a[k] ?? "");
+            const bv = k === "artist" ? `${b.artist} ${b.title}` : String(b[k] ?? "");
+            return av < bv ? -m : av > bv ? m : 0;
+          });
+        }
         const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
         const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
-        return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+        return {
+          ok: true,
+          data: {
+            playlistId: request.playlistId, items, total: items.length,
+            nextCursor: null, hasMore: false, totalDurationMs, durationKnownCount,
+            unanalyzedCount: items.filter((t) => !t.analysisReady).length,
+          },
+        };
       },
       list_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
       search_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
@@ -284,11 +320,11 @@ test("Library: sorting by BPM column actually orders rows by numeric BPM value",
     // string compare, or a comparator applied to the wrong array) reorders
     // rows without the BPM column actually ending up sorted.
     const tracks = [
-      { id: "t1", title: "Track A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPreview: [], durationMs: 180000, bpm: 128, key: "8A" },
-      { id: "t2", title: "Track B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPreview: [], durationMs: 180000, bpm: 90, key: "8A" },
-      { id: "t3", title: "Track C", artist: "Artist", album: "Album", filePath: "/music/c.mp3", waveformPreview: [], durationMs: 180000, bpm: 174, key: "8A" },
-      { id: "t4", title: "Track D", artist: "Artist", album: "Album", filePath: "/music/d.mp3", waveformPreview: [], durationMs: 180000, bpm: 9, key: "8A" },
-      { id: "t5", title: "Track E", artist: "Artist", album: "Album", filePath: "/music/e.mp3", waveformPreview: [], durationMs: 180000, bpm: 128.5, key: "8A" }
+      { id: "t1", title: "Track A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPreview: [], durationMs: 180000, bpm: 128, key: "8A", analysisReady: true },
+      { id: "t2", title: "Track B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPreview: [], durationMs: 180000, bpm: 90, key: "8A", analysisReady: true },
+      { id: "t3", title: "Track C", artist: "Artist", album: "Album", filePath: "/music/c.mp3", waveformPreview: [], durationMs: 180000, bpm: 174, key: "8A", analysisReady: true },
+      { id: "t4", title: "Track D", artist: "Artist", album: "Album", filePath: "/music/d.mp3", waveformPreview: [], durationMs: 180000, bpm: 9, key: "8A", analysisReady: true },
+      { id: "t5", title: "Track E", artist: "Artist", album: "Album", filePath: "/music/e.mp3", waveformPreview: [], durationMs: 180000, bpm: 128.5, key: "8A", analysisReady: true }
     ];
 
     const handlers = {

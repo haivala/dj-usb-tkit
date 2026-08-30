@@ -1,4 +1,4 @@
-import { catchErr, handleTrackAction, resolveEmitStatus } from "../shared/track_actions.mjs";
+import { catchErr, handleTrackAction, resolveEmitStatus, resolveRowActionTrack } from "../shared/track_actions.mjs";
 
 export function bindLibraryEvents(ctx) {
   const {
@@ -239,11 +239,8 @@ export function bindLibraryEvents(ctx) {
   el.libraryTableBody.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
     const action = target?.dataset?.action;
-    const id = target?.dataset?.id;
     const rowKey = target?.closest(".track-grid-row")?.dataset?.playbackRow || null;
-    const visibleTracks = getLibraryVisibleTracks();
-    const track = visibleTracks.find((item) => String(item.id) === String(id))
-      || state.tracks.find((item) => String(item.id) === String(id));
+    const track = resolveRowActionTrack(getLibraryVisibleTracks(), target);
     if (!track) return;
 
     handleTrackAction({ action, track, origin: "local", target, event, state, rowKey, ctx });

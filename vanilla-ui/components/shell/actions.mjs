@@ -1,10 +1,3 @@
-export function applySortToTracks(tableSortState, tracks, tbodyId, deps = {}) {
-  const sortTracks = deps.sortTracks || ((items) => items);
-  const st = tableSortState[tbodyId];
-  if (!st) return tracks;
-  return sortTracks(tracks, st.key, st.dir);
-}
-
 export function clearTrackSort(tableSortState, bodyId, grid) {
   delete tableSortState[bodyId];
   if (!grid) return;

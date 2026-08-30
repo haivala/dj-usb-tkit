@@ -1,5 +1,66 @@
 import { test, expect } from "./coverage-fixture.mjs";
 
+// The app-playlist track list is server-paginated/searched/sorted via
+// `get_playlist_tracks` (shared TrackListController), and drag-reorder + the
+// sort-commit are single-move / sort-mode `reorder_playlist_tracks` calls.
+// These helpers let every mock below implement that contract in one line.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__playlistTracksPage = (all, request) => {
+      let rows = (all || []).slice();
+      const q = String(request.query || "").trim().toLowerCase();
+      if (q) rows = rows.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q));
+      if (request.sortBy) {
+        const m = request.sortDir === "desc" ? -1 : 1;
+        const k = request.sortBy;
+        rows = rows.slice().sort((a, b) => {
+          if (k === "bpm" || k === "durationMs") return m * ((Number(a[k]) || 0) - (Number(b[k]) || 0));
+          const av = k === "artist" ? `${a.artist} ${a.title}` : String(a[k] ?? "");
+          const bv = k === "artist" ? `${b.artist} ${b.title}` : String(b[k] ?? "");
+          return av < bv ? -m : av > bv ? m : 0;
+        });
+      }
+      const off = Number(request.cursor || 0);
+      const lim = Number(request.limit || 0) || rows.length;
+      const slice = rows.slice(off, off + lim);
+      const nextOff = off + slice.length;
+      return {
+        playlistId: request.playlistId,
+        items: slice,
+        total: rows.length,
+        nextCursor: nextOff < rows.length ? String(nextOff) : null,
+        hasMore: nextOff < rows.length,
+        totalDurationMs: rows.reduce((s, t) => s + (t.durationMs > 0 ? t.durationMs : 0), 0),
+        durationKnownCount: rows.filter((t) => t.durationMs > 0).length,
+        unanalyzedCount: rows.filter((t) => !t.analysisReady).length,
+      };
+    };
+    window.__applyReorder = (cur, request) => {
+      const list = (cur || []).slice();
+      const byId = new Map(list.map((t) => [t.id, t]));
+      let ids;
+      if (Array.isArray(request.orderedTrackIds) && request.orderedTrackIds.length) {
+        ids = request.orderedTrackIds;
+      } else if (request.sortBy) {
+        const m = request.sortDir === "desc" ? -1 : 1;
+        const k = request.sortBy;
+        ids = list.sort((a, b) => {
+          const av = k === "artist" ? `${a.artist} ${a.title}` : String(a[k] ?? "");
+          const bv = k === "artist" ? `${b.artist} ${b.title}` : String(b[k] ?? "");
+          return av < bv ? -m : av > bv ? m : 0;
+        }).map((t) => t.id);
+      } else if (request.moveTrackId) {
+        ids = list.map((t) => t.id).filter((id) => id !== request.moveTrackId);
+        const at = request.beforeTrackId ? ids.indexOf(request.beforeTrackId) : -1;
+        ids.splice(at < 0 ? ids.length : at, 0, request.moveTrackId);
+      } else {
+        ids = list.map((t) => t.id);
+      }
+      return ids.map((id) => byId.get(id)).filter(Boolean);
+    };
+  });
+});
+
 test("playlist analyze-missing skips already-analyzed tracks and targets the rest", async ({ page }) => {
   await page.addInitScript(() => {
     // registerBackendJobEvents() only calls listen("job:event", ...) when
@@ -124,10 +185,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
             return { ok: true, data: { items: playlists } };
           }
           if (command === "get_playlist_tracks") {
-            const items = playlistTracks[request.playlistId] || [];
-            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
-            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
           if (command === "search_tracks" || command === "list_tracks") {
             return { ok: true, data: { total: libraryTracks.length, items: libraryTracks } };
@@ -363,10 +421,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
             return { ok: true, data: { items: playlists } };
           }
           if (command === "get_playlist_tracks") {
-            const items = playlistTracks[request.playlistId] || [];
-            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
-            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
           if (command === "search_tracks" || command === "list_tracks") {
             return { ok: true, data: { total: 0, items: [] } };
@@ -512,10 +567,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
             return { ok: true, data: { items: playlists } };
           }
           if (command === "get_playlist_tracks") {
-            const items = playlistTracks[request.playlistId] || [];
-            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
-            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
           if (command === "search_tracks" || command === "list_tracks") {
             return { ok: true, data: { total: 0, items: [] } };
@@ -595,9 +647,9 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
 
     const playlistTracks = {
       "pl-1": [
-        { id: "t1", title: "Song A", artist: "Artist", album: "", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t2", title: "Song B", artist: "Artist", album: "", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t3", title: "Song C", artist: "Artist", album: "", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+        { id: "t1", title: "Song A", artist: "Artist", album: "", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t2", title: "Song B", artist: "Artist", album: "", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t3", title: "Song C", artist: "Artist", album: "", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
       ]
     };
 
@@ -617,21 +669,12 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
             return { ok: true, data: { items: playlists } };
           }
           if (command === "get_playlist_tracks") {
-            const items = playlistTracks[request.playlistId] || [];
-            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
-            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
           }
           if (command === "reorder_playlist_tracks") {
-            window.__reorderPlaylistTrackCalls.push(request.orderedTrackIds);
-            const byId = new Map((playlistTracks[request.playlistId] || []).map((t) => [t.id, t]));
-            playlistTracks[request.playlistId] = request.orderedTrackIds
-              .map((id) => byId.get(id))
-              .filter(Boolean);
-            return {
-              ok: true,
-              data: { playlistId: request.playlistId, reordered: request.orderedTrackIds.length }
-            };
+            window.__reorderPlaylistTrackCalls.push(request);
+            playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId] || [], request);
+            return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
           }
           if (command === "search_tracks" || command === "list_tracks") {
             return { ok: true, data: { total: 0, items: [] } };
@@ -752,7 +795,7 @@ test("playlist track drag-and-drop reorder persists the new order", async ({ pag
 
   const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
   expect(calls.length).toBeGreaterThan(0);
-  expect(calls[calls.length - 1]).toEqual(["t2", "t3", "t1"]);
+  expect(calls[calls.length - 1]).toEqual({ playlistId: "pl-1", moveTrackId: "t1", beforeTrackId: null });
 });
 
 test("playlist track drag that does not change position skips persisting order", async ({ page }) => {
@@ -803,7 +846,7 @@ test("dragging a playlist track while sorted persists the manual order and clear
 
   const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
   expect(calls.length).toBeGreaterThan(0);
-  expect(calls[calls.length - 1]).toEqual(["t2", "t3", "t1"]);
+  expect(calls[calls.length - 1]).toEqual({ playlistId: "pl-1", moveTrackId: "t1", beforeTrackId: null });
 
   // The drag clears the sort so the manual order isn't immediately re-sorted away.
   await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
@@ -825,9 +868,9 @@ test("playlist track drag handle is hidden while a search filter is active", asy
   await page.locator("#playlistSearchInput").fill("Song A");
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(1);
   await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
-  // The footer shows the whole-playlist backend total, unaffected by the
-  // client-side search filter (same as the USB playlist/history footers).
-  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 9:00");
+  // Search is a backend query param now (like the library and USB views), so
+  // the footer total tracks the filtered set -- one 3:00 track here.
+  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00");
 });
 
 async function connectUsbAndFetchPlaylists(page) {
@@ -950,7 +993,7 @@ test("changing the export sync mode releases and re-engages the open playlist's 
 
   const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
   expect(calls.length).toBe(1);
-  expect(calls[0]).toEqual(["t1", "t2", "t3"]);
+  expect(calls[0]).toEqual({ playlistId: "pl-1", sortBy: "artist", sortDir: "asc" });
 });
 
 test("playlist track drag handle stays enabled in additive mode when no same-name USB playlist exists", async ({ page }) => {
@@ -983,12 +1026,12 @@ test("switching away from a sorted playlist commits the sort as its real order, 
 
     const playlistTracks = {
       "pl-free": [
-        { id: "t1", title: "Song A", artist: "Artist", album: "Zulu Album", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t2", title: "Song B", artist: "Artist", album: "Alpha Album", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+        { id: "t1", title: "Song A", artist: "Artist", album: "Zulu Album", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t2", title: "Song B", artist: "Artist", album: "Alpha Album", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
       ],
       "pl-locked": [
-        { id: "t3", title: "Song C", artist: "Artist", album: "Zulu Album", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t4", title: "Song D", artist: "Artist", album: "Alpha Album", filePath: "/music/d.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+        { id: "t3", title: "Song C", artist: "Artist", album: "Zulu Album", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t4", title: "Song D", artist: "Artist", album: "Alpha Album", filePath: "/music/d.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
       ]
     };
 
@@ -1004,16 +1047,12 @@ test("switching away from a sorted playlist commits the sort as its real order, 
           if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "get_playlist_tracks") {
-            const items = playlistTracks[request.playlistId] || [];
-            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
-            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
           if (command === "reorder_playlist_tracks") {
             window.__reorderPlaylistTrackCalls.push(request);
-            const byId = new Map((playlistTracks[request.playlistId] || []).map((t) => [t.id, t]));
-            playlistTracks[request.playlistId] = request.orderedTrackIds.map((id) => byId.get(id)).filter(Boolean);
-            return { ok: true, data: { playlistId: request.playlistId, reordered: request.orderedTrackIds.length } };
+            playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId], request);
+            return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
           }
           if (command === "search_tracks" || command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
@@ -1078,7 +1117,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
   await expect(lockedRows).toHaveCount(2);
 
   const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
-  expect(reorderCalls).toEqual([{ playlistId: "pl-free", orderedTrackIds: ["t2", "t1"] }]);
+  expect(reorderCalls).toEqual([{ playlistId: "pl-free", sortBy: "album", sortDir: "asc" }]);
 
   // The locked playlist must not inherit the sort -- it was never sorted itself.
   await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
@@ -1098,12 +1137,12 @@ function installTwoPlaylistTauriMock(page) {
 
     const playlistTracks = {
       "pl-a": [
-        { id: "t1", title: "Song A", artist: "Artist", album: "Zulu Album", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t2", title: "Song B", artist: "Artist", album: "Alpha Album", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+        { id: "t1", title: "Song A", artist: "Artist", album: "Zulu Album", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t2", title: "Song B", artist: "Artist", album: "Alpha Album", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
       ],
       "pl-b": [
-        { id: "t3", title: "Song C", artist: "Artist", album: "Zulu Album", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" },
-        { id: "t4", title: "Song D", artist: "Artist", album: "Alpha Album", filePath: "/music/d.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A" }
+        { id: "t3", title: "Song C", artist: "Artist", album: "Zulu Album", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t4", title: "Song D", artist: "Artist", album: "Alpha Album", filePath: "/music/d.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
       ]
     };
 
@@ -1119,16 +1158,12 @@ function installTwoPlaylistTauriMock(page) {
           if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "get_playlist_tracks") {
-            const items = playlistTracks[request.playlistId] || [];
-            const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-            const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
-            return { ok: true, data: { playlistId: request.playlistId, items, totalDurationMs, durationKnownCount } };
+            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
           if (command === "reorder_playlist_tracks") {
             window.__reorderPlaylistTrackCalls.push(request);
-            const byId = new Map((playlistTracks[request.playlistId] || []).map((t) => [t.id, t]));
-            playlistTracks[request.playlistId] = request.orderedTrackIds.map((id) => byId.get(id)).filter(Boolean);
-            return { ok: true, data: { playlistId: request.playlistId, reordered: request.orderedTrackIds.length } };
+            playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId], request);
+            return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
           }
           if (command === "search_tracks" || command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
@@ -1162,7 +1197,7 @@ test("switching between two unlocked playlists commits the outgoing sort and doe
   await expect(rowsB).toHaveCount(2);
 
   const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
-  expect(reorderCalls).toEqual([{ playlistId: "pl-a", orderedTrackIds: ["t2", "t1"] }]);
+  expect(reorderCalls).toEqual([{ playlistId: "pl-a", sortBy: "album", sortDir: "asc" }]);
 
   await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
   await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).not.toHaveClass(/sort-asc|sort-desc/);
@@ -1182,7 +1217,7 @@ test("switching to a non-playlist view (Library) also commits an active playlist
   await page.locator('.nav-item[data-view="library"]').click();
   await expect.poll(() => page.evaluate(() => window.__reorderPlaylistTrackCalls.length)).toBeGreaterThan(0);
   const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
-  expect(reorderCalls).toEqual([{ playlistId: "pl-a", orderedTrackIds: ["t2", "t1"] }]);
+  expect(reorderCalls).toEqual([{ playlistId: "pl-a", sortBy: "album", sortDir: "asc" }]);
 });
 
 test("a same-playlist refresh (search) does not clear or commit an active sort", async ({ page }) => {

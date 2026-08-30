@@ -290,18 +290,22 @@ export async function loadPlaylists(state, deps) {
 // order at two points: navigating away from the playlist, and exporting it.
 // Both call this with the playlist the sort belongs to.
 export async function commitActivePlaylistSort(state, playlistId, deps) {
-  const { command, isPlaylistSortActive, clearPlaylistTrackSort, applySortToTracks } = deps;
-  const wasSortActive = isPlaylistSortActive();
-  // Compute the sorted order *before* clearing -- applySortToTracks reads
-  // the same sort state clearPlaylistTrackSort deletes.
-  const playlist = wasSortActive ? (state.playlists || []).find((p) => p.id === playlistId) : null;
-  const orderedTrackIds = playlist?.tracks?.length
-    ? applySortToTracks(playlist.tracks, "playlistTracksBody").map((t) => t.id)
-    : null;
+  const { command, getActiveSort, clearPlaylistTrackSort } = deps;
+  // Read the active sort *before* clearing -- clearPlaylistTrackSort deletes
+  // the same state.
+  const sort = getActiveSort();
   clearPlaylistTrackSort();
-  if (!playlistId || !orderedTrackIds) return;
+  const playlist = (state.playlists || []).find((p) => p.id === playlistId);
+  if (!playlistId || !playlist || !sort?.key) return;
   if (state.playlistUsbExportStatusById?.get(playlistId)?.locksReorder) return;
-  await command("reorder_playlist_tracks", { playlistId, orderedTrackIds });
+  // Sort-commit mode: the backend reorders the whole playlist by these keys
+  // (same comparator get_playlist_tracks uses) and persists it as the new
+  // position order -- no need for the client to hold every track.
+  await command("reorder_playlist_tracks", {
+    playlistId,
+    sortBy: sort.key,
+    sortDir: sort.dir || "asc",
+  });
 }
 
 export function updatePlaylistExportButtons(state, el, deps) {
@@ -328,15 +332,16 @@ export function updatePlaylistExportButtons(state, el, deps) {
   // imported from a folder on a USB stick is `isUsbPath` but still analyzable).
   // The backend export gate (ensure_playlist_tracks_analysis_ready) is the
   // hard safety net.
-  const analyzeCandidates = Array.isArray(current?.tracks)
-    ? current.tracks.filter((track) => !track.analysisReady)
-    : [];
-  const showAnalyzeMissing = analyzeCandidates.length > 0;
+  // Count of not-yet-analysis-ready tracks over the WHOLE playlist, computed
+  // server-side (get_playlist_tracks -> unanalyzedCount) -- the client only
+  // holds a page, so it can't count them itself.
+  const unanalyzedCount = Number(current?.unanalyzedCount) || 0;
+  const showAnalyzeMissing = unanalyzedCount > 0;
   if (el.analyzePlaylistMissingBtn) {
     el.analyzePlaylistMissingBtn.disabled = !showAnalyzeMissing;
     el.analyzePlaylistMissingBtn.hidden = !showAnalyzeMissing;
     el.analyzePlaylistMissingBtn.textContent = showAnalyzeMissing
-      ? `Analyze Missing Tracks (${analyzeCandidates.length})`
+      ? `Analyze Missing Tracks (${unanalyzedCount})`
       : "Analyze Missing Tracks";
     el.analyzePlaylistMissingBtn.dataset.tooltip = showAnalyzeMissing
       ? "Analyze missing waveform, BPM, and duration for tracks in this playlist"

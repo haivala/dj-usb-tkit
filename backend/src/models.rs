@@ -495,6 +495,11 @@ pub struct GetPlaylistTracksData {
     pub total_duration_ms: u64,
     #[serde(default)]
     pub duration_known_count: usize,
+    /// Tracks in the whole filtered playlist the backend flags as not yet
+    /// analysis-ready (drives the "Analyze Missing Tracks (N)" button, which
+    /// can't count them from a single loaded page).
+    #[serde(default)]
+    pub unanalyzed_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -610,11 +615,29 @@ pub struct RemoveTracksFromPlaylistData {
     pub removed: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReorderPlaylistTracksRequest {
     pub playlist_id: String,
+    /// Explicit-order mode: the complete new track order. Must match the
+    /// playlist's current track set exactly.
+    #[serde(default)]
     pub ordered_track_ids: Vec<String>,
+    /// Sort-commit mode: reorder the whole playlist by this column (same
+    /// comparator as `get_playlist_tracks`), then persist it as the new
+    /// position order. Used when a client column sort is committed on
+    /// navigate-away / export.
+    #[serde(default)]
+    pub sort_by: Option<String>,
+    #[serde(default)]
+    pub sort_dir: Option<String>,
+    /// Single-move mode (drag-reorder): move this track to immediately before
+    /// `before_track_id` (or to the end when that is absent). Lets a paginated
+    /// client reorder without holding the whole list.
+    #[serde(default)]
+    pub move_track_id: Option<String>,
+    #[serde(default)]
+    pub before_track_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -75,17 +75,24 @@
   re-queries the backend so it covers every track, not only the visible page. The frontend's
   separate per-page hydration round-trip and its bespoke pagination bookkeeping are gone,
   replaced by one shared track-list controller.
-- **Chore:** the app-playlist track list moved onto that same shared controller (its search
-  and column sort stay client-side view ops, as before — the sort still only becomes the
-  playlist's real order on navigate-away/export). `get_playlist_tracks` also gained the
-  shared cursor-paginated request/response shape for future use. Two near-duplicate
-  playlist-render code paths collapsed into one.
 - **Improvement:** sorting the library by a column now spans the whole library, not just the
   rows already scrolled into view — the sort (and the search) run server-side via
   `browse_source_files`. The library track list moved onto the shared controller as well, so
   all four track-list views (library, app playlist, USB playlist, USB history) now share one
   fetch/paginate/search/sort/scroll data layer. The `state.filteredTracks` client-search
   overlay and the library's bespoke pagination/scroll bookkeeping are gone.
+- **Improvement:** the app-playlist track list is now server-paginated/searched/sorted too, on
+  the same shared controller — a large curated playlist renders its first page immediately and
+  scroll-loads the rest, its column sort and search span the whole playlist, and its
+  "Analyze Missing Tracks (N)" count comes from the backend. A column sort stays a reversible
+  view op until committed on navigate-away/export (`reorder_playlist_tracks` gained a
+  `sortBy` mode); drag-reorder became a single-move (`moveTrackId`/`beforeTrackId`) so it
+  works without loading every row. The last of the frontend's client-side track sort/filter
+  helpers (`sortTracks`, `filterTracksByQuery`, `applySortToTracks`) are deleted — sorting and
+  filtering a track list is now entirely a backend concern.
+- **Chore:** unified track-row action resolution across all four views into one
+  `resolveRowActionTrack(view, el)` helper (position-first, identity fallback), replacing the
+  library-vs-USB `data-id` / `data-index` split.
 
 ## 0.1.33
 

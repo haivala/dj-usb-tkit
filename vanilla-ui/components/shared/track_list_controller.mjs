@@ -41,21 +41,12 @@ export function createTrackListController(config = {}) {
     onResponse = () => {},
     // () => tableSortState  (the shell's per-body { key, dir } sort map)
     getTableSortState = () => ({}),
-    // Optional external backing for `ctl.items` -- the library points these at
-    // `state.tracks` so playback resolution / analysis patching / selection,
-    // which all read `state.tracks`, stay consistent. Default: internal array.
+    // Optional external backing for `ctl.items` -- the library and app playlist
+    // point these at `state.tracks` / `playlist.tracks` so playback resolution
+    // / analysis patching / selection, which read those, stay consistent.
+    // Default: internal array.
     getItems = null,
     setItems = null,
-    // "backend" (default): a column-header sort reloads page 1 with sortBy,
-    // and `setSearch` reloads page 1 with the query.
-    // "client": re-sort / re-filter the loaded items in place, no fetch (used
-    // by the editable app playlist, whose sort is a reversible view op
-    // committed elsewhere and whose search must not shrink the loaded list --
-    // `commitActivePlaylistSort` reorders the whole list, not the filtered
-    // view).
-    sortMode = "backend",
-    sortItems = (items) => items, // client mode: (items, key, dir) -> sorted
-    filterItems = (items) => items, // client mode: (items) -> filtered by ctl.query
   } = config;
 
   let internalItems = [];
@@ -84,13 +75,11 @@ export function createTrackListController(config = {}) {
     enumerable: true,
   });
 
-  // What the table currently shows / row clicks resolve against. In backend
-  // sort mode this is just `items`; in client sort mode it is the
-  // query-filtered, column-sorted view of `items`.
+  // What the table currently shows / row actions resolve against. Every view
+  // renders `items` in exact order (search + sort are backend query params),
+  // so this is just `items`.
   Object.defineProperty(ctl, "view", {
-    get: () => (sortMode === "client"
-      ? sortItems(filterItems(readItems()), getTableSortState()[bodyId]?.key, getTableSortState()[bodyId]?.dir)
-      : readItems()),
+    get: readItems,
     enumerable: true,
   });
 
@@ -116,17 +105,12 @@ export function createTrackListController(config = {}) {
       ctl.hasMore = !!data.hasMore;
 
       const { body, durationTarget } = getElements();
-      if (sortMode === "client") {
-        // Not paginated: render the whole (client-sorted) view.
-        await renderTrackTable(body, ctl.view, rowOptions());
-      } else {
-        const indexOffset = append ? readItems().length - page.length : 0;
-        await renderTrackTable(
-          body,
-          page,
-          append ? { ...rowOptions(), append: true, indexOffset } : rowOptions()
-        );
-      }
+      const indexOffset = append ? readItems().length - page.length : 0;
+      await renderTrackTable(
+        body,
+        page,
+        append ? { ...rowOptions(), append: true, indexOffset } : rowOptions()
+      );
       if (seq !== ctl.seq) return;
 
       renderDurationSummary(durationTarget, {
@@ -190,16 +174,13 @@ export function createTrackListController(config = {}) {
     const next = String(value || "");
     if (next === ctl.query) return Promise.resolve();
     ctl.query = next;
-    // Client mode filters the already-loaded list -- no refetch.
-    return sortMode === "client" ? ctl.rerender() : ctl.reload();
+    return ctl.reload();
   };
 
   // Wired as this view's entry in `bodyToRendererMap` -- the shell's sort
-  // header click updates `tableSortState[bodyId]` then calls this. Backend mode
-  // reloads page 1 with the new sortBy; client mode just re-renders the sorted
-  // view (the loaded list is the whole list).
+  // header click updates `tableSortState[bodyId]` then calls this. Reloads
+  // page 1 with the new sortBy (so the sort spans the whole list).
   ctl.applyHeaderSort = () => {
-    if (sortMode === "client") return ctl.rerender();
     const st = getTableSortState()[bodyId] || null;
     const by = st?.key || null;
     const dir = st?.dir || null;

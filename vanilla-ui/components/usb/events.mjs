@@ -1,4 +1,4 @@
-import { catchErr, handleTrackAction, trackMetaFingerprint, resolveEmitStatus } from "../shared/track_actions.mjs";
+import { catchErr, handleTrackAction, trackMetaFingerprint, resolveEmitStatus, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 
 export function bindUsbEvents(ctx) {
@@ -270,12 +270,8 @@ export function bindUsbEvents(ctx) {
     const target = event.target.closest("[data-action]");
     const action = target?.dataset?.action;
     const row = target?.closest(".track-grid-row") || event.target.closest(".track-grid-row");
-    const rowIndex = Number(row?.dataset?.trackIndex);
-    const index = Number.isFinite(Number(target?.dataset?.index))
-      ? Number(target?.dataset?.index)
-      : rowIndex;
     const rowKey = row?.dataset?.playbackRow || null;
-    const track = usbPlaylistTracksCtl.items[index];
+    const track = resolveRowActionTrack(usbPlaylistTracksCtl.view, target || event.target);
     if (!track) return;
 
     if (!action) {
@@ -322,12 +318,8 @@ export function bindUsbEvents(ctx) {
     const target = event.target.closest("[data-action]");
     const action = target?.dataset?.action;
     const row = target?.closest(".track-grid-row") || event.target.closest(".track-grid-row");
-    const rowIndex = Number(row?.dataset?.trackIndex);
-    const index = Number.isFinite(Number(target?.dataset?.index))
-      ? Number(target?.dataset?.index)
-      : rowIndex;
     const rowKey = row?.dataset?.playbackRow || null;
-    const track = usbHistoryTracksCtl.items[index];
+    const track = resolveRowActionTrack(usbHistoryTracksCtl.view, target || event.target);
     if (!track) return;
 
     if (!action) {

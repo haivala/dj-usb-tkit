@@ -1,4 +1,4 @@
-import { catchErr, handleTrackAction, resolveEmitStatus } from "../shared/track_actions.mjs";
+import { catchErr, handleTrackAction, resolveEmitStatus, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 
 export function bindPlaylistEvents(ctx) {
@@ -22,6 +22,9 @@ export function bindPlaylistEvents(ctx) {
     clearPlaylistTrackSort = () => {}
   } = ctx;
   const emitStatus = resolveEmitStatus(ctx);
+
+  // Scroll-load more of the (now paginated) playlist track list.
+  playlistTracksCtl?.attachScroll?.();
 
   el.navPlaylistList.addEventListener("mousedown", (event) => {
     const deleteBtn = event.target.closest("[data-delete-playlist]");
@@ -57,19 +60,23 @@ export function bindPlaylistEvents(ctx) {
     promptNewPlaylist();
   });
 
+  let playlistSearchTimer = null;
   el.playlistSearchInput?.addEventListener("input", () => {
     state.playlistTrackSearch = String(el.playlistSearchInput.value || "");
-    // Client-side filter of the already-loaded playlist -- no refetch.
-    Promise.resolve(playlistTracksCtl.setSearch(state.playlistTrackSearch)).catch(catchErr(emitStatus));
+    // Debounced backend re-query of the playlist (get_playlist_tracks query
+    // param) -- same as the library search.
+    if (playlistSearchTimer) clearTimeout(playlistSearchTimer);
+    playlistSearchTimer = setTimeout(() => {
+      playlistSearchTimer = null;
+      Promise.resolve(playlistTracksCtl.setSearch(state.playlistTrackSearch)).catch(catchErr(emitStatus));
+    }, 180);
   });
 
   el.panels.playlist.addEventListener("click", (event) => {
     const actionTarget = event.target.closest("[data-action]");
     if (actionTarget?.dataset?.action === "remove-playlist-track") {
-      const id = actionTarget.dataset.id;
       const playlist = getCurrentPlaylist();
-      const track = playlistTracksCtl.view.find((item) => String(item.id) === String(id))
-        || playlist?.tracks?.find((item) => String(item.id) === String(id));
+      const track = resolveRowActionTrack(playlistTracksCtl.view, actionTarget);
       if (!playlist || !track?.id) return;
       command("remove_tracks_from_playlist", {
         playlistId: playlist.id,
@@ -91,10 +98,7 @@ export function bindPlaylistEvents(ctx) {
 
     const action = actionTarget?.dataset?.action;
     if (action === "play-library" || action === "scrub-play") {
-      const id = actionTarget.dataset.id;
-      const playlist = getCurrentPlaylist();
-      const track = playlistTracksCtl.view.find((item) => String(item.id) === String(id))
-        || playlist?.tracks?.find((item) => String(item.id) === String(id));
+      const track = resolveRowActionTrack(playlistTracksCtl.view, actionTarget);
       if (!track) return;
       const rowKey = actionTarget?.closest(".track-grid-row")?.dataset?.playbackRow || null;
       handleTrackAction({ action, track, origin: "local", target: actionTarget, event, state, rowKey, ctx });
@@ -114,9 +118,16 @@ export function bindPlaylistEvents(ctx) {
     });
   });
 
-  el.analyzePlaylistMissingBtn?.addEventListener("click", () => {
+  el.analyzePlaylistMissingBtn?.addEventListener("click", async () => {
     const playlist = getCurrentPlaylist();
     if (!playlist) return;
+    // The list is paginated -- pull the rest before collecting ids so a big
+    // playlist doesn't only analyze its first page.
+    try {
+      while (playlistTracksCtl?.hasMore) await playlistTracksCtl.loadMore();
+    } catch (err) {
+      console.error(err);
+    }
     const trackIds = (playlist.tracks || [])
       .filter((track) => !track.analysisReady)
       .map((track) => String(resolveLocalTrackId(track) || track.localTrackId || track.id || "").trim())
@@ -179,6 +190,7 @@ export function bindPlaylistEvents(ctx) {
     if (!dragSourceRow) return;
     dragSourceRow.classList.remove("dragging");
     const playlist = getCurrentPlaylist();
+    const movedRow = dragSourceRow;
     const newOrder = Array.from(
       el.playlistTracksBody.querySelectorAll(".track-grid-row[data-track-id]")
     ).map((r) => r.dataset.trackId);
@@ -188,10 +200,17 @@ export function bindPlaylistEvents(ctx) {
     if (!playlist || !originalOrder || newOrder.join("\u0000") === originalOrder.join("\u0000")) {
       return;
     }
+    // Single-move: the backend repositions this one track relative to its new
+    // neighbour, over the whole playlist -- the DOM only holds loaded rows.
+    const nextRow = movedRow.nextElementSibling;
+    const beforeTrackId = nextRow?.classList?.contains("track-grid-row")
+      ? (nextRow.dataset.trackId || null)
+      : null;
     clearPlaylistTrackSort();
     command("reorder_playlist_tracks", {
       playlistId: playlist.id,
-      orderedTrackIds: newOrder
+      moveTrackId: movedRow.dataset.trackId,
+      beforeTrackId
     })
       .catch((err) => {
         console.error(err);

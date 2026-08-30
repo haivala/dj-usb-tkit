@@ -334,29 +334,3 @@ function validateFormatCompatibility(ext, sampleRate, bitDepth, bitrate) {
   }
 }
 
-export function sortTracks(tracks, key, dir) {
-  if (!key) return tracks;
-  const sorted = [...tracks];
-  const m = dir === "desc" ? -1 : 1;
-  sorted.sort((a, b) => {
-    switch (key) {
-      case "title": return m * (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
-      case "artist": {
-        const byArtist = (a.artist || "").localeCompare(b.artist || "", undefined, { sensitivity: "base" });
-        if (byArtist !== 0) return m * byArtist;
-        return m * (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
-      }
-      case "album": return m * (a.album || "").localeCompare(b.album || "", undefined, { sensitivity: "base" });
-      case "format": {
-        const fa = String(a.formatExt || "").toLowerCase();
-        const fb = String(b.formatExt || "").toLowerCase();
-        return m * fa.localeCompare(fb, undefined, { sensitivity: "base" });
-      }
-      case "bpm": return m * ((Number(a.bpm) || 0) - (Number(b.bpm) || 0));
-      case "durationMs": return m * ((Number(a.durationMs) || 0) - (Number(b.durationMs) || 0));
-      case "key": return m * (a.key || "").localeCompare(b.key || "", undefined, { sensitivity: "base" });
-      default: return 0;
-    }
-  });
-  return sorted;
-}

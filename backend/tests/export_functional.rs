@@ -3761,6 +3761,7 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
     let reordered = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
         playlist_id: target_playlist_id.clone(),
         ordered_track_ids: new_order_ids.clone(),
+        ..Default::default()
     });
     assert!(
         reordered.ok,

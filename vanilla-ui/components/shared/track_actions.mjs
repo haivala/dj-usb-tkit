@@ -18,6 +18,30 @@ export function trackMetaFingerprint(track) {
   return `${Array.isArray(track?.waveformPreview) ? track.waveformPreview.join(",") : ""}|${String(track?.artworkUrl || track?.artworkDataUrl || "")}|${track?.artworkChecked === true ? "art-ok" : ""}|${String(track?.bpm || "")}|${String(track?.key || "")}`;
 }
 
+// Resolve the track a row action/click targets, from the array the table
+// currently shows (`controller.view`). Every rendered row carries both its
+// position in that view (`data-index` on the control, `data-track-index` on
+// the row) and a stable identity (`data-id` / `data-track-id`). All four
+// track-list views (library, app playlist, USB playlist, USB history) render
+// `view` in exact order, so the index is the primary key; identity is the
+// fallback for a row that was patched in place out of order.
+export function resolveRowActionTrack(view, el) {
+  const list = Array.isArray(view) ? view : [];
+  const row = el?.closest?.(".track-grid-row") || null;
+  const attrEl = el?.closest?.("[data-index],[data-id]") || null;
+
+  const idx = Number(attrEl?.dataset?.index ?? row?.dataset?.trackIndex);
+  if (Number.isInteger(idx) && idx >= 0 && idx < list.length) return list[idx];
+
+  const id = String(attrEl?.dataset?.id ?? row?.dataset?.trackId ?? "").trim();
+  if (id) {
+    return list.find(
+      (t) => String(t?.id) === id || String(t?.localTrackId ?? "") === id,
+    ) ?? null;
+  }
+  return null;
+}
+
 // Handles add / analyze / play / scrub track table actions.
 // Returns true if the action was handled (caller should return after).
 export function handleTrackAction({ action, track, origin, target, event, state, rowKey, ctx }) {

@@ -27,7 +27,13 @@ The playlist command layer is intentionally CRUD-oriented:
   page.
 - `add_track_candidates_to_playlist` resolves frontend row candidates and delegates to `add_tracks_to_playlist`
 - `add_tracks_to_playlist`, `remove_tracks_from_playlist` mutate membership rows
-- `reorder_playlist_tracks` persists a user drag-reorder to `playlist_tracks.position`
+- `reorder_playlist_tracks` persists a new track order to `playlist_tracks.position`,
+  in one of three modes: `orderedTrackIds` (the complete order, must match the
+  current set), `sortBy`/`sortDir` (server sorts the whole playlist by that
+  column — the same comparator `get_playlist_tracks` uses — and persists it;
+  this is how a client column sort is committed on navigate-away / export), or
+  `moveTrackId` + optional `beforeTrackId` (reposition one track relative to a
+  neighbour, so a paginated client can drag-reorder without holding every row).
 
 Playlist export is blocked when the selected playlist contains local tracks
 under a known missing source root. The user must relocate the source folder or
@@ -35,10 +41,14 @@ explicitly remove that source before export proceeds. This prevents a moved or
 unmounted music folder from producing an empty or partially empty USB playlist
 without an explicit user decision.
 
-Track rows within an app playlist can be reordered by dragging. Dragging is
-disabled client-side while a column sort or search filter is active, since the
-rendered row order wouldn't match the playlist's real track order in that
-case. It is also locked when the current export sync mode is additive
+Track rows within an app playlist can be reordered by dragging. A column sort
+is a reversible view op while browsing (it re-queries the page sorted, like
+every other list) and only becomes the playlist's persisted order when
+committed — on navigate-away or export — via `reorder_playlist_tracks`'s
+`sortBy` mode. Dragging while sorted is allowed; the drop clears the sort and
+sends a single-move. Dragging is disabled while a search filter is active
+(the rendered rows are a filtered subset). It is also locked when the current
+export sync mode is additive
 (`pruneStale = false`, see `docs/USB_EXPORT.md`) and a same-named playlist
 already exists on the connected USB, since an additive export never rewrites
 the order of entries already on the device — a reorder there wouldn't be

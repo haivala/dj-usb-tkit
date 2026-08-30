@@ -52,7 +52,10 @@ function bindDeps(overrides) {
     analyzeTrackIds: async () => {},
     resolveLocalTrackId: () => null,
     refreshCurrentPlaylistTracks: async () => {},
-    playlistTracksCtl: { view: [], setSearch: () => {}, rerender: async () => {} },
+    playlistTracksCtl: {
+      view: [], hasMore: false, setSearch: () => {}, rerender: async () => {},
+      loadMore: async () => {}, attachScroll: () => {},
+    },
     ...overrides
   };
 }
@@ -115,15 +118,14 @@ function commitDeps(overrides = {}) {
     calls,
     deps: {
       command: async (cmd, payload) => { calls.push([cmd, payload]); return {}; },
-      isPlaylistSortActive: () => true,
+      getActiveSort: () => ({ key: "artist", dir: "desc" }),
       clearPlaylistTrackSort: () => { calls.push(["clear"]); },
-      applySortToTracks: (tracks) => tracks,
       ...overrides
     }
   };
 }
 
-test("commitActivePlaylistSort commits the full track order when a sort is active", async () => {
+test("commitActivePlaylistSort sends the active sort to the backend to persist as the new order", async () => {
   const state = {
     playlists: [{ id: "p1", name: "A", tracks: [{ id: "t2" }, { id: "t1" }] }],
     playlistUsbExportStatusById: new Map()
@@ -134,7 +136,7 @@ test("commitActivePlaylistSort commits the full track order when a sort is activ
 
   assert.deepEqual(calls, [
     ["clear"],
-    ["reorder_playlist_tracks", { playlistId: "p1", orderedTrackIds: ["t2", "t1"] }]
+    ["reorder_playlist_tracks", { playlistId: "p1", sortBy: "artist", sortDir: "desc" }]
   ]);
 });
 
@@ -143,7 +145,7 @@ test("commitActivePlaylistSort no-ops (still clears) when no sort is active", as
     playlists: [{ id: "p1", name: "A", tracks: [{ id: "t1" }] }],
     playlistUsbExportStatusById: new Map()
   };
-  const { calls, deps } = commitDeps({ isPlaylistSortActive: () => false });
+  const { calls, deps } = commitDeps({ getActiveSort: () => null });
 
   await commitActivePlaylistSort(state, "p1", deps);
 

@@ -259,6 +259,7 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
     let reorder = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
         playlist_id: playlist_id.clone(),
         ordered_track_ids: vec![track_c.clone(), track_a.clone(), track_b.clone()],
+        ..Default::default()
     });
     assert!(reorder.ok, "reorder failed: {reorder:?}");
     assert_eq!(reorder.data.expect("reorder data").reordered, 3);

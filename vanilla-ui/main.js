@@ -60,7 +60,6 @@ import {
   getHistoryDateValue,
   getHistoryDateDisplay,
   formatTimestampLocal,
-  filterTracksByQuery,
   buildTracklistText,
   loadMoreIfNearBottom,
 } from "./track_utils.mjs";
@@ -81,6 +80,7 @@ const LIBRARY_LOAD_LIMIT_INIT = 200;
 const LIBRARY_LOAD_LIMIT_DEFAULT = 200;
 const LIBRARY_LOAD_LIMIT_POST_SCAN = 1000;
 const LIBRARY_SCROLL_FETCH_THRESHOLD_PX = 120;
+const PLAYLIST_LOAD_LIMIT_DEFAULT = 150;
 const APP_VERSION_FALLBACK = "Not set";
 const MOCK_API_CLIENT_MODULE = "./mock_api_client.mjs";
 
@@ -457,10 +457,6 @@ async function renderTrackTable(tbody, tracks, options = {}) {
   });
 }
 
-const applySortToTracks = (tracks, tbodyId) => shell.applySortToTracks(tableSortState, tracks, tbodyId, {
-    sortTracks: trackTable.sortTracks,
-  });
-
 const clearPlaylistTrackSort = () => shell.clearTrackSort(
   tableSortState,
   "playlistTracksBody",
@@ -469,38 +465,42 @@ const clearPlaylistTrackSort = () => shell.clearTrackSort(
 
 const commitActivePlaylistSort = (playlistId) => playlist.commitActivePlaylistSort(state, playlistId, {
   command,
-  isPlaylistSortActive: () => !!tableSortState.playlistTracksBody,
+  getActiveSort: () => tableSortState.playlistTracksBody || null,
   clearPlaylistTrackSort,
-  applySortToTracks,
 });
 
-// The app-playlist track table's data layer. Unlike the other three views its
-// list is not paginated (get_playlist_tracks returns the whole playlist) and
-// its column sort + search are *client-side view ops* -- the sort only becomes
-// the playlist's real order when committed on navigate-away/export
-// (commitActivePlaylistSort), and search must not shrink `playlist.tracks`
-// (which drag-reorder and the commit both operate on in full). So this runs in
-// sortMode "client": `ctl.items` is the whole playlist (backed by
-// `getCurrentPlaylist().tracks`), `ctl.view` is the filtered+sorted render.
+// The app-playlist track table's data layer -- server-paginated + searched +
+// sorted via `get_playlist_tracks`, same as the other three views. `ctl.items`
+// is backed by `getCurrentPlaylist().tracks` (the loaded page(s)). A column
+// sort is still a *reversible view op* while browsing -- it re-queries page 1
+// sorted, and only becomes the playlist's persisted order when
+// `commitActivePlaylistSort` fires on navigate-away/export (which sends the
+// sort params to the backend, so it reorders the whole playlist, not just what
+// was loaded). Drag-reorder sends a single-move to the backend for the same
+// reason.
 const playlistTracksCtl = createTrackListController({
   bodyId: "playlistTracksBody",
-  pageSize: 0,
+  pageSize: PLAYLIST_LOAD_LIMIT_DEFAULT,
   getElements: () => ({
     body: el.playlistTracksBody,
     wrap: el.playlistTableWrap,
     durationTarget: el.playlistTotalDuration,
   }),
-  fetchPage: ({ scopeId, cursor, limit }) =>
-    command("get_playlist_tracks", { playlistId: scopeId, cursor: cursor || null, limit }),
+  fetchPage: ({ scopeId, query, sortBy, sortDir, cursor, limit }) =>
+    command("get_playlist_tracks", {
+      playlistId: scopeId,
+      query,
+      sortBy: sortBy || null,
+      sortDir: sortDir || null,
+      cursor: cursor || null,
+      limit,
+    }),
   normalize: (track) => normalizeTrack(track, "plt"),
   getItems: () => getCurrentPlaylist()?.tracks || [],
   setItems: (value) => {
     const p = getCurrentPlaylist();
     if (p) p.tracks = value;
   },
-  sortMode: "client",
-  sortItems: (items) => applySortToTracks(items, "playlistTracksBody"),
-  filterItems: (items) => filterTracksByQuery(items, playlistTracksCtl.query),
   rowOptions: () => {
     const playlist = getCurrentPlaylist();
     const lock = playlist
@@ -534,7 +534,9 @@ const playlistTracksCtl = createTrackListController({
     if (!p) return;
     p.totalDurationMs = Number(data.totalDurationMs) || 0;
     p.durationKnownCount = Number(data.durationKnownCount) || 0;
+    p.unanalyzedCount = Number(data.unanalyzedCount) || 0;
   },
+  onPage: () => renderPlaylistPanelChrome(),
 });
 
 // Panel glue around the playlist track table that the controller does not own:
@@ -543,7 +545,7 @@ const playlistTracksCtl = createTrackListController({
 function renderPlaylistPanelChrome() {
   const playlist = getCurrentPlaylist();
   if (!playlist) return;
-  const empty = !(playlist.tracks || []).length;
+  const empty = playlistTracksCtl.total === 0 && !playlistTracksCtl.loading;
   if (el.playlistEmptyState) {
     el.playlistEmptyState.innerHTML = "";
     if (empty) {
@@ -577,13 +579,13 @@ function handleSortHeaderClick(e) {
       applyLibrarySort,
       renderUsbPlaylistTracks,
       renderHistoryTracks,
-      renderCurrentPlaylistTracksFromState,
+      applyPlaylistSort,
     },
     bodyToRendererMap: {
       libraryTableBody: "applyLibrarySort",
       usbPlaylistTracks: "renderUsbPlaylistTracks",
       historyTracks: "renderHistoryTracks",
-      playlistTracksBody: "renderCurrentPlaylistTracksFromState",
+      playlistTracksBody: "applyPlaylistSort",
     },
     doc: document,
   });
@@ -851,9 +853,18 @@ function scheduleApplySearchLocalFilter() {
 function applyLibraryDurationSummary(totalMs, unknownCount) {
   library.applyLibraryDurationSummary(el, state, totalMs, unknownCount, { formatDurationMs });
 }
+// Playlist column-header sort -> re-query page 1 with the new sortBy (spans
+// the whole playlist). Wired via bodyToRendererMap. Still a reversible view op
+// until committed by commitActivePlaylistSort.
+const applyPlaylistSort = async () => {
+  if (!getCurrentPlaylist()) return;
+  await playlistTracksCtl.applyHeaderSort();
+  renderPlaylistPanelChrome();
+};
+
 // Re-render the open playlist's track table from the already-loaded
-// `playlist.tracks` (no fetch) -- used when only the view changed: a column
-// sort, a reorder-lock flip after a USB scan, a cross-view analysis patch.
+// `playlist.tracks` (no fetch) -- used when only the view changed: a
+// reorder-lock flip after a USB scan, a cross-view analysis patch.
 async function renderCurrentPlaylistTracksFromState() {
   if (!getCurrentPlaylist()) return;
   await playlistTracksCtl.rerender();
@@ -1057,6 +1068,11 @@ async function refreshCurrentPlaylistTracks() {
   const playlist = getCurrentPlaylist();
   if (!playlist) return;
   playlistTracksCtl.query = String(state.playlistTrackSearch || "");
+  // Keep the controller's sort in lockstep with the header UI state -- a drag
+  // clears the sort (deletes tableSortState) but leaves ctl.sortBy stale.
+  const st = tableSortState.playlistTracksBody || null;
+  playlistTracksCtl.sortBy = st?.key || null;
+  playlistTracksCtl.sortDir = st?.dir || null;
   await playlistTracksCtl.load({ scopeId: playlist.id });
   renderPlaylistPanelChrome();
 }

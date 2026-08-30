@@ -156,8 +156,12 @@ PDB+eDB snapshot pairs taken before every USB-mutating operation.
 local source rows server-side, preserves the USB-origin no-fuzzy-match rule, and then delegates
 to playlist membership insertion.
 
-`reorder_playlist_tracks` takes an ordered list of track ids and persists that order to the
-`playlist_tracks.position` column for a local (app-owned) playlist; see `docs/PLAYLISTS_PLAYBACK.md`
+`reorder_playlist_tracks` persists a new order to the `playlist_tracks.position` column for a
+local (app-owned) playlist, in one of three request shapes — `orderedTrackIds` (the full order),
+`sortBy`/`sortDir` (server sorts the whole playlist by that column and persists it — commits a
+client column sort), or `moveTrackId` + optional `beforeTrackId` (single-move for a paginated
+drag-reorder). `get_playlist_tracks` also returns `unanalyzedCount` over the whole filtered
+playlist, since a paginated client can't count them from one page. See `docs/PLAYLISTS_PLAYBACK.md`
 for when the UI disables reordering. `fetch_usb_playlists` and `run_usb_diagnostics` both return a
 `playlistUsbExportStatus` array (one entry per local playlist) so the frontend doesn't have to
 re-derive that lock condition from raw USB-scan/export-setting state.

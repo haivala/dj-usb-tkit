@@ -518,7 +518,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         ? tracks.filter((t) => `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(q))
         : tracks.slice();
       if (sortBy) {
-        // Mirrors the backend sort (frontend sortTracks): "artist" ties break by title.
+        // Mirrors the backend sort_tracks: "artist" ties break by title.
         const m = sortDir === "desc" ? -1 : 1;
         rows = rows.slice().sort((a, b) => {
           const av = sortBy === "artist" ? `${a.artist} ${a.title}` : String(a[sortBy] ?? "");
