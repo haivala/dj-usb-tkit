@@ -52,7 +52,7 @@ test("resetUsbStateViews clears lists and rerenders", () => {
   let renders = 0;
   resetUsbStateViews(state, el, {
     renderUsbPlaylists: () => { renders += 1; },
-    renderUsbPlaylistTracks: () => { renders += 1; },
+    clearUsbPlaylistTracks: () => { renders += 1; },
     renderHistoryList: () => { renders += 1; },
     renderHistoryTracks: () => { renders += 1; }
   });

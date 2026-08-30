@@ -117,6 +117,14 @@ export function createTrackListController(config = {}) {
   // Re-fetch page 1 with the current scope/query/sort (search or sort change).
   ctl.reload = () => run(null, { append: false });
 
+  // Re-render the currently-loaded rows without a fetch -- used when a row's
+  // data changed in place (a row-click re-hydrate, a cross-view analysis
+  // patch) but the in-place row patch couldn't find its DOM node.
+  ctl.rerender = async () => {
+    const { body } = getElements();
+    if (body) await renderTrackTable(body, ctl.items, rowOptions());
+  };
+
   // Drop the current list without fetching (view deselected / USB disconnected).
   // Bumps `seq` so any in-flight response is ignored, and renders an empty table.
   ctl.clear = async () => {

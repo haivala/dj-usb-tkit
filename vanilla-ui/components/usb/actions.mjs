@@ -566,7 +566,7 @@ export function loadUsbRootFromStorage(state, el, deps = {}) {
 export function resetUsbStateViews(state, el, deps = {}) {
   const {
     renderUsbPlaylists = () => {},
-    renderUsbPlaylistTracks = () => {},
+    clearUsbPlaylistTracks = () => {},
     renderHistoryList = () => {},
     renderHistoryTracks = () => {},
     renderUsbPlayerMenuEditor = () => {},
@@ -575,10 +575,6 @@ export function resetUsbStateViews(state, el, deps = {}) {
 
   state.usbPlaylists = [];
   state.playlistUsbExportStatusById = new Map();
-  state.usbPlaylistTracks = [];
-  state.usbPlaylistTracksView = [];
-  state.usbPlaylistPagedCount = 0;
-  state.usbPlaylistLoadingMore = false;
   state.histories = [];
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
@@ -599,7 +595,7 @@ export function resetUsbStateViews(state, el, deps = {}) {
   if (hideDiagnostics) hideUsbDiagnostics(el);
 
   renderUsbPlaylists();
-  renderUsbPlaylistTracks();
+  clearUsbPlaylistTracks();
   renderHistoryList();
   renderHistoryTracks();
   renderUsbPlayerMenuEditor();
@@ -985,7 +981,7 @@ export async function refreshUsb(state, el, deps) {
     stopProgressHeartbeat,
     normalizeUsbPlaylist,
     renderUsbPlaylists,
-    renderUsbPlaylistTracks,
+    clearUsbPlaylistTracks = () => {},
     renderCurrentPlaylistTracksFromState,
     updatePlaylistExportButtons,
     countWarningsForStatus,
@@ -1032,11 +1028,10 @@ export async function refreshUsb(state, el, deps) {
 
   const usbTrackTotal = state.usbPlaylists.reduce((sum, playlist) => sum + (playlist.trackCount || 0), 0);
   el.usbCountsText.textContent = `${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`;
-  state.usbPlaylistTracks = [];
   setProgress(true, 90, "Rendering playlists...");
   await new Promise((r) => setTimeout(r, 20));
   renderUsbPlaylists();
-  renderUsbPlaylistTracks();
+  clearUsbPlaylistTracks();
   updatePlaylistExportButtons();
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await renderCurrentPlaylistTracksFromState?.();
@@ -1558,7 +1553,7 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
     updateModeText,
     switchView,
     renderUsbPlaylists,
-    renderUsbPlaylistTracks,
+    clearUsbPlaylistTracks = () => {},
     refreshMissingSourceRoots = async () => [],
     clearUsbDiagnostics = () => {},
     commitActivePlaylistSort = async () => {}
@@ -1676,9 +1671,8 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
   await switchView(playlistId);
 
   state.usbPlaylists = [];
-  state.usbPlaylistTracks = [];
   renderUsbPlaylists();
-  renderUsbPlaylistTracks();
+  clearUsbPlaylistTracks();
 }
 
 export function renderUsbPlaylists(state, el, deps = {}) {
@@ -1751,7 +1745,7 @@ async function hydrateUsbTrackPage(container, tracks, deps = {}) {
   if (missedPatch) renderFallback();
 }
 
-function usbPlaylistRowOptions() {
+export function usbPlaylistRowOptions() {
   return {
     withCheckbox: false,
     actionLabel: "+",
@@ -1762,73 +1756,6 @@ function usbPlaylistRowOptions() {
     secondaryActionLabel: "Play",
     secondaryActionType: "play-usb"
   };
-}
-
-// "Total time" is not computed here (or from any client-side track sum) --
-// it's a property of the selected playlist, computed once server-side by
-// fetch_usb_playlists (see applyUsbDurationSummary / the playlist-selection
-// click handler in events.mjs) and unaffected by which rows happen to be
-// rendered/hydrated/paginated at any given moment.
-//
-// For very large selections (see LARGE_USB_SELECTION_THRESHOLD in
-// events.mjs), only the first `state.usbPlaylistPagedCount` tracks of the
-// filtered+sorted view are actually rendered -- the rest load in as the
-// user scrolls (loadMoreUsbPlaylistTracks below). For selections at/under
-// the threshold, usbPlaylistPagedCount stays 0 and every track renders, same
-// as before pagination existed.
-//
-// Every render here also hydrates whatever it just rendered (see
-// hydrateUsbTrackPage above) -- this runs for selection, search, and sort
-// alike (all three funnel through this one function), so newly-visible
-// tracks always get their bpm/key/waveform/artwork fetched regardless of
-// *why* they became visible.
-export async function renderUsbPlaylistTracks(state, el, deps = {}) {
-  const {
-    filterTracksByQuery = (tracks) => tracks,
-    applySortToTracks = (tracks) => tracks,
-    renderTrackTable = () => {},
-    hydrateUsbTrackMetadataBatch,
-    patchUsbTrackRow
-  } = deps;
-  const filtered = filterTracksByQuery(state.usbPlaylistTracks, state.usbTrackSearch);
-  // Sorted, not just filtered: row click handlers resolve a row's
-  // data-index back into this array, so it has to match rendered order.
-  state.usbPlaylistTracksView = applySortToTracks(filtered, "usbPlaylistTracks");
-  const view = state.usbPlaylistTracksView;
-  const pageCount = state.usbPlaylistPagedCount > 0
-    ? Math.min(state.usbPlaylistPagedCount, view.length)
-    : view.length;
-  const pageTracks = view.slice(0, pageCount);
-  await renderTrackTable(el.usbPlaylistTracks, pageTracks, usbPlaylistRowOptions());
-  await hydrateUsbTrackPage(el.usbPlaylistTracks, pageTracks, {
-    hydrateUsbTrackMetadataBatch,
-    patchRow: patchUsbTrackRow,
-    renderFallback: () => renderUsbPlaylistTracks(state, el, deps)
-  });
-}
-
-// Renders and hydrates the next page of an already-paginated large USB
-// playlist selection, appending to what's already rendered instead of
-// rebuilding it (see options.append on renderTrackTable).
-export async function loadMoreUsbPlaylistTracks(state, el, pageSize, deps = {}) {
-  const { renderTrackTable = () => {}, hydrateUsbTrackMetadataBatch, patchUsbTrackRow } = deps;
-  const view = state.usbPlaylistTracksView;
-  const start = state.usbPlaylistPagedCount;
-  if (start >= view.length) return [];
-  const end = Math.min(view.length, start + pageSize);
-  const pageTracks = view.slice(start, end);
-  await renderTrackTable(el.usbPlaylistTracks, pageTracks, {
-    ...usbPlaylistRowOptions(),
-    append: true,
-    indexOffset: start
-  });
-  state.usbPlaylistPagedCount = end;
-  await hydrateUsbTrackPage(el.usbPlaylistTracks, pageTracks, {
-    hydrateUsbTrackMetadataBatch,
-    patchRow: patchUsbTrackRow,
-    renderFallback: () => renderUsbPlaylistTracks(state, el, deps)
-  });
-  return pageTracks;
 }
 
 // Pure setter -- see the comment on renderUsbPlaylistTracks above. Shared by

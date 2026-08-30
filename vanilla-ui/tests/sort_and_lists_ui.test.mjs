@@ -4,7 +4,6 @@ import {
   applySortToTracks
 } from "../components/shell/actions.mjs";
 import {
-  renderUsbPlaylistTracks,
   renderHistoryTracks
 } from "../components/usb/actions.mjs";
 
@@ -15,19 +14,9 @@ test("applySortToTracks applies configured state sorter", () => {
   assert.deepEqual(out.map((t) => t.title), ["a", "b"]);
 });
 
-test("renderUsbPlaylistTracks computes view and renders table", () => {
-  const state = { usbPlaylistTracks: [{ id: 1 }, { id: 2 }], usbTrackSearch: "", usbPlaylistTracksView: [] };
-  const el = { usbPlaylistTracks: {}, usbPlaylistTotalDuration: {} };
-  let renderedCount = 0;
-  renderUsbPlaylistTracks(state, el, {
-    filterTracksByQuery: (tracks) => tracks,
-    applySortToTracks: (tracks) => tracks,
-    renderTrackTable: (_tbody, tracks) => { renderedCount = tracks.length; }
-  });
-  assert.equal(state.usbPlaylistTracksView.length, 2);
-  assert.equal(renderedCount, 2);
-});
-
+// The USB-playlist track view is now driven by the shared TrackListController
+// (see tests/track_list_controller.test.mjs); only USB history still uses this
+// legacy self-hydrating render path.
 test("renderHistoryTracks computes view and renders table", () => {
   const state = { historyTracks: [{ id: "a" }], historyTrackSearch: "", historyTracksView: [] };
   const el = { historyTracks: {}, historyTotalDuration: {} };

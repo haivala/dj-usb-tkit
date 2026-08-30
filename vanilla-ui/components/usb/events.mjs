@@ -26,9 +26,8 @@ export function bindUsbEvents(ctx) {
     removeUsbPlayerMenuItems,
     moveUsbPlayerMenuItems,
     syncUsbPlayerMenusEdbToPdb,
-    renderUsbPlaylistTracks,
+    usbPlaylistTracksCtl,
     renderHistoryTracks,
-    loadMoreUsbPlaylistTracks,
     loadMoreHistoryTracks,
     removeUsbPlaylist,
     reorderUsbPlaylists,
@@ -58,7 +57,6 @@ export function bindUsbEvents(ctx) {
   const onPlayerMenuListClick = typeof handleUsbPlayerMenuListClick === "function"
     ? handleUsbPlayerMenuListClick
     : () => {};
-  let usbSelectionHydrationToken = 0;
   let historySelectionHydrationToken = 0;
 
   // USB_SELECTION_PAGE_SIZE does double duty as both the batched-hydration
@@ -124,21 +122,9 @@ export function bindUsbEvents(ctx) {
     }
   };
 
-  const usbPlaylistTableWrap = el.usbPlaylistTracks?.closest?.(".table-wrap");
-  usbPlaylistTableWrap?.addEventListener("scroll", () => {
-    const token = usbSelectionHydrationToken;
-    loadMoreIfNearBottom(
-      usbPlaylistTableWrap,
-      USB_SCROLL_FETCH_THRESHOLD_PX,
-      () => state.usbPlaylistLoadingMore,
-      () => state.usbPlaylistPagedCount > 0 && state.usbPlaylistPagedCount < state.usbPlaylistTracksView.length,
-      () => loadNextPage(
-        loadMoreUsbPlaylistTracks,
-        () => usbSelectionHydrationToken === token,
-        (loading) => { state.usbPlaylistLoadingMore = loading; }
-      ).catch((err) => console.warn("USB playlist page load failed:", err))
-    );
-  }, { passive: true });
+  // USB-playlist tracks: fetch/paginate/search/sort/scroll are owned by the
+  // shared track-list controller (see main.js). Scroll-load wires itself here.
+  usbPlaylistTracksCtl?.attachScroll?.();
 
   const historyTableWrap = el.historyTracks?.closest?.(".table-wrap");
   historyTableWrap?.addEventListener("scroll", () => {
@@ -263,12 +249,8 @@ export function bindUsbEvents(ctx) {
   });
 
   el.usbTrackSearch?.addEventListener("input", () => {
-    state.usbTrackSearch = String(el.usbTrackSearch.value || "");
-    // A new filter changes which/how-many tracks are in view -- restart
-    // pagination at one page over the filtered set rather than keeping
-    // whatever page count the previous (unfiltered) view had reached.
-    if (state.usbPlaylistPagedCount > 0) state.usbPlaylistPagedCount = USB_SELECTION_PAGE_SIZE;
-    renderUsbPlaylistTracks();
+    usbPlaylistTracksCtl.setSearch(el.usbTrackSearch.value)
+      .catch((err) => console.warn("USB playlist search failed:", err));
   });
 
   el.historyTrackSearch?.addEventListener("input", () => {
@@ -298,34 +280,19 @@ export function bindUsbEvents(ctx) {
     const id = btn.dataset.usbPlaylist;
     const playlist = state.usbPlaylists[index]
       || state.usbPlaylists.find((item) => String(item.id) === String(id));
-    state.usbPlaylistTracks = playlist?.tracks || [];
-    state.usbPlaylistPagedCount = state.usbPlaylistTracks.length > LARGE_USB_SELECTION_THRESHOLD
-      ? USB_SELECTION_PAGE_SIZE
-      : 0;
-    state.usbPlaylistLoadingMore = false;
     setActiveListItem(el.usbPlaylists, btn);
-    // renderUsbPlaylistTracks() renders AND hydrates whatever page it
-    // renders (see components/usb/actions.mjs) -- no separate hydration
-    // call needed here. Bumping the token still matters: it's what lets
-    // the usbPlaylistTableWrap scroll listener below tell a stale
-    // load-more continuation from a previous selection to stop.
-    renderUsbPlaylistTracks().catch((err) => {
-      console.warn("USB playlist render/hydration failed:", err);
-    });
-    const usbTrackCount = playlist?.trackCount ?? state.usbPlaylistTracks.length;
-    const usbKnownCount = playlist?.durationKnownCount ?? 0;
-    applyDurationSummary(
-      el.usbPlaylistTotalDuration,
-      playlist?.totalDurationMs ?? 0,
-      Math.max(0, usbTrackCount - usbKnownCount),
-      { formatDurationMs }
-    );
-    usbSelectionHydrationToken += 1;
     if (!playlist) {
+      usbPlaylistTracksCtl.clear();
       emitStatus("Failed to resolve selected USB playlist");
       return;
     }
-    emitStatus(`USB playlist selected: ${playlist.name} (${state.usbPlaylistTracks.length} tracks)`);
+    // The controller fetches page 1 (paginated + hydrated server-side),
+    // renders it, and sets the "Total time" footer from the response.
+    usbPlaylistTracksCtl.load({ scopeId: playlist.id }).catch((err) => {
+      console.warn("USB playlist load failed:", err);
+      emitStatus(`Failed to load USB playlist: ${err.message}`);
+    });
+    emitStatus(`USB playlist selected: ${playlist.name} (${playlist.trackCount ?? "?"} tracks)`);
   });
 
   let dragSourceLi = null;
@@ -395,14 +362,16 @@ export function bindUsbEvents(ctx) {
       ? Number(target?.dataset?.index)
       : rowIndex;
     const rowKey = row?.dataset?.playbackRow || null;
-    const track = state.usbPlaylistTracksView[index];
+    const track = usbPlaylistTracksCtl.items[index];
     if (!track) return;
 
     if (!action) {
+      // Rows arrive hydrated from fetch_usb_playlist_tracks; this is the
+      // belt-and-suspenders re-hydrate for a row that somehow still isn't.
       const before = trackMetaFingerprint(track);
       await hydrateUsbTrackMetadata(track);
       if (trackMetaFingerprint(track) !== before && !patchUsbTrackRow(track)) {
-        renderUsbPlaylistTracks();
+        usbPlaylistTracksCtl.rerender();
       }
       return;
     }

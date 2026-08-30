@@ -112,6 +112,17 @@ test("normalize is applied to every fetched item", async () => {
   assert.deepEqual(ctl.items.map((t) => t.tag), ["n-1", "n-2"]);
 });
 
+test("rerender redraws the currently-loaded items without fetching", async () => {
+  const { ctl, calls } = harness();
+  await ctl.load({ scopeId: "pl-1" });
+  await ctl.loadMore();
+  const fetchCount = calls.fetch.length;
+  await ctl.rerender();
+  assert.equal(calls.fetch.length, fetchCount);
+  assert.equal(calls.renders.at(-1).n, 3); // all loaded items, not just a page
+  assert.equal(calls.renders.at(-1).options.append, undefined);
+});
+
 test("clear empties the list, renders an empty table, and zeroes the footer", async () => {
   const { ctl, calls } = harness();
   await ctl.load({ scopeId: "pl-1" });

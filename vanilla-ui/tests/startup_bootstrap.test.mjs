@@ -47,7 +47,7 @@ function deferredDeps(calls = [], overrides = {}) {
     libraryLoadLimitInit: 111,
     updateModeText: () => { calls.push("mode"); },
     updateSelectionCount: () => { calls.push("selection"); },
-    renderUsbPlaylistTracks: () => { calls.push("usb"); },
+    clearUsbPlaylistTracks: () => { calls.push("usb"); },
     renderWaveformsIn: () => { calls.push("wave"); },
     documentObj: {},
     setStatus: () => {},

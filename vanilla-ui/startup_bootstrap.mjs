@@ -145,7 +145,7 @@ export function runDeferredInitialLoad(state, deps = {}) {
     libraryLoadLimitInit = 200,
     updateModeText = () => {},
     updateSelectionCount = () => {},
-    renderUsbPlaylistTracks = () => {},
+    clearUsbPlaylistTracks = () => {},
     renderWaveformsIn = () => {},
     documentObj = typeof document !== "undefined" ? document : null,
     setStatus = () => {},
@@ -167,7 +167,7 @@ export function runDeferredInitialLoad(state, deps = {}) {
       }
       updateModeText();
       updateSelectionCount();
-      renderUsbPlaylistTracks();
+      clearUsbPlaylistTracks();
       renderWaveformsIn(documentObj);
     }).then(() => {
       state.startupPhase = false;

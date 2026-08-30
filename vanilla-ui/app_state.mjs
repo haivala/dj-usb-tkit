@@ -47,16 +47,8 @@ export function createInitialState() {
     // re-derives the "does this collide with an existing USB playlist, and
     // would an additive export leave its order untouched" rule itself.
     playlistUsbExportStatusById: new Map(),
-    usbPlaylistTracks: [],
-    usbPlaylistTracksView: [],
-    usbTrackSearch: "",
-    // Very large USB playlists (well above the ~80-track typical case) are
-    // rendered/hydrated a page at a time instead of all at once -- see
-    // paginateUsbSelection in components/usb/events.mjs. usbPlaylistPagedCount
-    // is how many of usbPlaylistTracksView are currently rendered; equals
-    // usbPlaylistTracksView.length for selections at/under the threshold.
-    usbPlaylistPagedCount: 0,
-    usbPlaylistLoadingMore: false,
+    // The USB-playlist track table's fetch/pagination/search/sort state lives in
+    // its TrackListController (main.js), not here.
     histories: [],
     selectedHistoryIndex: null,
     historyTracks: [],

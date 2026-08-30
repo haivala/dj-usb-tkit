@@ -47,7 +47,7 @@ test("refreshUsb re-renders the open playlist after replacing the export status 
     stopProgressHeartbeat: () => {},
     normalizeUsbPlaylist: (p) => p,
     renderUsbPlaylists: () => {},
-    renderUsbPlaylistTracks: () => {},
+    clearUsbPlaylistTracks: () => {},
     renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; },
     updatePlaylistExportButtons: () => {},
     countWarningsForStatus: () => 0,
@@ -212,7 +212,7 @@ function makeExportDeps(overrides = {}) {
     updateModeText: () => {},
     switchView: async () => {},
     renderUsbPlaylists: () => {},
-    renderUsbPlaylistTracks: () => {},
+    clearUsbPlaylistTracks: () => {},
     refreshMissingSourceRoots: async () => [],
     clearUsbDiagnostics: () => {},
     ...overrides

@@ -15,6 +15,7 @@ import * as backupsUi from "./components/backups/actions.mjs";
 import * as library from "./components/library/actions.mjs";
 import * as settings from "./components/settings/actions.mjs";
 import * as shell from "./components/shell/actions.mjs";
+import { createTrackListController } from "./components/shared/track_list_controller.mjs";
 import {
   createInitialState,
   createTableSortState,
@@ -938,21 +939,37 @@ const addTracksToCurrentPlaylist = async (tracks) => playlist.addTracksToCurrent
 function renderUsbPlaylists() {
   usb.renderUsbPlaylists(state, el, { escapeHtml });
 }
+
+// The USB-playlist track table's data layer: paginated + searched + sorted +
+// per-page-hydrated by the backend (fetch_usb_playlist_tracks), rendered via
+// the shared controller. Selection/search/sort/scroll all go through it.
+const usbPlaylistTracksCtl = createTrackListController({
+  bodyId: "usbPlaylistTracks",
+  getElements: () => ({
+    body: el.usbPlaylistTracks,
+    wrap: el.usbPlaylistTracks?.closest?.(".table-wrap"),
+    durationTarget: el.usbPlaylistTotalDuration,
+  }),
+  fetchPage: ({ scopeId, query, sortBy, sortDir, cursor, limit }) =>
+    command("fetch_usb_playlist_tracks", {
+      usbRoot: state.usbRoot || null,
+      id: scopeId,
+      query,
+      sortBy: sortBy || null,
+      sortDir: sortDir || null,
+      cursor: cursor || null,
+      limit,
+    }),
+  normalize: (track) => normalizeTrack(track, "usb"),
+  rowOptions: usb.usbPlaylistRowOptions,
+  renderTrackTable,
+  renderDurationSummary: (target, summary) =>
+    renderTrackListDurationSummary(target, summary, formatDurationMs),
+  getTableSortState: () => tableSortState,
+});
+// Sort-header clicks route here via bodyToRendererMap.
 async function renderUsbPlaylistTracks() {
-  await usb.renderUsbPlaylistTracks(state, el, {
-    filterTracksByQuery,
-    applySortToTracks,
-    renderTrackTable,
-    hydrateUsbTrackMetadataBatch,
-    patchUsbTrackRow,
-  });
-}
-async function loadMoreUsbPlaylistTracks(pageSize) {
-  return usb.loadMoreUsbPlaylistTracks(state, el, pageSize, {
-    renderTrackTable,
-    hydrateUsbTrackMetadataBatch,
-    patchUsbTrackRow,
-  });
+  await usbPlaylistTracksCtl.applyHeaderSort();
 }
 function renderHistoryList() {
   usb.renderHistoryList(state, el, { escapeHtml, getHistoryDateValue });
@@ -985,7 +1002,7 @@ function handleUsbPlayerMenuListClick(side, event) {
 function resetUsbStateViews({ hideDiagnostics = true } = {}) {
   usb.resetUsbStateViews(state, el, {
     renderUsbPlaylists,
-    renderUsbPlaylistTracks,
+    clearUsbPlaylistTracks: () => usbPlaylistTracksCtl.clear(),
     renderHistoryList,
     renderHistoryTracks,
     renderUsbPlayerMenuEditor,
@@ -1101,7 +1118,7 @@ const refreshUsb = async () => usb.refreshUsb(state, el, {
     stopProgressHeartbeat,
     normalizeUsbPlaylist,
     renderUsbPlaylists,
-    renderUsbPlaylistTracks,
+    clearUsbPlaylistTracks: () => usbPlaylistTracksCtl.clear(),
     renderCurrentPlaylistTracksFromState,
     updatePlaylistExportButtons,
     countWarningsForStatus: eventLog.countWarningsForStatus,
@@ -1201,7 +1218,7 @@ const exportPlaylistToUsb = async (playlistId) => usb.exportPlaylistToUsb(state,
     updateModeText,
     switchView,
     renderUsbPlaylists,
-    renderUsbPlaylistTracks,
+    clearUsbPlaylistTracks: () => usbPlaylistTracksCtl.clear(),
     refreshMissingSourceRoots: checkSourceRoots,
     clearUsbDiagnostics: () => usb.clearUsbDiagnostics(el),
     commitActivePlaylistSort,
@@ -1338,7 +1355,7 @@ const runDeferredInitialLoad = () => bootstrap.runDeferredInitialLoad(state, {
     libraryLoadLimitInit: LIBRARY_LOAD_LIMIT_INIT,
     updateModeText,
     updateSelectionCount,
-    renderUsbPlaylistTracks,
+    clearUsbPlaylistTracks: () => usbPlaylistTracksCtl.clear(),
     renderWaveformsIn,
     documentObj: document,
     setStatus,
@@ -1445,9 +1462,8 @@ function bindEvents() {
     moveUsbPlayerMenuItems,
     syncUsbPlayerMenusEdbToPdb,
     scheduleApplySearchLocalFilter,
-    renderUsbPlaylistTracks,
+    usbPlaylistTracksCtl,
     renderHistoryTracks,
-    loadMoreUsbPlaylistTracks,
     loadMoreHistoryTracks,
     patchUsbTrackRow,
     patchHistoryTrackRow,
