@@ -10,7 +10,8 @@ use crate::edb::{open_edb_from_usb_root, open_edb_rw};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    ExportToUsbData, ExportToUsbRequest, Playlist, PlaylistUsbExportStatus, WarningEntry,
+    ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest, Playlist, PlaylistUsbExportStatus,
+    WarningEntry,
 };
 
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
@@ -26,14 +27,13 @@ use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
     WriteExportLibraryDbResult, WriteExportPdbResult, canonicalize_track_path_identity,
     collect_manifest_owned_paths, copy_if_different, copy_wav_normalized_if_needed,
-    ensure_analysis_bundle_ppth,
-    export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
-    exported_media_target_path, exported_media_target_path_with_ordinal,
-    filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path,
-    normalize_owned_export_path, preview_pdb, prune_stale_export_owned_files,
-    remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash, to_usb_relative_path,
-    verify_edb_content, verify_edb_content_with_conn, verify_pdb_content, write_edb_playlist,
-    write_edb_playlist_with_conn, write_pdb,
+    ensure_analysis_bundle_ppth, export_analysis_bundle_for_track, export_artwork_for_player,
+    export_owned_files_setting_key, exported_media_target_path,
+    exported_media_target_path_with_ordinal, filter_prunable_stale_paths_for_playlist,
+    is_safe_export_owned_path, normalize_owned_export_path, preview_pdb,
+    prune_stale_export_owned_files, remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash,
+    to_usb_relative_path, verify_edb_content, verify_edb_content_with_conn, verify_pdb_content,
+    write_edb_playlist, write_edb_playlist_with_conn, write_pdb,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
@@ -243,10 +243,71 @@ fn validate_manifest_path(
     Some(normalized)
 }
 
+/// Which side of the destructive steps a manifest invariant check runs on.
+/// Both run the same per-track path checks; the phase only changes the error
+/// wording and the `validationType` the frontend keys off of, so a failure
+/// that happens *after* the DB write and stale-file prune (drive already
+/// modified, restore from backup) is distinguishable from one caught before
+/// anything was touched.
+#[derive(Clone, Copy)]
+enum ManifestCheckPhase {
+    BeforeDbWrite,
+    AfterPrune,
+}
+
+impl ManifestCheckPhase {
+    fn validation_type(self) -> &'static str {
+        match self {
+            Self::BeforeDbWrite => "export_manifest_invariant",
+            Self::AfterPrune => "export_manifest_post_prune",
+        }
+    }
+
+    fn error_message(self) -> &'static str {
+        match self {
+            Self::BeforeDbWrite => "export blocked: manifest invariant check failed",
+            Self::AfterPrune => {
+                "export finished with errors: the stale-file prune removed a file the exported \
+                 playlist still references — the USB databases were written; restore from the \
+                 pre-export backup"
+            }
+        }
+    }
+}
+
+/// Pre-database-write manifest check: unsafe/duplicate/missing targets and
+/// unsafe mirror pruning. Nothing on the drive has been touched yet, so a
+/// failure here is a clean abort.
 fn validate_export_manifest_before_db_write(
     usb_root: &Path,
     manifest: &ExportManifest,
     require_files: bool,
+) -> BackendResult<()> {
+    run_manifest_invariant_check(
+        usb_root,
+        manifest,
+        require_files,
+        ManifestCheckPhase::BeforeDbWrite,
+    )
+}
+
+/// Post-prune bookend to `validate_export_manifest_before_db_write`: re-checks
+/// that every file the freshly-exported playlist references still exists after
+/// the mirror-mode stale-file prune ran. `filter_prunable_stale_paths_for_playlist`
+/// already excludes in-playlist paths, so a hit here means the prune deleted
+/// something it shouldn't have and the drive needs the backup.
+fn validate_export_manifest_after_prune(
+    usb_root: &Path,
+    manifest: &ExportManifest,
+) -> BackendResult<()> {
+    run_manifest_invariant_check(usb_root, manifest, true, ManifestCheckPhase::AfterPrune)
+}
+
+fn run_manifest_invariant_check(
+    usb_root: &Path,
+    manifest: &ExportManifest,
+    require_files: bool,
+    phase: ManifestCheckPhase,
 ) -> BackendResult<()> {
     let mut issues = ManifestValidationIssues::new();
 
@@ -350,11 +411,160 @@ fn validate_export_manifest_before_db_write(
     }
 
     Err(BackendError::ValidationWithDetails(
-        "export blocked: manifest invariant check failed".to_string(),
+        phase.error_message().to_string(),
         json!({
-            "validationType": "export_manifest_invariant",
+            "validationType": phase.validation_type(),
             "issueCount": issues.total,
             "issues": issues.samples,
+        }),
+    ))
+}
+
+/// Extra bytes kept free beyond the estimated media copy. Covers eDB/PDB
+/// growth, PDB page-allocation slack, filesystem cluster rounding across
+/// hundreds of small files, and the analysis/artwork bytes not counted for
+/// tracks whose audio is already on the drive (their bundles are reused, so
+/// the estimate skips them entirely).
+const EXPORT_FREE_SPACE_HEADROOM_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Estimate the bytes an export will newly write into `Contents` (plus the
+/// optional artwork/analysis assets), skipping tracks already present at their
+/// primary target with a matching size — `copy_if_different` skips those and
+/// their assets are reused, not rewritten. Deliberately an estimate: the
+/// collision-suffixing in the real copy loop can pick a different file name,
+/// which only matters for the "already present" check, not the byte total.
+fn estimate_export_new_bytes(
+    media_root: &Path,
+    playlist: &ExportPlaylistData,
+    options: &ExportToUsbOptions,
+) -> u64 {
+    let mut total: u64 = 0;
+    for track in &playlist.tracks {
+        let source = PathBuf::from(&track.file_path);
+        let Ok(meta) = std::fs::metadata(&source) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let source_len = meta.len();
+        let extension = source
+            .extension()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_else(|| "bin".to_string());
+        let target = exported_media_target_path(
+            media_root,
+            &source,
+            &track.artist,
+            track.album.as_deref(),
+            &track.title,
+            &extension,
+        );
+        let already_present = std::fs::metadata(&target)
+            .map(|dst| dst.is_file() && dst.len() == source_len)
+            .unwrap_or(false);
+        if already_present {
+            continue;
+        }
+        total = total.saturating_add(source_len);
+
+        if options.include_analysis
+            && let Some(dat) = track.waveform_peaks_path.as_deref()
+        {
+            let dat = Path::new(dat);
+            for variant in [
+                dat.to_path_buf(),
+                dat.with_extension("EXT"),
+                dat.with_extension("2EX"),
+            ] {
+                if let Ok(m) = std::fs::metadata(&variant) {
+                    total = total.saturating_add(m.len());
+                }
+            }
+        }
+
+        if options.include_artwork
+            && let Some(art) = track.artwork_path.as_deref()
+            && let Ok(m) = std::fs::metadata(art)
+        {
+            total = total.saturating_add(m.len());
+        }
+    }
+    total
+}
+
+/// `Some((required, available))` when the export cannot fit, `None` when it
+/// fits. Split out from `ensure_usb_has_space_for_export` so the arithmetic is
+/// unit-testable without a real filesystem of a known size.
+fn export_space_shortfall(estimate: u64, available: u64) -> Option<(u64, u64)> {
+    let required = estimate.saturating_add(EXPORT_FREE_SPACE_HEADROOM_BYTES);
+    (required > available).then_some((required, available))
+}
+
+/// Free bytes on the filesystem backing `usb_root`, using the same
+/// "longest matching mount point wins" rule as `usb_identity`. `None` when no
+/// enumerated disk covers the path — callers treat that as "can't tell, don't
+/// block".
+fn usb_mount_available_bytes(usb_root: &Path) -> Option<u64> {
+    let canon = std::fs::canonicalize(usb_root).unwrap_or_else(|_| usb_root.to_path_buf());
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    disks
+        .list()
+        .iter()
+        .filter(|disk| canon.starts_with(disk.mount_point()))
+        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .map(|disk| disk.available_space())
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Best-effort free-space preflight. The copy loop writes each track's audio
+/// (and optional artwork/analysis) straight onto the USB filesystem before any
+/// database is written, so a drive that fills mid-loop leaves orphaned partial
+/// media and no updated library. Estimate the new bytes up front and refuse
+/// the export when the drive can't hold them plus headroom. Silently skipped
+/// when the mount's free space can't be read.
+fn ensure_usb_has_space_for_export(
+    usb_root: &Path,
+    media_root: &Path,
+    playlist: &ExportPlaylistData,
+    options: &ExportToUsbOptions,
+) -> BackendResult<()> {
+    let Some(available) = usb_mount_available_bytes(usb_root) else {
+        return Ok(());
+    };
+    let estimate = estimate_export_new_bytes(media_root, playlist, options);
+    let Some((required, available)) = export_space_shortfall(estimate, available) else {
+        return Ok(());
+    };
+    Err(BackendError::ValidationWithDetails(
+        format!(
+            "export blocked: not enough free space on the USB drive — need about {}, {} free",
+            format_bytes(required),
+            format_bytes(available),
+        ),
+        json!({
+            "validationType": "insufficient_usb_space",
+            "estimatedCopyBytes": estimate,
+            "headroomBytes": EXPORT_FREE_SPACE_HEADROOM_BYTES,
+            "requiredBytes": required,
+            "availableBytes": available,
+            "usbRoot": usb_root.to_string_lossy(),
         }),
     ))
 }
@@ -549,6 +759,9 @@ impl BackendService {
 
         let mut warnings = Vec::<WarningEntry>::new();
         ensure_playlist_tracks_analysis_ready(&usb_root, &playlist)?;
+        if !export_dry_run {
+            ensure_usb_has_space_for_export(&usb_root, &media_root, &playlist, &options)?;
+        }
         let local_conn = self.db.connect()?;
         Self::ensure_track_export_identity_schema(&local_conn)?;
         let app_master_db_id = Self::ensure_local_u32_setting(
@@ -1110,6 +1323,11 @@ impl BackendService {
                         prune_result.removed, prune_result.missing, prune_result.skipped
                     ),
                 ));
+                // Bookend to the pre-DB-write manifest check: prove the prune
+                // didn't delete a file the freshly-exported playlist still
+                // references. Runs before save_export_owned_files so the owned
+                // set isn't advanced on a run that ended up inconsistent.
+                validate_export_manifest_after_prune(&usb_root, &manifest)?;
             }
             self.save_export_owned_files(&owned_setting_key, &current_owned)?;
             {
@@ -1547,11 +1765,12 @@ impl BackendService {
 mod tests {
     use super::{
         BackendService, ContentFingerprint, compute_playlist_usb_export_status,
-        content_fingerprint_key, ensure_playlist_tracks_analysis_ready,
-        existing_usb_relative_if_file, existing_usb_relative_if_present, has_required_analysis,
-        has_required_analysis_fields, normalize_playlist_name_for_compare,
-        playlist_locks_reorder_on_export, record_existing_usb_path_by_fingerprint,
-        resolve_collision_free_media_target, usb_playlist_names_for_export_compare,
+        content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes,
+        existing_usb_relative_if_file, existing_usb_relative_if_present, export_space_shortfall,
+        format_bytes, has_required_analysis, has_required_analysis_fields,
+        normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
+        record_existing_usb_path_by_fingerprint, resolve_collision_free_media_target,
+        usb_playlist_names_for_export_compare, validate_export_manifest_after_prune,
         validate_export_manifest_before_db_write,
     };
     use crate::error::BackendError;
@@ -1559,6 +1778,7 @@ mod tests {
     use crate::pdb_reader::{ParsedPdb, PdbPlaylistTreeRow};
     use crate::service::export_helpers::{
         ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
+        exported_media_target_path,
     };
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
@@ -2466,6 +2686,169 @@ mod tests {
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
+    }
+
+    // --- post-prune manifest re-validation (#7) ---
+
+    #[test]
+    fn manifest_validation_after_prune_passes_when_every_referenced_file_survived() {
+        let usb_dir = tempdir().expect("usb dir");
+        std::fs::create_dir_all(usb_dir.path().join("Contents")).expect("contents dir");
+        std::fs::write(usb_dir.path().join("Contents/track.mp3"), b"audio").expect("media");
+        let manifest = minimal_manifest(usb_dir.path(), manifest_track("/Contents/track.mp3"));
+
+        validate_export_manifest_after_prune(usb_dir.path(), &manifest)
+            .expect("intact export must pass the post-prune check");
+    }
+
+    #[test]
+    fn manifest_validation_after_prune_flags_a_media_file_the_prune_removed() {
+        let usb_dir = tempdir().expect("usb dir");
+        // Manifest references /Contents/track.mp3 but it is not on disk -- as if
+        // the mirror-mode stale-file prune wrongly deleted it.
+        let manifest = minimal_manifest(usb_dir.path(), manifest_track("/Contents/track.mp3"));
+
+        let err = validate_export_manifest_after_prune(usb_dir.path(), &manifest).unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(msg, details) => {
+                assert!(msg.contains("stale-file prune removed a file"));
+                assert_eq!(details["validationType"], "export_manifest_post_prune");
+                assert!(
+                    details["issues"]
+                        .as_array()
+                        .expect("issues array")
+                        .iter()
+                        .any(|issue| issue.as_str().unwrap_or_default().contains("media file"))
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    // --- free-space preflight (#3) ---
+
+    #[test]
+    fn export_space_shortfall_trips_only_when_estimate_plus_headroom_exceeds_free() {
+        assert_eq!(export_space_shortfall(0, u64::MAX), None);
+        // Estimate alone would fit, but the fixed headroom pushes it over.
+        assert!(export_space_shortfall(10, 20).is_some());
+        let (required, available) = export_space_shortfall(5_000_000_000, 1_000_000_000)
+            .expect("a 5 GB estimate cannot fit in 1 GB free");
+        assert!(required > available);
+        assert_eq!(available, 1_000_000_000);
+    }
+
+    #[test]
+    fn format_bytes_scales_units() {
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1024), "1.0 KiB");
+        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MiB");
+        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB");
+    }
+
+    #[test]
+    fn estimate_export_new_bytes_counts_new_audio_and_skips_files_already_on_usb() {
+        let root = tempdir().expect("root");
+        let media_src = root.path().join("src");
+        let media_root = root.path().join("usb/Contents");
+        std::fs::create_dir_all(&media_src).expect("src dir");
+        std::fs::create_dir_all(&media_root).expect("contents dir");
+
+        // Already on the USB at its primary target with a matching size.
+        let present_src = media_src.join("present.mp3");
+        std::fs::write(&present_src, vec![0u8; 4096]).expect("present src");
+        let present_target = exported_media_target_path(
+            &media_root,
+            &present_src,
+            "Artist",
+            Some("Album"),
+            "Present",
+            "mp3",
+        );
+        std::fs::create_dir_all(present_target.parent().expect("target parent"))
+            .expect("mk target parent");
+        std::fs::write(&present_target, vec![0u8; 4096]).expect("present target");
+
+        let new_src = media_src.join("new.mp3");
+        std::fs::write(&new_src, vec![0u8; 10_000]).expect("new src");
+
+        let mut present = make_track();
+        present.id = "present".to_string();
+        present.title = "Present".to_string();
+        present.file_path = present_src.to_string_lossy().to_string();
+        present.waveform_peaks_path = None;
+        present.artwork_path = None;
+
+        let mut new_track = make_track();
+        new_track.id = "new".to_string();
+        new_track.title = "New".to_string();
+        new_track.file_path = new_src.to_string_lossy().to_string();
+        new_track.waveform_peaks_path = None;
+        new_track.artwork_path = None;
+
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: vec![present, new_track],
+        };
+        let options = ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            estimate_export_new_bytes(&media_root, &playlist, &options),
+            10_000
+        );
+    }
+
+    #[test]
+    fn estimate_export_new_bytes_adds_analysis_bundle_bytes_only_when_requested() {
+        let root = tempdir().expect("root");
+        let media_src = root.path().join("src");
+        let media_root = root.path().join("usb/Contents");
+        std::fs::create_dir_all(&media_src).expect("src dir");
+        std::fs::create_dir_all(&media_root).expect("contents dir");
+
+        let src = media_src.join("song.mp3");
+        std::fs::write(&src, vec![0u8; 1000]).expect("src");
+        let dat = media_src.join("song.DAT");
+        std::fs::write(&dat, vec![0u8; 200]).expect("dat");
+        std::fs::write(media_src.join("song.EXT"), vec![0u8; 50]).expect("ext");
+        std::fs::write(media_src.join("song.2EX"), vec![0u8; 25]).expect("2ex");
+
+        let mut track = make_track();
+        track.file_path = src.to_string_lossy().to_string();
+        track.waveform_peaks_path = Some(dat.to_string_lossy().to_string());
+        track.artwork_path = None;
+
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: vec![track],
+        };
+
+        let without = ExportToUsbOptions {
+            include_analysis: false,
+            include_artwork: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            estimate_export_new_bytes(&media_root, &playlist, &without),
+            1000
+        );
+
+        let with = ExportToUsbOptions {
+            include_analysis: true,
+            include_artwork: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            estimate_export_new_bytes(&media_root, &playlist, &with),
+            1000 + 200 + 50 + 25
+        );
     }
 
     // --- export_to_usb validation paths ---

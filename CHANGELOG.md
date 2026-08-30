@@ -39,6 +39,14 @@
   progress event as `analysisReady`. The frontend no longer re-derives it, so the
   "Analyze"/"Reanalyze" labels, the playlist "Analyze Missing" button, and the green
   "fully analyzed" source chip can no longer disagree with the backend.
+- **Improvement:** export now runs a free-space preflight before copying any media — it
+  estimates the new bytes the copy will write (skipping tracks already on the drive) and
+  refuses the export up front when the USB can't hold them plus headroom, instead of filling
+  the drive mid-copy and leaving orphaned partial files with no updated database.
+- **Improvement:** mirror-mode export re-runs the manifest invariant check after the stale-file
+  prune, so if the prune ever deleted a file the freshly-exported playlist still references the
+  export fails loudly (pointing at the pre-export backup) instead of reporting success with a
+  hole in the drive.
 
 ## 0.1.33
 
