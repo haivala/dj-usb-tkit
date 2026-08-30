@@ -22,8 +22,7 @@ test("renderUsbPlaylistTracks computes view and renders table", () => {
   renderUsbPlaylistTracks(state, el, {
     filterTracksByQuery: (tracks) => tracks,
     applySortToTracks: (tracks) => tracks,
-    renderTrackTable: (_tbody, tracks) => { renderedCount = tracks.length; },
-    updateTrackListDurationSummary: () => {}
+    renderTrackTable: (_tbody, tracks) => { renderedCount = tracks.length; }
   });
   assert.equal(state.usbPlaylistTracksView.length, 2);
   assert.equal(renderedCount, 2);
@@ -36,8 +35,7 @@ test("renderHistoryTracks computes view and renders table", () => {
   renderHistoryTracks(state, el, {
     filterTracksByQuery: (tracks) => tracks,
     applySortToTracks: (tracks) => tracks,
-    renderTrackTable: (_tbody, tracks) => { renderedCount = tracks.length; },
-    updateTrackListDurationSummary: () => {}
+    renderTrackTable: (_tbody, tracks) => { renderedCount = tracks.length; }
   });
   assert.equal(state.historyTracksView.length, 1);
   assert.equal(renderedCount, 1);

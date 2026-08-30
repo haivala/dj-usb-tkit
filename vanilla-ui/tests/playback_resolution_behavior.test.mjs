@@ -1,10 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { playTrackFromOrigin } from "../components/playback/actions.mjs";
-
-const require = createRequire(import.meta.url);
-const { getPlaybackSourceLabel } = require("../playback_source_label.js");
 
 const localTrack = {
   id: "t-local",
@@ -43,7 +39,6 @@ function playbackDeps({ command, setStatus = () => {}, generation } = {}) {
     updateTransportButtonsInDom: () => {},
     setStatus,
     warn: () => {},
-    getPlaybackSourceLabel,
     ...(generation === undefined ? {} : { generation }),
   };
 }
@@ -101,9 +96,7 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
   assert.equal(state.playbackPath, "/music/Track.mp3");
   assert.equal(state.playbackRowKey, "r1");
   assert.deepEqual(state.playbackLabelContext, {
-    origin: "usb",
-    libraryResolved: true,
-    hasUsbContext: true,
+    sourceLabel: "Library (matched)",
     title: "Artist - Track",
   });
   assert.match(status, /Playing from Library \(matched\): Artist - Track/);
@@ -131,7 +124,7 @@ test("playTrackFromOrigin commits a backend USB fallback result without local fa
 
   assert.equal(state.playbackTrackId, "t-usb");
   assert.equal(state.playbackPath, "/usb/Contents/Track.mp3");
-  assert.equal(state.playbackLabelContext.libraryResolved, false);
+  assert.equal(state.playbackLabelContext.sourceLabel, "USB (library unavailable)");
   assert.match(status, /Playing from USB \(library unavailable\): Artist - Track/);
 });
 
@@ -167,7 +160,7 @@ test("playTrackFromOrigin reports backend playback failures as event-log errors"
     },
   }));
 
-  assert.match(status, /Playback failed \(Library\): decoder error/);
+  assert.match(status, /Playback failed: decoder error/);
   assert.equal(statusMeta?.level, "error");
   assert.equal(statusMeta?.source, "playback");
 });

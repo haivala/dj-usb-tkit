@@ -47,6 +47,20 @@
   prune, so if the prune ever deleted a file the freshly-exported playlist still references the
   export fails loudly (pointing at the pre-export backup) instead of reporting success with a
   hole in the drive.
+- **Fix:** the playback status line no longer changes its source label ("Library (matched)",
+  "USB", …) after the first seek — the label the backend resolved at play time is now reused
+  as-is for later playback events instead of being re-derived in the frontend, which could not
+  reproduce every backend label.
+- **Fix:** every track in an opened playlist is now correctly flagged as coming from the
+  external master database (or not) — a mismatched column list in the playlist-tracks query
+  made them all look non-master-db.
+- **Improvement:** the open playlist's "Total time" footer now shows the backend-computed
+  whole-playlist total (matching the panel title) and no longer re-sums the visible rows in
+  the frontend, so it stays correct while a track search filter is active — the same behaviour
+  the library and USB playlist/history footers already had.
+- **Chore:** dropped the frontend's defensive snake_case / seconds-vs-milliseconds track-field
+  coalescing — the backend response contract is camelCase with a single `durationMs` field, so
+  the extra branches were dead code that could only mask a real contract drift.
 
 ## 0.1.33
 

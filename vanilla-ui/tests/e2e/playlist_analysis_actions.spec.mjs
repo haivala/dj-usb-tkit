@@ -281,6 +281,9 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
 
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
   await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks, Total time: 3:00)");
+  // Footer total comes straight from the backend (get_playlist_tracks), not a
+  // client-side sum -- 1 of the 2 tracks has no known length.
+  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00 (1 without length)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toHaveText("Analyze Missing Tracks (1)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeVisible();
   await expect(page.locator("#exportPlaylistBtn")).toBeHidden();
@@ -817,10 +820,14 @@ test("playlist track drag handle is hidden while a search filter is active", asy
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
   await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
+  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 9:00");
 
   await page.locator("#playlistSearchInput").fill("Song A");
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(1);
   await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
+  // The footer shows the whole-playlist backend total, unaffected by the
+  // client-side search filter (same as the USB playlist/history footers).
+  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 9:00");
 });
 
 async function connectUsbAndFetchPlaylists(page) {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTracklistText, formatDurationMs } from "../track_utils.mjs";
+import { buildTracklistText, formatDurationMs, renderTrackListDurationSummary } from "../track_utils.mjs";
 
 test("buildTracklistText with timeMode off is plain Artist - Title lines", () => {
   const tracks = [
@@ -51,4 +51,23 @@ test("buildTracklistText returns empty string for empty input", () => {
 
 test("formatDurationMs still rolls over to H:MM:SS past an hour (sanity check for reused formatter)", () => {
   assert.equal(formatDurationMs(3661000), "1:01:01");
+});
+
+test("renderTrackListDurationSummary renders the backend total verbatim", () => {
+  const target = { textContent: "" };
+  renderTrackListDurationSummary(target, { totalDurationMs: 3661000, durationKnownCount: 3, trackCount: 3 });
+  assert.equal(target.textContent, "Total time: 1:01:01");
+});
+
+test("renderTrackListDurationSummary appends a 'without length' suffix when some durations are unknown", () => {
+  const target = { textContent: "" };
+  renderTrackListDurationSummary(target, { totalDurationMs: 180000, durationKnownCount: 1, trackCount: 3 });
+  assert.equal(target.textContent, "Total time: 3:00 (2 without length)");
+});
+
+test("renderTrackListDurationSummary is a no-op with a missing target and tolerates missing fields", () => {
+  assert.doesNotThrow(() => renderTrackListDurationSummary(null, { totalDurationMs: 1000 }));
+  const target = { textContent: "unchanged" };
+  renderTrackListDurationSummary(target);
+  assert.equal(target.textContent, "Total time: 0:00");
 });

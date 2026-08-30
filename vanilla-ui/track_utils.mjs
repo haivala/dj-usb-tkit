@@ -13,31 +13,11 @@ export function loadMoreIfNearBottom(wrap, thresholdPx, isBusy, hasMore, loadMor
   return loadMore();
 }
 
+// The backend sends exactly one canonical duration field, `durationMs`
+// (Option<u64> milliseconds), on every track-bearing response.
 export function normalizeDurationMs(track) {
-  if (!track || typeof track !== "object") return null;
-  const directMs = [
-    track.durationMs,
-    track.duration_ms,
-    track.lengthMs,
-    track.length_ms
-  ].map((v) => Number(v)).find((v) => Number.isFinite(v) && v > 0);
-  if (Number.isFinite(directMs)) return Math.round(directMs);
-
-  const directSeconds = [
-    track.durationSec,
-    track.duration_sec,
-    track.durationSeconds,
-    track.duration_seconds,
-    track.lengthSec,
-    track.length_sec
-  ].map((v) => Number(v)).find((v) => Number.isFinite(v) && v > 0);
-  if (Number.isFinite(directSeconds)) return Math.round(directSeconds * 1000);
-
-  const generic = Number(track.duration);
-  if (!Number.isFinite(generic) || generic <= 0) return null;
-  // Legacy payloads may provide seconds in `duration`; assume seconds for small values.
-  if (generic <= 24 * 60 * 60) return Math.round(generic * 1000);
-  return Math.round(generic);
+  const ms = Number(track?.durationMs);
+  return Number.isFinite(ms) && ms > 0 ? Math.round(ms) : null;
 }
 
 export function formatDurationMs(value) {
@@ -52,18 +32,18 @@ export function formatDurationMs(value) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-export function updateTrackListDurationSummary(target, tracks) {
-  const items = Array.isArray(tracks) ? tracks : [];
-  const durations = items
-    .map((track) => Number(track?.durationMs))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  const totalMs = durations.reduce((sum, value) => sum + value, 0);
-  const unknownCount = Math.max(0, items.length - durations.length);
-  if (target) {
-    const unknownSuffix = unknownCount > 0 ? ` (${unknownCount} without length)` : "";
-    target.textContent = `Total time: ${formatDurationMs(totalMs)}${unknownSuffix}`;
-  }
-  return { totalMs, unknownCount };
+// Pure setter -- the playlist total is computed by the backend
+// (GetPlaylistTracksData::total_duration_ms / duration_known_count, over the
+// full playlist) and passed straight through here, matching the library and
+// USB footers. It intentionally does not react to the client-side track search
+// filter, same as the USB playlist/history footers.
+export function renderTrackListDurationSummary(target, { totalDurationMs, durationKnownCount, trackCount } = {}, formatDurationMsFn = formatDurationMs) {
+  if (!target) return;
+  const total = Math.max(0, Number(totalDurationMs) || 0);
+  const known = Math.max(0, Number(durationKnownCount) || 0);
+  const unknown = Math.max(0, (Number(trackCount) || 0) - known);
+  const suffix = unknown > 0 ? ` (${unknown} without length)` : "";
+  target.textContent = `Total time: ${formatDurationMsFn(total)}${suffix}`;
 }
 
 export function buildTracklistText(tracks, timeMode) {

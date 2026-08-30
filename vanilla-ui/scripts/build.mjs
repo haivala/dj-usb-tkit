@@ -13,8 +13,7 @@ const staticFiles = [
   "styles.css",
   "mock_api_client.mjs",
   "text-icon.svg",
-  "playback_ui_state.js",
-  "playback_source_label.js"
+  "playback_ui_state.js"
 ];
 
 await rm(distDir, { recursive: true, force: true });

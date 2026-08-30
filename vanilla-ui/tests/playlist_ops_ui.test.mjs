@@ -129,7 +129,7 @@ test("refreshCurrentPlaylistTracks updates table state and refresh hooks", async
     renderEmptyState: (_container, payload) => calls.push(payload.heading),
     applySortToTracks: (tracks) => tracks,
     renderTrackTable: (_tbody, tracks) => calls.push(`rows:${tracks.length}`),
-    updateTrackListDurationSummary: (_node, tracks) => calls.push(`duration:${tracks.length}`),
+    renderTrackListDurationSummary: (_node, summary) => calls.push(`duration:${summary.trackCount}`),
     updatePlaylistPanelTitle: (item) => calls.push(`title:${item.id}`),
     updatePlaylistExportButtons: () => calls.push("buttons"),
     renderPlaylistList: () => calls.push("list")

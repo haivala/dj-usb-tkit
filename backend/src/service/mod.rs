@@ -2309,12 +2309,15 @@ impl BackendService {
         ensure_playlist_exists(&self.db, &req.playlist_id)?;
 
         let conn = self.db.connect()?;
+        // Column order MUST stay in lockstep with `TRACK_COLS` / `row_to_track`
+        // (which reads `master_db_source` positionally at index 19) -- this JOIN
+        // needs `t.`-prefixed names so it can't reuse `TRACK_COLS` verbatim.
         let mut stmt = conn.prepare(
             r#"
             SELECT t.id, t.title, t.artist, t.album, t.track_number, t.bpm, t.tonality, t.file_path,
                    t.file_size_bytes, t.format_ext, t.sample_rate_hz, t.bit_depth, t.bitrate_kbps, t.duration_ms,
                    t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at,
-                   t.wav_extensible_kind
+                   COALESCE(t.master_db_source, 0) AS master_db_source, t.wav_extensible_kind
             FROM playlist_tracks pt
             JOIN tracks t ON t.id = pt.track_id
             WHERE pt.playlist_id = ?1
@@ -4193,6 +4196,10 @@ mod tests {
             None,
             false,
         );
+        // master.db-sourced -- must survive get_playlist_tracks' hand-written
+        // SELECT (regression: its column list was misaligned vs `row_to_track`,
+        // which reads master_db_source positionally, so every playlist track
+        // came back master_db_source=false).
         insert_full_track(
             &conn,
             "t3",
@@ -4201,7 +4208,7 @@ mod tests {
             "/music/c.mp3",
             Some(100_000),
             None,
-            false,
+            true,
         );
         drop(conn);
 
@@ -4225,6 +4232,19 @@ mod tests {
             .expect("get playlist tracks");
         assert_eq!(tracks.total_duration_ms, 300_000);
         assert_eq!(tracks.duration_known_count, 2);
+
+        let by_id = |id: &str| {
+            tracks
+                .items
+                .iter()
+                .find(|t| t.id == id)
+                .unwrap_or_else(|| panic!("missing track {id}"))
+        };
+        assert!(
+            by_id("t3").master_db_source,
+            "master_db_source must survive get_playlist_tracks"
+        );
+        assert!(!by_id("t1").master_db_source);
     }
 
     #[test]

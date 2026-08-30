@@ -39,12 +39,6 @@ export function getPlaybackUiStateHelpers() {
   return globalThis?.playbackUiState || null;
 }
 
-function getPlaybackSourceLabelFn(deps = {}) {
-  if (typeof deps.getPlaybackSourceLabel === "function") return deps.getPlaybackSourceLabel;
-  const fallback = globalThis?.playbackSourceLabel?.getPlaybackSourceLabel;
-  return typeof fallback === "function" ? fallback : () => "Local file";
-}
-
 export function updateTransportButtonsInDom(state, root) {
   const helpers = getPlaybackUiStateHelpers();
   root.querySelectorAll(".transport-btn").forEach((btn) => {
@@ -402,14 +396,6 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
   const rawStartOffsetMs = toNumberOrNull(options.startOffsetMs);
   const startOffsetMs = rawStartOffsetMs === null ? null : Math.max(0, Math.round(rawStartOffsetMs));
   const waveformEl = options.waveformEl || null;
-  const hasUsbContext = !!state.usbRoot && !!state.usbRootValid;
-  const fallbackSourceLabel = ["local", "library", "playlist"].includes(originLower)
-    ? "Library"
-    : getPlaybackSourceLabelFn(deps)({
-        origin: originLower,
-        libraryResolved: false,
-        hasUsbContext
-      });
 
   return withBackendQueue(state, async () => {
     if (!isGenerationCurrent(state, generation)) return;
@@ -447,21 +433,16 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
           setWaveformPlayhead(waveformEl, startRatio, true);
         }
       }
-      const libraryResolved = playback?.libraryResolved === true || playback?.source === "library";
-      const sourceLabel = playback?.sourceLabel || fallbackSourceLabel;
-      const responseHasUsbContext = typeof playback?.hasUsbContext === "boolean"
-        ? playback.hasUsbContext
-        : hasUsbContext;
+      // Backend-owned: `play_resolved_track` always returns the resolved
+      // `sourceLabel` (see backend playback_source_label / mod.rs). Stash the
+      // string so later playback events re-use it verbatim rather than
+      // re-deriving a label the frontend can't always reproduce.
+      const sourceLabel = playback?.sourceLabel || "";
       state.playbackActive = true;
       state.playbackTrackId = playback?.trackId || track?.id || null;
       state.playbackPath = playback?.path || trackPath;
       state.playbackRowKey = options.rowKey || null;
-      state.playbackLabelContext = {
-        origin: originLower,
-        libraryResolved,
-        hasUsbContext: responseHasUsbContext,
-        title
-      };
+      state.playbackLabelContext = { sourceLabel, title };
       updateTransportButtonsInDom();
       setStatus(`Playing from ${sourceLabel}: ${title}`);
     } catch (err) {
@@ -471,7 +452,7 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
         setStatus("Cannot play: track not found in Library or selected USB.", { level: "warn", source: "playback" });
         return;
       }
-      setStatus(`Playback failed (${fallbackSourceLabel}): ${message}`, { level: "error", source: "playback" });
+      setStatus(`Playback failed: ${message}`, { level: "error", source: "playback" });
     }
   });
 }
@@ -604,14 +585,13 @@ export function handlePlaybackEvent(state, payload, deps) {
       }
     }
     updateTransportButtonsInDom();
-    // Make the status line a live projection of playback state rather than
-    // a one-shot string frozen at play-dispatch time -- recompute the
-    // label from the same context playTrackFromOrigin stashed, so later
-    // events (e.g. a seek) keep it accurate.
+    // Keep the status line a live projection of playback state rather than a
+    // one-shot string frozen at play-dispatch time -- reuse the backend-owned
+    // label playTrackFromOrigin stashed, verbatim, so later events (e.g. a
+    // seek) keep it accurate without re-deriving it here.
     if (playing && state.playbackLabelContext) {
-      const { origin, libraryResolved, hasUsbContext, title } = state.playbackLabelContext;
-      const label = getPlaybackSourceLabelFn(deps)({ origin, libraryResolved, hasUsbContext });
-      setStatus(`Playing from ${label}: ${title}`);
+      const { sourceLabel, title } = state.playbackLabelContext;
+      setStatus(`Playing from ${sourceLabel}: ${title}`);
     }
     return;
   }

@@ -4,26 +4,28 @@ import {
   normalizeTrack,
   normalizeUsbPlaylist
 } from "../components/library/actions.mjs";
+import { normalizeDurationMs } from "../track_utils.mjs";
 
-test("normalizeTrack maps snake_case and clamps waveform preview", () => {
+test("normalizeTrack maps the camelCase backend fields and clamps waveform preview", () => {
   const normalized = normalizeTrack({
     id: "1",
-    local_track_id: "local-1",
+    localTrackId: "local-1",
     title: "Song",
     artist: "Artist",
     album: "Album",
-    format_ext: "mp3",
-    sample_rate_hz: "44100",
-    bit_depth: "16",
-    bitrate_kbps: "320",
-    bpm_analyzer: "stratum",
+    formatExt: "mp3",
+    sampleRateHz: "44100",
+    bitDepth: "16",
+    bitrateKbps: "320",
+    bpmAnalyzer: "stratum",
+    durationMs: 12345,
     waveformPreview: [-10, 40, 500],
     filePath: "/music/song.mp3",
-    updated_at: "2024-01-01T00:00:00Z"
+    updatedAt: "2024-01-01T00:00:00Z"
   }, "x", {
     toPlayableUrl: (v) => v,
     appendUrlRevision: (url, rev) => `${url}?rev=${rev}`,
-    normalizeDurationMs: () => 12345
+    normalizeDurationMs
   });
 
   assert.equal(normalized.id, "1");
@@ -35,6 +37,15 @@ test("normalizeTrack maps snake_case and clamps waveform preview", () => {
   assert.deepEqual(normalized.waveformPreview, [0, 40, 100]);
   assert.equal(normalized.durationMs, 12345);
   assert.equal(normalized.searchText, "song artist album");
+});
+
+test("normalizeDurationMs reads the canonical durationMs (ms) and rejects non-positive values", () => {
+  assert.equal(normalizeDurationMs({ durationMs: 240000 }), 240000);
+  assert.equal(normalizeDurationMs({ durationMs: 1234.6 }), 1235);
+  assert.equal(normalizeDurationMs({ durationMs: 0 }), null);
+  assert.equal(normalizeDurationMs({ durationMs: null }), null);
+  assert.equal(normalizeDurationMs({}), null);
+  assert.equal(normalizeDurationMs(null), null);
 });
 
 test("normalizeTrack maps camelCase bpmAnalyzer", () => {

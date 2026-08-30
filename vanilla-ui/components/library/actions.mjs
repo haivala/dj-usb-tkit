@@ -33,7 +33,7 @@ export function trackHasArtwork(track) {
 }
 
 export function trackArtworkChecked(track) {
-  return track?.artworkChecked === true || track?.artwork_checked === true;
+  return track?.artworkChecked === true;
 }
 
 export function trackHasBpm(track) {
@@ -85,7 +85,7 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
   } = deps;
 
   const rawArtwork = track?.artworkDataUrl || track?.artworkUrl || track?.artworkPath || "";
-  const artworkRevision = track?.updatedAt || track?.updated_at || "";
+  const artworkRevision = track?.updatedAt || "";
   const convertedArtwork = appendUrlRevision(toPlayableUrl(rawArtwork) || "", artworkRevision);
   const filePath = String(track?.filePath || "").trim();
   const inferredFormat = inferFormatFromPath(filePath);
@@ -97,13 +97,13 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
 
   return {
     id: track?.id || `${fallbackIdPrefix}-${randomId()}`,
-    localTrackId: track?.localTrackId || track?.local_track_id || null,
+    localTrackId: track?.localTrackId || null,
     title,
     artist,
     album,
     trackNumber: toFiniteOrNull(track?.trackNumber),
     bpm: toFiniteOrNull(track?.bpm),
-    bpmAnalyzer: track?.bpmAnalyzer || track?.bpm_analyzer || "",
+    bpmAnalyzer: track?.bpmAnalyzer || "",
     key: track?.key || "",
     artworkUrl: convertedArtwork,
     artworkDataUrl: track?.artworkDataUrl || "",
@@ -113,19 +113,22 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     durationMs,
     waveformPeaksPath: track?.waveformPeaksPath || "",
     usbAnalysisPath: track?.usbAnalysisPath || "",
-    formatExt: track?.formatExt || track?.format_ext || inferredFormat,
-    sampleRateHz: toFiniteOrNull(track?.sampleRateHz ?? track?.sample_rate_hz),
-    bitDepth: toFiniteOrNull(track?.bitDepth ?? track?.bit_depth),
-    bitrateKbps: toFiniteOrNull(track?.bitrateKbps ?? track?.bitrate_kbps),
-    wavExtensibleKind: track?.wavExtensibleKind ?? track?.wav_extensible_kind ?? null,
+    // `formatExt` is genuinely absent on some rows (nullable DB column; USB
+    // tracks carry no format at all) -- inferring from the path is a real
+    // fallback, not a re-derivation of a rule the backend owns.
+    formatExt: track?.formatExt || inferredFormat,
+    sampleRateHz: toFiniteOrNull(track?.sampleRateHz),
+    bitDepth: toFiniteOrNull(track?.bitDepth),
+    bitrateKbps: toFiniteOrNull(track?.bitrateKbps),
+    wavExtensibleKind: track?.wavExtensibleKind ?? null,
     waveformPreview,
     waveformColorData: Array.isArray(track?.waveformColorData) ? track.waveformColorData : null,
-    createdAt: track?.createdAt || track?.created_at || "",
-    updatedAt: track?.updatedAt || track?.updated_at || "",
+    createdAt: track?.createdAt || "",
+    updatedAt: track?.updatedAt || "",
     searchText: `${title} ${artist} ${album}`.toLowerCase(),
-    masterDbSource: !!(track?.masterDbSource ?? track?.master_db_source),
-    isUsbPath: !!(track?.isUsbPath ?? track?.is_usb_path),
-    analysisReady: !!(track?.analysisReady ?? track?.analysis_ready)
+    masterDbSource: !!track?.masterDbSource,
+    isUsbPath: !!track?.isUsbPath,
+    analysisReady: !!track?.analysisReady
   };
 }
 
@@ -625,7 +628,7 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
     applySortToTracks = (tracks) => tracks,
     renderTrackTable = () => {},
     cssEscape = (value) => String(value || ""),
-    updateTrackListDurationSummary = () => {}
+    renderTrackListDurationSummary = () => {}
   } = deps;
 
   const playlist = getCurrentPlaylist();
@@ -677,7 +680,11 @@ export async function renderCurrentPlaylistTracksFromState(state, el, deps = {})
     const row = el.playlistTracksBody.querySelector(selector);
     if (row) row.classList.add("is-analyzing");
   }
-  updateTrackListDurationSummary(el.playlistTotalDuration, state.currentPlaylistTracksView);
+  renderTrackListDurationSummary(el.playlistTotalDuration, {
+    totalDurationMs: playlist.totalDurationMs,
+    durationKnownCount: playlist.durationKnownCount,
+    trackCount: playlist.tracks.length
+  });
 }
 
 // The library's duration total/unknown-count are computed entirely by the

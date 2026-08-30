@@ -18,7 +18,7 @@ test("waveform/artwork/bpm/key checks classify correctly", () => {
   assert.equal(trackHasArtwork({}), false);
   assert.equal(trackHasArtwork({ artworkChecked: true }), false);
   assert.equal(trackArtworkChecked({ artworkChecked: true }), true);
-  assert.equal(trackArtworkChecked({ artwork_checked: true }), true);
+  assert.equal(trackArtworkChecked({}), false);
 
   assert.equal(trackHasBpm({ bpm: 120 }), true);
   assert.equal(trackHasBpm({ bpm: 0 }), false);

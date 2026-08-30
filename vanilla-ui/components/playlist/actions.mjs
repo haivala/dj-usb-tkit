@@ -294,7 +294,7 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
     renderEmptyState,
     applySortToTracks,
     renderTrackTable,
-    updateTrackListDurationSummary,
+    renderTrackListDurationSummary,
     updatePlaylistPanelTitle,
     updatePlaylistExportButtons,
     renderPlaylistList
@@ -350,7 +350,11 @@ export async function refreshCurrentPlaylistTracks(state, el, deps) {
     enableDragReorder,
     dragDisabledTooltip
   });
-  updateTrackListDurationSummary(el.playlistTotalDuration, state.currentPlaylistTracksView);
+  renderTrackListDurationSummary(el.playlistTotalDuration, {
+    totalDurationMs: playlist.totalDurationMs,
+    durationKnownCount: playlist.durationKnownCount,
+    trackCount: playlist.tracks.length
+  });
   updatePlaylistPanelTitle(playlist);
   updatePlaylistExportButtons();
   renderPlaylistList();

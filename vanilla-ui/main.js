@@ -54,7 +54,7 @@ import { getKeyHue } from "./key_hue.mjs";
 import {
   normalizeDurationMs,
   formatDurationMs,
-  updateTrackListDurationSummary,
+  renderTrackListDurationSummary,
   getHistoryDateValue,
   getHistoryDateDisplay,
   formatTimestampLocal,
@@ -543,7 +543,6 @@ const playTrackFromOrigin = async (track, origin, options = {}) => playback.play
     setStatus,
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
-    getPlaybackSourceLabel: globalThis?.playbackSourceLabel?.getPlaybackSourceLabel,
   });
 
 function handlePlaybackEvent(payload) {
@@ -555,7 +554,6 @@ function handlePlaybackEvent(payload) {
     resolveTrackIdForPath: (path) => playback.findTrackIdByPath(state, path, { normalizePath }),
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
-    getPlaybackSourceLabel: globalThis?.playbackSourceLabel?.getPlaybackSourceLabel,
   });
 }
 
@@ -665,7 +663,7 @@ async function renderCurrentPlaylistTracksFromState() {
     applySortToTracks,
     renderTrackTable,
     cssEscape,
-    updateTrackListDurationSummary,
+    renderTrackListDurationSummary,
   });
 }
 const mergeHydratedTrackIntoState = (rawTrack) => library.mergeHydratedTrackIntoState(state, rawTrack, {
@@ -896,7 +894,7 @@ async function refreshCurrentPlaylistTracks() {
     renderEmptyState,
     applySortToTracks,
     renderTrackTable,
-    updateTrackListDurationSummary,
+    renderTrackListDurationSummary,
     updatePlaylistPanelTitle,
     updatePlaylistExportButtons,
     renderPlaylistList,
