@@ -34,11 +34,13 @@
   waveform/BPM/duration, including tracks imported into the library from a
   USB drive — previously the button was hidden for those and the export failed later at the
   backend analysis gate instead.
-- **Improvement:** whether a track still needs analysis is now decided entirely by the backend
-  (a single rule shared with the pre-export gate) and sent on every track row and analysis
-  progress event as `analysisReady`. The frontend no longer re-derives it, so the
-  "Analyze"/"Reanalyze" labels, the playlist "Analyze Missing" button, and the green
-  "fully analyzed" source chip can no longer disagree with the backend.
+- **Fix:** every track in an opened playlist is now correctly flagged as coming from the
+  external master database (or not) — a mismatched column list in the playlist-tracks query
+  made them all look non-master-db.
+- **Fix:** opening an app playlist that has tracks right after viewing an empty one now paints
+  its waveforms — the empty playlist's "no tracks" state hides the track table, and the
+  waveform canvases were being measured (and locked to 1×1) while still hidden, then never
+  repainted once the table was shown.
 - **Improvement:** export now runs a free-space preflight before copying any media — it
   estimates the new bytes the copy will write (skipping tracks already on the drive) and
   refuses the export up front when the USB can't hold them plus headroom, instead of filling
@@ -47,52 +49,32 @@
   prune, so if the prune ever deleted a file the freshly-exported playlist still references the
   export fails loudly (pointing at the pre-export backup) instead of reporting success with a
   hole in the drive.
-- **Fix:** the playback status line no longer changes its source label ("Library (matched)",
-  "USB", …) after the first seek — the label the backend resolved at play time is now reused
-  as-is for later playback events instead of being re-derived in the frontend, which could not
-  reproduce every backend label. Stopping playback also clears that stashed label now, so a
-  stray late event can't reprint it for a track that already ended.
-- **Fix:** every track in an opened playlist is now correctly flagged as coming from the
-  external master database (or not) — a mismatched column list in the playlist-tracks query
-  made them all look non-master-db.
-- **Improvement:** the open playlist's "Total time" footer now shows the backend-computed
-  whole-playlist total (matching the panel title) and no longer re-sums the visible rows in
-  the frontend, so it stays correct while a track search filter is active — the same behaviour
-  the library and USB playlist/history footers already had.
-- **Chore:** dropped the frontend's defensive snake_case / seconds-vs-milliseconds track-field
-  coalescing — the backend response contract is camelCase with a single `durationMs` field, so
-  the extra branches were dead code that could only mask a real contract drift. Every
-  track-list footer ("Total time" for the app playlist, library, and USB playlist/history) now
-  renders through one shared helper instead of three near-identical copies.
-- **Improvement:** a track's format badge is now always resolved by the backend — every
-  track-returning command guarantees `formatExt` on the wire (the scanner sets it, and
-  reads fall back to the file-path extension for legacy / master.db / USB-merge rows), and
-  USB tracks carry it too, derived from the PDB path. The frontend no longer infers the
-  format from the file path.
-- **Improvement:** selecting a large USB playlist or history session is faster and simpler —
-  the backend now returns one already-hydrated page at a time (waveform/BPM/key/artwork) via
-  `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks`, and searching or sorting the list
-  re-queries the backend so it covers every track, not only the visible page. The frontend's
-  separate per-page hydration round-trip and its bespoke pagination bookkeeping are gone,
-  replaced by one shared track-list controller.
-- **Improvement:** sorting the library by a column now spans the whole library, not just the
-  rows already scrolled into view — the sort (and the search) run server-side via
-  `browse_source_files`. The library track list moved onto the shared controller as well, so
-  all four track-list views (library, app playlist, USB playlist, USB history) now share one
-  fetch/paginate/search/sort/scroll data layer. The `state.filteredTracks` client-search
-  overlay and the library's bespoke pagination/scroll bookkeeping are gone.
-- **Improvement:** the app-playlist track list is now server-paginated/searched/sorted too, on
-  the same shared controller — a large curated playlist renders its first page immediately and
-  scroll-loads the rest, its column sort and search span the whole playlist, and its
-  "Analyze Missing Tracks (N)" count comes from the backend. A column sort stays a reversible
-  view op until committed on navigate-away/export (`reorder_playlist_tracks` gained a
-  `sortBy` mode); drag-reorder became a single-move (`moveTrackId`/`beforeTrackId`) so it
-  works without loading every row. The last of the frontend's client-side track sort/filter
-  helpers (`sortTracks`, `filterTracksByQuery`, `applySortToTracks`) are deleted — sorting and
-  filtering a track list is now entirely a backend concern.
-- **Chore:** unified track-row action resolution across all four views into one
-  `resolveRowActionTrack(view, el)` helper (position-first, identity fallback), replacing the
-  library-vs-USB `data-id` / `data-index` split.
+- **Improvement:** all four track-list views — library, app playlist, USB playlist, USB
+  history — now share one backend-driven fetch/paginate/search/sort/scroll data layer. Each
+  renders one already-hydrated page at a time (waveform/BPM/key/artwork) and scroll-loads the
+  rest; search and column sort re-query the backend (`browse_source_files`,
+  `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks`) so they span the whole list, not
+  just the rows scrolled into view. The `state.filteredTracks` client-search overlay, the
+  client-side `sortTracks` / `filterTracksByQuery` / `applySortToTracks` helpers, and every
+  view's bespoke pagination/scroll bookkeeping are gone. For the app playlist a column sort
+  stays a reversible view op until committed on navigate-away/export (`reorder_playlist_tracks`
+  gained a `sortBy` mode), and drag-reorder became a single-move (`moveTrackId` /
+  `beforeTrackId`) so it works without loading every row.
+- **Improvement:** more per-track derived state is now computed once by the backend and
+  rendered as-is, so the UI can no longer disagree with the pre-export gate or with itself:
+  whether a track still needs analysis (`analysisReady`, a single rule shared with the export
+  gate, on every row and analysis progress event), the format badge (`formatExt` guaranteed on
+  the wire for every track-returning command, USB tracks included, with a file-path-extension
+  fallback for legacy / master.db / USB-merge rows), the playback status source label ("Library
+  (matched)", "USB", … — resolved at play time, reused verbatim for later events, cleared on
+  stop), and every track-list "Total time" footer (whole-list backend total, correct while a
+  search filter is active).
+- **Chore:** track-list frontend cleanup enabled by the two changes above — one shared
+  "Total time" helper instead of three near-identical copies, one
+  `resolveRowActionTrack(view, el)` for row-action resolution across all four views
+  (position-first, identity fallback) replacing the library-vs-USB `data-id` / `data-index`
+  split, and the dead snake_case / seconds-vs-milliseconds track-field coalescing branches
+  removed now that the response contract is camelCase with a single `durationMs`.
 
 ## 0.1.33
 

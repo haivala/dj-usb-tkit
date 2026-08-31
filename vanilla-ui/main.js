@@ -531,10 +531,20 @@ const playlistTracksCtl = createTrackListController({
   getTableSortState: () => tableSortState,
   onResponse: (data) => {
     const p = getCurrentPlaylist();
-    if (!p) return;
-    p.totalDurationMs = Number(data.totalDurationMs) || 0;
-    p.durationKnownCount = Number(data.durationKnownCount) || 0;
-    p.unanalyzedCount = Number(data.unanalyzedCount) || 0;
+    if (p) {
+      p.totalDurationMs = Number(data.totalDurationMs) || 0;
+      p.durationKnownCount = Number(data.durationKnownCount) || 0;
+      p.unanalyzedCount = Number(data.unanalyzedCount) || 0;
+    }
+    // Reveal the table wrap *before* renderTrackTable paints the rows: a
+    // waveform canvas measured while an ancestor is `display:none` (the
+    // empty-state chrome still applied from a previously-selected empty
+    // playlist) sizes to 1x1 and is never repainted when the wrap is later
+    // shown, leaving every waveform blank. renderPlaylistPanelChrome() in
+    // onPage still owns the authoritative empty/non-empty state afterwards.
+    const hasTracks = Number(data.total) > 0 || (data.items || []).length > 0;
+    el.playlistTableWrap?.classList.toggle("hidden", !hasTracks);
+    el.playlistTotalDuration?.classList.toggle("hidden", !hasTracks);
   },
   onPage: () => renderPlaylistPanelChrome(),
 });

@@ -627,6 +627,76 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
   expect(analyzedRequests.map((item) => item.trackIds)).toEqual([["usb-import-1"]]);
 });
 
+test("selecting a playlist with tracks right after an empty one still paints its waveforms", async ({ page }) => {
+  // Regression: the empty-state chrome sets `#playlistTableWrap` to
+  // display:none. renderTrackTable() paints each row's waveform canvas via
+  // getBoundingClientRect(), which reads 0x0 while an ancestor is hidden, so
+  // the canvas locks to 1x1 and is never repainted once the wrap is shown
+  // again -- every waveform came up blank when the previously-selected
+  // playlist was empty. The wrap must be revealed before the rows render.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+
+    const playlists = [
+      { id: "pl-empty", name: "Empty Playlist", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      { id: "pl-full", name: "Full Playlist", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    ];
+
+    const playlistTracks = {
+      "pl-empty": [],
+      "pl-full": [
+        { id: "t1", title: "Song A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPeaksPath: "/tmp/a.dat", waveformPreview: [8, 20, 42, 65, 30, 55], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t2", title: "Song B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPeaksPath: "/tmp/b.dat", waveformPreview: [7, 19, 43, 61, 34, 57], durationMs: 180000, bpm: 122, key: "9A", analysisReady: true }
+      ]
+    };
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request || payload;
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "get_playlist_tracks") {
+            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
+          }
+          if (command === "search_tracks" || command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
+            return command === "get_frontend_settings"
+              ? { ok: true, data: { settings: {} } }
+              : { ok: true, data: { key: request.key, value: request.value } };
+          }
+          if (command === "resolve_playback_source") {
+            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
+          }
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        }
+      }
+    };
+  });
+
+  await page.goto("/");
+
+  // Select the empty playlist first -- this hides #playlistTableWrap.
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Empty Playlist" }).click();
+  await expect(page.locator("#playlistEmptyState")).toBeVisible();
+  await expect(page.locator("#playlistTableWrap")).toBeHidden();
+
+  // Now select the non-empty one.
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Full Playlist" }).click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+
+  // Every waveform canvas must be sized to its laid-out box, not the 1x1 it
+  // gets when measured inside a display:none ancestor.
+  await expect.poll(async () => page.evaluate(() => {
+    const canvases = Array.from(document.querySelectorAll("#playlistTracksBody .waveform.waveform-canvas .waveform-canvas-el"));
+    return canvases.length > 0 && canvases.every((c) => c.width > 1 && c.height > 1);
+  })).toBe(true);
+});
+
 function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneStale } = {}) {
   return page.addInitScript(({ usbSameNamePlaylistName, exportPruneStale }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
