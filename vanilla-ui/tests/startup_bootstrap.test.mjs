@@ -109,10 +109,15 @@ test("applySidebarCollapsedUi and showHelpOnFirstVisit update DOM", () => {
 
 test("runDeferredInitialLoad loads initial data, selects fallback playlists, and preserves valid current playlists", async () => {
   const calls = [];
-  const first = { playlists: [{ id: "p1" }], currentPlaylistId: null, startupPhase: true };
+  const first = {
+    playlists: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+    currentPlaylistId: null,
+    startupPhase: true
+  };
   runDeferredInitialLoad(first, deferredDeps(calls));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(first.currentPlaylistId, "p1");
+  // Newest playlist (last in created_at ASC order) is the default selection.
+  assert.equal(first.currentPlaylistId, "p3");
   assert.equal(first.startupPhase, false);
   assert.equal(calls.includes("playlists"), true);
   assert.equal(calls.includes("tracks"), true);

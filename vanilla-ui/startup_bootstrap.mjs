@@ -162,7 +162,10 @@ export function runDeferredInitialLoad(state, deps = {}) {
       if (state.playlists.length > 0) {
         const hasCurrent = state.playlists.some((playlist) => playlist.id === state.currentPlaylistId);
         if (!hasCurrent) {
-          state.currentPlaylistId = state.playlists[0].id;
+          // list_playlists is ordered created_at ASC, so the newest playlist is
+          // last -- default the selection to it (matches the post-delete fallback
+          // in components/playlist/actions.mjs).
+          state.currentPlaylistId = state.playlists.at(-1).id;
         }
       }
       updateModeText();
