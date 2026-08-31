@@ -1,47 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  resolveLocalTrackId,
-  shouldAllowResolvedFallback,
   resolveLocalTrackIdAsync,
-  resolveLocalTrack,
-  getTrackPlaybackPath,
   isTrackCurrentlyPlaying
 } from "../components/playback/actions.mjs";
 
-function normalizePath(value) {
-  return String(value || "").replace(/\\/g, "/").trim().toLowerCase();
-}
-
-test("resolveLocalTrackId prefers materialized id match", () => {
-  const state = {
-    tracks: [
-      { id: "local-1", filePath: "/music/a.mp3", title: "A", artist: "AA" }
-    ]
-  };
-  const id = resolveLocalTrackId({ id: "local-1", filePath: "/usb/a.mp3" }, state, { normalizePath });
-  assert.equal(id, "local-1");
+test("resolveLocalTrackIdAsync returns an existing localTrackId without hitting the backend", async () => {
+  let called = false;
+  const id = await resolveLocalTrackIdAsync({ id: "usb-1", localTrackId: "local-7" }, {}, {
+    command: async () => { called = true; return {}; }
+  });
+  assert.equal(id, "local-7");
+  assert.equal(called, false);
 });
 
-test("shouldAllowResolvedFallback blocks usb-origin candidates", () => {
-  const state = { usbRoot: "/usb" };
-  assert.equal(
-    shouldAllowResolvedFallback({ filePath: "/usb/Contents/a.mp3" }, state, { normalizePath }),
-    false
-  );
-  assert.equal(
-    shouldAllowResolvedFallback({ filePath: "/music/a.mp3" }, state, { normalizePath }),
-    true
-  );
-});
-
-test("resolveLocalTrackIdAsync materializes local track and promotes identity", async () => {
-  const state = { tracks: [] };
+test("resolveLocalTrackIdAsync resolves via the backend and promotes identity", async () => {
   const calls = [];
   let promoted = null;
   const track = { id: "usb-1", filePath: "/music/a.mp3", title: "A", artist: "AA" };
 
-  const id = await resolveLocalTrackIdAsync(track, state, {
+  const id = await resolveLocalTrackIdAsync(track, { usbRoot: null }, {
     command: async (name, payload) => {
       calls.push({ name, payload });
       if (name === "resolve_track_identity") {
@@ -49,11 +27,7 @@ test("resolveLocalTrackIdAsync materializes local track and promotes identity", 
       }
       throw new Error(`unexpected command ${name}`);
     },
-    normalizePath,
-    promoteTrackIdentity: (from, to) => {
-      promoted = { from, to };
-    },
-    resolveLocalTrackId: () => null
+    promoteTrackIdentity: (from, to) => { promoted = { from, to }; }
   });
 
   assert.equal(id, "local-99");
@@ -64,26 +38,35 @@ test("resolveLocalTrackIdAsync materializes local track and promotes identity", 
   assert.equal(calls[0].payload.filePath, "/music/a.mp3");
 });
 
-test("resolveLocalTrack finds exact file path candidate", () => {
-  const state = {
-    tracks: [
-      { id: "x1", filePath: "/music/a.mp3", title: "Wrong", artist: "Wrong" },
-      { id: "x2", filePath: "/music/b.mp3", title: "B", artist: "BB" }
-    ]
-  };
-  const resolved = resolveLocalTrack({ filePath: "/music/b.mp3", title: "Other", artist: "Other" }, state);
-  assert.equal(resolved?.id, "x2");
+test("resolveLocalTrackIdAsync returns null when the backend can't resolve", async () => {
+  const id = await resolveLocalTrackIdAsync({ id: "usb-9", title: "X" }, {}, {
+    command: async () => ({ trackId: null, resolvedBy: "none", materialized: false })
+  });
+  assert.equal(id, null);
 });
 
-test("isTrackCurrentlyPlaying compares normalized playback path", () => {
-  const state = {
-    playbackActive: true,
-    playbackTrackId: null,
-    playbackPath: "C:/Music/A.MP3"
-  };
-  const active = isTrackCurrentlyPlaying({ filePath: "c:\\music\\a.mp3" }, state, {
-    normalizePath,
-    getTrackPlaybackPath: (track) => getTrackPlaybackPath(track, { resolveLocalTrack: () => null })
-  });
-  assert.equal(active, true);
+test("isTrackCurrentlyPlaying matches on the backend-resolved localTrackId", () => {
+  const state = { playbackActive: true, playbackTrackId: "local-3" };
+  assert.equal(isTrackCurrentlyPlaying({ id: "usb-1", localTrackId: "local-3" }, state), true);
+  assert.equal(isTrackCurrentlyPlaying({ id: "usb-1", localTrackId: "local-4" }, state), false);
+});
+
+test("isTrackCurrentlyPlaying falls back to the row id when there is no localTrackId", () => {
+  const state = { playbackActive: true, playbackTrackId: "local-3" };
+  assert.equal(isTrackCurrentlyPlaying({ id: "local-3" }, state), true);
+});
+
+test("isTrackCurrentlyPlaying is false when nothing is playing", () => {
+  assert.equal(isTrackCurrentlyPlaying({ id: "local-3" }, { playbackActive: false, playbackTrackId: "local-3" }), false);
+});
+
+test("isTrackCurrentlyPlaying honors a pending stop / pending play", () => {
+  assert.equal(
+    isTrackCurrentlyPlaying({ id: "local-3" }, { playbackPendingKind: "stop", playbackActive: true, playbackTrackId: "local-3" }),
+    false
+  );
+  assert.equal(
+    isTrackCurrentlyPlaying({ id: "local-3" }, { playbackPendingKind: "play", playbackPendingTrackId: "local-3" }),
+    true
+  );
 });

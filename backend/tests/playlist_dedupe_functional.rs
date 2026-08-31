@@ -2,8 +2,9 @@ use std::fs;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, GetPlaylistTracksRequest,
-    ScanLibraryRequest, SearchTracksRequest,
+    AddLibrarySelectionToPlaylistRequest, AddTracksToPlaylistRequest, CreatePlaylistRequest,
+    DedupeMode, GetPlaylistTracksRequest, ListMatchingTrackIdsRequest, ScanLibraryRequest,
+    SearchTracksRequest,
 };
 use tempfile::tempdir;
 
@@ -87,4 +88,89 @@ fn add_tracks_to_playlist_honors_skip_and_allow_dedupe_modes() {
         .items;
     assert_eq!(playlist_tracks.len(), 3);
     assert!(playlist_tracks.iter().all(|track| track.id == track_id));
+}
+
+#[test]
+fn library_selection_is_enumerated_and_added_entirely_server_side() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    for name in ["Artist - One.mp3", "Artist - Two.mp3", "Artist - Three.mp3"] {
+        fs::write(media.join(name), b"audio").expect("write track");
+    }
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let roots = vec![media.to_string_lossy().to_string()];
+    assert!(
+        backend
+            .scan_library(ScanLibraryRequest {
+                source_roots: roots.clone(),
+                incremental: true,
+            })
+            .ok
+    );
+
+    // Every matching id, enumerated server-side (no need to page the list).
+    let matching = backend
+        .list_matching_track_ids(ListMatchingTrackIdsRequest {
+            source_roots: roots.clone(),
+            include_master_db: false,
+            query: String::new(),
+        })
+        .data
+        .expect("matching ids");
+    assert_eq!(matching.total, 3);
+    assert_eq!(matching.track_ids.len(), 3);
+
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: "Server-side selection".to_string(),
+        })
+        .data
+        .expect("playlist data")
+        .playlist_id;
+
+    // `all_matching` adds the whole filtered set even though the caller passed
+    // no ids at all.
+    let added_all = backend
+        .add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            playlist_id: playlist_id.clone(),
+            source_roots: roots.clone(),
+            include_master_db: false,
+            query: String::new(),
+            track_ids: Vec::new(),
+            all_matching: true,
+            dedupe: DedupeMode::Skip,
+        })
+        .data
+        .expect("add-all data");
+    assert_eq!(added_all.added, 3);
+
+    // A second call with explicit ids is fully de-duped.
+    let added_again = backend
+        .add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            playlist_id: playlist_id.clone(),
+            source_roots: roots,
+            include_master_db: false,
+            query: String::new(),
+            track_ids: matching.track_ids.clone(),
+            all_matching: false,
+            dedupe: DedupeMode::Skip,
+        })
+        .data
+        .expect("add-again data");
+    assert_eq!(added_again.added, 0);
+    assert_eq!(added_again.skipped, 3);
+
+    let count = backend
+        .get_playlist_tracks(GetPlaylistTracksRequest {
+            playlist_id,
+            ..Default::default()
+        })
+        .data
+        .expect("playlist tracks")
+        .items
+        .len();
+    assert_eq!(count, 3);
 }

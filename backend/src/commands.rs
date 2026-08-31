@@ -4,8 +4,10 @@ use std::sync::{Arc, Mutex, mpsc};
 use crate::error::BackendResult;
 use crate::error::ErrorPayload;
 use crate::models::{
-    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData,
-    AddTracksToPlaylistRequest, AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse,
+    AddLibrarySelectionToPlaylistRequest, AddTrackCandidatesToPlaylistData,
+    AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AddTracksToPlaylistRequest,
+    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, ListMatchingTrackIdsData,
+    ListMatchingTrackIdsRequest,
     BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
     CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
     DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData,
@@ -175,6 +177,20 @@ impl BackendCommands {
         req: AddTrackCandidatesToPlaylistRequest,
     ) -> ApiResponse<AddTrackCandidatesToPlaylistData> {
         wrap(self.service.add_track_candidates_to_playlist(req))
+    }
+
+    pub fn list_matching_track_ids(
+        &self,
+        req: ListMatchingTrackIdsRequest,
+    ) -> ApiResponse<ListMatchingTrackIdsData> {
+        wrap(self.service.list_matching_track_ids(req))
+    }
+
+    pub fn add_library_selection_to_playlist(
+        &self,
+        req: AddLibrarySelectionToPlaylistRequest,
+    ) -> ApiResponse<AddTracksToPlaylistData> {
+        wrap(self.service.add_library_selection_to_playlist(req))
     }
 
     pub fn remove_tracks_from_playlist(

@@ -516,6 +516,60 @@ export async function addTracksToCurrentPlaylist(tracks, deps) {
   emitStatus(`Added ${result.added} tracks (skipped ${result.skipped}) to ${playlist.name}`);
 }
 
+// Library "Add selected" / "Add all matching": the backend enumerates the
+// selection against the current library filter (so a selection spanning pages
+// the user scrolled past is not lost), materializes any browse-only rows, and
+// appends -- the frontend just forwards the ids / `allMatching` flag.
+export async function addLibrarySelectionToCurrentPlaylist(deps) {
+  const {
+    requireCurrentPlaylist,
+    pushEventLog,
+    withProgress,
+    command,
+    refreshCurrentPlaylistTracks,
+    trackIds = [],
+    allMatching = false,
+    libraryFilter = {}
+  } = deps;
+  const emitStatus = resolveEmitStatus(deps);
+
+  const playlist = requireCurrentPlaylist();
+  if (!playlist) return;
+  if (!allMatching && !trackIds.length) {
+    emitStatus("Select at least one track to add");
+    return;
+  }
+
+  const add = await withProgress("Adding tracks", async (progress) => {
+    progress(30, "Adding tracks...");
+    return command("add_library_selection_to_playlist", {
+      playlistId: playlist.id,
+      sourceRoots: libraryFilter.sourceRoots || [],
+      includeMasterDb: !!libraryFilter.includeMasterDb,
+      query: libraryFilter.query || "",
+      trackIds: allMatching ? [] : trackIds,
+      allMatching,
+      dedupe: "skip"
+    });
+  });
+
+  // Mirror the backend unconditionally clearing last_exported_* on add.
+  playlist.lastExportedAt = null;
+  playlist.lastExportedUsbRoot = null;
+  playlist.lastExportedTrackCount = null;
+  await refreshCurrentPlaylistTracks();
+  if (typeof pushEventLog === "function") {
+    pushEventLog({
+      level: "info",
+      source: "playlist-add",
+      code: "playlist_add.result",
+      message: `Added ${add?.added || 0} track(s) to ${playlist.name}`,
+      details: `added=${add?.added || 0} | skipped=${add?.skipped || 0} | allMatching=${allMatching}`
+    });
+  }
+  emitStatus(`Added ${add?.added || 0} tracks (skipped ${add?.skipped || 0}) to ${playlist.name}`);
+}
+
 export function createSingleSubmit(handler) {
   let submitted = false;
   return () => {

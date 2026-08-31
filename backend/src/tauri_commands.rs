@@ -11,8 +11,10 @@ use uuid::Uuid;
 use crate::commands::BackendCommands;
 use crate::error::{ErrorCode, ErrorPayload};
 use crate::models::{
-    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData,
-    AddTracksToPlaylistRequest, AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse,
+    AddLibrarySelectionToPlaylistRequest, AddTrackCandidatesToPlaylistData,
+    AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AddTracksToPlaylistRequest,
+    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, ListMatchingTrackIdsData,
+    ListMatchingTrackIdsRequest,
     BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
     CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
     DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData,
@@ -99,26 +101,15 @@ where
             let panic_text = panic_message(e);
             emit_playback_event(
                 app,
-                "playback.error",
-                None,
-                false,
-                0,
-                None,
-                Some(format!("Native playback {action} crashed: {panic_text}")),
+                PlaybackEvent::Error(Some(format!(
+                    "Native playback {action} crashed: {panic_text}"
+                ))),
             );
             Err(playback_panic_response(app, action, panic_text))
         }
         Err(e) => {
             let message = format!("native playback {action} task failed: {e}");
-            emit_playback_event(
-                app,
-                "playback.error",
-                None,
-                false,
-                0,
-                None,
-                Some(message.clone()),
-            );
+            emit_playback_event(app, PlaybackEvent::Error(Some(message.clone())));
             Err(ApiResponse::failure(ErrorPayload {
                 code: ErrorCode::InternalError,
                 message,
@@ -380,23 +371,65 @@ where
     Ok(response)
 }
 
-fn emit_playback_event<R: tauri::Runtime>(
-    app: &AppHandle<R>,
-    event_name: &str,
-    path: Option<String>,
-    playing: bool,
-    position_ms: u64,
-    duration_ms: Option<u64>,
-    message: Option<String>,
-) {
-    let payload = PlaybackEventPayload {
-        event: event_name.to_string(),
-        path,
-        playing,
-        position_ms,
-        duration_ms,
-        message,
-        timestamp: Utc::now().to_rfc3339(),
+/// The three playback notifications the frontend listens for. Each carries only
+/// the fields that are meaningful for it -- the flat `PlaybackEventPayload` wire
+/// shape (with its inert `None`/`false`/`0` columns) is assembled here, once.
+enum PlaybackEvent {
+    /// `playback.started`, or `playback.seeked` when `is_seek`.
+    Started {
+        is_seek: bool,
+        path: String,
+        playing: bool,
+        position_ms: u64,
+        duration_ms: Option<u64>,
+        track_id: Option<String>,
+    },
+    Stopped {
+        path: Option<String>,
+        duration_ms: Option<u64>,
+    },
+    Error(Option<String>),
+}
+
+fn emit_playback_event<R: tauri::Runtime>(app: &AppHandle<R>, event: PlaybackEvent) {
+    let payload = match event {
+        PlaybackEvent::Started {
+            is_seek,
+            path,
+            playing,
+            position_ms,
+            duration_ms,
+            track_id,
+        } => PlaybackEventPayload {
+            event: if is_seek { "playback.seeked" } else { "playback.started" }.to_string(),
+            path: Some(path),
+            playing,
+            position_ms,
+            duration_ms,
+            message: None,
+            track_id,
+            timestamp: Utc::now().to_rfc3339(),
+        },
+        PlaybackEvent::Stopped { path, duration_ms } => PlaybackEventPayload {
+            event: "playback.stopped".to_string(),
+            path,
+            playing: false,
+            position_ms: 0,
+            duration_ms,
+            message: None,
+            track_id: None,
+            timestamp: Utc::now().to_rfc3339(),
+        },
+        PlaybackEvent::Error(message) => PlaybackEventPayload {
+            event: "playback.error".to_string(),
+            path: None,
+            playing: false,
+            position_ms: 0,
+            duration_ms: None,
+            message,
+            track_id: None,
+            timestamp: Utc::now().to_rfc3339(),
+        },
     };
 
     if let Some(window) = app.get_webview_window("main") {
@@ -418,12 +451,10 @@ pub fn start_playback_transition_relay(
         while let Ok(transition) = transitions.recv() {
             emit_playback_event(
                 &app,
-                "playback.stopped",
-                transition.path,
-                false,
-                0,
-                transition.duration_ms,
-                None,
+                PlaybackEvent::Stopped {
+                    path: transition.path,
+                    duration_ms: transition.duration_ms,
+                },
             );
         }
         // The channel only disconnects if the playback worker thread exited (panicked or
@@ -705,6 +736,22 @@ pub fn add_track_candidates_to_playlist(
 }
 
 #[tauri::command]
+pub fn list_matching_track_ids(
+    state: State<'_, BackendCommands>,
+    request: ListMatchingTrackIdsRequest,
+) -> ApiResponse<ListMatchingTrackIdsData> {
+    state.list_matching_track_ids(request)
+}
+
+#[tauri::command]
+pub fn add_library_selection_to_playlist(
+    state: State<'_, BackendCommands>,
+    request: AddLibrarySelectionToPlaylistRequest,
+) -> ApiResponse<AddTracksToPlaylistData> {
+    state.add_library_selection_to_playlist(request)
+}
+
+#[tauri::command]
 pub fn remove_tracks_from_playlist(
     state: State<'_, BackendCommands>,
     request: RemoveTracksFromPlaylistRequest,
@@ -983,26 +1030,20 @@ pub async fn play_track_native(
     if let Some(data) = response.data.as_ref() {
         emit_playback_event(
             &app,
-            if is_seek {
-                "playback.seeked"
-            } else {
-                "playback.started"
+            PlaybackEvent::Started {
+                is_seek,
+                path: data.path.clone(),
+                playing: data.playing,
+                position_ms: data.position_ms,
+                duration_ms: data.duration_ms,
+                // legacy path -- `PlayTrackData` carries no resolved track id
+                track_id: None,
             },
-            Some(data.path.clone()),
-            data.playing,
-            data.position_ms,
-            data.duration_ms,
-            None,
         );
     } else {
         emit_playback_event(
             &app,
-            "playback.error",
-            None,
-            false,
-            0,
-            None,
-            response.error.as_ref().map(|e| e.message.clone()),
+            PlaybackEvent::Error(response.error.as_ref().map(|e| e.message.clone())),
         );
     }
     Ok(response)
@@ -1032,26 +1073,19 @@ pub async fn play_resolved_track(
     if let Some(data) = response.data.as_ref() {
         emit_playback_event(
             &app,
-            if is_seek {
-                "playback.seeked"
-            } else {
-                "playback.started"
+            PlaybackEvent::Started {
+                is_seek,
+                path: data.path.clone(),
+                playing: data.playing,
+                position_ms: data.position_ms,
+                duration_ms: data.duration_ms,
+                track_id: data.track_id.clone(),
             },
-            Some(data.path.clone()),
-            data.playing,
-            data.position_ms,
-            data.duration_ms,
-            None,
         );
     } else {
         emit_playback_event(
             &app,
-            "playback.error",
-            None,
-            false,
-            0,
-            None,
-            response.error.as_ref().map(|e| e.message.clone()),
+            PlaybackEvent::Error(response.error.as_ref().map(|e| e.message.clone())),
         );
     }
     Ok(response)
@@ -1071,22 +1105,15 @@ pub async fn stop_playback_native(
     if let Some(data) = response.data.as_ref() {
         emit_playback_event(
             &app,
-            "playback.stopped",
-            data.previous_path.clone(),
-            false,
-            0,
-            None,
-            None,
+            PlaybackEvent::Stopped {
+                path: data.previous_path.clone(),
+                duration_ms: None,
+            },
         );
     } else {
         emit_playback_event(
             &app,
-            "playback.error",
-            None,
-            false,
-            0,
-            None,
-            response.error.as_ref().map(|e| e.message.clone()),
+            PlaybackEvent::Error(response.error.as_ref().map(|e| e.message.clone())),
         );
     }
     Ok(response)

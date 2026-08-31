@@ -18,8 +18,8 @@ use crate::models::{
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, InspectUsbTrackData,
     InspectUsbTrackRequest, InspectUsbTrackResult, InspectUsbTracksData, InspectUsbTracksRequest,
     RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, ReorderUsbPlaylistsData,
-    ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts, UsbImportStats, UsbPlaylist, UsbTrack,
-    ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry,
+    ReorderUsbPlaylistsRequest, ResolvePlaybackSourceRequest, UsbHistory, UsbHistoryCounts,
+    UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry,
 };
 use crate::pdb_reader::{
     ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, count_pdb_playlists, parse_pdb,
@@ -1008,9 +1008,12 @@ impl BackendService {
         let playlist_usb_export_status =
             compute_playlist_usb_export_status(&local_playlists, &usb_playlist_names, prune_stale);
 
+        let playlist_track_total = items.iter().map(|p| p.track_count).sum();
+
         Ok(FetchUsbPlaylistsData {
             items,
             stats,
+            playlist_track_total,
             warnings,
             playlist_usb_export_status,
         })
@@ -2176,13 +2179,15 @@ impl BackendService {
             .ok_or_else(|| {
                 BackendError::NotFound(format!("USB playlist not found: {}", req.id))
             })?;
-        paginate_and_hydrate_usb_tracks(
+        let mut data = paginate_and_hydrate_usb_tracks(
             "fetch_usb_playlist_tracks",
             &req.id,
             playlist.tracks,
             &req,
             all.warnings,
-        )
+        )?;
+        self.fill_local_track_ids(&mut data.items);
+        Ok(data)
     }
 
     /// USB-history counterpart to `fetch_usb_playlist_tracks`.
@@ -2203,13 +2208,45 @@ impl BackendService {
             .ok_or_else(|| {
                 BackendError::NotFound(format!("USB history not found: {}", req.id))
             })?;
-        paginate_and_hydrate_usb_tracks(
+        let mut data = paginate_and_hydrate_usb_tracks(
             "fetch_usb_history_tracks",
             &req.id,
             history.tracks,
             &req,
             all.warnings,
-        )
+        )?;
+        self.fill_local_track_ids(&mut data.items);
+        Ok(data)
+    }
+
+    /// For each page track that isn't already linked to a local library row,
+    /// try a read-only `resolve_playback_source` match and stash the resulting
+    /// `local_track_id`. The frontend uses this id to mark the right row as
+    /// "playing" without re-scanning its (paginated) library list. Page-bounded
+    /// (called only on the returned page), read-only (never materializes).
+    fn fill_local_track_ids(&self, items: &mut [UsbTrack]) {
+        for track in items.iter_mut() {
+            if track.local_track_id.is_some() {
+                continue;
+            }
+            if track.title.trim().is_empty() && track.artist.trim().is_empty() {
+                continue;
+            }
+            let resolved = self.resolve_playback_source(ResolvePlaybackSourceRequest {
+                title: track.title.clone(),
+                artist: track.artist.clone(),
+                album: track.album.clone(),
+                bpm: track.bpm,
+                file_path: Some(track.identity_path().to_string()),
+                file_size_bytes: track.file_size_bytes,
+                track_id: None,
+            });
+            if let Ok(data) = resolved
+                && matches!(data.matched_by.as_str(), "self" | "hash" | "metadata")
+            {
+                track.local_track_id = data.track_id;
+            }
+        }
     }
 }
 
@@ -3491,6 +3528,9 @@ mod tests {
         assert_eq!(page1.total_duration_ms, 600_000);
         // The page is hydrated: format is populated (from Stage A) ...
         assert_eq!(page1.items[0].format_ext.as_deref(), Some("mp3"));
+        // ... and every page row carries a resolved local track id (from USB
+        // placeholder materialization, back-filled by `fill_local_track_ids`).
+        assert!(page1.items.iter().all(|t| t.local_track_id.is_some()));
 
         let page2 = service
             .fetch_usb_playlist_tracks(req(crate::models::FetchUsbTracksRequest {

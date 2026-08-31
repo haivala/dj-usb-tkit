@@ -16,7 +16,6 @@ export function bindPlaylistEvents(ctx) {
     updateModeText,
     exportPlaylistToUsb,
     analyzeTrackIds,
-    resolveLocalTrackId,
     refreshCurrentPlaylistTracks,
     playlistTracksCtl,
     clearPlaylistTrackSort = () => {}
@@ -121,22 +120,10 @@ export function bindPlaylistEvents(ctx) {
   el.analyzePlaylistMissingBtn?.addEventListener("click", async () => {
     const playlist = getCurrentPlaylist();
     if (!playlist) return;
-    // The list is paginated -- pull the rest before collecting ids so a big
-    // playlist doesn't only analyze its first page.
-    try {
-      while (playlistTracksCtl?.hasMore) await playlistTracksCtl.loadMore();
-    } catch (err) {
-      console.error(err);
-    }
-    const trackIds = (playlist.tracks || [])
-      .filter((track) => !track.analysisReady)
-      .map((track) => String(resolveLocalTrackId(track) || track.localTrackId || track.id || "").trim())
-      .filter(Boolean);
-    if (!trackIds.length) {
-      emitStatus("No tracks in this playlist need analysis.");
-      return;
-    }
-    analyzeTrackIds(trackIds, "Analyze Missing Tracks").catch((err) => {
+    // Backend-owned: `analyze_new_tracks` with a `playlistId` selects the tracks
+    // in this playlist that still need analysis, over the whole playlist -- no
+    // need to force-load every page here or resolve ids client-side.
+    analyzeTrackIds([], "Analyze Missing Tracks", { playlistId: playlist.id }).catch((err) => {
       console.error(err);
       emitStatus(`Analyze failed: ${err.message || err}`);
     });

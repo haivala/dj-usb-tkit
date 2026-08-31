@@ -816,6 +816,8 @@ fn main() {
             backend::tauri_commands::get_playlist_tracks,
             backend::tauri_commands::add_tracks_to_playlist,
             backend::tauri_commands::add_track_candidates_to_playlist,
+            backend::tauri_commands::list_matching_track_ids,
+            backend::tauri_commands::add_library_selection_to_playlist,
             backend::tauri_commands::remove_tracks_from_playlist,
             backend::tauri_commands::reorder_playlist_tracks,
             backend::tauri_commands::get_frontend_settings,

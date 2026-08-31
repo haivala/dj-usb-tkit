@@ -73,6 +73,18 @@ const TRACK_ANALYSIS_UPDATE_SQL: &str = r#"
 
 const ANALYSIS_AUTO_SELECT_LIMIT: usize = 3000;
 
+/// A SQL boolean expression, true for a `tracks` row that lacks the core
+/// analysis fields. This is the exact negation of `has_core_analysis_fields`
+/// (waveform peaks path non-empty AND bpm > 0 AND duration_ms > 0), so the
+/// "N need analysis" figures shown in the UI (`Track::analysis_ready`,
+/// `GetPlaylistTracksData::unanalyzed_count`, the scan status line, the
+/// source-folder "analyzed" dot) and the set actually picked for auto-analysis
+/// always agree. Key (`tonality`) and embedded artwork are deliberately NOT
+/// gated here -- backfilling those is a hydration concern, not "needs analysis".
+pub(crate) const MISSING_CORE_ANALYSIS_SQL: &str = "(COALESCE(TRIM(waveform_peaks_path), '') = '' \
+     OR bpm IS NULL OR bpm <= 0 \
+     OR duration_ms IS NULL OR duration_ms <= 0)";
+
 // Earlier attempts scaled the commit interval to worker_count (more workers
 // -> commit less often, since N tracks complete in roughly the time of one).
 // That reasoning only accounts for *throughput*, not how long an individual
@@ -528,12 +540,67 @@ impl BackendService {
         let job_id = format!("job-analysis-{}", Uuid::now_v7());
         let conn = self.db.connect()?;
         let auto_mode = req.track_ids.is_empty();
-        let auto_eligible_total = if auto_mode {
-            Some(count_tracks_missing_core_fields(&conn)?)
+
+        // In auto mode the caller can scope "tracks needing analysis" to one
+        // playlist or to the current library filter instead of the whole DB.
+        // We resolve the scoped id list here and feed it through the explicit-id
+        // path of `collect_tracks_for_analysis`, keeping the auto-select cap and
+        // its "limit reached" warning.
+        let scoped_ids: Option<Vec<String>> = if auto_mode {
+            if let Some(playlist_id) = req
+                .playlist_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+            {
+                Some(self.collect_playlist_unanalyzed_track_ids(&conn, playlist_id, &req.query)?)
+            } else if req.scope_to_library_filter {
+                let visible = self.compute_visible_library_tracks(
+                    &conn,
+                    &req.source_roots,
+                    req.include_master_db,
+                    &req.query,
+                )?;
+                Some(
+                    visible
+                        .iter()
+                        // A track whose analysis data comes from an attached
+                        // master.db doesn't need local analysis -- matches the
+                        // frontend's old post-scan `pendingTrackIds` filter.
+                        .filter(|track| {
+                            !(req.include_master_db && track.master_db_source)
+                                && !track_has_core_analysis_for_source_status(track)
+                        })
+                        .map(|track| track.id.clone())
+                        .collect(),
+                )
+            } else {
+                None
+            }
         } else {
             None
         };
-        let mut tracks = collect_tracks_for_analysis(&conn, &req.track_ids)?;
+
+        let (auto_eligible_total, mut tracks) = match scoped_ids {
+            // A scoped request with nothing to do must NOT fall through to
+            // `collect_tracks_for_analysis(&[])`, which would treat an empty
+            // slice as "auto-select the whole DB".
+            Some(ids) if ids.is_empty() => (Some(0usize), Vec::new()),
+            Some(ids) => {
+                let unclamped = ids.len();
+                let capped: Vec<String> =
+                    ids.into_iter().take(ANALYSIS_AUTO_SELECT_LIMIT).collect();
+                (Some(unclamped), collect_tracks_for_analysis(&conn, &capped)?)
+            }
+            None => {
+                let total = if auto_mode {
+                    Some(count_tracks_missing_core_fields(&conn)?)
+                } else {
+                    None
+                };
+                (total, collect_tracks_for_analysis(&conn, &req.track_ids)?)
+            }
+        };
         if tracks.is_empty() {
             return Ok(AnalyzeNewTracksData {
                 job_id,
@@ -1149,15 +1216,10 @@ pub(crate) fn collect_tracks_for_analysis(
             r#"
             SELECT id, title, file_path
             FROM tracks
-            WHERE bpm IS NULL
-               OR tonality IS NULL
-               OR duration_ms IS NULL
-               OR artwork_path IS NULL
-               OR waveform_peaks_path IS NULL
+            WHERE {MISSING_CORE_ANALYSIS_SQL}
             ORDER BY updated_at ASC
-            LIMIT {}
+            LIMIT {ANALYSIS_AUTO_SELECT_LIMIT}
             "#,
-            ANALYSIS_AUTO_SELECT_LIMIT
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| {
@@ -1217,15 +1279,7 @@ pub(crate) fn collect_tracks_for_analysis(
 
 fn count_tracks_missing_core_fields(conn: &rusqlite::Connection) -> BackendResult<usize> {
     let total: i64 = conn.query_row(
-        r#"
-        SELECT COUNT(*)
-        FROM tracks
-        WHERE bpm IS NULL
-           OR tonality IS NULL
-           OR duration_ms IS NULL
-           OR artwork_path IS NULL
-           OR waveform_peaks_path IS NULL
-        "#,
+        &format!("SELECT COUNT(*) FROM tracks WHERE {MISSING_CORE_ANALYSIS_SQL}"),
         [],
         |row| row.get(0),
     )?;
@@ -2946,21 +3000,47 @@ mod tests {
         assert!(rows.is_empty());
     }
 
+    /// Seeds a matrix that exercises the aligned "needs core analysis" predicate
+    /// (`MISSING_CORE_ANALYSIS_SQL` == `!has_core_analysis_fields`): only
+    /// waveform-path + positive bpm + positive duration matter; key/artwork
+    /// don't, and zero / empty values re-qualify.
+    fn seed_core_analysis_matrix(conn: &Connection) {
+        let insert = |id: &str, bpm: &str, ton: &str, dur: &str, art: &str, wave: &str| {
+            conn.execute(
+                &format!(
+                    "INSERT INTO tracks (id, title, file_path, bpm, tonality, duration_ms, artwork_path, waveform_peaks_path, updated_at)
+                     VALUES ('{id}', '{id}', '/m/{id}.mp3', {bpm}, {ton}, {dur}, {art}, {wave}, '2026-04-02T00:00:00Z')"
+                ),
+                [],
+            )
+            .expect("seed row");
+        };
+        // Fully analyzed -- NOT selected.
+        insert("ok", "120.0", "'8A'", "200000", "'/a.jpg'", "'/w.dat'");
+        // Missing only key + artwork -- still NOT selected (hydration concern).
+        insert("nokeyart", "120.0", "NULL", "200000", "NULL", "'/w.dat'");
+        // bpm 0 (failed / bpm-only run) -- selected.
+        insert("bpm0", "0", "'8A'", "200000", "'/a.jpg'", "'/w.dat'");
+        // Empty waveform path -- selected.
+        insert("nowave", "120.0", "'8A'", "200000", "'/a.jpg'", "''");
+        // Duration 0 -- selected.
+        insert("dur0", "120.0", "'8A'", "0", "'/a.jpg'", "'/w.dat'");
+    }
+
     #[test]
     fn collect_tracks_for_analysis_auto_selects_tracks_missing_core_fields() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         setup_tracks_table(&conn);
         insert_track(&conn, "t1", "Track 1");
-        conn.execute(
-            "INSERT INTO tracks (id, title, file_path, bpm, tonality, duration_ms, artwork_path, waveform_peaks_path, updated_at)
-             VALUES ('t2', 'Track 2', '/music/t2.mp3', 120.0, '8A', 200000, '/art/t2.jpg', '/wave/t2.dat', '2026-04-02T00:00:00Z')",
-            [],
-        )
-        .expect("insert fully-analyzed track");
+        seed_core_analysis_matrix(&conn);
 
-        let rows = collect_tracks_for_analysis(&conn, &[]).expect("collect tracks");
-        let ids = rows.into_iter().map(|t| t.id).collect::<Vec<_>>();
-        assert_eq!(ids, vec!["t1".to_string()]);
+        let mut ids = collect_tracks_for_analysis(&conn, &[])
+            .expect("collect tracks")
+            .into_iter()
+            .map(|t| t.id)
+            .collect::<Vec<_>>();
+        ids.sort();
+        assert_eq!(ids, vec!["bpm0", "dur0", "nowave", "t1"]);
     }
 
     #[test]
@@ -2968,15 +3048,11 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         setup_tracks_table(&conn);
         insert_track(&conn, "t1", "Track 1");
-        conn.execute(
-            "INSERT INTO tracks (id, title, file_path, bpm, tonality, duration_ms, artwork_path, waveform_peaks_path, updated_at)
-             VALUES ('t2', 'Track 2', '/music/t2.mp3', 120.0, '8A', 200000, '/art/t2.jpg', '/wave/t2.dat', '2026-04-02T00:00:00Z')",
-            [],
-        )
-        .expect("insert fully-analyzed track");
+        seed_core_analysis_matrix(&conn);
 
+        // t1 + bpm0 + nowave + dur0 == 4; "ok" and "nokeyart" excluded.
         let missing = count_tracks_missing_core_fields(&conn).expect("count missing");
-        assert_eq!(missing, 1);
+        assert_eq!(missing, 4);
     }
 
     // --- resolve_analysis_engine ---

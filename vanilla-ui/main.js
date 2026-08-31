@@ -312,7 +312,6 @@ const toPlayableUrl = (path) => playback.toPlayableUrl(path, {
     tauriConvertFileSrc,
     windowObj: window,
   });
-const normalizePath = (value) => library.normalizePath(value);
 
 const normalizeTrack = (track, fallbackIdPrefix = "t") => library.normalizeTrack(track, fallbackIdPrefix, {
     toPlayableUrl,
@@ -612,19 +611,11 @@ function clearAllWaveformPlayheads() {
 function setWaveformPlayhead(element, fraction, playing) {
   playback.setWaveformPlayhead(element, fraction, playing);
 }
-const resolveLocalTrackId = (track) => playback.resolveLocalTrackId(track, state, { normalizePath });
-const resolveLocalTrack = (track) => playback.resolveLocalTrack(track, state);
-const getTrackPlaybackPath = (track) => playback.getTrackPlaybackPath(track, { resolveLocalTrack });
-const isTrackCurrentlyPlaying = (track) => playback.isTrackCurrentlyPlaying(track, state, {
-    normalizePath,
-    getTrackPlaybackPath,
-  });
+const isTrackCurrentlyPlaying = (track) => playback.isTrackCurrentlyPlaying(track, state);
 
 const resolveLocalTrackIdAsync = async (track) => playback.resolveLocalTrackIdAsync(track, state, {
     command,
-    normalizePath,
     promoteTrackIdentity,
-    resolveLocalTrackId,
   });
 function promoteTrackIdentity(oldId, newId) {
   library.promoteTrackIdentity(state, el, oldId, newId, { cssEscape });
@@ -662,7 +653,6 @@ function handlePlaybackEvent(payload) {
     updateTransportButtonsInDom,
     clearAllWaveformPlayheads,
     setStatus,
-    resolveTrackIdForPath: (path) => playback.findTrackIdByPath(state, path, { normalizePath }),
     requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
   });
@@ -787,6 +777,12 @@ const libraryTracksCtl = createTrackListController({
   },
   onPage: (_page, { first }) => {
     if (first) {
+      // On a fresh query/sort (not a scroll-append), narrow the selection to
+      // what the new result set shows -- filtering the library is the user's
+      // way of scoping "add selected" / "analyze selected". Backend "Select
+      // all" sets `selectedTrackIds` directly and only re-renders (no `first`
+      // page load), so its larger-than-one-page selection is preserved until
+      // the query actually changes.
       const loadedIds = new Set((state.tracks || []).map((t) => t.id));
       state.selectedTrackIds = new Set(
         [...state.selectedTrackIds].filter((id) => loadedIds.has(id)),
@@ -942,11 +938,6 @@ const scanLibrary = async () => library.scanLibrary(state, {
     persistSourceRoots,
     resetAndLoadLibraryTracks,
     LIBRARY_LOAD_LIMIT_POST_SCAN,
-    trackPathIsInsideSelectedRoots: (fp) =>
-      library.trackPathMatchesAnyRoot(
-        fp,
-        library.enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots)
-      ),
     analyzeTrackIds,
     refreshCurrentPlaylistTracks,
     countWarningsForStatus: eventLog.countWarningsForStatus,
@@ -1001,7 +992,6 @@ const analyzeSelectedTracks = async () => library.analyzeSelectedTracks(state, {
     refreshCurrentPlaylistTracks,
   });
 const analyzeSingleTrack = async (track, modeLabel = null) => library.analyzeSingleTrack(state, track, modeLabel, {
-    resolveLocalTrackId,
     resolveLocalTrackIdAsync,
     setStatus,
     emitStatus,
@@ -1117,6 +1107,22 @@ const addTracksToCurrentPlaylist = async (tracks) => playlist.addTracksToCurrent
     promoteTrackIdentity,
     usbRoot: state.usbRoot,
     usbRootValid: state.usbRootValid,
+  });
+const addLibrarySelectionToCurrentPlaylist = async ({ trackIds, allMatching } = {}) =>
+  playlist.addLibrarySelectionToCurrentPlaylist({
+    requireCurrentPlaylist,
+    pushEventLog,
+    emitStatus,
+    withProgress,
+    command,
+    refreshCurrentPlaylistTracks,
+    trackIds: trackIds || [],
+    allMatching: !!allMatching,
+    libraryFilter: {
+      sourceRoots: library.enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots),
+      includeMasterDb: state.masterDbEnabled === true,
+      query: String(state.libraryQuery || "").trim(),
+    },
   });
 
 // --- USB closures ---
@@ -1661,6 +1667,7 @@ function bindEvents() {
     patchUsbTrackRow,
     patchHistoryTrackRow,
     addTracksToCurrentPlaylist,
+    addLibrarySelectionToCurrentPlaylist,
     loadMoreLibraryTracks,
     pruneUsbDevice,
     getLibraryVisibleTracks,
@@ -1686,7 +1693,6 @@ function bindEvents() {
     updateModeText,
     exportPlaylistToUsb,
     analyzeTrackIds,
-    resolveLocalTrackId,
     handleSortHeaderClick,
     handleLibraryTableWrapScroll,
     renderLibraryRows,

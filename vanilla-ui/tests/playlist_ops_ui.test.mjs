@@ -50,7 +50,6 @@ function bindDeps(overrides) {
     scrubRatioFromPointer: () => 0,
     exportPlaylistToUsb: async () => {},
     analyzeTrackIds: async () => {},
-    resolveLocalTrackId: () => null,
     refreshCurrentPlaylistTracks: async () => {},
     playlistTracksCtl: {
       view: [], hasMore: false, setSearch: () => {}, rerender: async () => {},
@@ -197,4 +196,34 @@ test("bindPlaylistEvents ignores playlist selection clicks while new playlist in
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(switched, []);
+});
+
+test("Analyze Missing Tracks delegates the whole playlist to the backend (no page force-load, no client id resolution)", async () => {
+  const dom = makeDom();
+  const { document, Event } = dom.window;
+  const el = {
+    ...elements(document, ["navPlaylistList", "addPlaylistBtn", "playlistSearchInput", "exportPlaylistBtn", "analyzePlaylistMissingBtn"]),
+    panels: { playlist: document.createElement("div") }
+  };
+  const analyzeCalls = [];
+  let loadMoreCalls = 0;
+
+  bindPlaylistEvents(bindDeps({
+    state: { currentPlaylistId: "pl-9", selectedTrackIds: new Set() },
+    el,
+    getCurrentPlaylist: () => ({ id: "pl-9", name: "Big", tracks: [{ id: "t1" }] }),
+    analyzeTrackIds: async (ids, label, options) => { analyzeCalls.push({ ids, label, options }); },
+    playlistTracksCtl: {
+      view: [], hasMore: true, setSearch: () => {}, rerender: async () => {},
+      loadMore: async () => { loadMoreCalls += 1; }, attachScroll: () => {},
+    },
+  }));
+
+  el.analyzePlaylistMissingBtn.dispatchEvent(new Event("click", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(loadMoreCalls, 0, "must not force-load playlist pages");
+  assert.equal(analyzeCalls.length, 1);
+  assert.deepEqual(analyzeCalls[0].ids, []);
+  assert.deepEqual(analyzeCalls[0].options, { playlistId: "pl-9" });
 });

@@ -335,9 +335,21 @@ function installScanAnalysisMock(page, opts = {}) {
             return { ok: true, data: { items: [] } };
           }
           if (command === "scan_library") {
+            // Backend-owned post-scan library facts (see ScanLibraryData).
+            const albums = new Set(
+              tracks.map((t) => String(t.album || "").trim().toLowerCase()).filter(Boolean)
+            );
             return {
               ok: true,
-              data: { jobId: "job-scan-mock", indexed: tracks.length, updated: 0, removed: 0 }
+              data: {
+                jobId: "job-scan-mock",
+                indexed: tracks.length,
+                updated: 0,
+                removed: 0,
+                scopedTrackCount: tracks.length,
+                albumCount: albums.size,
+                unanalyzedCount: tracks.filter((t) => !isCountable(t)).length
+              }
             };
           }
           if (command === "search_tracks" || command === "browse_source_files") {
@@ -365,7 +377,12 @@ function installScanAnalysisMock(page, opts = {}) {
           if (command === "analyze_new_tracks") {
             analyzeNewTracksCalls += 1;
             const req = payload?.request || {};
-            const ids = Array.isArray(req.trackIds) ? req.trackIds.map((v) => String(v)) : [];
+            let ids = Array.isArray(req.trackIds) ? req.trackIds.map((v) => String(v)) : [];
+            // Backend-scoped request: the caller sends no ids, the backend picks
+            // the tracks that still need core analysis (here: the whole library).
+            if (!ids.length && (req.scopeToLibraryFilter || req.playlistId)) {
+              ids = tracks.filter((t) => !isCountable(t)).map((t) => String(t.id));
+            }
             bpmRangeSeen = {
               min: Number(req.bpmMin || 0),
               max: Number(req.bpmMax || 0)
@@ -1277,6 +1294,10 @@ function installAnalyzeResponseMock(page, { analyzeResponse }) {
           }
           if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
             return { ok: true, data: { total: 1, items: [track] } };
+          }
+          if (command === "resolve_track_identity") {
+            // Single-row "Analyze" resolves the local id via the backend now.
+            return { ok: true, data: { trackId: track.id, resolvedBy: "self", materialized: false } };
           }
           if (command === "analyze_new_tracks") {
             return { ok: true, data: analyzeResponse };

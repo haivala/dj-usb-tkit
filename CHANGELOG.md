@@ -30,6 +30,27 @@
 
 ## Unreleased
 
+- **Fix:** "Analyze Missing Tracks" in a playlist and the post-scan library
+  analysis now select the tracks that need analysis entirely on the backend,
+  scoped to that playlist or to the current library filter, so a large paginated
+  list no longer analyzes only its first page — and the "N tracks / M albums"
+  figures in the scan status line are computed over the whole scanned library
+  rather than the page just loaded.
+- **Fix:** the backend's auto-selection of "tracks needing analysis" now uses the
+  same core-fields definition (waveform + positive BPM + positive duration) as
+  the row badges, the playlist "Analyze Missing" count and the source-folder
+  "analyzed" indicator, so the count shown and the set actually analyzed always
+  match; rows a failed run left with BPM 0 or no waveform are picked up again.
+- **Fix:** "Add selected" / "Select all matching" in the library now enumerate
+  and add tracks on the backend, so a selection spanning pages that have since
+  scrolled out of view is no longer lost.
+- **Improvement:** which library or USB row shows as "playing" is now decided
+  purely from the backend-resolved track id (carried on playback events and on
+  USB playlist/history rows), removing the client-side path/metadata scan that
+  ran for every row on every table render.
+- **Improvement:** the USB panel's "N playlists, M tracks" total and the USB
+  history session/track counts are read straight from the backend response with
+  no client-side fallback tally.
 
 ## 0.1.34
 

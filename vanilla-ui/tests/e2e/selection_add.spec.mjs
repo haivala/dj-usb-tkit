@@ -48,6 +48,28 @@ function installSelectionMock(page) {
             playlistTracks.set(id, []);
             return { ok: true, data: { playlistId: id, name } };
           }
+          if (command === "list_matching_track_ids") {
+            const q = String(payload?.request?.query || "").trim().toLowerCase();
+            const rows = q
+              ? tracks.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q))
+              : tracks;
+            const ids = rows.map((t) => t.id);
+            return { ok: true, data: { trackIds: ids, total: ids.length } };
+          }
+          if (command === "add_library_selection_to_playlist") {
+            const playlistId = String(payload?.request?.playlistId || "");
+            const wanted = Array.isArray(payload?.request?.trackIds) ? payload.request.trackIds.map(String) : [];
+            const current = playlistTracks.get(playlistId) || [];
+            let added = 0;
+            let skipped = 0;
+            for (const id of wanted) {
+              if (current.includes(id)) { skipped += 1; continue; }
+              current.push(id);
+              added += 1;
+            }
+            playlistTracks.set(playlistId, current);
+            return { ok: true, data: { playlistId, added, skipped } };
+          }
           if (command === "add_track_candidates_to_playlist") {
             const playlistId = String(payload?.request?.playlistId || "");
             const candidates = Array.isArray(payload?.request?.tracks) ? payload.request.tracks : [];
@@ -232,6 +254,26 @@ function installPaginatedLibraryMock(page, { trackCount }) {
             playlists.push(row);
             playlistTracks.set(id, []);
             return { ok: true, data: { playlistId: id, name } };
+          }
+          if (command === "list_matching_track_ids") {
+            const ids = allTracks.map((t) => t.id);
+            return { ok: true, data: { trackIds: ids, total: ids.length } };
+          }
+          if (command === "add_library_selection_to_playlist") {
+            const playlistId = String(payload?.request?.playlistId || "");
+            const wanted = payload?.request?.allMatching
+              ? allTracks.map((t) => t.id)
+              : (Array.isArray(payload?.request?.trackIds) ? payload.request.trackIds.map(String) : []);
+            const current = playlistTracks.get(playlistId) || [];
+            let added = 0;
+            let skipped = 0;
+            for (const id of wanted) {
+              if (current.includes(id)) { skipped += 1; continue; }
+              current.push(id);
+              added += 1;
+            }
+            playlistTracks.set(playlistId, current);
+            return { ok: true, data: { playlistId, added, skipped } };
           }
           if (command === "add_track_candidates_to_playlist") {
             const playlistId = String(payload?.request?.playlistId || "");

@@ -48,7 +48,17 @@ export function createMockInvoke({ state, normalizePath, constants }) {
     if (command === "scan_library") {
       return {
         ok: true,
-        data: { jobId: "mock-scan", indexed: 3, updated: 0, removed: 0, notFound: [], warnings: [] }
+        data: {
+          jobId: "mock-scan",
+          indexed: 3,
+          updated: 0,
+          removed: 0,
+          notFound: [],
+          scopedTrackCount: 3,
+          albumCount: 1,
+          unanalyzedCount: 0,
+          warnings: []
+        }
       };
     }
 
@@ -557,6 +567,18 @@ export function createMockInvoke({ state, normalizePath, constants }) {
       };
     }
 
+    if (command === "list_matching_track_ids") {
+      const ids = (state.__mockLibraryTrackIds || ["1", "2", "3"]).slice();
+      return { ok: true, data: { trackIds: ids, total: ids.length } };
+    }
+
+    if (command === "add_library_selection_to_playlist") {
+      const req = payload?.request || {};
+      const all = state.__mockLibraryTrackIds || ["1", "2", "3"];
+      const added = req.allMatching ? all.length : (req.trackIds || []).length;
+      return { ok: true, data: { playlistId: req.playlistId || "", added, skipped: 0 } };
+    }
+
     if (command === "remove_tracks_from_playlist") {
       const playlistId = payload?.request?.playlistId || "";
       const ids = new Set(payload?.request?.trackIds || []);
@@ -655,6 +677,7 @@ export function createMockInvoke({ state, normalizePath, constants }) {
             playlistReferencedTracks: 2,
             playlistEntries: 2
           },
+          playlistTrackTotal: 2,
           warnings: [],
           playlistUsbExportStatus: computeMockPlaylistUsbExportStatus(
             state.playlists,
@@ -679,6 +702,10 @@ export function createMockInvoke({ state, normalizePath, constants }) {
               ]
             }
           ],
+          counts: {
+            importedPlaylists: 1,
+            importedTracks: 1
+          },
           warnings: []
         }
       };

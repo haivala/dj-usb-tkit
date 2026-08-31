@@ -39,9 +39,10 @@ use crate::db::Db;
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    AddTrackCandidate, AddTrackCandidateResolution, AddTrackCandidatesToPlaylistData,
-    AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AddTracksToPlaylistRequest,
-    BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
+    AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidateResolution,
+    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData,
+    AddTracksToPlaylistRequest, BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData,
+    CheckSourceRootsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
     CreatePlaylistData, CreatePlaylistRequest, DedupeMode, DeletePlaylistData,
     DeletePlaylistRequest, DetectExternalMasterDbData, GetFrontendSettingsData,
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
@@ -746,6 +747,9 @@ impl BackendService {
                 updated: 0,
                 removed: 0,
                 not_found,
+                scoped_track_count: 0,
+                album_count: 0,
+                unanalyzed_count: 0,
                 warnings,
             });
         }
@@ -1017,12 +1021,49 @@ impl BackendService {
 
         tx.commit()?;
 
+        // Post-scan library facts over the whole scanned set (not the page the
+        // frontend reloads next): every on-disk file now has an indexed row and
+        // removed files are gone, so a plain DB read is accurate.
+        let (scoped_track_count, album_count, unanalyzed_count) = {
+            let mut stmt = conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks"))?;
+            let rows = stmt.query_map([], |row| row_to_track(row, false))?;
+            let scoped: Vec<Track> = rows
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .filter(|track| {
+                    existing_roots
+                        .iter()
+                        .any(|root| browse_path_matches_root(&track.file_path, root))
+                })
+                .collect();
+            let mut albums = std::collections::HashSet::<String>::new();
+            let mut unanalyzed = 0usize;
+            for track in &scoped {
+                let album = track
+                    .album
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_lowercase();
+                if !album.is_empty() {
+                    albums.insert(album);
+                }
+                if !track_has_core_analysis_for_source_status(track) {
+                    unanalyzed += 1;
+                }
+            }
+            (scoped.len(), albums.len(), unanalyzed)
+        };
+
         Ok(ScanLibraryData {
             job_id: Uuid::now_v7().to_string(),
             indexed,
             updated,
             removed,
             not_found,
+            scoped_track_count,
+            album_count,
+            unanalyzed_count,
             warnings,
         })
     }
@@ -1407,6 +1448,11 @@ impl BackendService {
             updated,
             removed,
             not_found,
+            // Master-DB scan isn't scoped to source folders; the post-scan
+            // library facts are only surfaced for `scan_library`.
+            scoped_track_count: 0,
+            album_count: 0,
+            unanalyzed_count: 0,
             warnings,
         })
     }
@@ -2325,13 +2371,15 @@ impl BackendService {
         Ok(ListPlaylistsData { items })
     }
 
-    pub fn get_playlist_tracks(
+    /// The playlist's tracks as local library rows, in playlist position order.
+    /// Shared by `get_playlist_tracks` and the playlist-scoped analyze path so
+    /// both see the exact same set (USB-only entries with no local row are
+    /// dropped by the JOIN in both).
+    pub(crate) fn load_playlist_tracks_ordered(
         &self,
-        req: GetPlaylistTracksRequest,
-    ) -> BackendResult<GetPlaylistTracksData> {
-        ensure_playlist_exists(&self.db, &req.playlist_id)?;
-
-        let conn = self.db.connect()?;
+        conn: &rusqlite::Connection,
+        playlist_id: &str,
+    ) -> BackendResult<Vec<Track>> {
         // Column order MUST stay in lockstep with `TRACK_COLS` / `row_to_track`
         // (which reads `master_db_source` positionally at index 19) -- this JOIN
         // needs `t.`-prefixed names so it can't reuse `TRACK_COLS` verbatim.
@@ -2347,10 +2395,39 @@ impl BackendService {
             ORDER BY pt.position ASC
             "#,
         )?;
-
-        let rows = stmt.query_map(params![req.playlist_id], |row| row_to_track(row, true))?;
+        let rows = stmt.query_map(params![playlist_id], |row| row_to_track(row, true))?;
         let mut items = rows.collect::<Result<Vec<_>, _>>()?;
-        apply_is_usb_path(&conn, &mut items)?;
+        apply_is_usb_path(conn, &mut items)?;
+        Ok(items)
+    }
+
+    /// Local track ids in `playlist_id` that still need core analysis, honoring
+    /// the same `query` filter `get_playlist_tracks` applies to its
+    /// `unanalyzed_count`. Playlist position order.
+    pub(crate) fn collect_playlist_unanalyzed_track_ids(
+        &self,
+        conn: &rusqlite::Connection,
+        playlist_id: &str,
+        query: &str,
+    ) -> BackendResult<Vec<String>> {
+        let items = self.load_playlist_tracks_ordered(conn, playlist_id)?;
+        let query = query.trim().to_lowercase();
+        Ok(items
+            .into_iter()
+            .filter(|track| query.is_empty() || track_matches_query(track, &query))
+            .filter(|track| !track.analysis_ready)
+            .map(|track| track.id)
+            .collect())
+    }
+
+    pub fn get_playlist_tracks(
+        &self,
+        req: GetPlaylistTracksRequest,
+    ) -> BackendResult<GetPlaylistTracksData> {
+        ensure_playlist_exists(&self.db, &req.playlist_id)?;
+
+        let conn = self.db.connect()?;
+        let mut items = self.load_playlist_tracks_ordered(&conn, &req.playlist_id)?;
 
         let query = req.query.trim().to_lowercase();
         if !query.is_empty() {
@@ -2506,6 +2583,85 @@ impl BackendService {
             playlist_id: req.playlist_id,
             added,
             skipped,
+        })
+    }
+
+    pub fn list_matching_track_ids(
+        &self,
+        req: ListMatchingTrackIdsRequest,
+    ) -> BackendResult<ListMatchingTrackIdsData> {
+        let conn = self.db.connect()?;
+        let visible = self.compute_visible_library_tracks(
+            &conn,
+            &req.source_roots,
+            req.include_master_db,
+            &req.query,
+        )?;
+        let track_ids: Vec<String> = visible.into_iter().map(|track| track.id).collect();
+        let total = track_ids.len();
+        Ok(ListMatchingTrackIdsData { track_ids, total })
+    }
+
+    pub fn add_library_selection_to_playlist(
+        &self,
+        req: AddLibrarySelectionToPlaylistRequest,
+    ) -> BackendResult<AddTracksToPlaylistData> {
+        let conn = self.db.connect()?;
+        ensure_playlist_exists_conn(&conn, &req.playlist_id)?;
+
+        let visible = self.compute_visible_library_tracks(
+            &conn,
+            &req.source_roots,
+            req.include_master_db,
+            &req.query,
+        )?;
+
+        let wanted: std::collections::HashSet<&str> =
+            req.track_ids.iter().map(String::as_str).collect();
+        let chosen: Vec<&Track> = visible
+            .iter()
+            .filter(|track| req.all_matching || wanted.contains(track.id.as_str()))
+            .collect();
+
+        // Every visible row is either a real `tracks` row or a browse-only file
+        // that isn't indexed yet (`id == file_path`); materialize the latter so
+        // the playlist references a stable local id, matching what the
+        // single-row "+" does.
+        let mut track_ids = Vec::<String>::with_capacity(chosen.len());
+        for track in chosen {
+            if track_id_exists(&conn, &track.id)? {
+                track_ids.push(track.id.clone());
+                continue;
+            }
+            let materialized = self.materialize_source_track(MaterializeSourceTrackRequest {
+                file_path: track.file_path.clone(),
+                title: track.title.clone(),
+                artist: track.artist.clone(),
+                album: track.album.clone(),
+                track_number: track.track_number,
+                key: track.key.clone(),
+                file_size_bytes: track.file_size_bytes,
+                format_ext: track.format_ext.clone(),
+                sample_rate_hz: track.sample_rate_hz,
+                bit_depth: track.bit_depth,
+                bitrate_kbps: track.bitrate_kbps,
+            })?;
+            track_ids.push(materialized.track_id);
+        }
+        drop(conn);
+
+        if track_ids.is_empty() {
+            return Ok(AddTracksToPlaylistData {
+                playlist_id: req.playlist_id,
+                added: 0,
+                skipped: 0,
+            });
+        }
+
+        self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: req.playlist_id,
+            track_ids,
+            dedupe: req.dedupe,
         })
     }
 

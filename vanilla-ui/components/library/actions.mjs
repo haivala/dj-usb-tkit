@@ -637,7 +637,6 @@ export async function scanLibrary(state, deps) {
     persistSourceRoots,
     resetAndLoadLibraryTracks,
     LIBRARY_LOAD_LIMIT_POST_SCAN,
-    trackPathIsInsideSelectedRoots,
     analyzeTrackIds,
     refreshCurrentPlaylistTracks,
     countWarningsForStatus,
@@ -677,24 +676,18 @@ export async function scanLibrary(state, deps) {
   }
 
   await resetAndLoadLibraryTracks("", LIBRARY_LOAD_LIMIT_POST_SCAN);
-  const scopedTracks = state.tracks
-    .filter((track) => trackPathIsInsideSelectedRoots(track.filePath));
-  const albumCount = new Set(
-    scopedTracks
-      .map((track) => String(track.album || "").trim().toLowerCase())
-      .filter(Boolean)
-  ).size;
-  const pendingTrackIds = scopedTracks
-    .filter((track) => !(state.masterDbEnabled && track.masterDbSource) && !track.analysisReady)
-    .map((track) => track.id)
-    .filter(Boolean);
+  // Backend-owned: `scan_library` reports these over the whole scanned library,
+  // not the page the frontend just loaded.
+  const scopedTrackCount = Math.max(0, Number(result?.scopedTrackCount || 0));
+  const albumCount = Math.max(0, Number(result?.albumCount || 0));
+  const unanalyzedCount = Math.max(0, Number(result?.unanalyzedCount || 0));
 
   emitStatus(
-    `Library scan: ${scopedTracks.length} tracks across ${albumCount} albums (local DB rows indexed ${result.indexed}, updated ${result.updated}, removed ${result.removed}). Resolving waveform/BPM/key...`
+    `Library scan: ${scopedTrackCount} tracks across ${albumCount} albums (local DB rows indexed ${result.indexed}, updated ${result.updated}, removed ${result.removed}). Resolving waveform/BPM/key...`
   );
 
-  const analysis = pendingTrackIds.length > 0
-    ? await analyzeTrackIds(pendingTrackIds, "Scan analysis")
+  const analysis = unanalyzedCount > 0
+    ? await analyzeTrackIds([], "Scan analysis", { scopeToLibraryFilter: true })
     : { analyzed: 0, failed: 0, warnings: [] };
   const analyzed = Number(analysis?.analyzed || 0);
   const failed = Number(analysis?.failed || 0);
@@ -708,7 +701,7 @@ export async function scanLibrary(state, deps) {
   const missingCount = missingSourceRootsArray(state).length;
   const missingSuffix = missingCount ? ` | ${missingCount} source folder(s) missing` : "";
   emitStatus(
-    `Scan done: ${scopedTracks.length} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}${missingSuffix}`,
+    `Scan done: ${scopedTrackCount} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}${missingSuffix}`,
     { warningCount }
   );
 }
@@ -810,7 +803,12 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     }
   }
   const ids = Array.isArray(trackIds) ? trackIds.filter(Boolean) : [];
-  if (!ids.length) return;
+  // With `playlistId` / `scopeToLibraryFilter` the backend picks the tracks that
+  // still need analysis (over the whole playlist / library filter, not just the
+  // page the frontend has loaded), so an empty `ids` list is a valid request.
+  const backendScoped = !!(options.playlistId || options.scopeToLibraryFilter);
+  if (!ids.length && !backendScoped) return;
+  const countLabel = ids.length ? `${ids.length}` : "matching";
   const bpmRange = parseAnalysisBpmRange(state.analysisBpmRange);
 
   let analyzed = 0;
@@ -818,7 +816,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
   const warnings = [];
   let hydratedItems = [];
 
-  emitStatus(`${modeLabel}: 0/${ids.length} track(s) ready...`);
+  emitStatus(`${modeLabel}: preparing ${countLabel} track(s)...`);
 
   // Per-row "analyzing" state is driven by job:event (job_manager.mjs), which
   // only marks a track analyzing once the backend actually starts working on
@@ -829,6 +827,8 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
   try {
     const batch = await command("analyze_new_tracks", {
       trackIds: ids,
+      playlistId: options.playlistId || null,
+      scopeToLibraryFilter: !!options.scopeToLibraryFilter,
       bpmMin: bpmRange.min,
       bpmMax: bpmRange.max,
       analysisEngine: state.analysisEngine,
@@ -843,7 +843,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
     warnings.push(...batchWarnings);
     hydratedItems = Array.isArray(batch?.items) ? batch.items : [];
-    emitStatus(`${modeLabel}: ${ids.length}/${ids.length} track(s) ready...`);
+    emitStatus(`${modeLabel}: ${analyzed + failed} track(s) processed...`);
   } catch (err) {
     failed = ids.length;
     warnings.push(`batch analysis failed: ${err.message || err}`);
@@ -888,16 +888,12 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
 
 export async function analyzeSingleTrack(state, track, modeLabel = null, deps) {
   const {
-    resolveLocalTrackId,
     resolveLocalTrackIdAsync,
     setStatus,
     analyzeTrackIds
   } = deps;
   const emitStatus = resolveEmitStatus(deps);
-  let localId = resolveLocalTrackId(track);
-  if (!localId) {
-    localId = await resolveLocalTrackIdAsync(track);
-  }
+  const localId = await resolveLocalTrackIdAsync(track);
   if (!localId) {
     emitStatus("Track is not in local library yet. Scan library first, then analyze.");
     return;

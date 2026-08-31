@@ -29,11 +29,10 @@ export function bindLibraryEvents(ctx) {
     analyzeSelectedTracks,
     scheduleApplySearchLocalFilter,
     addTracksToCurrentPlaylist,
+    addLibrarySelectionToCurrentPlaylist,
     getLibraryVisibleTracks,
     hydrateLoadedTracksPreviewsInBackground = async () => {},
     LIBRARY_LOAD_LIMIT_DEFAULT,
-    loadMoreLibraryTracks,
-    libraryTracksCtl,
   } = ctx;
   const emitStatus = resolveEmitStatus(ctx);
 
@@ -194,8 +193,12 @@ export function bindLibraryEvents(ctx) {
   }, { passive: true });
 
   el.addSelectedBtn.addEventListener("click", () => {
-    const selected = state.tracks.filter((track) => state.selectedTrackIds.has(track.id));
-    addTracksToCurrentPlaylist(selected).catch(catchErr(emitStatus));
+    // Backend-owned: it enumerates the ticked ids against the current library
+    // filter and materializes any browse-only rows -- so a selection spanning
+    // pages that have since been dropped isn't silently lost.
+    addLibrarySelectionToCurrentPlaylist({
+      trackIds: Array.from(state.selectedTrackIds || []),
+    }).catch(catchErr(emitStatus));
   });
 
   el.selectAllTracks.addEventListener("change", (event) => {
@@ -207,21 +210,18 @@ export function bindLibraryEvents(ctx) {
       return;
     }
     (async () => {
-      if (libraryTracksCtl?.hasMore) {
-        await withProgress("Loading all matching tracks", async (progress) => {
-          while (libraryTracksCtl.hasMore) {
-            await loadMoreLibraryTracks(LIBRARY_LOAD_LIMIT_DEFAULT);
-            const total = libraryTracksCtl.total || state.tracks.length || 1;
-            progress(
-              Math.min(90, Math.round((state.tracks.length / total) * 90)),
-              `Loaded ${state.tracks.length} of ${total}...`
-            );
-          }
+      // Backend enumerates every id matching the current filter in one call --
+      // no need to page the whole list into the client to collect ids.
+      const data = await withProgress("Selecting all matching tracks", async (progress) => {
+        progress(40, "Enumerating tracks...");
+        return command("list_matching_track_ids", {
+          sourceRoots: enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots),
+          includeMasterDb: state.masterDbEnabled === true,
+          query: String(state.libraryQuery || "").trim(),
         });
-      }
+      });
       if (!checkbox.checked) return;
-      state.selectedTrackIds.clear();
-      state.tracks.forEach((track) => state.selectedTrackIds.add(track.id));
+      state.selectedTrackIds = new Set((data?.trackIds || []).filter(Boolean));
       ctx.renderLibraryRows();
       updateSelectionCount();
     })().catch(catchErr(emitStatus));

@@ -157,6 +157,18 @@ pub struct ScanLibraryData {
     pub removed: usize,
     #[serde(default)]
     pub not_found: Vec<String>,
+    /// Tracks under the scanned roots, computed over the whole library after
+    /// the scan commits (not the page the frontend reloads). `0` for the
+    /// pre-scan validation-error / no-op returns.
+    #[serde(default)]
+    pub scoped_track_count: usize,
+    /// Distinct non-empty album names among `scoped_track_count`.
+    #[serde(default)]
+    pub album_count: usize,
+    /// How many of `scoped_track_count` still need core analysis
+    /// (same predicate as `Track::analysis_ready`).
+    #[serde(default)]
+    pub unanalyzed_count: usize,
     #[serde(default)]
     pub warnings: Vec<WarningEntry>,
 }
@@ -523,6 +535,48 @@ pub struct AddTracksToPlaylistData {
     pub playlist_id: String,
     pub added: usize,
     pub skipped: usize,
+}
+
+/// Every local track id that matches the current library filter -- so
+/// "Select all" doesn't have to page the whole list into the frontend just to
+/// enumerate ids.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMatchingTrackIdsRequest {
+    #[serde(default)]
+    pub source_roots: Vec<String>,
+    #[serde(default)]
+    pub include_master_db: bool,
+    #[serde(default)]
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMatchingTrackIdsData {
+    pub track_ids: Vec<String>,
+    pub total: usize,
+}
+
+/// Add a library selection to a playlist entirely server-side: the frontend
+/// sends the current filter plus either the ticked ids or `all_matching`, and
+/// the backend enumerates, materializes any browse-only rows, and appends --
+/// so a selection that spans pages the user has scrolled past is never lost.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddLibrarySelectionToPlaylistRequest {
+    pub playlist_id: String,
+    #[serde(default)]
+    pub source_roots: Vec<String>,
+    #[serde(default)]
+    pub include_master_db: bool,
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub track_ids: Vec<String>,
+    #[serde(default)]
+    pub all_matching: bool,
+    pub dedupe: DedupeMode,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -943,6 +997,11 @@ pub struct PlaylistUsbExportStatus {
 pub struct FetchUsbPlaylistsData {
     pub items: Vec<UsbPlaylist>,
     pub stats: UsbImportStats,
+    /// Sum of `track_count` over `items` (post name-dedupe) -- the "M tracks"
+    /// figure in the USB panel header. Computed server-side so the frontend
+    /// never re-sums per-playlist counts. Deliberately the sum, not a distinct
+    /// count, so a track in two playlists still counts twice.
+    pub playlist_track_total: usize,
     pub warnings: Vec<WarningEntry>,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
@@ -1113,6 +1172,12 @@ pub struct PlaybackEventPayload {
     pub position_ms: u64,
     pub duration_ms: Option<u64>,
     pub message: Option<String>,
+    /// The resolved local track id the backend is actually playing, forwarded
+    /// on `playback.started` / `playback.seeked` so the frontend marks the
+    /// right row as playing without re-resolving a path against its (paginated)
+    /// track list. `None` on error/stop events and legacy paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_id: Option<String>,
     pub timestamp: String,
 }
 
@@ -1234,6 +1299,16 @@ pub struct FetchUsbTracksData {
 pub struct AnalyzeNewTracksRequest {
     #[serde(default)]
     pub track_ids: Vec<String>,
+    /// When `track_ids` is empty: restrict auto-selection to the tracks in this
+    /// playlist that still need core analysis (over the whole playlist, not a
+    /// page). Ignored when `track_ids` is non-empty.
+    #[serde(default)]
+    pub playlist_id: Option<String>,
+    /// When `track_ids` is empty and `playlist_id` is unset: restrict
+    /// auto-selection to the current library filter (`source_roots` +
+    /// `include_master_db` + `query`) instead of the whole DB.
+    #[serde(default)]
+    pub scope_to_library_filter: bool,
     #[serde(default)]
     pub bpm_min: Option<u32>,
     #[serde(default)]

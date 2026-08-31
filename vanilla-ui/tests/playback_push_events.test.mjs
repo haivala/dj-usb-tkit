@@ -89,22 +89,25 @@ test("handlePlaybackEvent resets playback state on stop and cancels interpolatio
   assert.equal(calls.status, "Idle");
 });
 
-test("handlePlaybackEvent reconciles ids on path changes but leaves seek state intact", () => {
+test("handlePlaybackEvent applies the backend-resolved trackId and clears rowKey on a path change", () => {
   const changed = {
     playbackActive: true,
     playbackPath: "/music/a.mp3",
     playbackTrackId: "old-id",
     playbackRowKey: "row-old",
-    activeWaveform: null,
-    tracks: [{ id: "new-id", filePath: "/music/b.mp3" }]
+    activeWaveform: null
   };
-  handlePlaybackEvent(changed, started("/music/b.mp3", { positionMs: 0, durationMs: 0 }), eventDeps({
-    resolveTrackIdForPath: (path) => changed.tracks.find((track) => track.filePath === path)?.id || null
-  }).deps);
+  handlePlaybackEvent(
+    changed,
+    started("/music/b.mp3", { positionMs: 0, durationMs: 0, trackId: "new-id" }),
+    eventDeps().deps
+  );
   assert.equal(changed.playbackPath, "/music/b.mp3");
   assert.equal(changed.playbackTrackId, "new-id");
   assert.equal(changed.playbackRowKey, null);
+});
 
+test("handlePlaybackEvent leaves playbackTrackId untouched when the event omits trackId", () => {
   const seeked = {
     playbackActive: true,
     playbackPath: "/music/a.mp3",
@@ -112,13 +115,21 @@ test("handlePlaybackEvent reconciles ids on path changes but leaves seek state i
     playbackRowKey: "row-1",
     activeWaveform: null
   };
-  let resolveCalls = 0;
-  handlePlaybackEvent(seeked, started("/music/a.mp3", { event: "playback.seeked" }), eventDeps({
-    resolveTrackIdForPath: () => { resolveCalls += 1; return null; }
-  }).deps);
+  handlePlaybackEvent(seeked, started("/music/a.mp3", { event: "playback.seeked" }), eventDeps().deps);
   assert.equal(seeked.playbackTrackId, "id-1");
   assert.equal(seeked.playbackRowKey, "row-1");
-  assert.equal(resolveCalls, 0);
+});
+
+test("handlePlaybackEvent clears playbackTrackId when the backend sends trackId null", () => {
+  const state = {
+    playbackActive: true,
+    playbackPath: "/music/a.mp3",
+    playbackTrackId: "id-1",
+    playbackRowKey: "row-1",
+    activeWaveform: null
+  };
+  handlePlaybackEvent(state, started("/music/b.mp3", { trackId: null }), eventDeps().deps);
+  assert.equal(state.playbackTrackId, null);
 });
 
 test("handlePlaybackEvent reuses the backend source label verbatim on a seek", () => {

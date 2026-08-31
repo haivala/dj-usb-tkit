@@ -180,80 +180,18 @@ function toNumberOrNull(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function isMaterializedLocalId(candidate, normalizePath) {
-  if (!candidate?.id) return false;
-  const candidateId = normalizePath(candidate.id);
-  const candidatePath = normalizePath(candidate.filePath || "");
-  return !!candidateId && candidateId !== candidatePath;
-}
-
-export function resolveLocalTrackId(track, state, deps) {
-  const { normalizePath } = deps;
-  if (!track) return null;
-  if (track.localTrackId) return track.localTrackId;
-
-  if (track.id) {
-    const byId = state.tracks.find((t) => t.id === track.id);
-    if (byId && isMaterializedLocalId(byId, normalizePath)) {
-      return track.id;
-    }
-  }
-
-  const normTitle = String(track.title || "").trim().toLowerCase();
-  const normArtist = String(track.artist || "").trim().toLowerCase();
-  const normAlbum = String(track.album || "").trim().toLowerCase();
-  const normFormat = String(track.formatExt || "").trim().toLowerCase();
-  const normPath = normalizePath(track.filePath || "");
-
-  if (normPath) {
-    const byPath = state.tracks.find((t) => normalizePath(t.filePath || "") === normPath);
-    if (byPath && isMaterializedLocalId(byPath, normalizePath)) {
-      return byPath.id;
-    }
-  }
-
-  const strictMatch = state.tracks.find(
-    (t) => isMaterializedLocalId(t, normalizePath)
-      && String(t.title || "").trim().toLowerCase() === normTitle
-      && String(t.artist || "").trim().toLowerCase() === normArtist
-      && (!normAlbum || String(t.album || "").trim().toLowerCase() === normAlbum)
-      && (!normFormat || String(t.formatExt || "").trim().toLowerCase() === normFormat)
-  );
-  if (strictMatch?.id) return strictMatch.id;
-
-  const looseMatch = state.tracks.find(
-    (t) => isMaterializedLocalId(t, normalizePath)
-      && String(t.title || "").trim().toLowerCase() === normTitle
-      && String(t.artist || "").trim().toLowerCase() === normArtist
-  );
-  return looseMatch?.id || null;
-}
-
-export function shouldAllowResolvedFallback(track, state, deps) {
-  const { normalizePath } = deps;
-  if (!track) return false;
-  const filePath = String(track.filePath || "").trim();
-  const usbRoot = String(state.usbRoot || "").trim();
-  const usbAnalysisPath = String(track.usbAnalysisPath || "").trim();
-  if (usbAnalysisPath) return false;
-  if (usbRoot && filePath && normalizePath(filePath).startsWith(normalizePath(usbRoot))) {
-    return false;
-  }
-  return true;
-}
-
+// Track-identity resolution is backend-owned: `resolve_track_identity` sees the
+// whole library DB (the frontend only ever holds the loaded pages) and can
+// materialize a local row for an on-disk file. No client-side matching here --
+// not even as a fast path.
 export async function resolveLocalTrackIdAsync(track, state, deps) {
   const {
     command,
-    normalizePath,
     promoteTrackIdentity
   } = deps;
-  const resolveLocalTrackIdFn = deps.resolveLocalTrackId
-    || ((value) => resolveLocalTrackId(value, state, { normalizePath }));
 
-  const syncId = resolveLocalTrackIdFn(track);
-  if (syncId) return syncId;
   if (!track) return null;
+  if (track.localTrackId) return track.localTrackId;
 
   const filePath = String(track.filePath || "").trim();
   try {
@@ -289,92 +227,18 @@ export async function resolveLocalTrackIdAsync(track, state, deps) {
   return null;
 }
 
-function getFileName(value) {
-  const normalized = String(value || "").replace(/\\/g, "/").trim().toLowerCase();
-  if (!normalized) return "";
-  const i = normalized.lastIndexOf("/");
-  return i >= 0 ? normalized.slice(i + 1) : normalized;
-}
-
-function getStem(value) {
-  const file = getFileName(value);
-  const i = file.lastIndexOf(".");
-  return i > 0 ? file.slice(0, i) : file;
-}
-
-export function resolveLocalTrack(track, state) {
-  if (!track) return null;
-
-  if (track.id) {
-    const byId = state.tracks.find((t) => t.id === track.id);
-    if (byId?.filePath) return byId;
-  }
-
-  const title = String(track.title || "").trim().toLowerCase();
-  const artist = String(track.artist || "").trim().toLowerCase();
-  if (!title) return null;
-
-  const byMeta = state.tracks.find((t) => {
-    const tTitle = String(t.title || "").trim().toLowerCase();
-    const tArtist = String(t.artist || "").trim().toLowerCase();
-    return tTitle === title && tArtist === artist && !!t.filePath;
-  });
-  if (byMeta) return byMeta;
-
-  const sourcePath = String(track.filePath || "").replace(/\\/g, "/").trim().toLowerCase();
-  if (!sourcePath) return null;
-
-  const byExactPath = state.tracks.find(
-    (t) => String(t.filePath || "").replace(/\\/g, "/").trim().toLowerCase() === sourcePath && !!t.filePath
-  );
-  if (byExactPath) return byExactPath;
-
-  const sourceFile = getFileName(sourcePath);
-  const sourceStem = getStem(sourcePath);
-  if (!sourceFile && !sourceStem) return null;
-
-  const byFile = state.tracks.filter((t) => getFileName(t.filePath) === sourceFile && !!t.filePath);
-  if (byFile.length === 1) return byFile[0];
-  if (byFile.length > 1) {
-    const narrowed = byFile.find((t) => {
-      const tTitle = String(t.title || "").trim().toLowerCase();
-      const tArtist = String(t.artist || "").trim().toLowerCase();
-      return (title && tTitle === title) || (artist && tArtist === artist);
-    });
-    if (narrowed) return narrowed;
-  }
-
-  const byStem = state.tracks.filter((t) => getStem(t.filePath) === sourceStem && !!t.filePath);
-  if (byStem.length === 1) return byStem[0];
-  if (byStem.length > 1) {
-    const narrowed = byStem.find((t) => {
-      const tTitle = String(t.title || "").trim().toLowerCase();
-      const tArtist = String(t.artist || "").trim().toLowerCase();
-      return (title && tTitle === title) || (artist && tArtist === artist);
-    });
-    if (narrowed) return narrowed;
-  }
-
-  return null;
-}
-
-export function getTrackPlaybackPath(track, deps) {
-  const { resolveLocalTrack } = deps;
-  const localTrack = resolveLocalTrack(track);
-  return localTrack?.filePath || track?.filePath || "";
-}
-
-export function isTrackCurrentlyPlaying(track, state, deps) {
-  const { normalizePath, getTrackPlaybackPath } = deps;
+// Synchronous, per-row hot path (rendered for every track in every list). Pure
+// id compare against the backend-resolved id the playback events / USB rows
+// carry -- no path or metadata scan over `state.tracks` (which is only the
+// loaded pages).
+export function isTrackCurrentlyPlaying(track, state) {
   if (state.playbackPendingKind === "stop") return false;
   if (state.playbackPendingKind === "play") {
     return !!(state.playbackPendingTrackId && track?.id && state.playbackPendingTrackId === track.id);
   }
   if (!state.playbackActive) return false;
-  if (state.playbackTrackId && track?.id && state.playbackTrackId === track.id) return true;
-  const a = normalizePath(getTrackPlaybackPath(track));
-  const b = normalizePath(state.playbackPath || "");
-  return !!a && !!b && a === b;
+  const rowId = String(track?.localTrackId || track?.id || "");
+  return !!rowId && !!state.playbackTrackId && state.playbackTrackId === rowId;
 }
 export async function playTrackFromOrigin(state, track, origin, options = {}, deps) {
   const {
@@ -531,21 +395,12 @@ export async function playTrackFromOriginController(state, track, origin, option
     }
   }
 }
-export function findTrackIdByPath(state, path, deps) {
-  const { normalizePath } = deps;
-  const target = normalizePath(path || "");
-  if (!target) return null;
-  const match = (state.tracks || []).find((t) => normalizePath(t.filePath || "") === target);
-  return match?.id || null;
-}
-
 export function handlePlaybackEvent(state, payload, deps) {
   const {
     setWaveformPlayhead,
     updateTransportButtonsInDom,
     clearAllWaveformPlayheads,
     setStatus,
-    resolveTrackIdForPath,
     requestAnimationFrameFn,
     cancelAnimationFrameFn
   } = deps;
@@ -568,8 +423,13 @@ export function handlePlaybackEvent(state, payload, deps) {
     const pathChanged = path !== null && path !== state.playbackPath;
     state.playbackActive = playing;
     state.playbackPath = path;
+    // Backend-owned: `playback.started` / `playback.seeked` carry the resolved
+    // local track id (omitted when the backend couldn't resolve one -- then we
+    // keep whatever `play_resolved_track` already stashed).
+    if (payload.trackId !== undefined) {
+      state.playbackTrackId = payload.trackId || null;
+    }
     if (pathChanged) {
-      state.playbackTrackId = typeof resolveTrackIdForPath === "function" ? resolveTrackIdForPath(path) : null;
       state.playbackRowKey = null;
     }
     if (state.activeWaveform) {

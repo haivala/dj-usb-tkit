@@ -51,6 +51,17 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     assert!(scan_all.ok, "scan all failed: {scan_all:?}");
     let scan_all_data = scan_all.data.expect("scan all data");
     assert_eq!(scan_all_data.indexed, 4, "expected 4 indexed tracks");
+    // Post-scan library facts, computed by the backend over the whole scanned
+    // set (not the page the frontend reloads).
+    assert_eq!(scan_all_data.scoped_track_count, 4);
+    assert_eq!(
+        scan_all_data.album_count, 2,
+        "album is derived per source folder (source-a, source-b)"
+    );
+    assert_eq!(
+        scan_all_data.unanalyzed_count, 4,
+        "nothing is analyzed right after the first scan"
+    );
 
     // Remove just the file, not the whole source-b directory: the scanner
     // deliberately treats a vanished source ROOT as "not found" rather than
@@ -75,6 +86,8 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         remove_data.removed >= 1,
         "expected at least one removed track after deleting the source-b file"
     );
+    assert_eq!(remove_data.scoped_track_count, 3);
+    assert_eq!(remove_data.unanalyzed_count, 3);
 
     let remaining_tracks = backend
         .search_tracks(SearchTracksRequest {
@@ -129,6 +142,24 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         "expected bpm and key for all analyzed tracks"
     );
 
+    // A re-scan now reports every scanned track as analyzed -- the scan-status
+    // count and `Track::analysis_ready` agree.
+    let rescan = backend
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![
+                source_a.to_string_lossy().to_string(),
+                source_b.to_string_lossy().to_string(),
+            ],
+            incremental: true,
+        })
+        .data
+        .expect("rescan data");
+    assert_eq!(rescan.scoped_track_count, 3);
+    assert_eq!(
+        rescan.unanalyzed_count, 0,
+        "all survivors are analyzed after analyze_new_tracks"
+    );
+
     let init_usb = backend.initialize_usb(InitializeUsbRequest {
         usb_root: usb.to_string_lossy().to_string(),
     });
@@ -150,6 +181,19 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     });
     assert!(add_source_tracks.ok, "add source tracks failed");
     assert_eq!(add_source_tracks.data.expect("add source data").added, 3);
+
+    // Playlist-scoped "Analyze Missing": every track in this playlist is already
+    // analyzed, so backend auto-selection scoped to the playlist finds nothing
+    // (rather than falling through to a DB-wide auto-select).
+    let scoped_analyze = backend
+        .analyze_new_tracks(AnalyzeNewTracksRequest {
+            playlist_id: Some(source_playlist_id.clone()),
+            ..Default::default()
+        })
+        .data
+        .expect("scoped analyze data");
+    assert_eq!(scoped_analyze.analyzed, 0);
+    assert_eq!(scoped_analyze.failed, 0);
 
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -181,7 +225,17 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         usb_playlists.ok,
         "fetch usb playlists failed: {usb_playlists:?}"
     );
-    let usb_items = usb_playlists.data.expect("usb playlist data").items;
+    let usb_playlists_data = usb_playlists.data.expect("usb playlist data");
+    // Header total is backend-computed as the sum of per-playlist counts.
+    assert_eq!(
+        usb_playlists_data.playlist_track_total,
+        usb_playlists_data
+            .items
+            .iter()
+            .map(|p| p.track_count)
+            .sum::<usize>(),
+    );
+    let usb_items = usb_playlists_data.items;
     let usb_playlist = usb_items
         .iter()
         .find(|p| p.name == "Flow Source Playlist" && !p.tracks.is_empty())

@@ -56,6 +56,33 @@ test("refreshUsb re-renders the open playlist after replacing the export status 
   assert.equal(renderOpenPlaylist, 1);
 });
 
+test("refreshUsb renders the backend-computed playlistTrackTotal, not a client sum", async () => {
+  const state = { usbRoot: "/USB", usbPlaylists: [], usbPlaylistTracks: [] };
+  const el = { usbCountsText: { textContent: "" } };
+  await refreshUsb(state, el, {
+    setStatus: () => {},
+    command: async () => ({
+      // per-playlist trackCount sums to 5, but the header must use the
+      // backend's playlistTrackTotal verbatim
+      items: [{ id: "a", trackCount: 2, tracks: [] }, { id: "b", trackCount: 3, tracks: [] }],
+      playlistTrackTotal: 5,
+      warnings: [],
+      playlistUsbExportStatus: []
+    }),
+    setProgress: () => {},
+    startProgressHeartbeat: () => {},
+    stopProgressHeartbeat: () => {},
+    normalizeUsbPlaylist: (p) => p,
+    renderUsbPlaylists: () => {},
+    clearUsbPlaylistTracks: () => {},
+    renderCurrentPlaylistTracksFromState: async () => {},
+    updatePlaylistExportButtons: () => {},
+    countWarningsForStatus: () => 0,
+    logWarnings: () => {}
+  });
+  assert.equal(el.usbCountsText.textContent, "2 playlists, 5 tracks");
+});
+
 test("diagnostics guard, history refresh, and tracklist filename sanitizing stay stable", async () => {
   let status = "";
   await runUsbDiagnostics({ usbRoot: null }, {

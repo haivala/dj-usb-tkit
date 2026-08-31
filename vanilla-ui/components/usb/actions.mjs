@@ -1022,7 +1022,7 @@ export async function refreshUsb(state, el, deps) {
   setProgress(true, 80, "Computing stats...");
   await new Promise((r) => setTimeout(r, 20));
 
-  const usbTrackTotal = state.usbPlaylists.reduce((sum, playlist) => sum + (playlist.trackCount || 0), 0);
+  const usbTrackTotal = Number(data.playlistTrackTotal) || 0;
   el.usbCountsText.textContent = `${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`;
   setProgress(true, 90, "Rendering playlists...");
   await new Promise((r) => setTimeout(r, 20));
@@ -1175,12 +1175,10 @@ export async function refreshHistory(state, el, deps) {
     ...history,
     tracks: (history.tracks || []).map((track) => normalizeTrack(track, "hist"))
   }));
+  // Backend-owned: `fetch_usb_histories` always returns `counts` computed over
+  // the full import -- the frontend renders them, never re-tallies.
   const counts = data.counts || {};
-  const importedPlaylists = Number.isFinite(counts.importedPlaylists) ? counts.importedPlaylists : state.histories.length;
-  const importedTracks = Number.isFinite(counts.importedTracks)
-    ? counts.importedTracks
-    : state.histories.reduce((sum, history) => sum + (history.tracks?.length || 0), 0);
-  el.historyCountsText.textContent = `${importedPlaylists} sessions, ${importedTracks} tracks`;
+  el.historyCountsText.textContent = `${counts.importedPlaylists || 0} sessions, ${counts.importedTracks || 0} tracks`;
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
   if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
