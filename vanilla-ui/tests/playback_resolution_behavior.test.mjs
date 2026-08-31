@@ -70,7 +70,7 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
       calls.push({ name, payload });
       assert.equal(name, "play_resolved_track");
       return backendPlayback({
-        sourceLabel: "Library (matched)",
+        sourceLabel: "Library",
         hasUsbContext: true,
       });
     },
@@ -96,10 +96,10 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
   assert.equal(state.playbackPath, "/music/Track.mp3");
   assert.equal(state.playbackRowKey, "r1");
   assert.deepEqual(state.playbackLabelContext, {
-    sourceLabel: "Library (matched)",
+    sourceLabel: "Library",
     title: "Artist - Track",
   });
-  assert.match(status, /Playing from Library \(matched\): Artist - Track/);
+  assert.match(status, /Playing from Library: Artist - Track/);
 });
 
 test("playTrackFromOrigin commits a backend USB fallback result without local fallback logic", async () => {
@@ -115,7 +115,7 @@ test("playTrackFromOrigin commits a backend USB fallback result without local fa
         trackId: "t-usb",
         matchedBy: "none",
         source: "usb",
-        sourceLabel: "USB (library unavailable)",
+        sourceLabel: "USB",
         libraryResolved: false,
         hasUsbContext: true,
       });
@@ -124,8 +124,8 @@ test("playTrackFromOrigin commits a backend USB fallback result without local fa
 
   assert.equal(state.playbackTrackId, "t-usb");
   assert.equal(state.playbackPath, "/usb/Contents/Track.mp3");
-  assert.equal(state.playbackLabelContext.sourceLabel, "USB (library unavailable)");
-  assert.match(status, /Playing from USB \(library unavailable\): Artist - Track/);
+  assert.equal(state.playbackLabelContext.sourceLabel, "USB");
+  assert.match(status, /Playing from USB: Artist - Track/);
 });
 
 test("playTrackFromOrigin reports backend not-found as a warning", async () => {

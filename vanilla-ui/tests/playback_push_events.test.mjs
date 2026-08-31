@@ -122,20 +122,20 @@ test("handlePlaybackEvent reconciles ids on path changes but leaves seek state i
 });
 
 test("handlePlaybackEvent reuses the backend source label verbatim on a seek", () => {
-  // Regression: the status line used to be re-derived from a 4-way JS enum that
-  // can't reproduce every backend label, so a seek downgraded
-  // "USB (library unavailable)" to "USB".
+  // Regression: the status line used to be re-derived on the frontend from the
+  // play origin, so a seek on a USB-origin track that the backend actually
+  // resolved to the library flipped the label from "Library" back to "USB".
   const state = {
     playbackActive: true,
     playbackPath: "/music/a.mp3",
     playbackTrackId: "id-1",
     playbackRowKey: "row-1",
     activeWaveform: null,
-    playbackLabelContext: { sourceLabel: "USB (library unavailable)", title: "Artist - Track" }
+    playbackLabelContext: { sourceLabel: "Library", title: "Artist - Track" }
   };
   const { calls, deps } = eventDeps();
   handlePlaybackEvent(state, started("/music/a.mp3", { event: "playback.seeked" }), deps);
-  assert.equal(calls.status, "Playing from USB (library unavailable): Artist - Track");
+  assert.equal(calls.status, "Playing from Library: Artist - Track");
 });
 
 test("handlePlaybackEvent ignores stray started events but applies pending started events", () => {

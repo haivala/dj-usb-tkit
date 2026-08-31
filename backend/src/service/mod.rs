@@ -115,31 +115,27 @@ fn browse_path_key(path: &str) -> String {
     path.trim().replace('\\', "/").to_ascii_lowercase()
 }
 
+/// True when `path` names a file that currently exists on disk. Used by
+/// playback resolution to prefer a library row whose file is actually
+/// present over a stale/duplicate row pointing at a moved-or-deleted file.
+fn file_path_exists(path: &str) -> bool {
+    let trimmed = path.trim();
+    !trimmed.is_empty() && Path::new(trimmed).is_file()
+}
+
 pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
     let file_key = browse_path_key(file_path);
     let root_key = browse_path_key(root).trim_end_matches('/').to_string();
     !root_key.is_empty() && (file_key == root_key || file_key.starts_with(&format!("{root_key}/")))
 }
 
-fn playback_source_label(
-    origin: Option<&str>,
-    library_resolved: bool,
-    has_usb_context: bool,
-) -> String {
-    let origin = origin.unwrap_or("").trim().to_ascii_lowercase();
-    let external_origin = origin == "usb" || origin == "history";
-    if library_resolved {
-        if external_origin {
-            "Library (matched)"
-        } else {
-            "Library"
-        }
-    } else if external_origin && has_usb_context {
-        "USB"
-    } else {
-        "Local file"
-    }
-    .to_string()
+/// The status-line label: only *where* playback is coming from, with no
+/// qualifier about how it was resolved or what was skipped -- any fallback
+/// detail belongs in the Event Log, not here. Every caller either resolved
+/// the library copy or is playing a USB copy (a request with neither errors
+/// out before it gets here), so those are the only two outcomes.
+fn playback_source_label(library_resolved: bool) -> String {
+    if library_resolved { "Library" } else { "USB" }.to_string()
 }
 
 fn is_recoverable_playback_error(message: &str) -> bool {
@@ -625,28 +621,33 @@ impl BackendService {
                         resolved.track_id.or(req.track_id),
                         &matched_by,
                         "library",
-                        playback_source_label(req.origin.as_deref(), true, has_usb_context),
+                        playback_source_label(true),
                         has_usb_context,
                     ));
                 }
                 Err(library_err) => {
-                    if let Some(path) = usb_path
+                    if let Some(usb_fallback) = usb_path
                         .as_deref()
                         .filter(|usb_path| browse_path_key(usb_path) != browse_path_key(path))
                     {
+                        crate::backend_log!(
+                            Warn,
+                            "playback",
+                            "library copy failed to play ({matched_by}), fell back to USB: {library_err} [library path: {path}]"
+                        );
                         let status = play_native_with_recovery(
                             playback,
-                            path,
+                            usb_fallback,
                             req.start_offset_ms,
                             req.start_ratio,
                         )?;
                         return Ok(play_resolved_track_data(
                             status,
-                            path,
+                            usb_fallback,
                             req.track_id,
                             &matched_by,
                             "usb",
-                            "USB (library unavailable)".to_string(),
+                            playback_source_label(false),
                             has_usb_context,
                         ));
                     }
@@ -664,7 +665,7 @@ impl BackendService {
                 req.track_id,
                 &matched_by,
                 "usb",
-                playback_source_label(req.origin.as_deref(), false, has_usb_context),
+                playback_source_label(false),
                 has_usb_context,
             ));
         }
@@ -2153,11 +2154,15 @@ impl BackendService {
 
         // Fast path: any origin (library, playlist, USB, history) may carry
         // the id of the row it was dispatched from. If that row is a
-        // genuine local track, resolve to it directly with a single indexed
-        // lookup -- no fingerprint scan needed. If it turns out to be
-        // USB-rooted (e.g. a playlist entry created before this fix, still
-        // pointing at a stale placeholder), fall through to the
-        // fingerprint/title search below so it can self-heal.
+        // genuine local track whose file is still on disk, resolve to it
+        // directly with a single indexed lookup -- no fingerprint scan
+        // needed. If it turns out to be USB-rooted (e.g. a playlist entry
+        // created before this fix, still pointing at a stale placeholder),
+        // or its file has since moved/been deleted, fall through to the
+        // fingerprint/title search below so it can self-heal onto a live
+        // library copy. The stale row is kept as a last-resort fallback in
+        // case the search finds nothing better.
+        let mut weak_self: Option<ResolvePlaybackSourceData> = None;
         if let Some(id) = req.track_id.as_deref().filter(|id| !id.trim().is_empty()) {
             let mut stmt =
                 conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks WHERE id = ?1"))?;
@@ -2167,22 +2172,26 @@ impl BackendService {
             if let Some(track) = track
                 && !is_usb_rooted(&track.file_path)
             {
-                return Ok(ResolvePlaybackSourceData {
+                let data = ResolvePlaybackSourceData {
                     resolved_path: Some(track.file_path.clone()),
                     matched_by: "self".to_string(),
                     track_id: Some(track.id),
-                });
+                };
+                if file_path_exists(&track.file_path) {
+                    return Ok(data);
+                }
+                weak_self = Some(data);
             }
         }
 
         let title = req.title.trim();
         let artist = req.artist.trim();
         if title.is_empty() || artist.is_empty() {
-            return Ok(ResolvePlaybackSourceData {
+            return Ok(weak_self.unwrap_or_else(|| ResolvePlaybackSourceData {
                 resolved_path: None,
                 matched_by: "none".to_string(),
                 track_id: None,
-            });
+            }));
         }
 
         let fingerprint = build_track_match_fingerprint(title, artist, req.album.as_deref());
@@ -2222,11 +2231,11 @@ impl BackendService {
             });
         }
 
-        Ok(ResolvePlaybackSourceData {
+        Ok(weak_self.unwrap_or_else(|| ResolvePlaybackSourceData {
             resolved_path: None,
             matched_by: "none".to_string(),
             track_id: None,
-        })
+        }))
     }
 
     pub fn create_playlist(&self, req: CreatePlaylistRequest) -> BackendResult<CreatePlaylistData> {
@@ -3277,8 +3286,16 @@ fn path_stem_lower(value: &str) -> String {
 }
 
 fn best_candidate(candidates: Vec<Track>, req: &ResolvePlaybackSourceRequest) -> Option<Track> {
+    // Track the best-scoring candidate whose file is actually on disk
+    // separately from the best overall. A stale/duplicate library row
+    // pointing at a moved-or-deleted file must never win over a live copy
+    // of the same track, however well it scores -- but if nothing is on
+    // disk we still return the best guess so the caller's USB fallback (and
+    // the "file not found" surfacing) can take over.
     let mut best: Option<Track> = None;
     let mut best_score = -1i32;
+    let mut best_on_disk: Option<Track> = None;
+    let mut best_on_disk_score = -1i32;
     for candidate in candidates {
         // A known file-size mismatch is stronger evidence of "different
         // file" than any positive score contribution elsewhere can
@@ -3290,12 +3307,18 @@ fn best_candidate(candidates: Vec<Track>, req: &ResolvePlaybackSourceRequest) ->
             continue;
         }
         let score = score_playback_candidate(&candidate, req);
+        if score > best_on_disk_score && file_path_exists(&candidate.file_path) {
+            best_on_disk_score = score;
+            best_on_disk = Some(candidate.clone());
+        }
         if score > best_score {
             best_score = score;
             best = Some(candidate);
         }
     }
-    best.filter(|_| best_score >= 24)
+    best_on_disk
+        .filter(|_| best_on_disk_score >= 24)
+        .or_else(|| best.filter(|_| best_score >= 24))
 }
 
 /// Stable in-place sort of a track page by one of the frontend column keys.
@@ -5589,21 +5612,9 @@ mod tests {
     }
 
     #[test]
-    fn playback_source_label_matches_origin_and_resolution_context() {
-        assert_eq!(playback_source_label(Some("local"), true, false), "Library");
-        assert_eq!(
-            playback_source_label(Some("playlist"), true, false),
-            "Library"
-        );
-        assert_eq!(
-            playback_source_label(Some("usb"), true, true),
-            "Library (matched)"
-        );
-        assert_eq!(playback_source_label(Some("history"), false, true), "USB");
-        assert_eq!(
-            playback_source_label(Some("history"), false, false),
-            "Local file"
-        );
+    fn playback_source_label_states_only_where_playback_comes_from() {
+        assert_eq!(playback_source_label(true), "Library");
+        assert_eq!(playback_source_label(false), "USB");
     }
 
     #[test]
@@ -5675,6 +5686,108 @@ mod tests {
             .expect("resolve playback source");
         assert_eq!(result.matched_by, "hash");
         assert_eq!(result.track_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn resolve_playback_source_fast_path_skips_row_whose_file_is_missing() {
+        let (dir, service) = test_service();
+        let live_path = dir.path().join("live.mp3");
+        std::fs::write(&live_path, b"x").expect("write live file");
+        let live_path = live_path.to_string_lossy().to_string();
+
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(&conn, "stale", "Song", "Artist", "/music/gone.mp3", None, None, false);
+        insert_full_track(&conn, "live", "Song", "Artist", &live_path, None, None, false);
+        drop(conn);
+
+        let result = service
+            .resolve_playback_source(ResolvePlaybackSourceRequest {
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                bpm: None,
+                file_path: None,
+                file_size_bytes: None,
+                track_id: Some("stale".to_string()),
+            })
+            .expect("resolve playback source");
+        assert_eq!(result.resolved_path.as_deref(), Some(live_path.as_str()));
+        assert_eq!(result.track_id.as_deref(), Some("live"));
+    }
+
+    #[test]
+    fn resolve_playback_source_best_candidate_prefers_file_on_disk() {
+        let (dir, service) = test_service();
+        let live_path = dir.path().join("live.mp3");
+        std::fs::write(&live_path, b"x").expect("write live file");
+        let live_path = live_path.to_string_lossy().to_string();
+
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(&conn, "stale", "Song", "Artist", "/music/gone.mp3", None, None, false);
+        insert_full_track(&conn, "live", "Song", "Artist", &live_path, None, None, false);
+        drop(conn);
+
+        let result = service
+            .resolve_playback_source(ResolvePlaybackSourceRequest {
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                bpm: None,
+                file_path: None,
+                file_size_bytes: None,
+                track_id: None,
+            })
+            .expect("resolve playback source");
+        assert_eq!(result.resolved_path.as_deref(), Some(live_path.as_str()));
+        assert_eq!(result.track_id.as_deref(), Some("live"));
+    }
+
+    #[test]
+    fn resolve_playback_source_falls_back_to_missing_file_row_when_nothing_on_disk() {
+        // The USB fallback in play_resolved_track relies on still getting a
+        // library path here even when its file is gone -- don't regress that.
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(&conn, "stale", "Song", "Artist", "/music/gone.mp3", None, None, false);
+        drop(conn);
+
+        let result = service
+            .resolve_playback_source(ResolvePlaybackSourceRequest {
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: None,
+                bpm: None,
+                file_path: None,
+                file_size_bytes: None,
+                track_id: None,
+            })
+            .expect("resolve playback source");
+        assert_eq!(result.matched_by, "hash");
+        assert_eq!(result.resolved_path.as_deref(), Some("/music/gone.mp3"));
+    }
+
+    #[test]
+    fn resolve_playback_source_keeps_missing_self_row_as_last_resort() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(&conn, "stale", "Song", "Artist", "/music/gone.mp3", None, None, false);
+        drop(conn);
+
+        // Metadata that matches nothing by fingerprint or title, so the search
+        // passes come up empty and the missing-file self row is all we have.
+        let result = service
+            .resolve_playback_source(ResolvePlaybackSourceRequest {
+                title: "Totally Different".to_string(),
+                artist: "Nobody".to_string(),
+                album: None,
+                bpm: None,
+                file_path: None,
+                file_size_bytes: None,
+                track_id: Some("stale".to_string()),
+            })
+            .expect("resolve playback source");
+        assert_eq!(result.matched_by, "self");
+        assert_eq!(result.resolved_path.as_deref(), Some("/music/gone.mp3"));
     }
 
     #[test]

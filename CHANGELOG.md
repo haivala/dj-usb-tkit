@@ -30,6 +30,18 @@
 
 ## Unreleased
 
+
+## 0.1.34
+
+- **Fix:** playing a track from a USB playlist now plays the library copy whenever
+  the library actually has the file on disk, instead of sometimes falling through
+  to the USB copy and reporting a misleading "library unavailable". Playback
+  resolution now skips library rows whose file has moved or been deleted and heals
+  onto a live copy of the same track.
+- **Improvement:** the playback status line now states only where a track is
+  playing from — `Library` or `USB` with no "(matched)" /  "(library unavailable)" qualifier. 
+  When playback does fall back from the library copy to a USB copy, the reason is recorded 
+  in the Event Log.
 - **Fix:** the playlist panel again offers "Analyze Missing Tracks" for every track missing
   waveform/BPM/duration, including tracks imported into the library from a
   USB drive — previously the button was hidden for those and the export failed later at the

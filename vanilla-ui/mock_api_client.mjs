@@ -431,10 +431,9 @@ export function createMockInvoke({ state, normalizePath, constants }) {
       if (!played?.ok) return played;
 
       const source = libraryPath ? "library" : "usb";
-      const externalOrigin = ["usb", "history"].includes(String(req.origin || "").toLowerCase());
-      const sourceLabel = source === "library"
-        ? (externalOrigin ? "Library (matched)" : "Library")
-        : (externalOrigin && hasUsbContext ? "USB" : "Local file");
+      // Mirrors backend playback_source_label: state only where playback
+      // comes from, no "how it resolved" qualifier.
+      const sourceLabel = source === "library" ? "Library" : "USB";
       return {
         ok: true,
         data: {
