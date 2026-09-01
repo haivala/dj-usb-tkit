@@ -30,6 +30,16 @@
 
 ## Unreleased
 
+- **Improvement:** the CDJ format-compatibility badge (the per-track format cell
+  and its tooltip) is now computed in Rust (`service::format_compat`) and shipped
+  as a `formatCompat` field on every track; the frontend just renders it. The
+  ~120-line codec rule table left `vanilla-ui/track_table.mjs`, and the WAV
+  "will be auto-converted on export" verdict now shares one predicate
+  (`WavFormatIssue::is_export_autofixable`) with the export copy path so the two
+  can't disagree.
+- **Fix:** an MP3 whose reported average bitrate exceeds 320 kbps is no longer
+  flagged as unsupported -- a CBR MPEG Layer III stream can't exceed its tier's
+  ceiling, so a higher average just means VBR, which CDJs play fine.
 - **Chore:** removed `vanilla-ui/mock_api_client.mjs`, the ~1100-line browser/dev
   re-implementation of the backend. It was only reachable from a browser-preview
   fallback and one unit test (the Playwright suite injects its own per-spec

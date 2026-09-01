@@ -55,6 +55,15 @@ impl WavFormatIssue {
             _ => None,
         }
     }
+
+    /// Whether the export pipeline can losslessly rewrite this `fmt ` chunk to
+    /// a standard PCM/IEEE-float header (see `copy_wav_normalized_if_needed`).
+    /// `ExtensibleOther` cannot be converted safely and stays a hard warning.
+    /// Single source of truth shared by the export copy path and the
+    /// format-compatibility badge (`service::format_compat`).
+    pub fn is_export_autofixable(self) -> bool {
+        matches!(self, WavFormatIssue::ExtensiblePcm)
+    }
 }
 
 /// Walks RIFF chunks looking for `fmt `, reading only the bytes needed

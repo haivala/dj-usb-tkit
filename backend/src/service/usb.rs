@@ -75,6 +75,8 @@ fn build_usb_track_index(
             let resolved_file_path = resolve_usb_side_path(usb_root, &t.track_file_path)
                 .unwrap_or_else(|| t.track_file_path.clone());
             let usb_analysis_path = resolve_usb_side_path(usb_root, &t.anlz_path);
+            let format_ext = crate::utils::format_ext_from_path(&t.track_file_path)
+                .or_else(|| t.file_name.as_deref().and_then(crate::utils::format_ext_from_path));
             (
                 t.id,
                 UsbTrack {
@@ -95,13 +97,14 @@ fn build_usb_track_index(
                     },
                     key,
                     file_path: resolved_file_path,
-                    format_ext: crate::utils::format_ext_from_path(&t.track_file_path).or_else(
-                        || {
-                            t.file_name
-                                .as_deref()
-                                .and_then(crate::utils::format_ext_from_path)
-                        },
+                    format_compat: super::format_compat::compute_format_compat(
+                        format_ext.as_deref(),
+                        None,
+                        None,
+                        None,
+                        None,
                     ),
+                    format_ext,
                     usb_media_path: Some(t.track_file_path.clone()),
                     artwork_data_url: None,
                     artwork_path,
@@ -326,6 +329,16 @@ fn hydrate_usb_track_in_place(track: &mut UsbTrack) {
     if track.artwork_data_url.is_none() {
         track.artwork_data_url = track.artwork_path.as_deref().and_then(artwork_path_to_data_url);
     }
+    // USB rows only carry `format_ext` -- no sample rate / bit depth / bitrate
+    // and no WAV extensible-header flag -- so this only ever flags a genuinely
+    // unrecognised extension. Mirrors `Track.format_compat`.
+    track.format_compat = super::format_compat::compute_format_compat(
+        track.format_ext.as_deref(),
+        None,
+        None,
+        None,
+        None,
+    );
 }
 
 /// Filter → whole-list aggregates → sort → offset-slice → hydrate the page.
@@ -1568,6 +1581,7 @@ impl BackendService {
                                         key: None,
                                         file_path: String::new(),
                                         format_ext: None,
+                                        format_compat: crate::models::FormatCompat::default(),
                                         usb_media_path: None,
                                         artwork_path: None,
                                         artwork_data_url: None,
@@ -2032,11 +2046,14 @@ impl BackendService {
             true,
             edb_index.as_ref(),
         ) {
-            Some((source, track)) => Ok(InspectUsbTrackData {
-                source,
-                track,
-                warnings,
-            }),
+            Some((source, mut track)) => {
+                hydrate_usb_track_in_place(&mut track);
+                Ok(InspectUsbTrackData {
+                    source,
+                    track,
+                    warnings,
+                })
+            }
             None => Err(BackendError::Validation(format!(
                 "trackId {track_id} not found on USB metadata sources"
             ))),
@@ -2140,11 +2157,14 @@ impl BackendService {
                     false,
                     edb_index.as_ref(),
                 ) {
-                    Some((source, track)) => InspectUsbTrackResult {
-                        track_id: item.track_id,
-                        source: Some(source),
-                        track: Some(track),
-                    },
+                    Some((source, mut track)) => {
+                        hydrate_usb_track_in_place(&mut track);
+                        InspectUsbTrackResult {
+                            track_id: item.track_id,
+                            source: Some(source),
+                            track: Some(track),
+                        }
+                    }
                     None => InspectUsbTrackResult {
                         track_id: item.track_id,
                         source: None,
@@ -2356,6 +2376,8 @@ fn resolve_usb_track_from_sources(
                 let waveform_preview = usb_analysis_path
                     .as_deref()
                     .and_then(load_waveform_preview_from_analysis_path);
+                let format_ext = crate::utils::format_ext_from_path(&t.track_file_path)
+                    .or_else(|| t.file_name.as_deref().and_then(crate::utils::format_ext_from_path));
                 return Some((
                     "pdb".to_string(),
                     UsbTrack {
@@ -2376,13 +2398,14 @@ fn resolve_usb_track_from_sources(
                         },
                         key,
                         file_path: resolved_file_path,
-                        format_ext: crate::utils::format_ext_from_path(&t.track_file_path).or_else(
-                            || {
-                                t.file_name
-                                    .as_deref()
-                                    .and_then(crate::utils::format_ext_from_path)
-                            },
+                        format_compat: super::format_compat::compute_format_compat(
+                            format_ext.as_deref(),
+                            None,
+                            None,
+                            None,
+                            None,
                         ),
+                        format_ext,
                         usb_media_path: Some(t.track_file_path.clone()),
                         artwork_data_url: include_artwork_data_url
                             .then(|| artwork_path.as_deref().and_then(artwork_path_to_data_url))
@@ -2448,6 +2471,7 @@ mod tests {
             key: None,
             file_path: file_path.to_string(),
             format_ext: crate::utils::format_ext_from_path(file_path),
+            format_compat: Default::default(),
             usb_media_path: None,
             artwork_path: None,
             artwork_data_url: None,

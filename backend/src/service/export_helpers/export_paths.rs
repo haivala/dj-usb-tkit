@@ -180,7 +180,8 @@ pub fn copy_wav_normalized_if_needed(source: &Path, target: &Path) -> BackendRes
         Some(info) => info,
         None => return copy_if_different(source, target),
     };
-    if crate::wav_format::classify(&info) != Some(crate::wav_format::WavFormatIssue::ExtensiblePcm)
+    if !crate::wav_format::classify(&info)
+        .is_some_and(crate::wav_format::WavFormatIssue::is_export_autofixable)
     {
         return copy_if_different(source, target);
     }

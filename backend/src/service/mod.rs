@@ -7,6 +7,7 @@ mod diagnostics;
 mod export;
 pub mod export_helpers;
 mod export_log;
+pub(crate) mod format_compat;
 mod repair;
 mod usb;
 pub mod usb_backups;
@@ -1610,6 +1611,16 @@ impl BackendService {
                     existing.clone()
                 } else {
                     let now = now();
+                    let wav_extensible_kind = scanned
+                        .wav_extensible_kind
+                        .map(|kind| kind.as_db_str().to_string());
+                    let format_compat = format_compat::compute_format_compat(
+                        scanned.format_ext.as_deref(),
+                        scanned.sample_rate_hz,
+                        scanned.bit_depth,
+                        scanned.bitrate_kbps,
+                        wav_extensible_kind.as_deref(),
+                    );
                     Track {
                         id: scanned.path.clone(),
                         title: scanned.title,
@@ -1625,9 +1636,7 @@ impl BackendService {
                         sample_rate_hz: scanned.sample_rate_hz,
                         bit_depth: scanned.bit_depth,
                         bitrate_kbps: scanned.bitrate_kbps,
-                        wav_extensible_kind: scanned
-                            .wav_extensible_kind
-                            .map(|kind| kind.as_db_str().to_string()),
+                        wav_extensible_kind,
                         duration_ms: None,
                         artwork_path: None,
                         artwork_data_url: None,
@@ -1640,6 +1649,7 @@ impl BackendService {
                         is_usb_path: false,
                         // Freshly scanned, not yet indexed -- no analysis.
                         analysis_ready: false,
+                        format_compat,
                     }
                 }
             })
@@ -3357,6 +3367,21 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
     let analysis_ready =
         has_core_analysis_fields(waveform_peaks_path.as_deref(), bpm, duration_ms);
 
+    let format_ext: Option<String> = row
+        .get::<_, Option<String>>(9)?
+        .or_else(|| crate::utils::format_ext_from_path(&file_path));
+    let sample_rate_hz: Option<u32> = row.get(10)?;
+    let bit_depth: Option<u8> = row.get(11)?;
+    let bitrate_kbps: Option<u32> = row.get(12)?;
+    let wav_extensible_kind: Option<String> = row.get("wav_extensible_kind").unwrap_or(None);
+    let format_compat = format_compat::compute_format_compat(
+        format_ext.as_deref(),
+        sample_rate_hz,
+        bit_depth,
+        bitrate_kbps,
+        wav_extensible_kind.as_deref(),
+    );
+
     Ok(Track {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -3370,16 +3395,12 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
         // Backend-owned: every track-returning command guarantees a format on
         // the wire. Fall back to the file-path extension for legacy NULL rows
         // and import paths that don't set the column (master.db, USB merge).
-        format_ext: row
-            .get::<_, Option<String>>(9)?
-            .or_else(|| crate::utils::format_ext_from_path(&file_path)),
+        format_ext,
         file_path,
-        sample_rate_hz: row.get(10)?,
-        bit_depth: row.get(11)?,
-        bitrate_kbps: row.get(12)?,
-        // Looked up by name (not position) since callers select the tracks
-        // columns with varying shapes; some queries omit this column.
-        wav_extensible_kind: row.get("wav_extensible_kind").unwrap_or(None),
+        sample_rate_hz,
+        bit_depth,
+        bitrate_kbps,
+        wav_extensible_kind,
         duration_ms,
         artwork_path,
         artwork_data_url,
@@ -3393,6 +3414,7 @@ fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Re
         // apply_is_usb_path); internal-only callers leave this false.
         is_usb_path: false,
         analysis_ready,
+        format_compat,
     })
 }
 
@@ -4286,6 +4308,7 @@ mod tests {
             master_db_source: false,
             is_usb_path: false,
             analysis_ready: false,
+            format_compat: Default::default(),
         }
     }
 

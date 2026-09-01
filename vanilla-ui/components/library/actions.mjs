@@ -68,6 +68,20 @@ function toFiniteOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+const FORMAT_COMPAT_SEVERITIES = new Set(["ok", "autofix", "warn"]);
+
+// Coerce the backend `formatCompat` object into a stable `{ severity, warning }`
+// shape. The rule itself lives in Rust (service::format_compat) -- this only
+// guards against a missing/legacy field.
+function normalizeFormatCompat(value) {
+  const severityRaw = String(value?.severity || "ok").toLowerCase();
+  const severity = FORMAT_COMPAT_SEVERITIES.has(severityRaw) ? severityRaw : "ok";
+  const warning = typeof value?.warning === "string" && value.warning.trim()
+    ? value.warning
+    : null;
+  return { severity, warning };
+}
+
 export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
   const {
     toPlayableUrl = () => null,
@@ -110,7 +124,9 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     sampleRateHz: toFiniteOrNull(track?.sampleRateHz),
     bitDepth: toFiniteOrNull(track?.bitDepth),
     bitrateKbps: toFiniteOrNull(track?.bitrateKbps),
-    wavExtensibleKind: track?.wavExtensibleKind ?? null,
+    // Backend-owned CDJ format-compatibility verdict (service::format_compat).
+    // `{ severity: "ok" | "autofix" | "warn", warning: string | null }`.
+    formatCompat: normalizeFormatCompat(track?.formatCompat),
     waveformPreview,
     waveformColorData: Array.isArray(track?.waveformColorData) ? track.waveformColorData : null,
     createdAt: track?.createdAt || "",

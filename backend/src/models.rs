@@ -126,6 +126,35 @@ pub struct Track {
     /// treats this as the only signal for "needs analysis". See
     /// `service::has_core_analysis_fields`.
     pub analysis_ready: bool,
+    /// CDJ playback-compatibility judgement for this track's audio format,
+    /// derived from `format_ext` + the technical fields above. Computed fresh
+    /// on every read (see `service::format_compat`) -- the frontend renders the
+    /// badge/tooltip and never re-derives the rule.
+    #[serde(default)]
+    pub format_compat: FormatCompat,
+}
+
+/// How a track's audio format is expected to behave on CDJ hardware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FormatCompatSeverity {
+    /// No known playback problem.
+    #[default]
+    Ok,
+    /// Plays as-is, but the source has a header quirk the export pipeline
+    /// rewrites automatically (WAVE_FORMAT_EXTENSIBLE wrapping plain PCM).
+    Autofix,
+    /// May not play on CDJ hardware and there's nothing we can safely do.
+    Warn,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormatCompat {
+    pub severity: FormatCompatSeverity,
+    /// Human-readable reason, present whenever `severity` isn't `Ok`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -929,6 +958,12 @@ pub struct UsbTrack {
     /// Explicit edits) don't get silently merged.
     #[serde(default)]
     pub file_size_bytes: Option<i64>,
+    /// CDJ format-compatibility badge (mirrors `Track.format_compat`). USB rows
+    /// only carry `format_ext`, so this is `ok` for every known extension and
+    /// only flags a genuinely unrecognised one. Filled in during page
+    /// hydration -- see `service::usb::hydrate_usb_track_in_place`.
+    #[serde(default)]
+    pub format_compat: FormatCompat,
 }
 
 impl UsbTrack {

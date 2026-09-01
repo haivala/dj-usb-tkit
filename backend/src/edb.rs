@@ -406,6 +406,7 @@ pub fn try_read_track_index_from_edb_with_conn(
             .as_deref()
             .and_then(|p| resolve_usb_side_path(usb_root, p))
             .unwrap_or_default();
+        let format_ext = path.as_deref().and_then(crate::utils::format_ext_from_path);
         Ok((
             content_id,
             UsbTrack {
@@ -418,7 +419,14 @@ pub fn try_read_track_index_from_edb_with_conn(
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
                 key: key_name,
                 file_path: resolved_file_path,
-                format_ext: path.as_deref().and_then(crate::utils::format_ext_from_path),
+                format_compat: crate::service::format_compat::compute_format_compat(
+                    format_ext.as_deref(),
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                format_ext,
                 usb_media_path: path,
                 artwork_path: image_path
                     .as_deref()
@@ -769,6 +777,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             } else {
                 path.clone().unwrap_or_default()
             };
+            let format_ext = path.as_deref().and_then(crate::utils::format_ext_from_path);
             Ok(UsbTrack {
                 id: content_id.to_string(),
                 local_track_id: None,
@@ -779,7 +788,14 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
                 key: key_name,
                 file_path: resolved_file_path,
-                format_ext: path.as_deref().and_then(crate::utils::format_ext_from_path),
+                format_compat: crate::service::format_compat::compute_format_compat(
+                    format_ext.as_deref(),
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                format_ext,
                 usb_media_path: path,
                 artwork_data_url: None,
                 artwork_path: resolved_image_path,

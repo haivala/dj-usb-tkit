@@ -231,7 +231,9 @@ function formatTrackFormatDetail(sampleRate, bitDepth, bitrate) {
 
 function describeTrackFormat(track) {
   // Backend-owned: every track-returning command populates `formatExt` (falling
-  // back to the file-path extension server-side), so the frontend never infers.
+  // back to the file-path extension server-side) and `formatCompat` (severity +
+  // warning, computed in Rust by service::format_compat). The frontend renders
+  // the badge and never re-derives the CDJ-compatibility rule.
   const ext = String(track?.formatExt || "").trim().toLowerCase();
   const label = ext ? ext.toUpperCase() : "Unknown";
   const sampleRate = Number(track?.sampleRateHz || 0) || null;
@@ -239,99 +241,18 @@ function describeTrackFormat(track) {
   const bitrate = Number(track?.bitrateKbps || 0) || null;
   const detail = formatTrackFormatDetail(sampleRate, bitDepth, bitrate);
 
-  if (ext === "wav") {
-    const wavExtensibleKind = track?.wavExtensibleKind || null;
-    if (wavExtensibleKind === "extensible_pcm") {
-      return {
-        label,
-        kind: "autofix",
-        warning: "Uses an extended WAV header (WAVE_FORMAT_EXTENSIBLE) that some CDJs reject. Will be automatically converted to standard PCM on export.",
-        detail,
-      };
-    }
-    if (wavExtensibleKind === "extensible_other") {
-      return {
-        label,
-        kind: "warn",
-        warning: "Uses an extended WAV header with a non-standard subformat - cannot be safely converted and may not play on CDJ hardware.",
-        detail,
-      };
-    }
-  }
-
-  const warning = validateFormatCompatibility(ext, sampleRate, bitDepth, bitrate);
-  return { label, kind: warning ? "warn" : null, warning, detail };
+  const compat = track?.formatCompat || {};
+  const severity = String(compat.severity || "ok");
+  return {
+    label,
+    detail,
+    kind: severity === "ok" ? null : severity,
+    warning: compat.warning || null,
+  };
 }
 
 function formatTrackFormatTooltip(formatInfo) {
   if (formatInfo.warning && formatInfo.detail) return `${formatInfo.detail} — ${formatInfo.warning}`;
   return formatInfo.warning || formatInfo.detail || "";
-}
-
-function validateFormatCompatibility(ext, sampleRate, bitDepth, bitrate) {
-  const inSet = (value, set) => value != null && set.includes(value);
-  const inRange = (value, min, max) => value != null && value >= min && value <= max;
-
-  const ratesA = [44100, 48000, 96000];
-  const ratesB = [44100, 48000, 88200, 96000];
-  const ratesAac = [16000, 22050, 24000, 32000, 44100, 48000];
-  const bitsLossless = [16, 24];
-
-  switch (ext) {
-    case "wav":
-      if (sampleRate == null || bitDepth == null) return null;
-      if (!inSet(sampleRate, ratesA) || !inSet(bitDepth, bitsLossless)) {
-        return "Outside WAV support (16/24-bit, 44.1/48/96 kHz)";
-      }
-      return null;
-    case "mp3":
-      if (sampleRate == null || bitrate == null) return null;
-      if (!inSet(sampleRate, ratesAac)) {
-        return "Outside MP3 sample-rate support";
-      }
-      if (inSet(sampleRate, [16000, 22050, 24000]) && !inRange(bitrate, 8, 160)) {
-        return "Outside MP3 bitrate support for 16/22.05/24 kHz";
-      }
-      if (inSet(sampleRate, [32000, 44100, 48000]) && !inRange(bitrate, 32, 320)) {
-        return "Outside MP3 bitrate support for 32/44.1/48 kHz";
-      }
-      return null;
-    case "aac":
-    case "mp4":
-      if (sampleRate == null || bitrate == null) return null;
-      if (!inSet(sampleRate, ratesAac) || !inRange(bitrate, 16, 320)) {
-        return "Outside AAC support (16-320 kbps, 16/22.05/24/32/44.1/48 kHz)";
-      }
-      return null;
-    case "m4a":
-      if (sampleRate == null || (bitrate == null && bitDepth == null)) return null;
-      // Could be AAC or ALAC. Pass if either profile matches.
-      if (
-        inSet(sampleRate, ratesAac)
-        && inRange(bitrate, 16, 320)
-      ) {
-        return null;
-      }
-      if (inSet(sampleRate, ratesB) && inSet(bitDepth, bitsLossless)) {
-        return null;
-      }
-      return "Outside AAC/ALAC support for .m4a";
-    case "flac":
-    case "fla":
-      if (sampleRate == null || bitDepth == null) return null;
-      if (!inSet(sampleRate, ratesB) || !inSet(bitDepth, bitsLossless)) {
-        return "Outside FLAC support (16/24-bit, 44.1/48/88.2/96 kHz)";
-      }
-      return null;
-    case "aif":
-    case "aiff":
-      if (sampleRate == null || bitDepth == null) return null;
-      if (!inSet(sampleRate, ratesB) || !inSet(bitDepth, bitsLossless)) {
-        return "Outside AIFF support (16/24-bit, 44.1/48/88.2/96 kHz)";
-      }
-      return null;
-    default:
-      return "Unlisted format";
-  }
 }
 

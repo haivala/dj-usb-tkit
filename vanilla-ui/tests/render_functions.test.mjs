@@ -144,11 +144,14 @@ test("renderTrackTable empty states use one full-width grid empty cell", () => {
   }
 });
 
-test("createTrackRow renders the expected wav format badge variants", () => {
+test("createTrackRow renders the format badge variant the backend's formatCompat asks for", () => {
   const autofix = formatBadgeRow({
     filePath: "/media/track.wav",
     formatExt: "wav",
-    wavExtensibleKind: "extensible_pcm"
+    formatCompat: {
+      severity: "autofix",
+      warning: "Uses an extended WAV header (WAVE_FORMAT_EXTENSIBLE) that some CDJs reject. Will be automatically converted to standard PCM on export."
+    }
   });
   assert.ok(autofix.includes('class="format-badge autofix"'));
   assert.ok(!autofix.includes('class="format-badge warn"'));
@@ -157,7 +160,10 @@ test("createTrackRow renders the expected wav format badge variants", () => {
   const warning = formatBadgeRow({
     filePath: "/media/track.wav",
     formatExt: "wav",
-    wavExtensibleKind: "extensible_other"
+    formatCompat: {
+      severity: "warn",
+      warning: "Uses an extended WAV header with a non-standard subformat - cannot be safely converted and may not play on CDJ hardware."
+    }
   });
   assert.ok(warning.includes('class="format-badge warn"'));
   assert.ok(!warning.includes('class="format-badge autofix"'));
@@ -166,7 +172,7 @@ test("createTrackRow renders the expected wav format badge variants", () => {
   const plain = formatBadgeRow({
     filePath: "/media/track.wav",
     formatExt: "wav",
-    wavExtensibleKind: null,
+    formatCompat: { severity: "ok", warning: null },
     sampleRateHz: 44100,
     bitDepth: 16
   });
