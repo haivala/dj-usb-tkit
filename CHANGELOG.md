@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.1.34
+
 - **Fix:** the shimmer on the progress-footer bar now sweeps the full width of the
   track instead of being confined to the filled portion, so it no longer stalls
   after a short travel and restarts while a job is still near 0%.
