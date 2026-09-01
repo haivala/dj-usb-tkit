@@ -32,68 +32,19 @@
 
 - **Fix:** the playlist panel header shows the whole playlist's track count, not
   just the number of rows loaded into the current page.
-- **Improvement:** more per-track and per-request logic moved to the backend:
-  whether a USB row still needs a deeper metadata fetch is a `needsHydration`
-  flag the backend sets; `analyze_new_tracks` accepts the raw BPM-range string
-  and parses it itself; the history-session date and job-progress status text
-  are always fully resolved server-side. The matching frontend helpers
-  (`usbTrackNeedsHydration` + 5 predicates, `parseAnalysisBpmRange`, the JS BPM
-  preset list, the job-stage fallback-text table) are gone.
-- **Improvement:** the USB diagnostics / parity / repair reports are now fully
-  assembled by the backend. The "Player Counter Snapshot" section arrives as a
-  ready `DiagSection`, the strict-parity "Issues" badges as an `issueLabels`
-  list, the player-menu divergence banner as a `summary` string with
-  `canSync` / `canRestore` flags, and each repair fix carries `alwaysApplied`
-  and its full description — so the frontend no longer hand-builds any of them
-  or regex-matches fix titles.
-- **Improvement:** which player-menu categories can't be removed (TRACK / PLAYLIST /
-  FOLDER / SEARCH / HISTORY) is now a `removable` flag the backend sets on each
-  `UsbPlayerMenuItem`, instead of a hard-coded kind set duplicated in the
-  frontend. `update_usb_player_menu_config` was already the authority.
-- **Improvement:** the playlist reorder-lock ("won't reorder on USB" in additive
-  export mode) is now owned entirely by the backend. Changing the export sync
-  mode calls a new lightweight `refresh_playlist_export_status` command (staged
-  PDB/eDB only, no USB rescan) instead of the frontend re-deriving `locksReorder`
-  from a copy of the rule.
-- **Improvement:** the in-app update check moved to the backend — a new
-  `check_for_update` command does the GitHub Releases fetch, the semver
-  comparison, and the `**Severity:** critical` scan in Rust
-  (`backend/src/service/update_check.rs`, with unit tests). The renderer keeps
-  only the notice/banner rendering. The HTTP call no longer runs from the
-  webview.
-- **Improvement:** the Event Log and the status-bar "(N warning(s))" count now read
-  each backend warning's `level` verbatim instead of guessing severity by
-  substring-scanning the message text. Every backend warning has been a typed
-  `{ level, code, message, source }` for a while; the frontend's
-  `classifyLogLevelFromText` heuristic and the "Auto analysis limit reached"
-  message-prefix match are gone (the latter keys off the `analysis.auto-select-limit`
-  code now).
-- **Improvement:** command failures now carry the backend error's `code` and
-  `details` onto the thrown error, so the playback "track not found" case is
-  recognised by its `NOT_FOUND` code instead of a regex on the English message.
-  This also revives the export "N/M tracks need analysis" message, which had been
-  silently falling through to the generic failure text because `details` was
-  dropped.
-- **Improvement:** the CDJ format-compatibility badge (the per-track format cell
-  and its tooltip) is now computed in Rust (`service::format_compat`) and shipped
-  as a `formatCompat` field on every track; the frontend just renders it. The
-  ~120-line codec rule table left `vanilla-ui/track_table.mjs`, and the WAV
-  "will be auto-converted on export" verdict now shares one predicate
-  (`WavFormatIssue::is_export_autofixable`) with the export copy path so the two
-  can't disagree.
 - **Fix:** an MP3 whose reported average bitrate exceeds 320 kbps is no longer
-  flagged as unsupported -- a CBR MPEG Layer III stream can't exceed its tier's
+  flagged as unsupported — a CBR MPEG Layer III stream can't exceed its tier's
   ceiling, so a higher average just means VBR, which CDJs play fine.
-- **Chore:** removed `vanilla-ui/mock_api_client.mjs`, the ~1100-line browser/dev
-  re-implementation of the backend. It was only reachable from a browser-preview
-  fallback and one unit test (the Playwright suite injects its own per-spec
-  stubs), and it forced every backend-owned derivation to be mirrored a second
-  time in JS. `api_client.mjs` is now just the Tauri wrapper.
-- **Improvement:** `track.bpm` is carried through frontend state as a number
-  everywhere (the realtime analysis patch previously stored a formatted string);
-  a single `formatBpm` helper owns the display formatting at render time. Dropped
-  the now-dead `searchText` field and the snake_case response-key fallbacks that
-  predated the backend serializing everything as camelCase.
+- **Fix:** a blocked USB export again shows the specific "N/M tracks need
+  analysis" (or missing-source-folder) reason instead of a generic failure line.
+- **Chore:** large sweep moving derived UI state out of the JS frontend into the
+  Rust backend, so each fact is computed once (with unit tests) and the frontend
+  just renders it — CDJ format-compatibility badges, Event Log warning severity,
+  the in-app update check (no longer an HTTP call from the webview), the export
+  reorder-lock, USB-row hydration state, the entire USB diagnostics / parity /
+  repair report, player-menu `removable` flags, BPM-range parsing, history-session
+  dates, and job-status text. Also removed `mock_api_client.mjs`, a ~1100-line
+  browser/dev re-implementation of the backend. No user-visible behavior change.
 
 ## 0.1.35
 
