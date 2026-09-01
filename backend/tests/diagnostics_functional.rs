@@ -3919,19 +3919,17 @@ fn repair_detects_unindexed_audio_under_contents() {
         "expected unindexed-audio issue detected: {:#?}",
         data.detected_issues
     );
+    // The reason it's manual-only is now baked into the fix's own description
+    // (no separate unsupported_items row duplicating it).
     assert!(
+        data.proposed_fixes.iter().any(|f| {
+            f.id == "manual_reimport_unindexed_audio"
+                && !f.supported
+                && f.description.contains("copy files to safety/media library")
+                && f.description.contains("See Event Log")
+        }),
+        "expected the manual-only unindexed-audio guidance fix with full detail: {:#?}",
         data.proposed_fixes
-            .iter()
-            .any(|f| f.id == "manual_reimport_unindexed_audio" && !f.supported),
-        "expected the manual-only unindexed-audio guidance fix: {:#?}",
-        data.proposed_fixes
-    );
-    assert!(
-        data.unsupported_items
-            .iter()
-            .any(|i| i.issue.contains("unindexed audio file")),
-        "expected an unsupported-item entry for the unindexed audio: {:#?}",
-        data.unsupported_items
     );
 }
 

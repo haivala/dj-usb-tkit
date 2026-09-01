@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+- **Improvement:** the USB diagnostics / parity / repair reports are now fully
+  assembled by the backend. The "Player Counter Snapshot" section arrives as a
+  ready `DiagSection`, the strict-parity "Issues" badges as an `issueLabels`
+  list, the player-menu divergence banner as a `summary` string with
+  `canSync` / `canRestore` flags, and each repair fix carries `alwaysApplied`
+  and its full description — so the frontend no longer hand-builds any of them
+  or regex-matches fix titles.
 - **Improvement:** which player-menu categories can't be removed (TRACK / PLAYLIST /
   FOLDER / SEARCH / HISTORY) is now a `removable` flag the backend sets on each
   `UsbPlayerMenuItem`, instead of a hard-coded kind set duplicated in the

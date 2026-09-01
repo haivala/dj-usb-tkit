@@ -96,31 +96,56 @@ test("renderRepairPreview handles no fixes and supported fix selection", () => {
   assert.equal(withFixes.el.applyRepairsBtn.disabled, true);
 });
 
-test("renderRepairPreview merges preview-only missing-audio manual review into one item", () => {
+test("renderRepairPreview renders each backend fix description verbatim and appends unsupported items", () => {
+  // The backend now bakes the full "why this is manual-only" text into the
+  // fix's `description` and doesn't emit a duplicate unsupportedItem for it.
   const { el } = renderPreview({
     detectedIssues: ["unindexed", "missing-audio"],
     proposedFixes: [
-      { title: "Manual Re-import Unindexed Audio", description: "placeholder", supported: false, destructive: false },
-      { title: "Remove Missing Audio References", description: "placeholder", supported: false, destructive: false }
+      {
+        id: "remove_missing_audio_references",
+        title: "Remove Missing Audio References",
+        description: "9 missing-audio reference(s) require manual review. Automatic removal is disabled while 13 canonical-path unindexed audio file(s) are present.",
+        supported: false,
+        destructive: false
+      }
     ],
     estimatedFileWrites: 0,
     estimatedFileDeletes: 0,
     unsupportedItems: [
-      { issue: "13 unindexed audio file(s) under Contents", reason: "Automatic deletion is intentionally disabled." },
-      {
-        issue: "9 missing-audio reference(s) require manual review",
-        reason: "Automatic removal is disabled while 13 unindexed audio file(s) are present."
-      }
+      { issue: "2 malformed USBANLZ entry/entries", reason: "Inspect Event Log entries." }
     ]
   });
 
   assert.match(el.diagRepairSummary.textContent, /2 issue\(s\).*0 fixable/);
   assert.equal(el.diagRepairFixes.children.length, 2);
-  assert.equal(el.diagRepairFixes.children[1].children[0].children[0].children[0].textContent, "Remove Missing Audio References");
+  assert.equal(el.diagRepairFixes.children[0].children[0].children[0].children[0].textContent, "Remove Missing Audio References");
   assert.match(
-    el.diagRepairFixes.children[1].children[0].children[1].textContent,
-    /9 missing-audio reference\(s\) require manual review.*13 unindexed audio file\(s\)/
+    el.diagRepairFixes.children[0].children[0].children[1].textContent,
+    /9 missing-audio reference\(s\) require manual review.*13 canonical-path unindexed audio file\(s\)/
   );
+  // The standalone unsupported item renders as its own row, unmodified.
+  assert.equal(el.diagRepairFixes.children[1].children[0].children[0].children[0].textContent, "2 malformed USBANLZ entry/entries");
+});
+
+test("renderRepairPreview locks a backend always-applied fix's checkbox checked", () => {
+  const { el } = renderPreview({
+    detectedIssues: ["a", "b"],
+    proposedFixes: [
+      { id: "repair_pdb_truncated_table_chain", title: "Truncated chain", description: "d", supported: true, destructive: false, alwaysApplied: true },
+      { id: "fix_regular", title: "Regular", description: "d", supported: true, destructive: false }
+    ],
+    estimatedFileWrites: 1,
+    estimatedFileDeletes: 0,
+    unsupportedItems: []
+  });
+
+  const lockedCheckbox = el.diagRepairFixes.children[0].children[0];
+  assert.equal(lockedCheckbox.checked, true);
+  assert.equal(lockedCheckbox.disabled, true);
+  // li -> content -> meta span (title, desc, meta)
+  assert.match(el.diagRepairFixes.children[0].children[1].children[2].textContent, /always applied/);
+  assert.equal(el.diagRepairFixes.children[1].children[0].disabled, false);
 });
 
 function makeHealthDot() {

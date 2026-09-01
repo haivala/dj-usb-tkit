@@ -3,80 +3,19 @@ import assert from "node:assert/strict";
 
 import { formatParityIssues } from "../components/usb/actions.mjs";
 
-test("formatParityIssues returns empty array at full parity", () => {
+// The "Issues" badges are computed in Rust now
+// (service::diagnostics::parity_issue_labels, tested there). The frontend just
+// passes `UsbParityPlaylistDetail.issueLabels` straight through.
+
+test("formatParityIssues returns the backend's issueLabels verbatim", () => {
   assert.deepEqual(
-    formatParityIssues({
-      pdbTracks: 10,
-      edbTracks: 10,
-      onlyInPdb: 0,
-      onlyInEdb: 0,
-      orderMismatch: false,
-      playlistIdMatch: true,
-      sortOrderMatch: true
-    }),
-    []
+    formatParityIssues({ issueLabels: ["+PDB 4", "order mismatch"] }),
+    ["+PDB 4", "order mismatch"]
   );
 });
 
-test("formatParityIssues shows +PDB only when both DBs have tracks", () => {
-  assert.deepEqual(
-    formatParityIssues({
-      pdbTracks: 10,
-      edbTracks: 6,
-      onlyInPdb: 4,
-      onlyInEdb: 0,
-      playlistIdMatch: true,
-      sortOrderMatch: true
-    }),
-    ["+PDB 4"]
-  );
-});
-
-test("formatParityIssues suppresses +PDB when eDB is 0", () => {
-  assert.deepEqual(
-    formatParityIssues({
-      pdbTracks: 50,
-      edbTracks: 0,
-      onlyInPdb: 50,
-      onlyInEdb: 0,
-      playlistIdMatch: false,
-      sortOrderMatch: false
-    }),
-    ["id mismatch", "sort mismatch"]
-  );
-});
-
-test("formatParityIssues shows structural issues", () => {
-  assert.deepEqual(
-    formatParityIssues({
-      pdbTracks: 10,
-      edbTracks: 10,
-      onlyInPdb: 0,
-      onlyInEdb: 0,
-      orderMismatch: true,
-      playlistIdMatch: true,
-      sortOrderMatch: true
-    }),
-    ["order mismatch"]
-  );
-});
-
-test("formatParityIssues shows multiple issues", () => {
-  const issues = formatParityIssues({
-    pdbTracks: 10,
-    edbTracks: 8,
-    onlyInPdb: 2,
-    onlyInEdb: 0,
-    playlistIdMatch: false,
-    sortOrderMatch: false,
-    pdbMissingCoreMetadata: 1,
-    dictionaryIdIssueTracks: 2
-  });
-  assert.deepEqual(issues, [
-    "+PDB 2",
-    "id mismatch",
-    "sort mismatch",
-    "PDB gaps 1",
-    "dict issues 2"
-  ]);
+test("formatParityIssues returns an empty array when there are no labels", () => {
+  assert.deepEqual(formatParityIssues({ issueLabels: [] }), []);
+  assert.deepEqual(formatParityIssues({}), []);
+  assert.deepEqual(formatParityIssues(null), []);
 });

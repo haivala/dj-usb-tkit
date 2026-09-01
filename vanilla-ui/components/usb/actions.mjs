@@ -12,15 +12,6 @@ import { resolveEmitStatus } from "../shared/track_actions.mjs";
 // belonged to the new one.
 export const USB_ROOT_LOCKING_JOB_TYPES = new Set(["usb_read", "usb_write", "diagnostics", "export"]);
 
-// Structural prerequisites that must always run before a strict-parity upgrade in the same
-// repair batch (see backend/src/service/repair.rs's REPAIR_FIX_DISPLAY_ORDER doc-comment for
-// why). Deselecting these while strict parity stays selected has no safe outcome, so the repair
-// preview locks their checkboxes checked instead of letting the user turn them off.
-const ALWAYS_APPLIED_FIX_IDS = new Set([
-  "repair_pdb_truncated_table_chain",
-  "repair_pdb_torn_growth_pages"
-]);
-
 export function isUsbRootChangeBlocked(state) {
   return !!state.activeJobId && USB_ROOT_LOCKING_JOB_TYPES.has(state.activeJobType);
 }
@@ -114,24 +105,10 @@ export function computeExportButtonState({
       : "Select a valid USB folder first"
   };
 }
+// Backend-owned: `UsbParityPlaylistDetail.issueLabels` is built in Rust
+// (service::diagnostics::parity_issue_labels). The frontend renders them.
 export function formatParityIssues(pd) {
-  const pdbTracks = Number(pd?.pdbTracks || 0);
-  const edbTracks = Number(pd?.edbTracks || 0);
-  const onlyInPdb = Number(pd?.onlyInPdb || 0);
-  const onlyInEdb = Number(pd?.onlyInEdb || 0);
-  return [
-    (onlyInPdb > 0 && edbTracks > 0) ? `+PDB ${onlyInPdb}` : "",
-    (onlyInEdb > 0 && pdbTracks > 0) ? `+eDB ${onlyInEdb}` : "",
-    pd?.playlistIdMatch === false ? "id mismatch" : "",
-    pd?.sortOrderMatch === false ? "sort mismatch" : "",
-    pd?.orderMismatch ? "order mismatch" : "",
-    Number(pd?.pdbDuplicateEntries || 0) ? `dup PDB ${pd.pdbDuplicateEntries}` : "",
-    Number(pd?.pdbMissingCoreMetadata || 0) ? `PDB gaps ${pd.pdbMissingCoreMetadata}` : "",
-    Number(pd?.edbMissingCoreMetadata || 0) ? `eDB gaps ${pd.edbMissingCoreMetadata}` : "",
-    Number(pd?.pathMismatchTracks || 0) ? `path mismatch ${pd.pathMismatchTracks}` : "",
-    Number(pd?.dictionaryIdIssueTracks || 0) ? `dict issues ${pd.dictionaryIdIssueTracks}` : "",
-    Number(pd?.artworkMismatchTracks || 0) ? `art mismatch ${pd.artworkMismatchTracks}` : "",
-  ].filter(Boolean);
+  return Array.isArray(pd?.issueLabels) ? pd.issueLabels : [];
 }
 export function diagStatusIcon(status) {
   if (status === "PASS") return "\u2713";
@@ -180,46 +157,9 @@ export function renderDiagnosticsReport(el, data, deps = {}) {
     data.contentsIntegrity,
     data.analysisIntegrity,
     data.playlistResolution,
+    // Backend-assembled (service::diagnostics::player_counter_snapshot_section).
+    data.cdjCounterSection,
   ].filter(Boolean);
-
-  const cdj = data.cdjCounterSnapshot;
-  if (cdj) {
-    const dataPage = cdj.t19?.dataPage || null;
-    const t19Line = dataPage
-      ? `t19 ec=${Number(cdj.t19.ec || 0)} chain=${Number(cdj.t19.chainLen || 0)} p${Number(dataPage.page || 0)} nrs=${Number(dataPage.nrs || 0)} num_rl=${Number(dataPage.numRl || 0)} rowpf0=0x${Number(dataPage.rowpf0 || 0).toString(16).padStart(4, "0")} tranrf0=0x${Number(dataPage.tranrf0 || 0).toString(16).padStart(4, "0")}`
-      : `t19 ec=${Number(cdj.t19?.ec || 0)} chain=${Number(cdj.t19?.chainLen || 0)}`;
-    sections.push({
-      title: "Player Counter Snapshot",
-      status: String(cdj.confidence || "low").toLowerCase() === "high" ? "PASS" : "WARN",
-      checks: [
-        {
-          label: "Predicted player counter",
-          status: "PASS",
-          detail: `playlists ${Number(cdj.playlistCountCandidate || 0)}, songs ${Number(cdj.songCountCandidate || 0)} (confidence: ${String(cdj.confidence || "low")})`
-        },
-        {
-          label: "Shape mode",
-          status: "PASS",
-          detail: `${String(cdj.shapeMode || "unknown")} (baseline-init-like: ${cdj.baselineInitLike ? "yes" : "no"})`
-        },
-        {
-          label: "Cross-check",
-          status: "PASS",
-          detail: `t00 tracks ${Number(cdj.t00Tracks || 0)}, t08 entries ${Number(cdj.t08Entries || 0)}`
-        },
-        {
-          label: "History pointers",
-          status: "PASS",
-          detail: `t11 ${Number(cdj.t11?.first || 0)}-${Number(cdj.t11?.last || 0)} ec=${Number(cdj.t11?.ec || 0)} | t12 ${Number(cdj.t12?.first || 0)}-${Number(cdj.t12?.last || 0)} ec=${Number(cdj.t12?.ec || 0)} | t17 ${Number(cdj.t17?.first || 0)}-${Number(cdj.t17?.last || 0)} ec=${Number(cdj.t17?.ec || 0)} | t18 ${Number(cdj.t18?.first || 0)}-${Number(cdj.t18?.last || 0)} ec=${Number(cdj.t18?.ec || 0)}`
-        },
-        {
-          label: "Primitive signal",
-          status: "PASS",
-          detail: t19Line
-        }
-      ]
-    });
-  }
 
   el.diagSections.innerHTML = "";
   for (const sec of sections) {
@@ -438,36 +378,11 @@ export function renderRepairPreview(el, data, deps = {}) {
   }
 
   if (el.diagRepairFixes) {
+    // Backend-owned: each fix's `description` is already the full text (the
+    // reason a fix is manual-only is baked in server-side), and unsupported
+    // items no longer duplicate a fix row -- so they render straight through.
     const fixesToRender = fixes.map((f) => ({ ...f }));
-    const unindexedPattern = /unindexed audio file\(s\) under contents/i;
-    const missingAudioPattern = /missing-audio reference\(s\) require manual review/i;
-    const unindexedIdx = fixesToRender.findIndex((f) =>
-      /manual re-import unindexed audio/i.test(String(f?.title || ""))
-    );
-    const missingAudioIdx = fixesToRender.findIndex((f) =>
-      /remove missing audio references/i.test(String(f?.title || ""))
-      && !f?.supported
-    );
-    if (unindexedIdx >= 0) {
-      const unindexedItem = unsupportedItems.find((item) =>
-        unindexedPattern.test(String(item?.issue || ""))
-      );
-      if (unindexedItem) {
-        const note = `${unindexedItem.reason} See Event Log for full path list/details.`;
-        fixesToRender[unindexedIdx].description = note;
-      }
-    }
-    if (missingAudioIdx >= 0) {
-      const missingAudioItem = unsupportedItems.find((item) =>
-        missingAudioPattern.test(String(item?.issue || ""))
-      );
-      if (missingAudioItem) {
-        fixesToRender[missingAudioIdx].description = `${missingAudioItem.issue}. ${missingAudioItem.reason}`;
-      }
-    }
     for (const item of unsupportedItems) {
-      if (unindexedPattern.test(String(item?.issue || "")) && unindexedIdx >= 0) continue;
-      if (missingAudioPattern.test(String(item?.issue || "")) && missingAudioIdx >= 0) continue;
       fixesToRender.push({
         id: `unsupported:${item.issue}`,
         title: item.issue,
@@ -492,7 +407,7 @@ export function renderRepairPreview(el, data, deps = {}) {
 
       if (fix.supported) {
         const fixId = String(fix.id || "");
-        const alwaysApplied = ALWAYS_APPLIED_FIX_IDS.has(fixId);
+        const alwaysApplied = fix.alwaysApplied === true;
         const checkbox = documentObj.createElement("input");
         checkbox.type = "checkbox";
         checkbox.className = "diag-repair-fix-check";
@@ -535,7 +450,7 @@ export function renderRepairPreview(el, data, deps = {}) {
       const metaParts = [support, mode];
       if (fix.estimatedWrites) metaParts.push(`${fix.estimatedWrites} writes`);
       if (fix.estimatedDeletes) metaParts.push(`${fix.estimatedDeletes} deletes`);
-      if (ALWAYS_APPLIED_FIX_IDS.has(String(fix.id || ""))) metaParts.push("always applied");
+      if (fix.alwaysApplied === true) metaParts.push("always applied");
       meta.textContent = metaParts.join(" \u00b7 ");
       content.appendChild(meta);
 
@@ -1357,37 +1272,30 @@ export function renderUsbPlayerMenuEditor(state, el, deps = {}) {
 function renderUsbPlayerMenuDivergence(state, el) {
   const node = el.usbPlayerMenuDivergence;
   if (!node) return;
+  // Backend-owned: `summary` / `canSync` / `canRestore` come from
+  // service::repair (load_usb_player_menu_config). `canFix` is frontend state
+  // (a valid USB must be selected to run either action).
   const div = state.usbPlayerMenuDivergence || {};
-  const inEdbOnly = Array.isArray(div.inEdbVisibleOnly) ? div.inEdbVisibleOnly : [];
-  const pdbMissingKinds = Array.isArray(div.pdbMissingKinds) ? div.pdbMissingKinds : [];
   const canFix = !!(state.usbRoot && state.usbRootValid);
-  const noProblems = inEdbOnly.length === 0 && pdbMissingKinds.length === 0;
-  if (!canFix || noProblems) {
+  if (!canFix || (!div.canSync && !div.canRestore)) {
     node.classList.add("hidden");
     if (el.usbPlayerMenuDivergenceMessage) el.usbPlayerMenuDivergenceMessage.textContent = "";
     if (el.usbPlayerMenuSyncBtn) el.usbPlayerMenuSyncBtn.disabled = true;
     if (el.usbPlayerMenuRestoreBtn) el.usbPlayerMenuRestoreBtn.disabled = true;
     return;
   }
-  const parts = [];
-  if (inEdbOnly.length > 0) {
-    parts.push(`${inEdbOnly.length} active menu items missing from PDB`);
-  }
-  if (pdbMissingKinds.length > 0) {
-    parts.push(`PDB missing ${pdbMissingKinds.length} browse categories`);
-  }
   node.classList.remove("hidden");
-  const msg = parts.join("; ") + ".";
+  const msg = String(div.summary || "");
   if (el.usbPlayerMenuDivergenceMessage) {
     el.usbPlayerMenuDivergenceMessage.textContent = msg;
   } else {
     node.textContent = msg;
   }
   if (el.usbPlayerMenuSyncBtn) {
-    el.usbPlayerMenuSyncBtn.disabled = inEdbOnly.length === 0 || !canFix;
+    el.usbPlayerMenuSyncBtn.disabled = !div.canSync;
   }
   if (el.usbPlayerMenuRestoreBtn) {
-    el.usbPlayerMenuRestoreBtn.disabled = pdbMissingKinds.length === 0 || !canFix;
+    el.usbPlayerMenuRestoreBtn.disabled = !div.canRestore;
   }
 }
 
@@ -1448,6 +1356,9 @@ function normalizeDivergence(raw) {
     inPdbOnly: Array.isArray(raw?.inPdbOnly) ? raw.inPdbOnly : [],
     orderMismatch: !!raw?.orderMismatch,
     pdbMissingKinds: Array.isArray(raw?.pdbMissingKinds) ? raw.pdbMissingKinds : [],
+    summary: String(raw?.summary || ""),
+    canSync: !!raw?.canSync,
+    canRestore: !!raw?.canRestore,
   };
 }
 

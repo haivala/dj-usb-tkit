@@ -166,7 +166,9 @@ function installTauriMock(page, mode) {
                     sampleOnlyInPdb: [],
                     sampleOnlyInEdb: [],
                     sampleMetadataMismatches: ["Track A [analysisPath, artworkPath, artistDictId, pdbRequiredMetadata]"],
-                    status: "FAIL"
+                    status: "FAIL",
+                    // Backend-computed (service::diagnostics::parity_issue_labels).
+                    issueLabels: ["PDB gaps 1", "path mismatch 1", "dict issues 1", "art mismatch 1"]
                   }
                 ],
                 warnings: [],
@@ -202,6 +204,7 @@ function installTauriMock(page, mode) {
                     description: "Structural prerequisite fix.",
                     supported: true,
                     destructive: false,
+                    alwaysApplied: true,
                     estimatedWrites: 1,
                     estimatedDeletes: 0
                   },
@@ -211,6 +214,7 @@ function installTauriMock(page, mode) {
                     description: "Structural prerequisite fix.",
                     supported: true,
                     destructive: false,
+                    alwaysApplied: true,
                     estimatedWrites: 1,
                     estimatedDeletes: 0
                   },

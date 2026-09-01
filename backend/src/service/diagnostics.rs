@@ -164,6 +164,121 @@ fn compute_player_counter_snapshot(
     })
 }
 
+/// Renders a `PlayerCounterSnapshot` as the "Player Counter Snapshot"
+/// `DiagSection` (previously assembled in `vanilla-ui/components/usb/actions.mjs`
+/// `renderDiagnosticsReport`). Every check is informational (`PASS`); the
+/// section status is `PASS` only at high confidence.
+fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> DiagSection {
+    let t19_line = match cdj.t19.data_page.as_ref() {
+        Some(page) => format!(
+            "t19 ec={} chain={} p{} nrs={} num_rl={} rowpf0=0x{:04x} tranrf0=0x{:04x}",
+            cdj.t19.ec,
+            cdj.t19.chain_len,
+            page.page,
+            page.nrs,
+            page.num_rl,
+            page.rowpf0,
+            page.tranrf0,
+        ),
+        None => format!("t19 ec={} chain={}", cdj.t19.ec, cdj.t19.chain_len),
+    };
+    let history_pointers = format!(
+        "t11 {}-{} ec={} | t12 {}-{} ec={} | t17 {}-{} ec={} | t18 {}-{} ec={}",
+        cdj.t11.first,
+        cdj.t11.last,
+        cdj.t11.ec,
+        cdj.t12.first,
+        cdj.t12.last,
+        cdj.t12.ec,
+        cdj.t17.first,
+        cdj.t17.last,
+        cdj.t17.ec,
+        cdj.t18.first,
+        cdj.t18.last,
+        cdj.t18.ec,
+    );
+    let info = |label: &str, detail: String| DiagCheck {
+        label: label.to_string(),
+        status: DiagStatus::Pass,
+        detail,
+        link: None,
+    };
+    DiagSection {
+        title: "Player Counter Snapshot".to_string(),
+        status: if cdj.confidence.eq_ignore_ascii_case("high") {
+            DiagStatus::Pass
+        } else {
+            DiagStatus::Warn
+        },
+        checks: vec![
+            info(
+                "Predicted player counter",
+                format!(
+                    "playlists {}, songs {} (confidence: {})",
+                    cdj.playlist_count_candidate, cdj.song_count_candidate, cdj.confidence
+                ),
+            ),
+            info(
+                "Shape mode",
+                format!(
+                    "{} (baseline-init-like: {})",
+                    cdj.shape_mode,
+                    if cdj.baseline_init_like { "yes" } else { "no" }
+                ),
+            ),
+            info(
+                "Cross-check",
+                format!("t00 tracks {}, t08 entries {}", cdj.t00_tracks, cdj.t08_entries),
+            ),
+            info("History pointers", history_pointers),
+            info("Primitive signal", t19_line),
+        ],
+        counts: None,
+    }
+}
+
+/// Short "Issues" badges for a strict-parity playlist row (previously
+/// `formatParityIssues` in `vanilla-ui/components/usb/actions.mjs`). A `+PDB` /
+/// `+eDB` membership badge only shows when the other side actually has tracks,
+/// so a wholly-missing playlist isn't double-reported.
+fn parity_issue_labels(d: &UsbParityPlaylistDetail) -> Vec<String> {
+    let mut labels = Vec::new();
+    if d.only_in_pdb > 0 && d.edb_tracks > 0 {
+        labels.push(format!("+PDB {}", d.only_in_pdb));
+    }
+    if d.only_in_edb > 0 && d.pdb_tracks > 0 {
+        labels.push(format!("+eDB {}", d.only_in_edb));
+    }
+    if !d.playlist_id_match {
+        labels.push("id mismatch".to_string());
+    }
+    if !d.sort_order_match {
+        labels.push("sort mismatch".to_string());
+    }
+    if d.order_mismatch {
+        labels.push("order mismatch".to_string());
+    }
+    if d.pdb_duplicate_entries > 0 {
+        labels.push(format!("dup PDB {}", d.pdb_duplicate_entries));
+    }
+    if d.pdb_missing_core_metadata > 0 {
+        labels.push(format!("PDB gaps {}", d.pdb_missing_core_metadata));
+    }
+    if d.edb_missing_core_metadata > 0 {
+        labels.push(format!("eDB gaps {}", d.edb_missing_core_metadata));
+    }
+    if d.path_mismatch_tracks > 0 {
+        labels.push(format!("path mismatch {}", d.path_mismatch_tracks));
+    }
+    if d.dictionary_id_issue_tracks > 0 {
+        labels.push(format!("dict issues {}", d.dictionary_id_issue_tracks));
+    }
+    if d.artwork_mismatch_tracks > 0 {
+        labels.push(format!("art mismatch {}", d.artwork_mismatch_tracks));
+    }
+    labels
+}
+
 pub(crate) fn collect_edb_indexed_paths(
     conn: &rusqlite::Connection,
     warnings: &mut Vec<WarningEntry>,
@@ -795,6 +910,9 @@ impl BackendService {
         let cdj_counter_snapshot = parsed_opt
             .as_ref()
             .and_then(|(parsed, _)| compute_player_counter_snapshot(&pdb_path, parsed));
+        let cdj_counter_section = cdj_counter_snapshot
+            .as_ref()
+            .map(player_counter_snapshot_section);
         let usb_playlist_names = usb_playlist_names_for_export_compare(
             parsed_opt.as_ref().map(|p| &p.0),
             edb_playlist_tracks
@@ -816,6 +934,7 @@ impl BackendService {
             playlist_resolution,
             playlist_details,
             cdj_counter_snapshot,
+            cdj_counter_section,
             warnings: raw_warnings,
             duration_ms: start.elapsed().as_millis() as u64,
             playlist_usb_export_status,
@@ -2855,7 +2974,7 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Pass
         };
 
-        details.push(UsbParityPlaylistDetail {
+        let mut detail = UsbParityPlaylistDetail {
             name: display,
             pdb_tracks: pdb_unique_list.len(),
             edb_tracks: edb_unique_list.len(),
@@ -2880,7 +2999,10 @@ pub(crate) fn build_usb_parity_comparison(
             sample_only_in_edb,
             sample_metadata_mismatches,
             status,
-        });
+            issue_labels: Vec::new(),
+        };
+        detail.issue_labels = parity_issue_labels(&detail);
+        details.push(detail);
     }
     // Keep strict parity playlist details in playlist order, not alphabetical:
     // 1) prefer PDB sort order when present (device-facing ordering source)
@@ -3447,8 +3569,80 @@ mod tests {
         count_named_history_rows, diagnose_contents_integrity,
         diagnose_playlist_resolution_with_db, diagnose_playlist_resolution_with_edb_internal,
         evaluate_strict_raw_coverage_parity, normalize_pdb_path_for_edb_lookup,
-        normalize_track_path_for_identity, track_identity_key,
+        normalize_track_path_for_identity, parity_issue_labels, track_identity_key,
     };
+    use crate::models::UsbParityPlaylistDetail;
+
+    fn parity_detail() -> UsbParityPlaylistDetail {
+        use crate::models::DiagStatus;
+        UsbParityPlaylistDetail {
+            name: "P".to_string(),
+            pdb_tracks: 10,
+            edb_tracks: 10,
+            matched_tracks: 10,
+            only_in_pdb: 0,
+            only_in_edb: 0,
+            order_mismatch: false,
+            path_mismatch_tracks: 0,
+            dictionary_id_issue_tracks: 0,
+            playlist_id_match: true,
+            sort_order_match: true,
+            parent_match: None,
+            pdb_playlist_id: None,
+            edb_playlist_id: None,
+            pdb_sort_order: None,
+            edb_sort_order: None,
+            pdb_duplicate_entries: 0,
+            edb_missing_core_metadata: 0,
+            pdb_missing_core_metadata: 0,
+            artwork_mismatch_tracks: 0,
+            sample_only_in_pdb: Vec::new(),
+            sample_only_in_edb: Vec::new(),
+            sample_metadata_mismatches: Vec::new(),
+            status: DiagStatus::Pass,
+            issue_labels: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn parity_issue_labels_at_full_parity_is_empty() {
+        assert!(parity_issue_labels(&parity_detail()).is_empty());
+    }
+
+    #[test]
+    fn parity_issue_labels_membership_badge_needs_tracks_on_the_other_side() {
+        let mut d = parity_detail();
+        d.only_in_pdb = 4;
+        d.edb_tracks = 6;
+        assert_eq!(parity_issue_labels(&d), vec!["+PDB 4"]);
+
+        // wholly missing on eDB -> no `+PDB` badge (it isn't a partial diff)
+        let mut wholly_missing = parity_detail();
+        wholly_missing.only_in_pdb = 50;
+        wholly_missing.edb_tracks = 0;
+        wholly_missing.playlist_id_match = false;
+        wholly_missing.sort_order_match = false;
+        assert_eq!(
+            parity_issue_labels(&wholly_missing),
+            vec!["id mismatch", "sort mismatch"]
+        );
+    }
+
+    #[test]
+    fn parity_issue_labels_lists_structural_and_count_issues() {
+        let mut d = parity_detail();
+        d.pdb_tracks = 10;
+        d.edb_tracks = 8;
+        d.only_in_pdb = 2;
+        d.playlist_id_match = false;
+        d.sort_order_match = false;
+        d.pdb_missing_core_metadata = 1;
+        d.dictionary_id_issue_tracks = 2;
+        assert_eq!(
+            parity_issue_labels(&d),
+            vec!["+PDB 2", "id mismatch", "sort mismatch", "PDB gaps 1", "dict issues 2"]
+        );
+    }
     use crate::models::{DiagStatus, UsbTrack};
     use crate::pdb_reader::{
         ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistEntryRow,

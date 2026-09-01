@@ -73,6 +73,17 @@ const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_p
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
 const PDB_TORN_GROWTH_PAGES_FIX_ID: &str = "repair_pdb_torn_growth_pages";
 const PDB_TRUNCATED_TABLE_CHAIN_FIX_ID: &str = "repair_pdb_truncated_table_chain";
+
+/// Structural-prerequisite fixes the strict-parity upgrade needs to have run
+/// first -- surfaced to the editor as `RepairFixProposal.always_applied` so it
+/// can lock their checkbox. Kept in lockstep with `REPAIR_FIX_DISPLAY_ORDER`
+/// and the apply block.
+fn fix_always_applied(fix_id: &str) -> bool {
+    matches!(
+        fix_id,
+        PDB_TRUNCATED_TABLE_CHAIN_FIX_ID | PDB_TORN_GROWTH_PAGES_FIX_ID
+    )
+}
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
 
@@ -84,11 +95,11 @@ const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignme
 ///
 /// If a future fix is likewise a structural prerequisite for strict parity
 /// (must physically run before it, not just "happens to run early"), three
-/// places need updating together: its position in the apply block below,
-/// its position in this array, and `ALWAYS_APPLIED_FIX_IDS` in
-/// `vanilla-ui/components/usb/actions.mjs` — the frontend locks that fix's
-/// checkbox checked so a user can't deselect a prerequisite while leaving
-/// strict parity selected.
+/// places need updating together: its position in the apply block below, its
+/// position in this array, and `fix_always_applied` above — which sets
+/// `RepairFixProposal.always_applied` so the editor locks that fix's checkbox
+/// checked (a user can't deselect a prerequisite while leaving strict parity
+/// selected).
 const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     "fix_empty_analysis_files",
     PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,
@@ -2499,6 +2510,27 @@ fn load_usb_player_menu_config(
         .collect();
     pdb_missing_kinds.sort_unstable();
 
+    let can_sync = !in_edb_visible_only.is_empty();
+    let can_restore = !pdb_missing_kinds.is_empty();
+    let mut summary_parts = Vec::new();
+    if can_sync {
+        summary_parts.push(format!(
+            "{} active menu items missing from PDB",
+            in_edb_visible_only.len()
+        ));
+    }
+    if can_restore {
+        summary_parts.push(format!(
+            "PDB missing {} browse categories",
+            pdb_missing_kinds.len()
+        ));
+    }
+    let summary = if summary_parts.is_empty() {
+        String::new()
+    } else {
+        format!("{}.", summary_parts.join("; "))
+    };
+
     Ok((
         current,
         available,
@@ -2507,6 +2539,9 @@ fn load_usb_player_menu_config(
             in_pdb_only,
             order_mismatch,
             pdb_missing_kinds,
+            summary,
+            can_sync,
+            can_restore,
         },
     ))
 }
@@ -3469,6 +3504,7 @@ impl BackendService {
                         .to_string(),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: writes,
                 estimated_deletes: 0,
             });
@@ -3560,6 +3596,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3580,6 +3617,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3600,6 +3638,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3620,6 +3659,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3641,6 +3681,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3664,6 +3705,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3684,6 +3726,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3708,6 +3751,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3729,6 +3773,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3753,6 +3798,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3778,6 +3824,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3821,6 +3868,7 @@ impl BackendService {
                      and cut off tracks/playlists parity had just written.",
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3843,6 +3891,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3863,6 +3912,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3900,6 +3950,7 @@ impl BackendService {
                 ),
                 supported: true,
                 destructive: false,
+                always_applied: false,
                 estimated_writes: 1,
                 estimated_deletes: 0,
             });
@@ -3993,19 +4044,12 @@ impl BackendService {
                 proposed_fixes.push(RepairFixProposal {
                         id: "manual_reimport_unindexed_audio".to_string(),
                         title: "Manual Re-import Unindexed Audio".to_string(),
-                        description: "Non-destructive guidance: copy unindexed files to safety/media library and import/export again."
-                            .to_string(),
+                        description: "Automatic deletion is intentionally disabled for canonical-path index drift. Recommended flow: copy files to safety/media library, import into playlists, export again. (Strict raw-count drift is reported separately in parity checks.) See Event Log for full path list/details.".to_string(),
                         supported: false,
                         destructive: false,
+                        always_applied: false,
                         estimated_writes: 0,
                         estimated_deletes: 0,
-                    });
-                unsupported_items.push(RepairUnsupportedItem {
-                        issue: format!(
-                            "{} canonical-path unindexed audio file(s) under Contents",
-                            unindexed_audio_paths.len()
-                        ),
-                        reason: "Automatic deletion is intentionally disabled for canonical-path index drift. Recommended flow: copy files to safety/media library, import into playlists, export again. (Strict raw-count drift is reported separately in parity checks.)".to_string(),
                     });
                 warnings.push(logging::log(
                     Level::Warn,
@@ -4038,6 +4082,7 @@ impl BackendService {
                             .to_string(),
                     supported: true,
                     destructive: true,
+                    always_applied: false,
                     estimated_writes: 0,
                     estimated_deletes: missing_audio_track_ids.len(),
                 });
@@ -4045,23 +4090,16 @@ impl BackendService {
                 proposed_fixes.push(RepairFixProposal {
                     id: "remove_missing_audio_references".to_string(),
                     title: "Remove Missing Audio References".to_string(),
-                    description:
-                        "Manual-only in this state: index drift detected (unindexed files are present), so automatic deletion is disabled."
-                            .to_string(),
-                    supported: false,
-                    destructive: false,
-                    estimated_writes: 0,
-                    estimated_deletes: 0,
-                });
-                unsupported_items.push(RepairUnsupportedItem {
-                    issue: format!(
-                        "{} missing-audio reference(s) require manual review",
-                        missing_audio_track_ids.len()
-                    ),
-                    reason: format!(
-                        "Automatic removal is disabled while {} canonical-path unindexed audio file(s) are present. Re-import/export first, then re-run diagnostics.",
+                    description: format!(
+                        "{} missing-audio reference(s) require manual review. Automatic removal is disabled while {} canonical-path unindexed audio file(s) are present. Re-import/export first, then re-run diagnostics.",
+                        missing_audio_track_ids.len(),
                         unindexed_audio_paths.len(),
                     ),
+                    supported: false,
+                    destructive: false,
+                    always_applied: false,
+                    estimated_writes: 0,
+                    estimated_deletes: 0,
                 });
                 warnings.push(logging::log(
                     Level::Warn,
@@ -4118,6 +4156,7 @@ impl BackendService {
                                 supported: true,
                                 destructive: current_history_count > 0
                                     || current_history_content_count > 0,
+                                always_applied: false,
                                 estimated_writes: target_history_count + target_history_content_count,
                                 estimated_deletes: current_history_count + current_history_content_count,
                             });
@@ -4159,6 +4198,7 @@ impl BackendService {
                         description: "Collect all playlists from both eDB and PDB, merge metadata from both sides, and rewrite both databases once.".to_string(),
                         supported: true,
                         destructive: false,
+                        always_applied: false,
                         estimated_writes: 0,
                         estimated_deletes: 0,
                     });
@@ -4185,6 +4225,7 @@ impl BackendService {
                         ),
                         supported: true,
                         destructive: false,
+                        always_applied: false,
                         estimated_writes: 1,
                         estimated_deletes: 0,
                     });
@@ -4210,6 +4251,9 @@ impl BackendService {
                 .position(|id| *id == f.id)
                 .unwrap_or(usize::MAX)
         });
+        for fix in &mut proposed_fixes {
+            fix.always_applied = fix_always_applied(&fix.id);
+        }
 
         let selected = if req.selected_fix_ids.is_empty() {
             proposed_fixes
@@ -6016,6 +6060,7 @@ mod tests {
             sample_only_in_edb: Vec::new(),
             sample_metadata_mismatches: Vec::new(),
             status: DiagStatus::Pass,
+            issue_labels: Vec::new(),
         }
     }
 

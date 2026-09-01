@@ -1543,8 +1543,15 @@ pub struct RunUsbDiagnosticsData {
     pub analysis_integrity: DiagSection,
     pub playlist_resolution: DiagSection,
     pub playlist_details: Vec<PlaylistDiagEntry>,
+    /// Raw player-counter table signals -- consumed by the `run_usb_diagnostics`
+    /// CLI debug tool. The desktop UI renders `cdj_counter_section` instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cdj_counter_snapshot: Option<PlayerCounterSnapshot>,
+    /// The player-counter snapshot rendered as a `DiagSection` (built
+    /// backend-side from `cdj_counter_snapshot` so the frontend just appends it
+    /// alongside the other sections).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdj_counter_section: Option<DiagSection>,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
@@ -1641,6 +1648,11 @@ pub struct UsbParityPlaylistDetail {
     #[serde(default)]
     pub sample_metadata_mismatches: Vec<String>,
     pub status: DiagStatus,
+    /// Short human-readable badges for the parity table's "Issues" column
+    /// (e.g. `"+PDB 3"`, `"order mismatch"`). Built backend-side from the
+    /// counters above so the frontend renders them verbatim.
+    #[serde(default)]
+    pub issue_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1712,6 +1724,18 @@ pub struct UsbPlayerMenuDivergence {
     /// Use the PDB sync command to restore.
     #[serde(default)]
     pub pdb_missing_kinds: Vec<u32>,
+    /// One-line description of the divergence for the editor's warning banner,
+    /// or empty when there is nothing to report. Built backend-side.
+    #[serde(default)]
+    pub summary: String,
+    /// Whether the "Sync eDB → PDB" action has anything to do
+    /// (`in_edb_visible_only` non-empty).
+    #[serde(default)]
+    pub can_sync: bool,
+    /// Whether the "Restore PDB categories" action has anything to do
+    /// (`pdb_missing_kinds` non-empty).
+    #[serde(default)]
+    pub can_restore: bool,
 }
 
 impl UsbPlayerMenuDivergence {
@@ -1794,6 +1818,11 @@ pub struct RepairFixProposal {
     pub destructive: bool,
     pub estimated_writes: usize,
     pub estimated_deletes: usize,
+    /// Structural-prerequisite fixes that must run before a strict-parity
+    /// upgrade -- the editor locks their checkbox checked. Set backend-side
+    /// (see `REPAIR_FIX_DISPLAY_ORDER` / the apply order in `service::repair`).
+    #[serde(default)]
+    pub always_applied: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
