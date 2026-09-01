@@ -42,7 +42,6 @@ export function startProgressHeartbeat(state, el) {
     }
     const now = Date.now();
     const totalSecs = Math.max(0, Math.floor((now - state.progressStartedAtMs) / 1000));
-    const idleSecs = Math.max(0, Math.floor((now - state.lastJobEventAtMs) / 1000));
     const suffix = ` (${totalSecs}s)`;
     el.progressText.textContent = `${state.progressBaseText}${suffix}`;
   }, 1000);
