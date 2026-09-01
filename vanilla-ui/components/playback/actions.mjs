@@ -62,6 +62,15 @@ export function updateTransportButtonsInDom(state, root) {
 export function setWaveformPlayhead(element, fraction, playing) {
   if (!element) return;
   const clamped = Math.max(0, Math.min(1, Number(fraction) || 0));
+  // Drive the playhead with a compositor-only `transform: translateX` (see
+  // styles.css) instead of animating `left`. Animating `left` forces a
+  // layout + repaint of the waveform region on every frame of the playback
+  // rAF loop, which is brutal when WebKitGTK is software-compositing (the
+  // AppImage path, where WEBKIT_DISABLE_DMABUF_RENDERER is forced on).
+  // `--playhead-position` (a percentage) is still written so scrub math and
+  // any width-less context keeps a usable value.
+  const width = element.clientWidth || 0;
+  element.style.setProperty("--playhead-x", `${clamped * width}px`);
   element.style.setProperty("--playhead-position", `${clamped * 100}%`);
   element.classList.toggle("is-playing", !!playing);
 }

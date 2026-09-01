@@ -2066,17 +2066,24 @@ input[type="checkbox"] {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: var(--playhead-position, 0%);
+  left: 0;
   width: 1px;
   background: var(--playhead-bg);
   box-shadow: 0 0 4px var(--playhead-glow);
   opacity: 0;
-  transform: translateX(-0.5px);
+  /* Composite-only movement: the playback rAF loop updates --playhead-x every
+     frame, and a promoted transform layer keeps that from re-laying-out or
+     repainting the waveform canvas underneath (critical under WebKitGTK
+     software compositing on the AppImage). */
+  transform: translateX(calc(var(--playhead-x, 0px) - 0.5px));
   pointer-events: none;
 }
 
 .waveform.is-playing .waveform-playhead {
   opacity: 1;
+  /* Only the actively-animating playhead gets its own layer, so a long
+     playlist isn't forced to allocate a compositor layer per row. */
+  will-change: transform;
 }
 
 /* ── muted helper ───────────────────────────────────── */

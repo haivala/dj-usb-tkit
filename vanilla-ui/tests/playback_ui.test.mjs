@@ -48,13 +48,18 @@ test("waveform helpers set, clear, and clamp pointer scrub ratios", () => {
   const dom = new JSDOM(`<!doctype html><body><div class="waveform"></div><div class="waveform"></div></body>`);
   const document = dom.window.document;
   const wf = document.querySelector(".waveform");
+  // jsdom does no layout, so clientWidth is 0 by default; pin it so the
+  // pixel-offset the playhead transform uses is exercised.
+  Object.defineProperty(wf, "clientWidth", { value: 120, configurable: true });
 
   setWaveformPlayhead(wf, 0.25, true);
+  assert.equal(wf.style.getPropertyValue("--playhead-x"), "30px");
   assert.equal(wf.style.getPropertyValue("--playhead-position"), "25%");
   assert.equal(wf.classList.contains("is-playing"), true);
 
   clearAllWaveformPlayheads(document);
   document.querySelectorAll(".waveform").forEach((item) => {
+    assert.equal(item.style.getPropertyValue("--playhead-x"), "0px");
     assert.equal(item.style.getPropertyValue("--playhead-position"), "0%");
     assert.equal(item.classList.contains("is-playing"), false);
   });
