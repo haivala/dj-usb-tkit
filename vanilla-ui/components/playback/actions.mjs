@@ -322,7 +322,10 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
     } catch (err) {
       if (!isGenerationCurrent(state, generation)) return;
       const message = err?.message || String(err);
-      if (/track not found in Library or selected USB/i.test(message)) {
+      // `play_resolved_track` only raises NOT_FOUND when it can't resolve the
+      // track to a playable path in the Library or the selected USB -- an
+      // expected, soft outcome, not a failure.
+      if (err?.code === "NOT_FOUND") {
         setStatus("Cannot play: track not found in Library or selected USB.", { level: "warn", source: "playback" });
         return;
       }

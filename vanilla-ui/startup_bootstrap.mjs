@@ -27,15 +27,14 @@ export async function hydrateAppVersionLabel(el, deps = {}) {
 
 export async function checkForUpdate(state, el, deps = {}) {
   const {
-    resolveVersion = async () => null,
     fetchUpdateInfo = async () => null,
     renderUpdateNotice = () => {},
     renderCriticalUpdateBanner = () => {}
   } = deps;
   try {
-    const version = await resolveVersion();
-    if (!version) return;
-    const info = await fetchUpdateInfo(version);
+    // Backend-owned: `check_for_update` knows the running version and does the
+    // GitHub fetch + version compare itself (see backend/src/service/update_check.rs).
+    const info = await fetchUpdateInfo();
     if (!info) return;
     state.updateCheck = info;
     renderUpdateNotice(state, el);

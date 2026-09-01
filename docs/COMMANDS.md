@@ -190,6 +190,13 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
 - `get_playback_status_native`
 - `playback_preflight_native`
 
+### App
+
+- `check_for_update` — fetches GitHub Releases, compares against the running
+  version, and returns `{ updateAvailable, severity, currentVersion,
+  latestVersion, releaseUrl }`. Never fails: a network/parse error logs a
+  warning and returns a "no update" verdict.
+
 ## Host utility commands
 
 These are desktop host commands, not backend API envelope commands:

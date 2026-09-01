@@ -137,7 +137,10 @@ test("playTrackFromOrigin reports backend not-found as a warning", async () => {
     setStatus: (text, meta) => { status = text; statusMeta = meta; },
     command: async (name) => {
       assert.equal(name, "play_resolved_track");
-      throw new Error("track not found in Library or selected USB");
+      // Mirrors the enriched error the api_client `command()` throws.
+      const err = new Error("track not found in Library or selected USB");
+      err.code = "NOT_FOUND";
+      throw err;
     },
   }));
 

@@ -70,7 +70,6 @@ import * as uiCtrl from "./ui_controller.mjs";
 import { createMessageBus, shouldPersistStatusToEventLog } from "./message_bus.mjs";
 import { openExternalUrl } from "./components/settings/events.mjs";
 import {
-  fetchUpdateInfo as fetchUpdateInfoRemote,
   renderUpdateNotice,
   renderCriticalUpdateBanner,
 } from "./update_check.mjs";
@@ -1491,19 +1490,14 @@ const hydrateAppVersionLabel = () => bootstrap.hydrateAppVersionLabel(el, {
     tauriGetVersion,
   });
 const checkForUpdate = () => bootstrap.checkForUpdate(state, el, {
-    resolveVersion: async () => {
-      if (!tauriIsTauri()) return null;
+    fetchUpdateInfo: async () => {
+      if (!isTauriRuntime()) return null;
       try {
-        const version = await tauriGetVersion();
-        return version && String(version).trim() ? String(version).trim() : null;
+        return await command("check_for_update");
       } catch {
         return null;
       }
     },
-    fetchUpdateInfo: (version) =>
-      fetchUpdateInfoRemote(version, {
-        fetchFn: typeof fetch !== "undefined" ? fetch.bind(window) : null,
-      }),
     renderUpdateNotice: (s, e) =>
       renderUpdateNotice(s, e, { openUrl: (url) => openExternalUrl(window, url) }),
     renderCriticalUpdateBanner: (s, e) =>

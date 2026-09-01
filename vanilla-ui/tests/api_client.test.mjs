@@ -83,3 +83,23 @@ test("command() unwraps ok envelopes and throws on failure", async () => {
   });
   await assert.rejects(() => bad.command("list_playlists"), /boom/);
 });
+
+test("command() carries the backend error's code and details onto the thrown Error", async () => {
+  const client = makeClient({
+    tauriIsTauri: () => true,
+    tauriInvoke: () => ({
+      ok: false,
+      error: {
+        code: "NOT_FOUND",
+        message: "track not found in Library or selected USB",
+        details: { validationType: "missing_analysis", missingTrackCount: 2 },
+      },
+    }),
+  });
+  const err = await client.command("play_resolved_track").then(
+    () => { throw new Error("expected rejection"); },
+    (e) => e,
+  );
+  assert.equal(err.code, "NOT_FOUND");
+  assert.deepEqual(err.details, { validationType: "missing_analysis", missingTrackCount: 2 });
+});

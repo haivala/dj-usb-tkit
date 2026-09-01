@@ -41,8 +41,13 @@ export function createApiClient({
     const response = await invoke(commandName, payload);
 
     if (!response?.ok) {
-      const msg = response?.error?.message || `Command failed: ${commandName}`;
-      throw new Error(msg);
+      const info = response?.error || {};
+      const error = new Error(info.message || `Command failed: ${commandName}`);
+      // Carry the backend's structured error fields through so callers key off
+      // `err.code` / `err.details` instead of matching the message string.
+      if (info.code) error.code = String(info.code);
+      if (info.details != null) error.details = info.details;
+      throw error;
     }
 
     return response.data;

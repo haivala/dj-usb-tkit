@@ -30,6 +30,12 @@
 
 ## Unreleased
 
+- **Improvement:** the in-app update check moved to the backend — a new
+  `check_for_update` command does the GitHub Releases fetch, the semver
+  comparison, and the `**Severity:** critical` scan in Rust
+  (`backend/src/service/update_check.rs`, with unit tests). The renderer keeps
+  only the notice/banner rendering. The HTTP call no longer runs from the
+  webview.
 - **Improvement:** the Event Log and the status-bar "(N warning(s))" count now read
   each backend warning's `level` verbatim instead of guessing severity by
   substring-scanning the message text. Every backend warning has been a typed
@@ -37,6 +43,12 @@
   `classifyLogLevelFromText` heuristic and the "Auto analysis limit reached"
   message-prefix match are gone (the latter keys off the `analysis.auto-select-limit`
   code now).
+- **Improvement:** command failures now carry the backend error's `code` and
+  `details` onto the thrown error, so the playback "track not found" case is
+  recognised by its `NOT_FOUND` code instead of a regex on the English message.
+  This also revives the export "N/M tracks need analysis" message, which had been
+  silently falling through to the generic failure text because `details` was
+  dropped.
 - **Improvement:** the CDJ format-compatibility badge (the per-track format cell
   and its tooltip) is now computed in Rust (`service::format_compat`) and shipped
   as a `formatCompat` field on every track; the frontend just renders it. The

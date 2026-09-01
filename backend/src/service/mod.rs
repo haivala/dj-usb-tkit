@@ -9,6 +9,7 @@ pub mod export_helpers;
 mod export_log;
 pub(crate) mod format_compat;
 mod repair;
+pub mod update_check;
 mod usb;
 pub mod usb_backups;
 pub(crate) mod usb_helpers;

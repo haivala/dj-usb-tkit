@@ -1617,3 +1617,47 @@ pub fn cancel_essentia_download(cancel: State<'_, EssentiaDownloadCancel>) -> Ap
 pub fn remove_essentia(state: State<'_, BackendCommands>) -> ApiResponse<()> {
     state.remove_essentia()
 }
+
+const RELEASES_API_URL: &str =
+    "https://api.github.com/repos/haivala/dj-usb-tkit/releases?per_page=10";
+
+/// Checks GitHub Releases for a newer stable build than the running one.
+/// Version comparison and the "critical" rule live in
+/// `service::update_check`; this only does the fetch. A failed check is
+/// background noise -- it logs quietly and reports "no update" rather than
+/// surfacing an error.
+#[tauri::command]
+pub async fn check_for_update() -> ApiResponse<crate::service::update_check::UpdateInfo> {
+    use crate::service::update_check::{self, GithubRelease, UpdateInfo};
+
+    let current = env!("CARGO_PKG_VERSION");
+
+    let fetch = async {
+        let client = reqwest::Client::builder()
+            .user_agent(concat!("dj-usb-tkit/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let response = client
+            .get(RELEASES_API_URL)
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "GitHub releases API returned {}",
+                response.status()
+            ));
+        }
+        let body = response.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str::<Vec<GithubRelease>>(&body).map_err(|e| e.to_string())
+    };
+
+    match fetch.await {
+        Ok(releases) => ApiResponse::success(update_check::evaluate(current, &releases)),
+        Err(message) => {
+            crate::backend_log!(Warn, "update-check", "update check failed: {message}");
+            ApiResponse::success(UpdateInfo::none(current))
+        }
+    }
+}
