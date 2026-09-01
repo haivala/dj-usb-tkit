@@ -175,37 +175,13 @@ export function setupRuntimeErrorLogging({ pushEventLog }) {
 
 // --- warning_utils.mjs ---
 
-export function classifyLogLevelFromText(text) {
-  const t = String(text || "").toLowerCase();
-  const errorHints = [
-    "failed",
-    "error",
-    "timeout",
-    "timed out",
-    "permission denied",
-    "denied",
-    "unreadable",
-    "corrupt",
-    "invalid key",
-  ];
-  const warnHints = [
-    "missing ",
-    "not found",
-    "appears empty",
-    "zero static track entries",
-    "skipped",
-  ];
-  if (errorHints.some((hint) => t.includes(hint))) return "error";
-  if (warnHints.some((hint) => t.includes(hint))) return "warn";
-  return "info";
-}
-
+// Backend warnings are always typed `WarningEntry { level, code, message, source }`
+// (built through `logging::log` in Rust -- see backend/src/logging.rs). The
+// frontend reads `level` verbatim and never guesses severity from the message
+// text.
 export function warningEntryLevel(entry) {
-  if (entry && typeof entry === "object") {
-    const level = String(entry.level || "").toLowerCase().trim();
-    if (level === "error" || level === "warn" || level === "info") return level;
-  }
-  return classifyLogLevelFromText(String(entry || "").trim());
+  const level = String(entry?.level || "").toLowerCase().trim();
+  return level === "error" || level === "warn" || level === "info" ? level : "info";
 }
 
 export function countWarningsForStatus(warnings) {
@@ -220,32 +196,22 @@ export function logWarnings(pushEventLog, source, warnings, context = "") {
   const list = Array.isArray(warnings) ? warnings : [];
   if (!list.length) return;
   for (const warning of list) {
-    const isTyped = warning && typeof warning === "object";
-    const text = isTyped
-      ? String(warning.message || "").trim()
-      : String(warning || "").trim();
+    const text = String(warning?.message ?? warning ?? "").trim();
     if (!text) continue;
-    const levelRaw = isTyped ? String(warning.level || "").toLowerCase().trim() : "";
-    const level = levelRaw === "error" || levelRaw === "warn" || levelRaw === "info"
-      ? levelRaw
-      : "info";
-    const warningSource = isTyped
-      ? String(warning.source || source || "ui").trim() || "ui"
-      : source;
-    const code = isTyped
-      ? String(warning.code || "").trim()
-      : `${String(source || "ui").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "ui"}.event`;
+    const level = warningEntryLevel(warning);
+    const warningSource = String(warning?.source || source || "ui").trim() || "ui";
+    const code = String(warning?.code || "").trim() || `${warningSource}.event`;
     const detailParts = [];
     if (context) detailParts.push(`context: ${context}`);
-    if (isTyped && typeof warning.details === "string" && warning.details.trim()) {
+    if (typeof warning?.details === "string" && warning.details.trim()) {
       detailParts.push(warning.details.trim());
     }
     const detailsJoined = detailParts.length ? detailParts.join(" | ") : null;
     const coalesceKeyParts = [
-      String(warningSource || "ui").trim().toLowerCase(),
-      String(code || "").trim().toLowerCase() || "event",
-      String(text || "").trim().toLowerCase(),
-      String(detailsJoined || "").trim().toLowerCase()
+      warningSource.toLowerCase(),
+      code.toLowerCase(),
+      text.toLowerCase(),
+      String(detailsJoined || "").toLowerCase()
     ];
     pushEventLog({
       level,

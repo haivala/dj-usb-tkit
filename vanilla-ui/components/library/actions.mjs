@@ -11,19 +11,15 @@ export function trackHasRenderableWaveform(track) {
 }
 
 export function warningEntryText(entry) {
-  if (entry && typeof entry === "object") return String(entry.message || "").trim();
-  return String(entry || "").trim();
+  return String(entry?.message ?? entry ?? "").trim();
 }
 
+// The backend tags this specific warning with a stable code (analysis.rs
+// `analysis.auto-select-limit`); match on that, not the English message.
 function findAnalysisAutoLimitWarning(warnings) {
   if (!Array.isArray(warnings)) return null;
-  for (const warning of warnings) {
-    const text = warningEntryText(warning);
-    if (text.startsWith("Auto analysis limit reached:")) {
-      return text;
-    }
-  }
-  return null;
+  const hit = warnings.find((w) => w?.code === "analysis.auto-select-limit");
+  return hit ? warningEntryText(hit) : null;
 }
 
 export function trackHasArtwork(track) {

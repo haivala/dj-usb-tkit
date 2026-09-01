@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+- **Improvement:** the Event Log and the status-bar "(N warning(s))" count now read
+  each backend warning's `level` verbatim instead of guessing severity by
+  substring-scanning the message text. Every backend warning has been a typed
+  `{ level, code, message, source }` for a while; the frontend's
+  `classifyLogLevelFromText` heuristic and the "Auto analysis limit reached"
+  message-prefix match are gone (the latter keys off the `analysis.auto-select-limit`
+  code now).
 - **Improvement:** the CDJ format-compatibility badge (the per-track format cell
   and its tooltip) is now computed in Rust (`service::format_compat`) and shipped
   as a `formatCompat` field on every track; the frontend just renders it. The
