@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTracklistText, formatDurationMs, renderTrackListDurationSummary } from "../track_utils.mjs";
+import { buildTracklistText, formatBpm, formatDurationMs, renderTrackListDurationSummary } from "../track_utils.mjs";
 
 test("buildTracklistText with timeMode off is plain Artist - Title lines", () => {
   const tracks = [
@@ -51,6 +51,21 @@ test("buildTracklistText returns empty string for empty input", () => {
 
 test("formatDurationMs still rolls over to H:MM:SS past an hour (sanity check for reused formatter)", () => {
   assert.equal(formatDurationMs(3661000), "1:01:01");
+});
+
+test("formatBpm renders a numeric bpm without forcing decimals and drops float noise", () => {
+  assert.equal(formatBpm(128), "128");
+  assert.equal(formatBpm(128.0), "128");
+  assert.equal(formatBpm(128.5), "128.5");
+  assert.equal(formatBpm(128.499999), "128.5");
+  assert.equal(formatBpm("174"), "174");
+});
+
+test("formatBpm returns an empty string for missing or non-positive values", () => {
+  assert.equal(formatBpm(null), "");
+  assert.equal(formatBpm(undefined), "");
+  assert.equal(formatBpm(0), "");
+  assert.equal(formatBpm("not a number"), "");
 });
 
 test("renderTrackListDurationSummary renders the backend total verbatim", () => {

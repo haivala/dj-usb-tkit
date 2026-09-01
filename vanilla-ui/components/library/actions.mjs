@@ -1,5 +1,5 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
-import { formatDurationMs, renderTrackListDurationSummary } from "../../track_utils.mjs";
+import { formatDurationMs, formatBpm, renderTrackListDurationSummary } from "../../track_utils.mjs";
 
 export function trackHasRenderableWaveform(track) {
   const hasPreview = Array.isArray(track?.waveformPreview)
@@ -115,7 +115,6 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     waveformColorData: Array.isArray(track?.waveformColorData) ? track.waveformColorData : null,
     createdAt: track?.createdAt || "",
     updatedAt: track?.updatedAt || "",
-    searchText: `${title} ${artist} ${album}`.toLowerCase(),
     masterDbSource: !!track?.masterDbSource,
     isUsbPath: !!track?.isUsbPath,
     analysisReady: !!track?.analysisReady
@@ -130,9 +129,7 @@ export function normalizeUsbPlaylist(playlist, deps = {}) {
       ? playlist.items
       : [];
   const tracks = rawTracks.map((track) => normalizeTrackFn(track, "usb"));
-  const declared = Number(
-    playlist?.trackCount ?? playlist?.track_count ?? playlist?.count ?? 0
-  );
+  const declared = Number(playlist?.trackCount ?? 0);
   return {
     ...playlist,
     source: String(playlist?.source || "unknown"),
@@ -166,17 +163,15 @@ export function mergeTrackPreservingBestFields(existing, normalized) {
 }
 
 export function applySourceRootAnalysisFromBrowseData(state, data) {
-  const rows = Array.isArray(data?.sourceRootAnalysis)
-    ? data.sourceRootAnalysis
-    : (Array.isArray(data?.source_root_analysis) ? data.source_root_analysis : []);
+  const rows = Array.isArray(data?.sourceRootAnalysis) ? data.sourceRootAnalysis : [];
   if (!rows.length) return;
   if (!state.sourceRootAnalysisStatus || typeof state.sourceRootAnalysisStatus !== "object") {
     state.sourceRootAnalysisStatus = {};
   }
   for (const row of rows) {
-    const root = String(row?.sourceRoot ?? row?.source_root ?? "").trim();
+    const root = String(row?.sourceRoot ?? "").trim();
     if (!root) continue;
-    state.sourceRootAnalysisStatus[root] = !!(row?.fullyAnalyzed ?? row?.fully_analyzed);
+    state.sourceRootAnalysisStatus[root] = !!row?.fullyAnalyzed;
   }
 }
 
@@ -1022,7 +1017,9 @@ export function patchTrackAnalysisFields(track, payload, deps) {
   };
   const bpm = Number(payload.bpm);
   if (payload.bpm !== undefined && payload.bpm !== null && Number.isFinite(bpm) && bpm > 0) {
-    setIfChanged("bpm", bpm.toFixed(2).replace(/\.00$/, ""));
+    // Store the raw number, same as normalizeTrack -- display formatting is
+    // formatBpm's job at render time, not state's.
+    setIfChanged("bpm", bpm);
   }
   if (typeof payload.bpmAnalyzer === "string" && payload.bpmAnalyzer.trim()) {
     setIfChanged("bpmAnalyzer", payload.bpmAnalyzer.trim());
@@ -1081,8 +1078,9 @@ export function patchLibraryRowCells(row, track, deps) {
   const bpmTd = row.querySelector(".td-bpm");
   if (bpmTd) {
     const bpmTitle = track.bpmAnalyzer ? ` data-tooltip="${escapeHtml(`Analyzed with: ${track.bpmAnalyzer}`)}"` : "";
-    bpmTd.innerHTML = track.bpm
-      ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(track.bpm)}</span>`
+    const bpmText = formatBpm(track.bpm);
+    bpmTd.innerHTML = bpmText
+      ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(bpmText)}</span>`
       : "-";
   }
 

@@ -36,7 +36,6 @@ test("normalizeTrack maps the camelCase backend fields and clamps waveform previ
   assert.equal(normalized.bpmAnalyzer, "stratum");
   assert.deepEqual(normalized.waveformPreview, [0, 40, 100]);
   assert.equal(normalized.durationMs, 12345);
-  assert.equal(normalized.searchText, "song artist album");
 });
 
 test("normalizeDurationMs reads the canonical durationMs (ms) and rejects non-positive values", () => {
@@ -87,7 +86,7 @@ test("normalizeUsbPlaylist normalizes tracks and keeps max trackCount", () => {
   const playlist = normalizeUsbPlaylist({
     name: "USB Set",
     source: "pdb",
-    track_count: 1,
+    trackCount: 1,
     items: [{ id: "t1", title: "A", artist: "B", filePath: "/usb/a.mp3" }, { id: "t2", title: "C", artist: "D", filePath: "/usb/c.mp3" }]
   }, {
     normalizeTrack: (track) => ({ ...track, normalized: true })

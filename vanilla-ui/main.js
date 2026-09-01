@@ -82,7 +82,6 @@ const LIBRARY_LOAD_LIMIT_POST_SCAN = 1000;
 const LIBRARY_SCROLL_FETCH_THRESHOLD_PX = 120;
 const PLAYLIST_LOAD_LIMIT_DEFAULT = 150;
 const APP_VERSION_FALLBACK = "Not set";
-const MOCK_API_CLIENT_MODULE = "./mock_api_client.mjs";
 
 const state = createInitialState();
 const tableSortState = createTableSortState();
@@ -93,14 +92,6 @@ const { invoke, command, isTauriRuntime, getTauriEventListen } =
     tauriInvoke,
     tauriIsTauri,
     tauriListen,
-    loadMockInvoke: async () => {
-      const { createMockInvoke } = await import(MOCK_API_CLIENT_MODULE);
-      return createMockInvoke({
-        state,
-        normalizePath: library.normalizePath,
-        constants: { LIBRARY_LOAD_LIMIT_DEFAULT, LIBRARY_LOAD_LIMIT_POST_SCAN },
-      });
-    },
   });
 
 let ThemeManager, AccentManager;

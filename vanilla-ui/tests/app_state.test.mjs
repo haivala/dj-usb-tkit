@@ -20,13 +20,6 @@ test("createInitialState returns expected default values", () => {
   assert.equal(state.activeTab, "library");
   assert.equal(state.progressBaseText, "Idle");
   assert.equal(state.startupPhase, true);
-  assert.deepEqual(state.mockPlayback, {
-    path: null,
-    playing: false,
-    startedAtMs: 0,
-    startOffsetMs: 0,
-    durationMs: 240000
-  });
 });
 
 test("createInitialState creates fresh mutable containers", () => {

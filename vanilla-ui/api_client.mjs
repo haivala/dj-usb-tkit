@@ -1,14 +1,10 @@
-// Backend API client: Tauri invoke wrapper plus optional browser/dev mock.
+// Backend API client: Tauri invoke wrapper.
 
 export function createApiClient({
   tauriInvoke,
   tauriIsTauri,
   tauriListen,
-  mockInvoke = null,
-  loadMockInvoke = null,
 }) {
-  let mockInvokePromise = null;
-
   function isTauriRuntime() {
     try {
       return !!tauriIsTauri();
@@ -22,19 +18,6 @@ export function createApiClient({
     return isTauriRuntime() ? tauriListen : null;
   }
 
-  async function getMockInvoke() {
-    if (typeof mockInvoke === "function") return mockInvoke;
-    if (typeof loadMockInvoke !== "function") return null;
-    if (!mockInvokePromise) {
-      mockInvokePromise = Promise.resolve(loadMockInvoke()).then((loaded) => {
-        if (typeof loaded === "function") return loaded;
-        if (typeof loaded?.invoke === "function") return loaded.invoke;
-        return null;
-      });
-    }
-    return mockInvokePromise;
-  }
-
   async function invoke(command, payload = {}) {
     if (isTauriRuntime()) {
       return tauriInvoke(command, payload);
@@ -43,9 +26,6 @@ export function createApiClient({
     if (window.__TAURI__?.core?.invoke) {
       return window.__TAURI__.core.invoke(command, payload);
     }
-
-    const fallback = await getMockInvoke();
-    if (fallback) return fallback(command, payload);
 
     return {
       ok: false,

@@ -32,6 +32,16 @@ export function formatDurationMs(value) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+// `track.bpm` is always carried through state as a number (or null) -- both
+// `normalizeTrack` and the realtime analysis patch store the raw numeric value.
+// This is the single place that turns it into display text: trims float noise
+// and a trailing `.00` without forcing decimals on a whole-number BPM.
+export function formatBpm(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return String(Math.round(n * 100) / 100);
+}
+
 // The single "Total time: … (N without length)" renderer for every track-list
 // footer (app playlist, library, USB playlist/history). The totals are always
 // backend-computed and passed straight through -- no client-side summing, and

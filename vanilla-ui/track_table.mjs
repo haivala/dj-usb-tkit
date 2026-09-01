@@ -1,4 +1,4 @@
-import { formatDurationMs } from "./track_utils.mjs";
+import { formatDurationMs, formatBpm } from "./track_utils.mjs";
 
 export function createTrackRow(track, options, deps) {
   const {
@@ -74,8 +74,9 @@ export function createTrackRow(track, options, deps) {
   }
 
   const bpmTitle = track.bpmAnalyzer ? ` data-tooltip="${escapeHtml(`Analyzed with: ${track.bpmAnalyzer}`)}"` : "";
-  const bpmCell = track.bpm
-    ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(track.bpm)}</span>`
+  const bpmText = formatBpm(track.bpm);
+  const bpmCell = bpmText
+    ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(bpmText)}</span>`
     : "-";
 
   const keyHue = getKeyHue(track.key);

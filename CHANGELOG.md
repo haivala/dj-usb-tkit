@@ -30,6 +30,17 @@
 
 ## Unreleased
 
+- **Chore:** removed `vanilla-ui/mock_api_client.mjs`, the ~1100-line browser/dev
+  re-implementation of the backend. It was only reachable from a browser-preview
+  fallback and one unit test (the Playwright suite injects its own per-spec
+  stubs), and it forced every backend-owned derivation to be mirrored a second
+  time in JS. `api_client.mjs` is now just the Tauri wrapper.
+- **Improvement:** `track.bpm` is carried through frontend state as a number
+  everywhere (the realtime analysis patch previously stored a formatted string);
+  a single `formatBpm` helper owns the display formatting at render time. Dropped
+  the now-dead `searchText` field and the snake_case response-key fallbacks that
+  predated the backend serializing everything as camelCase.
+
 ## 0.1.35
 
 - **Fix:** the shimmer on the progress-footer bar now sweeps the full width of the

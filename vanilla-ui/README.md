@@ -12,8 +12,7 @@ The build output is written to `vanilla-ui/dist/`, which is loaded by
 - `index.html`: application shell, panels, dialogs, and static templates
 - `styles.css`: frontend styling
 - `main.js`: application bootstrap and cross-component orchestration
-- `api_client.mjs`: Tauri command wrapper and lazy browser mock loader
-- `mock_api_client.mjs`: browser/dev mock backend used outside Tauri
+- `api_client.mjs`: Tauri command wrapper
 - `app_state.mjs`: initial state and shared state constructors
 - `message_bus.mjs`: centralized status, progress, and event-log message routing
 - `event_log.mjs`: event-log normalization and coalescing store
@@ -72,9 +71,9 @@ For the full backend command contract, see `docs/COMMANDS.md`.
 
 ## Behavior
 
-If the Tauri runtime is unavailable, the frontend lazy-loads local mock data so the UI
-can be exercised in a browser. USB export is intentionally excluded from browser
-mocks and requires the Tauri backend runtime.
+The frontend runs against the Tauri backend. When the Tauri runtime is unavailable it
+falls back to `window.__TAURI__.core.invoke` if a host injects one (the Playwright e2e
+suite does this per spec); otherwise every command returns an `INTERNAL_ERROR` envelope.
 
 Key behavior:
 

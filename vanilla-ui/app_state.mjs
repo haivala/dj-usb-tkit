@@ -91,14 +91,7 @@ export function createInitialState() {
     deletingPlaylistId: null,
     selectedRepairFixIds: new Set(),
     eventLogEntries: [],
-    startupPhase: true,
-    mockPlayback: {
-      path: null,
-      playing: false,
-      startedAtMs: 0,
-      startOffsetMs: 0,
-      durationMs: 240000
-    }
+    startupPhase: true
   };
 }
 
