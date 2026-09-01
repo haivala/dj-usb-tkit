@@ -2256,6 +2256,9 @@ body.sidebar-collapsed .progress-footer {
   overflow: hidden;
   background: var(--bg);
   border: 1px solid var(--line);
+  /* Anchor the shimmer to the whole track so it sweeps the full bar width,
+     not just the (initially near-zero) filled portion. */
+  position: relative;
 }
 
 .progress-fill {
@@ -2264,20 +2267,20 @@ body.sidebar-collapsed .progress-footer {
   border-radius: 999px;
   background: linear-gradient(90deg, var(--accent), var(--accent-hot));
   transition: width 180ms ease-out;
-  position: relative;
 }
 
-.progress-fill::after {
+.progress-track::after {
   content: '';
   position: absolute;
   inset: 0;
+  pointer-events: none;
   background: linear-gradient(
     90deg,
     transparent 0%,
     var(--shimmer) 50%,
     transparent 100%
   );
-  animation: shimmer 1.8s ease-in-out infinite;
+  animation: shimmer 1.8s linear infinite;
 }
 
 @keyframes shimmer {

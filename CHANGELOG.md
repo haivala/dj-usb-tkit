@@ -30,6 +30,9 @@
 
 ## Unreleased
 
+- **Fix:** the shimmer on the progress-footer bar now sweeps the full width of the
+  track instead of being confined to the filled portion, so it no longer stalls
+  after a short travel and restarts while a job is still near 0%.
 - **Fix:** "Analyze Missing Tracks" in a playlist and the post-scan library
   analysis now select the tracks that need analysis entirely on the backend,
   scoped to that playlist or to the current library filter, so a large paginated
