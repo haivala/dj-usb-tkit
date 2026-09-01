@@ -744,6 +744,22 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
 
     window.__reorderPlaylistTrackCalls = [];
 
+    // Mirrors the backend's export_prune_stale setting: seeded from the param,
+    // updated when the sync-mode toggle persists it via set_frontend_setting,
+    // read by refresh_playlist_export_status / fetch_usb_playlists.
+    let currentPruneStale = exportPruneStale !== false;
+    const exportStatusFor = () => playlists.map((playlist) => {
+      const sameNameExistsOnUsb = !!usbSameNamePlaylistName
+        && String(playlist.name || "").trim().toLowerCase()
+          === String(usbSameNamePlaylistName).trim().toLowerCase();
+      return {
+        playlistId: playlist.id,
+        playlistName: playlist.name,
+        sameNameExistsOnUsb,
+        locksReorder: !currentPruneStale && sameNameExistsOnUsb
+      };
+    });
+
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
@@ -772,9 +788,15 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
             return { ok: true, data: { total: 0, items: [] } };
           }
           if (command === "set_frontend_setting" || command === "get_frontend_settings") {
+            if (command === "set_frontend_setting" && request.key === "ui_export_prune_stale_v1") {
+              currentPruneStale = request.value === "1";
+            }
             return command === "get_frontend_settings"
               ? { ok: true, data: { settings: {} } }
               : { ok: true, data: { key: request.key, value: request.value } };
+          }
+          if (command === "refresh_playlist_export_status") {
+            return { ok: true, data: { playlistUsbExportStatus: exportStatusFor() } };
           }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
@@ -808,22 +830,13 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
                   trackCount: 1
                 }]
               : [];
-            const usbNames = new Set(items.map((item) => String(item.name || "").trim().toLowerCase()));
             return {
               ok: true,
               data: {
                 items,
                 stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
                 warnings: [],
-                playlistUsbExportStatus: playlists.map((playlist) => {
-                  const sameNameExistsOnUsb = usbNames.has(String(playlist.name || "").trim().toLowerCase());
-                  return {
-                    playlistId: playlist.id,
-                    playlistName: playlist.name,
-                    sameNameExistsOnUsb,
-                    locksReorder: exportPruneStale === false && sameNameExistsOnUsb
-                  };
-                })
+                playlistUsbExportStatus: exportStatusFor()
               }
             };
           }

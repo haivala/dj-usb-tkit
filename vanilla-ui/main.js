@@ -1322,6 +1322,8 @@ const removeUsbPlaylist = async (p) => usb.removeUsbPlaylist(state, p, {
     countWarningsForStatus: eventLog.countWarningsForStatus,
     clearUsbDiagnostics: () => usb.clearUsbDiagnostics(el),
   });
+const refreshPlaylistExportStatus = () =>
+  usb.refreshPlaylistExportStatus(state, { command });
 const reorderUsbPlaylists = async () => usb.reorderUsbPlaylists(state, el, {
     setStatus,
     emitStatus,
@@ -1674,6 +1676,7 @@ function bindEvents() {
     renderCurrentPlaylistTracksFromState,
     commitActivePlaylistSort,
     isPlaylistSortActive: () => !!tableSortState.playlistTracksBody,
+    refreshPlaylistExportStatus,
     loadPlaylists,
     updateModeText,
     exportPlaylistToUsb,

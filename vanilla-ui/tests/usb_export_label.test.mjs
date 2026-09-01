@@ -3,21 +3,18 @@ import assert from "node:assert/strict";
 
 import {
   computeExportButtonState,
-  playlistUsbExportStatusById
+  playlistUsbExportStatusById,
+  refreshPlaylistExportStatus
 } from "../components/usb/actions.mjs";
-import {
-  playlistLocksReorderOnExport,
-  recomputeReorderLocks
-} from "../components/shared/export_reorder_lock.mjs";
 
 // Append-vs-export text for a real reorder-locking / non-colliding playlist
-// is covered end-to-end via the Tauri mock in
+// is covered end-to-end via the Tauri stubs in
 // tests/e2e/playlist_analysis_actions.spec.mjs ("...disabled with a tooltip
 // when additive export won't reorder it on the USB" and "...stays enabled in
 // additive mode when no same-name USB playlist exists"), which also proves
 // the backend-computed field actually reaches the DOM. The `locksReorder`
-// boolean itself is unit- and functional-tested backend-side (see
-// backend/src/service/export.rs).
+// boolean itself is now owned entirely by the backend -- unit- and
+// functional-tested in backend/src/service/export.rs.
 
 test("playlistUsbExportStatusById indexes the backend's per-playlist status by playlist id", () => {
   const statusById = playlistUsbExportStatusById([
@@ -32,38 +29,33 @@ test("playlistUsbExportStatusById indexes the backend's per-playlist status by p
   assert.equal(statusById.get("missing"), undefined);
 });
 
-// Counterpart of the backend test
-// `playlist_locks_reorder_on_export_only_when_additive_and_same_name_exists`
-// in backend/src/service/export.rs -- if the rule changes on one side, one of
-// these two tests fails.
-test("playlistLocksReorderOnExport locks only in additive mode with a same-named USB playlist", () => {
-  assert.equal(playlistLocksReorderOnExport(true, true), false); // mirror
-  assert.equal(playlistLocksReorderOnExport(false, true), true); // additive + collision
-  assert.equal(playlistLocksReorderOnExport(false, false), false); // additive, no collision
-  assert.equal(playlistLocksReorderOnExport(true, false), false);
-  assert.equal(playlistLocksReorderOnExport(false, undefined), false);
+test("refreshPlaylistExportStatus re-indexes state from the backend command's response", async () => {
+  const state = { usbRoot: "/media/usb", playlistUsbExportStatusById: new Map() };
+  const calls = [];
+  const command = async (name, payload) => {
+    calls.push({ name, payload });
+    return {
+      playlistUsbExportStatus: [
+        { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true },
+        { playlistId: "p2", playlistName: "House", sameNameExistsOnUsb: false, locksReorder: false }
+      ]
+    };
+  };
+
+  const byId = await refreshPlaylistExportStatus(state, { command });
+
+  assert.deepEqual(calls, [{ name: "refresh_playlist_export_status", payload: { usbRoot: "/media/usb" } }]);
+  assert.equal(byId, state.playlistUsbExportStatusById);
+  assert.equal(state.playlistUsbExportStatusById.get("p1").locksReorder, true);
+  assert.equal(state.playlistUsbExportStatusById.get("p2").locksReorder, false);
 });
 
-test("recomputeReorderLocks re-derives locksReorder from cached sameNameExistsOnUsb", () => {
-  const input = new Map([
-    ["p1", { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: false }],
-    ["p2", { playlistId: "p2", playlistName: "House", sameNameExistsOnUsb: false, locksReorder: false }]
-  ]);
+test("refreshPlaylistExportStatus passes null usbRoot when none is connected", async () => {
+  const state = { usbRoot: null, playlistUsbExportStatusById: new Map([["p1", {}]]) };
+  const command = async () => ({ playlistUsbExportStatus: [] });
 
-  const additive = recomputeReorderLocks(input, false);
-  assert.notEqual(additive, input);
-  assert.equal(input.get("p1").locksReorder, false, "input entry not mutated");
-  assert.equal(additive.get("p1").locksReorder, true);
-  assert.equal(additive.get("p1").playlistName, "Testi");
-  assert.equal(additive.get("p1").sameNameExistsOnUsb, true);
-  assert.equal(additive.get("p2").locksReorder, false);
-
-  const mirror = recomputeReorderLocks(additive, true);
-  assert.equal(mirror.get("p1").locksReorder, false);
-  assert.equal(mirror.get("p2").locksReorder, false);
-
-  assert.equal(recomputeReorderLocks(null, false).size, 0);
-  assert.equal(recomputeReorderLocks(undefined, true).size, 0);
+  await refreshPlaylistExportStatus(state, { command });
+  assert.equal(state.playlistUsbExportStatusById.size, 0);
 });
 
 test("computeExportButtonState appends last path segment to export text", () => {

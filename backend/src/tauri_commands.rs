@@ -760,6 +760,14 @@ pub fn remove_tracks_from_playlist(
 }
 
 #[tauri::command]
+pub fn refresh_playlist_export_status(
+    state: State<'_, BackendCommands>,
+    request: crate::models::RefreshPlaylistExportStatusRequest,
+) -> ApiResponse<crate::models::RefreshPlaylistExportStatusData> {
+    state.refresh_playlist_export_status(request)
+}
+
+#[tauri::command]
 pub fn reorder_playlist_tracks(
     state: State<'_, BackendCommands>,
     request: ReorderPlaylistTracksRequest,

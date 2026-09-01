@@ -1,28 +1,8 @@
-// Single frontend copy of the backend reorder-lock rule
-// (playlist_locks_reorder_on_export in backend/src/service/export.rs): additive
-// export never rewrites the order of entries already on the USB, so reordering a
-// playlist that already exists there is a no-op and the track list is locked.
-export function playlistLocksReorderOnExport(pruneStale, sameNameExistsOnUsb) {
-  return !pruneStale && !!sameNameExistsOnUsb;
-}
-
-// Returns a NEW Map with shallow-cloned entries whose locksReorder is re-derived
-// from the cached sameNameExistsOnUsb and the current pruneStale setting. A fresh
-// Map (rather than in-place mutation) keeps entry objects held elsewhere -- e.g.
-// the diagnostics report -- from changing under them, and matches the style of
-// playlistUsbExportStatusById() in components/usb/actions.mjs.
-export function recomputeReorderLocks(statusById, pruneStale) {
-  const next = new Map();
-  if (statusById instanceof Map) {
-    for (const [id, entry] of statusById) {
-      next.set(id, {
-        ...entry,
-        locksReorder: playlistLocksReorderOnExport(pruneStale, entry?.sameNameExistsOnUsb)
-      });
-    }
-  }
-  return next;
-}
+// The reorder-lock rule (additive export never rewrites the order of entries
+// already on the USB, so reordering a playlist that already exists there is a
+// no-op) lives only in the backend now -- `playlist_locks_reorder_on_export`
+// in backend/src/service/export.rs. `state.playlistUsbExportStatusById` carries
+// the backend's `locksReorder` verdict; this module only renders it.
 
 export function exportReorderLockTooltip(playlistName) {
   return `Won't reorder on USB — "${playlistName}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`;

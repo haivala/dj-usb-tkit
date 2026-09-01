@@ -445,6 +445,13 @@ impl BackendCommands {
         wrap(self.service.export_to_usb(req))
     }
 
+    pub fn refresh_playlist_export_status(
+        &self,
+        req: crate::models::RefreshPlaylistExportStatusRequest,
+    ) -> ApiResponse<crate::models::RefreshPlaylistExportStatusData> {
+        wrap(self.service.refresh_playlist_export_status(req))
+    }
+
     pub fn export_to_usb_with_progress<F>(
         &self,
         req: ExportToUsbRequest,

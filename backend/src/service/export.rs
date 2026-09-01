@@ -44,7 +44,10 @@ use super::usb_utils::{
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
 use super::usb_vendor_compat::{USB_ANALYSIS_PREFIX, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX};
-use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID, has_core_analysis_fields, now};
+use super::{
+    BackendService, SETTING_EXPORT_MASTER_DB_ID, export_prune_stale_setting,
+    has_core_analysis_fields, now,
+};
 use uuid::Uuid;
 
 fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<String> {
@@ -712,6 +715,51 @@ pub(crate) fn compute_playlist_usb_export_status(
 impl BackendService {
     pub fn export_to_usb(&self, req: ExportToUsbRequest) -> BackendResult<ExportToUsbData> {
         self.export_to_usb_with_progress(req, |_, _, _| {})
+    }
+
+    /// Recompute every local playlist's `PlaylistUsbExportStatus` against the
+    /// connected USB's playlist names and the current export sync-mode setting.
+    /// Reads only the *staged* PDB/eDB (local cache, no access to the USB
+    /// drive), so the frontend can call it from the settings sync-mode toggle
+    /// instead of re-deriving `locksReorder` itself. With no (or no longer
+    /// valid) `usb_root`, every playlist comes back unlocked -- there is
+    /// nothing on a device to collide with.
+    pub fn refresh_playlist_export_status(
+        &self,
+        req: crate::models::RefreshPlaylistExportStatusRequest,
+    ) -> BackendResult<crate::models::RefreshPlaylistExportStatusData> {
+        let conn = self.db.connect()?;
+        let prune_stale = export_prune_stale_setting(&conn)?;
+        let local_playlists = self.list_playlists()?.items;
+
+        let usb_playlist_names = req
+            .usb_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|root| !root.is_empty())
+            .map(|root| {
+                let root = std::path::Path::new(root);
+                let mut warnings = Vec::new();
+                let parsed = super::usb_staging::stage_pdb(root)
+                    .ok()
+                    .and_then(|path| crate::pdb_reader::parse_pdb(&path).ok());
+                let edb_names = crate::edb::try_read_playlists_with_metadata_from_edb_db_only(
+                    root,
+                    &mut warnings,
+                )
+                .map(|by_name| by_name.into_keys().collect::<Vec<_>>())
+                .unwrap_or_default();
+                usb_playlist_names_for_export_compare(parsed.as_ref(), edb_names)
+            })
+            .unwrap_or_default();
+
+        Ok(crate::models::RefreshPlaylistExportStatusData {
+            playlist_usb_export_status: compute_playlist_usb_export_status(
+                &local_playlists,
+                &usb_playlist_names,
+                prune_stale,
+            ),
+        })
     }
 
     pub fn export_to_usb_with_progress<F>(
@@ -2897,6 +2945,27 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn refresh_playlist_export_status_with_no_usb_root_reports_every_playlist_unlocked() {
+        let (_dir, service) = test_service();
+        service
+            .create_playlist(CreatePlaylistRequest {
+                name: "Set A".to_string(),
+            })
+            .expect("create playlist");
+
+        let data = service
+            .refresh_playlist_export_status(crate::models::RefreshPlaylistExportStatusRequest {
+                usb_root: None,
+            })
+            .expect("refresh status");
+
+        assert_eq!(data.playlist_usb_export_status.len(), 1);
+        let status = &data.playlist_usb_export_status[0];
+        assert!(!status.same_name_exists_on_usb);
+        assert!(!status.locks_reorder);
     }
 
     #[test]

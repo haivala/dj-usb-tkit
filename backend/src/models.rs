@@ -1027,6 +1027,22 @@ pub struct PlaylistUsbExportStatus {
     pub locks_reorder: bool,
 }
 
+/// Request for `refresh_playlist_export_status` -- a cheap recompute of every
+/// playlist's `PlaylistUsbExportStatus` (staged PDB/eDB only, no USB access)
+/// for when the export sync-mode setting changes.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshPlaylistExportStatusRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshPlaylistExportStatusData {
+    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchUsbPlaylistsData {

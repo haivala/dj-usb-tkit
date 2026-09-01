@@ -90,7 +90,19 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
       commitCalls.push({ id, locksReorderAtCommit: state.playlistUsbExportStatusById.get(id)?.locksReorder });
       if (commitThrows) throw new Error("disk full");
     },
-    isPlaylistSortActive: () => sortActive
+    isPlaylistSortActive: () => sortActive,
+    // Stand-in for the `refresh_playlist_export_status` backend command: applies
+    // the same rule the backend does (`!pruneStale && sameNameExistsOnUsb`).
+    refreshPlaylistExportStatus: async () => {
+      const next = new Map();
+      for (const [id, entry] of state.playlistUsbExportStatusById) {
+        next.set(id, {
+          ...entry,
+          locksReorder: !state.exportPruneStale && !!entry.sameNameExistsOnUsb
+        });
+      }
+      state.playlistUsbExportStatusById = next;
+    }
   });
 
   const grid = doc.querySelector("[data-track-grid]");

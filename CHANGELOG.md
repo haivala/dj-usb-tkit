@@ -30,6 +30,11 @@
 
 ## Unreleased
 
+- **Improvement:** the playlist reorder-lock ("won't reorder on USB" in additive
+  export mode) is now owned entirely by the backend. Changing the export sync
+  mode calls a new lightweight `refresh_playlist_export_status` command (staged
+  PDB/eDB only, no USB rescan) instead of the frontend re-deriving `locksReorder`
+  from a copy of the rule.
 - **Improvement:** the in-app update check moved to the backend — a new
   `check_for_update` command does the GitHub Releases fetch, the semver
   comparison, and the `**Severity:** critical` scan in Rust

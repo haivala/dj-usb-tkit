@@ -61,6 +61,21 @@ export function playlistUsbExportStatusById(statusList) {
   return byId;
 }
 
+// Cheap backend recompute of every playlist's `PlaylistUsbExportStatus` (staged
+// PDB/eDB only, no USB access) -- used after the export sync-mode setting
+// changes so the reorder lock reflects the new mode without a full USB rescan
+// and without the frontend re-deriving the rule.
+export async function refreshPlaylistExportStatus(state, deps = {}) {
+  const { command } = deps;
+  const data = await command("refresh_playlist_export_status", {
+    usbRoot: state.usbRoot || null,
+  });
+  state.playlistUsbExportStatusById = playlistUsbExportStatusById(
+    data?.playlistUsbExportStatus,
+  );
+  return state.playlistUsbExportStatusById;
+}
+
 export function computeExportButtonState({
   usbRoot,
   usbRootValid,

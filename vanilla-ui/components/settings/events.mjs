@@ -1,5 +1,3 @@
-import { recomputeReorderLocks } from "../shared/export_reorder_lock.mjs";
-
 const NODE_JS_URL = "https://nodejs.org/";
 const WEBSITE_URL = "https://chiph.art?utm_source=djtkit&utm_medium=app&utm_campaign=sidebar";
 const SUPPORT_URL = "https://chiph.art/en/dj-usb-tkit/support?utm_source=djtkit&utm_medium=app&utm_campaign=support";
@@ -80,7 +78,8 @@ export function bindSettingsEvents(ctx) {
     getCurrentPlaylist,
     renderCurrentPlaylistTracksFromState,
     commitActivePlaylistSort,
-    isPlaylistSortActive
+    isPlaylistSortActive,
+    refreshPlaylistExportStatus
   } = ctx;
   const {
     STORAGE_KEY_HELP_SEEN,
@@ -142,10 +141,11 @@ export function bindSettingsEvents(ctx) {
       state.exportPruneStale ? "1" : "0"
     );
 
-    // The reorder lock is derived from (export mode, same-named playlist on USB).
-    // Re-derive it for the open playlist now so the track list unlocks/locks
-    // immediately -- otherwise it stays stale until the next USB scan.
     const openPlaylist = getCurrentPlaylist?.() || null;
+    // Predict whether additive mode is about to lock the open playlist purely
+    // to sequence the sort commit below -- `sameNameExistsOnUsb` is a
+    // backend-provided fact already on the status map. The authoritative
+    // `locksReorder` comes from the backend refresh right after.
     const willLock = !!openPlaylist
       && !state.exportPruneStale
       && !!state.playlistUsbExportStatusById?.get(openPlaylist.id)?.sameNameExistsOnUsb;
@@ -164,10 +164,13 @@ export function bindSettingsEvents(ctx) {
       }
     }
 
-    state.playlistUsbExportStatusById = recomputeReorderLocks(
-      state.playlistUsbExportStatusById,
-      state.exportPruneStale
-    );
+    // The setting is now persisted; ask the backend to recompute every
+    // playlist's reorder lock against it (cheap -- staged PDB/eDB, no USB scan).
+    try {
+      await refreshPlaylistExportStatus?.();
+    } catch (err) {
+      console.error(err);
+    }
 
     if (openPlaylist) {
       try {
