@@ -419,6 +419,7 @@ pub fn try_read_track_index_from_edb_with_conn(
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
                 key: key_name,
                 file_path: resolved_file_path,
+                needs_hydration: false,
                 format_compat: crate::service::format_compat::compute_format_compat(
                     format_ext.as_deref(),
                     None,
@@ -788,6 +789,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
                 key: key_name,
                 file_path: resolved_file_path,
+                needs_hydration: false,
                 format_compat: crate::service::format_compat::compute_format_compat(
                     format_ext.as_deref(),
                     None,

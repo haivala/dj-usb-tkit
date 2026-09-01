@@ -76,8 +76,11 @@ export function buildTracklistText(tracks, timeMode) {
     .join("\n");
 }
 
+// The backend resolves a history session's date itself (from the export log,
+// then the PDB's track date_created -- see `apply_history_dates_*` in
+// service/usb.rs) and hands it back as the one `createdAt` field.
 export function getHistoryDateValue(history) {
-  return history?.createdAt || history?.sourceCreatedAt || history?.sourcePlayedAt || "";
+  return history?.createdAt || "";
 }
 
 export function getHistoryDateDisplay(history) {

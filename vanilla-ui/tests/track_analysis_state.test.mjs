@@ -1,51 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  trackHasRenderableWaveform,
-  trackHasArtwork,
-  trackArtworkChecked,
-  trackHasBpm,
-  trackHasKey,
-  usbTrackNeedsHydration
-} from "../components/library/actions.mjs";
+import { normalizeTrack, trackArtworkChecked } from "../components/library/actions.mjs";
 
-test("waveform/artwork/bpm/key checks classify correctly", () => {
-  assert.equal(trackHasRenderableWaveform({ waveformPreview: [0, 12] }), true);
-  assert.equal(trackHasRenderableWaveform({ waveformPreview: [], waveformPeaksPath: "/a" }), true);
-  assert.equal(trackHasRenderableWaveform({ waveformPreview: [0, 0], waveformPeaksPath: "" }), false);
+// "Needs a deeper USB metadata fetch" is computed in Rust now
+// (service::usb::hydrate_usb_track_in_place, tested there). The frontend just
+// carries the `needsHydration` flag through normalizeTrack.
 
-  assert.equal(trackHasArtwork({ artworkUrl: "x" }), true);
-  assert.equal(trackHasArtwork({}), false);
-  assert.equal(trackHasArtwork({ artworkChecked: true }), false);
-  assert.equal(trackArtworkChecked({ artworkChecked: true }), true);
-  assert.equal(trackArtworkChecked({}), false);
+const deps = { toPlayableUrl: (v) => v, appendUrlRevision: (u) => u, normalizeDurationMs: () => null };
 
-  assert.equal(trackHasBpm({ bpm: 120 }), true);
-  assert.equal(trackHasBpm({ bpm: 0 }), false);
-
-  assert.equal(trackHasKey({ key: "8A" }), true);
-  assert.equal(trackHasKey({ key: "" }), false);
+test("normalizeTrack carries the backend needsHydration flag (USB rows)", () => {
+  assert.equal(normalizeTrack({ id: "1", needsHydration: true }, "usb", deps).needsHydration, true);
+  assert.equal(normalizeTrack({ id: "2", needsHydration: false }, "usb", deps).needsHydration, false);
+  // absent / non-boolean -> false
+  assert.equal(normalizeTrack({ id: "3" }, "lib", deps).needsHydration, false);
 });
 
-test("usbTrackNeedsHydration true until all core pieces exist", () => {
-  assert.equal(usbTrackNeedsHydration({}), true);
-  assert.equal(usbTrackNeedsHydration({
-    waveformPeaksPath: "/USB/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT",
-    waveformPreview: [],
-    artworkUrl: "x",
-    bpm: 120,
-    key: "8A"
-  }), true);
-  assert.equal(usbTrackNeedsHydration({
-    waveformPreview: [1],
-    artworkUrl: "x",
-    bpm: 120,
-    key: "8A"
-  }), false);
-  assert.equal(usbTrackNeedsHydration({
-    waveformPreview: [1],
-    artworkChecked: true,
-    bpm: 120,
-    key: "8A"
-  }), false);
+test("trackArtworkChecked reflects the frontend runtime flag", () => {
+  assert.equal(trackArtworkChecked({ artworkChecked: true }), true);
+  assert.equal(trackArtworkChecked({}), false);
 });

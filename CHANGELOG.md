@@ -30,6 +30,15 @@
 
 ## Unreleased
 
+- **Fix:** the playlist panel header shows the whole playlist's track count, not
+  just the number of rows loaded into the current page.
+- **Improvement:** more per-track and per-request logic moved to the backend:
+  whether a USB row still needs a deeper metadata fetch is a `needsHydration`
+  flag the backend sets; `analyze_new_tracks` accepts the raw BPM-range string
+  and parses it itself; the history-session date and job-progress status text
+  are always fully resolved server-side. The matching frontend helpers
+  (`usbTrackNeedsHydration` + 5 predicates, `parseAnalysisBpmRange`, the JS BPM
+  preset list, the job-stage fallback-text table) are gone.
 - **Improvement:** the USB diagnostics / parity / repair reports are now fully
   assembled by the backend. The "Player Counter Snapshot" section arrives as a
   ready `DiagSection`, the strict-parity "Issues" badges as an `issueLabels`

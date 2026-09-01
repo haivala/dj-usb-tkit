@@ -1711,11 +1711,12 @@ export async function pickUsbFolder(deps = {}) {
 
 export async function hydrateUsbTrackMetadata(state, track, deps = {}) {
   const {
-    usbTrackNeedsHydration = () => false,
     command = async () => ({}),
     normalizeTrack = (t) => t
   } = deps;
-  if (!track || !usbTrackNeedsHydration(track)) return track;
+  // Backend-owned: `needsHydration` (service::usb::hydrate_usb_track_in_place)
+  // says whether an inspect could still fill anything in.
+  if (!track || track.needsHydration !== true) return track;
   const trackId = String(track.id || "").trim();
   if (!/^\d+$/.test(trackId)) return track;
   try {
@@ -1730,6 +1731,8 @@ export async function hydrateUsbTrackMetadata(state, track, deps = {}) {
   } catch (err) {
     console.warn(`inspect_usb_track failed for ${trackId}:`, err);
   }
+  // We've inspected this row -- don't ask again even if fields are still blank.
+  track.needsHydration = false;
   return track;
 }
 

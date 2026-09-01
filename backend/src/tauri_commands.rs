@@ -329,6 +329,7 @@ where
     let job_id_for_task = job_id.clone();
     let job_type_for_task = job_type.to_string();
     let stage_for_task = stage.to_string();
+    let fallback_message = started_message.to_string();
     let response = match tauri::async_runtime::spawn_blocking(move || {
         let progress = Box::new(move |current: usize, total: usize, message: &str| {
             let denom = total.max(1);
@@ -337,6 +338,13 @@ where
                 job_id: &job_id_for_task,
                 job_type: &job_type_for_task,
                 stage: &stage_for_task,
+            };
+            // Every job:event carries a non-empty message so the frontend never
+            // has to invent stage-specific fallback text.
+            let message = if message.trim().is_empty() {
+                fallback_message.as_str()
+            } else {
+                message
             };
             emit_job_event(
                 &app_for_task,

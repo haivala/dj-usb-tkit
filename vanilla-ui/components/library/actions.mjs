@@ -1,15 +1,6 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
 import { formatDurationMs, formatBpm, renderTrackListDurationSummary } from "../../track_utils.mjs";
 
-export function trackHasRenderableWaveform(track) {
-  const hasPreview = Array.isArray(track?.waveformPreview)
-    && track.waveformPreview.length > 0
-    && track.waveformPreview.some((v) => Number(v) > 0);
-  const hasWaveformPath = typeof track?.waveformPeaksPath === "string"
-    && track.waveformPeaksPath.trim().length > 0;
-  return hasPreview || hasWaveformPath;
-}
-
 export function warningEntryText(entry) {
   return String(entry?.message ?? entry ?? "").trim();
 }
@@ -22,38 +13,15 @@ function findAnalysisAutoLimitWarning(warnings) {
   return hit ? warningEntryText(hit) : null;
 }
 
-export function trackHasArtwork(track) {
-  return !!(track?.artworkDataUrl || track?.artworkPath || track?.artworkUrl);
-}
-
 export function trackArtworkChecked(track) {
   return track?.artworkChecked === true;
 }
 
-export function trackHasBpm(track) {
-  return Number.isFinite(Number(track?.bpm)) && Number(track.bpm) > 0;
-}
+// Whether a track still needs core analysis (`analysisReady`) or a deeper USB
+// metadata fetch (`needsHydration`, on USB rows) is owned entirely by the
+// backend -- see `has_core_analysis_fields` / `hydrate_usb_track_in_place`.
+// The frontend reads the fields directly and never recomputes them.
 
-export function trackHasKey(track) {
-  return typeof track?.key === "string" && track.key.trim().length > 0;
-}
-
-// Whether a track still needs core analysis is owned entirely by the backend
-// (`Track.analysisReady` / the analysis job-progress payload -- see
-// `has_core_analysis_fields` in backend/src/service/mod.rs). The frontend
-// reads `track.analysisReady` directly and never recomputes it.
-
-export function usbTrackNeedsHydration(track, deps = {}) {
-  const hasWaveform = deps.trackHasRenderableWaveform || trackHasRenderableWaveform;
-  const hasArtwork = deps.trackHasArtwork || trackHasArtwork;
-  const artworkChecked = deps.trackArtworkChecked || trackArtworkChecked;
-  const hasBpm = deps.trackHasBpm || trackHasBpm;
-  const hasKey = deps.trackHasKey || trackHasKey;
-  const needsPreviewHydration = deps.trackNeedsPreviewHydration || trackNeedsPreviewHydration;
-  if (!track) return false;
-  const artworkResolved = hasArtwork(track) || artworkChecked(track);
-  return needsPreviewHydration(track) || !(hasWaveform(track) && artworkResolved && hasBpm(track) && hasKey(track));
-}
 function clampWaveformPreview(value) {
   if (!Array.isArray(value)) return [];
   return value.map((v) => Math.max(0, Math.min(100, Number(v) || 0)));
@@ -129,7 +97,11 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     updatedAt: track?.updatedAt || "",
     masterDbSource: !!track?.masterDbSource,
     isUsbPath: !!track?.isUsbPath,
-    analysisReady: !!track?.analysisReady
+    analysisReady: !!track?.analysisReady,
+    // USB rows only: backend flag for "still missing display data an
+    // inspect_usb_track could fill" (service::usb::hydrate_usb_track_in_place).
+    // Cleared to false by hydrateUsbTrackMetadata after it inspects the row.
+    needsHydration: track?.needsHydration === true
   };
 }
 
@@ -171,6 +143,11 @@ export function mergeTrackPreservingBestFields(existing, normalized) {
   // Backend-owned readiness only ever moves false -> true; a partial merge that
   // lacks the flag must not drop a previously-analyzed row back to "needs analysis".
   merged.analysisReady = !!(existing.analysisReady || normalized.analysisReady);
+  // Once a row has been hydrated (backend flag cleared, or an inspect ran),
+  // it stays hydrated across a re-fetch/merge.
+  merged.needsHydration = existing.needsHydration === false
+    ? false
+    : normalized.needsHydration === true;
   return merged;
 }
 
@@ -786,7 +763,6 @@ export async function scanMasterDb(state, deps) {
 
 export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", options = {}, deps) {
   const {
-    parseAnalysisBpmRange,
     command,
     setStatus,
     setTrackAnalyzingState,
@@ -816,7 +792,6 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
   const backendScoped = !!(options.playlistId || options.scopeToLibraryFilter);
   if (!ids.length && !backendScoped) return;
   const countLabel = ids.length ? `${ids.length}` : "matching";
-  const bpmRange = parseAnalysisBpmRange(state.analysisBpmRange);
 
   let analyzed = 0;
   let failed = 0;
@@ -836,8 +811,8 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
       trackIds: ids,
       playlistId: options.playlistId || null,
       scopeToLibraryFilter: !!options.scopeToLibraryFilter,
-      bpmMin: bpmRange.min,
-      bpmMax: bpmRange.max,
+      // Backend parses + validates the range string (service::analysis).
+      bpmRange: String(state.analysisBpmRange || ""),
       analysisEngine: state.analysisEngine,
       sourceRoots: (state.sourceRoots || []).filter(
         (root) => state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(state, root)
@@ -1177,35 +1152,14 @@ function formatDurationMsInternal(value) {
 
 export const DEFAULT_ANALYSIS_BPM_RANGE = "70-180";
 
-export const ANALYSIS_BPM_RANGE_PRESETS = [
-  "70-180",
-  "48-95",
-  "58-115",
-  "68-135",
-  "78-155",
-  "88-175",
-  "98-195",
-  "108-215",
-  "118-235",
-  "128-255"
-];
-
-export function parseAnalysisBpmRange(range) {
-  const raw = String(range || "").trim();
-  const m = /^(\d{1,3})\s*-\s*(\d{1,3})$/.exec(raw);
-  if (!m) return parseAnalysisBpmRange(DEFAULT_ANALYSIS_BPM_RANGE);
-  const min = Number(m[1]);
-  const max = Number(m[2]);
-  if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || min >= max) {
-    return parseAnalysisBpmRange(DEFAULT_ANALYSIS_BPM_RANGE);
-  }
-  return { label: `${min}-${max}`, min, max };
-}
-
+// Format guard for the persisted analysis-BPM-range setting (a corrupt
+// localStorage value shouldn't reach the dropdown). The range string is sent
+// as-is to `analyze_new_tracks`, which parses and validates it backend-side
+// (service::analysis::resolve_analysis_bpm_range); the dropdown's `<option>`
+// list in index.html is the source of truth for the offered presets.
 export function normalizeAnalysisBpmRange(range) {
-  const parsed = parseAnalysisBpmRange(range);
-  return ANALYSIS_BPM_RANGE_PRESETS.includes(parsed.label)
-    ? parsed.label
+  return /^\d{1,3}\s*-\s*\d{1,3}$/.test(String(range || "").trim())
+    ? String(range).trim()
     : DEFAULT_ANALYSIS_BPM_RANGE;
 }
 

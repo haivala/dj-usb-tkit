@@ -592,16 +592,18 @@ export function renderPlaylistSidebarItemContent(playlist, deps) {
   `;
 }
 
-// The playlist's duration total is computed entirely by the backend (which
-// sums the full playlist, not just whatever tracks happen to be loaded
-// client-side) and pushed here via playlist.totalDurationMs -- see
-// GetPlaylistTracksData::total_duration_ms. This is a pure setter, no track
-// iteration.
+// The playlist's track count AND duration total are both computed entirely by
+// the backend over the whole playlist (not just whatever page(s) happen to be
+// loaded client-side) and pushed here via playlist.trackCount /
+// playlist.totalDurationMs -- see GetPlaylistTracksData::{total,total_duration_ms}.
+// This is a pure setter, no track iteration.
 export function updatePlaylistPanelTitle(el, playlist, deps) {
   const { formatDurationMs } = deps;
   if (!el?.playlistPanelTitle || !playlist) return;
-  const tracks = Array.isArray(playlist.tracks) ? playlist.tracks : [];
-  const count = tracks.length;
+  const loaded = Array.isArray(playlist.tracks) ? playlist.tracks.length : 0;
+  // Prefer the backend's whole-playlist total; fall back to the loaded count
+  // only before the first page response has set it.
+  const count = Number(playlist.trackCount) > 0 ? Number(playlist.trackCount) : loaded;
   const totalMs = Number(playlist.totalDurationMs) || 0;
   const parts = [playlist.name];
   if (count > 0) {

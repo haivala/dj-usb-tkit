@@ -383,11 +383,13 @@ function installScanAnalysisMock(page, opts = {}) {
             if (!ids.length && (req.scopeToLibraryFilter || req.playlistId)) {
               ids = tracks.filter((t) => !isCountable(t)).map((t) => String(t.id));
             }
+            // Backend parses the `bpmRange` string (service::analysis); mirror that.
+            const [rangeMin, rangeMax] = String(req.bpmRange || "").split("-").map((n) => Number(n.trim()));
             bpmRangeSeen = {
-              min: Number(req.bpmMin || 0),
-              max: Number(req.bpmMax || 0)
+              min: Number.isFinite(rangeMin) ? rangeMin : Number(req.bpmMin || 0),
+              max: Number.isFinite(rangeMax) ? rangeMax : Number(req.bpmMax || 0)
             };
-            const data = await runAnalyzeNewTracks(ids, req.bpmMin, req.bpmMax);
+            const data = await runAnalyzeNewTracks(ids, bpmRangeSeen.min, bpmRangeSeen.max);
             return { ok: true, data };
           }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {

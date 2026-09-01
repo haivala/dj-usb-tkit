@@ -312,14 +312,6 @@ const normalizeTrack = (track, fallbackIdPrefix = "t") => library.normalizeTrack
 const buildCoverSrcCandidates = (track) => library.buildCoverSrcCandidates(track, { toPlayableUrl });
 const attachCoverFallbackHandlers = (root = document) => library.attachCoverFallbackHandlers(root, { document });
 
-const usbTrackNeedsHydration = (track) => library.usbTrackNeedsHydration(track, {
-    trackHasRenderableWaveform: library.trackHasRenderableWaveform,
-    trackHasArtwork: library.trackHasArtwork,
-    trackArtworkChecked: library.trackArtworkChecked,
-    trackHasBpm: library.trackHasBpm,
-    trackHasKey: library.trackHasKey,
-  });
-
 function getCurrentPlaylist() {
   return state.playlists.find((p) => p.id === state.currentPlaylistId) || null;
 }
@@ -524,6 +516,8 @@ const playlistTracksCtl = createTrackListController({
       p.totalDurationMs = Number(data.totalDurationMs) || 0;
       p.durationKnownCount = Number(data.durationKnownCount) || 0;
       p.unanalyzedCount = Number(data.unanalyzedCount) || 0;
+      // Whole-playlist count from the backend, not just the loaded page(s).
+      p.trackCount = Number(data.total) || 0;
     }
     // Reveal the table wrap *before* renderTrackTable paints the rows: a
     // waveform canvas measured while an ancestor is `display:none` (the
@@ -959,7 +953,6 @@ const scanMasterDb = async () => library.scanMasterDb(state, {
     logWarnings,
   });
 const analyzeTrackIds = async (trackIds, modeLabel = "Analyze", options = {}) => library.analyzeTrackIds(state, trackIds, modeLabel, options, {
-    parseAnalysisBpmRange: library.parseAnalysisBpmRange,
     command,
     setStatus,
     emitStatus,
@@ -1210,7 +1203,6 @@ function showDiagRepairView() {
   usb.showDiagRepairView(el);
 }
 const hydrateUsbTrackMetadata = (track) => usb.hydrateUsbTrackMetadata(state, track, {
-    usbTrackNeedsHydration,
     command,
     normalizeTrack,
   });

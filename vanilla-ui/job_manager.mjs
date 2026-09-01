@@ -110,28 +110,11 @@ function setAnalysisControlsVisible(state, el, visible) {
   updateAnalysisPauseButtonAppearance(el, false);
 }
 
-const JOB_STAGE_STATUS_RULES = {
-  "usb_read:fetch_usb_playlists": ({ message }) => message || "Importing USB playlists...",
-  "usb_read:fetch_usb_histories": ({ message }) => message || "Importing USB histories...",
-};
-
-export function formatJobStatusText(jobType, stage, message) {
-  const normalizedJobType = String(jobType || "job");
-  const normalizedStage = String(stage || "");
-  const normalizedMessage = String(message || "");
-  if (normalizedMessage) {
-    return normalizedMessage;
-  }
-  const ruleKey = normalizedStage ? `${normalizedJobType}:${normalizedStage}` : "";
-  const formatter = JOB_STAGE_STATUS_RULES[ruleKey];
-  if (typeof formatter === "function") {
-    return formatter({
-      jobType: normalizedJobType,
-      stage: normalizedStage,
-      message: normalizedMessage
-    });
-  }
-  return "";
+// Backend-owned: every `job:event` carries a non-empty `message`
+// (run_usb_job_with_progress substitutes the job's started-message for a blank
+// progress update), so there's nothing to fall back to here.
+export function formatJobStatusText(_jobType, _stage, message) {
+  return String(message || "");
 }
 
 function createEmitMessage(deps = {}) {

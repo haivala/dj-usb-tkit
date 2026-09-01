@@ -512,9 +512,21 @@ fn essentia_worker_pool() -> &'static EssentiaWorkerPool {
     POOL.get_or_init(EssentiaWorkerPool::default)
 }
 
-fn resolve_analysis_bpm_range(bpm_min: Option<u32>, bpm_max: Option<u32>) -> (u32, u32) {
-    let min = bpm_min.unwrap_or(DEFAULT_ANALYSIS_BPM_MIN);
-    let max = bpm_max.unwrap_or(DEFAULT_ANALYSIS_BPM_MAX);
+/// `"70-180"` (or `" 70 - 180 "`) -> `(70, 180)`; `None` for anything else.
+fn parse_bpm_range_str(range: &str) -> Option<(u32, u32)> {
+    let (lo, hi) = range.split_once('-')?;
+    Some((lo.trim().parse().ok()?, hi.trim().parse().ok()?))
+}
+
+fn resolve_analysis_bpm_range(
+    bpm_range: Option<&str>,
+    bpm_min: Option<u32>,
+    bpm_max: Option<u32>,
+) -> (u32, u32) {
+    let (min, max) = bpm_range
+        .and_then(parse_bpm_range_str)
+        .or_else(|| Some((bpm_min?, bpm_max?)))
+        .unwrap_or((DEFAULT_ANALYSIS_BPM_MIN, DEFAULT_ANALYSIS_BPM_MAX));
     if min == 0 || max == 0 || min >= max {
         return (DEFAULT_ANALYSIS_BPM_MIN, DEFAULT_ANALYSIS_BPM_MAX);
     }
@@ -645,7 +657,8 @@ impl BackendService {
             ));
         }
         let total = tracks.len();
-        let (bpm_min, bpm_max) = resolve_analysis_bpm_range(req.bpm_min, req.bpm_max);
+        let (bpm_min, bpm_max) =
+            resolve_analysis_bpm_range(req.bpm_range.as_deref(), req.bpm_min, req.bpm_max);
         let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
 
         // Live library-duration-total baseline: the frontend passes its
@@ -2785,13 +2798,26 @@ mod tests {
 
     #[test]
     fn resolve_analysis_bpm_range_defaults_to_70_180() {
-        assert_eq!(resolve_analysis_bpm_range(None, None), (70, 180));
+        assert_eq!(resolve_analysis_bpm_range(None, None, None), (70, 180));
+        assert_eq!(resolve_analysis_bpm_range(Some("nonsense"), None, None), (70, 180));
+    }
+
+    #[test]
+    fn resolve_analysis_bpm_range_parses_the_range_string() {
+        assert_eq!(resolve_analysis_bpm_range(Some("88-175"), None, None), (88, 175));
+        assert_eq!(resolve_analysis_bpm_range(Some(" 48 - 95 "), None, None), (48, 95));
+        // range string wins over the pre-parsed fields
+        assert_eq!(resolve_analysis_bpm_range(Some("100-200"), Some(1), Some(2)), (100, 200));
+        // unparseable range string falls back to the pre-parsed fields
+        assert_eq!(resolve_analysis_bpm_range(Some("bad"), Some(60), Some(140)), (60, 140));
+        // parseable-but-invalid range (min >= max) -> default
+        assert_eq!(resolve_analysis_bpm_range(Some("9-9"), Some(60), Some(140)), (70, 180));
     }
 
     #[test]
     fn resolve_analysis_bpm_range_rejects_invalid_values() {
-        assert_eq!(resolve_analysis_bpm_range(Some(180), Some(70)), (70, 180));
-        assert_eq!(resolve_analysis_bpm_range(Some(0), Some(180)), (70, 180));
+        assert_eq!(resolve_analysis_bpm_range(None, Some(180), Some(70)), (70, 180));
+        assert_eq!(resolve_analysis_bpm_range(None, Some(0), Some(180)), (70, 180));
     }
 
     #[test]

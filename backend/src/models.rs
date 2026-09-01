@@ -964,6 +964,12 @@ pub struct UsbTrack {
     /// hydration -- see `service::usb::hydrate_usb_track_in_place`.
     #[serde(default)]
     pub format_compat: FormatCompat,
+    /// True when the row is still missing display data (waveform bytes,
+    /// artwork, BPM, or key) that an `inspect_usb_track` deep-resolve could
+    /// fill in. Set during page hydration; the frontend clears it once it has
+    /// inspected that row.
+    #[serde(default)]
+    pub needs_hydration: bool,
 }
 
 impl UsbTrack {
@@ -1360,6 +1366,12 @@ pub struct AnalyzeNewTracksRequest {
     /// `include_master_db` + `query`) instead of the whole DB.
     #[serde(default)]
     pub scope_to_library_filter: bool,
+    /// Preferred: the raw range string from the settings dropdown, e.g.
+    /// `"70-180"`. The backend parses and validates it (see
+    /// `resolve_analysis_bpm_range`). `bpm_min`/`bpm_max` are the older
+    /// pre-parsed form, still accepted as a fallback.
+    #[serde(default)]
+    pub bpm_range: Option<String>,
     #[serde(default)]
     pub bpm_min: Option<u32>,
     #[serde(default)]

@@ -97,6 +97,7 @@ fn build_usb_track_index(
                     },
                     key,
                     file_path: resolved_file_path,
+                    needs_hydration: false,
                     format_compat: super::format_compat::compute_format_compat(
                         format_ext.as_deref(),
                         None,
@@ -339,6 +340,30 @@ fn hydrate_usb_track_in_place(track: &mut UsbTrack) {
         None,
         None,
     );
+
+    // Whether a row is still missing display data the `inspect_usb_track`
+    // deep-resolve could fill in (waveform bytes, artwork, BPM, key). Computed
+    // here, after the cheap hydration above, so the frontend just reads the
+    // flag instead of re-deriving it from four field checks. The frontend
+    // clears it to `false` once it has run an inspect for that row.
+    let has_waveform = track
+        .waveform_preview
+        .as_ref()
+        .is_some_and(|preview| !preview.is_empty());
+    let has_artwork = track
+        .artwork_data_url
+        .as_deref()
+        .is_some_and(|url| !url.is_empty())
+        || track
+            .artwork_path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty());
+    let has_bpm = track.bpm.is_some_and(|bpm| bpm > 0.0);
+    let has_key = track
+        .key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty());
+    track.needs_hydration = !(has_waveform && has_artwork && has_bpm && has_key);
 }
 
 /// Filter → whole-list aggregates → sort → offset-slice → hydrate the page.
@@ -1581,6 +1606,7 @@ impl BackendService {
                                         key: None,
                                         file_path: String::new(),
                                         format_ext: None,
+                                        needs_hydration: false,
                                         format_compat: crate::models::FormatCompat::default(),
                                         usb_media_path: None,
                                         artwork_path: None,
@@ -2398,6 +2424,7 @@ fn resolve_usb_track_from_sources(
                         },
                         key,
                         file_path: resolved_file_path,
+                        needs_hydration: false,
                         format_compat: super::format_compat::compute_format_compat(
                             format_ext.as_deref(),
                             None,
@@ -2451,9 +2478,9 @@ mod tests {
         SLOW_USB_STAGE_MS, apply_history_dates_from_track_date_created,
         build_history_track_date_index, build_track_match_fingerprint, build_usb_track_index,
         cleanup_empty_dirs_recursive, edb_track_index_from_playlist_tracks,
-        filter_named_history_playlists, normalize_date_created, now, push_usb_stage_timing,
-        push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
-        sum_usb_track_durations,
+        filter_named_history_playlists, hydrate_usb_track_in_place, normalize_date_created, now,
+        push_usb_stage_timing, push_usb_stage_timing_with_threshold, select_history_rows,
+        slow_stage_threshold_ms, sum_usb_track_durations,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
@@ -2471,6 +2498,7 @@ mod tests {
             key: None,
             file_path: file_path.to_string(),
             format_ext: crate::utils::format_ext_from_path(file_path),
+            needs_hydration: false,
             format_compat: Default::default(),
             usb_media_path: None,
             artwork_path: None,
@@ -2514,6 +2542,38 @@ mod tests {
             title: String::new(),
             anlz_path: String::new(),
             track_file_path: String::new(),
+        }
+    }
+
+    #[test]
+    fn hydrate_usb_track_in_place_sets_needs_hydration_from_missing_display_data() {
+        // Everything present -> no further hydration needed.
+        let mut complete = make_track("1", "/USB/Contents/a.mp3");
+        complete.waveform_preview = Some(vec![1, 2, 3]);
+        complete.artwork_path = Some("/USB/art/a.jpg".to_string());
+        complete.bpm = Some(128.0);
+        complete.key = Some("8A".to_string());
+        hydrate_usb_track_in_place(&mut complete);
+        assert!(!complete.needs_hydration);
+
+        // Any missing piece -> needs hydration.
+        for tweak in [
+            |t: &mut UsbTrack| t.bpm = None,
+            |t: &mut UsbTrack| t.key = None,
+            |t: &mut UsbTrack| t.waveform_preview = None,
+            |t: &mut UsbTrack| {
+                t.artwork_path = None;
+                t.artwork_data_url = None;
+            },
+        ] {
+            let mut track = make_track("2", "/USB/Contents/b.mp3");
+            track.waveform_preview = Some(vec![1, 2, 3]);
+            track.artwork_path = Some("/USB/art/b.jpg".to_string());
+            track.bpm = Some(128.0);
+            track.key = Some("8A".to_string());
+            tweak(&mut track);
+            hydrate_usb_track_in_place(&mut track);
+            assert!(track.needs_hydration, "expected needs_hydration after tweak");
         }
     }
 

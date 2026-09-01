@@ -133,9 +133,10 @@ test("progress primitives clamp, classify, dismiss, and pause/resume heartbeat",
   });
 });
 
-test("formatJobStatusText preserves backend messages and returns empty when there is no message", () => {
-  assert.equal(formatJobStatusText("usb_read", "fetch_usb_playlists", "Importing USB playlists..."), "Importing USB playlists...");
-  assert.equal(formatJobStatusText("usb_read", "fetch_usb_histories", "Importing USB histories..."), "Importing USB histories...");
+test("formatJobStatusText is a passthrough of the backend message", () => {
+  // Every job:event carries a non-empty message now (the backend substitutes
+  // the job's started-message for a blank progress update).
+  assert.equal(formatJobStatusText("usb_read", "fetch_usb_playlists", "USB: Reading playlists"), "USB: Reading playlists");
   assert.equal(formatJobStatusText("scan", "unknown_stage", "Running"), "Running");
   assert.equal(formatJobStatusText("scan", "unknown_stage", ""), "");
 });
