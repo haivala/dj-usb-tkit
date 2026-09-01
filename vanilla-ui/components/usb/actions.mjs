@@ -1410,7 +1410,12 @@ export async function syncUsbPlayerMenusEdbToPdb(state, el, deps) {
   emitStatus(data?.updated ? "PDB categories restored" : "PDB already complete");
 }
 
-const PROTECTED_PLAYER_MENU_KINDS = new Set([131, 132, 144, 145, 149]);
+// Whether the currently-selected `current` menu item may be removed is a
+// backend-owned fact (`UsbPlayerMenuItem.removable`, see
+// backend/src/service/repair.rs). The frontend just reads it.
+function currentPlayerMenuItemByKind(state, kind) {
+  return (state.usbPlayerMenuCurrent || []).find((item) => Number(item.kind) === kind) || null;
+}
 
 export function syncUsbPlayerMenuEditorControls(state, el) {
   const availableEl = el.usbPlayerMenuAvailable;
@@ -1429,7 +1434,8 @@ export function syncUsbPlayerMenuEditorControls(state, el) {
   if (el.usbPlayerMenuAddBtn) el.usbPlayerMenuAddBtn.disabled = !hasRoot || !hasAvailable;
   if (el.usbPlayerMenuRemoveBtn)
     el.usbPlayerMenuRemoveBtn.disabled =
-      !hasRoot || !hasCurrent || PROTECTED_PLAYER_MENU_KINDS.has(currentSelected);
+      !hasRoot || !hasCurrent
+      || currentPlayerMenuItemByKind(state, currentSelected)?.removable === false;
   if (el.usbPlayerMenuUpBtn) el.usbPlayerMenuUpBtn.disabled = !hasRoot || currentIdx <= 0;
   if (el.usbPlayerMenuDownBtn) {
     el.usbPlayerMenuDownBtn.disabled = !hasRoot || currentIdx < 0 || currentIdx >= currentKinds.length - 1;
@@ -1509,7 +1515,9 @@ export async function addUsbPlayerMenuItems(state, el, deps) {
 export async function removeUsbPlayerMenuItems(state, el, deps) {
   const selected = normalizeMenuKind(state.usbPlayerMenuCurrentSelectedKind);
   if (selected === null) return;
-  if (PROTECTED_PLAYER_MENU_KINDS.has(selected)) return;
+  // Belt-and-suspenders: the Remove button is already disabled for these, and
+  // update_usb_player_menu_config rejects the request backend-side.
+  if (currentPlayerMenuItemByKind(state, selected)?.removable === false) return;
   const currentKinds = (state.usbPlayerMenuCurrent || [])
     .map((item) => Number(item.kind))
     .filter((kind) => kind !== selected);

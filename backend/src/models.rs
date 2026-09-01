@@ -1681,10 +1681,19 @@ pub struct UsbPlayerMenuItem {
     pub sequence_no: Option<u32>,
     #[serde(default = "default_menu_origin")]
     pub origin: UsbPlayerMenuItemOrigin,
+    /// False for the browse categories a CDJ requires (TRACK/PLAYLIST/FOLDER/
+    /// SEARCH/HISTORY). `update_usb_player_menu_config` rejects a request that
+    /// drops one; the frontend just disables the Remove button.
+    #[serde(default = "default_menu_removable")]
+    pub removable: bool,
 }
 
 fn default_menu_origin() -> UsbPlayerMenuItemOrigin {
     UsbPlayerMenuItemOrigin::Both
+}
+
+fn default_menu_removable() -> bool {
+    true
 }
 
 /// Kind-level mismatch between PDB t16 (master) and eDB category/menuItem.

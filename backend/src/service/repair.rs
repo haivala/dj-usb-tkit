@@ -43,6 +43,13 @@ use super::usb_vendor_compat::vendor_pdb_path;
 /// TRACK=131, PLAYLIST=132, FOLDER=144, SEARCH=145, HISTORY=149.
 const REQUIRED_PLAYER_MENU_KINDS: &[u32] = &[131, 132, 144, 145, 149];
 
+/// Whether a player-menu item of this kind may be removed from the current
+/// menu. Mirrored onto `UsbPlayerMenuItem.removable` so the frontend never
+/// re-derives the set; `update_usb_player_menu_config` is the authority.
+fn player_menu_kind_removable(kind: u32) -> bool {
+    !REQUIRED_PLAYER_MENU_KINDS.contains(&kind)
+}
+
 use super::diagnostics::{
     build_meta_key, collect_edb_indexed_paths, contents_path_match_key,
     normalize_analysis_path_for_identity, normalize_path_for_contents_match,
@@ -2428,6 +2435,7 @@ fn load_usb_player_menu_config(
             is_visible: true,
             sequence_no: Some(u32::try_from(seq).unwrap_or(u32::MAX)),
             origin,
+            removable: player_menu_kind_removable(row.kind),
         });
     }
 
@@ -2449,6 +2457,7 @@ fn load_usb_player_menu_config(
             is_visible: false,
             sequence_no: None,
             origin,
+            removable: player_menu_kind_removable(row.kind),
         });
     }
     available.sort_by_key(|item| item.menu_item_id);

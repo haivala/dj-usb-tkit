@@ -30,6 +30,10 @@
 
 ## Unreleased
 
+- **Improvement:** which player-menu categories can't be removed (TRACK / PLAYLIST /
+  FOLDER / SEARCH / HISTORY) is now a `removable` flag the backend sets on each
+  `UsbPlayerMenuItem`, instead of a hard-coded kind set duplicated in the
+  frontend. `update_usb_player_menu_config` was already the authority.
 - **Improvement:** the playlist reorder-lock ("won't reorder on USB" in additive
   export mode) is now owned entirely by the backend. Changing the export sync
   mode calls a new lightweight `refresh_playlist_export_status` command (staged

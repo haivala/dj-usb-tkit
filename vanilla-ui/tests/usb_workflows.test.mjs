@@ -356,8 +356,8 @@ test("player menu single-select clears opposite list and enables proper actions"
       { kind: 134, name: "RATING", origin: "both" },
     ],
     usbPlayerMenuCurrent: [
-      { kind: 132, name: "PLAYLIST", origin: "both" },
-      { kind: 139, name: "KEY", origin: "both" },
+      { kind: 132, name: "PLAYLIST", origin: "both", removable: false },
+      { kind: 139, name: "KEY", origin: "both", removable: true },
     ],
     usbPlayerMenuAvailableSelectedKind: null,
     usbPlayerMenuCurrentSelectedKind: null,
@@ -401,4 +401,15 @@ test("player menu single-select clears opposite list and enables proper actions"
     el.usbPlayerMenuCurrent.querySelector(".player-menu-item[data-menu-kind='139']")?.classList.contains("is-selected"),
     true,
   );
+
+  // Selecting a backend-flagged non-removable item disables the Remove button.
+  handleUsbPlayerMenuListClick(
+    state,
+    el,
+    { documentObj: document },
+    "current",
+    { target: el.usbPlayerMenuCurrent.querySelector(".player-menu-item[data-menu-kind='132']") }
+  );
+  syncUsbPlayerMenuEditorControls(state, el);
+  assert.equal(el.usbPlayerMenuRemoveBtn.disabled, true);
 });
