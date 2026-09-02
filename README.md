@@ -8,6 +8,30 @@ Prebuilt installers for macOS, Windows, and Linux are on the [Releases](https://
   <img src="docs/assets/DJ-USB-Tkit.png" alt="DJ USB Tkit screenshot" width="800" />
 </p>
 
+## Installing a Prebuilt Release
+
+### macOS
+
+The `.dmg` builds are not signed with an Apple Developer certificate or notarized,
+so Gatekeeper will refuse to open the app on first launch ("DJ USB Tkit is damaged
+and can't be opened" or "the developer cannot be verified").
+
+To run it:
+
+1. Open the `.dmg` and drag **DJ USB Tkit** to `/Applications`.
+2. Clear the extended attributes macOS added to the download:
+
+   ```bash
+   xattr -cr "/Applications/DJ USB Tkit.app"
+   ```
+
+3. Launch the app normally. If you skipped step 2, you can instead right-click
+   (or Control-click) the app icon, choose **Open**, and confirm once — but the
+   `xattr` command is the reliable fix on Apple Silicon.
+
+This only needs to be done once per installed version. Building from source (see
+below) also avoids the prompt.
+
 ## Current Capabilities
 
 - Library scanning, playlist management, and native local playback.
