@@ -30,6 +30,10 @@
 
 ## Unreleased
 
+- **Fix:** dragging a playlist track while a column sort is active now saves that
+  sorted order the moment the drag starts (the sort arrow clears), so the track
+  lands exactly where you drop it instead of the list jumping to an unrelated
+  order.
 - **Fix:** the playlist panel header shows the whole playlist's track count, not
   just the number of rows loaded into the current page.
 - **Fix:** an MP3 whose reported average bitrate exceeds 320 kbps is no longer

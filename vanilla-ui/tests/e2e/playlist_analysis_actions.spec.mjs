@@ -736,9 +736,9 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
 
     const playlistTracks = {
       "pl-1": [
-        { id: "t1", title: "Song A", artist: "Artist", album: "", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t2", title: "Song B", artist: "Artist", album: "", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t3", title: "Song C", artist: "Artist", album: "", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
+        { id: "t1", title: "Song A", artist: "Nina", album: "", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t2", title: "Song B", artist: "Alex", album: "", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+        { id: "t3", title: "Song C", artist: "Max", album: "", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
       ]
     };
 
@@ -932,7 +932,7 @@ test("playlist track drag handle stays enabled while a column sort is active", a
   await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
 });
 
-test("dragging a playlist track while sorted persists the manual order and clears the sorted-by hint", async ({ page }) => {
+test("dragging a playlist track while sorted commits the sorted order first, then applies the manual move", async ({ page }) => {
   await installReorderTauriMock(page);
   await page.goto("/");
 
@@ -940,22 +940,32 @@ test("dragging a playlist track while sorted persists the manual order and clear
   const rows = page.locator("#playlistTracksBody .track-grid-row");
   await expect(rows).toHaveCount(3);
 
+  // Sort by artist -> view becomes [t2 (Alex), t3 (Max), t1 (Nina)], distinct
+  // from the persisted insertion order [t1, t2, t3].
   await page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]').click();
   await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
-
-  // Drag "Song A" (t1, row 0) to below "Song C" (t3, row 2) while sorted.
-  await dragPlaylistTrackRow(page, "t1", "t3", false);
-
-  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
-  expect(calls.length).toBeGreaterThan(0);
-  expect(calls[calls.length - 1]).toEqual({ playlistId: "pl-1", moveTrackId: "t1", beforeTrackId: null });
-
-  // The drag clears the sort so the manual order isn't immediately re-sorted away.
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
-  await expect(page.locator("#panel-playlist .sortable.sort-asc, #panel-playlist .sortable.sort-desc")).toHaveCount(0);
   await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t2");
   await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t3");
   await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t1");
+
+  // Drag "Alex" (t2, row 0) down past "Nina" (t1, row 2) while sorted.
+  await dragPlaylistTrackRow(page, "t2", "t1", false);
+
+  // The sorted view is persisted FIRST (sort-commit), then the single move --
+  // so `beforeTrackId` lines up with what the user actually saw.
+  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  expect(calls).toEqual([
+    { playlistId: "pl-1", sortBy: "artist", sortDir: "asc" },
+    { playlistId: "pl-1", moveTrackId: "t2", beforeTrackId: null },
+  ]);
+
+  // Sort indicator cleared the moment the drag started; nothing jumps around --
+  // final order is the sorted order with just t2 dragged to the end.
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+  await expect(page.locator("#panel-playlist .sortable.sort-asc, #panel-playlist .sortable.sort-desc")).toHaveCount(0);
+  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t3");
+  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t1");
+  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t2");
 });
 
 test("playlist track drag handle is hidden while a search filter is active", async ({ page }) => {
