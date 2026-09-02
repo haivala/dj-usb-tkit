@@ -2,25 +2,43 @@
 
 Local-first DJ library manager and USB exporter built with Rust + Tauri.
 
+Prebuilt installers for macOS, Windows, and Linux are on the [Releases](https://github.com/haivala/dj-usb-tkit/releases) page.
+
 <p align="center">
   <img src="docs/assets/DJ-USB-Tkit.png" alt="DJ USB Tkit screenshot" width="800" />
 </p>
 
-## App Requirements
+## Current Capabilities
 
-- Local-first desktop workflows for library indexing, playlist management, USB import/export, diagnostics/repairs, and native playback.
+- Library scanning, playlist management, and native local playback.
+- USB import/export with `mirror` and `additive` playlist sync modes.
+- Local BPM, key, waveform, and artwork analysis for missing track metadata.
+- USB diagnostics, strict parity reporting, and preview-first repair actions.
+- Repair tools can help recover some broken USB database states; backups are
+  created before repair writes, but recovery is not guaranteed.
+- USB initialization for drives that are writable but missing the expected
+  export database structure.
+- USB drives can be given a persistent name, so the same physical drive keeps
+  its identity across replugs, ports, and computers.
+- A dedicated Backups panel to list, restore, and delete USB database
+  snapshots, with configurable retention.
+- Automated backend and frontend coverage for core workflows, export behavior,
+  diagnostics, and UI interactions.
+
+## Design Goals
+
+- Local-first desktop workflows — no cloud dependency for indexing, playlists, USB import/export, diagnostics/repairs, or playback.
 - Fast prep flow: index library quickly, build playlists, analyze only missing tracks for the target playlist, then export.
-- Analysis engine support: `stratum` (default) and optional `essentia`.
-- Export sync modes: `mirror` (exact playlist sync) and `additive` (append missing tracks without removing existing members).
-- Strict parity reporting is separate from operational passability so users can distinguish "works" vs "fully parity-clean" outcomes.
+- Strict parity reporting is kept separate from operational passability, so users can distinguish "works" vs "fully parity-clean" outcomes.
+- Pluggable analysis engine: `stratum` (default) and optional `essentia`.
 
-Detailed behavior and requirements are documented under `docs/`, starting with `docs/README.md`. See [`docs/COMPARISON.md`](docs/COMPARISON.md) for how this differs from rekordbox.
+Detailed behavior and requirements are documented under `docs/`, starting with [`docs/README.md`](docs/README.md); command reference details are in [`docs/COMMANDS.md`](docs/COMMANDS.md). See [`docs/COMPARISON.md`](docs/COMPARISON.md) for how this differs from rekordbox.
 
 > **Warning:** This software writes to DJ USB drives and library databases. Use it at your own risk: the author and maintainers are not responsible for broken USB exports, corrupted databases, data loss, or other damage to your USB drive. Always keep your own backups.
 >
 > The app creates timestamped backups of the existing PDB/eDB database files before every export, playlist reorder/removal, repair, or menu-config write. The newest backup always stays on the USB drive in `PIONEER/rekordbox/backups/`; older ones are moved to a local cache to avoid filling up the drive. Backups can be browsed, restored, or deleted from the **Backups** panel (Settings → Open Backups). The repair tools have also recovered broken USB database states in real use, but recovery is not guaranteed. This software is provided without warranty; see [LICENSE](LICENSE).
 
-Project code is licensed under `MIT`; contributions are accepted under the same terms (inbound = outbound). See `CONTRIBUTING.md`.
+Project code is licensed under `MIT`; contributions are accepted under the same terms (inbound = outbound). See `CONTRIBUTING.md`. A redistribution-focused dependency/license audit is tracked in [`docs/THIRD_PARTY_LICENSES.md`](docs/THIRD_PARTY_LICENSES.md).
 
 ## Prerequisites
 
@@ -68,6 +86,8 @@ cargo run
 `cargo run` does not require Tauri CLI. Tauri CLI is required for release bundle builds (`tauri build`).
 
 ## Release Bundles
+
+Published builds are available on the [Releases](https://github.com/haivala/dj-usb-tkit/releases) page. To build your own:
 
 ### macOS
 
@@ -130,27 +150,6 @@ backend/       – Rust library: data model, SQLite storage, commands
 desktop/       – Tauri host app
 vanilla-ui/    – Frontend (vanilla HTML/JS/CSS)
 ```
-
-## Current Capabilities
-
-- Library scanning, playlist management, and native local playback.
-- USB import/export with `mirror` and `additive` playlist sync modes.
-- Local BPM, key, waveform, and artwork analysis for missing track metadata.
-- USB diagnostics, strict parity reporting, and preview-first repair actions.
-- Repair tools can help recover some broken USB database states; backups are
-  created before repair writes, but recovery is not guaranteed.
-- USB initialization for drives that are writable but missing the expected
-  export database structure.
-- USB drives can be given a persistent name, so the same physical drive keeps
-  its identity across replugs, ports, and computers.
-- A dedicated Backups panel to list, restore, and delete USB database
-  snapshots, with configurable retention.
-- Automated backend and frontend coverage for core workflows, export behavior,
-  diagnostics, and UI interactions.
-
-Backend behavior and app requirements are documented in the functional docs under `docs/`, with command reference details in `docs/COMMANDS.md`.
-A redistribution-focused dependency/license audit is tracked in `docs/THIRD_PARTY_LICENSES.md`.
-Contribution guidelines are documented in `CONTRIBUTING.md`.
 
 ## Donate
 
