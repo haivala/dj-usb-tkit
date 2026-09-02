@@ -24,17 +24,34 @@ Latest hardware-validated result per device × scenario. This is a derived view 
 to the Validation History below that changes an outcome, update the matching row
 here too.
 
+Overall status: everything is working. There are no open `warn`/`fail` outcomes
+on any device, and all previously known issues are fixed and hardware-confirmed
+on the hardware that originally showed them. The latest run (app 0.1.36,
+2026-09-02) re-validated every scenario on CDJ-2000NXS2, CDJ-3000, and the newly
+added CDJ-3000X; CDJ-2000NXS remains green on its last-tested versions with no
+regression reported.
+
+Additive export — adding tracks to a USB that was initialized by rekordbox,
+without wiping the existing library — has worked on hardware since the first
+release (0.1.0) and has stayed working through every version since.
+
 | Device model | Test scenario | Status | Last tested app version | Last validated date | Notes |
 |---|---|---|---|---|---|
-| CDJ-2000NXS2 | `normal-export` | pass | 0.1.33 | 2026-08-29 | |
-| CDJ-2000NXS2 | `strict-parity-repair` | pass | 0.1.33 | 2026-08-29 | |
-| CDJ-2000NXS2 | `non-ascii-track-string-alignment` | pass | 0.1.33 | 2026-08-29 | |
-| CDJ-2000NXS2 | `more-than-16-tracks-fresh-usb-init` | fail (last direct test) | <=0.1.30 | 2026-08-29 | Fixed in 0.1.31 per `CHANGELOG.md`. |
+| CDJ-2000NXS2 | `normal-export` | pass | 0.1.36 | 2026-09-02 | |
+| CDJ-2000NXS2 | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | |
+| CDJ-2000NXS2 | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | |
+| CDJ-2000NXS2 | `more-than-16-tracks-fresh-usb-init` | pass | 0.1.36 | 2026-09-02 | Was `fail` at <=0.1.30; fixed in 0.1.31, hardware-confirmed on 0.1.36. |
 | CDJ-2000NXS | `normal-export` | pass | 0.1.16 | 2026-08-14 | |
 | CDJ-2000NXS | `strict-parity-repair` | pass | 0.1.16 | 2026-08-14 | |
 | CDJ-2000NXS | `non-ascii-track-string-alignment` | pass | 0.1.11 | 2026-08-07 | Not retested since; app version has moved on but no regression reported. |
-| CDJ-3000 | `normal-export` | pass (stale) | 0.1.0 | 2026-06-28 | No retest since the first release; many app versions have shipped since. |
-| CDJ-3000 | `strict-parity-repair` | pass (stale) | 0.1.0 | 2026-06-28 | No retest since the first release; many app versions have shipped since. |
+| CDJ-3000 | `normal-export` | pass | 0.1.36 | 2026-09-02 | |
+| CDJ-3000 | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | |
+| CDJ-3000 | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First direct test of this scenario on CDJ-3000. |
+| CDJ-3000 | `more-than-16-tracks-fresh-usb-init` | pass | 0.1.36 | 2026-09-02 | First direct test of this scenario on CDJ-3000. |
+| CDJ-3000X | `normal-export` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
+| CDJ-3000X | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
+| CDJ-3000X | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
+| CDJ-3000X | `more-than-16-tracks-fresh-usb-init` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 
 ## Validation History
 
@@ -63,6 +80,18 @@ Current Status table above is a summary of its latest rows.
 | CDJ-2000NXS2 | 1.82 | 0.1.33 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-08-29 | maintainer | Exported USB is accepted and playable. |
 | CDJ-2000NXS2 | 1.82 | 0.1.33 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-08-29 | maintainer | Strict parity repair output is accepted and playable. |
 | CDJ-2000NXS2 | 1.82 | 0.1.33 | `non-ascii-track-string-alignment` | USB insert, database mount, Albums browse into a track whose title/filename require UTF-16 encoding, track listing, track load, playback start | pass | hardware | 2026-08-29 | maintainer | Confirmed still working on this version. |
+| CDJ-2000NXS2 | 1.82 | 0.1.36 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-09-02 | maintainer | Exported USB is accepted and playable. |
+| CDJ-2000NXS2 | 1.82 | 0.1.36 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-09-02 | maintainer | Strict parity repair output is accepted and playable. |
+| CDJ-2000NXS2 | 1.82 | 0.1.36 | `non-ascii-track-string-alignment` | USB insert, database mount, Albums browse into a track whose title/filename require UTF-16 encoding, track listing, track load, playback start | pass | hardware | 2026-09-02 | maintainer | Confirmed still working on this version. |
+| CDJ-2000NXS2 | 1.82 | 0.1.36 | `more-than-16-tracks-fresh-usb-init` | Initialize a fresh USB, export a playlist with more than 16 tracks, insert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-09-02 | maintainer | First hardware retest on this device since the 0.1.31 fix; previously `fail` at <=0.1.30 (see Known Issues). No longer ejects in a loop; database mounts and plays. |
+| CDJ-3000 | 3.20 | 0.1.36 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-09-02 | maintainer | Exported USB is accepted and playable. First retest since 0.1.0. |
+| CDJ-3000 | 3.20 | 0.1.36 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-09-02 | maintainer | Strict parity repair output is accepted and playable. First retest since 0.1.0. |
+| CDJ-3000 | 3.20 | 0.1.36 | `non-ascii-track-string-alignment` | USB insert, database mount, Albums browse into a track whose title/filename require UTF-16 encoding, track listing, track load, playback start | pass | hardware | 2026-09-02 | maintainer | First direct test of this scenario on CDJ-3000. |
+| CDJ-3000 | 3.20 | 0.1.36 | `more-than-16-tracks-fresh-usb-init` | Initialize a fresh USB, export a playlist with more than 16 tracks, insert USB, database mount | pass | hardware | 2026-09-02 | maintainer | First direct test of this scenario on CDJ-3000. |
+| CDJ-3000X | 1.31 | 0.1.36 | `normal-export` | USB insert, database mount, playlist browse, track load, playback start | pass | hardware | 2026-09-02 | maintainer | First validation on CDJ-3000X. Exported USB is accepted and playable. |
+| CDJ-3000X | 1.31 | 0.1.36 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-09-02 | maintainer | First validation on CDJ-3000X. Strict parity repair output is accepted and playable. |
+| CDJ-3000X | 1.31 | 0.1.36 | `non-ascii-track-string-alignment` | USB insert, database mount, Albums browse into a track whose title/filename require UTF-16 encoding, track listing, track load, playback start | pass | hardware | 2026-09-02 | maintainer | First validation on CDJ-3000X. |
+| CDJ-3000X | 1.31 | 0.1.36 | `more-than-16-tracks-fresh-usb-init` | Initialize a fresh USB, export a playlist with more than 16 tracks, insert USB, database mount | pass | hardware | 2026-09-02 | maintainer | First validation on CDJ-3000X. |
 
 ## Known Issues
 
@@ -127,9 +156,9 @@ Artifacts:
 - None captured beyond the observed eject loop.
 
 Validation questions:
-- Root cause fixed in 0.1.31 per `CHANGELOG.md`, but this specific scenario
-  has not been independently hardware-retested since — the 0.1.33 `pass` rows
-  in Validation History cover other scenarios only.
+- None outstanding — root cause fixed in 0.1.31 and hardware-confirmed `pass` on
+  0.1.36 on the CDJ-2000NXS2 (fw 1.82) that originally showed the fault, plus
+  CDJ-3000 (fw 3.20) and CDJ-3000X (fw 1.31).
 
 ## Required Operations
 
