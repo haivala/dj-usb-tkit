@@ -685,28 +685,74 @@ pub(crate) fn usb_playlist_names_for_export_compare(
     names
 }
 
+/// The trailing directory name of a USB root path (the "USB_TRY" in
+/// `/media/user/USB_TRY`), for the export button label. Handles both `/` and
+/// `\` separators and trailing slashes; `None` for an empty path or a bare
+/// root like `/`. Replaces the frontend's own `usbRoot.split(...).pop()`.
+pub(crate) fn usb_root_last_segment(usb_root: &str) -> Option<String> {
+    let trimmed = usb_root.trim().trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_string)
+}
+
+/// The export button's label for one playlist when a valid USB is selected.
+/// `locks_reorder` true means the next export is an additive append onto a
+/// same-named USB playlist rather than a fresh write.
+fn export_button_text(locks_reorder: bool, playlist_name: &str, usb_dir: Option<&str>) -> String {
+    match (locks_reorder, usb_dir) {
+        (true, Some(dir)) => format!("Append to ({playlist_name}) on USB: ({dir})"),
+        (true, None) => format!("Append to ({playlist_name}) on USB"),
+        (false, Some(dir)) => format!("Export to USB: {dir}"),
+        (false, None) => "Export to USB".to_string(),
+    }
+}
+
+/// Tooltip paired with `export_button_text`.
+fn export_button_title(locks_reorder: bool, playlist_name: &str) -> String {
+    if locks_reorder {
+        format!("Append current playlist tracks to existing USB playlist \"{playlist_name}\"")
+    } else {
+        "Export current playlist to selected USB".to_string()
+    }
+}
+
 /// Join every local playlist against the set of playlist names already known
 /// to exist on the connected USB (already normalized via
 /// `normalize_playlist_name_for_compare`), computed once server-side so the
-/// frontend never re-derives this from raw state.
+/// frontend never re-derives this from raw state. `usb_root` is the connected
+/// drive's path (if any), used only for the export button label's trailing
+/// directory name.
 pub(crate) fn compute_playlist_usb_export_status(
     local_playlists: &[Playlist],
     usb_playlist_names: &HashSet<String>,
     prune_stale: bool,
+    usb_root: Option<&str>,
 ) -> Vec<PlaylistUsbExportStatus> {
+    let usb_dir = usb_root.and_then(usb_root_last_segment);
     local_playlists
         .iter()
         .map(|playlist| {
             let same_name_exists_on_usb =
                 usb_playlist_names.contains(&normalize_playlist_name_for_compare(&playlist.name));
+            let locks_reorder =
+                playlist_locks_reorder_on_export(prune_stale, same_name_exists_on_usb);
             PlaylistUsbExportStatus {
                 playlist_id: playlist.id.clone(),
                 playlist_name: playlist.name.clone(),
                 same_name_exists_on_usb,
-                locks_reorder: playlist_locks_reorder_on_export(
-                    prune_stale,
-                    same_name_exists_on_usb,
+                locks_reorder,
+                export_button_text: export_button_text(
+                    locks_reorder,
+                    &playlist.name,
+                    usb_dir.as_deref(),
                 ),
+                export_button_title: export_button_title(locks_reorder, &playlist.name),
             }
         })
         .collect()
@@ -758,6 +804,7 @@ impl BackendService {
                 &local_playlists,
                 &usb_playlist_names,
                 prune_stale,
+                req.usb_root.as_deref(),
             ),
         })
     }
@@ -796,6 +843,25 @@ impl BackendService {
         if playlist.tracks.is_empty() {
             return Err(BackendError::Validation(
                 "playlist has no tracks to export".to_string(),
+            ));
+        }
+
+        let blocking_missing_roots = {
+            let conn = self.db.connect()?;
+            super::export_blocking_missing_source_roots(
+                &conn,
+                playlist.tracks.iter().map(|track| track.file_path.as_str()),
+            )?
+        };
+        if let Some(missing_root) = blocking_missing_roots.first() {
+            return Err(BackendError::ValidationWithDetails(
+                format!(
+                    "export blocked: source folder is missing: {missing_root}. Relocate or remove it first."
+                ),
+                json!({
+                    "validationType": "source_root_missing",
+                    "missingRoots": blocking_missing_roots,
+                }),
             ));
         }
 
@@ -1818,8 +1884,8 @@ mod tests {
         format_bytes, has_required_analysis, has_required_analysis_fields,
         normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
         record_existing_usb_path_by_fingerprint, resolve_collision_free_media_target,
-        usb_playlist_names_for_export_compare, validate_export_manifest_after_prune,
-        validate_export_manifest_before_db_write,
+        usb_playlist_names_for_export_compare, usb_root_last_segment,
+        validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
     };
     use crate::error::BackendError;
     use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, Playlist};
@@ -2948,6 +3014,58 @@ mod tests {
     }
 
     #[test]
+    fn export_to_usb_blocks_when_a_playlist_track_lives_under_a_missing_source_root() {
+        let (_dir, service) = test_service();
+        let usb_dir = tempdir().expect("usb dir");
+        let missing_root = "/definitely/gone/library";
+
+        let conn = service.db.connect().expect("connect");
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, format_ext, created_at, updated_at)
+             VALUES ('t1', 'Song', 'Artist', ?1, 'mp3', datetime('now'), datetime('now'))",
+            [format!("{missing_root}/set/track.mp3")],
+        )
+        .expect("insert track");
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))",
+            rusqlite::params![
+                crate::service::SETTING_UI_SOURCE_ROOTS,
+                format!("[\"{missing_root}\"]")
+            ],
+        )
+        .expect("seed source root");
+        drop(conn);
+
+        let playlist = service
+            .create_playlist(CreatePlaylistRequest {
+                name: "Set".to_string(),
+            })
+            .expect("create playlist");
+        service
+            .add_tracks_to_playlist(crate::models::AddTracksToPlaylistRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                track_ids: vec!["t1".to_string()],
+                dedupe: crate::models::DedupeMode::Allow,
+            })
+            .expect("add track");
+
+        let err = service
+            .export_to_usb(ExportToUsbRequest {
+                usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
+                playlist_id: playlist.playlist_id,
+                options: None,
+            })
+            .unwrap_err();
+        match err {
+            BackendError::ValidationWithDetails(_, details) => {
+                assert_eq!(details["validationType"], "source_root_missing");
+                assert_eq!(details["missingRoots"][0], missing_root);
+            }
+            other => panic!("expected source_root_missing validation, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn refresh_playlist_export_status_with_no_usb_root_reports_every_playlist_unlocked() {
         let (_dir, service) = test_service();
         service
@@ -3052,17 +3170,65 @@ mod tests {
                 .into_iter()
                 .collect();
 
-        let additive = compute_playlist_usb_export_status(&local_playlists, &usb_names, false);
+        let additive = compute_playlist_usb_export_status(
+            &local_playlists,
+            &usb_names,
+            false,
+            Some("/media/user/USB_TRY"),
+        );
         let p1 = additive.iter().find(|s| s.playlist_id == "p1").unwrap();
         let p2 = additive.iter().find(|s| s.playlist_id == "p2").unwrap();
         assert!(p1.same_name_exists_on_usb);
         assert!(p1.locks_reorder);
+        assert_eq!(p1.export_button_text, "Append to (My Set) on USB: (USB_TRY)");
+        assert_eq!(
+            p1.export_button_title,
+            "Append current playlist tracks to existing USB playlist \"My Set\""
+        );
         assert!(!p2.same_name_exists_on_usb);
         assert!(!p2.locks_reorder);
+        assert_eq!(p2.export_button_text, "Export to USB: USB_TRY");
+        assert_eq!(
+            p2.export_button_title,
+            "Export current playlist to selected USB"
+        );
 
-        let mirror = compute_playlist_usb_export_status(&local_playlists, &usb_names, true);
+        let mirror = compute_playlist_usb_export_status(
+            &local_playlists,
+            &usb_names,
+            true,
+            Some("/media/user/USB_TRY"),
+        );
         let p1_mirror = mirror.iter().find(|s| s.playlist_id == "p1").unwrap();
         assert!(p1_mirror.same_name_exists_on_usb);
         assert!(!p1_mirror.locks_reorder);
+        assert_eq!(p1_mirror.export_button_text, "Export to USB: USB_TRY");
+    }
+
+    #[test]
+    fn usb_root_last_segment_takes_trailing_dir_across_separators() {
+        assert_eq!(
+            usb_root_last_segment("/media/user/USB_TRY"),
+            Some("USB_TRY".to_string())
+        );
+        assert_eq!(
+            usb_root_last_segment("/media/user/USB_TRY/"),
+            Some("USB_TRY".to_string())
+        );
+        assert_eq!(
+            usb_root_last_segment("E:\\DJ SETS\\"),
+            Some("DJ SETS".to_string())
+        );
+        assert_eq!(usb_root_last_segment("/"), None);
+        assert_eq!(usb_root_last_segment("   "), None);
+    }
+
+    #[test]
+    fn compute_playlist_usb_export_status_without_usb_root_omits_dir_from_label() {
+        let local_playlists = vec![make_playlist("p1", "My Set")];
+        let usb_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        let status = compute_playlist_usb_export_status(&local_playlists, &usb_names, false, None);
+        assert_eq!(status[0].export_button_text, "Export to USB");
     }
 }

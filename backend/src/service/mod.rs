@@ -297,6 +297,43 @@ fn relative_path_under_source_root(file_path: &str, source_root: &str) -> Option
     None
 }
 
+/// Configured source folders that are currently missing (unplugged drive,
+/// moved directory) *and* actually hold at least one of `track_file_paths`.
+/// Empty when every source folder a playlist track lives under is present.
+///
+/// The frontend used to run this prefix match itself (`trackPathMatchesAnyRoot`
+/// / `playlistTracksAffectedByMissingRoots`) over only the loaded page of a
+/// playlist; hoisting it into the export path checks the whole playlist and
+/// keeps the rule in one place.
+pub(crate) fn export_blocking_missing_source_roots<I, S>(
+    conn: &rusqlite::Connection,
+    track_file_paths: I,
+) -> BackendResult<Vec<String>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let missing: Vec<String> = configured_source_roots(conn)?
+        .into_iter()
+        .filter(|root| !source_root_is_usable(root))
+        .collect();
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+    let paths: Vec<String> = track_file_paths
+        .into_iter()
+        .map(|path| path.as_ref().to_string())
+        .collect();
+    Ok(missing
+        .into_iter()
+        .filter(|root| {
+            paths
+                .iter()
+                .any(|path| relative_path_under_source_root(path, root).is_some())
+        })
+        .collect())
+}
+
 fn relocated_source_path(new_root: &Path, relative_path: &str) -> PathBuf {
     let trimmed = relative_path.trim_matches('/');
     if trimmed.is_empty() {
@@ -5496,6 +5533,52 @@ mod tests {
             result.missing,
             vec!["/definitely/does/not/exist/anywhere".to_string()]
         );
+    }
+
+    #[test]
+    fn export_blocking_missing_source_roots_flags_only_roots_that_hold_a_track() {
+        let (_dir, service) = test_service();
+        let present = tempfile::tempdir().expect("present root");
+        let present_root = present.path().to_string_lossy().to_string();
+        let missing_root = "/definitely/does/not/exist/anywhere".to_string();
+        let missing_but_unused = "/also/not/here".to_string();
+
+        let conn = service.db.connect().expect("connect");
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))",
+            params![
+                SETTING_UI_SOURCE_ROOTS,
+                serde_json::to_string(&[
+                    present_root.clone(),
+                    missing_root.clone(),
+                    missing_but_unused,
+                ])
+                .unwrap()
+            ],
+        )
+        .expect("seed source roots");
+
+        // A track under the missing root blocks; one under the present root and
+        // one under no configured root do not. The missing-but-unused root is
+        // missing yet holds no track, so it is not reported.
+        let blocking = export_blocking_missing_source_roots(
+            &conn,
+            [
+                format!("{missing_root}/set/track.mp3"),
+                format!("{present_root}/track.mp3"),
+                "/somewhere/else/track.mp3".to_string(),
+            ],
+        )
+        .expect("guard");
+        assert_eq!(blocking, vec![missing_root]);
+
+        // Every track lives under a present root -> nothing blocks.
+        let clear = export_blocking_missing_source_roots(
+            &conn,
+            [format!("{present_root}/only/here.mp3")],
+        )
+        .expect("guard");
+        assert!(clear.is_empty());
     }
 
     #[test]

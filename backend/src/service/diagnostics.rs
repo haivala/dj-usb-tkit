@@ -923,8 +923,12 @@ impl BackendService {
         let local_playlists = self.list_playlists()?.items;
         let conn = self.db.connect()?;
         let prune_stale = export_prune_stale_setting(&conn)?;
-        let playlist_usb_export_status =
-            compute_playlist_usb_export_status(&local_playlists, &usb_playlist_names, prune_stale);
+        let playlist_usb_export_status = compute_playlist_usb_export_status(
+            &local_playlists,
+            &usb_playlist_names,
+            prune_stale,
+            Some(usb_root.to_string_lossy().as_ref()),
+        );
         let data = RunUsbDiagnosticsData {
             overall_status,
             pdb_integrity,

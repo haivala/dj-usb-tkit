@@ -240,7 +240,6 @@ function makeExportDeps(overrides = {}) {
     switchView: async () => {},
     renderUsbPlaylists: () => {},
     clearUsbPlaylistTracks: () => {},
-    refreshMissingSourceRoots: async () => [],
     clearUsbDiagnostics: () => {},
     ...overrides
   };
@@ -260,26 +259,27 @@ test("exportPlaylistToUsb reports local blockers and generic command failures", 
   assert.match(status, /Export failed: boom/);
   assert.equal(logged[0].code, "export.failure");
 
-  let exportCalled = false;
-  await exportPlaylistToUsb(
-    makeExportState({
-      sourceRoots: ["/music/missing"],
-      missingSourceRoots: new Set(["/music/missing"]),
-      playlists: [{ id: "p1", name: "Set", tracks: [{ id: "t1", filePath: "/music/missing/Artist - Track.mp3" }] }]
-    }),
-    {},
-    "p1",
-    makeExportDeps({
-      setStatus: (text) => { status = text; },
-      command: async () => {
-        exportCalled = true;
-        return {};
-      },
-      refreshMissingSourceRoots: async () => ["/music/missing"]
-    })
+  // A missing source folder is now a backend export-gate rejection
+  // (validationType "source_root_missing") -- the frontend renders it, no
+  // client-side path matching.
+  await assert.rejects(
+    exportPlaylistToUsb(
+      makeExportState({
+        playlists: [{ id: "p1", name: "Set", tracks: [{ id: "t1", filePath: "/music/missing/Artist - Track.mp3" }] }]
+      }),
+      {},
+      "p1",
+      makeExportDeps({
+        setStatus: (text) => { status = text; },
+        command: async () => {
+          const err = new Error("export blocked: source folder is missing: /music/missing. Relocate or remove it first.");
+          err.details = { validationType: "source_root_missing", missingRoots: ["/music/missing"] };
+          throw err;
+        }
+      })
+    )
   );
-  assert.equal(exportCalled, false);
-  assert.match(status, /Export blocked: source folder is missing/);
+  assert.match(status, /Export blocked: source folder is missing: \/music\/missing/);
 });
 
 test("exportPlaylistToUsb clears diagnostics after success and forwards backup option", async () => {

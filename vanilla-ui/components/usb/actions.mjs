@@ -1,8 +1,4 @@
-import {
-  missingSourceRootsArray,
-  playlistTracksAffectedByMissingRoots,
-  warningEntryText
-} from "../library/actions.mjs";
+import { warningEntryText } from "../library/actions.mjs";
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
@@ -71,38 +67,22 @@ export function computeExportButtonState({
   usbRoot,
   usbRootValid,
   currentPlaylistId,
-  currentPlaylistName,
   playlistUsbExportStatusById: statusById
 }) {
   const enabled = !!usbRoot && !!usbRootValid;
-  const currentName = String(currentPlaylistName || "").trim();
-  const status = statusById instanceof Map ? statusById.get(String(currentPlaylistId || "")) : null;
-  // `locksReorder` is exactly "additive export mode AND same-named playlist
-  // already on USB" (see PlaylistUsbExportStatus) -- the same condition that
-  // makes an export here an append rather than a fresh write.
-  const appendModeToExisting = enabled && !!status?.locksReorder;
-
-  const lastDir = enabled
-    ? String(usbRoot).replace(/[\\/]+$/, "").split(/[\\/]/).pop() || ""
-    : "";
-
-  let text;
   if (!enabled) {
-    text = "Select USB first";
-  } else if (appendModeToExisting) {
-    text = `Append to (${currentName}) on USB: (${lastDir})`;
-  } else {
-    text = lastDir ? `Export to USB: ${lastDir}` : "Export to USB";
+    return { enabled: false, text: "Select USB first", title: "Select a valid USB folder first" };
   }
-
+  // The label ("Append to (X) on USB: (dir)" vs "Export to USB: dir") and its
+  // tooltip are backend-computed per playlist (PlaylistUsbExportStatus --
+  // service::export::compute_playlist_usb_export_status), so the append rule
+  // and the USB-path parsing both live in Rust. The fallbacks only apply
+  // before the first USB scan has populated the status map.
+  const status = statusById instanceof Map ? statusById.get(String(currentPlaylistId || "")) : null;
   return {
-    enabled,
-    text,
-    title: enabled
-      ? (appendModeToExisting
-        ? `Append current playlist tracks to existing USB playlist "${currentName}"`
-        : "Export current playlist to selected USB")
-      : "Select a valid USB folder first"
+    enabled: true,
+    text: status?.exportButtonText || "Export to USB",
+    title: status?.exportButtonTitle || "Export current playlist to selected USB"
   };
 }
 // Backend-owned: `UsbParityPlaylistDetail.issueLabels` is built in Rust
@@ -1482,7 +1462,6 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
     switchView,
     renderUsbPlaylists,
     clearUsbPlaylistTracks = () => {},
-    refreshMissingSourceRoots = async () => [],
     clearUsbDiagnostics = () => {},
     commitActivePlaylistSort = async () => {}
   } = deps;
@@ -1520,14 +1499,9 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
     emitStatus("Playlist must contain tracks before export");
     return;
   }
-  await refreshMissingSourceRoots({ silent: true });
-  const affectedMissingTracks = playlistTracksAffectedByMissingRoots(playlist.tracks, state);
-  if (affectedMissingTracks.length) {
-    const missingRoots = missingSourceRootsArray(state);
-    const suffix = missingRoots.length ? `: ${missingRoots[0]}` : "";
-    emitStatus(`Export blocked: source folder is missing${suffix}. Relocate or remove it first.`);
-    return;
-  }
+  // A missing source folder that a playlist track lives under is caught by the
+  // backend export gate (validationType "source_root_missing"), which sees the
+  // whole playlist rather than just the loaded page -- handled below.
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select a valid USB folder first");
     return;
@@ -1560,6 +1534,10 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
       const missing = Number(details.missingTrackCount || 0);
       const total = Number(details.totalTrackCount || 0);
       emitStatus(`Export blocked: ${missing}/${total} track(s) need analysis. Use Analyze Missing Tracks.`);
+    } else if (details?.validationType === "source_root_missing") {
+      const missingRoot = Array.isArray(details.missingRoots) ? details.missingRoots[0] : "";
+      const suffix = missingRoot ? `: ${missingRoot}` : "";
+      emitStatus(`Export blocked: source folder is missing${suffix}. Relocate or remove it first.`);
     } else {
       const msg = String(error?.message || "USB export failed").trim() || "USB export failed";
       emitStatus(`Export failed: ${msg}. See Event Log for details.`);

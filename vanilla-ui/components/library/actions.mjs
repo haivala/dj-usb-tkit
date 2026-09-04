@@ -214,12 +214,6 @@ export function sourceRootIsMissing(state, root) {
     .some((candidate) => normalizePath(candidate).replace(/\/+$/, "") === key);
 }
 
-export function playlistTracksAffectedByMissingRoots(tracks, state) {
-  const missing = missingSourceRootsArray(state);
-  if (!missing.length || !Array.isArray(tracks)) return [];
-  return tracks.filter((track) => trackPathMatchesAnyRoot(track?.filePath, missing));
-}
-
 export async function refreshMissingSourceRoots(state, deps = {}) {
   const {
     command = async () => ({ missing: [] }),
@@ -1167,16 +1161,6 @@ export function normalizeAnalysisBpmRange(range) {
 
 export function normalizePath(value) {
   return String(value || "").replace(/\\/g, "/").trim().toLowerCase();
-}
-
-export function trackPathMatchesAnyRoot(filePath, roots) {
-  const fp = normalizePath(filePath);
-  if (!fp) return false;
-  return roots.some((root) => {
-    const r = normalizePath(root).replace(/\/+$/, "");
-    if (!r) return false;
-    return fp === r || fp.startsWith(`${r}/`);
-  });
 }
 
 export function enabledSourceRoots(sourceRoots, sourceRootEnabled = {}, missingSourceRoots = null) {

@@ -1031,6 +1031,15 @@ pub struct PlaylistUsbExportStatus {
     pub playlist_name: String,
     pub same_name_exists_on_usb: bool,
     pub locks_reorder: bool,
+    /// The export button's label when a valid USB is selected -- either
+    /// "Append to (<name>) on USB: (<dir>)" (additive export onto a same-named
+    /// playlist) or "Export to USB: <dir>". Built server-side (see
+    /// `service::export::compute_playlist_usb_export_status`) so the frontend
+    /// never re-derives it or parses the USB path itself; when no USB is
+    /// selected the frontend shows its own "Select USB first" instead.
+    pub export_button_text: String,
+    /// Tooltip paired with `export_button_text`.
+    pub export_button_title: String,
 }
 
 /// Request for `refresh_playlist_export_status` -- a cheap recompute of every

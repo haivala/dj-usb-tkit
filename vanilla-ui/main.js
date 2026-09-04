@@ -1402,7 +1402,6 @@ const exportPlaylistToUsb = async (playlistId) => usb.exportPlaylistToUsb(state,
     switchView,
     renderUsbPlaylists,
     clearUsbPlaylistTracks: () => usbPlaylistTracksCtl.clear(),
-    refreshMissingSourceRoots: checkSourceRoots,
     clearUsbDiagnostics: () => usb.clearUsbDiagnostics(el),
     commitActivePlaylistSort,
   });

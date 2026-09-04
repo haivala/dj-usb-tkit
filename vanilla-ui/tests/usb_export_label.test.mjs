@@ -58,15 +58,38 @@ test("refreshPlaylistExportStatus passes null usbRoot when none is connected", a
   assert.equal(state.playlistUsbExportStatusById.size, 0);
 });
 
-test("computeExportButtonState appends last path segment to export text", () => {
+test("computeExportButtonState renders the backend-computed label for the current playlist", () => {
+  const statusById = playlistUsbExportStatusById([
+    {
+      playlistId: "p1",
+      playlistName: "Testi",
+      sameNameExistsOnUsb: false,
+      locksReorder: false,
+      exportButtonText: "Export to USB: USB_TRY",
+      exportButtonTitle: "Export current playlist to selected USB"
+    }
+  ]);
+
   const state = computeExportButtonState({
     usbRoot: "/media/user/USB_TRY",
     usbRootValid: true,
     currentPlaylistId: "p1",
-    currentPlaylistName: "Testi",
-    playlistUsbExportStatusById: new Map()
+    playlistUsbExportStatusById: statusById
   });
 
   assert.equal(state.enabled, true);
   assert.equal(state.text, "Export to USB: USB_TRY");
+  assert.equal(state.title, "Export current playlist to selected USB");
+});
+
+test("computeExportButtonState shows the select-USB prompt when no valid USB is set", () => {
+  const state = computeExportButtonState({
+    usbRoot: "",
+    usbRootValid: false,
+    currentPlaylistId: "p1",
+    playlistUsbExportStatusById: new Map()
+  });
+
+  assert.equal(state.enabled, false);
+  assert.equal(state.text, "Select USB first");
 });

@@ -752,11 +752,20 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
       const sameNameExistsOnUsb = !!usbSameNamePlaylistName
         && String(playlist.name || "").trim().toLowerCase()
           === String(usbSameNamePlaylistName).trim().toLowerCase();
+      const locksReorder = !currentPruneStale && sameNameExistsOnUsb;
       return {
         playlistId: playlist.id,
         playlistName: playlist.name,
         sameNameExistsOnUsb,
-        locksReorder: !currentPruneStale && sameNameExistsOnUsb
+        locksReorder,
+        // Backend-built label (service::export::compute_playlist_usb_export_status);
+        // usb root here is "/USB" so the trailing dir is "USB".
+        exportButtonText: locksReorder
+          ? `Append to (${playlist.name}) on USB: (USB)`
+          : "Export to USB: USB",
+        exportButtonTitle: locksReorder
+          ? `Append current playlist tracks to existing USB playlist "${playlist.name}"`
+          : "Export current playlist to selected USB"
       };
     });
 
@@ -1194,11 +1203,18 @@ test("switching away from a sorted playlist commits the sort as its real order, 
                 warnings: [],
                 playlistUsbExportStatus: playlists.map((playlist) => {
                   const sameNameExistsOnUsb = usbNames.has(String(playlist.name || "").trim().toLowerCase());
+                  const locksReorder = sameNameExistsOnUsb;
                   return {
                     playlistId: playlist.id,
                     playlistName: playlist.name,
                     sameNameExistsOnUsb,
-                    locksReorder: sameNameExistsOnUsb
+                    locksReorder,
+                    exportButtonText: locksReorder
+                      ? `Append to (${playlist.name}) on USB: (USB)`
+                      : "Export to USB: USB",
+                    exportButtonTitle: locksReorder
+                      ? `Append current playlist tracks to existing USB playlist "${playlist.name}"`
+                      : "Export current playlist to selected USB"
                   };
                 })
               }

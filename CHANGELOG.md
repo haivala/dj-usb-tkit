@@ -30,6 +30,15 @@
 
 ## Unreleased
 
+- **Improvement:** a USB export is now blocked when *any* track in the playlist
+  lives under a missing source folder, not just one on the currently loaded
+  page — the check moved into the backend export gate, which sees the whole
+  playlist.
+- **Chore:** the export button label ("Append to … on USB" vs "Export to USB")
+  and the missing-source-folder export block are computed in the backend; the
+  frontend renders them instead of re-deriving the append rule or parsing the
+  USB path itself.
+
 ## 0.1.36
 
 - **Fix:** dragging a playlist track while a column sort is active now saves that

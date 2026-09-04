@@ -319,7 +319,6 @@ export function updatePlaylistExportButtons(state, el, deps) {
     usbRoot: state.usbRoot,
     usbRootValid: state.usbRootValid,
     currentPlaylistId: current?.id,
-    currentPlaylistName: current?.name,
     playlistUsbExportStatusById: state.playlistUsbExportStatusById
   });
 
