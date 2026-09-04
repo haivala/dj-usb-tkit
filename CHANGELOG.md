@@ -54,6 +54,13 @@
   and the missing-source-folder export block are computed in the backend; the
   frontend renders them instead of re-deriving the append rule or parsing the
   USB path itself.
+- **Improvement:** the first beat of the beat grid is now refined against the
+  raw decoded audio after analysis-engine detection, snapping to the nearest
+  clear attack transient instead of relying solely on the engine's coarser
+  beat-grid estimate — including rescuing tracks with a quiet/silent intro,
+  where the engine could otherwise lock onto a false near-zero first beat.
+  Applies to both the `stratum` and `essentia` engines; a manually-edited
+  first beat is unaffected.
 
 ## 0.1.36
 

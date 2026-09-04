@@ -2,6 +2,7 @@
 
 pub(crate) mod analysis;
 pub mod anlz;
+pub(crate) mod beat_refine;
 pub(crate) mod bpm_key;
 pub mod cues;
 mod diagnostics;
