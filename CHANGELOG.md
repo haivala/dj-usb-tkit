@@ -30,6 +30,22 @@
 
 ## Unreleased
 
+- **New feature:** cue points and the beat-grid first beat are now editable. A
+  per-track modal (opened from the magnifier button next to a track's waveform)
+  shows the full-detail colour waveform with a beat-grid overlay and
+  **scroll-to-zoom / drag-to-pan** (opens zoomed to the first ~2 minutes, "Fit"
+  shows the whole track); click the waveform to play from a point (the view
+  follows the playhead), **double-click to add a cue there** (or play and hit
+  "+ Cue" to drop one at the playhead; up to 8, each auto-named "Cue 1", "Cue
+  2", … with a distinct default colour and both editable), and every cue row
+  and waveform marker has its own play-from-here control. The first beat can
+  be nudged by the beat. Each cue is exported as both a
+  memory cue and a hot-cue pad (A–H, colour), baked into the local analysis
+  files and the USB Rekordbox database (`PCOB`/`PCPT` + `PCO2`/`PCP2` ANLZ
+  chunks and the eDB `cue` table), and preserved when a stick is re-imported.
+- **Chore:** documented the new `track_cues` table, the two new commands
+  (`get_track_detail`, `save_track_analysis_edits`), and the cue/beat-grid
+  export & import paths across the `docs/` set.
 - **Improvement:** a USB export is now blocked when *any* track in the playlist
   lives under a missing source folder, not just one on the currently loaded
   page — the check moved into the backend export gate, which sees the whole

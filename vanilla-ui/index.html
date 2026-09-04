@@ -581,6 +581,54 @@
     </div>
   </div>
 
+  <div class="confirm-overlay" id="trackDetailOverlay" hidden>
+    <div class="track-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="trackDetailTitle">
+      <div class="track-detail-header">
+        <h3 id="trackDetailTitle">Cue Points</h3>
+        <button class="settings-close" id="trackDetailCloseBtn" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="track-detail-firstbeat">
+        <label for="trackDetailFirstBeatMs">First beat (ms)</label>
+        <button type="button" id="trackDetailFirstBeatMinus" data-tooltip="Back one beat">&minus;</button>
+        <input type="number" id="trackDetailFirstBeatMs" min="0" step="1" />
+        <button type="button" id="trackDetailFirstBeatPlus" data-tooltip="Forward one beat">+</button>
+      </div>
+
+      <div class="track-detail-waveform-wrap">
+        <div class="track-detail-zoom">
+          <span class="track-detail-hint">Click to play · double-click to add a cue · scroll to zoom · drag to pan</span>
+          <div class="track-detail-zoom-btns">
+            <button type="button" id="trackDetailZoomOut" data-tooltip="Zoom out">&minus;</button>
+            <button type="button" id="trackDetailZoomIn" data-tooltip="Zoom in">+</button>
+            <button type="button" id="trackDetailZoomFit" data-tooltip="Fit whole track">Fit</button>
+          </div>
+        </div>
+        <div class="waveform waveform-canvas track-detail-canvas" id="trackDetailWaveform">
+          <canvas class="waveform-canvas-el"></canvas>
+          <div class="track-detail-beatgrid" id="trackDetailBeatgrid"></div>
+          <div class="track-detail-cue-markers" id="trackDetailCueMarkers"></div>
+          <i class="waveform-playhead"></i>
+          <i class="track-detail-playhead" id="trackDetailPlayhead" hidden></i>
+        </div>
+      </div>
+
+      <div class="track-detail-cues">
+        <div class="track-detail-cues-head">
+          <span>Cues</span>
+          <button type="button" id="trackDetailAddCue">+ Cue</button>
+        </div>
+        <div class="track-detail-cue-list" id="trackDetailCueList"></div>
+      </div>
+
+      <div class="row confirm-actions">
+        <button id="trackDetailCancelBtn">Cancel</button>
+        <button id="trackDetailSaveBtn" data-primary>Save</button>
+      </div>
+    </div>
+    <div class="track-detail-color-popover" id="trackDetailColorPopover" hidden></div>
+  </div>
+
   <!-- Empty state template (hidden, cloned by JS) -->
   <template id="emptyStateTemplate">
     <div class="empty-state">

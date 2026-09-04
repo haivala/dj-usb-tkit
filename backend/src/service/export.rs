@@ -1103,7 +1103,12 @@ impl BackendService {
                         .filter(|p| analysis_bundle_exists(usb_root.as_path(), p))
                 {
                     if !export_dry_run {
-                        ensure_analysis_bundle_ppth(&usb_root, &existing_analysis, &exported_path)?;
+                        ensure_analysis_bundle_ppth(
+                            &usb_root,
+                            &existing_analysis,
+                            &exported_path,
+                            track,
+                        )?;
                     }
                     analysis_relative = Some(existing_analysis);
                     retain_waveform = true;
@@ -1119,6 +1124,7 @@ impl BackendService {
                                 &usb_root,
                                 &existing_analysis,
                                 &exported_path,
+                                track,
                             )?;
                         }
                         analysis_relative = Some(existing_analysis);
@@ -1197,6 +1203,8 @@ impl BackendService {
                 artwork_path: artwork_relative,
                 waveform_path: analysis_relative,
                 duration_ms: track.duration_ms,
+                first_beat_ms: track.first_beat_ms,
+                cues: track.cues.clone(),
             });
         }
 
@@ -1678,9 +1686,20 @@ impl BackendService {
                     .as_deref()
                     .map(Self::file_type_from_extension),
                 first_beat_ms: row.get::<_, Option<i64>>(37)?.map(|v| v as u32),
+                cues: Vec::new(),
             })
         })?;
         playlist.tracks = rows.collect::<Result<Vec<_>, _>>()?;
+
+        let track_ids: Vec<String> = playlist.tracks.iter().map(|t| t.id.clone()).collect();
+        let mut cues_by_track =
+            crate::service::cues::load_track_cues_bulk(&conn, &track_ids)?;
+        for track in &mut playlist.tracks {
+            if let Some(cues) = cues_by_track.remove(&track.id) {
+                track.cues = cues;
+            }
+        }
+
         Ok(playlist)
     }
 
@@ -1900,6 +1919,7 @@ mod tests {
 
     fn make_track() -> ExportTrackData {
         ExportTrackData {
+            cues: Vec::new(),
             id: "t1".to_string(),
             title: "Track".to_string(),
             artist: "Artist".to_string(),
@@ -2575,6 +2595,8 @@ mod tests {
             artwork_path: None,
             waveform_path: None,
             duration_ms: None,
+            first_beat_ms: None,
+            cues: Vec::new(),
         }
     }
 

@@ -38,7 +38,10 @@ export function createTrackRow(track, options, deps) {
   const playInWaveform = options.secondaryActionLabel
     ? `<button class="transport-btn ${isPlayingTrack ? "is-playing" : ""}" data-action="${options.secondaryActionType}" data-index="${options.index}" data-id="${escapeHtml(renderTrackId)}" data-row-key="${escapeHtml(rowKey)}" data-origin="${escapeHtml(options.origin || "usb")}" aria-label="${transportLabel}" data-tooltip="${transportLabel}">${transportIcon}</button>`
     : "";
-  const waveformWithAction = `<div class="waveform-cell">${playInWaveform}${waveformCell}</div>`;
+  const cueDetailBtn = options.enableAnalyzeActions
+    ? `<button class="waveform-detail-btn" data-action="edit-track-detail" data-index="${options.index}" data-id="${escapeHtml(renderTrackId)}"${track.analysisReady ? "" : " disabled"} aria-label="Cue points &amp; beat grid" data-tooltip="${track.analysisReady ? "Edit cue points &amp; beat grid" : "Analyze this track first"}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="21" y1="21" x2="15.5" y2="15.5"></line></svg></button>`
+    : "";
+  const waveformWithAction = `<div class="waveform-cell">${playInWaveform}${waveformCell}${cueDetailBtn}</div>`;
 
   const selectCell = options.withCheckbox
     ? `<div role="cell" class="track-grid-cell td-select"><input type="checkbox" data-id="${track.id}" ${options.selectedIds?.has(track.id) ? "checked" : ""} /></div>`

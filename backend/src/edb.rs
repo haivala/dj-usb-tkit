@@ -67,6 +67,7 @@ pub struct ExportTrackData {
     pub waveform_peaks_path: Option<String>,
     pub duration_ms: Option<u64>,
     pub first_beat_ms: Option<u32>,
+    pub cues: Vec<crate::models::TrackCue>,
     pub position: usize,
 }
 
@@ -117,6 +118,8 @@ pub struct ExportManifestTrack {
     pub artwork_path: Option<String>,
     pub waveform_path: Option<String>,
     pub duration_ms: Option<u64>,
+    pub first_beat_ms: Option<u32>,
+    pub cues: Vec<crate::models::TrackCue>,
 }
 
 #[derive(Debug, Clone)]

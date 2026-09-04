@@ -2945,6 +2945,8 @@ fn build_manifest_for_merged_playlist(
             artwork_path: mt.artwork_path.clone(),
             waveform_path: (!mt.analysis_path.is_empty()).then(|| mt.analysis_path.clone()),
             duration_ms: mt.duration_ms,
+            first_beat_ms: None,
+            cues: Vec::new(),
         })
         .collect();
     let manifest = ExportManifest {

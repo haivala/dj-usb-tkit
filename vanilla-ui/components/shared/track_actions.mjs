@@ -69,6 +69,11 @@ export function handleTrackAction({ action, track, origin, target, event, state,
     return true;
   }
 
+  if (action === "edit-track-detail") {
+    ctx.openTrackDetail?.(track)?.catch?.(catchErr(emitStatus));
+    return true;
+  }
+
   if (action === "play-library" || action === "play-usb" || action === "play-history") {
     const helpers = getPlaybackUiStateHelpers();
     const stopRequested = helpers?.shouldToggleStop

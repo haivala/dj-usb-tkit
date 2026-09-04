@@ -1323,6 +1323,29 @@ button[data-export-playlist]:hover {
   color: var(--accent-hot);
 }
 
+.waveform-detail-btn {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text);
+}
+.waveform-detail-btn svg {
+  width: 19px;
+  height: 19px;
+  stroke: currentColor;
+  fill: none;
+}
+.waveform-detail-btn:hover { color: var(--accent); }
+.waveform-detail-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 /* ── Track add button (compact icon) ─────────────── */
 
 .track-add-btn {
@@ -1425,11 +1448,11 @@ td.num, th.num {
 }
 
 .track-grid--library {
-  --track-grid-cols: 44px 52px 180px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
+  --track-grid-cols: 44px 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
 }
 
 .track-grid--no-select {
-  --track-grid-cols: 52px 180px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
+  --track-grid-cols: 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
 }
 
 /* App playlist tracks reserve a leading column for the drag-to-reorder
@@ -1437,7 +1460,7 @@ td.num, th.num {
    template, since USB playlist/history tracks use that same class but
    never reorder. */
 .track-grid[data-body-id="playlistTracksBody"] {
-  --track-grid-cols: 24px 52px 180px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
+  --track-grid-cols: 24px 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
 }
 
 .track-grid-row {
@@ -3361,4 +3384,188 @@ td button[data-action]:disabled,
 .help-donate-link:hover {
   background: var(--accent-hover);
   box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+/* ── Track-detail modal: cue points + beat grid ─────────────────────── */
+.track-detail-dialog {
+  width: min(96vw, 1400px);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.25);
+  padding: 16px;
+}
+.track-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.track-detail-header h3 { margin: 0; }
+.track-detail-hint { font-size: 11px; color: var(--muted); }
+.track-detail-firstbeat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.track-detail-firstbeat label { font-weight: 600; }
+.track-detail-firstbeat input { width: 96px; }
+.track-detail-waveform-wrap {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.track-detail-zoom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+.track-detail-zoom .track-detail-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-detail-zoom-btns { display: flex; gap: 4px; flex: none; }
+.track-detail-zoom button {
+  padding: 2px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.track-detail-canvas {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  cursor: grab;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+.track-detail-canvas.is-panning { cursor: grabbing; }
+.track-detail-canvas .waveform-canvas-el { width: 100%; height: 100%; display: block; }
+.track-detail-canvas .waveform-playhead { display: none; }
+.track-detail-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -1px;
+  background: var(--accent, #b06cff);
+  box-shadow: 0 0 6px var(--accent-glow, rgba(176, 108, 255, 0.6));
+  pointer-events: none;
+  z-index: 1;
+}
+.track-detail-playhead[hidden] { display: none; }
+.track-detail-beatgrid,
+.track-detail-cue-markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.track-detail-cue-markers { pointer-events: auto; }
+.cue-marker.off-view { display: none; }
+.beatgrid-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(128, 140, 160, 0.28);
+}
+.beatgrid-line.is-downbeat { background: rgba(128, 140, 160, 0.6); width: 2px; }
+.cue-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  transform: translateX(-1px);
+  border-left: 2px solid var(--cue-color, #4EB648);
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  text-align: center;
+  line-height: 14px;
+  cursor: pointer;
+  background: linear-gradient(var(--cue-color, #4EB648), var(--cue-color, #4EB648)) top left / 16px 15px no-repeat;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+.track-detail-cues {
+  margin-top: 12px;
+}
+.track-detail-cues-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.track-detail-cues-head span { font-weight: 600; margin-right: auto; }
+#trackDetailAddCue:disabled { opacity: .4; cursor: default; }
+.track-detail-cue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.cue-list-empty { margin: 8px 0; }
+.cue-row {
+  display: grid;
+  grid-template-columns: 26px 72px 24px 1fr 28px;
+  align-items: center;
+  gap: 8px;
+}
+.cue-row-play {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+}
+.cue-row-play svg { width: 14px; height: 14px; fill: currentColor; }
+.cue-row-play:hover { color: var(--accent); }
+.cue-row-pos { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+.cue-row-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  padding: 0;
+}
+.cue-row-delete {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+.cue-row-delete:hover { color: var(--danger, #e12424); }
+.track-detail-color-popover {
+  position: absolute;
+  display: grid;
+  grid-template-columns: repeat(4, 22px);
+  gap: 4px;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 1001;
+}
+.track-detail-color-popover[hidden] { display: none !important; }
+.cue-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  padding: 0;
 }

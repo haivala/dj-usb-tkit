@@ -400,6 +400,28 @@ pub(crate) fn read_pwv4_from_anlz(dat_path: &str) -> Option<Vec<u8>> {
     find_anlz_chunk_payload(container, "PWV4").map(|p| p.to_vec())
 }
 
+/// Extract the raw PWV5 colour-detail waveform payload from a desktop library
+/// ANLZ `.EXT` file (no conversion). 2 bytes/entry, BE u16:
+/// `R(3) | G(3) | B(3) | Height(5) | _(2)`. Entry count is duration-derived
+/// (`ceil(duration_s * 150) + 4`), so this can be tens of thousands of entries.
+pub(crate) fn read_pwv5_from_anlz(dat_path: &str) -> Option<Vec<u8>> {
+    let base = std::path::PathBuf::from(dat_path);
+    let ext_path = if base
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("ext"))
+    {
+        base
+    } else {
+        base.with_extension("EXT")
+    };
+    let bytes = std::fs::read(&ext_path).ok()?;
+    let container = find_anlz_chunk_payload(&bytes, "PMAI").unwrap_or(&bytes);
+    find_anlz_chunk_payload(container, "PWV5")
+        .map(<[u8]>::to_vec)
+        .filter(|p| p.len() >= 4)
+}
+
 pub(crate) fn extract_waveform_preview_from_anlz_bytes(
     bytes: &[u8],
     bins: usize,
@@ -2329,6 +2351,8 @@ mod diag_tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                 id: "track-1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -2482,6 +2506,8 @@ mod diag_tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                 id: "track-1".to_string(),
                 master_db_id: None,
                 master_content_id: None,

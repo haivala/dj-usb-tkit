@@ -16,6 +16,7 @@ Known Issues below.
 - `pass`: scenario works end-to-end on tested hardware.
 - `warn`: scenario is usable but has caveats.
 - `fail`: scenario does not work as required.
+- `untested`: implemented and covered by automated tests, but not yet run on hardware.
 
 ## Current Status
 
@@ -52,6 +53,7 @@ release (0.1.0) and has stayed working through every version since.
 | CDJ-3000X | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `more-than-16-tracks-fresh-usb-init` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
+| _any_ | `cue-points-and-edited-beatgrid` | untested | Unreleased | — | New in Unreleased: exported hot cues (A–H pads + colour), memory cues (CALL navigation), and a user-edited first beat. Needs a hardware pass — confirm pads trigger at the right spots/colours, memory-cue CALL works, and the beat grid aligns. Also confirms the eDB `cue` seek-anchor fields left at `0` don't mis-seek (see `docs/eDB.md`). |
 
 ## Validation History
 

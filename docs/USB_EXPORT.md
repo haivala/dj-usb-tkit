@@ -212,6 +212,24 @@ If playlist tracks are missing required analysis, export is blocked and UI instr
 
 Analysis bundle handling is copy-only during export. Export requires the track to already have a `DAT/EXT/2EX` bundle and copies/reuses it even if the bundle is older or low-detail. Export does not decode source audio or regenerate ANLZ files; missing bundle files block export before media copy starts. See `docs/WAVEFORMS.md`.
 
+**Cue points and edited beat grids** are the one exception to copy-only: when a
+track has rows in `track_cues` (max 8) or a user-set `first_beat_ms`, the copied
+`.DAT` / `.EXT` are passed through `apply_analysis_edits_to_anlz` (after the
+`PPTH` injection) so the exported bundle carries the current cue list and beat
+grid — including on the "reuse an on-USB bundle" retain path
+(`ensure_analysis_bundle_ppth`). **Each cue point is written twice**: a memory
+point (`PCPT`/`PCP2` with `hot_cue = 0`) and a hot-cue pad (`hot_cue = 1..8` by
+position order), so a CDJ surfaces it both in the CALL/memory list and on a pad.
+In the eDB, `write_edb_cues_for_content` replaces the `cue` rows for the track's
+`content_id` with **two rows per cue point** (`kind = 0` memory /
+`kind = 1` hot; `inUsec = position_ms × 1000`, `colorTableIndex` = palette index
+for the hot row / `-1` for memory; MPEG/decoder seek fields left `0` — the
+player recomputes them), bumps `content.cueUpdateCount`, and sets
+`isHotCueAutoLoadOn`. `hotCueBankList` is intentionally left empty. In the PDB
+the `autoload_hotcues` flag is already written `ON` for every exported track.
+Unedited tracks are byte-identical to before (empty `PCOB`/`PCO2` placeholders,
+`cueUpdateCount` untouched).
+
 WAV media copy has one exception to plain byte-for-byte copying: if a source WAV's `fmt ` chunk uses `WAVE_FORMAT_EXTENSIBLE` and wraps plain PCM or IEEE-float data (flagged during scan — see `docs/LIBRARY_ANALYSIS.md`), export rewrites the header to a standard 16-byte PCM/float `fmt ` chunk before writing it to the USB drive, since some Pioneer CDJs reject the extensible form outright. This is a lossless, header-only rewrite: only the `fmt ` chunk bytes and the overall RIFF size are changed, sample data is streamed through unmodified. If the extensible header wraps some other subformat, there's nothing safe to rewrite and the file is copied unchanged (`copy_if_different`), keeping the hard warning from scan surfaced in the UI. See `backend/src/wav_format.rs` (`rewrite_extensible_to_pcm`) and `copy_wav_normalized_if_needed` in `export_paths.rs`.
 
 Current media-copy behavior is intentionally conservative: file copy/write steps

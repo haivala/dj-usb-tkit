@@ -15,6 +15,7 @@ import * as backupsUi from "./components/backups/actions.mjs";
 import * as library from "./components/library/actions.mjs";
 import * as settings from "./components/settings/actions.mjs";
 import * as shell from "./components/shell/actions.mjs";
+import * as trackDetail from "./components/track-detail/actions.mjs";
 import { createTrackListController } from "./components/shared/track_list_controller.mjs";
 import { applyPlaylistReorderLockToGrid } from "./components/shared/export_reorder_lock.mjs";
 import {
@@ -133,6 +134,11 @@ const ELEMENT_IDS = [
   "tracklistExportCancelBtn", "helpBtn", "helpOverlay", "helpCloseBtn",
   "eventLogLevelFilter", "eventLogSourceFilter", "eventLogClearBtn", "eventLogSummary",
   "eventLogList",
+  "trackDetailOverlay", "trackDetailTitle", "trackDetailCloseBtn", "trackDetailWaveform",
+  "trackDetailBeatgrid", "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs",
+  "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailAddCue",
+  "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit",
+  "trackDetailCueList", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
 ];
 
 const el = {
@@ -151,6 +157,7 @@ const el = {
 
 const confirmDialog = uiCtrl.createConfirmDialogController(el);
 const tracklistExportDialog = uiCtrl.createTracklistExportDialogController(el);
+const trackDetailDialog = trackDetail.createTrackDetailController(el);
 
 // --- Closures that bind state/el/deps ---
 
@@ -604,6 +611,14 @@ const resolveLocalTrackIdAsync = async (track) => playback.resolveLocalTrackIdAs
 function promoteTrackIdentity(oldId, newId) {
   library.promoteTrackIdentity(state, el, oldId, newId, { cssEscape });
 }
+
+const openTrackDetail = (track) => trackDetail.openTrackDetail(track, {
+    command,
+    state,
+    resolveLocalTrackIdAsync,
+    trackDetailDialog,
+    emitStatus,
+  });
 
 const stopPlaybackIfActive = async () => playback.stopPlaybackIfActive(state, {
     command,
@@ -1559,6 +1574,8 @@ function bindEvents() {
     sidebarExpandBtn,
     confirmDialog,
     tracklistExportDialog,
+    trackDetailDialog,
+    openTrackDetail,
     constants: {
       STORAGE_KEY_SIDEBAR_COLLAPSED,
       FRONTEND_DB_KEY_SIDEBAR_COLLAPSED,

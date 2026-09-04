@@ -14,7 +14,8 @@ use crate::models::{
     ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
     GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, GetUsbDeviceNameData,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbDeviceNameData,
     GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
     InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
     InspectUsbTracksData, InspectUsbTracksRequest, ListPlaylistsData, ListTracksData,
@@ -31,8 +32,10 @@ use crate::models::{
     ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
     RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
     RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
+    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, ScanMasterDbRequest, SearchTracksData,
+    SearchTracksRequest, SetAnalysisPausedData,
     SetFrontendSettingData, SetFrontendSettingRequest, SetUsbDeviceNameData,
+    TrackDetail,
     SetUsbDeviceNameRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
     UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
 };
@@ -119,6 +122,17 @@ impl BackendCommands {
         req: RemoveTracksBySourceRootsRequest,
     ) -> ApiResponse<RemoveTracksBySourceRootsData> {
         wrap(self.service.remove_tracks_by_source_roots(req))
+    }
+
+    pub fn get_track_detail(&self, req: GetTrackDetailRequest) -> ApiResponse<TrackDetail> {
+        wrap(self.service.get_track_detail(req))
+    }
+
+    pub fn save_track_analysis_edits(
+        &self,
+        req: SaveTrackAnalysisEditsRequest,
+    ) -> ApiResponse<SaveTrackAnalysisEditsData> {
+        wrap(self.service.save_track_analysis_edits(req))
     }
 
     pub fn relocate_source_root(

@@ -44,6 +44,12 @@ fn db_migration_is_idempotent_and_adds_expected_columns() {
     assert!(has_column(&conn, "playlists", "last_exported_at"));
     assert!(has_column(&conn, "playlists", "last_exported_usb_root"));
     assert!(has_column(&conn, "playlists", "last_exported_track_count"));
+    assert!(has_column(&conn, "tracks", "first_beat_ms"));
+    assert!(has_column(&conn, "tracks", "first_beat_ms_source"));
+    assert!(has_column(&conn, "track_cues", "position_ms"));
+    assert!(has_column(&conn, "track_cues", "color_id"));
+    assert!(has_column(&conn, "track_cues", "name"));
+    assert!(!has_column(&conn, "track_cues", "hot_cue_index"));
 
     let track_number_count: i64 = conn
         .query_row(
@@ -72,7 +78,7 @@ fn db_migration_is_idempotent_and_adds_expected_columns() {
             |row| row.get(0),
         )
         .expect("schema_version value");
-    assert_eq!(schema_version, 1);
+    assert_eq!(schema_version, 2);
 }
 
 fn seed_legacy_backend_schema(db_path: &Path) {

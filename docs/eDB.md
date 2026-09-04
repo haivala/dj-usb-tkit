@@ -54,7 +54,7 @@ The baseline eDB schema contains these table families:
 | content and metadata dictionaries | `content`, `artist`, `album`, `key`, `genre`, `label`, `color`, `image` | track metadata and id-to-name/path resolution |
 | playlist and membership | `playlist`, `playlist_content` | playlist tree rows and ordered membership |
 | history and membership | `history`, `history_content` | imported and repaired history sessions |
-| cue and hot-cue banks | `cue`, `hotCueBankList`, `hotCueBankList_cue` | baseline schema and cue/hot-cue references |
+| cue and hot-cue banks | `cue`, `hotCueBankList`, `hotCueBankList_cue` | `cue` is populated on export from the app's `track_cues` (see below); `hotCueBankList*` remain baseline-only |
 | navigation/config | `property`, `menuItem`, `category`, `sort` | device/db metadata, browse catalog, visible category state, sort state |
 | user tags and recommendations | `myTag`, `myTag_content`, `recommendedLike` | user/My Tag tree, tag-to-track links, recommendation rows |
 
@@ -288,8 +288,31 @@ These eDB areas are intentionally handled conservatively:
 - optional columns such as `imageFilePath_id` that may appear on some USBs;
 - tag data carried only through `exportExt.pdb`, which this app keeps
   byte-stable rather than rewriting;
-- optional cue, hot-cue-bank, recommendation, and metadata families not actively
+- hot-cue-bank, recommendation, and metadata families not actively
   mutated by normal export.
 
 The current policy is to probe schema shape before writing optional fields and
 to keep report commands read-only.
+
+### `cue` table on export
+
+`write_edb_cues_for_content` (in `export_helpers/mod.rs`) rewrites the `cue`
+rows for each exported track's `content_id` from the app's `track_cues`
+(max 8 cue points):
+
+- `DELETE FROM cue WHERE content_id = ?` then **two `INSERT`s per cue point** —
+  a memory row and a hot row (columns probed against the USB's actual `cue`
+  schema);
+- `kind` = `0` for the memory row / `1` for the hot row; `colorTableIndex` =
+  the palette index on the hot row / `-1` on the memory row;
+- `inUsec = position_ms × 1000`, `in150FramePerSec = round(position_ms × 0.15)`,
+  `outUsec`/`out150FramePerSec` = `-1`;
+- MPEG-frame / block-offset / decoding-start columns are written `0` — the
+  player recomputes precise seek anchors from `inUsec` + the ANLZ file (**risk
+  flagged**: unverified on hardware);
+- `content.cueUpdateCount` is incremented (only when ≥1 cue is written; the
+  historical `''` reset stays for tracks with no cues) and
+  `isHotCueAutoLoadOn` is set.
+
+`hotCueBankList` / `hotCueBankList_cue` are still left empty — CDJs read A–H
+pads from the `cue` table plus the ANLZ `PCPT`/`PCP2` chunks.

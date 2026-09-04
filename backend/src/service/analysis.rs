@@ -1525,6 +1525,9 @@ fn analyze_local_track_with_updates(
     let waveform_peaks_path = if waveform.peaks.is_empty() {
         None
     } else {
+        // Cues (if the track was previously edited) are baked into the cache
+        // by `save_track_analysis_edits`; a fresh analysis writes an empty cue
+        // list and the next save/export re-applies them.
         write_generated_anlz_bundle_with_first_beat(
             &waveform,
             &bundle_paths,
@@ -1532,6 +1535,7 @@ fn analyze_local_track_with_updates(
             bpm,
             duration_ms,
             first_beat_ms,
+            &[],
         )?;
         Some(bundle_paths.dat_path.to_string_lossy().to_string())
     };

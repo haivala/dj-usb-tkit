@@ -286,6 +286,8 @@ mod tests {
         exported_path: &str,
     ) -> ExportManifestTrack {
         ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
             id: id.to_string(),
             master_db_id: None,
             master_content_id: None,

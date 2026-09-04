@@ -1878,3 +1878,77 @@ pub struct ScanMasterDbRequest {
     #[serde(default)]
     pub path: Option<String>,
 }
+
+// ── track cues + beat-grid editing ────────────────────────
+
+/// A cue point on a track. This app targets CDJ playback directly, so a cue is
+/// just a position + optional name + colour; on export each cue is written as
+/// both a memory point and a hot-cue pad (A–H). The list is capped at 8.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackCue {
+    pub id: String,
+    pub position_ms: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_id: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// One cue in a `save_track_analysis_edits` request (no id — the save fully
+/// replaces the track's cue list).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackCueInput {
+    pub position_ms: u32,
+    #[serde(default)]
+    pub color_id: Option<u8>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTrackDetailRequest {
+    pub track_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackDetail {
+    pub track: Track,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_beat_ms: Option<u32>,
+    pub cues: Vec<TrackCue>,
+    /// Base64 of the raw PWV5 colour-detail waveform payload from the track's
+    /// `.EXT` bundle (2 bytes/entry, BE u16). Absent when the track has no
+    /// analysis. Base64 rather than `Vec<u8>` because the payload is tens of KB
+    /// and a JSON number array would be ~3× that on the wire.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail_waveform: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTrackAnalysisEditsRequest {
+    pub track_id: String,
+    /// `None` ⇒ leave the stored first beat unchanged.
+    #[serde(default)]
+    pub first_beat_ms: Option<u32>,
+    /// `None` ⇒ leave the cue list unchanged; `Some(_)` ⇒ full replace.
+    #[serde(default)]
+    pub cues: Option<Vec<TrackCueInput>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTrackAnalysisEditsData {
+    pub track_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_beat_ms: Option<u32>,
+    pub cues: Vec<TrackCue>,
+    /// Whether the cached local ANLZ bundle was successfully rewritten with the
+    /// new cues / beat grid. `false` when the track has no analysis cache yet
+    /// (the edits are still persisted and applied at the next analysis/export).
+    pub anlz_regenerated: bool,
+}

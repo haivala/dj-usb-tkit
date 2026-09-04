@@ -58,6 +58,33 @@ USB export does not generate or regenerate ANLZ from source audio. Export is a c
 Run track analysis before export to create or refresh the local bundle. This keeps CPU-heavy audio
 decoding out of the USB export path.
 
+## Cue and beat-grid chunks
+
+`anlz.rs` writes **real** cue chunks when a track has edited cues (see
+`docs/APP_DATA_MODEL.md` → TrackCue):
+
+- `.DAT`: `PCOB`/`PCPT` (hot + memory)
+- `.EXT`: `PCOB`/`PCPT` + `PCO2`/`PCP2` (hot + memory) — `PCP2` carries the
+  hot-cue colour and comment.
+
+A track with no cues still emits the historical **empty** `PCOB`/`PCO2`
+placeholders byte-for-byte, so unedited exports are unchanged.
+
+`save_track_analysis_edits` and USB export both apply
+`apply_analysis_edits_to_anlz`, an in-place transform that rebuilds only
+`PQTZ`/`PQT2` (from `first_beat_ms`) and the cue chunks, copying every other
+chunk — including `PSSI` phrase data — verbatim. `read_cues_from_anlz` /
+`read_first_beat_from_anlz` decode them back on USB re-import.
+
+The track-detail modal renders the **PWV5 colour-detail** waveform from the
+`.EXT`, read raw by `read_pwv5_from_anlz` (`usb_utils.rs`), **base64-encoded**
+onto `get_track_detail`'s `detailWaveform` (the raw payload is tens of KB — a
+JSON number array would be ~3× that on the wire). The modal decodes it and
+renders only the visible `[startMs, endMs]` slice, so **scroll-to-zoom /
+drag-to-pan** shows the full ~150 entries/sec detail; it opens zoomed to the
+first ~2 minutes. The magnifier button is disabled for tracks with no analysis
+(no `.EXT` ⇒ no PWV5). See `vanilla-ui/components/track-detail/waveform_detail.mjs`.
+
 ## Decode Bounds
 
 Waveform generation decodes up to `24_000_000` mono samples during analysis. Duration for ANLZ

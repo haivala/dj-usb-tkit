@@ -3,6 +3,7 @@
 pub(crate) mod analysis;
 pub mod anlz;
 pub(crate) mod bpm_key;
+pub mod cues;
 mod diagnostics;
 mod export;
 pub mod export_helpers;
@@ -85,7 +86,7 @@ const WAVEFORM_PREVIEW_BINS: usize = 2400;
 
 const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
 
-const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm, tonality, file_path, \
+pub(crate) const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm, tonality, file_path, \
     file_size_bytes, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, duration_ms, \
     artwork_path, waveform_peaks_path, bpm_analyzer, created_at, updated_at, \
     COALESCE(master_db_source, 0) AS master_db_source, wav_extensible_kind";
@@ -3364,7 +3365,10 @@ fn check_node_available() -> bool {
         .unwrap_or(false)
 }
 
-fn row_to_track(row: &rusqlite::Row<'_>, include_previews: bool) -> rusqlite::Result<Track> {
+pub(crate) fn row_to_track(
+    row: &rusqlite::Row<'_>,
+    include_previews: bool,
+) -> rusqlite::Result<Track> {
     let file_path: String = row.get(7)?;
     let artwork_path: Option<String> = row.get(14)?;
     let waveform_peaks_path: Option<String> = row.get(15)?;

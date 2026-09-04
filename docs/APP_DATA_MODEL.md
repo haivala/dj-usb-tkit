@@ -18,6 +18,37 @@ Represents a local library track. Core fields include identity, display metadata
 
 `Playlist` is the user-managed container. `PlaylistTrack` stores ordered membership and position within the playlist.
 
+### TrackCue and the beat-grid first beat
+
+The `track_cues` table holds user-editable cue points, one row per cue,
+`ON DELETE CASCADE` from `tracks`. This app targets CDJ playback directly, so a
+cue is just a position + colour + name — there is no user-facing
+memory-vs-hot distinction. **At most 8 cues** per track; on export each cue is
+written as *both* a memory point and a hot-cue pad (A–H by position order).
+
+| column | notes |
+| --- | --- |
+| `position_ms` | cue position from track start |
+| `color_id` | palette index (`service::cues::HOTCUE_PALETTE`, 1–8); defaults to green |
+| `name` | optional comment/label |
+| `sort_order` | insert order |
+
+The beat-grid anchor is `tracks.first_beat_ms` (already present). A companion
+`tracks.first_beat_ms_source` column (`'estimated'` default, `'user'` once
+edited) tells re-analysis to keep a user-set value instead of overwriting it
+with `estimate_first_beat_ms`.
+
+Cues and the first beat are read via `get_track_detail` (returns `TrackDetail`
+= `Track` + `firstBeatMs` + ordered `cues` + `detailWaveform`, the raw PWV5
+colour-detail waveform for the modal) and replaced atomically via
+`save_track_analysis_edits` (`cues: [{ positionMs, colorId, name }]`).
+`TrackCue` is **not** on the grid `Track` model — only the per-track modal
+fetches it. On save the local ANLZ cache (`.DAT`/`.EXT` at `waveform_peaks_path`)
+is rewritten in place (`PQTZ`/`PQT2` + `PCOB`/`PCPT` + `PCO2`/`PCP2`, each cue
+doubled to a memory + hot entry) and `last_exported_*` is cleared on every
+playlist containing the track. See `docs/USB_EXPORT.md` / `docs/USB_IMPORT.md`
+for the USB round-trip.
+
 ### UsbDevice, UsbPlaylist, UsbTrack, UsbHistory
 
 These entities represent USB-side discovered state:

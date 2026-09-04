@@ -527,7 +527,7 @@ slots:
 | `2` | structural default |
 | `3` | structural default |
 | `6` | publish track info flag (`ON` when enabled) |
-| `7` | autoload hot cues flag (`ON` when enabled) |
+| `7` | autoload hot cues flag — written `ON` for every exported track, so hot cues written to the ANLZ/eDB auto-load on the player. Cue *data* itself lives in the ANLZ bundle + eDB `cue` table, not the PDB. |
 | `10` | date added |
 | `11` | release date |
 | `14` | analysis path |

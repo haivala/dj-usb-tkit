@@ -74,6 +74,18 @@ drive selection from being rendered against a newer selected drive.
 - `remove_tracks_by_source_roots`
 - `relocate_source_root`
 - `get_tracks_by_ids_with_previews`
+- `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform }` for
+  the track-detail modal (cue points + beat-grid editing). `detailWaveform` is
+  the **base64** of the raw PWV5 colour-detail waveform payload from the `.EXT`
+  (2 bytes/entry, BE u16; absent when the track has no analysis). Cues are
+  ordered by `sortOrder`.
+- `save_track_analysis_edits` — `{ trackId, firstBeatMs?, cues? }` → atomically
+  replaces the track's cue list (`cues: Some([...])`, max 8) and/or updates the
+  beat-grid anchor (`firstBeatMs: Some(ms)`), rewrites the cached local ANLZ
+  bundle, and clears `last_exported_*` on every playlist containing the track.
+  A `null` field is left unchanged. `cues[]` entries are
+  `{ positionMs, colorId?, name? }`; each becomes a memory point + a hot-cue pad
+  on export.
 
 ### Settings
 

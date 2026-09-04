@@ -29,6 +29,18 @@ Known DB data surfaces used by import:
 
 Track metadata resolution for imported playlist entries is multi-source. The importer attempts to resolve each referenced track ID through PDB row data, then eDB content data, then optional master-DB fallback, and skips unresolvable orphan entries instead of failing the whole playlist import.
 
+### Cue points and beat grid on import
+
+When `materialize_usb_track_row` creates or matches a local `tracks` row for a
+USB track, `import_anlz_cues_for_track` reads cue points from the on-USB
+`.EXT` (preferred, for colour + comment) or `.DAT` (`read_cues_from_anlz`) and
+seeds `track_cues`, and seeds `tracks.first_beat_ms` from the `PQTZ`/`PQT2`
+anchor. The app writes each cue as a memory + hot pair on export, so entries are
+**deduped by position** back into one `track_cues` row (cap 8). This only
+happens when the local track has **no cues yet** and (for the first beat) **no
+value yet** — local edits always win over what is on the stick, so re-importing
+a stick you exported never clobbers newer local work.
+
 `detect_external_master_db` locates the local rekordbox `master.db` by checking
 a fixed candidate list in order and returning the first path that exists:
 

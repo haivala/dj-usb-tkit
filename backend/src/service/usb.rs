@@ -1909,6 +1909,10 @@ impl BackendService {
             params![Uuid::now_v7().to_string(), id, usb_device_id, file_path, now_ts],
         )?;
 
+        if let Some(dat) = track.waveform_peaks_path.as_deref() {
+            super::cues::import_anlz_cues_for_track(tx, &id, std::path::Path::new(dat))?;
+        }
+
         track.local_track_id = Some(id);
         Ok(true)
     }
@@ -3143,6 +3147,7 @@ mod tests {
 
     fn make_export_track(id: &str, title: &str, filename: &str) -> crate::edb::ExportTrackData {
         crate::edb::ExportTrackData {
+            cues: Vec::new(),
             id: id.to_string(),
             title: title.to_string(),
             artist: "Artist".to_string(),
@@ -3211,6 +3216,8 @@ mod tests {
                 .enumerate()
                 .map(
                     |(i, (id, title, filename))| crate::edb::ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                         id: id.to_string(),
                         master_db_id: None,
                         master_content_id: None,

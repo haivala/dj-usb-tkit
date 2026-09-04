@@ -7,10 +7,26 @@ use backend::models::{
     AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
     CreatePlaylistRequest, DedupeMode, ExportToUsbOptions, ExportToUsbRequest,
     FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
-    GetTracksByIdsRequest, InitializeUsbRequest, MaterializeSourceTrackRequest, ScanLibraryRequest,
-    SearchTracksRequest,
+    GetTrackDetailRequest, GetTracksByIdsRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
+    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, SearchTracksRequest, TrackCueInput,
 };
 use backend::pdb_reader::parse_pdb;
+use backend::service::anlz::read_cues_from_anlz;
+use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
+
+fn find_files_named(dir: &Path, name: &str, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            find_files_named(&path, name, out);
+        } else if path.file_name().and_then(|s| s.to_str()) == Some(name) {
+            out.push(path);
+        }
+    }
+}
 use tempfile::tempdir;
 
 const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
@@ -609,6 +625,275 @@ fn analyze_local_track_waveform_preview_comes_from_anlz_roundtrip() {
         preview.iter().any(|&v| v > 0),
         "waveform preview must have at least one non-zero value"
     );
+}
+
+#[test]
+fn save_track_analysis_edits_bakes_cues_and_first_beat_into_cached_anlz() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let source = root.path().join("source");
+    fs::create_dir_all(&source).expect("create source dir");
+
+    let wav = source.join("cue_bake.wav");
+    write_test_pulsed_key_wav(&wav, 128.0, 12_000);
+
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![source.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    let track_id = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search")
+        .items[0]
+        .id
+        .clone();
+
+    let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
+        track_ids: vec![track_id.clone()],
+        analysis_engine: None,
+        ..Default::default()
+    });
+    assert_eq!(analyze.data.expect("analyze").analyzed, 1);
+
+    let dat_path = backend
+        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
+            track_ids: vec![track_id.clone()],
+        })
+        .data
+        .expect("hydrate")
+        .items[0]
+        .waveform_peaks_path
+        .clone()
+        .expect("waveform path");
+    let ext_path = Path::new(&dat_path).with_extension("EXT");
+
+    // Freshly analysed cache carries no cues.
+    assert!(read_cues_from_anlz(&fs::read(&dat_path).unwrap()).is_empty());
+    let pqtz_before = fs::read(&dat_path).unwrap();
+
+    let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: Some(210),
+        cues: Some(vec![
+            TrackCueInput {
+                position_ms: 1_500,
+                color_id: None,
+                name: Some("Intro".to_string()),
+            },
+            TrackCueInput {
+                position_ms: 4_000,
+                color_id: Some(2),
+                name: Some("Drop".to_string()),
+            },
+        ]),
+    });
+    assert!(save.ok, "save failed: {save:?}");
+    assert!(
+        save.data.expect("save data").anlz_regenerated,
+        "cache should have been rewritten"
+    );
+
+    for path in [Path::new(&dat_path), ext_path.as_path()] {
+        let bytes = fs::read(path).expect("read cached anlz");
+        let cues = read_cues_from_anlz(&bytes);
+        // Each cue point is written as a memory + a hot entry; hot slots follow
+        // position order (1500 → A, 4000 → B).
+        assert_eq!(cues.len(), 4, "{path:?} should carry memory + hot per cue");
+        assert!(cues.iter().any(|c| c.hot_cue == 1 && c.position_ms == 1_500));
+        assert!(cues.iter().any(|c| c.hot_cue == 0 && c.position_ms == 1_500));
+        assert!(cues.iter().any(|c| c.hot_cue == 2 && c.position_ms == 4_000));
+        assert!(cues.iter().any(|c| c.hot_cue == 0 && c.position_ms == 4_000));
+    }
+
+    // Beat grid in the .DAT actually changed.
+    assert_ne!(fs::read(&dat_path).unwrap(), pqtz_before);
+
+    // And it survives a fresh get_track_detail.
+    let detail = backend
+        .get_track_detail(GetTrackDetailRequest {
+            track_id: track_id.clone(),
+        })
+        .data
+        .expect("detail");
+    assert_eq!(detail.first_beat_ms, Some(210));
+    assert_eq!(detail.cues.len(), 2);
+    let detail_b64 = detail
+        .detail_waveform
+        .expect("detail modal should get the PWV5 colour waveform");
+    // base64 of the raw PWV5 payload: ~150 entries/sec × 2 bytes for a 12 s
+    // track ⇒ several KB of bytes ⇒ several thousand base64 chars. This is the
+    // full detail chunk, not a downsampled preview.
+    assert!(
+        detail_b64.len() > 3000 && detail_b64.chars().all(|c| c.is_ascii_graphic()),
+        "detailWaveform should be a large base64 string (got {} chars)",
+        detail_b64.len()
+    );
+}
+
+#[test]
+fn export_to_usb_writes_cues_into_anlz_and_edb() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let source = root.path().join("source");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&source).expect("create source dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    write_test_pulsed_key_wav(&source.join("cue_export.wav"), 128.0, 16_000);
+
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![source.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    let track_id = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search")
+        .items[0]
+        .id
+        .clone();
+    backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
+        track_ids: vec![track_id.clone()],
+        analysis_engine: None,
+        ..Default::default()
+    });
+
+    let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: Some(180),
+        cues: Some(vec![
+            TrackCueInput {
+                position_ms: 2_000,
+                color_id: None,
+                name: Some("Verse".to_string()),
+            },
+            TrackCueInput {
+                position_ms: 6_000,
+                color_id: Some(3),
+                name: Some("Drop".to_string()),
+            },
+        ]),
+    });
+    assert!(save.ok, "save failed: {save:?}");
+
+    backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: "Cue Export".to_string(),
+        })
+        .data
+        .expect("playlist")
+        .playlist_id;
+    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![track_id.clone()],
+        dedupe: DedupeMode::Skip,
+    });
+
+    let export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(export.ok, "export failed: {export:?}");
+
+    // The exported .EXT under PIONEER/USBANLZ carries memory + hot per cue.
+    let mut ext_files = Vec::new();
+    find_files_named(&usb.join("PIONEER").join("USBANLZ"), "ANLZ0000.EXT", &mut ext_files);
+    assert_eq!(ext_files.len(), 1, "expected one exported .EXT");
+    let cues = read_cues_from_anlz(&fs::read(&ext_files[0]).unwrap());
+    assert_eq!(cues.len(), 4);
+    assert!(cues.iter().any(|c| c.hot_cue == 2 && c.position_ms == 6_000 && c.comment == "Drop"));
+    assert!(cues.iter().any(|c| c.hot_cue == 0 && c.position_ms == 6_000));
+    assert!(cues.iter().any(|c| c.hot_cue == 1 && c.position_ms == 2_000));
+
+    // And the exported eDB has matching `cue` rows (2 per cue point).
+    let edb_path = usb
+        .join("PIONEER")
+        .join("rekordbox")
+        .join("exportLibrary.db");
+    let conn = rusqlite::Connection::open(&edb_path).expect("open edb");
+    conn.pragma_update(None, "key", DEFAULT_USB_EDB_KEY)
+        .expect("edb key");
+    let cue_count: i64 = conn
+        .query_row("SELECT COUNT(1) FROM cue", [], |row| row.get(0))
+        .expect("count cue rows");
+    assert_eq!(cue_count, 4, "eDB should have memory + hot rows per cue");
+    let hot_in_usec: i64 = conn
+        .query_row(
+            "SELECT inUsec FROM cue WHERE kind = 1 ORDER BY inUsec DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("hot cue row");
+    assert_eq!(hot_in_usec, 6_000_000);
+    let cue_update_count: i64 = conn
+        .query_row(
+            "SELECT CAST(cueUpdateCount AS INTEGER) FROM content LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("cueUpdateCount");
+    assert!(cue_update_count >= 1, "cueUpdateCount should be bumped");
+    drop(conn);
+
+    // Re-import the exported stick into a clean library: cues + first beat come back.
+    let fresh_data_dir = root.path().join("data2");
+    let fresh = BackendCommands::new(&fresh_data_dir).expect("fresh backend");
+    let imported = fresh.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(imported.ok, "fetch usb playlists failed: {imported:?}");
+
+    let fresh_db = rusqlite::Connection::open(fresh_data_dir.join("backend.db")).expect("open db2");
+    let (imported_track_id, imported_first_beat): (String, Option<i64>) = fresh_db
+        .query_row(
+            "SELECT id, first_beat_ms FROM tracks WHERE title NOT LIKE 'Unknown%' LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("imported track");
+    assert_eq!(imported_first_beat, Some(180), "first beat should be imported");
+    let imported_cue_count: i64 = fresh_db
+        .query_row(
+            "SELECT COUNT(1) FROM track_cues WHERE track_id = ?1",
+            [&imported_track_id],
+            |row| row.get(0),
+        )
+        .expect("imported cue count");
+    assert_eq!(
+        imported_cue_count, 2,
+        "memory + hot pairs collapse back to one cue point per position"
+    );
+    let positions: Vec<i64> = fresh_db
+        .prepare("SELECT position_ms FROM track_cues WHERE track_id = ?1 ORDER BY position_ms")
+        .expect("prepare")
+        .query_map([&imported_track_id], |row| row.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("collect");
+    assert_eq!(positions, vec![2_000, 6_000]);
 }
 
 #[test]

@@ -5,13 +5,13 @@ use std::path::Path;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddTracksToPlaylistRequest, CheckSourceRootsRequest, CreatePlaylistRequest, DedupeMode,
-    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
-    GetPlaylistTracksRequest, InitializeUsbRequest, ListTracksRequest, PlayResolvedTrackRequest,
+    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
+    GetTrackDetailRequest, InitializeUsbRequest, ListTracksRequest, PlayResolvedTrackRequest,
     PlayTrackRequest, PlaybackPreflightRequest, PruneUsbDeviceRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
     ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksRequest,
-    ValidateUsbRootRequest,
+    RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanMasterDbRequest,
+    SearchTracksRequest, TrackCueInput, ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -784,6 +784,115 @@ fn run_usb_parity_report_with_progress_returns_api_failure_for_missing_root() {
 
     assert!(!response.ok, "missing root should fail: {response:?}");
     let _ = progress_events;
+}
+
+#[test]
+fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::copy(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/noart/track_no_art.mp3"),
+        media.join("track.mp3"),
+    )
+    .expect("copy fixture");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+
+    let listed = backend.search_tracks(SearchTracksRequest {
+        query: String::new(),
+        limit: 10,
+        cursor: None,
+    });
+    let track_id = listed
+        .data
+        .expect("search data")
+        .items
+        .first()
+        .expect("one track")
+        .id
+        .clone();
+
+    fn cue(pos: u32, color: Option<u8>, name: Option<&str>) -> TrackCueInput {
+        TrackCueInput {
+            position_ms: pos,
+            color_id: color,
+            name: name.map(str::to_string),
+        }
+    }
+
+    // Save three cue points and a first beat.
+    let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: Some(321),
+        cues: Some(vec![
+            cue(64_000, None, None),
+            cue(1_000, None, Some("Intro")),
+            cue(2_000, Some(2), Some("Drop")),
+        ]),
+    });
+    assert!(save.ok, "save failed: {save:?}");
+    let save_data = save.data.expect("save data");
+    assert_eq!(save_data.cues.len(), 3);
+    assert_eq!(save_data.first_beat_ms, Some(321));
+
+    // get_track_detail round-trips them in insert order.
+    let detail = backend
+        .get_track_detail(GetTrackDetailRequest {
+            track_id: track_id.clone(),
+        })
+        .data
+        .expect("detail data");
+    assert_eq!(detail.first_beat_ms, Some(321));
+    assert_eq!(detail.cues.len(), 3);
+    assert_eq!(detail.cues[1].name.as_deref(), Some("Intro"));
+    // Every cue gets a colour (default green when omitted).
+    assert!(detail.cues.iter().all(|c| c.color_id.is_some()));
+    let drop = detail
+        .cues
+        .iter()
+        .find(|c| c.name.as_deref() == Some("Drop"))
+        .expect("drop cue");
+    assert_eq!(drop.color_id, Some(2));
+
+    // Re-saving with only first_beat_ms leaves the cue list untouched.
+    let just_beat = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: Some(654),
+        cues: None,
+    });
+    assert!(just_beat.ok, "beat-only save failed: {just_beat:?}");
+    assert_eq!(just_beat.data.expect("data").cues.len(), 3);
+
+    // More than 8 cue points is rejected.
+    let too_many = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: None,
+        cues: Some((0..9).map(|i| cue(i * 1000, None, None)).collect()),
+    });
+    assert!(!too_many.ok, "9 cue points should be rejected");
+
+    // Unknown colour is rejected.
+    let bad_color = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: None,
+        cues: Some(vec![cue(1_000, Some(99), None)]),
+    });
+    assert!(!bad_color.ok, "unknown colorId should be rejected");
+
+    // Unknown track id is a NotFound.
+    let missing = backend.get_track_detail(GetTrackDetailRequest {
+        track_id: "nope".to_string(),
+    });
+    assert!(!missing.ok, "unknown track should fail");
 }
 
 #[test]

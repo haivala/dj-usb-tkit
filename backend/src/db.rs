@@ -6,7 +6,7 @@ use rusqlite::Connection;
 
 use crate::error::{BackendError, BackendResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, Clone)]
 pub struct Db {
@@ -97,6 +97,18 @@ impl Db {
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS track_cues (
+              id TEXT PRIMARY KEY,
+              track_id TEXT NOT NULL,
+              position_ms INTEGER NOT NULL,
+              color_id INTEGER,
+              name TEXT,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS playlists (
               id TEXT PRIMARY KEY,
               name TEXT NOT NULL,
@@ -183,6 +195,8 @@ impl Db {
               ON track_usb_links (usb_device_id);
             CREATE INDEX IF NOT EXISTS idx_usb_device_exports_device
               ON usb_device_exports (usb_device_id, exported_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_track_cues_track
+              ON track_cues (track_id, sort_order);
             "#,
         )?;
 
@@ -207,6 +221,7 @@ impl Db {
         ensure_tracks_column(&conn, "label_id", "INTEGER")?;
         ensure_tracks_column(&conn, "bpm_analyzer", "TEXT")?;
         ensure_tracks_column(&conn, "first_beat_ms", "INTEGER")?;
+        ensure_tracks_column(&conn, "first_beat_ms_source", "TEXT")?;
         ensure_tracks_column(&conn, "genre", "TEXT")?;
         ensure_tracks_column(&conn, "master_db_source", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_tracks_column(&conn, "wav_extensible_kind", "TEXT")?;
@@ -249,6 +264,7 @@ const ALLOWED_TRACK_COLUMNS: &[&str] = &[
     "label_id",
     "bpm_analyzer",
     "first_beat_ms",
+    "first_beat_ms_source",
     "genre",
     "master_db_source",
     "wav_extensible_kind",
@@ -345,6 +361,62 @@ mod tests {
             )
             .expect("schema_version row");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrate_creates_track_cues_table_and_first_beat_source_column() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Db::new(dir.path()).expect("db init");
+        let conn = db.connect().expect("db connect");
+
+        let cue_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(track_cues)")
+            .expect("prepare")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("collect");
+        for expected in ["id", "track_id", "position_ms", "color_id", "name", "sort_order"] {
+            assert!(
+                cue_cols.iter().any(|c| c == expected),
+                "track_cues missing column {expected}; got {cue_cols:?}"
+            );
+        }
+        for absent in ["kind", "hot_cue_index", "is_loop"] {
+            assert!(
+                !cue_cols.iter().any(|c| c == absent),
+                "track_cues should not have column {absent}; got {cue_cols:?}"
+            );
+        }
+
+        let track_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(tracks)")
+            .expect("prepare")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("collect");
+        assert!(
+            track_cols.iter().any(|c| c == "first_beat_ms_source"),
+            "tracks missing first_beat_ms_source; got {track_cols:?}"
+        );
+
+        // Cues cascade-delete with their track.
+        conn.execute_batch(
+            r#"
+            INSERT INTO tracks (id, title, artist, file_path, created_at, updated_at)
+              VALUES ('t1', 'a', 'b', '/x.wav', 'now', 'now');
+            INSERT INTO track_cues (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
+              VALUES ('c1', 't1', 1000, 5, 'Drop', 0, 'now', 'now');
+            "#,
+        )
+        .expect("seed cue");
+        conn.execute("DELETE FROM tracks WHERE id = 't1'", [])
+            .expect("delete track");
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(1) FROM track_cues", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(remaining, 0, "track_cues should cascade-delete with the track");
     }
 
     #[test]

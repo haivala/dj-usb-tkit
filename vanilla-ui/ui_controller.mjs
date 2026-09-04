@@ -6,7 +6,10 @@ import { bindSettingsEvents } from "./components/settings/events.mjs";
 import { bindEventLogEvents } from "./components/event-log/events.mjs";
 import { bindBackupsEvents } from "./components/backups/events.mjs";
 import { bindShellEvents } from "./components/shell/events.mjs";
+import { bindTrackDetailEvents } from "./components/track-detail/events.mjs";
 import { initTooltips } from "./tooltip.mjs";
+
+export { createTrackDetailController } from "./components/track-detail/actions.mjs";
 
 export function setStatusText(el, text, warningCount = 0) {
   const target = el.statusText;
@@ -270,6 +273,7 @@ export function bindEvents(ctx) {
   bindLibraryEvents(ctx);
   bindUsbEvents(ctx);
   bindPlaylistEvents(ctx);
+  bindTrackDetailEvents(ctx);
 }
 
 export function createBindEventsContext(state, el, deps = {}) {

@@ -324,7 +324,8 @@ pub fn export_artwork_for_player(
 
 // Re-export analysis helpers so they're available via export_helpers::*
 pub use super::super::anlz::canonical_analysis_bundle_paths;
-use super::super::anlz::ensure_ppth_chunk;
+use super::super::anlz::{AnlzAnalysisEdits, apply_analysis_edits_to_anlz, ensure_ppth_chunk};
+use super::super::cues::anlz_cues_from_track_cues;
 
 fn write_bytes_if_different(target: &Path, bytes: &[u8]) -> BackendResult<()> {
     if let Some(parent) = target.parent() {
@@ -345,16 +346,25 @@ fn write_anlz_with_export_path(
     source: &Path,
     target: &Path,
     track_path: &str,
+    edits: Option<&AnlzAnalysisEdits<'_>>,
 ) -> BackendResult<()> {
     let source_bytes = std::fs::read(source)?;
-    let bytes = ensure_ppth_chunk(&source_bytes, track_path);
+    let mut bytes = ensure_ppth_chunk(&source_bytes, track_path);
+    if let Some(edits) = edits {
+        bytes = apply_analysis_edits_to_anlz(&bytes, edits);
+    }
     write_bytes_if_different(target, &bytes)
 }
 
+/// Ensure a reused on-USB analysis bundle has the exported track's PPTH, and
+/// re-apply the current cue list + user first beat (idempotent). The retain
+/// path reuses a bundle already on the stick, so this is where locally-edited
+/// cues get onto it even when no fresh bundle is generated.
 pub fn ensure_analysis_bundle_ppth(
     usb_root: &Path,
     analysis_path: &str,
     track_path: &str,
+    track: &ExportTrackData,
 ) -> BackendResult<()> {
     let dat_abs = resolve_usb_side_path(usb_root, analysis_path).ok_or_else(|| {
         BackendError::Validation(format!("invalid USB analysis path: {analysis_path}"))
@@ -362,11 +372,27 @@ pub fn ensure_analysis_bundle_ppth(
     let dat_path = PathBuf::from(dat_abs);
     let ext_path = dat_path.with_extension("EXT");
     let twoex_path = dat_path.with_extension("2EX");
-    for path in [&dat_path, &ext_path, &twoex_path] {
+
+    let cues = anlz_cues_from_track_cues(&track.cues);
+    let has_edits = !track.cues.is_empty() || track.first_beat_ms.is_some();
+    let edits = has_edits.then_some(AnlzAnalysisEdits {
+        bpm: track.bpm,
+        duration_ms: track.duration_ms,
+        first_beat_ms: track.first_beat_ms,
+        cues: Some(cues.as_slice()),
+    });
+
+    for path in [&dat_path, &ext_path] {
         let bytes = std::fs::read(path)?;
-        let with_ppth = ensure_ppth_chunk(&bytes, track_path);
-        write_bytes_if_different(path, &with_ppth)?;
+        let mut out = ensure_ppth_chunk(&bytes, track_path);
+        if let Some(edits) = &edits {
+            out = apply_analysis_edits_to_anlz(&out, edits);
+        }
+        write_bytes_if_different(path, &out)?;
     }
+    let bytes = std::fs::read(&twoex_path)?;
+    let with_ppth = ensure_ppth_chunk(&bytes, track_path);
+    write_bytes_if_different(&twoex_path, &with_ppth)?;
     Ok(())
 }
 
@@ -411,9 +437,17 @@ pub fn export_analysis_bundle_for_track(
     if let Some(parent) = dat_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    write_anlz_with_export_path(local_dat, &dat_path, track_path)?;
-    write_anlz_with_export_path(&local_ext, &ext_path, track_path)?;
-    write_anlz_with_export_path(&local_twoex, &twoex_path, track_path)?;
+    let cues = anlz_cues_from_track_cues(&track.cues);
+    let has_edits = !track.cues.is_empty() || track.first_beat_ms.is_some();
+    let edits = has_edits.then_some(AnlzAnalysisEdits {
+        bpm: track.bpm,
+        duration_ms: track.duration_ms,
+        first_beat_ms: track.first_beat_ms,
+        cues: Some(cues.as_slice()),
+    });
+    write_anlz_with_export_path(local_dat, &dat_path, track_path, edits.as_ref())?;
+    write_anlz_with_export_path(&local_ext, &ext_path, track_path, edits.as_ref())?;
+    write_anlz_with_export_path(&local_twoex, &twoex_path, track_path, None)?;
     Ok(to_usb_relative_path(usb_root, &dat_path.to_string_lossy())
         .or_else(|| Some(dat_path.to_string_lossy().to_string())))
 }

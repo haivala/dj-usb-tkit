@@ -21,7 +21,8 @@ use crate::models::{
     ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
     GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest, GetUsbDeviceNameData,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbDeviceNameData,
     GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
     InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
     InspectUsbTracksData, InspectUsbTracksRequest, JobEventPayload, ListPlaylistsData,
@@ -38,9 +39,11 @@ use crate::models::{
     ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
     RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
     RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    ScanMasterDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
+    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, ScanMasterDbRequest, SearchTracksData,
+    SearchTracksRequest, SetAnalysisPausedData,
     SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, UpdateUsbPlayerMenuConfigData,
+    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
+    UpdateUsbPlayerMenuConfigData,
     UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
@@ -664,6 +667,22 @@ pub fn remove_tracks_by_source_roots(
     request: RemoveTracksBySourceRootsRequest,
 ) -> ApiResponse<RemoveTracksBySourceRootsData> {
     state.remove_tracks_by_source_roots(request)
+}
+
+#[tauri::command]
+pub fn get_track_detail(
+    state: State<'_, BackendCommands>,
+    request: GetTrackDetailRequest,
+) -> ApiResponse<TrackDetail> {
+    state.get_track_detail(request)
+}
+
+#[tauri::command]
+pub fn save_track_analysis_edits(
+    state: State<'_, BackendCommands>,
+    request: SaveTrackAnalysisEditsRequest,
+) -> ApiResponse<SaveTrackAnalysisEditsData> {
+    state.save_track_analysis_edits(request)
 }
 
 #[tauri::command]

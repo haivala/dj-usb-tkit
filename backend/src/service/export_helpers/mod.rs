@@ -55,7 +55,8 @@ use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 
 use crate::error::{BackendError, BackendResult};
-use crate::models::{ExportToUsbOptions, WarningEntry};
+use crate::models::{ExportToUsbOptions, TrackCue, WarningEntry};
+use crate::service::cues::MAX_HOT_CUES;
 use crate::pdb_reader::parse_pdb;
 use crate::utils::{collect_chain as collect_chain_pages, page_offset, table_ptr_fields};
 
@@ -564,6 +565,8 @@ pub fn write_edb_playlist_with_conn(
             }
         };
 
+        write_edb_cues_for_content(&tx, content_id, &track.cues, &content_columns)?;
+
         if !mirror_playlist_entries {
             let already_linked: Option<i64> = tx
                 .query_row(
@@ -616,6 +619,94 @@ pub fn load_table_columns_tx(
         out.insert(row?);
     }
     Ok(out)
+}
+
+/// Rewrite the eDB `cue` rows for a `content_id` from the app's cue list.
+///
+/// The app owns cue rows for tracks it exports: existing rows for this content
+/// are dropped and replaced. Hot cues carry `colorTableIndex`; memory points
+/// use `-1`. Precise decoder seek anchors (`inMpegFrameNumber`, block offsets,
+/// …) are left at 0 — the CDJ recomputes them from `inUsec` + the analysis
+/// file. `content.cueUpdateCount` is bumped when any cue is written.
+pub fn write_edb_cues_for_content(
+    tx: &rusqlite::Transaction<'_>,
+    content_id: i64,
+    cues: &[TrackCue],
+    content_columns: &HashSet<String>,
+) -> BackendResult<()> {
+    if !table_exists(tx, "cue") {
+        return Ok(());
+    }
+    tx.execute("DELETE FROM cue WHERE content_id = ?1", params![content_id])?;
+    if cues.is_empty() {
+        return Ok(());
+    }
+
+    let cue_columns = load_table_columns_tx(tx, "cue")?;
+    let mut cue_id = next_numeric_id(tx, "cue", "cue_id")?;
+
+    let mut sorted: Vec<&TrackCue> = cues.iter().collect();
+    sorted.sort_by_key(|c| c.position_ms);
+
+    // Each cue point is written twice: a memory point (kind 0) and, for the
+    // first 8 by position, a hot-cue pad (kind 1) carrying the colour. Hot-slot
+    // ordering is implicit in insert order.
+    for cue in sorted.iter().take(MAX_HOT_CUES as usize) {
+        let in_usec = i64::from(cue.position_ms) * 1000;
+        let in_frames_150 = ((f64::from(cue.position_ms) * 150.0) / 1000.0).round() as i64;
+        let comment = cue.name.clone().unwrap_or_default();
+        let color_index = i64::from(cue.color_id.unwrap_or(0));
+
+        for (kind, color_table_index) in [(0i64, -1i64), (1i64, color_index)] {
+            let mut fields: Vec<(&str, rusqlite::types::Value)> = vec![
+                ("cue_id", cue_id.into()),
+                ("content_id", content_id.into()),
+                ("kind", kind.into()),
+                ("colorTableIndex", color_table_index.into()),
+                ("cueComment", comment.clone().into()),
+                ("isActiveLoop", 0i64.into()),
+                ("beatLoopNumerator", 0i64.into()),
+                ("beatLoopDenominator", 0i64.into()),
+                ("inUsec", in_usec.into()),
+                ("outUsec", (-1i64).into()),
+                ("in150FramePerSec", in_frames_150.into()),
+                ("out150FramePerSec", (-1i64).into()),
+            ];
+            // Only keep columns that actually exist in this eDB's `cue` table.
+            fields.retain(|(name, _)| cue_columns.contains(*name));
+
+            let col_list = fields
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let placeholders = (1..=fields.len())
+                .map(|n| format!("?{n}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let values: Vec<rusqlite::types::Value> =
+                fields.into_iter().map(|(_, v)| v).collect();
+            tx.execute(
+                &format!("INSERT INTO cue ({col_list}) VALUES ({placeholders})"),
+                rusqlite::params_from_iter(values.iter()),
+            )?;
+            cue_id += 1;
+        }
+    }
+
+    if content_columns.contains("cueUpdateCount") {
+        tx.execute(
+            "UPDATE content SET cueUpdateCount = (COALESCE(CAST(cueUpdateCount AS INTEGER), 0) + 1) WHERE content_id = ?1",
+            params![content_id],
+        )?;
+    }
+    if content_columns.contains("isHotCueAutoLoadOn") {
+        tx.execute(
+            "UPDATE content SET isHotCueAutoLoadOn = 1 WHERE content_id = ?1",
+            params![content_id],
+        )?;
+    }
+    Ok(())
 }
 
 pub fn update_existing_content_row(
@@ -2103,6 +2194,8 @@ mod tests {
 
     fn mapping_test_track() -> ExportManifestTrack {
         ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
             id: "track-1".to_string(),
             master_db_id: Some(556_677),
             master_content_id: Some(112_233),
@@ -3079,6 +3172,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: vec![],
             tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -3216,6 +3311,7 @@ mod tests {
         );
 
         let track = ExportTrackData {
+            cues: Vec::new(),
             id: "t-local-cache".to_string(),
             title: "Track".to_string(),
             artist: "Artist".to_string(),
@@ -3300,6 +3396,7 @@ mod tests {
         fs::write(&local_2ex, &twoex_content).unwrap();
 
         let track = ExportTrackData {
+            cues: Vec::new(),
             id: "t-copy-local".to_string(),
             title: "Track".to_string(),
             artist: "Artist".to_string(),
@@ -3385,6 +3482,7 @@ mod tests {
         );
 
         let track = ExportTrackData {
+            cues: Vec::new(),
             id: "t-fallback".to_string(),
             title: "Track".to_string(),
             artist: "Artist".to_string(),
@@ -3674,6 +3772,7 @@ mod tests {
             id: "pl-last".to_string(),
             name: "Last Playlist".to_string(),
             tracks: vec![ExportTrackData {
+            cues: Vec::new(),
                 id: "t1".to_string(),
                 title: "Song A".to_string(),
                 artist: "Artist".to_string(),
@@ -3731,6 +3830,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -4533,6 +4634,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: Some(1),
                 master_content_id: Some(1),
@@ -5369,6 +5472,8 @@ mod tests {
             warnings: Vec::new(),
             tracks: vec![
                 ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                     id: "t1".to_string(),
                     master_db_id: Some(1),
                     master_content_id: Some(1),
@@ -5415,6 +5520,8 @@ mod tests {
                     duration_ms: Some(180_000),
                 },
                 ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                     id: "t2".to_string(),
                     master_db_id: Some(2),
                     master_content_id: Some(2),
@@ -5514,6 +5621,7 @@ mod tests {
     /// Helper: create a minimal ExportTrackData
     fn make_test_track(id: &str, title: &str, filename: &str) -> ExportTrackData {
         ExportTrackData {
+            cues: Vec::new(),
             id: id.to_string(),
             title: title.to_string(),
             artist: "Artist".to_string(),
@@ -5582,6 +5690,8 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, (id, title, filename))| ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                     id: id.to_string(),
                     master_db_id: None,
                     master_content_id: None,
@@ -5706,6 +5816,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: vec![],
             tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -5793,6 +5905,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: vec![],
             tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -6044,6 +6158,7 @@ mod tests {
             id: "pl-1".to_string(),
             name: "Test".to_string(),
             tracks: vec![super::ExportTrackData {
+            cues: Vec::new(),
                 id: "t1".to_string(),
                 title: "Track A".to_string(),
                 artist: "Artist".to_string(),
@@ -6101,6 +6216,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![super::ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,

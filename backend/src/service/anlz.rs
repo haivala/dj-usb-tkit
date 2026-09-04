@@ -161,7 +161,15 @@ pub fn write_generated_anlz_bundle(
     bpm: Option<f64>,
     duration_ms: Option<u64>,
 ) -> BackendResult<()> {
-    write_generated_anlz_bundle_with_first_beat(waveform, paths, track_path, bpm, duration_ms, None)
+    write_generated_anlz_bundle_with_first_beat(
+        waveform,
+        paths,
+        track_path,
+        bpm,
+        duration_ms,
+        None,
+        &[],
+    )
 }
 
 pub fn write_generated_anlz_bundle_with_first_beat(
@@ -171,6 +179,7 @@ pub fn write_generated_anlz_bundle_with_first_beat(
     bpm: Option<f64>,
     duration_ms: Option<u64>,
     first_beat_ms_override: Option<u32>,
+    cues: &[AnlzCue],
 ) -> BackendResult<()> {
     let dat = build_anlz_dat_file_with_first_beat(
         waveform,
@@ -178,6 +187,7 @@ pub fn write_generated_anlz_bundle_with_first_beat(
         bpm,
         duration_ms,
         first_beat_ms_override,
+        cues,
     );
     let ext = build_anlz_ext_file_with_first_beat(
         waveform,
@@ -185,6 +195,7 @@ pub fn write_generated_anlz_bundle_with_first_beat(
         bpm,
         duration_ms,
         first_beat_ms_override,
+        cues,
     );
     let twoex = build_anlz_2ex_file(waveform, track_path, duration_ms);
     if let Some(parent) = paths.dat_path.parent() {
@@ -196,7 +207,7 @@ pub fn write_generated_anlz_bundle_with_first_beat(
     Ok(())
 }
 
-fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> BackendResult<()> {
+pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> BackendResult<()> {
     let parent = path.parent().ok_or_else(|| {
         crate::error::BackendError::Internal("missing parent directory".to_string())
     })?;
@@ -519,6 +530,108 @@ pub fn ensure_ppth_chunk(data: &[u8], track_path: &str) -> Vec<u8> {
     out
 }
 
+/// Post-analysis edits to fold into an already-generated ANLZ file.
+///
+/// `None` fields leave the corresponding chunks untouched; the walk in
+/// [`apply_analysis_edits_to_anlz`] only rebuilds chunk types that already
+/// exist in the source file, and never touches `PSSI`, waveform, or `PPTH`.
+pub struct AnlzAnalysisEdits<'a> {
+    pub bpm: Option<f64>,
+    pub duration_ms: Option<u64>,
+    /// `Some` ⇒ rebuild `PQTZ`/`PQT2` with this beat-grid anchor.
+    pub first_beat_ms: Option<u32>,
+    /// `Some` ⇒ rebuild `PCOB`/`PCO2` from this cue list (full replace).
+    pub cues: Option<&'a [AnlzCue]>,
+}
+
+/// Rewrite the beat-grid (`PQTZ`/`PQT2`) and/or cue (`PCOB`/`PCO2`) chunks of an
+/// existing `PMAI` file in place, preserving every other chunk and its order.
+///
+/// Mirrors [`ensure_ppth_chunk`]'s chunk walk. `PSSI` phrase data is copied
+/// verbatim — its layout is not fully understood and must not be regenerated on
+/// an incremental edit (a full re-analysis is the only thing that rewrites it).
+pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) -> Vec<u8> {
+    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
+        return data.to_vec();
+    }
+    if edits.first_beat_ms.is_none() && edits.cues.is_none() {
+        return data.to_vec();
+    }
+
+    let rebuilt_first_beat = edits
+        .first_beat_ms
+        .map(|raw| normalize_first_beat_ms(raw, edits.bpm));
+
+    let mut out = Vec::with_capacity(data.len());
+    out.extend_from_slice(&data[..28]);
+
+    let mut pos = 28usize;
+    while pos < data.len() {
+        if pos + 12 > data.len() {
+            out.extend_from_slice(&data[pos..]);
+            break;
+        }
+        let Some(header_len) = read_u32_be_at(data, pos + 4).map(|v| v as usize) else {
+            out.extend_from_slice(&data[pos..]);
+            break;
+        };
+        let Some(total_len) = read_u32_be_at(data, pos + 8).map(|v| v as usize) else {
+            out.extend_from_slice(&data[pos..]);
+            break;
+        };
+        if header_len < 12 || total_len < header_len || total_len == 0 || pos + total_len > data.len()
+        {
+            out.extend_from_slice(&data[pos..]);
+            break;
+        }
+
+        let fourcc = &data[pos..pos + 4];
+        let original = &data[pos..pos + total_len];
+        let mut replacement: Option<Vec<u8>> = None;
+
+        if let Some(first_beat_ms) = rebuilt_first_beat {
+            if fourcc == b"PQTZ" {
+                let mut chunk = Vec::new();
+                append_pqtz_chunk(&mut chunk, edits.bpm, edits.duration_ms, first_beat_ms);
+                if !chunk.is_empty() {
+                    replacement = Some(chunk);
+                }
+            } else if fourcc == b"PQT2" {
+                let mut chunk = Vec::new();
+                append_pqt2_chunk(&mut chunk, edits.bpm, edits.duration_ms, first_beat_ms);
+                if !chunk.is_empty() {
+                    replacement = Some(chunk);
+                }
+            }
+        }
+
+        if let Some(cues) = edits.cues
+            && (fourcc == b"PCOB" || fourcc == b"PCO2")
+            && let Some(cue_type) = read_u32_be_at(data, pos + 12)
+        {
+            let mut chunk = Vec::new();
+            if fourcc == b"PCOB" {
+                append_pcob_chunk(&mut chunk, cue_type, cues);
+            } else {
+                append_pco2_chunk(&mut chunk, cue_type, cues);
+            }
+            if !chunk.is_empty() {
+                replacement = Some(chunk);
+            }
+        }
+
+        match replacement {
+            Some(chunk) => out.extend_from_slice(&chunk),
+            None => out.extend_from_slice(original),
+        }
+        pos += total_len;
+    }
+
+    let file_len = out.len() as u32;
+    out[8..12].copy_from_slice(&file_len.to_be_bytes());
+    out
+}
+
 #[cfg(test)]
 pub(crate) fn ppth_path_from_anlz(data: &[u8]) -> Option<String> {
     if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
@@ -763,39 +876,309 @@ fn compute_num_beats(duration_ms: f64, beat_interval_ms: f64, first_beat_ms: u32
 }
 
 // ===========================================================================
-// PCOB — cue list (empty placeholder)
+// Cue points — PCOB/PCPT (basic) and PCO2/PCP2 (extended, with colour + comment)
 // ===========================================================================
 //
-// len_header = 0x18 (24)
-// Offset 12-15: type       (4 bytes, 0=memory points, 1=hot cues)
-// Offset 16-17: lencues    (2 bytes, 0)
-// Offset 18-19: unk        (2 bytes, 0)
-// Offset 20-23: memory_count (4 bytes, observed 0xFFFFFFFF for empty)
+// PCOB header (len_header = 0x18 / 24):
+//   abs 12-15: type          (0 = memory points, 1 = hot cues)
+//   abs 16-17: unknown       (0)
+//   abs 18-19: len_cues      (entry count)
+//   abs 20-23: memory_count  (entry count; 0xFFFFFFFF is written only for the
+//                             empty placeholder, kept for byte-parity)
+//   abs 24+  : PCPT entries
+//
+// PCPT entry (len_header = 0x1C / 28, len_entry = 0x38 / 56, fixed):
+//   abs 12-15: hot_cue      (0 = memory; 1 = hot A, 2 = B, …)
+//   abs 16-19: status       (memory = 0, hot = 1)
+//   abs 20-23: unknown1     (0x00100000, observed constant)
+//   abs 24-25: order_first  (memory: 1-based ordinal; hot: 0xFFFF)
+//   abs 26-27: order_last   (same as order_first)
+//   abs 28   : type         (1 = point)
+//   abs 29-31: padding
+//   abs 32-35: time         (ms)
+//   abs 36-39: loop_time    (0xFFFFFFFF, no loop)
+//   abs 40-55: padding
+//
+// PCO2 header (len_header = 0x14 / 20):
+//   abs 12-15: type
+//   abs 16-17: len_cues
+//   abs 18-19: unknown (0)
+//   abs 20+  : PCP2 entries
+//
+// PCP2 entry (len_header = 0x10 / 16, len_entry variable):
+//   abs 12-15: hot_cue
+//   abs 16   : type (1 = point)
+//   abs 17-19: padding
+//   abs 20-23: time (ms)
+//   abs 24-27: loop_time (0xFFFFFFFF)
+//   abs 28   : color_id (palette index; 0 for memory)
+//   abs 29-35: padding
+//   abs 36-37: loop_numerator (0)
+//   abs 38-39: loop_denominator (0)
+//   abs 40-43: len_comment  ((utf16_units + 1) * 2, or 0)
+//   abs 44…  : comment (UTF-16BE, NUL-terminated)
+//   then     : color_code, color_red, color_green, color_blue (u8 each)
+//   then     : zero padding to a 4-byte multiple
 
-fn append_empty_pcob_chunk(file: &mut Vec<u8>, cue_type: u32) {
-    let mut header = vec![0u8; 12];
-    header[0..4].copy_from_slice(&cue_type.to_be_bytes()); // type
-    // header[4..6] = lencues = 0
-    // header[6..8] = unk = 0
-    header[8..12].copy_from_slice(&0xFFFFFFFFu32.to_be_bytes()); // memory_count
-    append_anlz_chunk(file, b"PCOB", &header, &[]);
+/// A cue point ready for ANLZ encoding. `hot_cue` is 0 for a memory point or the
+/// 1-based pad slot (1 = A … 8 = H) for a hot cue.
+#[derive(Debug, Clone, Default)]
+pub struct AnlzCue {
+    pub position_ms: u32,
+    pub hot_cue: u32,
+    pub color_id: u8,
+    pub color_rgb: (u8, u8, u8),
+    pub color_code: u8,
+    pub comment: String,
 }
 
-// ===========================================================================
-// PCO2 — extended cue list (empty placeholder)
-// ===========================================================================
-//
-// len_header = 0x14 (20)
-// Offset 12-15: type       (4 bytes, 0=memory points, 1=hot cues)
-// Offset 16-17: lencues    (2 bytes, 0)
-// Offset 18-19: unknown    (2 bytes, 0)
+impl AnlzCue {
+    fn is_hot(&self) -> bool {
+        self.hot_cue != 0
+    }
+}
 
-fn append_empty_pco2_chunk(file: &mut Vec<u8>, cue_type: u32) {
+/// Cues of one list type (hot when `hot` is true, memory otherwise), ordered the
+/// way Rekordbox writes them: hot cues by pad slot, memory points by time.
+fn cues_for_type(cues: &[AnlzCue], hot: bool) -> Vec<&AnlzCue> {
+    let mut out: Vec<&AnlzCue> = cues.iter().filter(|c| c.is_hot() == hot).collect();
+    if hot {
+        out.sort_by_key(|c| c.hot_cue);
+    } else {
+        out.sort_by_key(|c| c.position_ms);
+    }
+    out
+}
+
+fn build_pcpt_entry(cue: &AnlzCue, hot: bool, ordinal: u16) -> Vec<u8> {
+    let mut header = Vec::with_capacity(16);
+    header.extend_from_slice(&cue.hot_cue.to_be_bytes()); // hot_cue
+    header.extend_from_slice(&(if hot { 1u32 } else { 0u32 }).to_be_bytes()); // status
+    header.extend_from_slice(&0x0010_0000u32.to_be_bytes()); // unknown1
+    let order = if hot { 0xFFFFu16 } else { ordinal };
+    header.extend_from_slice(&order.to_be_bytes()); // order_first
+    header.extend_from_slice(&order.to_be_bytes()); // order_last
+
+    let mut payload = vec![0u8; 28];
+    payload[0] = 1; // type = point
+    payload[4..8].copy_from_slice(&cue.position_ms.to_be_bytes());
+    payload[8..12].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes()); // loop_time
+
+    let mut entry = Vec::new();
+    append_anlz_chunk(&mut entry, b"PCPT", &header, &payload);
+    entry
+}
+
+fn build_pcp2_entry(cue: &AnlzCue) -> Vec<u8> {
+    let header = cue.hot_cue.to_be_bytes().to_vec(); // hot_cue
+
+    let comment_utf16: Vec<u16> = cue.comment.encode_utf16().collect();
+    let len_comment = if comment_utf16.is_empty() {
+        0u32
+    } else {
+        ((comment_utf16.len() + 1) * 2) as u32
+    };
+
+    let mut payload = vec![0u8; 28]; // abs 16..44 fixed portion
+    payload[0] = 1; // type = point (abs 16)
+    payload[4..8].copy_from_slice(&cue.position_ms.to_be_bytes()); // time (abs 20)
+    payload[8..12].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes()); // loop_time (abs 24)
+    payload[12] = cue.color_id; // color_id (abs 28)
+    // payload[20..22] loop_numerator (abs 36), payload[22..24] loop_denominator
+    // (abs 38) stay zero.
+    payload[24..28].copy_from_slice(&len_comment.to_be_bytes()); // len_comment (abs 40)
+
+    for unit in &comment_utf16 {
+        payload.extend_from_slice(&unit.to_be_bytes());
+    }
+    if !comment_utf16.is_empty() {
+        payload.extend_from_slice(&0u16.to_be_bytes()); // NUL terminator
+    }
+
+    payload.push(cue.color_code);
+    payload.push(cue.color_rgb.0);
+    payload.push(cue.color_rgb.1);
+    payload.push(cue.color_rgb.2);
+
+    while !(payload.len() + 16).is_multiple_of(4) {
+        payload.push(0);
+    }
+
+    let mut entry = Vec::new();
+    append_anlz_chunk(&mut entry, b"PCP2", &header, &payload);
+    entry
+}
+
+/// Decode every cue point from an ANLZ file (`.DAT` or `.EXT`).
+///
+/// Prefers the extended `PCO2`/`PCP2` chunks (colour + comment); falls back to
+/// `PCOB`/`PCPT` (position + hot slot only) for older bundles that lack `PCO2`.
+/// Used on USB re-import so cues the app itself exported survive round-trips.
+pub fn read_cues_from_anlz(data: &[u8]) -> Vec<AnlzCue> {
+    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
+        return Vec::new();
+    }
+
+    let mut from_pco2: Vec<AnlzCue> = Vec::new();
+    let mut from_pcob: Vec<AnlzCue> = Vec::new();
+
+    let mut pos = 28usize;
+    while pos + 12 <= data.len() {
+        let fourcc = &data[pos..pos + 4];
+        let Some(header_len) = read_u32_be_at(data, pos + 4).map(|v| v as usize) else {
+            break;
+        };
+        let Some(total_len) = read_u32_be_at(data, pos + 8).map(|v| v as usize) else {
+            break;
+        };
+        if header_len < 12 || total_len < header_len || pos + total_len > data.len() {
+            break;
+        }
+
+        if fourcc == b"PCO2" || fourcc == b"PCOB" {
+            let body = &data[pos + header_len..pos + total_len];
+            let mut sub = 0usize;
+            while sub + 12 <= body.len() {
+                let sub_fourcc = &body[sub..sub + 4];
+                let sub_hlen = read_u32_be_at(body, sub + 4).unwrap_or(0) as usize;
+                let sub_tlen = read_u32_be_at(body, sub + 8).unwrap_or(0) as usize;
+                if sub_hlen < 12 || sub_tlen < sub_hlen || sub + sub_tlen > body.len() {
+                    break;
+                }
+                let entry = &body[sub..sub + sub_tlen];
+                if sub_fourcc == b"PCP2" {
+                    if let Some(cue) = parse_pcp2_entry(entry) {
+                        from_pco2.push(cue);
+                    }
+                } else if sub_fourcc == b"PCPT"
+                    && let Some(cue) = parse_pcpt_entry(entry)
+                {
+                    from_pcob.push(cue);
+                }
+                sub += sub_tlen;
+            }
+        }
+        pos += total_len;
+    }
+
+    if !from_pco2.is_empty() {
+        from_pco2
+    } else {
+        from_pcob
+    }
+}
+
+/// Read the beat-grid anchor (time of the first beat, ms) from an ANLZ file's
+/// `PQTZ` (or `PQT2`) chunk. Used on USB re-import to seed `tracks.first_beat_ms`.
+pub fn read_first_beat_from_anlz(data: &[u8]) -> Option<u32> {
+    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
+        return None;
+    }
+    let mut pos = 28usize;
+    while pos + 12 <= data.len() {
+        let fourcc = &data[pos..pos + 4];
+        let header_len = read_u32_be_at(data, pos + 4)? as usize;
+        let total_len = read_u32_be_at(data, pos + 8)? as usize;
+        if header_len < 12 || total_len < header_len || pos + total_len > data.len() {
+            break;
+        }
+        if fourcc == b"PQTZ" {
+            // payload: 8-byte beat entries (beat_num u16, tempo u16, time u32)
+            let body = &data[pos + header_len..pos + total_len];
+            if body.len() >= 8 {
+                return read_u32_be_at(body, 4);
+            }
+        }
+        if fourcc == b"PQT2" {
+            // header carries first_time_ms at chunk-relative offset 28.
+            if let Some(t) = read_u32_be_at(data, pos + 28) {
+                return Some(t);
+            }
+        }
+        pos += total_len;
+    }
+    None
+}
+
+fn parse_pcpt_entry(entry: &[u8]) -> Option<AnlzCue> {
+    // abs 12-15 hot_cue, abs 32-35 time
+    let hot_cue = read_u32_be_at(entry, 12)?;
+    let position_ms = read_u32_be_at(entry, 32)?;
+    Some(AnlzCue {
+        position_ms,
+        hot_cue,
+        ..AnlzCue::default()
+    })
+}
+
+fn parse_pcp2_entry(entry: &[u8]) -> Option<AnlzCue> {
+    // abs 12-15 hot_cue, abs 20-23 time, abs 28 color_id, abs 40-43 len_comment
+    let hot_cue = read_u32_be_at(entry, 12)?;
+    let position_ms = read_u32_be_at(entry, 20)?;
+    let color_id = entry.get(28).copied().unwrap_or(0);
+    let mut comment = String::new();
+    if let Some(len_comment) = read_u32_be_at(entry, 40).map(|v| v as usize)
+        && len_comment >= 2
+        && 44 + len_comment <= entry.len()
+    {
+        let units: Vec<u16> = entry[44..44 + len_comment]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_be_bytes(*c))
+            .take_while(|&u| u != 0)
+            .collect();
+        comment = String::from_utf16_lossy(&units);
+    }
+    Some(AnlzCue {
+        position_ms,
+        hot_cue,
+        color_id,
+        comment,
+        ..AnlzCue::default()
+    })
+}
+
+fn append_pcob_chunk(file: &mut Vec<u8>, cue_type: u32, cues: &[AnlzCue]) {
+    let hot = cue_type == 1;
+    let entries = cues_for_type(cues, hot);
+
+    let mut header = vec![0u8; 12];
+    header[0..4].copy_from_slice(&cue_type.to_be_bytes()); // type
+    if entries.is_empty() {
+        // Preserve the historical empty-placeholder bytes exactly.
+        header[8..12].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes()); // memory_count
+        append_anlz_chunk(file, b"PCOB", &header, &[]);
+        return;
+    }
+    let count = entries.len() as u32;
+    header[6..8].copy_from_slice(&(count as u16).to_be_bytes()); // len_cues
+    header[8..12].copy_from_slice(&count.to_be_bytes()); // memory_count
+
+    let mut payload = Vec::new();
+    for (i, cue) in entries.iter().enumerate() {
+        payload.extend_from_slice(&build_pcpt_entry(cue, hot, (i + 1) as u16));
+    }
+    append_anlz_chunk(file, b"PCOB", &header, &payload);
+}
+
+fn append_pco2_chunk(file: &mut Vec<u8>, cue_type: u32, cues: &[AnlzCue]) {
+    let hot = cue_type == 1;
+    let entries = cues_for_type(cues, hot);
+
     let mut header = vec![0u8; 8];
     header[0..4].copy_from_slice(&cue_type.to_be_bytes()); // type
-    // header[4..6] = lencues = 0
-    // header[6..8] = unknown = 0
-    append_anlz_chunk(file, b"PCO2", &header, &[]);
+    if entries.is_empty() {
+        append_anlz_chunk(file, b"PCO2", &header, &[]);
+        return;
+    }
+    header[4..6].copy_from_slice(&(entries.len() as u16).to_be_bytes()); // len_cues
+
+    let mut payload = Vec::new();
+    for cue in &entries {
+        payload.extend_from_slice(&build_pcp2_entry(cue));
+    }
+    append_anlz_chunk(file, b"PCO2", &header, &payload);
 }
 
 // ===========================================================================
@@ -961,7 +1344,7 @@ pub fn build_anlz_dat_file(
     bpm: Option<f64>,
     duration_ms: Option<u64>,
 ) -> Vec<u8> {
-    build_anlz_dat_file_with_first_beat(waveform, track_path, bpm, duration_ms, None)
+    build_anlz_dat_file_with_first_beat(waveform, track_path, bpm, duration_ms, None, &[])
 }
 
 fn build_anlz_dat_file_with_first_beat(
@@ -970,6 +1353,7 @@ fn build_anlz_dat_file_with_first_beat(
     bpm: Option<f64>,
     duration_ms: Option<u64>,
     first_beat_ms_override: Option<u32>,
+    cues: &[AnlzCue],
 ) -> Vec<u8> {
     let mut file = build_anlz_file_header();
     let first_beat_ms_raw = first_beat_ms_override
@@ -1033,11 +1417,11 @@ fn build_anlz_dat_file_with_first_beat(
         append_anlz_chunk(&mut file, b"PWV2", &header, &payload);
     }
 
-    // 6. PCOB — empty hot cue list (type=1)
-    append_empty_pcob_chunk(&mut file, 1);
+    // 6. PCOB — hot cue list (type=1)
+    append_pcob_chunk(&mut file, 1, cues);
 
-    // 7. PCOB — empty memory point list (type=0)
-    append_empty_pcob_chunk(&mut file, 0);
+    // 7. PCOB — memory point list (type=0)
+    append_pcob_chunk(&mut file, 0, cues);
 
     file
 }
@@ -1074,7 +1458,7 @@ pub fn build_anlz_ext_file(
     bpm: Option<f64>,
     duration_ms: Option<u64>,
 ) -> Vec<u8> {
-    build_anlz_ext_file_with_first_beat(waveform, track_path, bpm, duration_ms, None)
+    build_anlz_ext_file_with_first_beat(waveform, track_path, bpm, duration_ms, None, &[])
 }
 
 fn build_anlz_ext_file_with_first_beat(
@@ -1083,6 +1467,7 @@ fn build_anlz_ext_file_with_first_beat(
     bpm: Option<f64>,
     duration_ms: Option<u64>,
     first_beat_ms_override: Option<u32>,
+    cues: &[AnlzCue],
 ) -> Vec<u8> {
     let mut file = build_anlz_file_header();
     let first_beat_ms_raw = first_beat_ms_override
@@ -1113,17 +1498,17 @@ fn build_anlz_ext_file_with_first_beat(
         append_anlz_chunk(&mut file, b"PWV3", &header, &payload);
     }
 
-    // 3. PCOB — empty hot cue list (type=1)
-    append_empty_pcob_chunk(&mut file, 1);
+    // 3. PCOB — hot cue list (type=1)
+    append_pcob_chunk(&mut file, 1, cues);
 
-    // 4. PCOB — empty memory point list (type=0)
-    append_empty_pcob_chunk(&mut file, 0);
+    // 4. PCOB — memory point list (type=0)
+    append_pcob_chunk(&mut file, 0, cues);
 
-    // 5. PCO2 — empty extended hot cue list (type=1)
-    append_empty_pco2_chunk(&mut file, 1);
+    // 5. PCO2 — extended hot cue list (type=1)
+    append_pco2_chunk(&mut file, 1, cues);
 
-    // 6. PCO2 — empty extended memory point list (type=0)
-    append_empty_pco2_chunk(&mut file, 0);
+    // 6. PCO2 — extended memory point list (type=0)
+    append_pco2_chunk(&mut file, 0, cues);
 
     // 7. PQT2 — extended beat grid
     append_pqt2_chunk(&mut file, bpm, duration_ms, first_beat_ms);
@@ -1484,6 +1869,7 @@ mod tests {
             Some(120.0),
             Some(10_000),
             Some(0),
+            &[],
         );
         let pqtz = find_chunk_payload(&dat, "PQTZ").expect("PQTZ chunk");
         assert_eq!(pqtz.len(), 21 * 8);
@@ -1940,5 +2326,177 @@ mod tests {
     fn from_peaks_assigns_default_mid_band() {
         let waveform = WaveformData::from_peaks(vec![50, 75, 100]);
         assert_eq!(waveform.bands, vec![3, 3, 3]);
+    }
+
+    // --- Cue points ---
+
+    fn sample_cues() -> Vec<AnlzCue> {
+        vec![
+            AnlzCue {
+                position_ms: 1_000,
+                hot_cue: 0,
+                comment: "Intro".to_string(),
+                ..AnlzCue::default()
+            },
+            AnlzCue {
+                position_ms: 64_000,
+                hot_cue: 0,
+                ..AnlzCue::default()
+            },
+            AnlzCue {
+                position_ms: 2_000,
+                hot_cue: 1,
+                color_id: 2,
+                color_rgb: (0xE1, 0x24, 0x24),
+                color_code: 2,
+                comment: "Drop".to_string(),
+            },
+            AnlzCue {
+                position_ms: 128_000,
+                hot_cue: 3,
+                color_id: 5,
+                color_rgb: (0x4E, 0xB6, 0x48),
+                color_code: 5,
+                ..AnlzCue::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn empty_cue_chunks_match_previous_placeholder_bytes() {
+        // The historical empty placeholders: PCOB header type + memory_count
+        // 0xFFFFFFFF, PCO2 header type only.
+        let mut pcob = Vec::new();
+        append_pcob_chunk(&mut pcob, 1, &[]);
+        assert_eq!(&pcob[0..4], b"PCOB");
+        assert_eq!(read_u32_be(&pcob, 4), 0x18); // len_header
+        assert_eq!(read_u32_be(&pcob, 8), 0x18); // len_tag (no entries)
+        assert_eq!(read_u32_be(&pcob, 12), 1); // type
+        assert_eq!(read_u32_be(&pcob, 20), 0xFFFF_FFFF); // memory_count
+
+        let mut pco2 = Vec::new();
+        append_pco2_chunk(&mut pco2, 0, &[]);
+        assert_eq!(&pco2[0..4], b"PCO2");
+        assert_eq!(read_u32_be(&pco2, 4), 0x14);
+        assert_eq!(read_u32_be(&pco2, 8), 0x14);
+        assert_eq!(read_u32_be(&pco2, 12), 0); // type
+    }
+
+    #[test]
+    fn pcpt_entry_is_56_bytes_with_expected_fields() {
+        let mut pcob = Vec::new();
+        append_pcob_chunk(&mut pcob, 1, &sample_cues());
+        // sample_cues has two hot cues (slots 1 and 3), sorted by slot.
+        assert_eq!(read_u32_be(&pcob, 12), 1); // type
+        assert_eq!(u16::from_be_bytes([pcob[18], pcob[19]]), 2); // len_cues
+        assert_eq!(read_u32_be(&pcob, 20), 2); // memory_count
+        let body = &pcob[24..];
+        assert_eq!(&body[0..4], b"PCPT");
+        assert_eq!(read_u32_be(body, 4), 0x1C); // len_header
+        assert_eq!(read_u32_be(body, 8), 0x38); // len_entry
+        assert_eq!(read_u32_be(body, 12), 1); // hot_cue slot
+        assert_eq!(read_u32_be(body, 16), 1); // status (hot)
+        assert_eq!(read_u32_be(body, 20), 0x0010_0000); // unknown1
+        assert_eq!(body[28], 1); // type = point
+        assert_eq!(read_u32_be(body, 32), 2_000); // time
+        assert_eq!(read_u32_be(body, 36), 0xFFFF_FFFF); // loop_time
+    }
+
+    #[test]
+    fn pcp2_entry_encodes_comment_and_rgb() {
+        let mut pco2 = Vec::new();
+        append_pco2_chunk(&mut pco2, 1, &sample_cues());
+        let body = &pco2[20..];
+        assert_eq!(&body[0..4], b"PCP2");
+        assert_eq!(read_u32_be(body, 4), 0x10); // len_header
+        let len_entry = read_u32_be(body, 8) as usize;
+        assert_eq!(len_entry, body.len().min(len_entry));
+        assert_eq!(len_entry % 4, 0, "entry length must be 4-byte aligned");
+        assert_eq!(read_u32_be(body, 12), 1); // hot_cue
+        assert_eq!(body[16], 1); // type
+        assert_eq!(read_u32_be(body, 20), 2_000); // time
+        assert_eq!(body[28], 2); // color_id
+        let len_comment = read_u32_be(body, 40) as usize;
+        assert_eq!(len_comment, ("Drop".encode_utf16().count() + 1) * 2);
+        let comment_units: Vec<u16> = body[44..44 + len_comment - 2]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_be_bytes(*c))
+            .collect();
+        assert_eq!(String::from_utf16_lossy(&comment_units), "Drop");
+        // color_code + RGB follow the NUL-terminated comment
+        let rgb_off = 44 + len_comment;
+        assert_eq!(body[rgb_off], 2); // color_code
+        assert_eq!(&body[rgb_off + 1..rgb_off + 4], &[0xE1, 0x24, 0x24]);
+    }
+
+    #[test]
+    fn cues_round_trip_through_ext_file() {
+        let ext = build_anlz_ext_file_with_first_beat(
+            &WaveformData::from_peaks(vec![128; 400]),
+            "",
+            Some(128.0),
+            Some(180_000),
+            Some(0),
+            &sample_cues(),
+        );
+        verify_anlz_structure(&ext, "EXT with cues");
+
+        let decoded = read_cues_from_anlz(&ext);
+        assert_eq!(decoded.len(), 4);
+
+        let mut memory: Vec<_> = decoded.iter().filter(|c| c.hot_cue == 0).collect();
+        memory.sort_by_key(|c| c.position_ms);
+        assert_eq!(memory[0].position_ms, 1_000);
+        assert_eq!(memory[0].comment, "Intro");
+        assert_eq!(memory[1].position_ms, 64_000);
+
+        let hot: Vec<_> = decoded.iter().filter(|c| c.hot_cue != 0).collect();
+        assert_eq!(hot.len(), 2);
+        let drop = hot.iter().find(|c| c.hot_cue == 1).expect("slot 1");
+        assert_eq!(drop.position_ms, 2_000);
+        assert_eq!(drop.color_id, 2);
+        assert_eq!(drop.comment, "Drop");
+    }
+
+    #[test]
+    fn apply_analysis_edits_injects_cues_and_shifts_beatgrid_only() {
+        let plain = build_anlz_ext_file(
+            &WaveformData::from_peaks(vec![128; 400]),
+            "/Contents/x.mp3",
+            Some(120.0),
+            Some(120_000),
+        );
+        let before_tags = collect_chunk_tags(&plain);
+
+        let edited = apply_analysis_edits_to_anlz(
+            &plain,
+            &AnlzAnalysisEdits {
+                bpm: Some(120.0),
+                duration_ms: Some(120_000),
+                first_beat_ms: Some(250),
+                cues: Some(&sample_cues()),
+            },
+        );
+
+        // Chunk order and every non-cue / non-beatgrid chunk are unchanged.
+        assert_eq!(collect_chunk_tags(&edited), before_tags);
+        for tag in ["PPTH", "PWV3", "PWV5", "PWV4", "PSSI"] {
+            assert_eq!(
+                find_chunk_payload(&plain, tag),
+                find_chunk_payload(&edited, tag),
+                "{tag} must be byte-identical"
+            );
+        }
+        // PQT2 beat times moved.
+        assert_ne!(
+            find_chunk_payload(&plain, "PQT2"),
+            find_chunk_payload(&edited, "PQT2"),
+        );
+        // Cues now decode back out.
+        assert_eq!(read_cues_from_anlz(&edited).len(), 4);
+        assert!(read_cues_from_anlz(&plain).is_empty());
+        verify_anlz_structure(&edited, "edited EXT");
     }
 }

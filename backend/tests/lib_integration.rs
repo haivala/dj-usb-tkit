@@ -123,6 +123,8 @@ fn seed_usb_missing_audio_fixture(backend: &BackendCommands, usb_root: &Path) ->
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
             id: "t-missing".to_string(),
             master_db_id: None,
             master_content_id: None,
@@ -3170,6 +3172,8 @@ fn fetch_usb_playlists_materialization_clears_stale_local_key_when_usb_key_is_mi
         tracks: Vec::new(),
     };
     let manifest_track = ExportManifestTrack {
+        first_beat_ms: None,
+        cues: Vec::new(),
         id: "manifest-track".to_string(),
         master_db_id: None,
         master_content_id: None,
@@ -3344,6 +3348,8 @@ fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
         tracks: Vec::new(),
     };
     let manifest_track = ExportManifestTrack {
+        first_beat_ms: None,
+        cues: Vec::new(),
         id: "manifest-track".to_string(),
         master_db_id: None,
         master_content_id: None,
@@ -3692,6 +3698,8 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
         warnings: Vec::new(),
         tracks: vec![
             ExportManifestTrack {
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t-a".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -3738,6 +3746,8 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
                 duration_ms: Some(180_000),
             },
             ExportManifestTrack {
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t-b".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -3784,6 +3794,8 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
                 duration_ms: Some(181_000),
             },
             ExportManifestTrack {
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t-c".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -3985,6 +3997,8 @@ fn repair_usb_diagnostics_strict_upgrade_is_not_proposed_when_neither_side_is_ri
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
             id: "t-thin".to_string(),
             master_db_id: None,
             master_content_id: None,
@@ -5314,6 +5328,8 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![ExportManifestTrack {
+            first_beat_ms: None,
+            cues: Vec::new(),
             id: "t-foreign".to_string(),
             master_db_id: None,
             master_content_id: None,
