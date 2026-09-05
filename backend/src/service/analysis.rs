@@ -32,7 +32,6 @@ use crate::models::{
 };
 
 use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
-use super::beat_refine::refine_first_beat_ms;
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
 use super::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash};
 use super::{
@@ -1508,16 +1507,7 @@ fn analyze_local_track_with_updates(
     };
     let bpm = bpm_key_result.bpm;
     let key = bpm_key_result.key;
-    // Snap the engine's (coarse, STFT-hop-quantized) first-beat estimate to
-    // the nearest clear attack transient in the raw decoded audio -- see
-    // `beat_refine` for why. Falls back to the engine's own value when no
-    // confident transient is found nearby (e.g. an ambient/pad intro).
-    let first_beat_ms = bpm_key_result.first_beat_ms.map(|ms| {
-        decoded
-            .as_ref()
-            .map(|(samples, sample_rate)| refine_first_beat_ms(samples, *sample_rate, bpm, ms))
-            .unwrap_or(ms)
-    });
+    let first_beat_ms = bpm_key_result.first_beat_ms;
     let duration_ms = detect_track_duration_ms(&path).or_else(|| {
         decoded.as_ref().and_then(|(samples, sample_rate)| {
             duration_ms_from_decoded(samples.len(), *sample_rate)
@@ -2502,8 +2492,8 @@ pub(crate) fn build_waveform_preview_from_file_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        AnalysisEngine, BpmDetectionParams, EssentiaResult, analyze_local_track_with_updates,
-        build_waveform_data_from_samples, build_waveform_preview_from_audio,
+        AnalysisEngine, EssentiaResult, build_waveform_data_from_samples,
+        build_waveform_preview_from_audio,
         build_waveform_preview_from_file_bytes, build_waveform_preview_from_samples,
         collect_tracks_for_analysis, combine_worker_caps, count_tracks_missing_core_fields,
         decode_audio_mono_samples, discover_cover_art_in_dir, discover_cover_art_in_parent,
@@ -3318,107 +3308,4 @@ mod tests {
         assert!(persist_library_artwork_thumbnail_from_image(img, dir.path(), "track-1").is_none());
     }
 
-    // --- end-to-end first-beat accuracy (engine detection + beat_refine snap) ---
-
-    /// A mono 16-bit PCM WAV with a periodic 60Hz kick-drum burst (~50ms
-    /// exponential decay), one per beat at `bpm`, starting `lead_in_beats`
-    /// beats into the file instead of at sample 0 -- so the true first-onset
-    /// sample is unambiguous (not confounded with `normalize_first_beat_ms`'s
-    /// mod-wrap around 0).
-    fn generate_kick_pattern_wav(
-        sample_rate: u32,
-        bpm: f64,
-        duration_secs: f64,
-        lead_in_beats: f64,
-    ) -> (Vec<u8>, usize) {
-        let num_samples = (sample_rate as f64 * duration_secs) as usize;
-        let beat_interval_samples = (sample_rate as f64 * 60.0 / bpm) as usize;
-        let lead_in_samples = (beat_interval_samples as f64 * lead_in_beats) as usize;
-        let kick_freq = 60.0_f64;
-        let kick_decay_samples = (sample_rate as f64 * 0.05) as usize;
-
-        let mut samples = vec![0i16; num_samples];
-        let mut first_onset_sample = None;
-        for (i, sample) in samples.iter_mut().enumerate().skip(lead_in_samples) {
-            let beat_pos = (i - lead_in_samples) % beat_interval_samples;
-            if beat_pos < kick_decay_samples {
-                if first_onset_sample.is_none() {
-                    first_onset_sample = Some(i);
-                }
-                let t = beat_pos as f64 / sample_rate as f64;
-                let amplitude = (-t * 40.0).exp();
-                let sine = (2.0 * std::f64::consts::PI * kick_freq * t).sin();
-                *sample = (sine * amplitude * 30000.0) as i16;
-            }
-        }
-
-        let data_size = (num_samples * 2) as u32;
-        let file_size = 36 + data_size;
-        let mut buf = Vec::with_capacity(file_size as usize + 8);
-        buf.extend_from_slice(b"RIFF");
-        buf.extend_from_slice(&file_size.to_le_bytes());
-        buf.extend_from_slice(b"WAVE");
-        buf.extend_from_slice(b"fmt ");
-        buf.extend_from_slice(&16u32.to_le_bytes());
-        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        buf.extend_from_slice(&1u16.to_le_bytes()); // mono
-        buf.extend_from_slice(&sample_rate.to_le_bytes());
-        buf.extend_from_slice(&(sample_rate * 2).to_le_bytes());
-        buf.extend_from_slice(&2u16.to_le_bytes());
-        buf.extend_from_slice(&16u16.to_le_bytes());
-        buf.extend_from_slice(b"data");
-        buf.extend_from_slice(&data_size.to_le_bytes());
-        for s in &samples {
-            buf.extend_from_slice(&s.to_le_bytes());
-        }
-
-        (buf, first_onset_sample.unwrap_or(lead_in_samples))
-    }
-
-    #[test]
-    fn analyze_local_track_detects_first_beat_near_true_kick_onset() {
-        const SAMPLE_RATE: u32 = 44_100;
-        const BPM: f64 = 120.0;
-        let (wav_bytes, first_onset_sample) =
-            generate_kick_pattern_wav(SAMPLE_RATE, BPM, 30.0, 1.5);
-        let true_first_beat_ms = (first_onset_sample as f64 / SAMPLE_RATE as f64 * 1000.0).round();
-
-        let dir = tempdir().expect("tempdir");
-        let wav_path = dir.path().join("kick_pattern.wav");
-        std::fs::write(&wav_path, &wav_bytes).expect("write wav");
-        let waveform_dir = dir.path().join("waveforms");
-        let artwork_dir = dir.path().join("artwork");
-        std::fs::create_dir_all(&waveform_dir).expect("waveform dir");
-        std::fs::create_dir_all(&artwork_dir).expect("artwork dir");
-
-        let result = analyze_local_track_with_updates(
-            wav_path.to_str().expect("utf8 path"),
-            "track-first-beat-accuracy",
-            &waveform_dir,
-            &artwork_dir,
-            BpmDetectionParams {
-                bpm_min: 70,
-                bpm_max: 180,
-                engine: AnalysisEngine::Stratum,
-            },
-            &mut |_| {},
-        )
-        .expect("analysis succeeds");
-
-        let first_beat_ms = result
-            .first_beat_ms
-            .expect("stratum-dsp should report a first beat for a clear kick pattern")
-            as f64;
-        // Full end-to-end tolerance (real stratum-dsp BPM/onset detection
-        // plus the beat_refine snap), looser than beat_refine's own unit
-        // tests since it also depends on the engine's beat-grid phase choice
-        // modulo one beat interval.
-        let beat_interval_ms = 60_000.0 / BPM;
-        let diff = (first_beat_ms - true_first_beat_ms).abs() % beat_interval_ms;
-        let diff = diff.min(beat_interval_ms - diff);
-        assert!(
-            diff <= 15.0,
-            "first_beat_ms={first_beat_ms} true={true_first_beat_ms} diff={diff}"
-        );
-    }
 }

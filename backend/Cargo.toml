@@ -192,6 +192,11 @@ path = "src/bin/render_3way_waveform.rs"
 required-features = ["dev-tools"]
 
 [[bin]]
+name = "compare_anlz_beatgrids"
+path = "src/bin/compare_anlz_beatgrids.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
 name = "run_usb_diagnostics"
 path = "src/bin/run_usb_diagnostics.rs"
 required-features = ["dev-tools"]
