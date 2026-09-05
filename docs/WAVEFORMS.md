@@ -76,6 +76,22 @@ placeholders byte-for-byte, so unedited exports are unchanged.
 chunk — including `PSSI` phrase data — verbatim. `read_cues_from_anlz` /
 `read_first_beat_from_anlz` decode them back on USB re-import.
 
+The beat grid also rebuilds from `bpm` **alone**, with no explicit
+`first_beat_ms` and no cues: when a track's on-USB bundle already exists
+(the export "retain" path, `ensure_analysis_bundle_ppth`), a positive
+`track.bpm` is enough to trigger `apply_analysis_edits_to_anlz`, which reuses
+whatever anchor is already embedded in the bundle (`read_first_beat_from_anlz`)
+rather than requiring a fresh one. This closes a real failure mode: a track
+re-analyzed to the correct BPM but with no confident first-beat detection
+(`stratum-dsp` can return a tempo with an empty `beat_grid.beats`) used to
+leave its *existing* beat grid untouched on every future export — including
+one baked at the ANLZ writer's `120.0` BPM fallback by a degenerate earlier
+analysis or by `fix_empty_analysis_files` (which now also carries the
+track's real PDB `tempo_x100`/duration forward instead of defaulting). PDB
+and eDB tempo metadata could be completely correct while CDJ hardware still
+read the stale beat-grid tempo for its live/master display — a normal
+re-export now corrects it.
+
 The track-detail modal renders the **PWV5 colour-detail** waveform from the
 `.EXT`, read raw by `read_pwv5_from_anlz` (`usb_utils.rs`), **base64-encoded**
 onto `get_track_detail`'s `detailWaveform` (the raw payload is tens of KB — a

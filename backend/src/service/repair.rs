@@ -5708,6 +5708,12 @@ impl BackendService {
             source_audio: String,
             analysis_dir: std::path::PathBuf,
             track_path: String,
+            // Known-good tempo/duration from the already-parsed PDB row, so a
+            // regenerated bundle bakes in the track's real beat grid instead
+            // of falling back to the ANLZ writer's 120 BPM / 180s defaults
+            // (see docs/DIAGNOSTICS_REPAIRS.md).
+            bpm: Option<f64>,
+            duration_ms: Option<u64>,
         }
 
         let mut map_by_file = std::collections::HashMap::<String, AnalysisRepairTarget>::new();
@@ -5740,6 +5746,8 @@ impl BackendService {
                         source_audio: s,
                         analysis_dir: analysis_dir.clone(),
                         track_path: t.track_file_path.clone(),
+                        bpm: (t.tempo_x100 > 0).then(|| t.tempo_x100 as f64 / 100.0),
+                        duration_ms: t.duration_seconds.map(|s| s as u64 * 1000),
                     };
                     map_by_file.insert(canonicalize_playlist_name(&a), target.clone());
                     map_by_dir.insert(
@@ -5755,16 +5763,19 @@ impl BackendService {
         {
             let conn = handle.conn();
             let mut stmt = conn.prepare(
-                "SELECT path, analysisDataFilePath FROM content WHERE analysisDataFilePath IS NOT NULL",
+                "SELECT path, analysisDataFilePath, bpmx100, length FROM content \
+                 WHERE analysisDataFilePath IS NOT NULL",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
                 ))
             })?;
             for row in rows {
-                let (path, analysis_path) = row?;
+                let (path, analysis_path, bpmx100, length_seconds) = row?;
                 if let (Some(p), Some(a)) = (path.as_deref(), analysis_path.as_deref())
                     && let (Some(ra), Some(rp)) = (
                         resolve_usb_side_path(usb_root, a),
@@ -5780,6 +5791,8 @@ impl BackendService {
                         source_audio: rp,
                         analysis_dir: analysis_dir.clone(),
                         track_path: p.to_string(),
+                        bpm: bpmx100.filter(|v| *v > 0).map(|v| v as f64 / 100.0),
+                        duration_ms: length_seconds.filter(|v| *v > 0).map(|v| v as u64 * 1000),
                     };
                     map_by_file
                         .entry(canonicalize_playlist_name(&ra))
@@ -5853,8 +5866,8 @@ impl BackendService {
                 &waveform,
                 &bundle_paths,
                 &target.track_path,
-                None,
-                None,
+                target.bpm,
+                target.duration_ms,
             ) {
                 failed += 1;
                 warnings.push(logging::log(
@@ -6031,8 +6044,9 @@ mod tests {
     use crate::edb::ExportDbPlaylist;
     use crate::models::{DiagCheck, DiagStatus, UsbParityPlaylistDetail};
     use crate::pdb_reader::{
-        ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistTreeRow,
+        ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistTreeRow, PdbTrackRow,
     };
+    use crate::service::anlz::read_beatgrid_tempo_from_anlz;
     use crate::service::export_helpers::inspect_pdb_columns_playlist_order;
     use tempfile::tempdir;
 
@@ -7408,5 +7422,81 @@ mod tests {
             .expect("history_content row");
         assert_eq!(content_hid, 10);
         assert_eq!(content_id, 101);
+    }
+
+    #[test]
+    fn apply_fix_empty_analysis_files_bakes_real_pdb_tempo_not_120_default() {
+        let (_td, usb_root) = test_usb_root();
+        let service_data_dir = tempdir().expect("service data dir");
+        let service = BackendService::new(service_data_dir.path()).expect("backend service");
+
+        // Source audio: garbage bytes are enough -- decode fails and
+        // build_waveform_preview_from_audio falls back to a raw-bytes
+        // waveform, same as any other file the audio decoder can't parse.
+        let audio_path = usb_root.join("Contents/track.mp3");
+        std::fs::create_dir_all(audio_path.parent().unwrap()).unwrap();
+        std::fs::write(&audio_path, vec![7u8; 2000]).unwrap();
+
+        let anlz_dir = usb_root.join("PIONEER/USBANLZ/P001/00000001");
+        std::fs::create_dir_all(&anlz_dir).unwrap();
+        let dat_path = anlz_dir.join("ANLZ0000.DAT");
+        std::fs::write(&dat_path, b"").unwrap(); // the "empty analysis file" needing repair
+
+        let parsed = ParsedPdb {
+            tracks: vec![PdbTrackRow {
+                content_link: None,
+                sample_rate_hz: None,
+                file_size_bytes: None,
+                master_content_id: None,
+                master_db_id: None,
+                id: 1,
+                artist_id: 0,
+                album_id: 0,
+                artwork_id: 0,
+                key_id: 0,
+                genre_id: 0,
+                bitrate_kbps: None,
+                track_number: 0,
+                tempo_x100: 14_000, // the track's real, already-known tempo
+                release_year: None,
+                bit_depth: None,
+                duration_seconds: Some(222),
+                file_type: None,
+                isrc: None,
+                date_added: None,
+                release_date: None,
+                dj_comment: None,
+                file_name: None,
+                publish_track_info: None,
+                autoload_hotcues: None,
+                title: "Track".to_string(),
+                anlz_path: "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT".to_string(),
+                track_file_path: "/Contents/track.mp3".to_string(),
+            }],
+            ..ParsedPdb::default()
+        };
+
+        let empty_path =
+            resolve_usb_side_path(&usb_root, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT")
+                .expect("resolve anlz path");
+
+        let mut warnings = Vec::new();
+        let (fixed, skipped, failed, _writes) = service
+            .apply_fix_empty_analysis_files(
+                &usb_root,
+                &[empty_path],
+                None,
+                Some(&parsed),
+                &mut warnings,
+            )
+            .expect("apply fix_empty_analysis_files");
+        assert_eq!((fixed, skipped, failed), (1, 0, 0));
+
+        let dat_bytes = std::fs::read(&dat_path).expect("regenerated .DAT");
+        assert_eq!(
+            read_beatgrid_tempo_from_anlz(&dat_bytes),
+            Some(14_000),
+            "regenerated bundle must bake the track's real PDB tempo, not the 120 BPM default"
+        );
     }
 }

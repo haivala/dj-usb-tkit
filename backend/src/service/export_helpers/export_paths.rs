@@ -357,9 +357,14 @@ fn write_anlz_with_export_path(
 }
 
 /// Ensure a reused on-USB analysis bundle has the exported track's PPTH, and
-/// re-apply the current cue list + user first beat (idempotent). The retain
-/// path reuses a bundle already on the stick, so this is where locally-edited
-/// cues get onto it even when no fresh bundle is generated.
+/// re-apply the current cue list + user first beat + analyzed tempo
+/// (idempotent). The retain path reuses a bundle already on the stick, so
+/// this is where locally-edited cues get onto it even when no fresh bundle
+/// is generated -- and, just as importantly, where a beat grid baked with a
+/// stale or default tempo (e.g. left behind by an earlier degenerate
+/// analysis/repair pass) gets corrected once the track's real BPM is known,
+/// even if the track has no cues and no explicit first-beat edit. See
+/// `docs/DIAGNOSTICS_REPAIRS.md` for the failure mode this closes.
 pub fn ensure_analysis_bundle_ppth(
     usb_root: &Path,
     analysis_path: &str,
@@ -374,7 +379,14 @@ pub fn ensure_analysis_bundle_ppth(
     let twoex_path = dat_path.with_extension("2EX");
 
     let cues = anlz_cues_from_track_cues(&track.cues);
-    let has_edits = !track.cues.is_empty() || track.first_beat_ms.is_some();
+    // A positive bpm alone is enough to trigger a beat-grid rebuild -- when
+    // there's no explicit first_beat_ms, apply_analysis_edits_to_anlz reuses
+    // whatever anchor is already embedded in the bundle, so this only ever
+    // corrects tempo, never discards a decent existing anchor. Cheap either
+    // way: write_bytes_if_different makes an already-correct bundle a no-op.
+    let has_edits = !track.cues.is_empty()
+        || track.first_beat_ms.is_some()
+        || track.bpm.is_some_and(|b| b > 0.0);
     let edits = has_edits.then_some(AnlzAnalysisEdits {
         bpm: track.bpm,
         duration_ms: track.duration_ms,

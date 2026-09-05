@@ -30,6 +30,13 @@
 
 ## Unreleased
 
+- **Fix:** a track re-analyzed to a corrected BPM could still export with its
+  old beat grid (e.g. a hardcoded 120 BPM default) when the on-USB bundle
+  already existed and had no cues/first-beat edit to trigger a rebuild — CDJ
+  hardware reads that beat grid for its live tempo display, not the library
+  BPM field. Export now re-derives the beat grid from the analyzed BPM alone,
+  and `fix_empty_analysis_files` no longer defaults to 120 BPM when
+  regenerating a bundle. Re-exporting an affected playlist fixes it.
 - **New feature:** cue points and the beat-grid first beat are now editable. A
   per-track modal (opened from the magnifier button next to a track's waveform)
   shows the full-detail colour waveform with a beat-grid overlay and

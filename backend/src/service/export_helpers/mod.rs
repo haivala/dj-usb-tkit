@@ -3468,6 +3468,74 @@ mod tests {
     }
 
     #[test]
+    fn ensure_analysis_bundle_ppth_rebuilds_beatgrid_from_bpm_alone_on_retain_path() {
+        use crate::service::anlz::{
+            build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file,
+            read_beatgrid_tempo_from_anlz,
+        };
+
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path().join("usb");
+        fs::create_dir_all(&usb_root).unwrap();
+
+        let exported_path = "/Contents/Artist/Album/track.flac";
+
+        // Simulate a bundle already on the USB (the "retain" export path)
+        // whose beat grid was baked at a stale/default 120 BPM, matching
+        // the real-world bug: PDB/eDB and the app's own `tracks.bpm` are
+        // already correct, but nothing has re-derived the beat grid since.
+        let waveform = WaveformData::from_peaks(vec![128; 400]);
+        let (dat_path, ext_path, twoex_path) =
+            canonical_analysis_bundle_paths(&usb_root, exported_path);
+        fs::create_dir_all(dat_path.parent().unwrap()).unwrap();
+        fs::write(
+            &dat_path,
+            build_anlz_dat_file(&waveform, exported_path, Some(120.0), Some(200_000)),
+        )
+        .unwrap();
+        fs::write(
+            &ext_path,
+            build_anlz_ext_file(&waveform, exported_path, Some(120.0), Some(200_000)),
+        )
+        .unwrap();
+        fs::write(
+            &twoex_path,
+            build_anlz_2ex_file(&waveform, exported_path, Some(200_000)),
+        )
+        .unwrap();
+
+        // The track has since been correctly re-analyzed to 140 BPM, but
+        // has no cues and no confident first-beat -- the exact shape that
+        // used to leave the retain path's beat-grid rebuild un-triggered.
+        let track = ExportTrackData {
+            bpm: Some(140.0),
+            first_beat_ms: None,
+            cues: Vec::new(),
+            duration_ms: Some(200_000),
+            ..make_test_track("t-bpm-fix", "Track", "track.flac")
+        };
+
+        ensure_analysis_bundle_ppth(
+            &usb_root,
+            &dat_path.to_string_lossy(),
+            exported_path,
+            &track,
+        )
+        .expect("ensure analysis bundle ppth");
+
+        assert_eq!(
+            read_beatgrid_tempo_from_anlz(&fs::read(&dat_path).unwrap()),
+            Some(14_000),
+            ".DAT beat grid must be corrected to the track's real bpm"
+        );
+        assert_eq!(
+            read_beatgrid_tempo_from_anlz(&fs::read(&ext_path).unwrap()),
+            Some(14_000),
+            ".EXT beat grid must be corrected to the track's real bpm"
+        );
+    }
+
+    #[test]
     fn export_analysis_does_not_regenerate_when_local_dat_missing() {
         let dir = tempdir().unwrap();
         let usb_root = dir.path().join("usb");

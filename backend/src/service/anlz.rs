@@ -223,13 +223,21 @@ pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> BackendResult<()>
     Ok(())
 }
 
+/// Fallback tempo baked into a beat-grid chunk when no real bpm is known at
+/// write time (e.g. a degenerate analysis pass, or a repair that hasn't
+/// learned the track's actual tempo). Named so callers elsewhere in the
+/// crate (diagnostics: `repair.rs`'s beat-grid-tempo-mismatch scan) can
+/// recognize "this chunk was never given a real tempo" instead of
+/// re-deriving the magic number independently.
+pub(crate) const ANLZ_DEFAULT_BEATGRID_BPM: f64 = 120.0;
+
 fn append_pqt2_chunk(
     file: &mut Vec<u8>,
     bpm: Option<f64>,
     duration_ms: Option<u64>,
     first_beat_ms: u32,
 ) {
-    let bpm_val = bpm.unwrap_or(120.0);
+    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
     if bpm_val <= 0.0 {
         return;
     }
@@ -274,7 +282,7 @@ fn append_pqt2_chunk(
 }
 
 fn normalize_first_beat_ms(first_beat_ms: u32, bpm: Option<f64>) -> u32 {
-    let bpm_val = bpm.unwrap_or(120.0);
+    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
     if bpm_val <= 0.0 {
         return 0;
     }
@@ -300,7 +308,7 @@ fn append_pssi_chunk(
     duration_ms: Option<u64>,
     first_beat_ms: u32,
 ) {
-    let bpm_val = bpm.unwrap_or(120.0);
+    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
     if bpm_val <= 0.0 {
         return;
     }
@@ -536,6 +544,9 @@ pub fn ensure_ppth_chunk(data: &[u8], track_path: &str) -> Vec<u8> {
 /// [`apply_analysis_edits_to_anlz`] only rebuilds chunk types that already
 /// exist in the source file, and never touches `PSSI`, waveform, or `PPTH`.
 pub struct AnlzAnalysisEdits<'a> {
+    /// `Some` ⇒ rebuild `PQTZ`/`PQT2` with this tempo, even with no explicit
+    /// `first_beat_ms` (the existing anchor already in the file is reused —
+    /// see `apply_analysis_edits_to_anlz`).
     pub bpm: Option<f64>,
     pub duration_ms: Option<u64>,
     /// `Some` ⇒ rebuild `PQTZ`/`PQT2` with this beat-grid anchor.
@@ -550,17 +561,25 @@ pub struct AnlzAnalysisEdits<'a> {
 /// Mirrors [`ensure_ppth_chunk`]'s chunk walk. `PSSI` phrase data is copied
 /// verbatim — its layout is not fully understood and must not be regenerated on
 /// an incremental edit (a full re-analysis is the only thing that rewrites it).
+///
+/// The beat grid is rebuilt whenever `edits.first_beat_ms` is explicit, *or*
+/// `edits.bpm` is given with no explicit anchor — in that second case the
+/// anchor already embedded in `data` is reused, so a bpm-only correction (a
+/// track re-analyzed to the right tempo but with no confident first-beat, or
+/// no cue/first-beat edit at all) still lands on disk instead of silently
+/// leaving a stale/default beat grid in place.
 pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) -> Vec<u8> {
     if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
         return data.to_vec();
     }
-    if edits.first_beat_ms.is_none() && edits.cues.is_none() {
+    let beatgrid_anchor_ms = edits
+        .first_beat_ms
+        .or_else(|| edits.bpm.and_then(|_| read_first_beat_from_anlz(data)));
+    if beatgrid_anchor_ms.is_none() && edits.cues.is_none() {
         return data.to_vec();
     }
 
-    let rebuilt_first_beat = edits
-        .first_beat_ms
-        .map(|raw| normalize_first_beat_ms(raw, edits.bpm));
+    let rebuilt_first_beat = beatgrid_anchor_ms.map(|raw| normalize_first_beat_ms(raw, edits.bpm));
 
     let mut out = Vec::with_capacity(data.len());
     out.extend_from_slice(&data[..28]);
@@ -705,7 +724,7 @@ fn append_pqtz_chunk(
     duration_ms: Option<u64>,
     first_beat_ms: u32,
 ) {
-    let bpm_val = bpm.unwrap_or(120.0);
+    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
     if bpm_val <= 0.0 {
         return;
     }
@@ -742,7 +761,7 @@ fn estimate_first_beat_ms(
     bpm: Option<f64>,
     duration_ms: Option<u64>,
 ) -> u32 {
-    let bpm_val = bpm.unwrap_or(120.0);
+    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
     let dur_ms = duration_ms.unwrap_or(180_000) as f64;
     if bpm_val <= 0.0 || waveform.peaks.is_empty() || dur_ms <= 0.0 {
         return 0;
@@ -1093,6 +1112,42 @@ pub fn read_first_beat_from_anlz(data: &[u8]) -> Option<u32> {
             // header carries first_time_ms at chunk-relative offset 28.
             if let Some(t) = read_u32_be_at(data, pos + 28) {
                 return Some(t);
+            }
+        }
+        pos += total_len;
+    }
+    None
+}
+
+/// Read the beat-grid tempo (BPM × 100) actually baked into an ANLZ `PQTZ`
+/// (or `PQT2`) chunk. Used by diagnostics to detect a bundle whose beat grid
+/// has drifted from the track's PDB `tempo_x100` (e.g. a stale/default grid
+/// left behind by an earlier degenerate analysis or repair pass — see
+/// `docs/DIAGNOSTICS_REPAIRS.md`).
+pub fn read_beatgrid_tempo_from_anlz(data: &[u8]) -> Option<u16> {
+    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
+        return None;
+    }
+    let mut pos = 28usize;
+    while pos + 12 <= data.len() {
+        let fourcc = &data[pos..pos + 4];
+        let header_len = read_u32_be_at(data, pos + 4)? as usize;
+        let total_len = read_u32_be_at(data, pos + 8)? as usize;
+        if header_len < 12 || total_len < header_len || pos + total_len > data.len() {
+            break;
+        }
+        if fourcc == b"PQTZ" {
+            // payload: 8-byte beat entries (beat_num u16, tempo u16, time u32)
+            let body = &data[pos + header_len..pos + total_len];
+            if body.len() >= 4 {
+                return Some(u16::from_be_bytes([body[2], body[3]]));
+            }
+        }
+        if fourcc == b"PQT2" {
+            // header content: first_beat_num(u16) tempo(u16) first_time_ms(u32) ...
+            // at content offset 12..14/14..16 (chunk-relative offset 26..28).
+            if header_len >= 28 {
+                return Some(u16::from_be_bytes([data[pos + 26], data[pos + 27]]));
             }
         }
         pos += total_len;
@@ -2498,5 +2553,59 @@ mod tests {
         assert_eq!(read_cues_from_anlz(&edited).len(), 4);
         assert!(read_cues_from_anlz(&plain).is_empty());
         verify_anlz_structure(&edited, "edited EXT");
+    }
+
+    #[test]
+    fn apply_analysis_edits_rebuilds_beatgrid_from_bpm_alone() {
+        // Simulates a bundle whose beat grid was baked with a stale/default
+        // tempo (e.g. the `fix_empty_analysis_files` bug this test guards
+        // against): built at 120 BPM with an explicit anchor at 0ms.
+        let plain = build_anlz_ext_file_with_first_beat(
+            &WaveformData::from_peaks(vec![128; 400]),
+            "/Contents/x.mp3",
+            Some(120.0),
+            Some(120_000),
+            Some(0),
+            &[],
+        );
+        assert_eq!(read_beatgrid_tempo_from_anlz(&plain), Some(12_000));
+
+        // A bpm-only correction -- no cues, no explicit first_beat_ms, which
+        // is exactly the shape of a track re-analyzed to the right tempo
+        // with no confident first-beat -- must still rebuild the grid.
+        let edited = apply_analysis_edits_to_anlz(
+            &plain,
+            &AnlzAnalysisEdits {
+                bpm: Some(140.0),
+                duration_ms: Some(120_000),
+                first_beat_ms: None,
+                cues: None,
+            },
+        );
+
+        assert_eq!(read_beatgrid_tempo_from_anlz(&edited), Some(14_000));
+        // The anchor already embedded in the bundle (0ms) is preserved,
+        // wrapped to the new tempo's beat interval -- not discarded.
+        assert_eq!(read_first_beat_from_anlz(&edited), Some(0));
+        for tag in ["PPTH", "PWV3", "PWV5", "PWV4", "PSSI"] {
+            assert_eq!(
+                find_chunk_payload(&plain, tag),
+                find_chunk_payload(&edited, tag),
+                "{tag} must be byte-identical"
+            );
+        }
+        verify_anlz_structure(&edited, "bpm-only edited EXT");
+
+        // A no-op edit (nothing to change) still returns the input verbatim.
+        let untouched = apply_analysis_edits_to_anlz(
+            &plain,
+            &AnlzAnalysisEdits {
+                bpm: None,
+                duration_ms: None,
+                first_beat_ms: None,
+                cues: None,
+            },
+        );
+        assert_eq!(untouched, plain);
     }
 }
