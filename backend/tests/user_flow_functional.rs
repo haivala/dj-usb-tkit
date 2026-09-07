@@ -7,8 +7,9 @@ use backend::models::{
     AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
     CreatePlaylistRequest, DedupeMode, ExportToUsbOptions, ExportToUsbRequest,
     FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
-    GetTrackDetailRequest, GetTracksByIdsRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
-    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, SearchTracksRequest, TrackCueInput,
+    GetTrackDetailRequest, GetTracksByIdsRequest, GetUsbTrackDetailRequest, InitializeUsbRequest,
+    MaterializeSourceTrackRequest, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsRequest,
+    ScanLibraryRequest, SearchTracksRequest, TrackCueInput,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::read_cues_from_anlz;
@@ -894,6 +895,354 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         .collect::<Result<_, _>>()
         .expect("collect");
     assert_eq!(positions, vec![2_000, 6_000]);
+}
+
+/// Scan + analyse a single track, bake local cues into it, then export it to a
+/// USB playlist. Returns `(backend, data_dir, usb, track_id, playlist_id)`.
+fn export_one_track_with_cues(
+    root: &Path,
+    initial_cues: Vec<TrackCueInput>,
+) -> (BackendCommands, PathBuf, PathBuf, String, String) {
+    let data_dir = root.join("data");
+    let source = root.join("source");
+    let usb = root.join("usb");
+    fs::create_dir_all(&source).expect("create source dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    write_test_pulsed_key_wav(&source.join("usb_cue_edit.wav"), 128.0, 16_000);
+
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![source.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    let track_id = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search")
+        .items[0]
+        .id
+        .clone();
+    backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        bpm_min: None,
+        bpm_max: None,
+        track_ids: vec![track_id.clone()],
+        analysis_engine: None,
+        ..Default::default()
+    });
+    let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: Some(200),
+        cues: Some(initial_cues),
+    });
+    assert!(save.ok, "local save failed: {save:?}");
+
+    backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: "USB Cue Edit".to_string(),
+        })
+        .data
+        .expect("playlist")
+        .playlist_id;
+    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![track_id.clone()],
+        dedupe: DedupeMode::Skip,
+    });
+    let export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(export.ok, "export failed: {export:?}");
+
+    (backend, data_dir, usb, track_id, playlist_id)
+}
+
+fn only_exported_ext(usb: &Path) -> PathBuf {
+    let mut ext_files = Vec::new();
+    find_files_named(&usb.join("PIONEER").join("USBANLZ"), "ANLZ0000.EXT", &mut ext_files);
+    assert_eq!(ext_files.len(), 1, "expected exactly one exported .EXT");
+    ext_files.pop().unwrap()
+}
+
+fn open_usb_edb(usb: &Path) -> rusqlite::Connection {
+    let conn = rusqlite::Connection::open(
+        usb.join("PIONEER").join("rekordbox").join("exportLibrary.db"),
+    )
+    .expect("open edb");
+    conn.pragma_update(None, "key", DEFAULT_USB_EDB_KEY)
+        .expect("edb key");
+    conn
+}
+
+fn first_usb_playlist_track(backend: &BackendCommands, usb: &Path) -> backend::models::UsbTrack {
+    backend
+        .fetch_usb_playlists(FetchUsbPlaylistsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("fetch usb playlists")
+        .items
+        .into_iter()
+        .flat_map(|p| p.tracks)
+        .find(|t| !t.title.starts_with("Unknown"))
+        .expect("a resolved usb playlist track")
+}
+
+#[test]
+fn save_usb_track_analysis_edits_writes_device_and_local_master() {
+    let root = tempdir().expect("temp root");
+    let (backend, data_dir, usb, track_id, playlist_id) = export_one_track_with_cues(
+        root.path(),
+        vec![
+            TrackCueInput { position_ms: 2_000, color_id: None, name: Some("A".into()) },
+            TrackCueInput { position_ms: 6_000, color_id: Some(3), name: Some("B".into()) },
+        ],
+    );
+
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let analysis_raw = usb_track
+        .usb_analysis_path_raw
+        .clone()
+        .expect("usb analysis path raw");
+    let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
+
+    // get_usb_track_detail round-trips the exported cues.
+    let detail = backend
+        .get_usb_track_detail(GetUsbTrackDetailRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: analysis_raw.clone(),
+        })
+        .data
+        .expect("usb detail");
+    assert_eq!(detail.cues.len(), 2);
+    assert!(detail.detail_waveform.is_some());
+
+    // Now edit the cue list from the USB view: one cue, moved.
+    let saved = backend
+        .save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: analysis_raw.clone(),
+            usb_media_path_raw: media_raw.clone(),
+            bpm: usb_track.bpm,
+            duration_ms: usb_track.duration_ms,
+            first_beat_ms: None,
+            cues: Some(vec![TrackCueInput {
+                position_ms: 3_500,
+                color_id: Some(5),
+                name: Some("Moved".into()),
+            }]),
+            local_track_id: usb_track.local_track_id.clone(),
+            title: Some(usb_track.title.clone()),
+            artist: Some(usb_track.artist.clone()),
+            album: usb_track.album.clone(),
+        })
+        .data
+        .expect("usb save");
+    assert!(saved.anlz_updated && saved.edb_updated && saved.local_updated, "{saved:?}");
+    assert_eq!(saved.cues.len(), 1);
+    assert_eq!(saved.cues[0].position_ms, 3_500);
+
+    // On-device ANLZ carries the new cue (memory + hot).
+    let device_cues = read_cues_from_anlz(&fs::read(only_exported_ext(&usb)).unwrap());
+    assert_eq!(device_cues.len(), 2);
+    assert!(device_cues.iter().all(|c| c.position_ms == 3_500));
+
+    // On-device eDB `cue` rows match (2 per cue point).
+    let edb = open_usb_edb(&usb);
+    let edb_cue_count: i64 = edb
+        .query_row("SELECT COUNT(1) FROM cue", [], |r| r.get(0))
+        .expect("count cue");
+    assert_eq!(edb_cue_count, 2);
+    let edb_in_usec: i64 = edb
+        .query_row("SELECT inUsec FROM cue WHERE kind = 1 LIMIT 1", [], |r| r.get(0))
+        .expect("hot cue");
+    assert_eq!(edb_in_usec, 3_500_000);
+    drop(edb);
+
+    // Local master matches.
+    let local_db = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open db");
+    let local_positions: Vec<i64> = local_db
+        .prepare("SELECT position_ms FROM track_cues WHERE track_id = ?1 ORDER BY position_ms")
+        .unwrap()
+        .query_map([&track_id], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(local_positions, vec![3_500]);
+
+    // The containing app playlist's export markers were reset.
+    let last_exported_at: Option<String> = local_db
+        .query_row(
+            "SELECT last_exported_at FROM playlists WHERE id = ?1",
+            [&playlist_id],
+            |r| r.get(0),
+        )
+        .expect("playlist row");
+    assert!(last_exported_at.is_none(), "export markers should be cleared");
+
+    // get_usb_track_detail round-trips the new cue.
+    let detail = backend
+        .get_usb_track_detail(GetUsbTrackDetailRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: analysis_raw,
+        })
+        .data
+        .expect("usb detail 2");
+    assert_eq!(detail.cues.len(), 1);
+    assert_eq!(detail.cues[0].position_ms, 3_500);
+}
+
+#[test]
+fn save_usb_track_analysis_edits_blocks_when_usb_not_connected() {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, _playlist_id) =
+        export_one_track_with_cues(root.path(), vec![TrackCueInput {
+            position_ms: 2_000,
+            color_id: None,
+            name: None,
+        }]);
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+
+    let blocked = backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+        usb_root: root.path().join("no-such-usb").to_string_lossy().to_string(),
+        usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().unwrap(),
+        usb_media_path_raw: usb_track.usb_media_path.clone().unwrap(),
+        bpm: usb_track.bpm,
+        duration_ms: usb_track.duration_ms,
+        first_beat_ms: None,
+        cues: Some(vec![TrackCueInput { position_ms: 1_000, color_id: None, name: None }]),
+        local_track_id: usb_track.local_track_id.clone(),
+        title: None,
+        artist: None,
+        album: None,
+    });
+    assert!(!blocked.ok, "save must be blocked when the USB is not connected");
+}
+
+#[test]
+fn save_usb_track_analysis_edits_empty_list_clears_device_and_local() {
+    let root = tempdir().expect("temp root");
+    let (backend, data_dir, usb, track_id, _playlist_id) = export_one_track_with_cues(
+        root.path(),
+        vec![
+            TrackCueInput { position_ms: 2_000, color_id: None, name: None },
+            TrackCueInput { position_ms: 6_000, color_id: Some(3), name: None },
+        ],
+    );
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+
+    let saved = backend
+        .save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().unwrap(),
+            usb_media_path_raw: usb_track.usb_media_path.clone().unwrap(),
+            bpm: usb_track.bpm,
+            duration_ms: usb_track.duration_ms,
+            first_beat_ms: None,
+            cues: Some(vec![]),
+            local_track_id: usb_track.local_track_id.clone(),
+            title: Some(usb_track.title.clone()),
+            artist: Some(usb_track.artist.clone()),
+            album: usb_track.album.clone(),
+        })
+        .data
+        .expect("usb save");
+    assert!(saved.local_updated);
+    assert!(saved.cues.is_empty());
+
+    assert!(
+        read_cues_from_anlz(&fs::read(only_exported_ext(&usb)).unwrap()).is_empty(),
+        "device ANLZ cues should be cleared"
+    );
+    let edb = open_usb_edb(&usb);
+    let edb_cue_count: i64 = edb
+        .query_row("SELECT COUNT(1) FROM cue", [], |r| r.get(0))
+        .expect("count cue");
+    assert_eq!(edb_cue_count, 0);
+    drop(edb);
+
+    let local_db = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open db");
+    let local_cue_count: i64 = local_db
+        .query_row(
+            "SELECT COUNT(1) FROM track_cues WHERE track_id = ?1",
+            [&track_id],
+            |r| r.get(0),
+        )
+        .expect("count local cues");
+    assert_eq!(local_cue_count, 0);
+}
+
+#[test]
+fn re_export_reconciles_on_usb_bundle_to_edited_local_master() {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, track_id, playlist_id) = export_one_track_with_cues(
+        root.path(),
+        vec![
+            TrackCueInput { position_ms: 2_000, color_id: None, name: None },
+            TrackCueInput { position_ms: 6_000, color_id: Some(3), name: None },
+        ],
+    );
+
+    let re_export = |backend: &BackendCommands| {
+        let out = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: playlist_id.clone(),
+            options: Some(ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: true,
+                prune_stale: false,
+                ..Default::default()
+            }),
+        });
+        assert!(out.ok, "re-export failed: {out:?}");
+    };
+
+    // Edit the LOCAL master: drop to one cue, then re-export.
+    backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: None,
+        cues: Some(vec![TrackCueInput { position_ms: 2_000, color_id: None, name: None }]),
+    });
+    re_export(&backend);
+    let device_cues = read_cues_from_anlz(&fs::read(only_exported_ext(&usb)).unwrap());
+    assert_eq!(device_cues.len(), 2, "one cue point => memory + hot");
+    assert!(device_cues.iter().all(|c| c.position_ms == 2_000));
+    let edb = open_usb_edb(&usb);
+    assert_eq!(
+        edb.query_row::<i64, _, _>("SELECT COUNT(1) FROM cue", [], |r| r.get(0)).unwrap(),
+        2
+    );
+    drop(edb);
+
+    // Edit again: clear all cues, re-export, assert device ends empty too.
+    backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: None,
+        cues: Some(vec![]),
+    });
+    re_export(&backend);
+    assert!(
+        read_cues_from_anlz(&fs::read(only_exported_ext(&usb)).unwrap()).is_empty(),
+        "cleared local cues must clear the on-USB ANLZ on re-export"
+    );
+    let edb = open_usb_edb(&usb);
+    assert_eq!(
+        edb.query_row::<i64, _, _>("SELECT COUNT(1) FROM cue", [], |r| r.get(0)).unwrap(),
+        0
+    );
 }
 
 #[test]

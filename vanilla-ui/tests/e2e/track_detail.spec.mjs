@@ -210,6 +210,192 @@ test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows 
   await expect(visibleMarkers).toHaveCount(1);
 });
 
+// --- Cue editor opened from a USB view (playlists / history) ---------------
+//
+// A USB row edits the on-device bundle directly: open goes through
+// get_usb_track_detail, save through save_usb_track_analysis_edits with the
+// row's raw on-device paths, and a not-connected USB blocks the flow.
+
+function installUsbTrackDetailMock(page) {
+  return page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
+    window.__calls = [];
+
+    const pwv5 = new Uint8Array(4000);
+    for (let i = 0; i < pwv5.length; i += 2) {
+      const h = 8 + (i % 20);
+      const v = (2 << 13) | (3 << 10) | (5 << 7) | (h << 2);
+      pwv5[i] = (v >> 8) & 0xff;
+      pwv5[i + 1] = v & 0xff;
+    }
+    const detailWaveformB64 = btoa(String.fromCharCode.apply(null, pwv5));
+
+    const usbTrack = {
+      id: "usbrow-1",
+      localTrackId: "local-1",
+      title: "USB Cue Track",
+      artist: "USB Artist",
+      album: "USB Album",
+      bpm: 126,
+      durationMs: 200000,
+      filePath: "/Volumes/USB-TEST/Contents/USB Artist/USB Album/track.mp3",
+      usbMediaPath: "/Contents/USB Artist/USB Album/track.mp3",
+      usbAnalysisPath: "/Volumes/USB-TEST/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT",
+      usbAnalysisPathRaw: "/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT",
+      waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
+    };
+    const tracksResponse = {
+      ok: true,
+      data: {
+        items: [usbTrack], total: 1, nextCursor: null, hasMore: false,
+        totalDurationMs: 200000, durationKnownCount: 1, warnings: [],
+      },
+    };
+
+    // When set, save_usb_track_analysis_edits fails (USB yanked mid-edit).
+    window.__usbSaveFails = false;
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          window.__calls.push({ command, request: payload?.request ?? null });
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "allow_asset_paths") return null;
+          if (command === "get_backend_log_buffer") return [];
+          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "check_source_roots") return { ok: true, data: { roots: [] } };
+          if (command === "list_playlists") return { ok: true, data: { items: [] } };
+          if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
+          if (command === "list_tracks" || command === "search_tracks") return { ok: true, data: { total: 0, items: [] } };
+          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [], nextCursor: null, hasMore: false } };
+          if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
+          if (command === "validate_usb_root") {
+            return {
+              ok: true,
+              data: {
+                valid: true, hasWriteAccess: true, normalizedRoot: "/Volumes/USB-TEST",
+                hasVendorRoot: true, hasContents: true, hasPdb: true, hasEdb: true, warnings: [],
+              },
+            };
+          }
+          if (command === "fetch_usb_playlists") {
+            return {
+              ok: true,
+              data: {
+                items: [{ id: "usb-1", name: "Warmup", source: "mock", trackCount: 1, tracks: [{}] }],
+                stats: { indexedTracks: 1, playlistReferencedTracks: 1, playlistEntries: 1 },
+                warnings: [],
+              },
+            };
+          }
+          if (command === "fetch_usb_histories") {
+            return {
+              ok: true,
+              data: {
+                items: [{ id: "hist-1", name: "HISTORY 2024-01-01", source: "mock", trackCount: 1, tracks: [{}] }],
+                warnings: [],
+              },
+            };
+          }
+          if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") return tracksResponse;
+          if (command === "get_usb_track_detail") {
+            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64 } };
+          }
+          if (command === "save_usb_track_analysis_edits") {
+            if (window.__usbSaveFails) {
+              return { ok: false, error: { code: "NOT_FOUND", message: "USB disconnected mid-edit" } };
+            }
+            return {
+              ok: true,
+              data: {
+                firstBeatMs: payload?.request?.firstBeatMs ?? null,
+                cues: payload?.request?.cues ?? [],
+                anlzUpdated: true, edbUpdated: true, localUpdated: true,
+              },
+            };
+          }
+          if (command === "stop_playback_native" || command === "get_playback_status_native") return { ok: true, data: {} };
+          return { ok: true, data: {} };
+        },
+      },
+      event: { listen: async () => () => {} },
+    };
+  });
+}
+
+async function openUsbView(page, subView) {
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator(`.nav-item[data-view="${subView}"]`).click();
+}
+
+test("cue editor opens + saves from a USB playlist row through the USB commands", async ({ page }) => {
+  await installUsbTrackDetailMock(page);
+  await page.goto("/");
+
+  await openUsbView(page, "usb-playlists");
+  await page.locator("#refreshUsbBtn").click();
+  await page.locator('[data-usb-playlist-index="0"]').click();
+
+  const row = page.locator("#usbPlaylistTracks .track-grid-row");
+  await expect(row).toHaveCount(1);
+  await row.locator('[data-action="edit-track-detail"]').click();
+
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+  const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
+  expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
+
+  await page.locator("#trackDetailAddCue").click();
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
+  expect(saveCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
+  expect(saveCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
+  expect(saveCall.request.localTrackId).toBe("local-1");
+  expect(saveCall.request.cues).toHaveLength(2);
+  await expect(page.locator("#statusText")).toContainText("to USB");
+});
+
+test("cue editor also opens from a USB history row", async ({ page }) => {
+  await installUsbTrackDetailMock(page);
+  await page.goto("/");
+
+  await openUsbView(page, "usb-history");
+  await page.locator("#refreshHistoryBtn").click();
+  await page.locator('[data-history-index="0"]').click();
+
+  const row = page.locator("#historyTracks .track-grid-row");
+  await expect(row).toHaveCount(1);
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
+  expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
+});
+
+test("a USB-side save that fails on the device is surfaced, not silently dropped", async ({ page }) => {
+  await installUsbTrackDetailMock(page);
+  await page.goto("/");
+
+  await openUsbView(page, "usb-playlists");
+  await page.locator("#refreshUsbBtn").click();
+  await page.locator('[data-usb-playlist-index="0"]').click();
+  await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+
+  // USB yanked between open and save: the command errors.
+  await page.evaluate(() => { window.__usbSaveFails = true; });
+  await page.locator("#trackDetailAddCue").click();
+  await page.locator("#trackDetailSaveBtn").click();
+
+  await expect(page.locator("#statusText")).toContainText("USB disconnected mid-edit");
+});
+
 test("cue button is disabled for an un-analyzed track", async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");

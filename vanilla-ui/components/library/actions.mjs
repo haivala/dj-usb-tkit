@@ -82,6 +82,10 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     durationMs,
     waveformPeaksPath: track?.waveformPeaksPath || "",
     usbAnalysisPath: track?.usbAnalysisPath || "",
+    // USB rows only: the un-resolved on-device ANLZ / media paths the cue
+    // editor needs to open + save straight onto the stick.
+    usbAnalysisPathRaw: track?.usbAnalysisPathRaw || "",
+    usbMediaPath: track?.usbMediaPath || "",
     // Backend-owned on every track-returning command (derived from the file
     // path server-side when the DB column / PDB row omits it).
     formatExt: track?.formatExt || "",

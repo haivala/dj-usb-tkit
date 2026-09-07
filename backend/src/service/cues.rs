@@ -20,15 +20,20 @@ use uuid::Uuid;
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    GetTrackDetailRequest, SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, TrackCue,
-    TrackCueInput, TrackDetail,
+    GetTrackDetailRequest, GetUsbTrackDetailRequest, ResolvePlaybackSourceRequest,
+    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
+    SaveUsbTrackAnalysisEditsRequest, TrackCue, TrackCueInput, TrackDetail, UsbTrackAnalysisDetail,
+    WarningEntry,
 };
+
+use crate::edb::{find_content_id_by_path, open_edb_rw};
 
 use super::anlz::{
     AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, atomic_write_bytes,
     read_cues_from_anlz, read_first_beat_from_anlz,
 };
-use super::usb_utils::read_pwv5_from_anlz;
+use super::export_helpers::{load_table_columns_tx, write_edb_cues_for_content};
+use super::usb_utils::{read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path};
 use super::{BackendService, TRACK_COLS, apply_is_usb_path, now, row_to_track};
 
 /// Highest number of cue points a track can carry (one per CDJ hot-cue pad A–H).
@@ -64,36 +69,18 @@ pub fn import_anlz_cues_for_track(
         return Ok(());
     }
 
-    // Collapse memory + hot entries at the same position into one cue point,
-    // preferring a non-empty comment / a valid colour.
-    let mut by_position: BTreeMap<u32, (Option<u8>, Option<String>)> = BTreeMap::new();
-    for cue in read_cues_from_anlz(&bytes) {
-        let entry = by_position.entry(cue.position_ms).or_default();
-        if entry.0.is_none() && cue.color_id != 0 && is_valid_color_id(cue.color_id) {
-            entry.0 = Some(cue.color_id);
-        }
-        if entry.1.is_none() {
-            let trimmed = cue.comment.trim();
-            if !trimmed.is_empty() {
-                entry.1 = Some(trimmed.to_string());
-            }
-        }
-    }
-
     let now = now();
-    for (index, (position_ms, (color_id, name))) in
-        by_position.into_iter().take(MAX_HOT_CUES as usize).enumerate()
-    {
+    for (index, cue) in collapse_anlz_cues(&bytes).into_iter().enumerate() {
         tx.execute(
             "INSERT INTO track_cues
                (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
             params![
-                Uuid::now_v7().to_string(),
+                cue.id,
                 track_id,
-                i64::from(position_ms),
-                color_id.map(i64::from),
-                name,
+                i64::from(cue.position_ms),
+                cue.color_id.map(i64::from),
+                cue.name,
                 index as i64,
                 now,
             ],
@@ -116,6 +103,50 @@ pub fn import_anlz_cues_for_track(
             "UPDATE tracks SET first_beat_ms = ?1 WHERE id = ?2 AND first_beat_ms IS NULL",
             params![i64::from(first_beat), track_id],
         )?;
+    }
+    Ok(())
+}
+
+/// Collapse the memory + hot-cue entries in an ANLZ bundle into one dedup-by-
+/// position `TrackCue` list (capped at [`MAX_HOT_CUES`], ordered by position),
+/// preferring a non-empty comment / a valid palette colour. Each returned cue
+/// gets a fresh synthetic id — callers that persist it assign their own.
+pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
+    let mut by_position: BTreeMap<u32, (Option<u8>, Option<String>)> = BTreeMap::new();
+    for cue in read_cues_from_anlz(bytes) {
+        let entry = by_position.entry(cue.position_ms).or_default();
+        if entry.0.is_none() && cue.color_id != 0 && is_valid_color_id(cue.color_id) {
+            entry.0 = Some(cue.color_id);
+        }
+        if entry.1.is_none() {
+            let trimmed = cue.comment.trim();
+            if !trimmed.is_empty() {
+                entry.1 = Some(trimmed.to_string());
+            }
+        }
+    }
+    by_position
+        .into_iter()
+        .take(MAX_HOT_CUES as usize)
+        .map(|(position_ms, (color_id, name))| TrackCue {
+            id: Uuid::now_v7().to_string(),
+            position_ms,
+            color_id,
+            name,
+        })
+        .collect()
+}
+
+/// Read/rewrite an ANLZ `.DAT` bundle and its sibling `.EXT` in place with
+/// `edits` applied (`.EXT` only when it exists). Shared by the local
+/// analysis-cache regenerator and the USB-native save.
+fn rewrite_anlz_bundle_files(dat_path: &Path, edits: &AnlzAnalysisEdits<'_>) -> BackendResult<()> {
+    let ext_path = dat_path.with_extension("EXT");
+    let dat = std::fs::read(dat_path)?;
+    atomic_write_bytes(dat_path, &apply_analysis_edits_to_anlz(&dat, edits))?;
+    if ext_path.is_file() {
+        let ext = std::fs::read(&ext_path)?;
+        atomic_write_bytes(&ext_path, &apply_analysis_edits_to_anlz(&ext, edits))?;
     }
     Ok(())
 }
@@ -281,6 +312,78 @@ fn normalize_cues(
     Ok(out)
 }
 
+impl NormalizedCue {
+    fn to_track_cue(&self) -> TrackCue {
+        TrackCue {
+            id: Uuid::now_v7().to_string(),
+            position_ms: self.position_ms,
+            color_id: self.color_id,
+            name: self.name.clone(),
+        }
+    }
+}
+
+fn normalized_to_track_cues(cues: &[NormalizedCue]) -> Vec<TrackCue> {
+    cues.iter().map(NormalizedCue::to_track_cue).collect()
+}
+
+/// Apply a first-beat / cue-list edit to the local master in `tx`: write
+/// `tracks.first_beat_ms` and/or replace `track_cues`, and — when either
+/// changed — bump `tracks.updated_at` and reset the export markers of every
+/// app playlist containing the track (a stale on-USB bundle is refreshed only
+/// by a re-export). Shared by the local save and the USB-native save.
+fn apply_local_analysis_edits_tx(
+    tx: &rusqlite::Transaction<'_>,
+    track_id: &str,
+    first_beat_ms: Option<u32>,
+    cues: Option<&[NormalizedCue]>,
+    now: &str,
+) -> BackendResult<()> {
+    if let Some(first_beat_ms) = first_beat_ms {
+        tx.execute(
+            "UPDATE tracks SET first_beat_ms = ?1, first_beat_ms_source = 'user', updated_at = ?2 WHERE id = ?3",
+            params![i64::from(first_beat_ms), now, track_id],
+        )?;
+    }
+
+    if let Some(cues) = cues {
+        tx.execute("DELETE FROM track_cues WHERE track_id = ?1", params![track_id])?;
+        for (index, cue) in cues.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO track_cues
+                   (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                params![
+                    Uuid::now_v7().to_string(),
+                    track_id,
+                    i64::from(cue.position_ms),
+                    cue.color_id.map(i64::from),
+                    cue.name,
+                    index as i64,
+                    now,
+                ],
+            )?;
+        }
+    }
+
+    if first_beat_ms.is_some() || cues.is_some() {
+        tx.execute(
+            "UPDATE tracks SET updated_at = ?1 WHERE id = ?2",
+            params![now, track_id],
+        )?;
+        tx.execute(
+            "UPDATE playlists
+                SET updated_at = ?1,
+                    last_exported_at = NULL,
+                    last_exported_usb_root = NULL,
+                    last_exported_track_count = NULL
+              WHERE id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = ?2)",
+            params![now, track_id],
+        )?;
+    }
+    Ok(())
+}
+
 impl BackendService {
     pub fn get_track_detail(&self, req: GetTrackDetailRequest) -> BackendResult<TrackDetail> {
         let track_id = req.track_id.trim();
@@ -357,50 +460,13 @@ impl BackendService {
 
         let now = now();
         let tx = conn.transaction()?;
-
-        if let Some(first_beat_ms) = req.first_beat_ms {
-            tx.execute(
-                "UPDATE tracks SET first_beat_ms = ?1, first_beat_ms_source = 'user', updated_at = ?2 WHERE id = ?3",
-                params![i64::from(first_beat_ms), now, track_id],
-            )?;
-        }
-
-        if let Some(cues) = &normalized {
-            tx.execute("DELETE FROM track_cues WHERE track_id = ?1", params![track_id])?;
-            for (index, cue) in cues.iter().enumerate() {
-                tx.execute(
-                    "INSERT INTO track_cues
-                       (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-                    params![
-                        Uuid::now_v7().to_string(),
-                        track_id,
-                        i64::from(cue.position_ms),
-                        cue.color_id.map(i64::from),
-                        cue.name,
-                        index as i64,
-                        now,
-                    ],
-                )?;
-            }
-        }
-
-        if req.first_beat_ms.is_some() || normalized.is_some() {
-            tx.execute(
-                "UPDATE tracks SET updated_at = ?1 WHERE id = ?2",
-                params![now, track_id],
-            )?;
-            tx.execute(
-                "UPDATE playlists
-                    SET updated_at = ?1,
-                        last_exported_at = NULL,
-                        last_exported_usb_root = NULL,
-                        last_exported_track_count = NULL
-                  WHERE id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = ?2)",
-                params![now, track_id],
-            )?;
-        }
-
+        apply_local_analysis_edits_tx(
+            &tx,
+            &track_id,
+            req.first_beat_ms,
+            normalized.as_deref(),
+            &now,
+        )?;
         tx.commit()?;
 
         // Bake the edits into the cached local ANLZ bundle so the local
@@ -438,6 +504,263 @@ impl BackendService {
         })
     }
 
+    /// Read cue points + beat-grid anchor + colour waveform straight off an
+    /// on-USB ANLZ bundle, for the cue editor opened from a USB playlist /
+    /// history row. No local `tracks` row need exist.
+    pub fn get_usb_track_detail(
+        &self,
+        req: GetUsbTrackDetailRequest,
+    ) -> BackendResult<UsbTrackAnalysisDetail> {
+        let usb_root = resolve_usb_root(Some(&req.usb_root))?;
+        let raw = req.usb_analysis_path_raw.trim();
+        if raw.is_empty() {
+            return Err(BackendError::Validation(
+                "usbAnalysisPathRaw is required".to_string(),
+            ));
+        }
+        let dat_abs = resolve_usb_side_path(&usb_root, raw)
+            .ok_or_else(|| BackendError::NotFound(format!("USB analysis path not found: {raw}")))?;
+        let dat_path = Path::new(&dat_abs);
+        let bytes = std::fs::read(dat_path.with_extension("EXT"))
+            .or_else(|_| std::fs::read(dat_path))
+            .map_err(|_| {
+                BackendError::NotFound(format!("USB analysis bundle not readable: {raw}"))
+            })?;
+        if bytes.is_empty() {
+            return Err(BackendError::NotFound(format!(
+                "USB analysis bundle is empty: {raw}"
+            )));
+        }
+
+        Ok(UsbTrackAnalysisDetail {
+            first_beat_ms: read_first_beat_from_anlz(&bytes),
+            cues: collapse_anlz_cues(&bytes),
+            detail_waveform: read_pwv5_from_anlz(&dat_abs)
+                .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
+        })
+    }
+
+    /// Save a cue / beat-grid edit made from a USB view: write the on-device
+    /// ANLZ + eDB **in place** (so a CDJ sees it without a re-export) and also
+    /// write the resolved local master (so the two never diverge and export
+    /// never has to merge two edit sets). The USB must be connected — a
+    /// not-connected / missing-bundle / not-in-eDB state blocks the save with
+    /// an error rather than a silent local-only downgrade.
+    pub fn save_usb_track_analysis_edits(
+        &self,
+        req: SaveUsbTrackAnalysisEditsRequest,
+    ) -> BackendResult<SaveUsbTrackAnalysisEditsData> {
+        // 1. USB connected? A failure here is the "block the save" contract.
+        let usb_root = resolve_usb_root(Some(&req.usb_root))?;
+
+        let raw = req.usb_analysis_path_raw.trim();
+        if raw.is_empty() {
+            return Err(BackendError::Validation(
+                "usbAnalysisPathRaw is required".to_string(),
+            ));
+        }
+        // 2. Absolute ANLZ path, must exist.
+        let dat_abs = resolve_usb_side_path(&usb_root, raw)
+            .ok_or_else(|| BackendError::NotFound(format!("USB analysis path not found: {raw}")))?;
+        let dat_path = Path::new(&dat_abs);
+        if !dat_path.is_file() {
+            return Err(BackendError::NotFound(format!(
+                "USB analysis bundle missing: {raw}"
+            )));
+        }
+
+        // 3. Validate + normalise the incoming edits.
+        if let Some(first_beat_ms) = req.first_beat_ms
+            && let Some(dur) = req.duration_ms.filter(|d| *d > 0)
+            && u64::from(first_beat_ms) >= dur
+        {
+            return Err(BackendError::Validation(
+                "firstBeatMs must be less than the track duration".to_string(),
+            ));
+        }
+        let normalized = match req.cues.as_deref() {
+            Some(inputs) => Some(normalize_cues(inputs, req.duration_ms)?),
+            None => None,
+        };
+
+        // 4. Open the device eDB and locate the track *before* writing
+        //    anything, so a missing content row blocks cleanly.
+        let mut warnings: Vec<WarningEntry> = Vec::new();
+        let mut edb_conn = open_edb_rw(&usb_root, &mut warnings).ok_or_else(|| {
+            BackendError::NotFound(
+                "USB library database (exportLibrary.db) not found or unreadable".to_string(),
+            )
+        })?;
+        let content_id = find_content_id_by_path(&edb_conn, &req.usb_media_path_raw)?
+            .ok_or_else(|| {
+                BackendError::NotFound(format!(
+                    "track not in this USB's library database: {}",
+                    req.usb_media_path_raw
+                ))
+            })?;
+
+        // The cue list to reconcile onto the device: the new list when this is
+        // a cue edit (empty list clears), otherwise the bundle's current list
+        // (a first-beat-only edit must not drop existing cues).
+        let effective_cues: Vec<TrackCue> = match &normalized {
+            Some(n) => normalized_to_track_cues(n),
+            None => collapse_anlz_cues(
+                &std::fs::read(dat_path.with_extension("EXT"))
+                    .or_else(|_| std::fs::read(dat_path))
+                    .unwrap_or_default(),
+            ),
+        };
+
+        // 5. ANLZ write, in place on the device.
+        let anlz_cues = anlz_cues_from_track_cues(&effective_cues);
+        rewrite_anlz_bundle_files(
+            dat_path,
+            &AnlzAnalysisEdits {
+                bpm: req.bpm,
+                duration_ms: req.duration_ms,
+                first_beat_ms: req.first_beat_ms,
+                cues: Some(&anlz_cues),
+            },
+        )?;
+
+        // 6. Local master write (mandatory when a match is found) — before the
+        //    eDB commit so a local failure aborts before the device diverges.
+        let local_updated = match self.resolve_local_track_id_for_usb(&usb_root, &req) {
+            Some(track_id) => {
+                let mut conn = self.db.connect()?;
+                let now = now();
+                let tx = conn.transaction()?;
+                apply_local_analysis_edits_tx(
+                    &tx,
+                    &track_id,
+                    req.first_beat_ms,
+                    normalized.as_deref(),
+                    &now,
+                )?;
+                tx.commit()?;
+                if let Err(err) = self.regenerate_cached_anlz_analysis_edits(&track_id) {
+                    logging::emit(
+                        Level::Warn,
+                        "cues.usb-save.local-anlz-regenerate-failed",
+                        &format!("could not rewrite cached ANLZ for {track_id}: {err}"),
+                    );
+                }
+                true
+            }
+            None => {
+                logging::emit(
+                    Level::Warn,
+                    "cues.usb-save.no-local-match",
+                    &format!(
+                        "USB cue edit for {} matched no local track; device written, local master not",
+                        req.usb_media_path_raw
+                    ),
+                );
+                false
+            }
+        };
+
+        // 7. eDB write + write-back to the device.
+        let tx = edb_conn.transaction()?;
+        let content_columns = load_table_columns_tx(&tx, "content")?;
+        write_edb_cues_for_content(&tx, content_id, &effective_cues, &content_columns)?;
+        tx.commit()?;
+        drop(edb_conn);
+        super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)?;
+
+        // 8. Re-read the device bundle for the response.
+        let bytes = std::fs::read(dat_path.with_extension("EXT"))
+            .or_else(|_| std::fs::read(dat_path))
+            .unwrap_or_default();
+        Ok(SaveUsbTrackAnalysisEditsData {
+            first_beat_ms: read_first_beat_from_anlz(&bytes),
+            cues: collapse_anlz_cues(&bytes),
+            anlz_updated: true,
+            edb_updated: true,
+            local_updated,
+        })
+    }
+
+    /// Resolve the local `tracks` id a USB row maps to, in priority order:
+    /// frontend hint → `track_usb_links` → `resolve_playback_source`
+    /// (fingerprint/title). Only the USB→local direction is ever needed.
+    fn resolve_local_track_id_for_usb(
+        &self,
+        usb_root: &Path,
+        req: &SaveUsbTrackAnalysisEditsRequest,
+    ) -> Option<String> {
+        let conn = self.db.connect().ok()?;
+
+        // 1. Frontend hint — accept only when the row still exists.
+        if let Some(hint) = req
+            .local_track_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let existing: Option<String> = conn
+                .query_row("SELECT id FROM tracks WHERE id = ?1", params![hint], |r| {
+                    r.get(0)
+                })
+                .optional()
+                .ok()?;
+            if existing.is_some() {
+                return existing;
+            }
+        }
+
+        // 2. Authoritative link row for this device + media path.
+        let media_raw = req.usb_media_path_raw.trim();
+        if !media_raw.is_empty() {
+            let root_key =
+                super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
+            let device_id: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM usb_devices WHERE root_path_key = ?1",
+                    params![root_key],
+                    |r| r.get(0),
+                )
+                .optional()
+                .ok()?;
+            if let Some(device_id) = device_id {
+                let resolved = resolve_usb_side_path(usb_root, media_raw);
+                let link: Option<String> = conn
+                    .query_row(
+                        "SELECT track_id FROM track_usb_links
+                           WHERE usb_device_id = ?1 AND usb_file_path IN (?2, ?3) LIMIT 1",
+                        params![device_id, media_raw, resolved],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .ok()?;
+                if link.is_some() {
+                    return link;
+                }
+            }
+        }
+
+        // 3. Fingerprint / title fallback.
+        let title = req.title.as_deref().unwrap_or_default().trim().to_string();
+        let artist = req.artist.as_deref().unwrap_or_default().trim().to_string();
+        if title.is_empty() && artist.is_empty() {
+            return None;
+        }
+        let resolved = self
+            .resolve_playback_source(ResolvePlaybackSourceRequest {
+                title,
+                artist,
+                album: req.album.clone(),
+                bpm: req.bpm,
+                file_path: Some(req.usb_media_path_raw.clone()),
+                file_size_bytes: None,
+                track_id: None,
+            })
+            .ok()?;
+        matches!(resolved.matched_by.as_str(), "self" | "hash" | "metadata")
+            .then_some(resolved.track_id)
+            .flatten()
+    }
+
     /// Rewrite the cached local ANLZ bundle (`.DAT`/`.EXT`) for a track so it
     /// carries the current `track_cues` + stored first beat.
     ///
@@ -465,7 +788,6 @@ impl BackendService {
             return Ok(false);
         };
         let dat_path = Path::new(&dat_path);
-        let ext_path = dat_path.with_extension("EXT");
         if !dat_path.is_file() {
             return Ok(false);
         }
@@ -478,12 +800,7 @@ impl BackendService {
             cues: Some(&cues),
         };
 
-        let dat = std::fs::read(dat_path)?;
-        atomic_write_bytes(dat_path, &apply_analysis_edits_to_anlz(&dat, &edits))?;
-        if ext_path.is_file() {
-            let ext = std::fs::read(&ext_path)?;
-            atomic_write_bytes(&ext_path, &apply_analysis_edits_to_anlz(&ext, &edits))?;
-        }
+        rewrite_anlz_bundle_files(dat_path, &edits)?;
         Ok(true)
     }
 }

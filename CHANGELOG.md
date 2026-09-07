@@ -54,8 +54,23 @@
   memory cue and a hot-cue pad (A–H, colour), baked into the local analysis
   files and the USB Rekordbox database (`PCOB`/`PCPT` + `PCO2`/`PCP2` ANLZ
   chunks and the eDB `cue` table), and preserved when a stick is re-imported.
-- **Chore:** documented the new `track_cues` table, the two new commands
-  (`get_track_detail`, `save_track_analysis_edits`), and the cue/beat-grid
+- **New feature:** the cue / beat-grid editor now opens on **every** playlist-view
+  track row — Library, app playlists, USB playlists, and USB history — not just
+  Library. Editing a Library or app-playlist row writes the local master (and
+  resets the affected playlists' export markers so a re-export refreshes the
+  stick). Editing a USB row writes that stick's ANLZ + Rekordbox database **in
+  place** (a CDJ sees the change with no re-export) *and* writes the same edit
+  into the local master, so the two never diverge; that path requires the USB to
+  be connected and blocks with a clear message otherwise. The local analysis
+  stays the single source of truth — export just reconciles each stick to it.
+- **Improvement:** on export, the on-USB analysis bundle is now reconciled to the
+  local master unconditionally on both the retain and fresh paths, instead of via
+  a per-path "has edits" heuristic — no behaviour change on any currently
+  reachable input, but a future change to the export analysis gate can no longer
+  silently reintroduce a stale-cue path.
+- **Chore:** documented the new `track_cues` table, the four cue/beat-grid
+  commands (`get_track_detail`, `save_track_analysis_edits`,
+  `get_usb_track_detail`, `save_usb_track_analysis_edits`), and the cue/beat-grid
   export & import paths across the `docs/` set.
 - **Improvement:** a USB export is now blocked when *any* track in the playlist
   lives under a missing source folder, not just one on the currently loaded

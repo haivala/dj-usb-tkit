@@ -22,6 +22,8 @@ use crate::models::{
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
     GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbTrackDetailRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
+    UsbTrackAnalysisDetail,
     GetUsbDeviceNameData,
     GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
     InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
@@ -683,6 +685,22 @@ pub fn save_track_analysis_edits(
     request: SaveTrackAnalysisEditsRequest,
 ) -> ApiResponse<SaveTrackAnalysisEditsData> {
     state.save_track_analysis_edits(request)
+}
+
+#[tauri::command]
+pub fn get_usb_track_detail(
+    state: State<'_, BackendCommands>,
+    request: GetUsbTrackDetailRequest,
+) -> ApiResponse<UsbTrackAnalysisDetail> {
+    state.get_usb_track_detail(request)
+}
+
+#[tauri::command]
+pub fn save_usb_track_analysis_edits(
+    state: State<'_, BackendCommands>,
+    request: SaveUsbTrackAnalysisEditsRequest,
+) -> ApiResponse<SaveUsbTrackAnalysisEditsData> {
+    state.save_usb_track_analysis_edits(request)
 }
 
 #[tauri::command]

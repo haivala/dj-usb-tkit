@@ -1606,7 +1606,7 @@ export function usbPlaylistRowOptions() {
     actionLabel: "+",
     actionType: "add-usb",
     compactAddButton: true,
-    enableAnalyzeActions: false,
+    enableAnalyzeActions: true,
     origin: "usb",
     secondaryActionLabel: "Play",
     secondaryActionType: "play-usb"
@@ -1643,7 +1643,7 @@ export function usbHistoryRowOptions() {
     actionLabel: "+",
     actionType: "add-history",
     compactAddButton: true,
-    enableAnalyzeActions: false,
+    enableAnalyzeActions: true,
     origin: "usb",
     secondaryActionLabel: "Play",
     secondaryActionType: "play-history"

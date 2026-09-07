@@ -1952,3 +1952,64 @@ pub struct SaveTrackAnalysisEditsData {
     /// (the edits are still persisted and applied at the next analysis/export).
     pub anlz_regenerated: bool,
 }
+
+// ── USB-native cue editing (edits an on-device bundle directly) ────────────
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsbTrackDetailRequest {
+    pub usb_root: String,
+    /// `UsbTrack.usb_analysis_path_raw` — the un-resolved on-device ANLZ path.
+    pub usb_analysis_path_raw: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbTrackAnalysisDetail {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_beat_ms: Option<u32>,
+    pub cues: Vec<TrackCue>,
+    /// Base64 PWV5 colour-detail waveform, same encoding as `TrackDetail`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail_waveform: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveUsbTrackAnalysisEditsRequest {
+    pub usb_root: String,
+    pub usb_analysis_path_raw: String,
+    /// eDB `content.path` lookup key (the PDB-relative media path).
+    pub usb_media_path_raw: String,
+    #[serde(default)]
+    pub bpm: Option<f64>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub first_beat_ms: Option<u32>,
+    /// `None` ⇒ leave the cue list unchanged; `Some(_)` ⇒ full replace.
+    #[serde(default)]
+    pub cues: Option<Vec<TrackCueInput>>,
+    /// Hint from `UsbTrack.local_track_id`; the save still verifies the row.
+    #[serde(default)]
+    pub local_track_id: Option<String>,
+    /// Metadata for the fingerprint fallback when no id hint / link row matches.
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub album: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveUsbTrackAnalysisEditsData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_beat_ms: Option<u32>,
+    pub cues: Vec<TrackCue>,
+    pub anlz_updated: bool,
+    pub edb_updated: bool,
+    /// `false` only when no local `tracks` row could be matched.
+    pub local_updated: bool,
+}

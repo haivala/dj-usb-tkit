@@ -504,7 +504,7 @@ const playlistTracksCtl = createTrackListController({
       origin: "local",
       secondaryActionLabel: "Play",
       secondaryActionType: "play-library",
-      enableAnalyzeActions: false,
+      enableAnalyzeActions: true,
       actionLabel: "×",
       actionType: "remove-playlist-track",
       compactAddButton: true,

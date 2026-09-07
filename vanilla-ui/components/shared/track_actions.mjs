@@ -70,7 +70,9 @@ export function handleTrackAction({ action, track, origin, target, event, state,
   }
 
   if (action === "edit-track-detail") {
-    ctx.openTrackDetail?.(track)?.catch?.(catchErr(emitStatus));
+    // Tag the row's origin so the modal knows whether to edit the local
+    // master (Library / app playlist) or the on-USB bundle directly.
+    ctx.openTrackDetail?.({ ...track, origin })?.catch?.(catchErr(emitStatus));
     return true;
   }
 

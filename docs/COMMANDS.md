@@ -86,6 +86,19 @@ drive selection from being rendered against a newer selected drive.
   A `null` field is left unchanged. `cues[]` entries are
   `{ positionMs, colorId?, name? }`; each becomes a memory point + a hot-cue pad
   on export.
+- `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw }` → reads
+  `{ firstBeatMs, cues, detailWaveform }` straight off an **on-USB** ANLZ bundle
+  for the cue editor opened from a USB playlist / history row (no local `tracks`
+  row need exist).
+- `save_usb_track_analysis_edits` — `{ usbRoot, usbAnalysisPathRaw,
+  usbMediaPathRaw, bpm?, durationMs?, firstBeatMs?, cues?, localTrackId?,
+  title?, artist?, album? }` → writes the on-device ANLZ + eDB **in place** and
+  also writes the resolved local master (so the two never diverge), clearing
+  `last_exported_*` on every playlist containing the track. The USB must be
+  connected: a not-connected root, a missing bundle, or a track absent from the
+  USB's eDB blocks the save with an error rather than a silent local-only
+  downgrade. Returns `{ firstBeatMs, cues, anlzUpdated, edbUpdated, localUpdated }`
+  (`localUpdated: false` only when no local track matched).
 
 ### Settings
 

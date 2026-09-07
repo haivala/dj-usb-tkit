@@ -807,6 +807,8 @@ fn main() {
             backend::tauri_commands::resolve_track_identity,
             backend::tauri_commands::get_track_detail,
             backend::tauri_commands::save_track_analysis_edits,
+            backend::tauri_commands::get_usb_track_detail,
+            backend::tauri_commands::save_usb_track_analysis_edits,
             backend::tauri_commands::remove_tracks_by_source_roots,
             backend::tauri_commands::relocate_source_root,
             backend::tauri_commands::get_tracks_by_ids_with_previews,

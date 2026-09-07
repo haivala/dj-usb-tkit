@@ -324,7 +324,9 @@ pub fn export_artwork_for_player(
 
 // Re-export analysis helpers so they're available via export_helpers::*
 pub use super::super::anlz::canonical_analysis_bundle_paths;
-use super::super::anlz::{AnlzAnalysisEdits, apply_analysis_edits_to_anlz, ensure_ppth_chunk};
+use super::super::anlz::{
+    AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, ensure_ppth_chunk,
+};
 use super::super::cues::anlz_cues_from_track_cues;
 
 fn write_bytes_if_different(target: &Path, bytes: &[u8]) -> BackendResult<()> {
@@ -340,6 +342,25 @@ fn write_bytes_if_different(target: &Path, bytes: &[u8]) -> BackendResult<()> {
         std::fs::write(target, bytes)?;
     }
     Ok(())
+}
+
+/// Build the ANLZ reconciliation for an export track from the local master,
+/// unconditionally. Both export paths (retain + fresh) apply this so the
+/// on-USB bundle always ends up matching the local analysis: cues (an empty
+/// list clears them), user first beat, analyzed tempo. Applying it on every
+/// track is free — `apply_analysis_edits_to_anlz` plus `write_bytes_if_different`
+/// make an already-correct bundle a no-op — and it removes the incidental
+/// `has_edits` predicate a future change to the export gate could quietly break.
+fn anlz_edits_from_export_track<'a>(
+    track: &'a ExportTrackData,
+    cues: &'a [AnlzCue],
+) -> AnlzAnalysisEdits<'a> {
+    AnlzAnalysisEdits {
+        bpm: track.bpm,
+        duration_ms: track.duration_ms,
+        first_beat_ms: track.first_beat_ms,
+        cues: Some(cues),
+    }
 }
 
 fn write_anlz_with_export_path(
@@ -379,27 +400,16 @@ pub fn ensure_analysis_bundle_ppth(
     let twoex_path = dat_path.with_extension("2EX");
 
     let cues = anlz_cues_from_track_cues(&track.cues);
-    // A positive bpm alone is enough to trigger a beat-grid rebuild -- when
-    // there's no explicit first_beat_ms, apply_analysis_edits_to_anlz reuses
-    // whatever anchor is already embedded in the bundle, so this only ever
-    // corrects tempo, never discards a decent existing anchor. Cheap either
-    // way: write_bytes_if_different makes an already-correct bundle a no-op.
-    let has_edits = !track.cues.is_empty()
-        || track.first_beat_ms.is_some()
-        || track.bpm.is_some_and(|b| b > 0.0);
-    let edits = has_edits.then_some(AnlzAnalysisEdits {
-        bpm: track.bpm,
-        duration_ms: track.duration_ms,
-        first_beat_ms: track.first_beat_ms,
-        cues: Some(cues.as_slice()),
-    });
+    // Reconcile the on-USB bundle to the local master unconditionally (see
+    // `anlz_edits_from_export_track`): a positive bpm alone rebuilds the beat
+    // grid against whatever anchor is already embedded, an empty cue list
+    // clears cues, and an already-correct bundle is a no-op via
+    // `write_bytes_if_different`.
+    let edits = anlz_edits_from_export_track(track, cues.as_slice());
 
     for path in [&dat_path, &ext_path] {
         let bytes = std::fs::read(path)?;
-        let mut out = ensure_ppth_chunk(&bytes, track_path);
-        if let Some(edits) = &edits {
-            out = apply_analysis_edits_to_anlz(&out, edits);
-        }
+        let out = apply_analysis_edits_to_anlz(&ensure_ppth_chunk(&bytes, track_path), &edits);
         write_bytes_if_different(path, &out)?;
     }
     let bytes = std::fs::read(&twoex_path)?;
@@ -449,16 +459,13 @@ pub fn export_analysis_bundle_for_track(
     if let Some(parent) = dat_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    // Reconcile to the local master unconditionally — same builder the retain
+    // path uses, so both stay aligned and neither depends on an incidental
+    // "bpm is always set at export" invariant.
     let cues = anlz_cues_from_track_cues(&track.cues);
-    let has_edits = !track.cues.is_empty() || track.first_beat_ms.is_some();
-    let edits = has_edits.then_some(AnlzAnalysisEdits {
-        bpm: track.bpm,
-        duration_ms: track.duration_ms,
-        first_beat_ms: track.first_beat_ms,
-        cues: Some(cues.as_slice()),
-    });
-    write_anlz_with_export_path(local_dat, &dat_path, track_path, edits.as_ref())?;
-    write_anlz_with_export_path(&local_ext, &ext_path, track_path, edits.as_ref())?;
+    let edits = anlz_edits_from_export_track(track, cues.as_slice());
+    write_anlz_with_export_path(local_dat, &dat_path, track_path, Some(&edits))?;
+    write_anlz_with_export_path(&local_ext, &ext_path, track_path, Some(&edits))?;
     write_anlz_with_export_path(&local_twoex, &twoex_path, track_path, None)?;
     Ok(to_usb_relative_path(usb_root, &dat_path.to_string_lossy())
         .or_else(|| Some(dat_path.to_string_lossy().to_string())))

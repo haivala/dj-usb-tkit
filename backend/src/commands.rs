@@ -15,6 +15,8 @@ use crate::models::{
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
     GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbTrackDetailRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
+    UsbTrackAnalysisDetail,
     GetUsbDeviceNameData,
     GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
     InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
@@ -133,6 +135,20 @@ impl BackendCommands {
         req: SaveTrackAnalysisEditsRequest,
     ) -> ApiResponse<SaveTrackAnalysisEditsData> {
         wrap(self.service.save_track_analysis_edits(req))
+    }
+
+    pub fn get_usb_track_detail(
+        &self,
+        req: GetUsbTrackDetailRequest,
+    ) -> ApiResponse<UsbTrackAnalysisDetail> {
+        wrap(self.service.get_usb_track_detail(req))
+    }
+
+    pub fn save_usb_track_analysis_edits(
+        &self,
+        req: SaveUsbTrackAnalysisEditsRequest,
+    ) -> ApiResponse<SaveUsbTrackAnalysisEditsData> {
+        wrap(self.service.save_usb_track_analysis_edits(req))
     }
 
     pub fn relocate_source_root(

@@ -468,10 +468,74 @@ export function createTrackDetailController(el) {
   return api;
 }
 
+/// Open the modal for a track from a USB view (playlists or history): fetch the
+/// detail straight off the on-device ANLZ bundle and, on Save, write the edit
+/// onto that USB *and* into the local master. The USB must be connected — a
+/// not-connected row is blocked here, never silently downgraded to local-only.
+async function openUsbTrackDetail(track, deps) {
+  const { command, trackDetailDialog, emitStatus, state } = deps;
+
+  if (!state?.usbRootValid || !state?.usbRoot) {
+    emitStatus("Connect the USB this track is on before editing its cues.");
+    return;
+  }
+  const usbAnalysisPathRaw = track.usbAnalysisPathRaw;
+  if (!usbAnalysisPathRaw) {
+    emitStatus("Analyze this track first to edit its cues.");
+    return;
+  }
+
+  let detail;
+  try {
+    detail = await command("get_usb_track_detail", {
+      usbRoot: state.usbRoot,
+      usbAnalysisPathRaw,
+    });
+  } catch (err) {
+    emitStatus(`Could not open cue editor: ${err.message}`);
+    return;
+  }
+  if (!detail.detailWaveform) {
+    emitStatus("Analyze this track first to edit its cues.");
+    return;
+  }
+
+  const payload = await trackDetailDialog.open({
+    track: { ...track, detailWaveform: detail.detailWaveform },
+    firstBeatMs: detail.firstBeatMs,
+    cues: detail.cues,
+    durationMs: track.durationMs,
+    bpm: track.bpm,
+  });
+  if (!payload) return;
+
+  try {
+    const saved = await command("save_usb_track_analysis_edits", {
+      usbRoot: state.usbRoot,
+      usbAnalysisPathRaw,
+      usbMediaPathRaw: track.usbMediaPath,
+      bpm: track.bpm,
+      durationMs: track.durationMs,
+      firstBeatMs: payload.firstBeatMs,
+      cues: payload.cues,
+      localTrackId: track.localTrackId || null,
+    });
+    const n = saved.cues.length;
+    emitStatus(`Saved ${n} cue${n === 1 ? "" : "s"} to USB`);
+  } catch (err) {
+    emitStatus(`Could not save cues: ${err.message}`);
+  }
+}
+
 /// Open the modal for a track: resolve to a local id, fetch detail, and on Save
 /// persist the edits.
 export async function openTrackDetail(track, deps) {
   const { command, resolveLocalTrackIdAsync, trackDetailDialog, emitStatus } = deps;
+
+  if (track?.origin === "usb") {
+    return openUsbTrackDetail(track, deps);
+  }
+
   let localId = null;
   try {
     localId = await resolveLocalTrackIdAsync(track);
