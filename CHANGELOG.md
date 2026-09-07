@@ -57,8 +57,10 @@
 - **New feature:** cue points and the beat-grid first beat are now editable. A
   per-track modal (opened from the magnifier button next to a track's waveform)
   shows the full-detail colour waveform with a beat-grid overlay and
-  **scroll-to-zoom / drag-to-pan** (opens zoomed to the first ~2 minutes, "Fit"
-  shows the whole track); click the waveform to play from a point (the view
+  **scroll-to-zoom / drag-to-pan** (opens zoomed to the first ~2 minutes, with a
+  readout above the waveform naming the visible window vs the track length — e.g.
+  "0:00–2:00 of 5:34" — so the zoomed-in start is unmistakable; "Fit" shows the
+  whole track); click the waveform to play from a point (the view
   follows the playhead), **double-click to add a cue there** (or play and hit
   "+ Cue" to drop one at the playhead; up to 8, each auto-named "Cue 1", "Cue
   2", … with a distinct default colour and both editable), and every cue row
@@ -81,6 +83,10 @@
   acted on a track's local library copy. That button is now hidden on the USB
   lists; it stays on the Library and app-playlist lists. The cue-editor button is
   unaffected.
+- **Fix:** the cue / beat-grid editor button was rendered on app-playlist track
+  rows but did nothing when clicked — the playlist track list's click handler
+  only routed play/scrub actions. It now routes the cue-editor and per-track
+  analyze buttons too, matching the Library list.
 - **Improvement:** on export, the on-USB analysis bundle is now reconciled to the
   local master unconditionally on both the retain and fresh paths, instead of via
   a per-path "has edits" heuristic — no behaviour change on any currently

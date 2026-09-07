@@ -98,7 +98,12 @@ export function bindPlaylistEvents(ctx) {
     }
 
     const action = actionTarget?.dataset?.action;
-    if (action === "play-library" || action === "scrub-play") {
+    if (
+      action === "play-library" ||
+      action === "scrub-play" ||
+      action === "edit-track-detail" ||
+      action === "analyze-track"
+    ) {
       const track = resolveRowActionTrack(playlistTracksCtl.view, actionTarget);
       if (!track) return;
       const rowKey = actionTarget?.closest(".track-grid-row")?.dataset?.playbackRow || null;

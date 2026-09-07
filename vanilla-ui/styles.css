@@ -3430,6 +3430,14 @@ td button[data-action]:disabled,
   background: var(--card);
 }
 .track-detail-zoom .track-detail-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-detail-zoom-range {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.track-detail-zoom-range.is-zoomed { color: var(--accent); font-weight: 600; }
 .track-detail-zoom-btns { display: flex; gap: 4px; flex: none; }
 .track-detail-zoom button {
   padding: 2px 10px;

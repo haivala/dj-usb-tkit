@@ -36,6 +36,12 @@ function formatMs(ms) {
   return `${m}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
 }
 
+// m:ss, for the zoom-range readout (no centiseconds — it's a coarse orientation cue).
+function formatClock(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 let tempIdSeq = 0;
 
 const raf = (cb) => (globalThis.requestAnimationFrame || ((f) => setTimeout(f, 16)))(cb);
@@ -272,12 +278,32 @@ export function createTrackDetailController(el) {
     if (el.trackDetailAddCue) el.trackDetailAddCue.disabled = working.cues.length >= MAX_CUES;
   }
 
+  // The modal opens zoomed to the first ~2 min, so make it unmistakable that
+  // the waveform is a window, not the whole track: show the visible span vs the
+  // track length ("0:00–2:00 of 5:34"), accented while zoomed, and point at Fit.
+  function renderZoomHint() {
+    const out = el.trackDetailZoomRange;
+    if (!out) return;
+    const dur = working.durationMs || 0;
+    const zoomed = dur > 0 && viewSpanMs() < dur - 1;
+    out.classList.toggle("is-zoomed", zoomed);
+    if (!dur) {
+      out.hidden = true;
+      return;
+    }
+    out.hidden = false;
+    out.textContent = zoomed
+      ? `${formatClock(working.view.startMs)}–${formatClock(working.view.endMs)} of ${formatClock(dur)} · “Fit” shows all`
+      : "Whole track";
+  }
+
   function renderView() {
     if (!open) return;
     renderWaveform();
     renderBeatgrid();
     renderMarkers();
     positionModalPlayhead();
+    renderZoomHint();
   }
 
   function render() {

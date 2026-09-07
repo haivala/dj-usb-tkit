@@ -201,13 +201,114 @@ test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows 
   // Default view is 0–120 s, so only the 30 s cue is on screen.
   await expect(visibleMarkers).toHaveCount(1);
 
+  // The zoom-range readout makes the initial zoomed-in view unmistakable: it
+  // names the visible window vs the 3-min track and points at Fit.
+  const zoomRange = page.locator("#trackDetailZoomRange");
+  await expect(zoomRange).toBeVisible();
+  await expect(zoomRange).toHaveClass(/is-zoomed/);
+  await expect(zoomRange).toContainText("0:00–2:00 of 3:00");
+
   await page.locator("#trackDetailZoomFit").click();
   await expect(visibleMarkers).toHaveCount(2);
+  // Fully zoomed out, the readout switches to a plain "whole track" state.
+  await expect(zoomRange).not.toHaveClass(/is-zoomed/);
+  await expect(zoomRange).toHaveText("Whole track");
 
   // Scroll-wheel zoom toward the left edge → the 170 s cue leaves the view again.
   await page.locator("#trackDetailWaveform").hover({ position: { x: 15, y: 100 } });
   await page.mouse.wheel(0, -500);
   await expect(visibleMarkers).toHaveCount(1);
+});
+
+test("cue editor opens + saves from an app-playlist track row", async ({ page }) => {
+  // Regression: the app-playlist panel click handler only routed play/scrub
+  // actions to handleTrackAction, so the cue button (added to every track list)
+  // was inert there — clicking it did nothing.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    window.__calls = [];
+
+    const pwv5 = new Uint8Array(4000);
+    for (let i = 0; i < pwv5.length; i += 2) {
+      const h = 8 + (i % 20);
+      const v = (2 << 13) | (3 << 10) | (5 << 7) | (h << 2);
+      pwv5[i] = (v >> 8) & 0xff;
+      pwv5[i + 1] = v & 0xff;
+    }
+    const detailWaveformB64 = btoa(String.fromCharCode.apply(null, pwv5));
+
+    const track = {
+      id: "plt-entry-1",
+      localTrackId: "local-1",
+      title: "Playlist Cue Track",
+      artist: "Artist",
+      album: "Album",
+      filePath: "/music/one.mp3",
+      bpm: 128,
+      durationMs: 180000,
+      analysisReady: true,
+      waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
+    };
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request ?? payload;
+          window.__calls.push({ command, request: request ?? null });
+          if (command === "clear_frontend_log") return "";
+          if (command === "append_frontend_log") return null;
+          if (command === "show_window") return null;
+          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "get_backend_log_buffer") return [];
+          if (command === "list_playlists") {
+            return { ok: true, data: { items: [{ id: "pl-1", name: "My Set", source: "local", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] } };
+          }
+          if (command === "get_playlist_tracks") {
+            return { ok: true, data: { playlistId: "pl-1", items: [track], total: 1, nextCursor: null, hasMore: false, totalDurationMs: 180000, durationKnownCount: 1, unanalyzedCount: 0 } };
+          }
+          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+            return { ok: true, data: { total: 0, items: [], nextCursor: null, hasMore: false } };
+          }
+          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], warnings: [] } };
+          }
+          if (command === "resolve_track_identity") {
+            return { ok: true, data: { trackId: "local-1", resolvedBy: "self", materialized: false } };
+          }
+          if (command === "get_track_detail") {
+            return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64 } };
+          }
+          if (command === "save_track_analysis_edits") {
+            return { ok: true, data: { trackId: "local-1", firstBeatMs: request?.firstBeatMs ?? null, cues: request?.cues ?? [], anlzRegenerated: true } };
+          }
+          if (command === "stop_playback_native" || command === "get_playback_status_native") return { ok: true, data: {} };
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        },
+      },
+      event: { listen: async () => () => {} },
+    };
+  });
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const row = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(row).toHaveCount(1);
+
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("90");
+
+  await page.locator("#trackDetailAddCue").click();
+  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_track_analysis_edits"));
+  expect(saveCall).toBeTruthy();
+  expect(saveCall.request.trackId).toBe("local-1");
+  expect(saveCall.request.cues).toHaveLength(1);
 });
 
 // --- Cue editor opened from a USB view (playlists / history) ---------------
