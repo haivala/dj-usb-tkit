@@ -30,6 +30,10 @@
 
 ## Unreleased
 
+- **Improvement:** local track analysis (BPM/key/beat-grid) is now several times
+  faster. The release build was compiling the audio-analysis engine and its FFT
+  backend size-first (`opt-level = "z"`); they now build speed-first while the
+  rest of the binary stays size-optimized.
 - **Fix:** a track re-analyzed to a corrected BPM could still export with its
   old beat grid (e.g. a hardcoded 120 BPM default) when the on-USB bundle
   already existed and had no cues/first-beat edit to trigger a rebuild — CDJ
