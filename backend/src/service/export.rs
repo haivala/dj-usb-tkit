@@ -1508,6 +1508,8 @@ impl BackendService {
             )?;
         }
 
+        self.invalidate_usb_parse_cache();
+
         Ok(ExportToUsbData {
             job_id: String::new(),
             playlist_id: playlist.id,

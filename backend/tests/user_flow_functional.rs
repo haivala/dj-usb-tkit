@@ -4,9 +4,11 @@ use std::path::PathBuf;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
+    AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistRequest,
+    AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
     CreatePlaylistRequest, DedupeMode, ExportToUsbOptions, ExportToUsbRequest,
-    FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
+    GetPlaylistTracksRequest,
     GetTrackDetailRequest, GetTracksByIdsRequest, GetUsbTrackDetailRequest, InitializeUsbRequest,
     MaterializeSourceTrackRequest, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsRequest,
     ScanLibraryRequest, SearchTracksRequest, TrackCueInput,
@@ -257,11 +259,22 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         .iter()
         .find(|p| p.name == "Flow Source Playlist" && !p.tracks.is_empty())
         .unwrap_or_else(|| panic!("expected exported USB playlist in {:?}", usb_items));
-    let usb_local_track_id = usb_playlist
-        .tracks
+    // Local-row materialization + `local_track_id` now happen on the paginated
+    // page fetch, not the bare import.
+    let usb_page = backend.fetch_usb_playlist_tracks(FetchUsbTracksRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        id: usb_playlist.id.clone(),
+        limit: 150,
+        ..Default::default()
+    });
+    assert!(usb_page.ok, "fetch usb playlist tracks failed: {usb_page:?}");
+    let usb_local_track_id = usb_page
+        .data
+        .expect("usb playlist track page")
+        .items
         .iter()
         .find_map(|t| t.local_track_id.clone())
-        .expect("expected local_track_id from usb playlist materialization");
+        .expect("expected local_track_id from usb playlist page materialization");
 
     let usb_histories = backend.fetch_usb_histories(FetchUsbHistoriesRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -275,17 +288,32 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         !history_items.is_empty(),
         "expected at least one injected history playlist"
     );
-    let history_local_track_id = history_items
-        .iter()
-        .flat_map(|h| h.tracks.iter())
-        .filter_map(|t| t.local_track_id.clone())
-        .find(|id| id != &usb_local_track_id)
-        .unwrap_or_else(|| {
-            panic!(
-                "expected distinct history local track id: {:?}",
-                history_items
-            )
+    let mut history_local_track_id = None;
+    for history in &history_items {
+        let page = backend.fetch_usb_history_tracks(FetchUsbTracksRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            id: history.id.clone(),
+            limit: 150,
+            ..Default::default()
         });
+        assert!(page.ok, "fetch usb history tracks failed: {page:?}");
+        history_local_track_id = page
+            .data
+            .expect("usb history track page")
+            .items
+            .iter()
+            .filter_map(|t| t.local_track_id.clone())
+            .find(|id| id != &usb_local_track_id);
+        if history_local_track_id.is_some() {
+            break;
+        }
+    }
+    let history_local_track_id = history_local_track_id.unwrap_or_else(|| {
+        panic!(
+            "expected distinct history local track id: {:?}",
+            history_items
+        )
+    });
     let library_track_id = remaining_ids
         .iter()
         .find(|id| *id != &usb_local_track_id && *id != &history_local_track_id)
@@ -859,13 +887,65 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
     assert!(cue_update_count >= 1, "cueUpdateCount should be bumped");
     drop(conn);
 
-    // Re-import the exported stick into a clean library: cues + first beat come back.
+    // Re-import the exported stick into a clean library, then add the track to
+    // a local playlist -- the ANLZ cue / first-beat import now happens on the
+    // add-to-playlist path (not the bare USB import).
     let fresh_data_dir = root.path().join("data2");
     let fresh = BackendCommands::new(&fresh_data_dir).expect("fresh backend");
     let imported = fresh.fetch_usb_playlists(FetchUsbPlaylistsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
     });
     assert!(imported.ok, "fetch usb playlists failed: {imported:?}");
+    let imported_playlist = imported
+        .data
+        .expect("imported usb playlists")
+        .items
+        .into_iter()
+        .find(|p| !p.tracks.is_empty())
+        .expect("a non-empty imported usb playlist");
+    let imported_page = fresh.fetch_usb_playlist_tracks(FetchUsbTracksRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        id: imported_playlist.id.clone(),
+        limit: 150,
+        ..Default::default()
+    });
+    assert!(
+        imported_page.ok,
+        "fetch imported usb playlist tracks failed: {imported_page:?}"
+    );
+    let imported_usb_track = imported_page
+        .data
+        .expect("imported usb page")
+        .items
+        .into_iter()
+        .find(|t| !t.title.starts_with("Unknown"))
+        .expect("a resolved imported usb track");
+    let fresh_playlist_id = fresh
+        .create_playlist(CreatePlaylistRequest {
+            name: "Cue Reimport".to_string(),
+        })
+        .data
+        .expect("fresh playlist")
+        .playlist_id;
+    let add_reimported = fresh.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
+        playlist_id: fresh_playlist_id,
+        tracks: vec![AddTrackCandidate {
+            track_id: Some(imported_usb_track.id.clone()),
+            local_track_id: imported_usb_track.local_track_id.clone(),
+            title: imported_usb_track.title.clone(),
+            artist: imported_usb_track.artist.clone(),
+            file_path: Some(imported_usb_track.file_path.clone()),
+            file_size_bytes: imported_usb_track.file_size_bytes,
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            usb_analysis_path: imported_usb_track.usb_analysis_path.clone(),
+            ..Default::default()
+        }],
+        dedupe: DedupeMode::Skip,
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        usb_root_valid: true,
+    });
+    assert!(add_reimported.ok, "add reimported failed: {add_reimported:?}");
+    assert_eq!(add_reimported.data.expect("add reimported data").added, 1);
 
     let fresh_db = rusqlite::Connection::open(fresh_data_dir.join("backend.db")).expect("open db2");
     let (imported_track_id, imported_first_beat): (String, Option<i64>) = fresh_db
@@ -895,6 +975,101 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         .collect::<Result<_, _>>()
         .expect("collect");
     assert_eq!(positions, vec![2_000, 6_000]);
+}
+
+/// A USB-only track that is added to a local playlist *without ever being
+/// page-viewed* (so it has no `localTrackId`) must still be materialized on
+/// demand -- created/linked and its ANLZ cues + beat grid imported -- via
+/// `materialize_usb_add_candidate`, not silently dropped.
+#[test]
+fn add_never_viewed_usb_track_materializes_row_and_imports_anlz_cues() {
+    let root = tempdir().expect("temp root");
+    let (_backend, _data_dir, usb, _track_id, _playlist_id) = export_one_track_with_cues(
+        root.path(),
+        vec![
+            TrackCueInput { position_ms: 2_000, color_id: None, name: Some("Verse".into()) },
+            TrackCueInput { position_ms: 6_000, color_id: Some(3), name: Some("Drop".into()) },
+        ],
+    );
+
+    // Fresh library: import the stick's playlist list only (no page fetch, so
+    // nothing is materialized), then add straight from that payload.
+    let fresh_data_dir = root.path().join("data_fresh");
+    let fresh = BackendCommands::new(&fresh_data_dir).expect("fresh backend");
+    let usb_track = fresh
+        .fetch_usb_playlists(FetchUsbPlaylistsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("usb playlists")
+        .items
+        .into_iter()
+        .flat_map(|p| p.tracks)
+        .find(|t| !t.title.starts_with("Unknown"))
+        .expect("a resolved usb track");
+    assert!(
+        usb_track.local_track_id.is_none(),
+        "bare import must not materialize a local id"
+    );
+
+    let playlist_id = fresh
+        .create_playlist(CreatePlaylistRequest {
+            name: "Never Viewed".to_string(),
+        })
+        .data
+        .expect("playlist")
+        .playlist_id;
+    let added = fresh.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        tracks: vec![AddTrackCandidate {
+            track_id: Some(usb_track.id.clone()),
+            title: usb_track.title.clone(),
+            artist: usb_track.artist.clone(),
+            file_path: Some(usb_track.file_path.clone()),
+            file_size_bytes: usb_track.file_size_bytes,
+            usb_analysis_path: usb_track.usb_analysis_path.clone(),
+            ..Default::default()
+        }],
+        dedupe: DedupeMode::Skip,
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        usb_root_valid: true,
+    });
+    assert!(added.ok, "add candidate failed: {added:?}");
+    let added = added.data.expect("add data");
+    assert_eq!(added.added, 1, "never-viewed usb track should still be added");
+    assert_eq!(added.resolutions[0].resolved_by, "usbMaterialized");
+    let materialized_id = added.resolutions[0]
+        .track_id
+        .clone()
+        .expect("materialized local id");
+
+    let fresh_db =
+        rusqlite::Connection::open(fresh_data_dir.join("backend.db")).expect("open fresh db");
+    let first_beat: Option<i64> = fresh_db
+        .query_row(
+            "SELECT first_beat_ms FROM tracks WHERE id = ?1",
+            [&materialized_id],
+            |row| row.get(0),
+        )
+        .expect("materialized track row");
+    assert_eq!(first_beat, Some(200), "beat grid anchor imported on add");
+    let cue_positions: Vec<i64> = fresh_db
+        .prepare("SELECT position_ms FROM track_cues WHERE track_id = ?1 ORDER BY position_ms")
+        .expect("prepare")
+        .query_map([&materialized_id], |row| row.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("collect");
+    assert_eq!(cue_positions, vec![2_000, 6_000], "hot cues imported on add");
+
+    let link_count: i64 = fresh_db
+        .query_row(
+            "SELECT COUNT(1) FROM track_usb_links WHERE track_id = ?1",
+            [&materialized_id],
+            |row| row.get(0),
+        )
+        .expect("count links");
+    assert_eq!(link_count, 1, "device copy recorded in track_usb_links");
 }
 
 /// Scan + analyse a single track, bake local cues into it, then export it to a

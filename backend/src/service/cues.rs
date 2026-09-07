@@ -385,6 +385,28 @@ fn apply_local_analysis_edits_tx(
 }
 
 impl BackendService {
+    /// Import a USB track's ANLZ cue points / beat-grid anchor into an
+    /// already-existing local `tracks` row, if not already imported. Called
+    /// from the add-to-playlist path for candidates that resolved to a real
+    /// row without going through `materialize_usb_add_candidate` (e.g. a
+    /// page-materialized row, or a genuine local copy). Cheap when already
+    /// imported: one `COUNT(1)` and no file read.
+    pub(crate) fn ensure_usb_analysis_imported(
+        &self,
+        track_id: &str,
+        anlz_abs_path: &str,
+    ) -> BackendResult<()> {
+        let anlz_abs_path = anlz_abs_path.trim();
+        if track_id.trim().is_empty() || anlz_abs_path.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.db.connect()?;
+        let tx = conn.transaction()?;
+        import_anlz_cues_for_track(&tx, track_id, std::path::Path::new(anlz_abs_path))?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn get_track_detail(&self, req: GetTrackDetailRequest) -> BackendResult<TrackDetail> {
         let track_id = req.track_id.trim();
         if track_id.is_empty() {
@@ -667,6 +689,8 @@ impl BackendService {
         tx.commit()?;
         drop(edb_conn);
         super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)?;
+
+        self.invalidate_usb_parse_cache();
 
         // 8. Re-read the device bundle for the response.
         let bytes = std::fs::read(dat_path.with_extension("EXT"))

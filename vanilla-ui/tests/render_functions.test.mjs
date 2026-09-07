@@ -87,6 +87,15 @@ test("createTrackRow analyze button reflects backend track.analysisReady", () =>
   assert.ok(ready.includes("Recompute waveform/BPM/key"));
 });
 
+test("createTrackRow omits the analyze button on USB rows but keeps the cue editor", () => {
+  const html = renderRow(
+    { id: "u-1", analysisReady: true, usbAnalysisPath: "/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT" },
+    { enableAnalyzeActions: true, origin: "usb" }
+  );
+  assert.ok(!html.includes('data-action="analyze-track"'));
+  assert.ok(html.includes('data-action="edit-track-detail"'));
+});
+
 test("createTrackRow renders a canvas for PWV4-only waveform data", () => {
   const html = renderRow({
     id: "t-pwv4",

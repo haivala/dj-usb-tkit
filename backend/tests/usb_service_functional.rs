@@ -10,7 +10,8 @@ use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
     AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
-    ExportToUsbRequest, FetchUsbHistoriesRequest, InitializeUsbRequest, InspectUsbTrackItem,
+    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbTracksRequest, InitializeUsbRequest,
+    InspectUsbTrackItem,
     InspectUsbTrackRequest, InspectUsbTracksRequest, ScanLibraryRequest, SearchTracksRequest,
     ValidateUsbRootRequest,
 };
@@ -814,10 +815,20 @@ fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks()
         2,
         "expected both tracks in history order"
     );
+
+    // Materialization moved to the paginated page fetch.
+    let page = backend.fetch_usb_history_tracks(FetchUsbTracksRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        id: history.id.clone(),
+        limit: 150,
+        ..Default::default()
+    });
+    assert!(page.ok, "fetch usb history tracks failed: {page:?}");
+    let page_items = page.data.expect("history track page").items;
+    assert_eq!(page_items.len(), 2, "expected both tracks in the page");
     assert!(
-        history.tracks.iter().all(|t| t.local_track_id.is_some()),
-        "history tracks should be materialized into the local library: {:?}",
-        history.tracks
+        page_items.iter().all(|t| t.local_track_id.is_some()),
+        "history tracks should be materialized into the local library: {page_items:?}"
     );
 }
 

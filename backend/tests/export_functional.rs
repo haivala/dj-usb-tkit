@@ -6,7 +6,8 @@ use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
     AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
-    ExportToUsbRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, InitializeUsbRequest,
+    ExportToUsbRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest, GetPlaylistTracksRequest,
+    InitializeUsbRequest,
     MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ReorderPlaylistTracksRequest,
     ReorderUsbPlaylistsRequest, RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest,
     SetFrontendSettingRequest,
@@ -1724,8 +1725,19 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
         .into_iter()
         .find(|p| p.name == "No Art Roundtrip Source")
         .expect("roundtrip usb playlist");
-    let usb_track = usb_playlist
-        .tracks
+    // Per-track materialization (local rows + `track_usb_links` + resolved
+    // `local_track_id`) happens on the paginated page fetch, not the import.
+    let usb_page = backend.fetch_usb_playlist_tracks(FetchUsbTracksRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        id: usb_playlist.id.clone(),
+        limit: 150,
+        ..Default::default()
+    });
+    assert!(usb_page.ok, "fetch usb playlist tracks failed: {usb_page:?}");
+    let usb_track = usb_page
+        .data
+        .expect("usb playlist track page")
+        .items
         .into_iter()
         .find(|t| t.title.contains("No Art"))
         .expect("roundtrip usb track");

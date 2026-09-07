@@ -75,7 +75,10 @@ export function createTrackRow(track, options, deps) {
         ? `<button class="track-add-btn" data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} data-tooltip="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`
         : `<button data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} data-tooltip="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`)
       : "";
-    const analysisButtons = options.enableAnalyzeActions
+    // USB playlist / history rows (`origin: "usb"`) keep `enableAnalyzeActions`
+    // on for the cue-editor button, but per-track analyze acts only on a local
+    // library copy, so it doesn't belong on those lists.
+    const analysisButtons = options.enableAnalyzeActions && options.origin !== "usb"
       ? `<button data-action="analyze-track" data-id="${escapeHtml(renderTrackId)}" data-tooltip="${track.analysisReady ? "Recompute waveform/BPM/key" : "Analyze missing waveform/BPM/key"}">${track.analysisReady ? "Reanalyze" : "Analyze"}</button>`
       : "";
     actionCell = `<div role="cell" class="track-grid-cell td-action"><div class="action-buttons">${primary}${analysisButtons}</div></div>`;

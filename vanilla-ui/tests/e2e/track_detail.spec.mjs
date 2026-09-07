@@ -343,6 +343,7 @@ test("cue editor opens + saves from a USB playlist row through the USB commands"
 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await expect(row).toHaveCount(1);
+  await expect(row.locator('[data-action="analyze-track"]')).toHaveCount(0);
   await row.locator('[data-action="edit-track-detail"]').click();
 
   await expect(page.locator("#trackDetailOverlay")).toBeVisible();
@@ -372,6 +373,7 @@ test("cue editor also opens from a USB history row", async ({ page }) => {
 
   const row = page.locator("#historyTracks .track-grid-row");
   await expect(row).toHaveCount(1);
+  await expect(row.locator('[data-action="analyze-track"]')).toHaveCount(0);
   await row.locator('[data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailOverlay")).toBeVisible();
   const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));

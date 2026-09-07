@@ -1,6 +1,7 @@
 //! USB validation, playlist/history fetching, track inspection.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use chrono::NaiveDate;
 use rusqlite::{OptionalExtension, params};
@@ -18,7 +19,7 @@ use crate::models::{
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, InspectUsbTrackData,
     InspectUsbTrackRequest, InspectUsbTrackResult, InspectUsbTracksData, InspectUsbTracksRequest,
     RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, ReorderUsbPlaylistsData,
-    ReorderUsbPlaylistsRequest, ResolvePlaybackSourceRequest, UsbHistory, UsbHistoryCounts,
+    ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts,
     UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry,
 };
 use crate::pdb_reader::{
@@ -52,6 +53,59 @@ use super::{
 };
 
 const SLOW_USB_STAGE_MS: u128 = 8_000;
+
+/// Size + mtime of a file, a cheap change signal for the locally-staged
+/// `export.pdb` / `exportLibrary.db` copies. `stage_pdb` / `stage_edb`
+/// re-sync those from the device whenever the USB-side file changed, so a
+/// matching staged signature means a cached parse is still current.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StagedFileSig {
+    size: u64,
+    mtime_ns: i128,
+}
+
+impl StagedFileSig {
+    fn of(path: &std::path::Path) -> Option<Self> {
+        let meta = std::fs::metadata(path).ok()?;
+        let dur = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        Some(Self {
+            size: meta.len(),
+            mtime_ns: dur.as_nanos() as i128,
+        })
+    }
+}
+
+/// Cache key for one parsed + resolved USB stick.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UsbParseCacheKey {
+    usb_root: std::path::PathBuf,
+    pdb: Option<StagedFileSig>,
+    edb: Option<StagedFileSig>,
+}
+
+/// The resolved-but-not-yet-materialized output of a USB playlist import:
+/// everything that is a pure function of the staged PDB + eDB. The paginated
+/// `fetch_usb_playlist_tracks` reuses this instead of re-parsing the whole
+/// stick on every page / search / sort / scroll.
+#[derive(Debug, Clone)]
+pub(crate) struct CachedUsbPlaylists {
+    items: Vec<UsbPlaylist>,
+    stats: UsbImportStats,
+    warnings: Vec<WarningEntry>,
+    usb_playlist_names: HashSet<String>,
+}
+
+/// One-entry parse cache: `(key, resolved playlists)`, guarded for sharing
+/// across `BackendService` clones.
+pub(crate) type UsbPlaylistsCache =
+    std::sync::Mutex<Option<(UsbParseCacheKey, Arc<CachedUsbPlaylists>)>>;
+/// One-entry parse cache for USB histories.
+pub(crate) type UsbHistoriesCache =
+    std::sync::Mutex<Option<(UsbParseCacheKey, Arc<crate::models::FetchUsbHistoriesData>)>>;
 
 fn build_usb_track_index(
     parsed: &crate::pdb_reader::ParsedPdb,
@@ -746,8 +800,131 @@ impl BackendService {
         })?;
         super::usb_staging::forget_cache_key_for_root(&usb_root);
         usb_utils::set_device_label(&conn, &usb_root, &name, &now())?;
+        self.invalidate_usb_parse_cache();
 
         Ok(crate::models::SetUsbDeviceNameData { saved: true })
+    }
+
+    /// Staged-file signature key for the parse cache. Also forces the local
+    /// staging copies to be in sync, so the subsequent `stage_pdb` /
+    /// `open_edb_from_usb_root` calls in the resolve are no-ops.
+    pub(crate) fn usb_parse_cache_key(&self, usb_root: &std::path::Path) -> UsbParseCacheKey {
+        let pdb = super::usb_staging::stage_pdb(usb_root)
+            .ok()
+            .as_deref()
+            .and_then(StagedFileSig::of);
+        let edb = super::usb_staging::stage_edb(usb_root)
+            .ok()
+            .as_deref()
+            .and_then(StagedFileSig::of);
+        UsbParseCacheKey {
+            usb_root: usb_root.to_path_buf(),
+            pdb,
+            edb,
+        }
+    }
+
+    /// Drop the cached USB parse. Called by every command that writes back to
+    /// the stick; the staged-signature key catches most changes on its own,
+    /// this is the belt-and-suspenders.
+    pub(crate) fn invalidate_usb_parse_cache(&self) {
+        if let Ok(mut guard) = self.usb_playlists_cache.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.usb_histories_cache.lock() {
+            *guard = None;
+        }
+    }
+
+    fn usb_playlists_cache_hit(&self, key: &UsbParseCacheKey) -> Option<Arc<CachedUsbPlaylists>> {
+        let guard = self.usb_playlists_cache.lock().ok()?;
+        guard
+            .as_ref()
+            .filter(|(cached_key, _)| cached_key == key)
+            .map(|(_, value)| Arc::clone(value))
+    }
+
+    fn usb_histories_cache_hit(
+        &self,
+        key: &UsbParseCacheKey,
+    ) -> Option<Arc<crate::models::FetchUsbHistoriesData>> {
+        let guard = self.usb_histories_cache.lock().ok()?;
+        guard
+            .as_ref()
+            .filter(|(cached_key, _)| cached_key == key)
+            .map(|(_, value)| Arc::clone(value))
+    }
+
+    /// The resolved USB histories for a stick, from cache or a fresh parse.
+    fn usb_histories_resolved(
+        &self,
+        usb_root: &std::path::Path,
+    ) -> BackendResult<Arc<crate::models::FetchUsbHistoriesData>> {
+        let key = self.usb_parse_cache_key(usb_root);
+        if let Some(hit) = self.usb_histories_cache_hit(&key) {
+            return Ok(hit);
+        }
+        // The no-PDB branch returns without caching, so fall back to the
+        // fresh result when the read-back misses.
+        let fresh = self.fetch_usb_histories_with_progress(
+            FetchUsbHistoriesRequest {
+                usb_root: Some(usb_root.to_string_lossy().into_owned()),
+            },
+            |_, _, _| {},
+        )?;
+        Ok(self
+            .usb_histories_cache_hit(&key)
+            .unwrap_or_else(|| Arc::new(fresh)))
+    }
+
+    /// The resolved (pre-materialization) playlists for a stick, from cache or
+    /// a fresh parse. Used by `fetch_usb_playlist_tracks` to avoid re-parsing
+    /// the whole stick per page.
+    fn usb_playlists_resolved(
+        &self,
+        usb_root: &std::path::Path,
+    ) -> BackendResult<Arc<CachedUsbPlaylists>> {
+        let key = self.usb_parse_cache_key(usb_root);
+        if let Some(hit) = self.usb_playlists_cache_hit(&key) {
+            return Ok(hit);
+        }
+        // Populate the cache via the full resolve, then read it back. This
+        // path always stores to the cache, so a miss here means the staged
+        // signature shifted mid-call -- rare; a retry succeeds.
+        self.fetch_usb_playlists_with_progress(
+            FetchUsbPlaylistsRequest {
+                usb_root: Some(usb_root.to_string_lossy().into_owned()),
+            },
+            |_, _, _| {},
+        )?;
+        self.usb_playlists_cache_hit(&key).ok_or_else(|| {
+            BackendError::Internal("USB playlist parse cache was not populated".to_string())
+        })
+    }
+
+    /// Build the `FetchUsbPlaylistsData` response from a resolved parse: adds
+    /// the per-call, local-DB-derived export-status comparison.
+    fn finish_usb_playlists(
+        &self,
+        resolved: &CachedUsbPlaylists,
+        usb_root: &std::path::Path,
+    ) -> BackendResult<FetchUsbPlaylistsData> {
+        let local_playlists = self.list_playlists()?.items;
+        let conn = self.db.connect()?;
+        let prune_stale = export_prune_stale_setting(&conn)?;
+        let playlist_usb_export_status = compute_playlist_usb_export_status(
+            &local_playlists,
+            &resolved.usb_playlist_names,
+            prune_stale,
+            Some(usb_root.to_string_lossy().as_ref()),
+        );
+        Ok(FetchUsbPlaylistsData {
+            items: resolved.items.clone(),
+            stats: resolved.stats.clone(),
+            playlist_track_total: resolved.items.iter().map(|p| p.track_count).sum(),
+            warnings: resolved.warnings.clone(),
+            playlist_usb_export_status,
+        })
     }
 
     pub fn fetch_usb_playlists(
@@ -771,6 +948,12 @@ impl BackendService {
         on_progress(10, 100, "USB: Parsing PDB");
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
+
+        let cache_key = self.usb_parse_cache_key(&usb_root);
+        if let Some(resolved) = self.usb_playlists_cache_hit(&cache_key) {
+            return self.finish_usb_playlists(&resolved, &usb_root);
+        }
+
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         let parsed = if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
@@ -975,12 +1158,13 @@ impl BackendService {
             playlist_referenced_tracks: referenced_track_ids.len(),
             playlist_entries: playlist_entries_total,
         };
-        let materialized_tracks = self.materialize_usb_playlist_tracks(&mut items, &usb_root)?;
-        push_usb_stage_timing(
-            &mut warnings,
-            "finalize playlist import",
-            &mut stage_started,
-        );
+        // Per-track materialization (local `tracks` rows, `track_usb_links`,
+        // ANLZ cue import) is deferred out of the import: the paginated
+        // `fetch_usb_playlist_tracks` materializes just the viewed page, and
+        // the add-to-playlist path materializes on demand. Importing every
+        // track of every playlist here meant thousands of scattered on-USB
+        // ANLZ reads -- minutes on an HDD-backed stick -- for data no unviewed,
+        // unadded row ever uses.
 
         warnings.insert(
             0,
@@ -1024,14 +1208,6 @@ impl BackendService {
                 ),
             ));
         }
-        if materialized_tracks > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "usb-import",
-                "usb.playlists.materialized",
-                format!("materialized {materialized_tracks} USB track row(s) into local library"),
-            ));
-        }
 
         let usb_playlist_names = usb_playlist_names_for_export_compare(
             parsed.as_ref(),
@@ -1040,25 +1216,17 @@ impl BackendService {
                 .into_iter()
                 .flat_map(|m| m.keys().cloned()),
         );
-        let local_playlists = self.list_playlists()?.items;
-        let conn = self.db.connect()?;
-        let prune_stale = export_prune_stale_setting(&conn)?;
-        let playlist_usb_export_status = compute_playlist_usb_export_status(
-            &local_playlists,
-            &usb_playlist_names,
-            prune_stale,
-            Some(usb_root.to_string_lossy().as_ref()),
-        );
 
-        let playlist_track_total = items.iter().map(|p| p.track_count).sum();
-
-        Ok(FetchUsbPlaylistsData {
+        let resolved = Arc::new(CachedUsbPlaylists {
             items,
             stats,
-            playlist_track_total,
             warnings,
-            playlist_usb_export_status,
-        })
+            usb_playlist_names,
+        });
+        if let Ok(mut guard) = self.usb_playlists_cache.lock() {
+            *guard = Some((cache_key, Arc::clone(&resolved)));
+        }
+        self.finish_usb_playlists(&resolved, &usb_root)
     }
 
     pub fn fetch_usb_histories(
@@ -1161,6 +1329,7 @@ impl BackendService {
         }
 
         on_progress(100, 100, "USB: Playlist order saved");
+        self.invalidate_usb_parse_cache();
 
         Ok(ReorderUsbPlaylistsData {
             reordered: patched,
@@ -1383,6 +1552,7 @@ impl BackendService {
             &mut stage_started,
         );
         on_progress(100, 100, "USB: Playlist removal completed");
+        self.invalidate_usb_parse_cache();
 
         Ok(RemoveUsbPlaylistData {
             playlist_name: name,
@@ -1409,6 +1579,12 @@ impl BackendService {
         on_progress(10, 100, "USB: Parsing PDB");
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing(&mut stage_warnings, "resolve usb root", &mut stage_started);
+
+        let cache_key = self.usb_parse_cache_key(&usb_root);
+        if let Some(hit) = self.usb_histories_cache_hit(&cache_key) {
+            return Ok((*hit).clone());
+        }
+
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         if !pdb_path.exists() {
             return Ok(FetchUsbHistoriesData {
@@ -1694,21 +1870,12 @@ impl BackendService {
         );
         warnings.extend(supplemental_warnings);
         warnings.extend(stage_warnings);
-        let materialized_tracks = self.materialize_usb_history_tracks(&mut items, &usb_root)?;
-        push_usb_stage_timing(&mut warnings, "finalize history import", &mut stage_started);
-        if materialized_tracks > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "usb-import",
-                "usb.histories.materialized",
-                format!(
-                    "materialized {materialized_tracks} USB history track row(s) into local library"
-                ),
-            ));
-        }
+        // Per-track materialization is deferred to `fetch_usb_history_tracks`
+        // (viewed page) and the add-to-playlist path -- see the note in
+        // `fetch_usb_playlists_with_progress`.
 
         let imported_tracks = items.iter().map(|history| history.tracks.len()).sum();
-        Ok(FetchUsbHistoriesData {
+        let data = FetchUsbHistoriesData {
             items,
             counts: UsbHistoryCounts {
                 imported_playlists: history_playlists.len(),
@@ -1737,12 +1904,23 @@ impl BackendService {
                 edb_history_content_rows,
             },
             warnings,
-        })
+        };
+        let data = Arc::new(data);
+        if let Ok(mut guard) = self.usb_histories_cache.lock() {
+            *guard = Some((cache_key, Arc::clone(&data)));
+        }
+        Ok((*data).clone())
     }
 
-    fn materialize_usb_playlist_tracks(
+    /// Materialize just the tracks on one already-paginated page: for each
+    /// row create/link a local `tracks` row and a `track_usb_links` row and
+    /// stash its `local_track_id` (used by the playback highlight and as the
+    /// add-to-playlist fast path). Pure DB work -- no on-USB ANLZ reads; cue /
+    /// beat-grid import is deferred to the add-to-playlist path. Both writes
+    /// are `ON CONFLICT DO UPDATE`, so concurrent scroll fetches are safe.
+    fn materialize_usb_track_page(
         &self,
-        playlists: &mut [UsbPlaylist],
+        tracks: &mut [UsbTrack],
         usb_root: &std::path::Path,
     ) -> BackendResult<usize> {
         let mut conn = self.db.connect()?;
@@ -1752,17 +1930,15 @@ impl BackendService {
         let usb_root_paths = untainted_usb_root_paths(&tx)?;
         let mut materialized = 0usize;
 
-        for playlist in playlists {
-            for track in &mut playlist.tracks {
-                if self.materialize_usb_track_row(
-                    &tx,
-                    track,
-                    &now_ts,
-                    &usb_device_id,
-                    &usb_root_paths,
-                )? {
-                    materialized += 1;
-                }
+        for track in tracks {
+            if self.materialize_usb_track_row(
+                &tx,
+                track,
+                &now_ts,
+                &usb_device_id,
+                &usb_root_paths,
+            )? {
+                materialized += 1;
             }
         }
 
@@ -1770,34 +1946,72 @@ impl BackendService {
         Ok(materialized)
     }
 
-    fn materialize_usb_history_tracks(
+    /// Materialize a single USB-origin add-to-playlist candidate on demand:
+    /// create/link its local `tracks` row + `track_usb_links` row and import
+    /// its ANLZ cue points / beat-grid anchor (needed for a later export).
+    /// Returns the resolved local track id, or `None` when the candidate
+    /// carries no usable file path / the stick is gone -- in which case the
+    /// caller falls back to today's "usbOrigin, unresolved" behaviour.
+    pub(crate) fn materialize_usb_add_candidate(
         &self,
-        histories: &mut [UsbHistory],
-        usb_root: &std::path::Path,
-    ) -> BackendResult<usize> {
+        candidate: &crate::models::AddTrackCandidate,
+        request_usb_root: Option<&str>,
+    ) -> BackendResult<Option<String>> {
+        let file_path = candidate.file_path.as_deref().unwrap_or("").trim().to_string();
+        if file_path.is_empty() {
+            return Ok(None);
+        }
+        let root_hint = candidate
+            .usb_root
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or(request_usb_root);
+        let Ok(usb_root) = resolve_usb_root(root_hint) else {
+            return Ok(None);
+        };
+
+        let analysis_path = candidate
+            .usb_analysis_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string);
+
+        let mut track = UsbTrack {
+            id: String::new(),
+            local_track_id: None,
+            title: candidate.title.clone(),
+            artist: candidate.artist.clone(),
+            album: candidate.album.clone(),
+            track_number: candidate.track_number,
+            bpm: candidate.bpm,
+            key: candidate.key.clone(),
+            file_path,
+            format_ext: candidate.format_ext.clone(),
+            usb_media_path: None,
+            artwork_path: None,
+            artwork_data_url: None,
+            waveform_peaks_path: analysis_path.clone(),
+            usb_analysis_path: analysis_path.clone(),
+            usb_analysis_path_raw: None,
+            waveform_preview: None,
+            duration_ms: None,
+            file_size_bytes: candidate.file_size_bytes,
+            format_compat: Default::default(),
+            needs_hydration: false,
+        };
+
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
         let now_ts = now();
-        let usb_device_id = usb_utils::upsert_usb_device(&tx, usb_root, false, &now_ts)?;
+        let usb_device_id = usb_utils::upsert_usb_device(&tx, &usb_root, false, &now_ts)?;
         let usb_root_paths = untainted_usb_root_paths(&tx)?;
-        let mut materialized = 0usize;
-
-        for history in histories {
-            for track in &mut history.tracks {
-                if self.materialize_usb_track_row(
-                    &tx,
-                    track,
-                    &now_ts,
-                    &usb_device_id,
-                    &usb_root_paths,
-                )? {
-                    materialized += 1;
-                }
-            }
+        self.materialize_usb_track_row(&tx, &mut track, &now_ts, &usb_device_id, &usb_root_paths)?;
+        if let (Some(id), Some(path)) = (track.local_track_id.as_deref(), analysis_path.as_deref()) {
+            super::cues::import_anlz_cues_for_track(&tx, id, std::path::Path::new(path))?;
         }
-
         tx.commit()?;
-        Ok(materialized)
+        Ok(track.local_track_id)
     }
 
     /// Matches an incoming USB-sourced track against existing `tracks` rows
@@ -1909,9 +2123,11 @@ impl BackendService {
             params![Uuid::now_v7().to_string(), id, usb_device_id, file_path, now_ts],
         )?;
 
-        if let Some(dat) = track.waveform_peaks_path.as_deref() {
-            super::cues::import_anlz_cues_for_track(tx, &id, std::path::Path::new(dat))?;
-        }
+        // Cue points / beat-grid anchor are NOT imported here -- that reads the
+        // on-USB ANLZ bundle from disk, and the only consumers (`get_track_detail`
+        // and export) need it only once the track is in a local playlist. The
+        // add-to-playlist path (`materialize_usb_add_candidate` /
+        // `ensure_usb_analysis_imported`) does the ANLZ import on demand.
 
         track.local_track_id = Some(id);
         Ok(true)
@@ -2213,22 +2429,18 @@ impl BackendService {
 
     /// One paginated/searched/sorted page of a USB playlist's tracks, with the
     /// waveform-preview bytes + artwork data URLs hydrated server-side for that
-    /// page. The playlist list (`fetch_usb_playlists`) is resolved once here to
-    /// get the ordered cheap-metadata track list; only the returned page pays
-    /// the per-track hydration I/O.
+    /// page. The playlist list is resolved from the parse cache (or once, on a
+    /// cache miss); only the returned page pays the per-track hydration I/O,
+    /// and only the returned page is materialized into local rows.
     pub fn fetch_usb_playlist_tracks(
         &self,
         req: FetchUsbTracksRequest,
     ) -> BackendResult<FetchUsbTracksData> {
-        let all = self.fetch_usb_playlists_with_progress(
-            FetchUsbPlaylistsRequest {
-                usb_root: req.usb_root.clone(),
-            },
-            |_, _, _| {},
-        )?;
-        let playlist = all
+        let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
+        let resolved = self.usb_playlists_resolved(&usb_root)?;
+        let playlist = resolved
             .items
-            .into_iter()
+            .iter()
             .find(|playlist| playlist.id == req.id)
             .ok_or_else(|| {
                 BackendError::NotFound(format!("USB playlist not found: {}", req.id))
@@ -2236,11 +2448,11 @@ impl BackendService {
         let mut data = paginate_and_hydrate_usb_tracks(
             "fetch_usb_playlist_tracks",
             &req.id,
-            playlist.tracks,
+            playlist.tracks.clone(),
             &req,
-            all.warnings,
+            resolved.warnings.clone(),
         )?;
-        self.fill_local_track_ids(&mut data.items);
+        self.materialize_usb_track_page(&mut data.items, &usb_root)?;
         Ok(data)
     }
 
@@ -2249,15 +2461,11 @@ impl BackendService {
         &self,
         req: FetchUsbTracksRequest,
     ) -> BackendResult<FetchUsbTracksData> {
-        let all = self.fetch_usb_histories_with_progress(
-            FetchUsbHistoriesRequest {
-                usb_root: req.usb_root.clone(),
-            },
-            |_, _, _| {},
-        )?;
+        let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
+        let all = self.usb_histories_resolved(&usb_root)?;
         let history = all
             .items
-            .into_iter()
+            .iter()
             .find(|history| history.id == req.id)
             .ok_or_else(|| {
                 BackendError::NotFound(format!("USB history not found: {}", req.id))
@@ -2265,42 +2473,12 @@ impl BackendService {
         let mut data = paginate_and_hydrate_usb_tracks(
             "fetch_usb_history_tracks",
             &req.id,
-            history.tracks,
+            history.tracks.clone(),
             &req,
-            all.warnings,
+            all.warnings.clone(),
         )?;
-        self.fill_local_track_ids(&mut data.items);
+        self.materialize_usb_track_page(&mut data.items, &usb_root)?;
         Ok(data)
-    }
-
-    /// For each page track that isn't already linked to a local library row,
-    /// try a read-only `resolve_playback_source` match and stash the resulting
-    /// `local_track_id`. The frontend uses this id to mark the right row as
-    /// "playing" without re-scanning its (paginated) library list. Page-bounded
-    /// (called only on the returned page), read-only (never materializes).
-    fn fill_local_track_ids(&self, items: &mut [UsbTrack]) {
-        for track in items.iter_mut() {
-            if track.local_track_id.is_some() {
-                continue;
-            }
-            if track.title.trim().is_empty() && track.artist.trim().is_empty() {
-                continue;
-            }
-            let resolved = self.resolve_playback_source(ResolvePlaybackSourceRequest {
-                title: track.title.clone(),
-                artist: track.artist.clone(),
-                album: track.album.clone(),
-                bpm: track.bpm,
-                file_path: Some(track.identity_path().to_string()),
-                file_size_bytes: track.file_size_bytes,
-                track_id: None,
-            });
-            if let Ok(data) = resolved
-                && matches!(data.matched_by.as_str(), "self" | "hash" | "metadata")
-            {
-                track.local_track_id = data.track_id;
-            }
-        }
     }
 }
 
@@ -3623,8 +3801,8 @@ mod tests {
         assert_eq!(page1.total_duration_ms, 600_000);
         // The page is hydrated: format is populated (from Stage A) ...
         assert_eq!(page1.items[0].format_ext.as_deref(), Some("mp3"));
-        // ... and every page row carries a resolved local track id (from USB
-        // placeholder materialization, back-filled by `fill_local_track_ids`).
+        // ... and every page row carries a resolved local track id (the page
+        // is materialized into local rows by `materialize_usb_track_page`).
         assert!(page1.items.iter().all(|t| t.local_track_id.is_some()));
 
         let page2 = service

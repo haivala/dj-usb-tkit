@@ -13,7 +13,7 @@ use backend::commands::BackendCommands;
 use backend::models::{
     AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode,
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
-    GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
+    FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
     MaterializeSourceTrackRequest, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
     ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
@@ -68,6 +68,30 @@ fn open_export_db(path: &Path) -> rusqlite::Connection {
         );
     }
     conn
+}
+
+/// Materialization of local rows / `track_usb_links` / `local_track_id` moved
+/// off the USB import and onto the paginated page fetch. Tests that used to
+/// read materialized state straight off `fetch_usb_playlists` now walk every
+/// playlist's pages instead.
+fn usb_tracks_via_pages(backend: &BackendCommands, usb_root: &Path) -> Vec<backend::models::UsbTrack> {
+    let root = usb_root.to_string_lossy().to_string();
+    let list = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+        usb_root: Some(root.clone()),
+    });
+    assert!(list.ok, "fetch usb playlists failed: {list:?}");
+    let mut out = Vec::new();
+    for playlist in list.data.expect("usb playlist data").items {
+        let page = backend.fetch_usb_playlist_tracks(FetchUsbTracksRequest {
+            usb_root: Some(root.clone()),
+            id: playlist.id,
+            limit: 500,
+            ..Default::default()
+        });
+        assert!(page.ok, "fetch usb playlist tracks failed: {page:?}");
+        out.extend(page.data.expect("usb track page").items);
+    }
+    out
 }
 
 fn seed_usb_unindexed_audio_fixture(backend: &BackendCommands, usb_root: &Path) -> String {
@@ -3271,10 +3295,9 @@ fn fetch_usb_playlists_materialization_clears_stale_local_key_when_usb_key_is_mi
     .expect("insert playlist content");
     drop(conn);
 
-    let playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-    });
-    assert!(playlists.ok, "fetch usb playlists failed: {playlists:?}");
+    // The paginated page fetch (not the bare import) materializes the page's
+    // rows against the local library.
+    let _ = usb_tracks_via_pages(&backend, &usb);
 
     let reloaded = backend
         .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
@@ -4798,19 +4821,8 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
         "export itself must not create extra track rows"
     );
 
-    let usb_playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-    });
-    assert!(
-        usb_playlists.ok,
-        "fetch usb playlists failed: {usb_playlists:?}"
-    );
-    let usb_track = usb_playlists
-        .data
-        .expect("usb playlist data")
-        .items
+    let usb_track = usb_tracks_via_pages(&backend, &usb)
         .into_iter()
-        .flat_map(|p| p.tracks)
         .find(|t| t.title.contains("Dedup Roundtrip"))
         .expect("roundtrip usb track");
 
@@ -5007,19 +5019,8 @@ fn fetch_usb_playlists_creates_placeholder_when_no_local_match() {
     assert!(removed.ok, "remove by source roots failed: {removed:?}");
     assert_eq!(removed.data.expect("removed data").removed, 1);
 
-    let usb_playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-    });
-    assert!(
-        usb_playlists.ok,
-        "fetch usb playlists failed: {usb_playlists:?}"
-    );
-    let usb_track = usb_playlists
-        .data
-        .expect("usb playlist data")
-        .items
+    let usb_track = usb_tracks_via_pages(&backend, &usb)
         .into_iter()
-        .flat_map(|p| p.tracks)
         .find(|t| t.title.contains("Placeholder Case"))
         .expect("roundtrip usb track");
 

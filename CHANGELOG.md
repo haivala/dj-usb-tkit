@@ -30,6 +30,19 @@
 
 ## Unreleased
 
+- **Improvement:** importing a USB is much faster, especially from a stick that
+  lives on a spinning HDD. The import no longer walks every track of every
+  playlist to create local library rows and read each track's on-USB analysis
+  bundle from disk (a "finalize playlist import" stage that could take minutes
+  on slow media). That per-track work now happens only for the tracks actually
+  on screen when a playlist is opened, and the cue points / beat grid are pulled
+  in when a track is added to a local playlist — where they are first needed for
+  export. Adding a USB track to a local playlist and re-exporting it are
+  unchanged.
+- **Improvement:** opening a USB playlist and scrolling, searching, or sorting
+  it no longer re-parses the whole stick's `export.pdb` / `exportLibrary.db` on
+  every request — the parsed result is cached in memory and reused until the
+  stick's databases change (or the app writes to them).
 - **Improvement:** local track analysis (BPM/key/beat-grid) is now several times
   faster. The release build was compiling the audio-analysis engine and its FFT
   backend size-first (`opt-level = "z"`); they now build speed-first while the
@@ -63,6 +76,11 @@
   into the local master, so the two never diverge; that path requires the USB to
   be connected and blocks with a clear message otherwise. The local analysis
   stays the single source of truth — export just reconciles each stick to it.
+- **Fix:** enabling the cue editor on the USB playlist and USB history track lists
+  also surfaced a per-track "Analyze / Reanalyze" button there, which only ever
+  acted on a track's local library copy. That button is now hidden on the USB
+  lists; it stays on the Library and app-playlist lists. The cue-editor button is
+  unaffected.
 - **Improvement:** on export, the on-USB analysis bundle is now reconciled to the
   local master unconditionally on both the retain and fresh paths, instead of via
   a per-path "has edits" heuristic — no behaviour change on any currently

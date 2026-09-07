@@ -463,6 +463,12 @@ pub struct BackendService {
     pub db: Db,
     pub analysis_paused: Arc<AtomicBool>,
     pub analysis_cancelled: Arc<AtomicBool>,
+    /// One-entry cache of the last USB stick's resolved playlists / histories,
+    /// keyed by the staged PDB + eDB signatures. Lets the paginated
+    /// `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks` skip a full
+    /// re-parse on every page. Shared across `.clone()`s of the service.
+    pub(crate) usb_playlists_cache: Arc<usb::UsbPlaylistsCache>,
+    pub(crate) usb_histories_cache: Arc<usb::UsbHistoriesCache>,
 }
 
 impl BackendService {
@@ -471,6 +477,8 @@ impl BackendService {
             db: Db::new(data_dir)?,
             analysis_paused: Arc::new(AtomicBool::new(false)),
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
+            usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
+            usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),
         };
         // Deliberately NOT called here (see `usb_staging::init_cache_root`'s
         // doc comment): `BackendService::new`/`BackendCommands::new` are the
@@ -746,7 +754,9 @@ impl BackendService {
     }
 
     pub fn initialize_usb(&self, req: InitializeUsbRequest) -> BackendResult<InitializeUsbData> {
-        initialize_usb_util(&req.usb_root)
+        let data = initialize_usb_util(&req.usb_root)?;
+        self.invalidate_usb_parse_cache();
+        Ok(data)
     }
 
     pub fn scan_library(&self, req: ScanLibraryRequest) -> BackendResult<ScanLibraryData> {
@@ -2776,7 +2786,22 @@ impl BackendService {
         request_usb_root_valid: bool,
     ) -> BackendResult<AddTrackCandidateResolution> {
         let previous_id = trimmed_string(candidate.track_id.as_deref());
+        // A USB-origin candidate carries the absolute path to its on-USB ANLZ
+        // bundle; its cues / beat-grid are imported lazily (not during the USB
+        // import) so they must be pulled in now, before the track can be
+        // exported from this local playlist.
+        let usb_anlz = candidate
+            .usb_analysis_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
         if let Some(local_track_id) = trimmed_string(candidate.local_track_id.as_deref()) {
+            if let Some(path) = usb_anlz
+                && track_id_exists(conn, &local_track_id)?
+            {
+                self.ensure_usb_analysis_imported(&local_track_id, path)?;
+            }
             return Ok(AddTrackCandidateResolution {
                 previous_id,
                 track_id: Some(local_track_id),
@@ -2788,6 +2813,9 @@ impl BackendService {
         if let Some(track_id) = previous_id.as_deref()
             && track_id_exists(conn, track_id)?
         {
+            if let Some(path) = usb_anlz {
+                self.ensure_usb_analysis_imported(track_id, path)?;
+            }
             return Ok(AddTrackCandidateResolution {
                 previous_id: previous_id.clone(),
                 track_id: Some(track_id.to_string()),
@@ -2797,6 +2825,18 @@ impl BackendService {
         }
 
         if add_candidate_is_usb_origin(candidate, request_usb_root) {
+            // Deferred materialization: create/link the local row and import
+            // the ANLZ analysis on demand instead of dropping the candidate.
+            if let Some(track_id) =
+                self.materialize_usb_add_candidate(candidate, request_usb_root)?
+            {
+                return Ok(AddTrackCandidateResolution {
+                    previous_id,
+                    track_id: Some(track_id),
+                    resolved_by: "usbMaterialized".to_string(),
+                    materialized: true,
+                });
+            }
             return Ok(AddTrackCandidateResolution {
                 previous_id,
                 track_id: None,
