@@ -30,30 +30,6 @@
 
 ## Unreleased
 
-- **Improvement:** importing a USB is much faster, especially from a stick that
-  lives on a spinning HDD. The import no longer walks every track of every
-  playlist to create local library rows and read each track's on-USB analysis
-  bundle from disk (a "finalize playlist import" stage that could take minutes
-  on slow media). That per-track work now happens only for the tracks actually
-  on screen when a playlist is opened, and the cue points / beat grid are pulled
-  in when a track is added to a local playlist — where they are first needed for
-  export. Adding a USB track to a local playlist and re-exporting it are
-  unchanged.
-- **Improvement:** opening a USB playlist and scrolling, searching, or sorting
-  it no longer re-parses the whole stick's `export.pdb` / `exportLibrary.db` on
-  every request — the parsed result is cached in memory and reused until the
-  stick's databases change (or the app writes to them).
-- **Improvement:** local track analysis (BPM/key/beat-grid) is now several times
-  faster. The release build was compiling the audio-analysis engine and its FFT
-  backend size-first (`opt-level = "z"`); they now build speed-first while the
-  rest of the binary stays size-optimized.
-- **Fix:** a track re-analyzed to a corrected BPM could still export with its
-  old beat grid (e.g. a hardcoded 120 BPM default) when the on-USB bundle
-  already existed and had no cues/first-beat edit to trigger a rebuild — CDJ
-  hardware reads that beat grid for its live tempo display, not the library
-  BPM field. Export now re-derives the beat grid from the analyzed BPM alone,
-  and `fix_empty_analysis_files` no longer defaults to 120 BPM when
-  regenerating a bundle. Re-exporting an affected playlist fixes it.
 - **New feature:** cue points and the beat-grid first beat are now editable. A
   per-track modal (opened from the magnifier button next to a track's waveform)
   shows the full-detail colour waveform with a beat-grid overlay and
@@ -78,15 +54,36 @@
   into the local master, so the two never diverge; that path requires the USB to
   be connected and blocks with a clear message otherwise. The local analysis
   stays the single source of truth — export just reconciles each stick to it.
-- **Fix:** enabling the cue editor on the USB playlist and USB history track lists
-  also surfaced a per-track "Analyze / Reanalyze" button there, which only ever
-  acted on a track's local library copy. That button is now hidden on the USB
-  lists; it stays on the Library and app-playlist lists. The cue-editor button is
-  unaffected.
-- **Fix:** the cue / beat-grid editor button was rendered on app-playlist track
-  rows but did nothing when clicked — the playlist track list's click handler
-  only routed play/scrub actions. It now routes the cue-editor and per-track
-  analyze buttons too, matching the Library list.
+  (The USB lists show the cue-editor button but no per-track "Analyze" button —
+  that only ever acts on a local library copy.)
+- **Fix:** a track re-analyzed to a corrected BPM could still export with its
+  old beat grid (e.g. a hardcoded 120 BPM default) when the on-USB bundle
+  already existed and had no cues/first-beat edit to trigger a rebuild — CDJ
+  hardware reads that beat grid for its live tempo display, not the library
+  BPM field. Export now re-derives the beat grid from the analyzed BPM alone,
+  and `fix_empty_analysis_files` no longer defaults to 120 BPM when
+  regenerating a bundle. Re-exporting an affected playlist fixes it.
+- **Improvement:** importing a USB is much faster, especially from a stick that
+  lives on a spinning HDD. The import no longer walks every track of every
+  playlist to create local library rows and read each track's on-USB analysis
+  bundle from disk (a "finalize playlist import" stage that could take minutes
+  on slow media). That per-track work now happens only for the tracks actually
+  on screen when a playlist is opened, and the cue points / beat grid are pulled
+  in when a track is added to a local playlist — where they are first needed for
+  export. Adding a USB track to a local playlist and re-exporting it are
+  unchanged.
+- **Improvement:** opening a USB playlist and scrolling, searching, or sorting
+  it no longer re-parses the whole stick's `export.pdb` / `exportLibrary.db` on
+  every request — the parsed result is cached in memory and reused until the
+  stick's databases change (or the app writes to them).
+- **Improvement:** local track analysis (BPM/key/beat-grid) is now several times
+  faster. The release build was compiling the audio-analysis engine and its FFT
+  backend size-first (`opt-level = "z"`); they now build speed-first while the
+  rest of the binary stays size-optimized.
+- **Improvement:** a USB export is now blocked when *any* track in the playlist
+  lives under a missing source folder, not just one on the currently loaded
+  page — the check moved into the backend export gate, which sees the whole
+  playlist.
 - **Improvement:** on export, the on-USB analysis bundle is now reconciled to the
   local master unconditionally on both the retain and fresh paths, instead of via
   a per-path "has edits" heuristic — no behaviour change on any currently
@@ -96,10 +93,6 @@
   commands (`get_track_detail`, `save_track_analysis_edits`,
   `get_usb_track_detail`, `save_usb_track_analysis_edits`), and the cue/beat-grid
   export & import paths across the `docs/` set.
-- **Improvement:** a USB export is now blocked when *any* track in the playlist
-  lives under a missing source folder, not just one on the currently loaded
-  page — the check moved into the backend export gate, which sees the whole
-  playlist.
 - **Chore:** the export button label ("Append to … on USB" vs "Export to USB")
   and the missing-source-folder export block are computed in the backend; the
   frontend renders them instead of re-deriving the append rule or parsing the
