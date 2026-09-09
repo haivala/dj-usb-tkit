@@ -748,6 +748,10 @@ fn stop_and_status_playback_native_report_idle_state_without_hardware() {
 }
 
 #[test]
+#[cfg_attr(
+    coverage,
+    ignore = "hardware-facing playback probe can hang under coverage instrumentation"
+)]
 fn playback_preflight_native_reports_readable_fixture() {
     let root = tempdir().expect("temp root");
     let data_dir = root.path().join("data");

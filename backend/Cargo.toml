@@ -49,6 +49,9 @@ libc = "0.2"
 [dev-dependencies]
 tempfile = "3"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+
 [[bin]]
 name = "init_usb"
 path = "src/bin/init_usb.rs"

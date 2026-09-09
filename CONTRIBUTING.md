@@ -94,6 +94,29 @@ npm test
 
 If your change affects only one area, it is fine to mention exactly which tests you ran.
 
+### Rust Coverage
+
+Rust coverage is a local developer tool, not a CI or release gate. To generate
+backend coverage, run:
+
+```text
+./scripts/rust-coverage.sh
+```
+
+Useful variants:
+
+```text
+./scripts/rust-coverage.sh --summary
+./scripts/rust-coverage.sh --html
+./scripts/rust-coverage.sh --lcov
+```
+
+The script writes reports under `target/llvm-cov/`. It uses `cargo-llvm-cov`
+and either existing `LLVM_COV`/`LLVM_PROFDATA` settings, matching system LLVM
+binaries, or a Rust toolchain with `llvm-tools-preview` installed.
+Hardware-facing playback probes are skipped only under coverage instrumentation
+so local coverage does not hang on machines without a usable audio stack.
+
 ## Commit And PR Guidance
 
 A good pull request usually includes:

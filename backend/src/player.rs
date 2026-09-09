@@ -748,6 +748,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        coverage,
+        ignore = "hardware-facing playback probe can hang under coverage instrumentation"
+    )]
     fn run_playback_preflight_reports_flac_fixture_as_decodable() {
         let preflight = run_playback_preflight(flac_fixture_path().to_str().unwrap())
             .expect("preflight should succeed for a readable fixture");
@@ -929,6 +933,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        coverage,
+        ignore = "hardware-facing playback probe can hang under coverage instrumentation"
+    )]
     fn run_playback_preflight_reports_non_audio_file_as_not_decodable() {
         let manifest_toml = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
         let preflight = run_playback_preflight(manifest_toml.to_str().unwrap())
@@ -943,6 +951,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        coverage,
+        ignore = "hardware-facing playback probe can hang under coverage instrumentation"
+    )]
     fn open_output_stream_does_not_panic_regardless_of_hardware_availability() {
         // No audio device is guaranteed in CI/sandboxed environments; this only
         // asserts that the ALSA/stderr noise-silencing wrappers unwind cleanly
