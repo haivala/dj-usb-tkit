@@ -93,6 +93,9 @@
   commands (`get_track_detail`, `save_track_analysis_edits`,
   `get_usb_track_detail`, `save_usb_track_analysis_edits`), and the cue/beat-grid
   export & import paths across the `docs/` set.
+- **Chore:** expanded Rust backend test coverage for cue persistence, playback
+  command error paths, command wrapper contracts, and `master.db` scanning,
+  raising backend line coverage from 89.54% to 90.23%.
 - **Chore:** the export button label ("Append to … on USB" vs "Export to USB")
   and the missing-source-folder export block are computed in the backend; the
   frontend renders them instead of re-deriving the append rule or parsing the

@@ -841,6 +841,14 @@ mod tests {
         }
     }
 
+    fn named_input(pos: u32, color: Option<u8>, name: Option<&str>) -> TrackCueInput {
+        TrackCueInput {
+            position_ms: pos,
+            color_id: color,
+            name: name.map(str::to_string),
+        }
+    }
+
     fn cue(id: &str, pos: u32, color: Option<u8>) -> TrackCue {
         TrackCue {
             id: id.to_string(),
@@ -848,6 +856,43 @@ mod tests {
             color_id: color,
             name: None,
         }
+    }
+
+    fn cue_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tracks (
+              id TEXT PRIMARY KEY,
+              first_beat_ms INTEGER,
+              first_beat_ms_source TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE track_cues (
+              id TEXT PRIMARY KEY,
+              track_id TEXT NOT NULL,
+              position_ms INTEGER NOT NULL,
+              color_id INTEGER,
+              name TEXT,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE playlists (
+              id TEXT PRIMARY KEY,
+              updated_at TEXT NOT NULL,
+              last_exported_at TEXT,
+              last_exported_usb_root TEXT,
+              last_exported_track_count INTEGER
+            );
+            CREATE TABLE playlist_tracks (
+              playlist_id TEXT NOT NULL,
+              track_id TEXT NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+        conn
     }
 
     #[test]
@@ -871,6 +916,37 @@ mod tests {
     }
 
     #[test]
+    fn normalize_trims_names_keeps_valid_color_and_treats_zero_duration_as_unbounded() {
+        let out = normalize_cues(
+            &[
+                named_input(u32::MAX, Some(8), Some("  Drop  ")),
+                named_input(1234, None, Some("   ")),
+            ],
+            Some(0),
+        )
+        .expect("ok");
+
+        assert_eq!(out[0].position_ms, u32::MAX);
+        assert_eq!(out[0].color_id, Some(8));
+        assert_eq!(out[0].name.as_deref(), Some("Drop"));
+        assert_eq!(out[1].color_id, Some(DEFAULT_HOTCUE_COLOR_ID));
+        assert_eq!(out[1].name, None);
+    }
+
+    #[test]
+    fn normalized_to_track_cues_preserves_normalized_fields_with_fresh_ids() {
+        let normalized =
+            normalize_cues(&[named_input(2000, Some(3), Some("Build"))], None).expect("ok");
+        let cues = normalized_to_track_cues(&normalized);
+
+        assert_eq!(cues.len(), 1);
+        assert!(!cues[0].id.is_empty());
+        assert_eq!(cues[0].position_ms, 2000);
+        assert_eq!(cues[0].color_id, Some(3));
+        assert_eq!(cues[0].name.as_deref(), Some("Build"));
+    }
+
+    #[test]
     fn anlz_cues_expands_each_point_to_memory_plus_hot() {
         let cues = vec![
             cue("c1", 3000, Some(2)),
@@ -890,5 +966,161 @@ mod tests {
         assert_eq!(hots[1].hot_cue, 2);
         assert_eq!(hots[1].color_id, 2);
         assert!(mems.iter().any(|c| c.position_ms == 8000));
+    }
+
+    #[test]
+    fn load_track_cues_orders_by_sort_order_then_position_and_clamps_negative_positions() {
+        let conn = cue_conn();
+        conn.execute(
+            "INSERT INTO track_cues
+               (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
+             VALUES
+               ('late', 'track-1', 9000, NULL, NULL, 2, 'old', 'old'),
+               ('neg', 'track-1', -50, 4, 'Start', 1, 'old', 'old'),
+               ('early', 'track-1', 1000, 5, 'Intro', 1, 'old', 'old')",
+            [],
+        )
+        .unwrap();
+
+        let cues = load_track_cues(&conn, "track-1").expect("cues");
+        assert_eq!(
+            cues.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["neg", "early", "late"]
+        );
+        assert_eq!(cues[0].position_ms, 0);
+        assert_eq!(cues[0].color_id, Some(4));
+        assert_eq!(cues[0].name.as_deref(), Some("Start"));
+    }
+
+    #[test]
+    fn load_track_cues_bulk_groups_cues_by_track_and_skips_tracks_without_cues() {
+        let conn = cue_conn();
+        conn.execute(
+            "INSERT INTO track_cues
+               (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
+             VALUES
+               ('a2', 'track-a', 2000, 2, NULL, 2, 'old', 'old'),
+               ('a1', 'track-a', 1000, 1, NULL, 1, 'old', 'old'),
+               ('b1', 'track-b', 3000, NULL, 'Break', 1, 'old', 'old')",
+            [],
+        )
+        .unwrap();
+
+        let out = load_track_cues_bulk(
+            &conn,
+            &[
+                "track-a".to_string(),
+                "track-b".to_string(),
+                "track-c".to_string(),
+            ],
+        )
+        .expect("bulk cues");
+
+        assert_eq!(
+            out.get("track-a")
+                .unwrap()
+                .iter()
+                .map(|cue| cue.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a1", "a2"]
+        );
+        assert_eq!(
+            out.get("track-b").unwrap()[0].name.as_deref(),
+            Some("Break")
+        );
+        assert!(!out.contains_key("track-c"));
+    }
+
+    #[test]
+    fn apply_local_analysis_edits_replaces_cues_and_invalidates_playlist_export_markers() {
+        let mut conn = cue_conn();
+        conn.execute(
+            "INSERT INTO tracks (id, first_beat_ms, first_beat_ms_source, updated_at)
+             VALUES ('track-1', NULL, NULL, 'old')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO playlists
+               (id, updated_at, last_exported_at, last_exported_usb_root, last_exported_track_count)
+             VALUES ('playlist-1', 'old', 'exported', '/usb', 3)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO playlist_tracks (playlist_id, track_id) VALUES ('playlist-1', 'track-1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO track_cues
+               (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
+             VALUES ('old-cue', 'track-1', 10, 1, 'Old', 0, 'old', 'old')",
+            [],
+        )
+        .unwrap();
+
+        let normalized = normalize_cues(
+            &[
+                named_input(3000, Some(2), Some("Two")),
+                named_input(1000, Some(1), Some("One")),
+            ],
+            Some(10_000),
+        )
+        .expect("normalized");
+        let tx = conn.transaction().unwrap();
+        apply_local_analysis_edits_tx(&tx, "track-1", Some(500), Some(&normalized), "new")
+            .expect("apply edits");
+        tx.commit().unwrap();
+
+        let first_beat: (i64, String, String) = conn
+            .query_row(
+                "SELECT first_beat_ms, first_beat_ms_source, updated_at FROM tracks WHERE id = 'track-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(first_beat, (500, "user".to_string(), "new".to_string()));
+
+        let cues = load_track_cues(&conn, "track-1").expect("cues");
+        assert_eq!(
+            cues.iter()
+                .map(|cue| cue.name.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("Two"), Some("One")]
+        );
+        let playlist: (String, Option<String>, Option<String>, Option<i64>) = conn
+            .query_row(
+                "SELECT updated_at, last_exported_at, last_exported_usb_root, last_exported_track_count
+                   FROM playlists WHERE id = 'playlist-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(playlist, ("new".to_string(), None, None, None));
+    }
+
+    #[test]
+    fn apply_local_analysis_edits_with_no_changes_leaves_timestamps_untouched() {
+        let mut conn = cue_conn();
+        conn.execute(
+            "INSERT INTO tracks (id, first_beat_ms, first_beat_ms_source, updated_at)
+             VALUES ('track-1', NULL, NULL, 'old')",
+            [],
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        apply_local_analysis_edits_tx(&tx, "track-1", None, None, "new").expect("noop");
+        tx.commit().unwrap();
+
+        let updated_at: String = conn
+            .query_row(
+                "SELECT updated_at FROM tracks WHERE id = 'track-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(updated_at, "old");
     }
 }

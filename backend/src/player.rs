@@ -990,6 +990,41 @@ mod tests {
     }
 
     #[test]
+    fn send_command_reports_worker_unavailable_when_command_channel_is_closed() {
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+        let controller = PlaybackController { tx };
+
+        let err = controller
+            .send_command(
+                |reply_tx| PlaybackCommand::Status { reply_tx },
+                "testing closed worker",
+                Duration::from_millis(1),
+            )
+            .expect_err("closed command receiver should be reported");
+
+        assert!(matches!(err, BackendError::Internal(msg) if msg.contains("worker unavailable")));
+    }
+
+    #[test]
+    fn send_command_reports_timeout_when_worker_does_not_reply() {
+        let (tx, _rx) = mpsc::channel();
+        let controller = PlaybackController { tx };
+
+        let err = controller
+            .send_command(
+                |reply_tx| PlaybackCommand::Status { reply_tx },
+                "testing timeout",
+                Duration::from_millis(1),
+            )
+            .expect_err("unanswered command should time out");
+
+        assert!(
+            matches!(err, BackendError::Internal(msg) if msg.contains("timed out") && msg.contains("testing timeout"))
+        );
+    }
+
+    #[test]
     fn supersede_pending_play_replies_with_error_and_clears_state() {
         let mut state = WorkerState::default();
         let (reply_tx, reply_rx) = mpsc::channel();

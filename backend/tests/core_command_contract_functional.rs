@@ -5,13 +5,15 @@ use std::path::Path;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddTracksToPlaylistRequest, CheckSourceRootsRequest, CreatePlaylistRequest, DedupeMode,
-    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
-    GetTrackDetailRequest, InitializeUsbRequest, ListTracksRequest, PlayResolvedTrackRequest,
-    PlayTrackRequest, PlaybackPreflightRequest, PruneUsbDeviceRequest,
+    DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbDeviceNameRequest, InitializeUsbRequest,
+    ListTracksRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest, PlayTrackRequest,
+    PlaybackPreflightRequest, PruneUsbDeviceRequest, RefreshPlaylistExportStatusRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
-    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanMasterDbRequest,
-    SearchTracksRequest, TrackCueInput, ValidateUsbRootRequest,
+    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
+    RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksRequest,
+    SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -107,6 +109,90 @@ fn search_tracks_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {
             .message
             .contains("cursor does not match current query"),
         "unexpected mismatch error: {mismatch_error:?}"
+    );
+}
+
+#[test]
+fn command_surface_covers_usb_name_backup_identity_refresh_and_preflight_wrappers() {
+    let root = tempdir().expect("temp root");
+    let usb_root = root.path().join("usb");
+    fs::create_dir_all(&usb_root).expect("create usb root");
+    let usb_root_string = usb_root.to_string_lossy().to_string();
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+
+    let identity = backend.resolve_track_identity(ResolveTrackIdentityRequest {
+        track_id: None,
+        title: String::new(),
+        artist: String::new(),
+        album: None,
+        bpm: None,
+        file_path: None,
+        file_size_bytes: None,
+        track_number: None,
+        key: None,
+        format_ext: None,
+        sample_rate_hz: None,
+        bit_depth: None,
+        bitrate_kbps: None,
+        usb_root: None,
+        usb_root_valid: false,
+        usb_analysis_path: None,
+    });
+    assert!(identity.ok, "identity wrapper failed: {identity:?}");
+    let identity = identity.data.expect("identity data");
+    assert_eq!(identity.track_id, None);
+    assert_eq!(identity.resolved_by, "none");
+    assert!(!identity.materialized);
+
+    let refreshed = backend.refresh_playlist_export_status(RefreshPlaylistExportStatusRequest {
+        usb_root: None,
+    });
+    assert!(refreshed.ok, "refresh wrapper failed: {refreshed:?}");
+    assert!(refreshed
+        .data
+        .expect("refresh data")
+        .playlist_usb_export_status
+        .is_empty());
+
+    let get_name = backend.get_usb_device_name(GetUsbDeviceNameRequest {
+        usb_root: usb_root_string.clone(),
+    });
+    assert!(get_name.ok, "get name wrapper failed: {get_name:?}");
+    assert!(get_name.data.expect("get name data").name.is_none());
+
+    let set_empty_name = backend.set_usb_device_name(SetUsbDeviceNameRequest {
+        usb_root: usb_root_string.clone(),
+        name: "   ".to_string(),
+    });
+    assert!(
+        !set_empty_name.ok,
+        "empty USB name should be rejected: {set_empty_name:?}"
+    );
+
+    let backups = backend.list_usb_backups(ListUsbBackupsRequest {
+        usb_root: usb_root_string.clone(),
+    });
+    assert!(backups.ok, "list backups wrapper failed: {backups:?}");
+    assert!(backups.data.expect("backup data").items.is_empty());
+
+    let restore = backend.restore_usb_backup(RestoreUsbBackupRequest {
+        usb_root: usb_root_string.clone(),
+        timestamp: "2020-01-01_00-00-00".to_string(),
+    });
+    assert!(!restore.ok, "missing restore snapshot should fail: {restore:?}");
+
+    let delete = backend.delete_usb_backup(DeleteUsbBackupRequest {
+        usb_root: usb_root_string,
+        timestamp: "2020-01-01_00-00-00".to_string(),
+    });
+    assert!(!delete.ok, "missing delete snapshot should fail: {delete:?}");
+
+    let preflight = backend.playback_preflight_native(PlaybackPreflightRequest {
+        path: "  ".to_string(),
+    });
+    assert!(
+        !preflight.ok,
+        "blank playback preflight path should be rejected: {preflight:?}"
     );
 }
 

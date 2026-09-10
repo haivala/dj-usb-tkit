@@ -4005,6 +4005,197 @@ mod tests {
         );
     }
 
+    fn create_master_db_fixture(
+        root: &Path,
+        rows: &[(&str, &str, Option<&str>, Option<&str>)],
+    ) -> PathBuf {
+        let master_path = root.join("rekordbox").join("master.db");
+        std::fs::create_dir_all(master_path.parent().unwrap()).expect("create master db dir");
+        let conn = rusqlite::Connection::open(&master_path).expect("create master db");
+        conn.execute_batch(&format!(
+            "PRAGMA key='{}';",
+            usb_vendor_compat::DEFAULT_MASTER_DB_KEY
+        ))
+        .expect("set master db key");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE djmdArtist (ID INTEGER PRIMARY KEY, Name TEXT);
+            CREATE TABLE djmdAlbum (ID INTEGER PRIMARY KEY, Name TEXT);
+            CREATE TABLE djmdKey (ID INTEGER PRIMARY KEY, ScaleName TEXT);
+            CREATE TABLE djmdContent (
+              ID INTEGER PRIMARY KEY,
+              FolderPath TEXT,
+              Title TEXT,
+              SrcArtistName TEXT,
+              ArtistID INTEGER,
+              AlbumID INTEGER,
+              BPM INTEGER,
+              KeyID INTEGER,
+              Length INTEGER,
+              AnalysisDataPath TEXT,
+              ImagePath TEXT,
+              rb_local_deleted INTEGER DEFAULT 0
+            );
+            INSERT INTO djmdArtist (ID, Name) VALUES (1, 'Fixture Artist');
+            INSERT INTO djmdAlbum (ID, Name) VALUES (1, 'Fixture Album');
+            INSERT INTO djmdKey (ID, ScaleName) VALUES (1, '8A');
+            "#,
+        )
+        .expect("create master db schema");
+
+        for (idx, (file_path, title, anlz_path, image_path)) in rows.iter().enumerate() {
+            conn.execute(
+                r#"
+                INSERT INTO djmdContent
+                  (ID, FolderPath, Title, SrcArtistName, ArtistID, AlbumID, BPM, KeyID, Length,
+                   AnalysisDataPath, ImagePath, rb_local_deleted)
+                VALUES (?1, ?2, ?3, 'Fallback Artist', 1, 1, 12600, 1, 245, ?4, ?5, 0)
+                "#,
+                params![idx as i64 + 1, file_path, title, anlz_path, image_path],
+            )
+            .expect("insert master db row");
+        }
+
+        conn.execute(
+            "INSERT INTO djmdContent (ID, FolderPath, Title, rb_local_deleted)
+             VALUES (999, '/deleted/track.mp3', 'Deleted', 1)",
+            [],
+        )
+        .expect("insert deleted row");
+        drop(conn);
+        master_path
+    }
+
+    #[test]
+    fn scan_master_db_imports_updates_removes_and_reports_resource_warnings() {
+        let master_root = tempfile::tempdir().expect("master root");
+        let media_root = tempfile::tempdir().expect("media root");
+        let (_service_dir, service) = test_service();
+
+        let existing_path = media_root.path().join("existing.mp3");
+        let new_nulls_path = media_root.path().join("new-nulls.aif");
+        let new_missing_assets_path = media_root.path().join("new-missing.flac");
+        std::fs::write(&existing_path, b"existing").expect("write existing file");
+        std::fs::write(&new_nulls_path, b"new").expect("write new file");
+        std::fs::write(&new_missing_assets_path, b"missing").expect("write missing-assets file");
+
+        let share_dir = master_root.path().join("rekordbox").join("share");
+        let anlz_path = share_dir.join("PIONEER/USBANLZ/a/ANLZ0000.EXT");
+        let image_path = share_dir.join("PIONEER/Artwork/a/COVER.JPG");
+        std::fs::create_dir_all(anlz_path.parent().unwrap()).expect("create anlz dir");
+        std::fs::create_dir_all(image_path.parent().unwrap()).expect("create image dir");
+        std::fs::write(&anlz_path, b"anlz").expect("write anlz");
+        std::fs::write(&image_path, b"jpg").expect("write artwork");
+
+        let removed_path = media_root.path().join("removed.mp3");
+        let master_path = create_master_db_fixture(
+            master_root.path(),
+            &[
+                (
+                    existing_path.to_str().unwrap(),
+                    "Updated Existing",
+                    Some("/PIONEER/USBANLZ/a/ANLZ0000.DAT"),
+                    Some("/PIONEER/Artwork/a/COVER.JPG"),
+                ),
+                (new_nulls_path.to_str().unwrap(), "Inserted Nulls", None, None),
+                (
+                    new_missing_assets_path.to_str().unwrap(),
+                    "Inserted Missing Assets",
+                    Some("/PIONEER/USBANLZ/missing/ANLZ0000.DAT"),
+                    Some("/PIONEER/Artwork/missing/COVER.JPG"),
+                ),
+                (removed_path.to_str().unwrap(), "Removed", None, None),
+            ],
+        );
+
+        let conn = service.db.connect().expect("service db");
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, created_at, updated_at)
+             VALUES ('existing-track', 'Old', 'Old Artist', ?1, 'old-fp', 'old', 'old')",
+            params![existing_path.to_str().unwrap()],
+        )
+        .expect("seed existing track");
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, created_at, updated_at)
+             VALUES ('removed-track', 'Gone', 'Old Artist', ?1, 'old-fp', 'old', 'old')",
+            params![removed_path.to_str().unwrap()],
+        )
+        .expect("seed removed track");
+        drop(conn);
+
+        let result = service
+            .scan_master_db(ScanMasterDbRequest {
+                path: Some(master_path.to_string_lossy().to_string()),
+            })
+            .expect("scan master db");
+
+        assert_eq!(result.indexed, 2);
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.removed, 1);
+        assert_eq!(result.not_found, vec![removed_path.to_string_lossy().to_string()]);
+        let warning_codes = result
+            .warnings
+            .iter()
+            .map(|warning| warning.code.as_str())
+            .collect::<Vec<_>>();
+        for code in [
+            "scan.master-db.anlz-sample",
+            "scan.master-db.image-sample",
+            "scan.master-db.anlz-null",
+            "scan.master-db.anlz-miss-summary",
+            "scan.master-db.anlz-ok",
+            "scan.master-db.artwork-null",
+            "scan.master-db.artwork-miss-summary",
+            "scan.master-db.artwork-ok",
+        ] {
+            assert!(
+                warning_codes.contains(&code),
+                "expected warning code {code}, got {warning_codes:?}"
+            );
+        }
+
+        let conn = service.db.connect().expect("service db");
+        let updated: (String, String, Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT title, artist, tonality, waveform_peaks_path, artwork_path
+                   FROM tracks WHERE id = 'existing-track'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("updated row");
+        assert_eq!(updated.0, "Updated Existing");
+        assert_eq!(updated.1, "Fixture Artist");
+        assert_eq!(updated.2.as_deref(), Some("8A"));
+        assert_eq!(updated.3.as_deref(), Some(anlz_path.to_str().unwrap()));
+        assert!(updated.4.as_deref().is_some_and(|path| path.ends_with(".JPG")));
+
+        let removed_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tracks WHERE id = 'removed-track'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("removed row count");
+        assert_eq!(removed_count, 0);
+
+        let imported_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tracks WHERE master_db_source = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("imported count");
+        assert_eq!(imported_count, 3);
+    }
+
     #[test]
     fn decode_track_page_cursor_rejects_invalid_token() {
         let signature = build_track_cursor_signature(&[TRACK_CURSOR_VERSION, "list_tracks"]);
