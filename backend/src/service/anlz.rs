@@ -902,18 +902,23 @@ fn compute_num_beats(duration_ms: f64, beat_interval_ms: f64, first_beat_ms: u32
 //   abs 12-15: type          (0 = memory points, 1 = hot cues)
 //   abs 16-17: unknown       (0)
 //   abs 18-19: len_cues      (entry count)
-//   abs 20-23: memory_count  (entry count; 0xFFFFFFFF is written only for the
-//                             empty placeholder, kept for byte-parity)
+//   abs 20-23: memory_count  (real Rekordbox always writes 0xFFFFFFFF for
+//                             the hot list, regardless of entry count;
+//                             for the memory list it writes `count - 1`
+//                             when non-empty, 0xFFFFFFFF when empty — the
+//                             `count - 1` case is confirmed only from a
+//                             single real 1-entry sample)
 //   abs 24+  : PCPT entries
 //
 // PCPT entry (len_header = 0x1C / 28, len_entry = 0x38 / 56, fixed):
 //   abs 12-15: hot_cue      (0 = memory; 1 = hot A, 2 = B, …)
-//   abs 16-19: status       (memory = 0, hot = 1)
-//   abs 20-23: unknown1     (0x00100000, observed constant)
+//   abs 16-19: status       (always 0, memory and hot alike)
+//   abs 20-23: unknown1     (0x00010000, observed constant)
 //   abs 24-25: order_first  (memory: 1-based ordinal; hot: 0xFFFF)
 //   abs 26-27: order_last   (same as order_first)
 //   abs 28   : type         (1 = point)
-//   abs 29-31: padding
+//   abs 29-31: reserved     (0x0003E8, observed constant, same value PCP2
+//                            carries at abs 17-19)
 //   abs 32-35: time         (ms)
 //   abs 36-39: loop_time    (0xFFFFFFFF, no loop)
 //   abs 40-55: padding
@@ -927,11 +932,13 @@ fn compute_num_beats(duration_ms: f64, beat_interval_ms: f64, first_beat_ms: u32
 // PCP2 entry (len_header = 0x10 / 16, len_entry variable):
 //   abs 12-15: hot_cue
 //   abs 16   : type (1 = point)
-//   abs 17-19: padding
+//   abs 17-19: reserved (0x0003E8, observed constant)
 //   abs 20-23: time (ms)
 //   abs 24-27: loop_time (0xFFFFFFFF)
 //   abs 28   : color_id (palette index; 0 for memory)
-//   abs 29-35: padding
+//   abs 29   : reserved (observed constant `1` on every real sample, all
+//              with color_id 0; not cross-checked against a non-zero color)
+//   abs 30-35: padding
 //   abs 36-37: loop_numerator (0)
 //   abs 38-39: loop_denominator (0)
 //   abs 40-43: len_comment  ((utf16_units + 1) * 2, or 0)
@@ -972,14 +979,15 @@ fn cues_for_type(cues: &[AnlzCue], hot: bool) -> Vec<&AnlzCue> {
 fn build_pcpt_entry(cue: &AnlzCue, hot: bool, ordinal: u16) -> Vec<u8> {
     let mut header = Vec::with_capacity(16);
     header.extend_from_slice(&cue.hot_cue.to_be_bytes()); // hot_cue
-    header.extend_from_slice(&(if hot { 1u32 } else { 0u32 }).to_be_bytes()); // status
-    header.extend_from_slice(&0x0010_0000u32.to_be_bytes()); // unknown1
+    header.extend_from_slice(&0u32.to_be_bytes()); // status (always 0, hot and memory alike)
+    header.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // unknown1
     let order = if hot { 0xFFFFu16 } else { ordinal };
     header.extend_from_slice(&order.to_be_bytes()); // order_first
     header.extend_from_slice(&order.to_be_bytes()); // order_last
 
     let mut payload = vec![0u8; 28];
     payload[0] = 1; // type = point
+    payload[1..4].copy_from_slice(&[0x00, 0x03, 0xe8]); // reserved (observed constant, 1000)
     payload[4..8].copy_from_slice(&cue.position_ms.to_be_bytes());
     payload[8..12].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes()); // loop_time
 
@@ -1000,9 +1008,13 @@ fn build_pcp2_entry(cue: &AnlzCue) -> Vec<u8> {
 
     let mut payload = vec![0u8; 28]; // abs 16..44 fixed portion
     payload[0] = 1; // type = point (abs 16)
+    payload[1..4].copy_from_slice(&[0x00, 0x03, 0xe8]); // reserved (observed constant, 1000; abs 17)
     payload[4..8].copy_from_slice(&cue.position_ms.to_be_bytes()); // time (abs 20)
     payload[8..12].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes()); // loop_time (abs 24)
     payload[12] = cue.color_id; // color_id (abs 28)
+    // abs 29: observed constant `1` on every real sample (all with color_id
+    // 0); not cross-checked against a genuine non-zero-color entry.
+    payload[13] = 1;
     // payload[20..22] loop_numerator (abs 36), payload[22..24] loop_denominator
     // (abs 38) stay zero.
     payload[24..28].copy_from_slice(&len_comment.to_be_bytes()); // len_comment (abs 40)
@@ -1208,7 +1220,12 @@ fn append_pcob_chunk(file: &mut Vec<u8>, cue_type: u32, cues: &[AnlzCue]) {
     }
     let count = entries.len() as u32;
     header[6..8].copy_from_slice(&(count as u16).to_be_bytes()); // len_cues
-    header[8..12].copy_from_slice(&count.to_be_bytes()); // memory_count
+    // memory_count: real Rekordbox always writes the 0xFFFFFFFF sentinel for
+    // the hot list, regardless of count (confirmed on 2-8 hot entries across
+    // real reference files). For the memory list, the one real sample we
+    // have (a single entry) writes `count - 1`; unconfirmed beyond 1 entry.
+    let memory_count = if hot { 0xFFFF_FFFFu32 } else { count - 1 };
+    header[8..12].copy_from_slice(&memory_count.to_be_bytes());
 
     let mut payload = Vec::new();
     for (i, cue) in entries.iter().enumerate() {
@@ -2444,17 +2461,39 @@ mod tests {
         // sample_cues has two hot cues (slots 1 and 3), sorted by slot.
         assert_eq!(read_u32_be(&pcob, 12), 1); // type
         assert_eq!(u16::from_be_bytes([pcob[18], pcob[19]]), 2); // len_cues
-        assert_eq!(read_u32_be(&pcob, 20), 2); // memory_count
+        // Hot list: real Rekordbox always writes the 0xFFFFFFFF sentinel here,
+        // regardless of entry count.
+        assert_eq!(read_u32_be(&pcob, 20), 0xFFFF_FFFF); // memory_count
         let body = &pcob[24..];
         assert_eq!(&body[0..4], b"PCPT");
         assert_eq!(read_u32_be(body, 4), 0x1C); // len_header
         assert_eq!(read_u32_be(body, 8), 0x38); // len_entry
         assert_eq!(read_u32_be(body, 12), 1); // hot_cue slot
-        assert_eq!(read_u32_be(body, 16), 1); // status (hot)
-        assert_eq!(read_u32_be(body, 20), 0x0010_0000); // unknown1
+        assert_eq!(read_u32_be(body, 16), 0); // status (always 0)
+        assert_eq!(read_u32_be(body, 20), 0x0001_0000); // unknown1
         assert_eq!(body[28], 1); // type = point
+        assert_eq!(&body[29..32], &[0x00, 0x03, 0xe8]); // reserved constant
         assert_eq!(read_u32_be(body, 32), 2_000); // time
         assert_eq!(read_u32_be(body, 36), 0xFFFF_FFFF); // loop_time
+    }
+
+    #[test]
+    fn pcob_memory_count_matches_real_rekordbox_semantics() {
+        // Memory list, 2 entries (sample_cues has two memory points):
+        // real Rekordbox writes `count - 1` when non-empty.
+        let mut mem_pcob = Vec::new();
+        append_pcob_chunk(&mut mem_pcob, 0, &sample_cues());
+        assert_eq!(read_u32_be(&mem_pcob, 20), 1); // memory_count = count - 1
+
+        // Memory list, empty: sentinel, unchanged from before.
+        let mut empty_mem_pcob = Vec::new();
+        append_pcob_chunk(&mut empty_mem_pcob, 0, &[]);
+        assert_eq!(read_u32_be(&empty_mem_pcob, 20), 0xFFFF_FFFF);
+
+        // Hot list, empty: sentinel too.
+        let mut empty_hot_pcob = Vec::new();
+        append_pcob_chunk(&mut empty_hot_pcob, 1, &[]);
+        assert_eq!(read_u32_be(&empty_hot_pcob, 20), 0xFFFF_FFFF);
     }
 
     #[test]
@@ -2469,8 +2508,10 @@ mod tests {
         assert_eq!(len_entry % 4, 0, "entry length must be 4-byte aligned");
         assert_eq!(read_u32_be(body, 12), 1); // hot_cue
         assert_eq!(body[16], 1); // type
+        assert_eq!(&body[17..20], &[0x00, 0x03, 0xe8]); // reserved constant
         assert_eq!(read_u32_be(body, 20), 2_000); // time
         assert_eq!(body[28], 2); // color_id
+        assert_eq!(body[29], 1); // reserved constant
         let len_comment = read_u32_be(body, 40) as usize;
         assert_eq!(len_comment, ("Drop".encode_utf16().count() + 1) * 2);
         let comment_units: Vec<u16> = body[44..44 + len_comment - 2]
