@@ -30,9 +30,8 @@ on any device, and all previously known issues are fixed and hardware-confirmed
 on the hardware that originally showed them. The latest run (app 0.1.36,
 2026-09-02) re-validated every scenario on CDJ-2000NXS2, CDJ-3000, and the newly
 added CDJ-3000X; CDJ-2000NXS remains green on its last-tested versions with no
-regression reported. `cue-points-and-edited-beatgrid` initially failed on
-CDJ-2000NX and CDJ-2000NXS2 (2026-09-11) and is now hardware-confirmed fixed
-on both — see Known Issues: "Unreleased — `cue-points-wrong-seek-position`".
+regression reported. `cue-points-and-edited-beatgrid` is hardware-confirmed
+on CDJ-2000NX and CDJ-2000NXS2 for its first release in 0.2.0.
 
 Additive export — adding tracks to a USB that was initialized by rekordbox,
 without wiping the existing library — has worked on hardware since the first
@@ -55,8 +54,8 @@ release (0.1.0) and has stayed working through every version since.
 | CDJ-3000X | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `more-than-16-tracks-fresh-usb-init` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
-| CDJ-2000NX | `cue-points-and-edited-beatgrid` | pass | Unreleased | 2026-09-11 | Was `fail` before the ANLZ cue-encoder byte-layout fix in this version — see `cue-points-wrong-seek-position` below. |
-| CDJ-2000NXS2 | `cue-points-and-edited-beatgrid` | pass | Unreleased | 2026-09-11 | Was `fail` before the ANLZ cue-encoder byte-layout fix in this version — see `cue-points-wrong-seek-position` below. |
+| CDJ-2000NX | `cue-points-and-edited-beatgrid` | pass | 0.2.0 | 2026-09-11 | First hardware validation of the 0.2.0 cue editor; cues trigger at their saved positions. |
+| CDJ-2000NXS2 | `cue-points-and-edited-beatgrid` | pass | 0.2.0 | 2026-09-11 | First hardware validation of the 0.2.0 cue editor; cues trigger at their saved positions. |
 
 ## Validation History
 
@@ -97,70 +96,14 @@ Current Status table above is a summary of its latest rows.
 | CDJ-3000X | 1.31 | 0.1.36 | `strict-parity-repair` | Apply strict parity repair, reinsert USB, database mount, playlist browse, track load, playback start | pass | hardware | 2026-09-02 | maintainer | First validation on CDJ-3000X. Strict parity repair output is accepted and playable. |
 | CDJ-3000X | 1.31 | 0.1.36 | `non-ascii-track-string-alignment` | USB insert, database mount, Albums browse into a track whose title/filename require UTF-16 encoding, track listing, track load, playback start | pass | hardware | 2026-09-02 | maintainer | First validation on CDJ-3000X. |
 | CDJ-3000X | 1.31 | 0.1.36 | `more-than-16-tracks-fresh-usb-init` | Initialize a fresh USB, export a playlist with more than 16 tracks, insert USB, database mount | pass | hardware | 2026-09-02 | maintainer | First validation on CDJ-3000X. |
-| CDJ-2000NX | unspecified | Unreleased | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | fail | hardware | 2026-09-11 | maintainer | Every cue jumped to roughly the same spot near track start instead of its saved position. See Known Issues: "Unreleased — `cue-points-wrong-seek-position`". |
-| CDJ-2000NXS2 | unspecified | Unreleased | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | fail | hardware | 2026-09-11 | maintainer | Same symptom as the CDJ-2000NX row above. See Known Issues: "Unreleased — `cue-points-wrong-seek-position`". |
-| CDJ-2000NX | unspecified | Unreleased | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | pass | hardware | 2026-09-11 | maintainer | Re-tested after the ANLZ cue-encoder byte-layout fix (re-saved the track's cues, no re-analysis). Cues now trigger at their saved positions. |
-| CDJ-2000NXS2 | unspecified | Unreleased | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | pass | hardware | 2026-09-11 | maintainer | Same fix and retest as the CDJ-2000NX row above. |
+| CDJ-2000NX | 1.44 | 0.2.0 | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | pass | hardware | 2026-09-11 | maintainer | First hardware validation of the 0.2.0 cue editor. Cues trigger at their saved positions. |
+| CDJ-2000NXS2 | 1.82 | 0.2.0 | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | pass | hardware | 2026-09-11 | maintainer | First hardware validation of the 0.2.0 cue editor. Cues trigger at their saved positions. |
 
 ## Known Issues
 
 Full write-ups for every `fail`/`warn` row in Validation History, headed by the
 affected app version range — that's the first thing anyone checking this file
 wants to know. Referenced from the table's Notes column by heading text.
-
-### Unreleased — `cue-points-wrong-seek-position` (fixed same cycle)
-
-**Devices:** CDJ-2000NX, CDJ-2000NXS2 (firmware not recorded)
-
-Symptoms:
-- Every saved cue point (memory point or hot-cue pad) jumped playback to
-  roughly the same position near the start of the track instead of its own
-  saved position, on every cue tested. The app's own cue editor showed the
-  correct times for the same track — this was purely an on-device playback
-  bug, not a data-storage or UI bug.
-
-Reproduction:
-1. Save two or more cue points at distinct positions on a track (via the
-   local cue editor or the USB-native cue editor).
-2. Export (or, for a USB-native edit, save in place) to a USB stick.
-3. Insert into a CDJ-2000NX or CDJ-2000NXS2, load the track, trigger each
-   memory/hot cue.
-4. Every cue lands at (approximately) the same spot near track start.
-
-Context:
-- The eDB `cue` table's ten seek-anchor columns (`inMpegFrameNumber`,
-  `inDecodingStartFramePosition`, `inFileOffsetInBlock`, etc.) were initially
-  suspected, since this app leaves them `NULL`. Ruled out: a genuine
-  Rekordbox-exported reference USB (with real hot cues on real tracks)
-  showed the `cue` table has **zero rows** even for tracks with 8 real hot
-  cues — real Rekordbox doesn't populate that table for on-device playback
-  either, so CDJs must read cue positions from the ANLZ files alone.
-- The actual bug: byte-for-byte diffing this app's own exported
-  `ANLZ0000.DAT`/`.EXT` cue chunks (`PCOB`/`PCPT` basic, `PCO2`/`PCP2`
-  extended) against the genuine Rekordbox reference found this app's
-  encoder was writing wrong values in three places every real Rekordbox
-  export gets consistently right: the `unknown1` constant in `PCPT`
-  (`0x00100000` instead of `0x00010000`), the `status` byte (`1` for hot
-  cues instead of always `0`), and a reserved 3-byte field immediately after
-  the `kind`/`type` byte in both `PCPT` and `PCP2` (left `0` instead of the
-  constant `0x0003E8`). All three were confirmed wrong on every one of 13
-  real cue entries sampled across two genuine Rekordbox tracks. A firmware
-  parser sanity-checking any of these fixed/magic fields and rejecting a
-  non-matching entry (falling back to a default position) fits the observed
-  symptom exactly.
-
-Artifacts:
-- Fixed in `backend/src/service/anlz.rs` (`build_pcpt_entry`,
-  `build_pcp2_entry`, `append_pcob_chunk`) — see the CHANGELOG entry in this
-  same Unreleased cycle.
-
-Validation questions:
-- None outstanding for the fields above — hardware-confirmed fixed on both
-  devices. Not yet verified: the `.DAT` file's basic `PCOB` caps hot cues at
-  3 (slots 4-8 go into the `.EXT`'s basic `PCOB` instead) in genuine
-  Rekordbox output; this app still writes the full list (up to 8) into both
-  files. Untested because the reproduction track only had 2 hot cues — worth
-  a follow-up hardware pass with a track that has 4+ hot cues.
 
 ### 0.1.10 and earlier — `non-ascii-track-string-alignment` (fixed in 0.1.11)
 

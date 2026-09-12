@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.2.0
+
 - **New feature:** cue points and the beat-grid first beat are now editable. A
   per-track modal (opened from the magnifier button next to a track's waveform)
   shows the full-detail colour waveform with a beat-grid overlay and
