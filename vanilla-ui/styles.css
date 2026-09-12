@@ -3420,8 +3420,8 @@ td button[data-action]:disabled,
 
 /* ── Track-detail modal: cue points + beat grid ─────────────────────── */
 .track-detail-dialog {
-  width: min(96vw, 1400px);
-  max-height: 92vh;
+  width: 98vw;
+  max-height: 97vh;
   overflow-y: auto;
   background: var(--card);
   border: 1px solid var(--line);

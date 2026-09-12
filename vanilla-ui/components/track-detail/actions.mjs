@@ -519,7 +519,7 @@ export function createTrackDetailController(el) {
 
       const t = working.track;
       el.trackDetailTitle.textContent =
-        `${t.artist ? t.artist + " – " : ""}${t.title || "Track"} · Cues & beat grid`;
+        `${t.album ? t.album + " · " : ""}${t.artist ? t.artist + " – " : ""}${t.title || "Track"}`;
       el.trackDetailOverlay.hidden = false;
       render();
       // Re-measure once layout has settled (canvas is otherwise sized from a

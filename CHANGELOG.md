@@ -36,6 +36,9 @@
   just on the next export.
 - **Fix:** on Windows, analyzing tracks with the essentia engine no longer
   flashes a console window for each spawned `node` process.
+- **Improvement:** the cues/beat-grid modal is larger (scales with the window
+  instead of capping out) and its heading now reads "Album · Artist – Title"
+  instead of repeating "Cues & beat grid".
 
 ## 0.2.0
 
