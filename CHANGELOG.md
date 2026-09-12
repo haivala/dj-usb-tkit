@@ -30,6 +30,10 @@
 
 ## Unreleased
 
+- **New feature:** BPM and musical key are now editable from the same
+  per-track cues/beat-grid modal. Editing BPM regenerates the beat grid;
+  edits made from a USB track update the on-device library immediately, not
+  just on the next export.
 - **Fix:** on Windows, analyzing tracks with the essentia engine no longer
   flashes a console window for each spawned `node` process.
 

@@ -589,6 +589,46 @@
       </div>
 
       <div class="track-detail-firstbeat">
+        <label for="trackDetailBpm">BPM</label>
+        <button type="button" id="trackDetailBpmMinus" data-tooltip="-0.01 BPM">&minus;</button>
+        <input type="number" id="trackDetailBpm" min="1" max="999" step="0.01" />
+        <button type="button" id="trackDetailBpmPlus" data-tooltip="+0.01 BPM">+</button>
+        <label for="trackDetailKey" class="track-detail-key-label">Key</label>
+        <button type="button" id="trackDetailKeyMinus" data-tooltip="Previous key">&minus;</button>
+        <select id="trackDetailKey">
+          <optgroup label="Major">
+            <option value="C">C</option>
+            <option value="C#">C#</option>
+            <option value="D">D</option>
+            <option value="D#">D#</option>
+            <option value="E">E</option>
+            <option value="F">F</option>
+            <option value="F#">F#</option>
+            <option value="G">G</option>
+            <option value="G#">G#</option>
+            <option value="A">A</option>
+            <option value="A#">A#</option>
+            <option value="B">B</option>
+          </optgroup>
+          <optgroup label="Minor">
+            <option value="Cm">Cm</option>
+            <option value="C#m">C#m</option>
+            <option value="Dm">Dm</option>
+            <option value="D#m">D#m</option>
+            <option value="Em">Em</option>
+            <option value="Fm">Fm</option>
+            <option value="F#m">F#m</option>
+            <option value="Gm">Gm</option>
+            <option value="G#m">G#m</option>
+            <option value="Am">Am</option>
+            <option value="A#m">A#m</option>
+            <option value="Bm">Bm</option>
+          </optgroup>
+        </select>
+        <button type="button" id="trackDetailKeyPlus" data-tooltip="Next key">+</button>
+      </div>
+
+      <div class="track-detail-firstbeat">
         <label for="trackDetailFirstBeatMs">First beat (ms)</label>
         <button type="button" id="trackDetailFirstBeatMinus" data-tooltip="Back one beat">&minus;</button>
         <input type="number" id="trackDetailFirstBeatMs" min="0" step="1" />

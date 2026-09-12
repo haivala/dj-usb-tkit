@@ -126,10 +126,10 @@ fn command_surface_covers_usb_name_backup_identity_refresh_and_preflight_wrapper
         artist: String::new(),
         album: None,
         bpm: None,
+        key: None,
         file_path: None,
         file_size_bytes: None,
         track_number: None,
-        key: None,
         format_ext: None,
         sample_rate_hz: None,
         bit_depth: None,
@@ -923,6 +923,8 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
     let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: Some(321),
+        bpm: None,
+        key: None,
         cues: Some(vec![
             cue(64_000, None, None),
             cue(1_000, None, Some("Intro")),
@@ -957,6 +959,8 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
     let just_beat = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: Some(654),
+        bpm: None,
+        key: None,
         cues: None,
     });
     assert!(just_beat.ok, "beat-only save failed: {just_beat:?}");
@@ -966,6 +970,8 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
     let too_many = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: None,
+        bpm: None,
+        key: None,
         cues: Some((0..9).map(|i| cue(i * 1000, None, None)).collect()),
     });
     assert!(!too_many.ok, "9 cue points should be rejected");
@@ -974,6 +980,8 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
     let bad_color = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: None,
+        bpm: None,
+        key: None,
         cues: Some(vec![cue(1_000, Some(99), None)]),
     });
     assert!(!bad_color.ok, "unknown colorId should be rejected");

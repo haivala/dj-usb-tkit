@@ -1062,7 +1062,12 @@ export function patchLibraryRowCells(row, track, deps) {
 
   const bpmTd = row.querySelector(".td-bpm");
   if (bpmTd) {
-    const bpmTitle = track.bpmAnalyzer ? ` data-tooltip="${escapeHtml(`Analyzed with: ${track.bpmAnalyzer}`)}"` : "";
+    const bpmTooltipText = track.bpmAnalyzer === "user"
+      ? "Manually set"
+      : track.bpmAnalyzer
+        ? `Analyzed with: ${track.bpmAnalyzer}`
+        : "";
+    const bpmTitle = bpmTooltipText ? ` data-tooltip="${escapeHtml(bpmTooltipText)}"` : "";
     const bpmText = formatBpm(track.bpm);
     bpmTd.innerHTML = bpmText
       ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(bpmText)}</span>`

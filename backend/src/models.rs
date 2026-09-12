@@ -97,8 +97,11 @@ pub struct Track {
     pub album: Option<String>,
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,
+    /// `"stratum"` / `"essentia"` for a detected value, `"user"` after a manual edit.
     pub bpm_analyzer: Option<String>,
     pub key: Option<String>,
+    /// `"stratum"` / `"essentia"` for a detected value, `"user"` after a manual edit.
+    pub key_source: Option<String>,
     pub file_path: String,
     pub file_size_bytes: Option<i64>,
     pub format_ext: Option<String>,
@@ -1938,6 +1941,12 @@ pub struct SaveTrackAnalysisEditsRequest {
     /// `None` ⇒ leave the cue list unchanged; `Some(_)` ⇒ full replace.
     #[serde(default)]
     pub cues: Option<Vec<TrackCueInput>>,
+    /// `None` ⇒ leave the stored bpm unchanged.
+    #[serde(default)]
+    pub bpm: Option<f64>,
+    /// `None` ⇒ leave the stored musical key unchanged.
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1947,6 +1956,14 @@ pub struct SaveTrackAnalysisEditsData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_beat_ms: Option<u32>,
     pub cues: Vec<TrackCue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpm_analyzer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_source: Option<String>,
     /// Whether the cached local ANLZ bundle was successfully rewritten with the
     /// new cues / beat grid. `false` when the track has no analysis cache yet
     /// (the edits are still persisted and applied at the next analysis/export).
@@ -1981,8 +1998,14 @@ pub struct SaveUsbTrackAnalysisEditsRequest {
     pub usb_analysis_path_raw: String,
     /// eDB `content.path` lookup key (the PDB-relative media path).
     pub usb_media_path_raw: String,
+    /// The track's current bpm (edited or not) — always required for the
+    /// on-device beat-grid rewrite, since the ANLZ write is a full rebuild
+    /// rather than an incremental patch.
     #[serde(default)]
     pub bpm: Option<f64>,
+    /// `None` ⇒ leave the stored musical key unchanged.
+    #[serde(default)]
+    pub key: Option<String>,
     #[serde(default)]
     pub duration_ms: Option<u64>,
     #[serde(default)]
@@ -2008,6 +2031,14 @@ pub struct SaveUsbTrackAnalysisEditsData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_beat_ms: Option<u32>,
     pub cues: Vec<TrackCue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpm_analyzer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_source: Option<String>,
     pub anlz_updated: bool,
     pub edb_updated: bool,
     /// `false` only when no local `tracks` row could be matched.

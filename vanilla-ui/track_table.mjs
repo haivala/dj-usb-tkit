@@ -84,7 +84,12 @@ export function createTrackRow(track, options, deps) {
     actionCell = `<div role="cell" class="track-grid-cell td-action"><div class="action-buttons">${primary}${analysisButtons}</div></div>`;
   }
 
-  const bpmTitle = track.bpmAnalyzer ? ` data-tooltip="${escapeHtml(`Analyzed with: ${track.bpmAnalyzer}`)}"` : "";
+  const bpmTooltipText = track.bpmAnalyzer === "user"
+    ? "Manually set"
+    : track.bpmAnalyzer
+      ? `Analyzed with: ${track.bpmAnalyzer}`
+      : "";
+  const bpmTitle = bpmTooltipText ? ` data-tooltip="${escapeHtml(bpmTooltipText)}"` : "";
   const bpmText = formatBpm(track.bpm);
   const bpmCell = bpmText
     ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(bpmText)}</span>`

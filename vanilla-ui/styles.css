@@ -1222,6 +1222,38 @@ input[type="password"] {
   font-family: 'JetBrains Mono', monospace;
 }
 
+select {
+  font-family: 'Outfit', sans-serif;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 24px 0 8px;
+  font-size: 13px;
+  background-color: var(--bg);
+  color: var(--ink);
+  transition: all 150ms ease;
+  /* The native widget chrome (notably WebKitGTK on Linux) ignores
+     background-color unless the OS-drawn control is stripped -- which also
+     removes its arrow, so redraw one with gradients instead of an image. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% - 2px),
+    calc(100% - 11px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
 button {
   background: var(--card);
   color: var(--ink);
@@ -3413,6 +3445,8 @@ td button[data-action]:disabled,
 }
 .track-detail-firstbeat label { font-weight: 600; }
 .track-detail-firstbeat input { width: 96px; }
+.track-detail-key-label { margin-left: 12px; }
+#trackDetailKey { width: 72px; max-width: 72px; }
 .track-detail-waveform-wrap {
   position: relative;
   border: 1px solid var(--line);

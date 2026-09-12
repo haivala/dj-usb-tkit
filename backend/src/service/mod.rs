@@ -89,7 +89,7 @@ const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
 pub(crate) const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm, tonality, file_path, \
     file_size_bytes, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, duration_ms, \
     artwork_path, waveform_peaks_path, bpm_analyzer, created_at, updated_at, \
-    COALESCE(master_db_source, 0) AS master_db_source, wav_extensible_kind";
+    COALESCE(master_db_source, 0) AS master_db_source, wav_extensible_kind, tonality_source";
 
 type ExistingTrackSnapshot = (
     String,
@@ -1679,6 +1679,7 @@ impl BackendService {
                         bpm: None,
                         bpm_analyzer: None,
                         key: scanned.tonality,
+                        key_source: None,
                         file_path: scanned.path,
                         file_size_bytes: scanned.file_size_bytes,
                         format_ext: scanned.format_ext,
@@ -3472,6 +3473,7 @@ pub(crate) fn row_to_track(
         bpm,
         bpm_analyzer,
         key: row.get(6)?,
+        key_source: row.get("tonality_source").unwrap_or(None),
         file_size_bytes: row.get(8)?,
         // Backend-owned: every track-returning command guarantees a format on
         // the wire. Fall back to the file-path extension for legacy NULL rows
@@ -4562,6 +4564,7 @@ mod tests {
             bpm: None,
             bpm_analyzer: None,
             key: None,
+            key_source: None,
             file_path: file_path.to_string(),
             file_size_bytes: None,
             format_ext: None,

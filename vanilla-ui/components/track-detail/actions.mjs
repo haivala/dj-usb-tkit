@@ -10,6 +10,7 @@ import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_d
 export const MAX_CUES = 8;
 export const MIN_SPAN_MS = 1000;
 export const DEFAULT_SPAN_MS = 120_000;
+const BPM_NUDGE_STEP = 0.01;
 
 // Mirrors backend `HOTCUE_PALETTE` (service/cues.rs). id -> css colour.
 export const HOTCUE_PALETTE = [
@@ -23,6 +24,12 @@ export const HOTCUE_PALETTE = [
   { id: 8, css: "#8A3FD1" },
 ];
 const DEFAULT_COLOR_ID = 5;
+
+// Mirrors backend `KEY_OPTIONS` (service/cues.rs). 12 majors then 12 minors.
+export const KEY_OPTIONS = [
+  "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+  "Cm", "C#m", "Dm", "D#m", "Em", "Fm", "F#m", "Gm", "G#m", "Am", "A#m", "Bm",
+];
 
 export function colorCssForId(colorId) {
   return HOTCUE_PALETTE.find((c) => c.id === colorId)?.css || "#8892a0";
@@ -61,6 +68,7 @@ export function createTrackDetailController(el) {
     track: null,
     durationMs: 0,
     bpm: null,
+    key: null,
     firstBeatMs: null,
     cues: [],
     view: { startMs: 0, endMs: 0 },
@@ -306,12 +314,36 @@ export function createTrackDetailController(el) {
     renderZoomHint();
   }
 
+  // A stored key can predate this stepper (e.g. essentia's flat spellings)
+  // and won't match any canonical `KEY_OPTIONS` entry -- rather than silently
+  // dropping it, keep it visible via a synthetic option so the select always
+  // reflects the real current value.
+  function syncKeySelect() {
+    const select = el.trackDetailKey;
+    if (!select) return;
+    const synthetic = select.querySelector("option[data-synthetic]");
+    if (working.key != null && !KEY_OPTIONS.includes(working.key)) {
+      const option = synthetic || select.ownerDocument.createElement("option");
+      option.value = working.key;
+      option.textContent = working.key;
+      option.dataset.synthetic = "1";
+      if (!synthetic) select.prepend(option);
+    } else if (synthetic) {
+      synthetic.remove();
+    }
+    if (working.key != null) select.value = working.key;
+  }
+
   function render() {
     if (!open) return;
     if (el.trackDetailFirstBeatMs) {
       el.trackDetailFirstBeatMs.value =
         working.firstBeatMs == null ? "" : String(working.firstBeatMs);
     }
+    if (el.trackDetailBpm) {
+      el.trackDetailBpm.value = working.bpm == null ? "" : String(working.bpm);
+    }
+    syncKeySelect();
     renderView();
     renderCueList();
   }
@@ -366,6 +398,36 @@ export function createTrackDetailController(el) {
       if (!interval) return;
       const base = working.firstBeatMs == null ? 0 : working.firstBeatMs;
       api.setFirstBeatMs(base + direction * interval);
+    },
+
+    setBpm(bpm) {
+      const parsed = Number.parseFloat(bpm);
+      if (!Number.isFinite(parsed) || parsed <= 0) return;
+      working.bpm = Math.round(Math.min(999, parsed) * 100) / 100;
+      render();
+    },
+
+    nudgeBpm(direction) {
+      const base = working.bpm == null ? 0 : working.bpm;
+      api.setBpm(base + direction * BPM_NUDGE_STEP);
+    },
+
+    setKey(key) {
+      const trimmed = typeof key === "string" ? key.trim() : "";
+      working.key = trimmed ? trimmed.slice(0, 16) : null;
+      render();
+    },
+
+    /// Step to the next/previous entry in `KEY_OPTIONS`. A current value
+    /// outside that list (a legacy/non-canonical stored key) jumps onto the
+    /// nearest end instead of stepping relative to a position it doesn't have.
+    nudgeKey(direction) {
+      const count = KEY_OPTIONS.length;
+      const index = working.key == null ? -1 : KEY_OPTIONS.indexOf(working.key);
+      const nextIndex = index === -1
+        ? (direction > 0 ? 0 : count - 1)
+        : (index + direction + count) % count;
+      api.setKey(KEY_OPTIONS[nextIndex]);
     },
 
     /// Add a cue. With an explicit `positionMs` it lands there (double-click on
@@ -435,7 +497,7 @@ export function createTrackDetailController(el) {
       if (resolver) resolver(result || null);
     },
 
-    open({ track, firstBeatMs, cues, durationMs, bpm }) {
+    open({ track, firstBeatMs, cues, durationMs, bpm, key }) {
       if (open) api.close(null);
       open = true;
       working.track = track || {};
@@ -444,6 +506,7 @@ export function createTrackDetailController(el) {
       waveformRetries = 0;
       working.durationMs = Number(durationMs) || Number(track?.durationMs) || 0;
       working.bpm = bpm != null ? bpm : track?.bpm ?? null;
+      working.key = key != null ? key : track?.key ?? null;
       working.firstBeatMs = firstBeatMs == null ? null : Math.round(firstBeatMs);
       working.followSuspendUntil = 0;
       working.cues = (cues || []).slice(0, MAX_CUES).map((c) => ({
@@ -479,6 +542,8 @@ export function createTrackDetailController(el) {
     toSavePayload() {
       return {
         firstBeatMs: working.firstBeatMs == null ? null : working.firstBeatMs,
+        bpm: working.bpm == null ? null : working.bpm,
+        key: working.key == null ? null : working.key,
         cues: working.cues
           .slice()
           .sort((a, b) => a.positionMs - b.positionMs)
@@ -499,7 +564,14 @@ export function createTrackDetailController(el) {
 /// onto that USB *and* into the local master. The USB must be connected — a
 /// not-connected row is blocked here, never silently downgraded to local-only.
 async function openUsbTrackDetail(track, deps) {
-  const { command, trackDetailDialog, emitStatus, state } = deps;
+  const {
+    command,
+    trackDetailDialog,
+    emitStatus,
+    state,
+    applyRealtimeAnalyzedTrackUpdate,
+    patchTrackAnalysisFields,
+  } = deps;
 
   if (!state?.usbRootValid || !state?.usbRoot) {
     emitStatus("Connect the USB this track is on before editing its cues.");
@@ -532,6 +604,7 @@ async function openUsbTrackDetail(track, deps) {
     cues: detail.cues,
     durationMs: track.durationMs,
     bpm: track.bpm,
+    key: track.key,
   });
   if (!payload) return;
 
@@ -540,7 +613,8 @@ async function openUsbTrackDetail(track, deps) {
       usbRoot: state.usbRoot,
       usbAnalysisPathRaw,
       usbMediaPathRaw: track.usbMediaPath,
-      bpm: track.bpm,
+      bpm: payload.bpm,
+      key: payload.key,
       durationMs: track.durationMs,
       firstBeatMs: payload.firstBeatMs,
       cues: payload.cues,
@@ -548,6 +622,15 @@ async function openUsbTrackDetail(track, deps) {
     });
     const n = saved.cues.length;
     emitStatus(`Saved ${n} cue${n === 1 ? "" : "s"} to USB`);
+    patchTrackAnalysisFields?.(track, { bpm: saved.bpm, bpmAnalyzer: saved.bpmAnalyzer, key: saved.key });
+    if (track.localTrackId) {
+      applyRealtimeAnalyzedTrackUpdate?.({
+        trackId: track.localTrackId,
+        bpm: saved.bpm,
+        bpmAnalyzer: saved.bpmAnalyzer,
+        key: saved.key,
+      });
+    }
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);
   }
@@ -556,7 +639,13 @@ async function openUsbTrackDetail(track, deps) {
 /// Open the modal for a track: resolve to a local id, fetch detail, and on Save
 /// persist the edits.
 export async function openTrackDetail(track, deps) {
-  const { command, resolveLocalTrackIdAsync, trackDetailDialog, emitStatus } = deps;
+  const {
+    command,
+    resolveLocalTrackIdAsync,
+    trackDetailDialog,
+    emitStatus,
+    applyRealtimeAnalyzedTrackUpdate,
+  } = deps;
 
   if (track?.origin === "usb") {
     return openUsbTrackDetail(track, deps);
@@ -591,6 +680,7 @@ export async function openTrackDetail(track, deps) {
     cues: detail.cues,
     durationMs: detail.track?.durationMs,
     bpm: detail.track?.bpm,
+    key: detail.track?.key,
   });
   if (!payload) return;
 
@@ -598,12 +688,20 @@ export async function openTrackDetail(track, deps) {
     const saved = await command("save_track_analysis_edits", {
       trackId: localId,
       firstBeatMs: payload.firstBeatMs,
+      bpm: payload.bpm,
+      key: payload.key,
       cues: payload.cues,
     });
     emitStatus(
       `Saved ${saved.cues.length} cue${saved.cues.length === 1 ? "" : "s"}` +
         (saved.anlzRegenerated ? "" : " (analysis cache not updated yet)")
     );
+    applyRealtimeAnalyzedTrackUpdate?.({
+      trackId: localId,
+      bpm: saved.bpm,
+      bpmAnalyzer: saved.bpmAnalyzer,
+      key: saved.key,
+    });
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);
   }

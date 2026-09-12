@@ -137,6 +137,8 @@ const ELEMENT_IDS = [
   "trackDetailOverlay", "trackDetailTitle", "trackDetailCloseBtn", "trackDetailWaveform",
   "trackDetailBeatgrid", "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs",
   "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailAddCue",
+  "trackDetailBpm", "trackDetailBpmMinus", "trackDetailBpmPlus",
+  "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
   "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailZoomRange",
   "trackDetailCueList", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
 ];
@@ -618,6 +620,8 @@ const openTrackDetail = (track) => trackDetail.openTrackDetail(track, {
     resolveLocalTrackIdAsync,
     trackDetailDialog,
     emitStatus,
+    applyRealtimeAnalyzedTrackUpdate,
+    patchTrackAnalysisFields,
   });
 
 const stopPlaybackIfActive = async () => playback.stopPlaybackIfActive(state, {

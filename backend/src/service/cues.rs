@@ -26,7 +26,7 @@ use crate::models::{
     WarningEntry,
 };
 
-use crate::edb::{find_content_id_by_path, open_edb_rw};
+use crate::edb::{find_content_id_by_path, find_key_id_by_name, open_edb_rw};
 
 use super::anlz::{
     AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, atomic_write_bytes,
@@ -267,6 +267,28 @@ pub fn anlz_cues_from_track_cues(cues: &[TrackCue]) -> Vec<AnlzCue> {
     out
 }
 
+/// The musical keys the track-detail modal's key stepper offers, in standard
+/// notation exactly as `stratum-dsp`'s `Key::name()` and the essentia runner
+/// emit it (sharp-only, e.g. "C#" never "Db"): 12 majors then 12 minors.
+/// Mirrored in `vanilla-ui/components/track-detail/actions.mjs` as
+/// `KEY_OPTIONS`.
+pub const KEY_OPTIONS: &[&str] = &[
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "Cm", "C#m", "Dm", "D#m",
+    "Em", "Fm", "F#m", "Gm", "G#m", "Am", "A#m", "Bm",
+];
+
+/// Trim and validate a user-entered musical key against `KEY_OPTIONS`. Only
+/// gates new *user* edits through the save endpoints — a track's stored key
+/// (from essentia, which can emit flat spellings, or a legacy value) is never
+/// re-validated by this.
+fn normalize_key_input(key: &str) -> BackendResult<String> {
+    let trimmed = key.trim();
+    if !KEY_OPTIONS.contains(&trimmed) {
+        return Err(BackendError::Validation(format!("unknown key: {trimmed}")));
+    }
+    Ok(trimmed.to_string())
+}
+
 /// A validated, normalised cue point ready to be persisted.
 #[derive(Debug)]
 struct NormalizedCue {
@@ -327,8 +349,9 @@ fn normalized_to_track_cues(cues: &[NormalizedCue]) -> Vec<TrackCue> {
     cues.iter().map(NormalizedCue::to_track_cue).collect()
 }
 
-/// Apply a first-beat / cue-list edit to the local master in `tx`: write
-/// `tracks.first_beat_ms` and/or replace `track_cues`, and — when either
+/// Apply a first-beat / cue-list / bpm / key edit to the local master in
+/// `tx`: write `tracks.first_beat_ms` and/or `tracks.bpm` and/or
+/// `tracks.tonality` and/or replace `track_cues`, and — when any of these
 /// changed — bump `tracks.updated_at` and reset the export markers of every
 /// app playlist containing the track (a stale on-USB bundle is refreshed only
 /// by a re-export). Shared by the local save and the USB-native save.
@@ -337,12 +360,28 @@ fn apply_local_analysis_edits_tx(
     track_id: &str,
     first_beat_ms: Option<u32>,
     cues: Option<&[NormalizedCue]>,
+    bpm: Option<f64>,
+    key: Option<&str>,
     now: &str,
 ) -> BackendResult<()> {
     if let Some(first_beat_ms) = first_beat_ms {
         tx.execute(
             "UPDATE tracks SET first_beat_ms = ?1, first_beat_ms_source = 'user', updated_at = ?2 WHERE id = ?3",
             params![i64::from(first_beat_ms), now, track_id],
+        )?;
+    }
+
+    if let Some(bpm) = bpm {
+        tx.execute(
+            "UPDATE tracks SET bpm = ?1, bpm_analyzer = 'user', updated_at = ?2 WHERE id = ?3",
+            params![bpm, now, track_id],
+        )?;
+    }
+
+    if let Some(key) = key {
+        tx.execute(
+            "UPDATE tracks SET tonality = ?1, tonality_source = 'user', updated_at = ?2 WHERE id = ?3",
+            params![key, now, track_id],
         )?;
     }
 
@@ -366,7 +405,7 @@ fn apply_local_analysis_edits_tx(
         }
     }
 
-    if first_beat_ms.is_some() || cues.is_some() {
+    if first_beat_ms.is_some() || cues.is_some() || bpm.is_some() || key.is_some() {
         tx.execute(
             "UPDATE tracks SET updated_at = ?1 WHERE id = ?2",
             params![now, track_id],
@@ -475,6 +514,16 @@ impl BackendService {
             ));
         }
 
+        if let Some(bpm) = req.bpm
+            && !(bpm > 0.0 && bpm <= 999.0)
+        {
+            return Err(BackendError::Validation(
+                "bpm must be greater than 0 and at most 999".to_string(),
+            ));
+        }
+
+        let key = req.key.as_deref().map(normalize_key_input).transpose()?;
+
         let normalized = match req.cues.as_deref() {
             Some(inputs) => Some(normalize_cues(inputs, duration_ms)?),
             None => None,
@@ -487,6 +536,8 @@ impl BackendService {
             &track_id,
             req.first_beat_ms,
             normalized.as_deref(),
+            req.bpm,
+            key.as_deref(),
             &now,
         )?;
         tx.commit()?;
@@ -510,18 +561,28 @@ impl BackendService {
 
         let conn = self.db.connect()?;
         let cues = load_track_cues(&conn, &track_id)?;
-        let first_beat_ms: Option<u32> = conn
-            .query_row(
-                "SELECT first_beat_ms FROM tracks WHERE id = ?1",
-                params![track_id],
-                |row| row.get::<_, Option<i64>>(0),
-            )?
-            .map(|v| v.max(0) as u32);
+        let (first_beat_ms, bpm, bpm_analyzer, key, key_source) = conn.query_row(
+            "SELECT first_beat_ms, bpm, bpm_analyzer, tonality, tonality_source FROM tracks WHERE id = ?1",
+            params![track_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?.map(|v| v.max(0) as u32),
+                    row.get::<_, Option<f64>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )?;
 
         Ok(SaveTrackAnalysisEditsData {
             track_id,
             first_beat_ms,
             cues,
+            bpm,
+            bpm_analyzer,
+            key,
+            key_source,
             anlz_regenerated,
         })
     }
@@ -600,6 +661,14 @@ impl BackendService {
                 "firstBeatMs must be less than the track duration".to_string(),
             ));
         }
+        if let Some(bpm) = req.bpm
+            && !(bpm > 0.0 && bpm <= 999.0)
+        {
+            return Err(BackendError::Validation(
+                "bpm must be greater than 0 and at most 999".to_string(),
+            ));
+        }
+        let key = req.key.as_deref().map(normalize_key_input).transpose()?;
         let normalized = match req.cues.as_deref() {
             Some(inputs) => Some(normalize_cues(inputs, req.duration_ms)?),
             None => None,
@@ -657,6 +726,8 @@ impl BackendService {
                     &track_id,
                     req.first_beat_ms,
                     normalized.as_deref(),
+                    req.bpm,
+                    key.as_deref(),
                     &now,
                 )?;
                 tx.commit()?;
@@ -686,6 +757,24 @@ impl BackendService {
         let tx = edb_conn.transaction()?;
         let content_columns = load_table_columns_tx(&tx, "content")?;
         write_edb_cues_for_content(&tx, content_id, &effective_cues, &content_columns)?;
+        if let Some(bpm) = req.bpm
+            && content_columns.contains("bpmx100")
+        {
+            let bpmx100 = (bpm * 100.0).round() as i64;
+            tx.execute(
+                "UPDATE content SET bpmx100 = ?1 WHERE content_id = ?2",
+                params![bpmx100, content_id],
+            )?;
+        }
+        if let Some(key) = key.as_deref()
+            && content_columns.contains("key_id")
+        {
+            let key_id = find_key_id_by_name(&tx, Some(key))?;
+            tx.execute(
+                "UPDATE content SET key_id = ?1 WHERE content_id = ?2",
+                params![key_id, content_id],
+            )?;
+        }
         tx.commit()?;
         drop(edb_conn);
         super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)?;
@@ -699,6 +788,10 @@ impl BackendService {
         Ok(SaveUsbTrackAnalysisEditsData {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
             cues: collapse_anlz_cues(&bytes),
+            bpm: req.bpm,
+            bpm_analyzer: req.bpm.map(|_| "user".to_string()),
+            key: key.clone(),
+            key_source: key.map(|_| "user".to_string()),
             anlz_updated: true,
             edb_updated: true,
             local_updated,
@@ -866,6 +959,10 @@ mod tests {
               id TEXT PRIMARY KEY,
               first_beat_ms INTEGER,
               first_beat_ms_source TEXT,
+              bpm REAL,
+              bpm_analyzer TEXT,
+              tonality TEXT,
+              tonality_source TEXT,
               updated_at TEXT
             );
             CREATE TABLE track_cues (
@@ -913,6 +1010,19 @@ mod tests {
     fn normalize_rejects_unknown_color() {
         let err = normalize_cues(&[input(0, Some(99))], None).expect_err("bad color");
         assert!(err.to_string().contains("colorId"));
+    }
+
+    #[test]
+    fn normalize_key_input_accepts_canonical_values() {
+        assert_eq!(normalize_key_input("Am").expect("valid key"), "Am");
+        assert_eq!(normalize_key_input("  F#  ").expect("trims"), "F#");
+    }
+
+    #[test]
+    fn normalize_key_input_rejects_non_canonical_values() {
+        assert!(normalize_key_input("Eb").is_err(), "flat spelling not in KEY_OPTIONS");
+        assert!(normalize_key_input("").is_err(), "empty key");
+        assert!(normalize_key_input("8B").is_err(), "camelot notation not in KEY_OPTIONS");
     }
 
     #[test]
@@ -1069,8 +1179,16 @@ mod tests {
         )
         .expect("normalized");
         let tx = conn.transaction().unwrap();
-        apply_local_analysis_edits_tx(&tx, "track-1", Some(500), Some(&normalized), "new")
-            .expect("apply edits");
+        apply_local_analysis_edits_tx(
+            &tx,
+            "track-1",
+            Some(500),
+            Some(&normalized),
+            Some(128.3),
+            Some("F#m"),
+            "new",
+        )
+        .expect("apply edits");
         tx.commit().unwrap();
 
         let first_beat: (i64, String, String) = conn
@@ -1081,6 +1199,24 @@ mod tests {
             )
             .unwrap();
         assert_eq!(first_beat, (500, "user".to_string(), "new".to_string()));
+
+        let bpm: (f64, String) = conn
+            .query_row(
+                "SELECT bpm, bpm_analyzer FROM tracks WHERE id = 'track-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(bpm, (128.3, "user".to_string()));
+
+        let key: (String, String) = conn
+            .query_row(
+                "SELECT tonality, tonality_source FROM tracks WHERE id = 'track-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(key, ("F#m".to_string(), "user".to_string()));
 
         let cues = load_track_cues(&conn, "track-1").expect("cues");
         assert_eq!(
@@ -1111,7 +1247,7 @@ mod tests {
         .unwrap();
 
         let tx = conn.transaction().unwrap();
-        apply_local_analysis_edits_tx(&tx, "track-1", None, None, "new").expect("noop");
+        apply_local_analysis_edits_tx(&tx, "track-1", None, None, None, None, "new").expect("noop");
         tx.commit().unwrap();
 
         let updated_at: String = conn

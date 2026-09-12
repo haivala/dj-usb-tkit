@@ -150,6 +150,26 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.setFirstBeatMs(Number(event.target.value) || 0);
   });
 
+  el.trackDetailBpmMinus?.addEventListener("click", () =>
+    trackDetailDialog.nudgeBpm(-1)
+  );
+  el.trackDetailBpmPlus?.addEventListener("click", () =>
+    trackDetailDialog.nudgeBpm(1)
+  );
+  el.trackDetailBpm?.addEventListener("change", (event) => {
+    trackDetailDialog.setBpm(Number.parseFloat(event.target.value));
+  });
+
+  el.trackDetailKeyMinus?.addEventListener("click", () =>
+    trackDetailDialog.nudgeKey(-1)
+  );
+  el.trackDetailKeyPlus?.addEventListener("click", () =>
+    trackDetailDialog.nudgeKey(1)
+  );
+  el.trackDetailKey?.addEventListener("change", (event) => {
+    trackDetailDialog.setKey(event.target.value);
+  });
+
   // Cue list: play / name / colour / delete (event-delegated).
   el.trackDetailCueList?.addEventListener("input", (event) => {
     const target = event.target.closest("[data-action='cue-name']");

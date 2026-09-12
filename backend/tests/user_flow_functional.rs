@@ -711,6 +711,8 @@ fn save_track_analysis_edits_bakes_cues_and_first_beat_into_cached_anlz() {
     let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: Some(210),
+        bpm: None,
+        key: None,
         cues: Some(vec![
             TrackCueInput {
                 position_ms: 1_500,
@@ -804,6 +806,8 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
     let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: Some(180),
+        bpm: None,
+        key: None,
         cues: Some(vec![
             TrackCueInput {
                 position_ms: 2_000,
@@ -1111,6 +1115,8 @@ fn export_one_track_with_cues(
     let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: Some(200),
+        bpm: None,
+        key: None,
         cues: Some(initial_cues),
     });
     assert!(save.ok, "local save failed: {save:?}");
@@ -1212,6 +1218,7 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
             usb_analysis_path_raw: analysis_raw.clone(),
             usb_media_path_raw: media_raw.clone(),
             bpm: usb_track.bpm,
+            key: None,
             duration_ms: usb_track.duration_ms,
             first_beat_ms: None,
             cues: Some(vec![TrackCueInput {
@@ -1296,6 +1303,7 @@ fn save_usb_track_analysis_edits_blocks_when_usb_not_connected() {
         usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().unwrap(),
         usb_media_path_raw: usb_track.usb_media_path.clone().unwrap(),
         bpm: usb_track.bpm,
+        key: None,
         duration_ms: usb_track.duration_ms,
         first_beat_ms: None,
         cues: Some(vec![TrackCueInput { position_ms: 1_000, color_id: None, name: None }]),
@@ -1325,6 +1333,7 @@ fn save_usb_track_analysis_edits_empty_list_clears_device_and_local() {
             usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().unwrap(),
             usb_media_path_raw: usb_track.usb_media_path.clone().unwrap(),
             bpm: usb_track.bpm,
+            key: None,
             duration_ms: usb_track.duration_ms,
             first_beat_ms: None,
             cues: Some(vec![]),
@@ -1389,6 +1398,8 @@ fn re_export_reconciles_on_usb_bundle_to_edited_local_master() {
     backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: None,
+        bpm: None,
+        key: None,
         cues: Some(vec![TrackCueInput { position_ms: 2_000, color_id: None, name: None }]),
     });
     re_export(&backend);
@@ -1406,6 +1417,8 @@ fn re_export_reconciles_on_usb_bundle_to_edited_local_master() {
     backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
         track_id: track_id.clone(),
         first_beat_ms: None,
+        bpm: None,
+        key: None,
         cues: Some(vec![]),
     });
     re_export(&backend);

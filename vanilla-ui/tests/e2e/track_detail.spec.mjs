@@ -14,6 +14,7 @@ function installTrackDetailMock(page, opts = {}) {
         album: "Album",
         filePath: "/music/one.mp3",
         bpm: 128,
+        key: "Am",
         durationMs: 180000,
         analysisReady: true,
         waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
@@ -76,6 +77,10 @@ function installTrackDetailMock(page, opts = {}) {
                 trackId: "t1",
                 firstBeatMs: payload?.request?.firstBeatMs ?? null,
                 cues: payload?.request?.cues ?? [],
+                bpm: payload?.request?.bpm ?? null,
+                bpmAnalyzer: payload?.request?.bpm != null ? "user" : null,
+                key: payload?.request?.key ?? null,
+                keySource: payload?.request?.key != null ? "user" : null,
                 anlzRegenerated: true,
               },
             };
@@ -119,6 +124,89 @@ test("track-detail modal adds a cue at the playhead and saves it", async ({ page
   expect(Object.keys(saveCall.request.cues[0]).sort()).toEqual(["colorId", "name", "positionMs"]);
 });
 
+test("track-detail modal edits BPM, saves it, and the library row/tooltip update", async ({ page }) => {
+  await installTrackDetailMock(page);
+  await page.goto("/");
+
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("128");
+
+  await page.locator("#trackDetailBpm").fill("140.25");
+  await page.locator("#trackDetailBpm").dispatchEvent("change");
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saveCall.request.bpm).toBe(140.25);
+
+  const bpmPill = page.locator('#libraryTableBody .track-grid-row .td-bpm .bpm-pill');
+  await expect(bpmPill).toHaveText("140.25");
+  await expect(bpmPill).toHaveAttribute("data-tooltip", "Manually set");
+});
+
+test("track-detail modal edits the musical key, saves it, and the library row updates", async ({ page }) => {
+  await installTrackDetailMock(page);
+  await page.goto("/");
+
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
+
+  await page.locator("#trackDetailKey").selectOption("F#m");
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saveCall.request.key).toBe("F#m");
+
+  const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
+  await expect(keyPill).toHaveText("F#m");
+});
+
+test("key stepper steps through KEY_OPTIONS and wraps at the ends", async ({ page }) => {
+  await installTrackDetailMock(page);
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+
+  // Fixture key is "Am" (index 21 of 24: majors C..B, then minors Cm..Bm).
+  await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
+  await page.locator("#trackDetailKeyPlus").click();
+  await expect(page.locator("#trackDetailKey")).toHaveValue("A#m");
+  await page.locator("#trackDetailKeyMinus").click();
+  await page.locator("#trackDetailKeyMinus").click();
+  await expect(page.locator("#trackDetailKey")).toHaveValue("G#m");
+
+  // Wrap: stepping past the last minor (Bm) lands back on the first major (C).
+  await page.locator("#trackDetailKey").selectOption("Bm");
+  await page.locator("#trackDetailKeyPlus").click();
+  await expect(page.locator("#trackDetailKey")).toHaveValue("C");
+  // Wrap the other way: stepping back from the first major (C) lands on Bm.
+  await page.locator("#trackDetailKeyMinus").click();
+  await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
+});
+
+test("BPM stepper nudges by 0.01 and clamps to a positive value", async ({ page }) => {
+  await installTrackDetailMock(page);
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("128");
+  await page.locator("#trackDetailBpmPlus").click();
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.01");
+  await page.locator("#trackDetailBpmMinus").click();
+  await page.locator("#trackDetailBpmMinus").click();
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("127.99");
+});
+
 test("double-click the waveform adds a cue at that position without starting playback", async ({ page }) => {
   await installTrackDetailMock(page);
   await page.goto("/");
@@ -136,6 +224,10 @@ test("double-click the waveform adds a cue at that position without starting pla
   expect(saveCall.request.cues).toHaveLength(1);
   expect(saveCall.request.cues[0].positionMs).toBeGreaterThan(15000);
   expect(saveCall.request.cues[0].positionMs).toBeLessThan(45000);
+  // A cue-only edit still carries the track's current (unedited) bpm, not
+  // null -- the on-device beat-grid rewrite needs a real bpm value even when
+  // bpm itself wasn't touched this save.
+  expect(saveCall.request.bpm).toBe(128);
   expect(
     await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
   ).toBe(false);
@@ -340,6 +432,7 @@ function installUsbTrackDetailMock(page) {
       artist: "USB Artist",
       album: "USB Album",
       bpm: 126,
+      key: "Bm",
       durationMs: 200000,
       filePath: "/Volumes/USB-TEST/Contents/USB Artist/USB Album/track.mp3",
       usbMediaPath: "/Contents/USB Artist/USB Album/track.mp3",
@@ -415,6 +508,10 @@ function installUsbTrackDetailMock(page) {
               data: {
                 firstBeatMs: payload?.request?.firstBeatMs ?? null,
                 cues: payload?.request?.cues ?? [],
+                bpm: payload?.request?.bpm ?? null,
+                bpmAnalyzer: payload?.request?.bpm != null ? "user" : null,
+                key: payload?.request?.key ?? null,
+                keySource: payload?.request?.key != null ? "user" : null,
                 anlzUpdated: true, edbUpdated: true, localUpdated: true,
               },
             };
@@ -461,7 +558,53 @@ test("cue editor opens + saves from a USB playlist row through the USB commands"
   expect(saveCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
   expect(saveCall.request.localTrackId).toBe("local-1");
   expect(saveCall.request.cues).toHaveLength(2);
+  // A cue-only USB edit still carries the current (unedited) bpm -- the
+  // on-device beat-grid rewrite always needs a real value, not null.
+  expect(saveCall.request.bpm).toBe(126);
   await expect(page.locator("#statusText")).toContainText("to USB");
+});
+
+test("cue editor edits BPM from a USB playlist row and saves it through the USB commands", async ({ page }) => {
+  await installUsbTrackDetailMock(page);
+  await page.goto("/");
+
+  await openUsbView(page, "usb-playlists");
+  await page.locator("#refreshUsbBtn").click();
+  await page.locator('[data-usb-playlist-index="0"]').click();
+
+  const row = page.locator("#usbPlaylistTracks .track-grid-row");
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("126");
+
+  await page.locator("#trackDetailBpm").fill("128.5");
+  await page.locator("#trackDetailBpm").dispatchEvent("change");
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
+  expect(saveCall.request.bpm).toBe(128.5);
+});
+
+test("cue editor edits the musical key from a USB playlist row and saves it through the USB commands", async ({ page }) => {
+  await installUsbTrackDetailMock(page);
+  await page.goto("/");
+
+  await openUsbView(page, "usb-playlists");
+  await page.locator("#refreshUsbBtn").click();
+  await page.locator('[data-usb-playlist-index="0"]').click();
+
+  const row = page.locator("#usbPlaylistTracks .track-grid-row");
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
+
+  await page.locator("#trackDetailKey").selectOption("Dm");
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
+  expect(saveCall.request.key).toBe("Dm");
 });
 
 test("cue editor also opens from a USB history row", async ({ page }) => {
