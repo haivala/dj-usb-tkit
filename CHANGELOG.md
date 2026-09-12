@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.2.1
+
 - **New feature:** BPM and musical key are now editable from the same
   per-track cues/beat-grid modal. Editing BPM regenerates the beat grid;
   edits made from a USB track update the on-device library immediately, not
