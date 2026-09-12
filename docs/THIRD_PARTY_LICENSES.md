@@ -4,7 +4,7 @@ This document is a redistribution-oriented license summary for repository code a
 
 ## Current licensing posture
 
-- Project code is licensed as `MIT`.
+- Project code is licensed as `AGPL-3.0-or-later`.
 - Default release artifacts do not bundle a Node runtime.
 - Essentia is optional and downloaded in-app when enabled by the user.
 
@@ -20,7 +20,9 @@ This summary tracks obligations visible from:
 
 ### Project code
 
-Redistribution follows the obligations of the MIT license.
+Redistribution follows the obligations of the GNU Affero General Public License v3.0 or later. Distributors must provide the corresponding source for conveyed copies under the same license terms, preserve notices, and pass along the license text.
+
+The AGPL network-use clause is a new obligation compared with the previous MIT license: anyone who runs a modified version of this software as a network service must offer the corresponding source of that modified version to users of the service.
 
 ### Optional Essentia runtime
 
@@ -44,7 +46,7 @@ Included notice files:
 
 ### Rust/Tauri dependency graph
 
-The graph is primarily permissive licenses, with some weak-copyleft components in the ecosystem. Keep dependency audits current for every release.
+The graph is primarily permissive licenses, with some weak-copyleft MPL-2.0 components in the ecosystem. MPL-2.0 dependencies are compatible with this AGPL project when combined as unmodified dependency files in a larger work; keep their notices and source-license terms intact, and keep dependency audits current for every release.
 
 ### Linux AppImage shared libraries
 

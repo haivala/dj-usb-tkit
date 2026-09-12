@@ -56,17 +56,6 @@
   stays the single source of truth — export just reconciles each stick to it.
   (The USB lists show the cue-editor button but no per-track "Analyze" button —
   that only ever acts on a local library copy.)
-- **Fix:** exported cue points (memory + hot-cue pads) landed on the wrong
-  spot on real CDJ hardware — every cue jumped to roughly the same position
-  near the start of the track instead of its saved position, confirmed on a
-  CDJ-2000NX and a CDJ-2000NXS2. The app's own cue editor showed the right
-  times (parsing was always correct), but the ANLZ cue-entry encoder
-  (`PCPT`/`PCP2`) was writing a wrong "unknown" magic constant, a wrong
-  status byte, and a zeroed reserved field where genuine Rekordbox always
-  writes fixed non-zero values — a byte-for-byte diff against a real
-  Rekordbox export found the exact mismatches. Fixed by matching Rekordbox's
-  real byte layout; re-saving a track's cues (or just re-exporting) rewrites
-  its ANLZ files with the corrected bytes, no re-analysis needed.
 - **Fix:** a track re-analyzed to a corrected BPM could still export with its
   old beat grid (e.g. a hardcoded 120 BPM default) when the on-USB bundle
   already existed and had no cues/first-beat edit to trigger a rebuild — CDJ
@@ -111,6 +100,8 @@
   and the missing-source-folder export block are computed in the backend; the
   frontend renders them instead of re-deriving the append rule or parsing the
   USB path itself.
+- **Chore:** relicense project code and package metadata from MIT to
+  `AGPL-3.0-or-later` for the 0.2.0 release line.
 
 ## 0.1.36
 

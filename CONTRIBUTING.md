@@ -6,17 +6,17 @@ This repository is a local-first DJ library manager and USB export tool built wi
 
 ## Project License
 
-This repository is licensed under `MIT`. See `LICENSE`.
+This repository is licensed under `AGPL-3.0-or-later`. See `LICENSE`.
 
 ## Contribution License Policy
 
-Unless explicitly stated otherwise, all contributions submitted to this repository are accepted under `MIT` (inbound = outbound).
+Unless explicitly stated otherwise, all contributions submitted to this repository are accepted under `AGPL-3.0-or-later` (inbound = outbound).
 
 In practical terms:
 
 - you keep your copyright in your contribution
-- by submitting a contribution, you agree that your contribution may be distributed under `MIT`
-- inbound contributions are treated as outbound under `MIT`
+- by submitting a contribution, you agree that your contribution may be distributed under `AGPL-3.0-or-later`
+- inbound contributions are treated as outbound under `AGPL-3.0-or-later`
 
 This is the project's default contribution policy. Do not submit code, assets, or other material unless you have the right to contribute it under these terms.
 
