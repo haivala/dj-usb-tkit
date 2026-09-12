@@ -3396,13 +3396,12 @@ pub fn check_essentia_installed(data_dir: &std::path::Path) -> bool {
 
 fn check_node_available() -> bool {
     let node_bin = std::env::var("DJTKIT_ESSENTIA_NODE").unwrap_or_else(|_| "node".to_string());
-    std::process::Command::new(&node_bin)
-        .arg("--version")
+    let mut cmd = std::process::Command::new(&node_bin);
+    cmd.arg("--version")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .stderr(std::process::Stdio::null());
+    crate::utils::suppress_console_window(&mut cmd);
+    cmd.status().map(|s| s.success()).unwrap_or(false)
 }
 
 pub(crate) fn row_to_track(

@@ -30,6 +30,9 @@
 
 ## Unreleased
 
+- **Fix:** on Windows, analyzing tracks with the essentia engine no longer
+  flashes a console window for each spawned `node` process.
+
 ## 0.2.0
 
 - **New feature:** cue points and the beat-grid first beat are now editable. A

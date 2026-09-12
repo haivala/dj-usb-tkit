@@ -164,6 +164,26 @@ pub fn collect_chain_lenient(bytes: &[u8], page_size: usize, first: u32, last: u
 }
 
 // ---------------------------------------------------------------------------
+// Process helpers
+// ---------------------------------------------------------------------------
+
+/// Stop a spawned console-subsystem process (bundled `node`, used to run the
+/// essentia analysis runner) from flashing a console window when launched
+/// from the GUI app on Windows.
+pub fn suppress_console_window(cmd: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Path helpers
 // ---------------------------------------------------------------------------
 

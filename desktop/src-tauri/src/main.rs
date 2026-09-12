@@ -470,11 +470,12 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
         return Ok(());
     }
 
-    let probe = match Command::new(&node_bin)
+    let mut probe_cmd = Command::new(&node_bin);
+    probe_cmd
         .arg(runner_path.to_string_lossy().to_string())
-        .arg(r#"{"sampleRate":44100}"#)
-        .output()
-    {
+        .arg(r#"{"sampleRate":44100}"#);
+    backend::utils::suppress_console_window(&mut probe_cmd);
+    let probe = match probe_cmd.output() {
         Ok(output) => output,
         Err(err) => {
             emit_backend_log(

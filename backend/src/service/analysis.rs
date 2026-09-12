@@ -359,6 +359,7 @@ impl EssentiaNodeWorker {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
         strip_appimage_lib_path(&mut command);
+        crate::utils::suppress_console_window(&mut command);
         let mut child = command.spawn().map_err(|err| {
             BackendError::Internal(format!("Failed to launch BPM/key analysis worker: {err}"))
         })?;
@@ -1862,6 +1863,7 @@ fn run_essentia_request_once(
         .arg(config.runner_path.to_string_lossy().to_string())
         .arg(args.to_string());
     strip_appimage_lib_path(&mut command);
+    crate::utils::suppress_console_window(&mut command);
     let output = command.output().map_err(|err| {
         let details = format!(
             "node={} runner={}",
