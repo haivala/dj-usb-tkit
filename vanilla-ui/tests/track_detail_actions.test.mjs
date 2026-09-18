@@ -182,7 +182,12 @@ test("openTrackDetail resolves id, fetches detail, then saves the edited payload
     }
     throw new Error(`unexpected ${name}`);
   };
-  const savedPayload = { firstBeatMs: 60, cues: [{ positionMs: 2000, colorId: 5, name: "Drop" }] };
+  const savedPayload = {
+    firstBeatMs: 60,
+    bpm: null,
+    key: null,
+    cues: [{ positionMs: 2000, colorId: 5, name: "Drop" }],
+  };
   const trackDetailDialog = { open: async () => savedPayload };
   const emitted = [];
   await openTrackDetail(
@@ -192,7 +197,13 @@ test("openTrackDetail resolves id, fetches detail, then saves the edited payload
 
   assert.deepEqual(calls[0], ["get_track_detail", { trackId: "local-1" }]);
   assert.equal(calls[1][0], "save_track_analysis_edits");
-  assert.deepEqual(calls[1][1], { trackId: "local-1", firstBeatMs: 60, cues: savedPayload.cues });
+  assert.deepEqual(calls[1][1], {
+    trackId: "local-1",
+    firstBeatMs: 60,
+    bpm: null,
+    key: null,
+    cues: savedPayload.cues,
+  });
   assert.match(emitted.join(" "), /Saved 1 cue/);
 });
 
