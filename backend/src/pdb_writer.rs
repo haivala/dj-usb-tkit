@@ -3293,6 +3293,21 @@ pub(crate) struct AppendOutcome {
     pub new_empty_candidate: u32,
 }
 
+/// Row-slot count packed into the page header at `0x18..0x1b`: bits 0-12 are
+/// `num_row_offsets`, bits 13-23 are `num_rows` (see `build_data_page`, the
+/// writer-side source of truth for this packing, and docs/PDB.md "Page
+/// Header"). Reading it as one 24-bit field — instead of the single byte at
+/// `0x18` — avoids the byte wrapping on pages with more than 255 rows, which
+/// a large enough playlist page (t08 rows are 12 bytes, so byte capacity
+/// alone allows well over 255 per page) can legitimately have even though
+/// our own writer never produces one.
+fn packed_page_row_slot_count(page: &[u8]) -> Option<usize> {
+    let packed = u32::from(*page.get(0x18)?)
+        | (u32::from(*page.get(0x19)?) << 8)
+        | (u32::from(*page.get(0x1a)?) << 16);
+    usize::try_from(packed & 0x1fff).ok()
+}
+
 fn page_has_transaction_tombstones(page: &[u8], page_size: usize) -> bool {
     if page.len() < page_size || page_size < PAGE_HEADER_SIZE {
         return false;
@@ -3301,9 +3316,7 @@ fn page_has_transaction_tombstones(page: &[u8], page_size: usize) -> bool {
     if used_s == 0 {
         return false;
     }
-    let nrs = page.get(0x18).copied().unwrap_or(0) as usize;
-    let num_rl = read_u16_le_at(page, 0x22).unwrap_or(0) as usize;
-    let row_slots = if num_rl == 8191 { nrs } else { nrs.max(num_rl) };
+    let row_slots = packed_page_row_slot_count(page).unwrap_or(0);
     if row_slots == 0 {
         return false;
     }
@@ -3348,9 +3361,7 @@ fn read_page_footer_state(page: &[u8], page_size: usize) -> Option<PageFooterSta
     if used_s == 0 {
         return None;
     }
-    let nrs = page.get(0x18).copied().unwrap_or(0) as usize;
-    let num_rl = read_u16_le_at(page, 0x22).unwrap_or(0) as usize;
-    let row_slots = if num_rl == 8191 { nrs } else { nrs.max(num_rl) };
+    let row_slots = packed_page_row_slot_count(page).unwrap_or(0);
     if row_slots == 0 {
         return None;
     }
@@ -5773,6 +5784,36 @@ pub(crate) fn append_playlist_tree_in_place(
 #[cfg(test)]
 mod additive_tests {
     use super::*;
+
+    // t08 playlist_entries rows are 12 bytes, so byte capacity alone lets a
+    // single 4096-byte page hold well over 255 rows (see docs/PDB.md "Page
+    // Footer Conventions"). Our own additive writer never produces such a
+    // page (`MAX_ROWS_PER_PAGE` caps every growth path at 255), but a page
+    // authored by real rekordbox for a large playlist can legitimately have
+    // more, and this tool must still read it correctly when patching it.
+    #[test]
+    fn parse_page_row_slots_handles_more_than_255_rows_on_a_page() {
+        let row_count = 260usize;
+        let rows: Vec<[u8; 12]> = (0..row_count as u32)
+            .map(|idx| {
+                encode_t08_row(T08EntryKey {
+                    entry_index: idx + 1,
+                    track_id: idx + 1,
+                    playlist_id: 1,
+                })
+            })
+            .collect();
+        let row_refs: Vec<&[u8]> = rows.iter().map(|r| r.as_slice()).collect();
+        let page = build_data_page(8, page_flags_for_table(8), 1, &row_refs, false);
+
+        let slots = parse_page_row_slots(&page, PAGE_SIZE);
+
+        assert_eq!(
+            slots.len(),
+            row_count,
+            "page header row-slot count must not wrap/undercount past 255 rows"
+        );
+    }
 
     fn make_empty_pdb_with_artists(count: usize) -> Vec<u8> {
         let mut data = PdbData::empty();
@@ -8466,9 +8507,7 @@ fn parse_t08_entries_from_page(page: &[u8], page_index: u32, len_page: usize) ->
         return Vec::new();
     }
     let payload = &page[payload_start..payload_end];
-    let nrs = page[24] as usize;
-    let num_rl = read_u16_le_at(page, 34).unwrap_or(0) as usize;
-    let n_header = if num_rl == 8191 { nrs } else { nrs.max(num_rl) };
+    let n_header = packed_page_row_slot_count(page).unwrap_or(0);
 
     // Compute the maximum number of rows the index space can hold, to detect
     // nrs u8 wrapping on pages with >255 rows.
@@ -8628,9 +8667,7 @@ pub(crate) fn parse_page_row_slots(page: &[u8], len_page: usize) -> Vec<PageRowS
         return Vec::new();
     }
     let payload_len = used_s.min(len_page.saturating_sub(40));
-    let nrs = page[24] as usize;
-    let num_rl = read_u16_le_at(page, 34).unwrap_or(0) as usize;
-    let n_header = if num_rl == 8191 { nrs } else { nrs.max(num_rl) };
+    let n_header = packed_page_row_slot_count(page).unwrap_or(0);
     if n_header == 0 {
         return Vec::new();
     }

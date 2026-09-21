@@ -30,6 +30,17 @@
 
 ## Unreleased
 
+**Severity:** critical — see item marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** additively patching an existing PDB whose `t08`
+  playlist_entries page holds more than 255 rows (byte capacity allows well
+  over 255 since rows are only 12 bytes, and a page can combine entries from
+  multiple playlists) could silently drop the page's last row from the
+  writer's view of "entries that already exist," causing that entry to be
+  duplicated when playlist changes were written back to the USB. Row-slot
+  counts are now decoded from the full packed page-header field instead of a
+  single byte that wrapped past 255.
+
 ## 0.2.1
 
 - **New feature:** BPM and musical key are now editable from the same
