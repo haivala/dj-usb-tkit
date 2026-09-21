@@ -27,6 +27,20 @@ pub fn read_u32_le_at(bytes: &[u8], offset: usize) -> Option<u32> {
         .map(u32::from_le_bytes)
 }
 
+/// Row-slot count packed into a PDB data page header at `0x18..0x1b`: bits
+/// 0-12 are `num_row_offsets`, bits 13-23 are `num_rows`. Reading this as one
+/// 24-bit field — instead of the single byte at `0x18` (`nrs`), which wraps
+/// past 255 rows — is correct up to 8191 rows/page and needs no fallback.
+/// `t08` playlist_entries rows are 12 bytes, so byte capacity alone lets a
+/// single 4096-byte page hold well over 255 of them; see docs/PDB.md "Page
+/// Footer Conventions".
+pub fn packed_page_row_slot_count(page: &[u8]) -> Option<usize> {
+    let packed = u32::from(*page.get(0x18)?)
+        | (u32::from(*page.get(0x19)?) << 8)
+        | (u32::from(*page.get(0x1a)?) << 16);
+    usize::try_from(packed & 0x1fff).ok()
+}
+
 // ---------------------------------------------------------------------------
 // Byte writes
 // ---------------------------------------------------------------------------

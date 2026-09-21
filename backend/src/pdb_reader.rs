@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::error::{BackendError, BackendResult};
+use crate::utils::packed_page_row_slot_count;
 
 #[derive(Debug, Clone)]
 pub struct PdbTrackRow {
@@ -598,18 +599,12 @@ fn parse_page_rows(
     }
     let payload = &page[payload_start..payload_end];
 
-    // num_rl=8191 (0x1FFF) is a sentinel meaning "num_rl not tracked on this
-    // page" — use nrs alone. Otherwise take the max of num_rl and nrs.
-    // nrs is a u8 that wraps at 256. When a page has more than 255 rows
-    // (common for playlist_entries), nrs silently underflows, causing rows to
-    // be missed. To handle this, compute the maximum possible row count from
-    // the available index space, then scan backward reading offsets. Stop when
-    // we exhaust the space between payload and the index, or hit invalid offsets.
-    let n_header = if page_info.num_rl == 8191 {
-        page_info.nrs as usize
-    } else {
-        usize::max(page_info.num_rl as usize, page_info.nrs as usize)
-    };
+    // The row-slot count is the packed 3-byte field at `0x18..0x1b`, not the
+    // single wrapping `nrs` byte at `0x18` combined with `num_rl` (`0x22`) —
+    // see `packed_page_row_slot_count`. The Phase 2 scan below stays as a
+    // defensive fallback (in case the header count is ever wrong for some
+    // other reason), but no longer needs to correct for `nrs` wrapping.
+    let n_header = packed_page_row_slot_count(page).unwrap_or(0);
     let index_space = len_page.saturating_sub(payload_end);
     // Each group of 16 rows needs 4 bytes (presence) + 16*2 (offsets) = 36 bytes.
     let full_groups = index_space / 36;
@@ -1194,7 +1189,14 @@ mod tests {
         // Page header
         page[4..8].copy_from_slice(&1u32.to_le_bytes()); // page_index = 1
         page[8..12].copy_from_slice(&table_type.to_le_bytes());
-        page[24] = (n % 256) as u8; // nrs wraps at 256
+        // Packed row-slot count at 0x18..0x1b (bits 0-12 = num_row_offsets),
+        // matching `build_data_page` in pdb_writer.rs. `page[24]` (0x18) is
+        // still `nrs` for tests that read it directly and deliberately expect
+        // it to wrap at 256.
+        let packed = (n as u32) & 0x1FFF;
+        page[24] = (packed & 0xFF) as u8;
+        page[25] = ((packed >> 8) & 0xFF) as u8;
+        page[26] = ((packed >> 16) & 0xFF) as u8;
 
         // Pack row payloads into the data area starting at offset 40
         let mut offset = 0usize;
@@ -1253,6 +1255,29 @@ mod tests {
         assert_eq!(&rows[0], b"AAAA");
         assert_eq!(&rows[1], b"BBBBBB");
         assert_eq!(&rows[2], b"CC");
+    }
+
+    #[test]
+    fn parse_page_rows_handles_more_than_255_rows_on_a_page() {
+        // t08 playlist_entries rows are 12 bytes, so byte capacity alone lets
+        // a single 4096-byte page hold well over 255 of them. `nrs` (the
+        // single byte at 0x18) wraps at 256; the packed 3-byte field must be
+        // read directly rather than relying on the Phase 2 gap-scan fallback
+        // to recover the true count.
+        let row_count = 260usize;
+        let rows_data: Vec<[u8; 12]> = (0..row_count as u32)
+            .map(|i| {
+                let mut row = [0u8; 12];
+                row[0..4].copy_from_slice(&i.to_le_bytes());
+                row
+            })
+            .collect();
+        let row_refs: Vec<&[u8]> = rows_data.iter().map(|r| r.as_slice()).collect();
+        let page = build_page(4096, 8, &row_refs);
+        let info = parse_page_info(&page).unwrap();
+        let mut warnings = Vec::new();
+        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        assert_eq!(rows.len(), row_count);
     }
 
     #[test]

@@ -3267,8 +3267,8 @@ pub(crate) mod writer_tests {
 
 use crate::error::BackendError;
 use crate::utils::{
-    collect_chain as collect_chain_pages, page_offset, read_u8_at, set_table_ptr_fields,
-    table_ptr_fields, write_u32_le_at,
+    collect_chain as collect_chain_pages, packed_page_row_slot_count, page_offset, read_u8_at,
+    set_table_ptr_fields, table_ptr_fields, write_u32_le_at,
 };
 
 const PAGE_HEADER_SIZE: usize = 40;
@@ -3291,21 +3291,6 @@ pub(crate) struct AppendOutcome {
     /// `empty_candidate` after the operation. Preserved when rows fit into
     /// existing pages; advanced only when the table chain grows.
     pub new_empty_candidate: u32,
-}
-
-/// Row-slot count packed into the page header at `0x18..0x1b`: bits 0-12 are
-/// `num_row_offsets`, bits 13-23 are `num_rows` (see `build_data_page`, the
-/// writer-side source of truth for this packing, and docs/PDB.md "Page
-/// Header"). Reading it as one 24-bit field — instead of the single byte at
-/// `0x18` — avoids the byte wrapping on pages with more than 255 rows, which
-/// a large enough playlist page (t08 rows are 12 bytes, so byte capacity
-/// alone allows well over 255 per page) can legitimately have even though
-/// our own writer never produces one.
-fn packed_page_row_slot_count(page: &[u8]) -> Option<usize> {
-    let packed = u32::from(*page.get(0x18)?)
-        | (u32::from(*page.get(0x19)?) << 8)
-        | (u32::from(*page.get(0x1a)?) << 16);
-    usize::try_from(packed & 0x1fff).ok()
 }
 
 fn page_has_transaction_tombstones(page: &[u8], page_size: usize) -> bool {

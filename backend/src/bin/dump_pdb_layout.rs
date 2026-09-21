@@ -4,7 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use backend::utils::{
-    read_u8_at as read_u8, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
+    packed_page_row_slot_count, read_u8_at as read_u8, read_u16_le_at as read_u16_le,
+    read_u32_le_at as read_u32_le,
 };
 
 #[derive(Debug, Default)]
@@ -61,7 +62,7 @@ fn main() {
         let table_type = read_u32_le(page, 8).unwrap_or(0);
         let nrs = read_u8(page, 24).unwrap_or(0);
         let num_rl = read_u16_le(page, 34).unwrap_or(0);
-        let rows = parse_row_count(page, len_page).unwrap_or(0);
+        let rows = parse_row_count(page).unwrap_or(0);
 
         let stats = by_type.entry(table_type).or_default();
         stats.pages += 1;
@@ -205,40 +206,6 @@ fn table_type_name(raw: u32) -> &'static str {
     }
 }
 
-fn parse_row_count(page: &[u8], len_page: usize) -> Option<usize> {
-    let nrs = read_u8(page, 24)? as usize;
-    let num_rl = read_u16_le(page, 34)?;
-    if num_rl == 8191 {
-        return Some(parse_rows_from_nrs_fallback(page, len_page, nrs));
-    }
-    Some(((num_rl as usize) & 0x1FFF).min(nrs))
-}
-
-fn parse_rows_from_nrs_fallback(page: &[u8], len_page: usize, nrs: usize) -> usize {
-    if nrs == 0 {
-        return 0;
-    }
-    let mut cursor = len_page;
-    let mut rows = 0usize;
-    let groups = nrs.div_ceil(16);
-    for _ in 0..groups {
-        if cursor < 4 {
-            break;
-        }
-        cursor -= 4;
-        let active = match read_u16_le(page, cursor) {
-            Some(v) => v,
-            None => break,
-        };
-        let declared = usize::try_from(active.count_ones()).unwrap_or(0);
-        if declared == 0 {
-            continue;
-        }
-        if cursor < declared * 2 {
-            break;
-        }
-        cursor -= declared * 2;
-        rows += declared;
-    }
-    rows.min(nrs)
+fn parse_row_count(page: &[u8]) -> Option<usize> {
+    packed_page_row_slot_count(page)
 }

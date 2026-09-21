@@ -16,7 +16,9 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use backend::utils::{read_u8_at as ru8, read_u16_le_at as ru16, read_u32_le_at as ru32};
+use backend::utils::{
+    packed_page_row_slot_count, read_u8_at as ru8, read_u16_le_at as ru16, read_u32_le_at as ru32,
+};
 
 fn main() {
     let args: Vec<_> = env::args().collect();
@@ -403,13 +405,12 @@ fn main() {
 
         let tt = ru32(&bytes, off + 8).unwrap_or(0);
         let nrs = ru8(&bytes, off + 0x18).unwrap_or(0) as usize;
-        let num_rl = ru16(&bytes, off + 0x22).unwrap_or(0) as usize;
-        let row_slots = if num_rl == 8191 { nrs } else { nrs.max(num_rl) };
+        let page = &bytes[off..off + page_size];
+        let row_slots = packed_page_row_slot_count(page).unwrap_or(0);
         if row_slots == 0 {
             continue;
         }
 
-        let page = &bytes[off..off + page_size];
         let groups = row_slots.div_ceil(16);
         let mut cursor = page_size;
         let mut rowpf_groups = Vec::with_capacity(groups);

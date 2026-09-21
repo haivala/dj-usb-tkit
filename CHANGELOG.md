@@ -30,6 +30,22 @@
 
 ## Unreleased
 
+- **Fix:** the repair/diagnostics scan for corrupted transaction footers
+  (`detect_pdb_zero_tranrf_pages_for_tables`) could silently skip inspecting
+  a page's true last row-footer group when that page had more than 255 rows
+  and crossed a 16-row group boundary right at the wrap point (257 rows is
+  the smallest case) — the same row-count decoding bug fixed for playlist
+  duplication in 0.2.2, but here it let real footer corruption on very large
+  playlists go undetected by "repair USB" instead of causing corruption
+  directly. Uses the same packed page-header decode as that fix.
+- **Chore:** hardened the main PDB reader's row-count decoding
+  (`parse_page_rows`, used by every read of a USB's library/playlist data)
+  to use the packed page-header field directly instead of relying on a
+  heuristic fallback scan to recover from the wrap — no known live bug here
+  (the fallback already self-corrected in every case tried), but it removes
+  the last place still depending on that fragile heuristic. Applied the same
+  fix to the internal `dump_*` developer diagnostic tools for consistency.
+
 ## 0.2.2
 
 **Severity:** critical — see item marked **(CRITICAL)** below.

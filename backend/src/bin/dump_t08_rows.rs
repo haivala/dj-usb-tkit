@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use backend::utils::{
-    collect_chain as collect_chain_pages, read_u16_le_at, read_u32_le_at, table_ptr_fields,
+    collect_chain as collect_chain_pages, packed_page_row_slot_count, read_u16_le_at,
+    read_u32_le_at, table_ptr_fields,
 };
 
 fn parse_t08_rows_with_pages(pdb: &[u8]) -> Vec<(u32, u32, u32, u32)> {
@@ -26,9 +27,7 @@ fn parse_t08_rows_with_pages(pdb: &[u8]) -> Vec<(u32, u32, u32, u32)> {
             continue;
         }
         let payload = &page[payload_start..payload_end];
-        let nrs = page[24] as usize;
-        let num_rl = read_u16_le_at(page, 34).unwrap_or(0) as usize;
-        let n_header = if num_rl == 8191 { nrs } else { nrs.max(num_rl) };
+        let n_header = packed_page_row_slot_count(page).unwrap_or(0);
         if n_header == 0 {
             continue;
         }

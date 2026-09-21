@@ -2068,7 +2068,7 @@ fn detect_pdb_zero_tranrf_pages_for_tables(
     pdb_path: &Path,
     table_filter: Option<&[u32]>,
 ) -> Vec<ZeroTranrfPage> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
+    use crate::utils::{read_u16_le_at, read_u32_le_at};
     let Ok(bytes) = std::fs::read(pdb_path) else {
         return Vec::new();
     };
@@ -2102,15 +2102,14 @@ fn detect_pdb_zero_tranrf_pages_for_tables(
         if used_s == 0 {
             continue;
         }
-        let nrs = read_u8_at(&bytes, off + 0x18).unwrap_or(0) as usize;
         let u5 = read_u16_le_at(&bytes, off + 0x20).unwrap_or(0);
         let num_rl = read_u16_le_at(&bytes, off + 0x22).unwrap_or(0) as usize;
-        let row_slots = if num_rl == 8191 { nrs } else { nrs.max(num_rl) };
+        let page = &bytes[off..off + page_size];
+        let row_slots = crate::utils::packed_page_row_slot_count(page).unwrap_or(0);
         if row_slots == 0 {
             continue;
         }
 
-        let page = &bytes[off..off + page_size];
         let groups = row_slots.div_ceil(16);
         let mut cursor = page_size;
         let mut rowpf_groups = Vec::with_capacity(groups);
@@ -6671,6 +6670,52 @@ mod tests {
 
         let bytes = std::fs::read(&pdb_path).unwrap();
         let off = TEST_PAGE_SIZE + tranrf_off;
+        assert_eq!(
+            u16::from_le_bytes(bytes[off..off + 2].try_into().unwrap()),
+            1,
+            "tranrf should now mirror rowpf"
+        );
+        assert!(detect_pdb_zero_tranrf_all_tables(&pdb_path).is_empty());
+    }
+
+    #[test]
+    fn zero_tranrf_repair_detects_corruption_on_a_wrapped_257_row_page() {
+        // tt=8 (playlist_entries), u5=1: only the last footer group carries
+        // tranrf. 257 rows is the smallest row count that both wraps `nrs`
+        // (257 & 0xFF = 1) and crosses a 16-row group boundary (257 rows =
+        // 17 groups), which used to make `nrs.max(num_rl)` undercount the
+        // group total by one and silently skip inspecting the true last
+        // group entirely -- see docs/PDB.md "Page Footer Conventions".
+        let mut p1 = data_page(1, 8);
+        p1[0x18] = 1; // packed row count low byte: 257 & 0xFF
+        p1[0x19] = 1; // packed row count mid byte: (257 >> 8) & 0xFF
+        p1[0x1a] = 0;
+        set_u5_num_rl(&mut p1, 1, 256); // (u5, num_rl) = (1, trc-1) for trc=257
+
+        // Footer groups are written backward from the page end. 16 full
+        // groups (rows 0..255) each consume 4 (rowpf|tranrf) + 16*2 (offsets)
+        // = 36 bytes; the 17th group (row 256 only) starts right after them.
+        let last_group_rowpf_off = TEST_PAGE_SIZE - 16 * 36 - 4;
+        let last_group_tranrf_off = last_group_rowpf_off + 2;
+        p1[last_group_rowpf_off..last_group_rowpf_off + 2].copy_from_slice(&1u16.to_le_bytes()); // rowpf != 0
+        // tranrf left at 0 (page starts zero-filled) -- the corrupt shape.
+
+        let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
+        let pdb_path = vendor_pdb_path(&usb_root);
+
+        let pages = detect_pdb_zero_tranrf_all_tables(&pdb_path);
+        assert_eq!(
+            pages.len(),
+            1,
+            "the 257th row's group must be inspected and flagged, not skipped"
+        );
+        assert_eq!(pages[0].page_index, 1);
+
+        let patched = apply_pdb_zero_tranrf_repair(&usb_root, &pages).unwrap();
+        assert_eq!(patched, 1);
+
+        let bytes = std::fs::read(&pdb_path).unwrap();
+        let off = TEST_PAGE_SIZE + last_group_tranrf_off;
         assert_eq!(
             u16::from_le_bytes(bytes[off..off + 2].try_into().unwrap()),
             1,

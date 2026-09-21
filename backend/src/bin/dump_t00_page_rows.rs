@@ -1,7 +1,9 @@
 use std::env;
 use std::path::PathBuf;
 
-use backend::utils::{read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le};
+use backend::utils::{
+    packed_page_row_slot_count, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
+};
 
 const PAGE_SIZE: usize = 4096;
 
@@ -24,9 +26,7 @@ fn parse_slots(page: &[u8]) -> Vec<Slot> {
         return Vec::new();
     }
     let payload_len = used_s.min(PAGE_SIZE.saturating_sub(40));
-    let nrs = page[24] as usize;
-    let num_rl = read_u16_le(page, 34).unwrap_or(0) as usize;
-    let n_header = if num_rl == 8191 { nrs } else { nrs.max(num_rl) };
+    let n_header = packed_page_row_slot_count(page).unwrap_or(0);
     if n_header == 0 {
         return Vec::new();
     }
