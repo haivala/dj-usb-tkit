@@ -427,24 +427,35 @@ including `u5=1, num_rl=0`.
 
 Sealed overflow pages use `(1, trc - 1)`.
 
-The row-slot count used for row traversal (`page_has_transaction_tombstones`,
-`read_page_footer_state`, `parse_t08_entries_from_page`,
-`parse_page_row_slots`) is read from the packed 3-byte field at `0x18..0x1b`
-(`packed_page_row_slot_count` in `pdb_writer.rs`), not from `nrs` (the single
-byte at `0x18`) combined with `num_rl` (`0x22`). Reading `nrs` alone wraps
-past 255 rows — a real risk for `t08` playlist_entries specifically, since its
-12-byte rows mean byte capacity alone lets a single 4096-byte page hold well
-over 255 of them (see the `MAX_ROWS_PER_PAGE` paragraph below). Earlier parser
-versions worked around the wrap with a heuristic (`num_rl==8191` meant
-"page does not track `num_rl`, trust `nrs`"; otherwise `max(nrs, num_rl)`),
-which could still misread by up to a few rows depending on table convention.
-Decoding the packed field directly is correct up to 8191 rows/page and
-needs no such fallback.
+The row-slot count used for row traversal is read from the packed 3-byte
+field at `0x18..0x1b` (`packed_page_row_slot_count` in `utils.rs`, the
+canonical decode every module below imports rather than reimplementing), not
+from `nrs` (the single byte at `0x18`) combined with `num_rl` (`0x22`).
+Reading `nrs` alone wraps past 255 rows — a real risk for `t08`
+playlist_entries specifically, since its 12-byte rows mean byte capacity
+alone lets a single 4096-byte page hold well over 255 of them (see the
+`MAX_ROWS_PER_PAGE` paragraph below). Earlier parser versions worked around
+the wrap with a heuristic (`num_rl==8191` meant "page does not track
+`num_rl`, trust `nrs`"; otherwise `max(nrs, num_rl)`), which could still
+misread by up to a few rows depending on table convention. Decoding the
+packed field directly is correct up to 8191 rows/page and needs no such
+fallback. Call sites that switched from the old heuristic to this decode:
+`pdb_writer.rs`'s `page_has_transaction_tombstones`, `read_page_footer_state`,
+`parse_t08_entries_from_page`, and `parse_page_row_slots`; `pdb_reader.rs`'s
+`parse_page_rows` (the row parser behind the main public `parse_pdb_bytes`
+entry point); and `repair.rs`'s `detect_pdb_zero_tranrf_pages_for_tables`,
+where the old heuristic could silently skip inspecting a large playlist
+page's true last footer group (257 rows is the smallest case that both wraps
+and crosses a 16-row group boundary), letting real transaction-footer
+corruption there go undetected by "repair USB." The `dump_*` developer
+diagnostic binaries in `src/bin/` carry the same fix for consistency, though
+they aren't part of the shipped app.
 
-`parse_t08_entries_from_page` additionally keeps a defensive Phase 2 scan
-that extends past the header-reported count when the page's footer index
-space can hold more rows than the header claims, in case the header count is
-ever wrong for a reason other than the (now-fixed) byte wrap.
+Two of the fixed sites keep a defensive Phase 2 scan that extends past the
+header-reported count when the page's footer index space can hold more rows
+than the header claims, in case the header count is ever wrong for a reason
+other than the (now-fixed) byte wrap: `pdb_writer.rs`'s
+`parse_t08_entries_from_page` and `pdb_reader.rs`'s `parse_page_rows`.
 
 The writer cannot rely on the parser's tolerance. It must emit page footer
 values accepted by players.
