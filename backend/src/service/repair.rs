@@ -1532,6 +1532,10 @@ fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
     Ok(patched)
 }
 
+/// Normalizes flagged pages to the current writer's own convention
+/// (`data_page_footer_fields(0, trc)`, i.e. `(1, nrs-1)`), not the older
+/// `(2, 0)` shape `detect_pdb_wrong_track_u5` still tolerates as valid on
+/// pages that already have it.
 fn apply_pdb_wrong_track_u5_repair(
     usb_root: &Path,
     pages: &[WrongTrackU5Page],
@@ -1556,8 +1560,11 @@ fn apply_pdb_wrong_track_u5_repair(
         if off + 0x24 > bytes.len() {
             continue;
         }
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&2u16.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&0u16.to_le_bytes());
+        let trc = crate::utils::packed_page_row_slot_count(&bytes[off..off + page_size])
+            .unwrap_or(0);
+        let (u5, num_rl) = crate::pdb_writer::data_page_footer_fields(0, trc as u16);
+        bytes[off + 0x20..off + 0x22].copy_from_slice(&u5.to_le_bytes());
+        bytes[off + 0x22..off + 0x24].copy_from_slice(&num_rl.to_le_bytes());
         patched += 1;
     }
     std::fs::write(&pdb_path, &bytes)?;
@@ -3675,9 +3682,10 @@ impl BackendService {
                 id: PDB_WRONG_TRACK_U5_FIX_ID.to_string(),
                 title: "Repair PDB Track Page Footer Shape".to_string(),
                 description: format!(
-                    "Normalise u5/num_rl footer fields on {} tt=0 track page(s) to (2, 0). \
-                     Both (1, nrs-1) and (2, 0) are accepted by player firmware; this repair \
-                     aligns the export to the format written by the current writer.",
+                    "Normalise u5/num_rl footer fields on {} tt=0 track page(s) to (1, nrs-1), \
+                     the format written by the current writer. (2, 0) is also accepted by player \
+                     firmware and left untouched on pages that already have it, but this repair \
+                     targets the current writer's own convention.",
                     pdb_wrong_track_u5_pages.len()
                 ),
                 supported: true,
@@ -7031,7 +7039,10 @@ mod tests {
     #[test]
     fn wrong_track_u5_repair_detects_and_fixes_active_page_footer() {
         // tt=0, flags=0x34 (active): only (u5=2, num_rl=0) or (u5=1, num_rl=nrs-1)
-        // are valid; anything else must be flagged and normalised to (2, 0).
+        // are valid; anything else must be flagged and normalised to the
+        // writer's own current convention, (u5=1, num_rl=nrs-1) -- not the
+        // older (2, 0) shape, which the detector still tolerates as valid on
+        // pages that already have it but is no longer the repair's target.
         let mut p1 = data_page(1, 0);
         set_flags(&mut p1, 0x34);
         set_nrs(&mut p1, 5);
@@ -7051,11 +7062,11 @@ mod tests {
         let off = TEST_PAGE_SIZE;
         assert_eq!(
             u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
-            2
+            1
         );
         assert_eq!(
             u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
-            0
+            4
         );
         assert!(detect_pdb_wrong_track_u5(&pdb_path).is_empty());
     }

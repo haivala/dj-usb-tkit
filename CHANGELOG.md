@@ -45,6 +45,14 @@
   (the fallback already self-corrected in every case tried), but it removes
   the last place still depending on that fragile heuristic. Applied the same
   fix to the internal `dump_*` developer diagnostic tools for consistency.
+- **Fix:** the "Repair PDB Track Page Footer Shape" repair normalized a
+  track page's footer fields to `(u5=2, num_rl=0)` — an older, undocumented
+  shape — instead of `(u5=1, num_rl=nrs-1)`, the convention the writer
+  itself actually produces and validates on every export. Both were accepted
+  as valid by the detector, so this only mattered on the rare page that
+  needed repairing at all, and only when this fix was applied without also
+  running "Upgrade Export Data To Strict Parity"; it now targets the
+  writer's own convention directly so it can't drift from it again.
 
 ## 0.2.2
 
