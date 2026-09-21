@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.2.2
+
 **Severity:** critical — see item marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** additively patching an existing PDB whose `t08`
@@ -40,6 +42,7 @@
   duplicated when playlist changes were written back to the USB. Row-slot
   counts are now decoded from the full packed page-header field instead of a
   single byte that wrapped past 255.
+- **Chore:** update deps
 
 ## 0.2.1
 
