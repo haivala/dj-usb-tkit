@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.2.3
+
 - **Fix:** the repair/diagnostics scan for corrupted transaction footers
   (`detect_pdb_zero_tranrf_pages_for_tables`) could silently skip inspecting
   a page's true last row-footer group when that page had more than 255 rows
