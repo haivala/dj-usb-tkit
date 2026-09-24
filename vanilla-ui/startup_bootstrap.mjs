@@ -109,6 +109,13 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
   }
 
   try {
+    state.cueStartOnFirstBeat =
+      localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_START_ON_FIRST_BEAT) === "1";
+  } catch {
+    state.cueStartOnFirstBeat = false;
+  }
+
+  try {
     state.sidebarCollapsed = localStorageObj?.getItem?.(constants.STORAGE_KEY_SIDEBAR_COLLAPSED) === "1";
   } catch {
     state.sidebarCollapsed = false;

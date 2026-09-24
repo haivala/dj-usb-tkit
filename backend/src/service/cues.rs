@@ -3,6 +3,9 @@
 //! This app targets CDJ playback directly (not Rekordbox), so a cue is just a
 //! position + optional name + colour. The list is capped at 8; on save/export
 //! each cue is written as BOTH a memory point and a hot-cue pad (A–H).
+//! On top of those, a track may carry one memory-only *playback-start* cue
+//! (`TrackCue::playback_start`) at or before the first hot cue, so a CDJ's
+//! auto-cue loads there (typically the first beat) rather than on cue A.
 //!
 //! Cues live in the local `track_cues` table. `get_track_detail` /
 //! `save_track_analysis_edits` read and replace them; on save the cached ANLZ
@@ -73,8 +76,9 @@ pub fn import_anlz_cues_for_track(
     for (index, cue) in collapse_anlz_cues(&bytes).into_iter().enumerate() {
         tx.execute(
             "INSERT INTO track_cues
-               (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+               (id, track_id, position_ms, color_id, name, sort_order, is_playback_start,
+                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
             params![
                 cue.id,
                 track_id,
@@ -82,6 +86,7 @@ pub fn import_anlz_cues_for_track(
                 cue.color_id.map(i64::from),
                 cue.name,
                 index as i64,
+                cue.playback_start,
                 now,
             ],
         )?;
@@ -111,30 +116,53 @@ pub fn import_anlz_cues_for_track(
 /// position `TrackCue` list (capped at [`MAX_HOT_CUES`], ordered by position),
 /// preferring a non-empty comment / a valid palette colour. Each returned cue
 /// gets a fresh synthetic id — callers that persist it assign their own.
+///
+/// A memory-only entry that precedes every hot-cue pad is the playback-start
+/// cue this app writes; it comes back first, flagged `playback_start`, outside
+/// the cap, and unnamed (the start cue carries no name). Any other memory-only entry is read as a regular cue.
 pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
-    let mut by_position: BTreeMap<u32, (Option<u8>, Option<String>)> = BTreeMap::new();
+    #[derive(Default)]
+    struct Collapsed {
+        color_id: Option<u8>,
+        name: Option<String>,
+        has_hot: bool,
+    }
+    let mut by_position: BTreeMap<u32, Collapsed> = BTreeMap::new();
     for cue in read_cues_from_anlz(bytes) {
         let entry = by_position.entry(cue.position_ms).or_default();
-        if entry.0.is_none() && cue.color_id != 0 && is_valid_color_id(cue.color_id) {
-            entry.0 = Some(cue.color_id);
+        entry.has_hot |= cue.hot_cue != 0;
+        if entry.color_id.is_none() && cue.color_id != 0 && is_valid_color_id(cue.color_id) {
+            entry.color_id = Some(cue.color_id);
         }
-        if entry.1.is_none() {
+        if entry.name.is_none() {
             let trimmed = cue.comment.trim();
             if !trimmed.is_empty() {
-                entry.1 = Some(trimmed.to_string());
+                entry.name = Some(trimmed.to_string());
             }
         }
     }
-    by_position
-        .into_iter()
-        .take(MAX_HOT_CUES as usize)
-        .map(|(position_ms, (color_id, name))| TrackCue {
+
+    let any_hot = by_position.values().any(|c| c.has_hot);
+    let mut entries = by_position.into_iter().peekable();
+    let mut out = Vec::new();
+    if any_hot && entries.peek().is_some_and(|(_, c)| !c.has_hot) {
+        let (position_ms, _) = entries.next().expect("peeked");
+        out.push(TrackCue {
             id: Uuid::now_v7().to_string(),
             position_ms,
-            color_id,
-            name,
-        })
-        .collect()
+            color_id: None,
+            name: None,
+            playback_start: true,
+        });
+    }
+    out.extend(entries.take(MAX_HOT_CUES as usize).map(|(position_ms, c)| TrackCue {
+        id: Uuid::now_v7().to_string(),
+        position_ms,
+        color_id: c.color_id,
+        name: c.name,
+        playback_start: false,
+    }));
+    out
 }
 
 /// Read/rewrite an ANLZ `.DAT` bundle and its sibling `.EXT` in place with
@@ -193,13 +221,14 @@ fn row_to_track_cue(row: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<Tr
         position_ms: row.get::<_, i64>(base + 1)?.max(0) as u32,
         color_id: row.get::<_, Option<i64>>(base + 2)?.map(|v| v as u8),
         name: row.get(base + 3)?,
+        playback_start: row.get::<_, i64>(base + 4)? != 0,
     })
 }
 
 /// Read a track's cue list in stable render order.
 pub fn load_track_cues(conn: &Connection, track_id: &str) -> BackendResult<Vec<TrackCue>> {
     let mut stmt = conn.prepare(
-        "SELECT id, position_ms, color_id, name
+        "SELECT id, position_ms, color_id, name, is_playback_start
            FROM track_cues WHERE track_id = ?1
           ORDER BY sort_order, position_ms",
     )?;
@@ -220,7 +249,7 @@ pub fn load_track_cues_bulk(
     }
     let placeholders = vec!["?"; track_ids.len()].join(", ");
     let sql = format!(
-        "SELECT track_id, id, position_ms, color_id, name
+        "SELECT track_id, id, position_ms, color_id, name, is_playback_start
            FROM track_cues WHERE track_id IN ({placeholders})
           ORDER BY track_id, sort_order, position_ms"
     );
@@ -240,14 +269,39 @@ pub fn anlz_cues_for_track(conn: &Connection, track_id: &str) -> BackendResult<V
     Ok(anlz_cues_from_track_cues(&load_track_cues(conn, track_id)?))
 }
 
-/// Expand each cue point into a memory `AnlzCue` **and** a hot `AnlzCue`
-/// (slot 1..=8 by position order). The `PCOB`/`PCO2` encoders split on `is_hot()`.
-pub fn anlz_cues_from_track_cues(cues: &[TrackCue]) -> Vec<AnlzCue> {
-    let mut sorted: Vec<&TrackCue> = cues.iter().collect();
-    sorted.sort_by_key(|c| c.position_ms);
+/// The cue list split into its hot cues (position order, capped at
+/// [`MAX_HOT_CUES`]) and the memory-only playback-start cue. The start cue is
+/// dropped when there are no hot cues or when it coincides with a hot cue's
+/// position (that hot cue's own memory point already sits there).
+pub fn split_playback_start(cues: &[TrackCue]) -> (Vec<&TrackCue>, Option<&TrackCue>) {
+    let mut hot: Vec<&TrackCue> = cues.iter().filter(|c| !c.playback_start).collect();
+    hot.sort_by_key(|c| c.position_ms);
+    hot.truncate(MAX_HOT_CUES as usize);
+    let start = cues
+        .iter()
+        .find(|c| c.playback_start)
+        .filter(|s| hot.first().is_some_and(|first| s.position_ms < first.position_ms));
+    (hot, start)
+}
 
-    let mut out = Vec::with_capacity(sorted.len() * 2);
-    for (i, cue) in sorted.iter().take(MAX_HOT_CUES as usize).enumerate() {
+/// Expand each cue point into a memory `AnlzCue` **and** a hot `AnlzCue`
+/// (slot 1..=8 by position order); the playback-start cue becomes a lone
+/// memory `AnlzCue`. The `PCOB`/`PCO2` encoders split on `is_hot()`.
+pub fn anlz_cues_from_track_cues(cues: &[TrackCue]) -> Vec<AnlzCue> {
+    let (sorted, start) = split_playback_start(cues);
+
+    let mut out = Vec::with_capacity(sorted.len() * 2 + 1);
+    if let Some(start) = start {
+        out.push(AnlzCue {
+            position_ms: start.position_ms,
+            hot_cue: 0,
+            color_id: 0,
+            color_rgb: (0, 0, 0),
+            color_code: 0,
+            comment: String::new(),
+        });
+    }
+    for (i, cue) in sorted.iter().enumerate() {
         let (color_id, rgb, code) = match cue.color_id.and_then(palette_entry) {
             Some(entry) => (entry.id, entry.rgb, entry.color_code),
             None => (0, (0, 0, 0), 0),
@@ -295,16 +349,27 @@ struct NormalizedCue {
     position_ms: u32,
     color_id: Option<u8>,
     name: Option<String>,
+    playback_start: bool,
 }
 
+/// Validate a cue-list edit. Hot cues are capped at [`MAX_HOT_CUES`]; at most
+/// one playback-start cue is allowed, it carries no name or colour, it is
+/// dropped when there are no hot cues, pulled back to the earliest hot cue when it lies after it, and is
+/// returned first.
 fn normalize_cues(
     inputs: &[TrackCueInput],
     duration_ms: Option<u64>,
 ) -> BackendResult<Vec<NormalizedCue>> {
-    if inputs.len() > MAX_HOT_CUES as usize {
+    let hot_count = inputs.iter().filter(|c| !c.playback_start).count();
+    if hot_count > MAX_HOT_CUES as usize {
         return Err(BackendError::Validation(format!(
             "at most {MAX_HOT_CUES} cue points are allowed"
         )));
+    }
+    if inputs.len() - hot_count > 1 {
+        return Err(BackendError::Validation(
+            "at most one playback-start cue is allowed".to_string(),
+        ));
     }
     let max_pos = duration_ms
         .filter(|d| *d > 0)
@@ -313,6 +378,21 @@ fn normalize_cues(
 
     let mut out = Vec::with_capacity(inputs.len());
     for input in inputs {
+        let name = input
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        if input.playback_start {
+            out.push(NormalizedCue {
+                position_ms: input.position_ms.min(max_pos),
+                color_id: None,
+                name: None,
+                playback_start: true,
+            });
+            continue;
+        }
         let color_id = match input.color_id {
             Some(id) if is_valid_color_id(id) => Some(id),
             Some(id) => {
@@ -323,13 +403,22 @@ fn normalize_cues(
         out.push(NormalizedCue {
             position_ms: input.position_ms.min(max_pos),
             color_id,
-            name: input
-                .name
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string),
+            name,
+            playback_start: false,
         });
+    }
+
+    let earliest_hot = out
+        .iter()
+        .filter(|c| !c.playback_start)
+        .map(|c| c.position_ms)
+        .min();
+    if let Some(index) = out.iter().position(|c| c.playback_start) {
+        let mut start = out.remove(index);
+        if let Some(earliest_hot) = earliest_hot {
+            start.position_ms = start.position_ms.min(earliest_hot);
+            out.insert(0, start);
+        }
     }
     Ok(out)
 }
@@ -341,6 +430,7 @@ impl NormalizedCue {
             position_ms: self.position_ms,
             color_id: self.color_id,
             name: self.name.clone(),
+            playback_start: self.playback_start,
         }
     }
 }
@@ -390,8 +480,9 @@ fn apply_local_analysis_edits_tx(
         for (index, cue) in cues.iter().enumerate() {
             tx.execute(
                 "INSERT INTO track_cues
-                   (id, track_id, position_ms, color_id, name, sort_order, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                   (id, track_id, position_ms, color_id, name, sort_order, is_playback_start,
+                    created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
                 params![
                     Uuid::now_v7().to_string(),
                     track_id,
@@ -399,6 +490,7 @@ fn apply_local_analysis_edits_tx(
                     cue.color_id.map(i64::from),
                     cue.name,
                     index as i64,
+                    cue.playback_start,
                     now,
                 ],
             )?;
@@ -931,6 +1023,7 @@ mod tests {
             position_ms: pos,
             color_id: color,
             name: None,
+            playback_start: false,
         }
     }
 
@@ -939,6 +1032,7 @@ mod tests {
             position_ms: pos,
             color_id: color,
             name: name.map(str::to_string),
+            playback_start: false,
         }
     }
 
@@ -948,6 +1042,7 @@ mod tests {
             position_ms: pos,
             color_id: color,
             name: None,
+            playback_start: false,
         }
     }
 
@@ -972,6 +1067,7 @@ mod tests {
               color_id INTEGER,
               name TEXT,
               sort_order INTEGER NOT NULL DEFAULT 0,
+              is_playback_start INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
@@ -1076,6 +1172,141 @@ mod tests {
         assert_eq!(hots[1].hot_cue, 2);
         assert_eq!(hots[1].color_id, 2);
         assert!(mems.iter().any(|c| c.position_ms == 8000));
+    }
+
+    fn start_input(pos: u32) -> TrackCueInput {
+        TrackCueInput {
+            position_ms: pos,
+            color_id: Some(3),
+            name: Some("Start".to_string()),
+            playback_start: true,
+        }
+    }
+
+    fn start_cue(pos: u32) -> TrackCue {
+        TrackCue {
+            playback_start: true,
+            ..cue("start", pos, None)
+        }
+    }
+
+    #[test]
+    fn normalize_puts_playback_start_first_without_colour_and_outside_the_cap() {
+        let mut inputs: Vec<_> = (1..=8).map(|i| input(i * 1000, None)).collect();
+        inputs.push(start_input(500));
+        let out = normalize_cues(&inputs, None).expect("8 hot + start is allowed");
+        assert_eq!(out.len(), 9);
+        assert!(out[0].playback_start);
+        assert_eq!(out[0].position_ms, 500);
+        assert_eq!(out[0].color_id, None);
+        assert_eq!(out[0].name, None, "the start cue is never named");
+        assert!(out[1..].iter().all(|c| !c.playback_start));
+    }
+
+    #[test]
+    fn normalize_pulls_playback_start_back_to_the_earliest_hot_cue() {
+        let out =
+            normalize_cues(&[input(4000, None), start_input(9000), input(2000, None)], None)
+                .expect("ok");
+        assert!(out[0].playback_start);
+        assert_eq!(out[0].position_ms, 2000);
+    }
+
+    #[test]
+    fn normalize_drops_playback_start_without_hot_cues() {
+        let out = normalize_cues(&[start_input(1000)], None).expect("ok");
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn normalize_rejects_two_playback_start_cues() {
+        let err = normalize_cues(&[input(4000, None), start_input(0), start_input(10)], None)
+            .expect_err("two start cues");
+        assert!(err.to_string().contains("playback-start"));
+    }
+
+    #[test]
+    fn anlz_cues_writes_playback_start_as_a_lone_memory_point() {
+        let anlz = anlz_cues_from_track_cues(&[
+            cue("c1", 3000, Some(2)),
+            start_cue(1000),
+            cue("c2", 5000, Some(5)),
+        ]);
+        assert_eq!(anlz.len(), 5);
+        let at_start: Vec<_> = anlz.iter().filter(|c| c.position_ms == 1000).collect();
+        assert_eq!(at_start.len(), 1);
+        assert_eq!(at_start[0].hot_cue, 0);
+        assert_eq!(at_start[0].color_id, 0);
+        // Hot slots count hot cues only.
+        let hots: Vec<_> = anlz.iter().filter(|c| c.hot_cue != 0).collect();
+        assert_eq!(
+            hots.iter().map(|c| (c.position_ms, c.hot_cue)).collect::<Vec<_>>(),
+            [(3000, 1), (5000, 2)]
+        );
+    }
+
+    #[test]
+    fn anlz_cues_skips_playback_start_on_a_hot_cue_or_without_hot_cues() {
+        let on_hot = anlz_cues_from_track_cues(&[cue("c1", 3000, Some(2)), start_cue(3000)]);
+        assert_eq!(on_hot.len(), 2, "the hot cue's memory point already sits there");
+        assert!(anlz_cues_from_track_cues(&[start_cue(1000)]).is_empty());
+    }
+
+    #[test]
+    fn collapse_round_trips_the_playback_start_cue() {
+        let plain = super::super::anlz::build_anlz_ext_file(
+            &super::super::anlz::WaveformData::from_peaks(vec![128; 400]),
+            "/Contents/x.mp3",
+            Some(120.0),
+            Some(120_000),
+        );
+        let anlz = anlz_cues_from_track_cues(&[
+            cue("c1", 3000, Some(2)),
+            TrackCue {
+                name: Some("Go".to_string()),
+                ..start_cue(750)
+            },
+            cue("c2", 5000, Some(5)),
+        ]);
+        let bytes = apply_analysis_edits_to_anlz(
+            &plain,
+            &AnlzAnalysisEdits {
+                bpm: Some(120.0),
+                duration_ms: Some(120_000),
+                first_beat_ms: None,
+                cues: Some(&anlz),
+            },
+        );
+
+        let collapsed = collapse_anlz_cues(&bytes);
+        assert_eq!(
+            collapsed
+                .iter()
+                .map(|c| (c.position_ms, c.playback_start))
+                .collect::<Vec<_>>(),
+            [(750, true), (3000, false), (5000, false)]
+        );
+        assert_eq!(collapsed[0].name, None);
+        assert_eq!(collapsed[0].color_id, None);
+        assert_eq!(collapsed[1].color_id, Some(2));
+    }
+
+    #[test]
+    fn load_track_cues_reads_the_playback_start_flag() {
+        let conn = cue_conn();
+        conn.execute(
+            "INSERT INTO track_cues
+               (id, track_id, position_ms, color_id, name, sort_order, is_playback_start,
+                created_at, updated_at)
+             VALUES
+               ('start', 'track-1', 500, NULL, NULL, 0, 1, 'old', 'old'),
+               ('hot', 'track-1', 1000, 5, NULL, 1, 0, 'old', 'old')",
+            [],
+        )
+        .unwrap();
+        let cues = load_track_cues(&conn, "track-1").expect("cues");
+        assert!(cues[0].playback_start);
+        assert!(!cues[1].playback_start);
     }
 
     #[test]

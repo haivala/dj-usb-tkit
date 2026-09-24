@@ -104,6 +104,7 @@ impl Db {
               color_id INTEGER,
               name TEXT,
               sort_order INTEGER NOT NULL DEFAULT 0,
+              is_playback_start INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL,
               FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
@@ -229,6 +230,7 @@ impl Db {
         ensure_playlists_column(&conn, "last_exported_at", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_usb_root", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_track_count", "INTEGER")?;
+        ensure_track_cues_column(&conn, "is_playback_start", "INTEGER NOT NULL DEFAULT 0")?;
         conn.execute_batch(
             r#"
             CREATE INDEX IF NOT EXISTS idx_tracks_match_fingerprint
@@ -277,28 +279,14 @@ const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[
     "last_exported_track_count",
 ];
 
+const ALLOWED_TRACK_CUES_COLUMNS: &[&str] = &["is_playback_start"];
+
 fn ensure_tracks_column(
     conn: &Connection,
     column_name: &str,
     definition: &str,
 ) -> BackendResult<()> {
-    if !ALLOWED_TRACK_COLUMNS.contains(&column_name) {
-        return Err(crate::error::BackendError::Internal(format!(
-            "ensure_tracks_column: column '{column_name}' not in allowlist"
-        )));
-    }
-
-    let mut stmt = conn.prepare("PRAGMA table_info(tracks)")?;
-    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for col in columns {
-        if col?.eq_ignore_ascii_case(column_name) {
-            return Ok(());
-        }
-    }
-
-    let sql = format!("ALTER TABLE tracks ADD COLUMN {column_name} {definition}");
-    conn.execute_batch(&sql)?;
-    Ok(())
+    ensure_column(conn, "tracks", ALLOWED_TRACK_COLUMNS, column_name, definition)
 }
 
 fn ensure_playlists_column(
@@ -306,13 +294,32 @@ fn ensure_playlists_column(
     column_name: &str,
     definition: &str,
 ) -> BackendResult<()> {
-    if !ALLOWED_PLAYLIST_COLUMNS.contains(&column_name) {
+    ensure_column(conn, "playlists", ALLOWED_PLAYLIST_COLUMNS, column_name, definition)
+}
+
+fn ensure_track_cues_column(
+    conn: &Connection,
+    column_name: &str,
+    definition: &str,
+) -> BackendResult<()> {
+    ensure_column(conn, "track_cues", ALLOWED_TRACK_CUES_COLUMNS, column_name, definition)
+}
+
+/// Idempotent `ALTER TABLE {table} ADD COLUMN`, gated on `allowed`.
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    allowed: &[&str],
+    column_name: &str,
+    definition: &str,
+) -> BackendResult<()> {
+    if !allowed.contains(&column_name) {
         return Err(crate::error::BackendError::Internal(format!(
-            "ensure_playlists_column: column '{column_name}' not in allowlist"
+            "ensure_{table}_column: column '{column_name}' not in allowlist"
         )));
     }
 
-    let mut stmt = conn.prepare("PRAGMA table_info(playlists)")?;
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
     for col in columns {
         if col?.eq_ignore_ascii_case(column_name) {
@@ -320,7 +327,7 @@ fn ensure_playlists_column(
         }
     }
 
-    let sql = format!("ALTER TABLE playlists ADD COLUMN {column_name} {definition}");
+    let sql = format!("ALTER TABLE {table} ADD COLUMN {column_name} {definition}");
     conn.execute_batch(&sql)?;
     Ok(())
 }
@@ -378,7 +385,15 @@ mod tests {
             .expect("query")
             .collect::<Result<_, _>>()
             .expect("collect");
-        for expected in ["id", "track_id", "position_ms", "color_id", "name", "sort_order"] {
+        for expected in [
+            "id",
+            "track_id",
+            "position_ms",
+            "color_id",
+            "name",
+            "sort_order",
+            "is_playback_start",
+        ] {
             assert!(
                 cue_cols.iter().any(|c| c == expected),
                 "track_cues missing column {expected}; got {cue_cols:?}"

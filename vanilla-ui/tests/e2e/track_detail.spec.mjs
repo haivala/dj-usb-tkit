@@ -4,6 +4,7 @@ function installTrackDetailMock(page, opts = {}) {
   return page.addInitScript((opts) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    if (opts.startOnFirstBeat) window.localStorage.setItem("djusbtkit.cueStartOnFirstBeat", "1");
     window.__calls = [];
 
     const tracks = [
@@ -38,6 +39,7 @@ function installTrackDetailMock(page, opts = {}) {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
+          if (command === "set_frontend_setting") return { ok: true, data: null };
           if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_backend_log_buffer") return [];
@@ -59,7 +61,10 @@ function installTrackDetailMock(page, opts = {}) {
               data: {
                 track: tracks[0],
                 firstBeatMs: 120,
-                cues: (opts.seedCues || []).map((positionMs) => ({ positionMs, colorId: 5, name: "" })),
+                cues: [
+                  ...(opts.seedStart != null ? [{ positionMs: opts.seedStart, playbackStart: true }] : []),
+                  ...(opts.seedCues || []).map((positionMs) => ({ positionMs, colorId: 5, name: "" })),
+                ],
                 detailWaveform: detailWaveformB64,
               },
             };
@@ -152,7 +157,180 @@ test("track-detail modal adds a cue at the playhead and saves it", async ({ page
   expect(saveCall).toBeTruthy();
   expect(Array.isArray(saveCall.request.cues)).toBe(true);
   expect(saveCall.request.cues).toHaveLength(1);
-  expect(Object.keys(saveCall.request.cues[0]).sort()).toEqual(["colorId", "name", "positionMs"]);
+  expect(Object.keys(saveCall.request.cues[0]).sort()).toEqual([
+    "colorId",
+    "name",
+    "playbackStart",
+    "positionMs",
+  ]);
+  expect(saveCall.request.cues[0].playbackStart).toBe(false);
+});
+
+async function openCueEditor(page, opts) {
+  await installTrackDetailMock(page, opts);
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+}
+
+const startPersistCalls = (page) =>
+  page.evaluate(() =>
+    window.__calls
+      .filter((c) => c.command === "set_frontend_setting")
+      .map((c) => c.request ?? c)
+      .filter((r) => JSON.stringify(r).includes("ui_cue_start_on_first_beat_v1"))
+  );
+
+test("start-on-first-beat toggle: informational with no cues, then applies the remembered (default off) setting", async ({ page }) => {
+  await openCueEditor(page);
+  const toggle = page.locator("#trackDetailStartOnFirstBeat");
+  const toggleText = page.locator("#trackDetailStartOnFirstBeatText");
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).toBeChecked();
+  await expect(toggleText).toHaveText("Start the playback on first beat");
+
+  await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  await expect(toggleText).toHaveText("Start the playback from first cue point");
+  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(0);
+
+  // Turning it on adds the memory-only start cue at the first beat (120 ms), listed first.
+  await toggle.check();
+  await expect(toggleText).toHaveText("Start the playback on first beat");
+  const rows = page.locator("#trackDetailCueList .cue-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toHaveClass(/is-playback-start/);
+  await expect(rows.first().locator(".cue-row-pos")).toHaveText("0:00.12");
+  await expect(rows.first().locator(".cue-row-delete")).toHaveCount(0);
+  await expect(rows.first().locator(".cue-row-color")).toHaveCount(0);
+  await expect(rows.first().locator(".cue-row-name")).toHaveCount(0);
+  await expect(rows.first().locator(".cue-row-label")).toHaveText("Playback start");
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start")).toHaveCount(1);
+  // Hot cues keep their A.. lettering, the same in the list as on the waveform.
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)")).toHaveText("A");
+  await expect(rows.nth(1).locator(".cue-row-color")).toHaveText("A");
+  await expect(rows.first().locator(".cue-row-memory")).toHaveText("▶");
+
+  // …and remembers the choice.
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("1");
+  await expect.poll(async () => (await startPersistCalls(page)).length).toBe(1);
+
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saveCall.request.cues).toHaveLength(2);
+  expect(saveCall.request.cues[0]).toEqual({
+    positionMs: 120,
+    colorId: null,
+    name: null,
+    playbackStart: true,
+  });
+  expect(saveCall.request.cues[1].playbackStart).toBe(false);
+});
+
+test("cue list rows carry the same letter as their waveform marker, in position order", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [60000, 30000] });
+  const rows = page.locator("#trackDetailCueList .cue-row");
+  await expect(rows.locator(".cue-row-pos")).toHaveText(["0:30.00", "1:00.00"]);
+  await expect(rows.locator(".cue-row-color")).toHaveText(["A", "B"]);
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveText(["A", "B"]);
+});
+
+test("remembered start-on-first-beat: the first cue adds the start cue; deleting the last cue removes it", async ({ page }) => {
+  await openCueEditor(page, { startOnFirstBeat: true });
+  const toggle = page.locator("#trackDetailStartOnFirstBeat");
+
+  await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
+  const rows = page.locator("#trackDetailCueList .cue-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toHaveClass(/is-playback-start/);
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toBeEnabled();
+
+  // A second cue doesn't add another start cue, nor count it toward the 8.
+  await page.locator("#trackDetailAddCue").click();
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(1);
+
+  for (let i = 0; i < 2; i += 1) {
+    await page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-delete").first().click();
+  }
+  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(0);
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveCount(0);
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).toBeChecked();
+  // Losing the cues is not a user choice: the remembered setting stays on.
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("1");
+});
+
+test("an existing track's start cue drives the toggle, not the remembered setting; unchecking remembers off", async ({ page }) => {
+  await openCueEditor(page, { startOnFirstBeat: true, seedCues: [30000] });
+  const toggle = page.locator("#trackDetailStartOnFirstBeat");
+  await expect(toggle).not.toBeChecked();
+  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(0);
+
+  await toggle.check();
+  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(1);
+  await toggle.uncheck();
+  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("0");
+});
+
+test("the playback-start cue follows an untouched first beat and is never after a hot cue", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30000], seedStart: 120 });
+  const toggle = page.locator("#trackDetailStartOnFirstBeat");
+  await expect(toggle).toBeChecked();
+  const toggleText = page.locator("#trackDetailStartOnFirstBeatText");
+  await expect(toggleText).toHaveText("Start the playback on first beat");
+  const startPos = page.locator("#trackDetailCueList .cue-row.is-playback-start .cue-row-pos");
+  const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
+  await expect(startPos).toHaveText("0:00.12");
+
+  // Untouched: follows the first beat (+1 beat at 128 BPM = 468.75 ms).
+  await page.locator("#trackDetailFirstBeatPlus").click();
+  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("589");
+  await expect(startPos).toHaveText("0:00.58");
+  await expect(toggleText).toHaveText("Start the playback on first beat");
+
+  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+  const drag = async (marker, ratio) => {
+    const box = await marker.boundingBox();
+    const y = box.y + box.height / 2;
+    await page.mouse.move(box.x + 2, y);
+    const targetX = wfBox.x + wfBox.width * ratio;
+    await page.mouse.down();
+    // Monotonic toward the target: an overshoot would legitimately push the start cue.
+    await page.mouse.move((box.x + 2 + targetX) / 2, y, { steps: 5 });
+    await page.mouse.move(targetX, y, { steps: 5 });
+    await page.mouse.up();
+  };
+
+  // Dragging it past the 30 s hot cue stops it on the hot cue.
+  await drag(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start"), 0.5);
+  await expect(startPos).toHaveText("0:30.00");
+  await expect(toggleText).toHaveText("Start the playback from playback start position");
+
+  // Dragging the hot cue before it pushes it back too.
+  await drag(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)"), 0.1);
+  const hotText = await hotPos.textContent();
+  expect(hotText).toMatch(/^0:1[12]\./);
+  await expect(startPos).toHaveText(hotText);
+
+  // Once dragged it no longer follows the first beat.
+  await page.locator("#trackDetailFirstBeatMinus").click();
+  await expect(startPos).toHaveText(hotText);
+
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  const [start, hot] = saveCall.request.cues;
+  expect(start.playbackStart).toBe(true);
+  expect(hot.playbackStart).toBe(false);
+  expect(start.positionMs).toBe(hot.positionMs);
 });
 
 test("track-detail modal edits BPM, saves it, and the library row/tooltip update", async ({ page }) => {

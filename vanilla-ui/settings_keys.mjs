@@ -15,6 +15,7 @@ export const STORAGE_KEY_SIDEBAR_COLLAPSED = "djusbtkit.sidebarCollapsed";
 export const STORAGE_KEY_HELP_SEEN = "djusbtkit.helpSeen";
 export const STORAGE_KEY_MASTER_DB_ENABLED = "djusbtkit.masterDbEnabled";
 export const STORAGE_KEY_SOURCES_EVER_CONFIGURED = "djusbtkit.sourcesEverConfigured";
+export const STORAGE_KEY_CUE_START_ON_FIRST_BEAT = "djusbtkit.cueStartOnFirstBeat";
 export const STORAGE_KEY_UPDATE_DISMISSED = "djusbtkit.updateDismissedVersion";
 
 export const FRONTEND_DB_KEY_THEME = "ui_theme_v1";
@@ -31,6 +32,7 @@ export const FRONTEND_DB_KEY_SIDEBAR_COLLAPSED = "ui_sidebar_collapsed_v1";
 export const FRONTEND_DB_KEY_HELP_SEEN = "ui_help_seen_v1";
 export const FRONTEND_DB_KEY_MASTER_DB_ENABLED = "ui_master_db_enabled_v1";
 export const FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED = "ui_sources_ever_configured_v1";
+export const FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT = "ui_cue_start_on_first_beat_v1";
 
 export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_THEME, dbKey: FRONTEND_DB_KEY_THEME },
@@ -46,5 +48,6 @@ export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_SIDEBAR_COLLAPSED, dbKey: FRONTEND_DB_KEY_SIDEBAR_COLLAPSED },
   { storageKey: STORAGE_KEY_HELP_SEEN, dbKey: FRONTEND_DB_KEY_HELP_SEEN },
   { storageKey: STORAGE_KEY_MASTER_DB_ENABLED, dbKey: FRONTEND_DB_KEY_MASTER_DB_ENABLED },
-  { storageKey: STORAGE_KEY_SOURCES_EVER_CONFIGURED, dbKey: FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED }
+  { storageKey: STORAGE_KEY_SOURCES_EVER_CONFIGURED, dbKey: FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED },
+  { storageKey: STORAGE_KEY_CUE_START_ON_FIRST_BEAT, dbKey: FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT }
 ];

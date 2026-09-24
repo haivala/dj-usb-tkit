@@ -56,7 +56,7 @@ use serde::Serialize;
 
 use crate::error::{BackendError, BackendResult};
 use crate::models::{ExportToUsbOptions, TrackCue, WarningEntry};
-use crate::service::cues::MAX_HOT_CUES;
+use crate::service::cues::split_playback_start;
 use crate::pdb_reader::parse_pdb;
 use crate::utils::{collect_chain as collect_chain_pages, page_offset, table_ptr_fields};
 
@@ -645,19 +645,24 @@ pub fn write_edb_cues_for_content(
     let cue_columns = load_table_columns_tx(tx, "cue")?;
     let mut cue_id = next_numeric_id(tx, "cue", "cue_id")?;
 
-    let mut sorted: Vec<&TrackCue> = cues.iter().collect();
-    sorted.sort_by_key(|c| c.position_ms);
+    let (sorted, start) = split_playback_start(cues);
 
     // Each cue point is written twice: a memory point (kind 0) and, for the
     // first 8 by position, a hot-cue pad (kind 1) carrying the colour. Hot-slot
-    // ordering is implicit in insert order.
-    for cue in sorted.iter().take(MAX_HOT_CUES as usize) {
+    // ordering is implicit in insert order. The playback-start cue is a lone
+    // memory point, written first.
+    const MEMORY: (i64, i64) = (0, -1);
+    let rows = start.map(|cue| (cue, vec![MEMORY])).into_iter().chain(
+        sorted
+            .into_iter()
+            .map(|cue| (cue, vec![MEMORY, (1, i64::from(cue.color_id.unwrap_or(0)))])),
+    );
+    for (cue, kinds) in rows {
         let in_usec = i64::from(cue.position_ms) * 1000;
         let in_frames_150 = ((f64::from(cue.position_ms) * 150.0) / 1000.0).round() as i64;
         let comment = cue.name.clone().unwrap_or_default();
-        let color_index = i64::from(cue.color_id.unwrap_or(0));
 
-        for (kind, color_table_index) in [(0i64, -1i64), (1i64, color_index)] {
+        for (kind, color_table_index) in kinds {
             let mut fields: Vec<(&str, rusqlite::types::Value)> = vec![
                 ("cue_id", cue_id.into()),
                 ("content_id", content_id.into()),

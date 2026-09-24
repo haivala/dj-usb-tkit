@@ -4,6 +4,12 @@
 // colour. The list is capped at 8; on save each becomes a memory point + a
 // hot-cue pad. The waveform is the full-detail PWV5 colour waveform with
 // scroll-to-zoom and drag-to-pan (see waveform_detail.mjs).
+//
+// "Start the playback on first beat" adds one more cue on top of those: the
+// playback-start cue (`playbackStart: true`), a memory point only (no pad, no
+// colour), never later than any hot cue, so the CDJ loads there instead of on
+// cue A. With no cues at all the CDJ already starts at the first audio, so
+// the toggle is then disabled and shown checked, purely informational.
 
 import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_detail.mjs";
 
@@ -24,6 +30,13 @@ export const HOTCUE_PALETTE = [
   { id: 8, css: "#8A3FD1" },
 ];
 const DEFAULT_COLOR_ID = 5;
+const START_TOGGLE_DISABLED_TOOLTIP =
+  "With no cue points the CDJ starts at the first audio, so on the first beat";
+const START_TOGGLE_TEXT_ON = "Start the playback on first beat";
+const START_TOGGLE_TEXT_OFF = "Start the playback from first cue point";
+const START_TOGGLE_TEXT_MOVED = "Start the playback from playback start position";
+const START_TOGGLE_TOOLTIP =
+  "Adds a memory cue (no hot cue) where playback starts, at or before the first cue point";
 
 // Mirrors backend `KEY_OPTIONS` (service/cues.rs). 12 majors then 12 minors.
 export const KEY_OPTIONS = [
@@ -55,7 +68,16 @@ const raf = (cb) => (globalThis.requestAnimationFrame || ((f) => setTimeout(f, 1
 const caf = (h) => (globalThis.cancelAnimationFrame || globalThis.clearTimeout)(h);
 const nowMs = () => globalThis.performance?.now?.() ?? Date.now();
 
-export function createTrackDetailController(el) {
+/// Position order; the playback-start cue wins a tie with a hot cue.
+function byPosition(a, b) {
+  return a.positionMs - b.positionMs || Number(!!b.playbackStart) - Number(!!a.playbackStart);
+}
+
+export function createTrackDetailController(el, prefs = {}) {
+  const {
+    getStartOnFirstBeatPref = () => false,
+    setStartOnFirstBeatPref = () => {},
+  } = prefs;
   let resolveFn = null;
   let open = false;
   let resizeObserver = null;
@@ -78,6 +100,45 @@ export function createTrackDetailController(el) {
     draggingTempId: null, // cue whose marker is being dragged on the waveform
   };
   let playPauseShowsPlaying = null;
+
+  function hotCues() {
+    return working.cues.filter((c) => !c.playbackStart);
+  }
+
+  function startCue() {
+    return working.cues.find((c) => c.playbackStart) || null;
+  }
+
+  function orderedCues() {
+    return working.cues.slice().sort(byPosition);
+  }
+
+  /// The playback-start cue never lies after a hot cue, and never exists
+  /// without one.
+  function enforceStartOrder() {
+    const start = startCue();
+    if (!start) return;
+    const hot = hotCues();
+    if (!hot.length) {
+      working.cues = hot;
+      return;
+    }
+    const earliest = Math.min(...hot.map((c) => c.positionMs));
+    if (start.positionMs > earliest) start.positionMs = earliest;
+  }
+
+  function addStartCue() {
+    if (startCue()) return;
+    working.cues.push({
+      tempId: `c${(tempIdSeq += 1)}`,
+      positionMs: working.firstBeatMs == null ? 0 : working.firstBeatMs,
+      colorId: null,
+      name: "",
+      playbackStart: true,
+      followsFirstBeat: true,
+    });
+    enforceStartOrder();
+  }
 
   function beatIntervalMs() {
     const bpm = Number(working.bpm) || 0;
@@ -173,21 +234,24 @@ export function createTrackDetailController(el) {
     const host = el.trackDetailCueMarkers;
     if (!host) return;
     host.textContent = "";
-    const ordered = working.cues.slice().sort((a, b) => a.positionMs - b.positionMs);
-    ordered.forEach((cue, i) => {
+    const labels = cueLabels();
+    for (const cue of orderedCues()) {
       const pct = msToPct(cue.positionMs);
       const marker = host.ownerDocument.createElement("i");
       marker.className =
         "cue-marker" +
+        (cue.playbackStart ? " is-playback-start" : "") +
         (pct < -2 || pct > 102 ? " off-view" : "") +
         (cue.tempId === working.draggingTempId ? " is-dragging" : "");
       marker.style.left = `${pct}%`;
-      marker.style.setProperty("--cue-color", colorCssForId(cue.colorId));
+      if (!cue.playbackStart) marker.style.setProperty("--cue-color", colorCssForId(cue.colorId));
       marker.dataset.tempId = cue.tempId;
-      marker.textContent = String.fromCharCode(65 + i);
-      marker.dataset.tooltip = `${marker.textContent} · ${formatMs(cue.positionMs)}`;
+      marker.textContent = labels.get(cue.tempId);
+      marker.dataset.tooltip = cue.playbackStart
+        ? `Playback start · ${formatMs(cue.positionMs)}`
+        : `${marker.textContent} · ${formatMs(cue.positionMs)}`;
       host.appendChild(marker);
-    });
+    }
   }
 
   // Both flags are the shared playback module's projection of backend state
@@ -259,10 +323,21 @@ export function createTrackDetailController(el) {
     playheadRafHandle = raf(playheadTick);
   }
 
-  function cueRow(cue) {
+  /// Hot cues are lettered A–H by position, the same on the waveform markers
+  /// and in the cue list; the playback-start cue is "▶".
+  function cueLabels() {
+    const labels = new Map();
+    let hotIndex = 0;
+    for (const cue of orderedCues()) {
+      labels.set(cue.tempId, cue.playbackStart ? "▶" : String.fromCharCode(65 + hotIndex++));
+    }
+    return labels;
+  }
+
+  function cueRow(cue, letter) {
     const doc = el.trackDetailCueList.ownerDocument;
     const row = doc.createElement("div");
-    row.className = "cue-row";
+    row.className = "cue-row" + (cue.playbackStart ? " is-playback-start" : "");
     row.dataset.tempId = cue.tempId;
 
     const play = doc.createElement("button");
@@ -280,12 +355,35 @@ export function createTrackDetailController(el) {
     pos.textContent = formatMs(cue.positionMs);
     row.appendChild(pos);
 
-    const swatch = doc.createElement("button");
-    swatch.type = "button";
-    swatch.className = "cue-row-color";
-    swatch.dataset.action = "cue-color";
-    swatch.style.background = colorCssForId(cue.colorId);
-    row.appendChild(swatch);
+    if (cue.playbackStart) {
+      const memory = doc.createElement("span");
+      memory.className = "cue-row-memory";
+      memory.textContent = letter;
+      memory.dataset.tooltip = "Memory cue only (no hot cue)";
+      row.appendChild(memory);
+    } else {
+      const swatch = doc.createElement("button");
+      swatch.type = "button";
+      swatch.className = "cue-row-color";
+      swatch.dataset.action = "cue-color";
+      swatch.style.background = colorCssForId(cue.colorId);
+      swatch.textContent = letter;
+      swatch.setAttribute("aria-label", `Cue ${letter} colour`);
+      row.appendChild(swatch);
+    }
+
+    if (cue.playbackStart) {
+      // Not nameable, and removed only by the "Start the playback…" toggle.
+      const label = doc.createElement("span");
+      label.className = "cue-row-label";
+      label.textContent = "Playback start";
+      row.appendChild(label);
+      const badge = doc.createElement("span");
+      badge.className = "cue-row-badge";
+      badge.textContent = "memory cue";
+      row.appendChild(badge);
+      return row;
+    }
 
     const name = doc.createElement("input");
     name.type = "text";
@@ -310,16 +408,39 @@ export function createTrackDetailController(el) {
     const host = el.trackDetailCueList;
     if (!host) return;
     host.textContent = "";
-    const ordered = working.cues.slice().sort((a, b) => a.positionMs - b.positionMs);
-    if (!ordered.length) {
+    const hotCount = hotCues().length;
+    if (!hotCount) {
       const empty = host.ownerDocument.createElement("p");
       empty.className = "muted cue-list-empty";
       empty.textContent = "No cues yet. Double-click the waveform to add one, or play and hit “+ Cue”.";
       host.appendChild(empty);
     } else {
-      for (const cue of ordered) host.appendChild(cueRow(cue));
+      const labels = cueLabels();
+      for (const cue of orderedCues()) host.appendChild(cueRow(cue, labels.get(cue.tempId)));
     }
-    if (el.trackDetailAddCue) el.trackDetailAddCue.disabled = working.cues.length >= MAX_CUES;
+    if (el.trackDetailAddCue) el.trackDetailAddCue.disabled = hotCount >= MAX_CUES;
+  }
+
+  function renderStartToggle() {
+    const toggle = el.trackDetailStartOnFirstBeat;
+    if (!toggle) return;
+    const hasCues = hotCues().length > 0;
+    toggle.disabled = !hasCues;
+    toggle.checked = hasCues ? !!startCue() : true;
+    if (el.trackDetailStartOnFirstBeatText) {
+      // Once the start cue sits anywhere but the first beat (dragged, or
+      // pulled back by a hot cue), the label names that position instead.
+      const start = startCue();
+      const firstBeat = working.firstBeatMs == null ? 0 : working.firstBeatMs;
+      el.trackDetailStartOnFirstBeatText.textContent = !toggle.checked
+        ? START_TOGGLE_TEXT_OFF
+        : start && start.positionMs !== firstBeat
+          ? START_TOGGLE_TEXT_MOVED
+          : START_TOGGLE_TEXT_ON;
+    }
+    const label = toggle.closest("label") || toggle;
+    label.classList.toggle("is-disabled", !hasCues);
+    label.dataset.tooltip = hasCues ? START_TOGGLE_TOOLTIP : START_TOGGLE_DISABLED_TOOLTIP;
   }
 
   // The modal opens zoomed to the first ~2 min, so make it unmistakable that
@@ -383,6 +504,7 @@ export function createTrackDetailController(el) {
     syncKeySelect();
     renderView();
     renderCueList();
+    renderStartToggle();
   }
 
   const api = {
@@ -429,6 +551,12 @@ export function createTrackDetailController(el) {
       working.firstBeatMs = working.durationMs
         ? Math.min(clamped, working.durationMs - 1)
         : clamped;
+      // An untouched playback-start cue follows the first beat.
+      const start = startCue();
+      if (start?.followsFirstBeat) {
+        start.positionMs = working.firstBeatMs;
+        enforceStartOrder();
+      }
       render();
     },
 
@@ -475,13 +603,15 @@ export function createTrackDetailController(el) {
     /// Name and colour default to "Cue N" / the Nth palette colour (N = 1-based
     /// add order) — assigned once at creation, never renumbered later, and
     /// always user-editable afterward.
+    /// The first cue on a track also applies the remembered "Start the
+    /// playback on first beat" setting.
     addCue(positionMs) {
-      if (working.cues.length >= MAX_CUES) return null;
+      const ordinal = hotCues().length;
+      if (ordinal >= MAX_CUES) return null;
       const dur = working.durationMs || 0;
       const pos = Number.isFinite(positionMs)
         ? Math.max(0, Math.min(dur, Math.round(positionMs)))
         : Math.round(currentPositionMs());
-      const ordinal = working.cues.length;
       const cue = {
         tempId: `c${(tempIdSeq += 1)}`,
         positionMs: pos,
@@ -489,8 +619,24 @@ export function createTrackDetailController(el) {
         name: `Cue ${ordinal + 1}`,
       };
       working.cues.push(cue);
+      if (ordinal === 0 && getStartOnFirstBeatPref()) addStartCue();
+      enforceStartOrder();
       render();
       return cue;
+    },
+
+    /// The "Start the playback on first beat" toggle: add/remove the
+    /// playback-start cue (only while the track has cues). `remember` makes it
+    /// the setting applied to the next track's first cue.
+    setStartOnFirstBeat(on, { remember = false } = {}) {
+      if (!hotCues().length) {
+        render();
+        return;
+      }
+      if (remember) setStartOnFirstBeatPref(!!on);
+      if (on) addStartCue();
+      else working.cues = hotCues();
+      render();
     },
 
     addCueAtRatio(ratio) {
@@ -510,6 +656,7 @@ export function createTrackDetailController(el) {
       const cue = working.cues.find((c) => c.tempId === tempId);
       if (!cue) return;
       Object.assign(cue, patch);
+      enforceStartOrder();
       render();
     },
 
@@ -528,8 +675,13 @@ export function createTrackDetailController(el) {
         ms = working.firstBeatMs + idx * interval;
       }
       cue.positionMs = Math.max(0, Math.min(dur, Math.round(ms)));
+      // Dragging the start cue pins it (no more following the first beat);
+      // it stops at the first hot cue, and a hot cue dragged before it pushes it.
+      if (cue.playbackStart) cue.followsFirstBeat = false;
+      enforceStartOrder();
       renderMarkers();
       renderCueList();
+      renderStartToggle();
     },
 
     setDraggingCue(tempId) {
@@ -539,6 +691,7 @@ export function createTrackDetailController(el) {
 
     deleteCue(tempId) {
       working.cues = working.cues.filter((c) => c.tempId !== tempId);
+      enforceStartOrder();
       render();
     },
 
@@ -575,12 +728,20 @@ export function createTrackDetailController(el) {
       working.followSuspendUntil = 0;
       working.draggingTempId = null;
       playPauseShowsPlaying = null;
-      working.cues = (cues || []).slice(0, MAX_CUES).map((c) => ({
+      const loaded = (cues || []).map((c) => ({
         tempId: `c${(tempIdSeq += 1)}`,
         positionMs: Math.round(c.positionMs || 0),
-        colorId: c.colorId ?? DEFAULT_COLOR_ID,
+        colorId: c.playbackStart ? null : c.colorId ?? DEFAULT_COLOR_ID,
         name: c.name || "",
+        playbackStart: !!c.playbackStart,
       }));
+      const start = loaded.find((c) => c.playbackStart);
+      if (start) start.followsFirstBeat = start.positionMs === working.firstBeatMs;
+      working.cues = [
+        ...(start ? [start] : []),
+        ...loaded.filter((c) => !c.playbackStart).slice(0, MAX_CUES),
+      ];
+      enforceStartOrder();
       applyView(0, Math.min(DEFAULT_SPAN_MS, working.durationMs || DEFAULT_SPAN_MS));
 
       const t = working.track;
@@ -610,14 +771,12 @@ export function createTrackDetailController(el) {
         firstBeatMs: working.firstBeatMs == null ? null : working.firstBeatMs,
         bpm: working.bpm == null ? null : working.bpm,
         key: working.key == null ? null : working.key,
-        cues: working.cues
-          .slice()
-          .sort((a, b) => a.positionMs - b.positionMs)
-          .map((c) => ({
-            positionMs: Math.round(c.positionMs),
-            colorId: c.colorId ?? DEFAULT_COLOR_ID,
-            name: c.name?.trim() ? c.name.trim() : null,
-          })),
+        cues: orderedCues().map((c) => ({
+          positionMs: Math.round(c.positionMs),
+          colorId: c.playbackStart ? null : c.colorId ?? DEFAULT_COLOR_ID,
+          name: !c.playbackStart && c.name?.trim() ? c.name.trim() : null,
+          playbackStart: !!c.playbackStart,
+        })),
       };
     },
   };

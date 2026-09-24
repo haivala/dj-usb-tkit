@@ -210,6 +210,10 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.setFirstBeatMs(Number(event.target.value) || 0);
   });
 
+  el.trackDetailStartOnFirstBeat?.addEventListener("change", (event) => {
+    trackDetailDialog.setStartOnFirstBeat(event.target.checked, { remember: true });
+  });
+
   el.trackDetailBpmMinus?.addEventListener("click", () =>
     trackDetailDialog.nudgeBpm(-1)
   );

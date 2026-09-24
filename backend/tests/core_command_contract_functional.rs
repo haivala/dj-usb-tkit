@@ -924,6 +924,7 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
             position_ms: pos,
             color_id: color,
             name: name.map(str::to_string),
+            playback_start: false,
         }
     }
 

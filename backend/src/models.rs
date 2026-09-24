@@ -1890,6 +1890,11 @@ pub struct ScanMasterDbRequest {
 /// A cue point on a track. This app targets CDJ playback directly, so a cue is
 /// just a position + optional name + colour; on export each cue is written as
 /// both a memory point and a hot-cue pad (A–H). The list is capped at 8.
+///
+/// `playback_start` marks the one optional *playback-start* cue: a memory
+/// point only (no hot-cue pad, no colour, no name), never later than any hot cue, so a
+/// CDJ's auto-cue loads there instead of on the first hot cue. It does not
+/// count toward the 8.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackCue {
@@ -1899,6 +1904,8 @@ pub struct TrackCue {
     pub color_id: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub playback_start: bool,
 }
 
 /// One cue in a `save_track_analysis_edits` request (no id — the save fully
@@ -1911,6 +1918,9 @@ pub struct TrackCueInput {
     pub color_id: Option<u8>,
     #[serde(default)]
     pub name: Option<String>,
+    /// The memory-only playback-start cue (see [`TrackCue::playback_start`]).
+    #[serde(default)]
+    pub playback_start: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

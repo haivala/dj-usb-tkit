@@ -35,6 +35,7 @@ import {
   STORAGE_KEY_ANALYSIS_ENGINE,
   STORAGE_KEY_SIDEBAR_COLLAPSED,
   STORAGE_KEY_HELP_SEEN,
+  STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
   FRONTEND_DB_KEY_THEME,
   FRONTEND_DB_KEY_ACCENT_HUE,
   FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
@@ -44,6 +45,7 @@ import {
   FRONTEND_DB_KEY_ANALYSIS_ENGINE,
   FRONTEND_DB_KEY_SIDEBAR_COLLAPSED,
   FRONTEND_DB_KEY_HELP_SEEN,
+  FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
 } from "./settings_keys.mjs";
 import {
   WAVEFORM_COLORS,
@@ -136,7 +138,7 @@ const ELEMENT_IDS = [
   "eventLogList",
   "trackDetailOverlay", "trackDetailTitle", "trackDetailCloseBtn", "trackDetailWaveform",
   "trackDetailBeatgrid", "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs",
-  "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailAddCue",
+  "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailStartOnFirstBeat", "trackDetailStartOnFirstBeatText", "trackDetailAddCue",
   "trackDetailBpm", "trackDetailBpmMinus", "trackDetailBpmPlus",
   "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
   "trackDetailPlayPause", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailZoomRange",
@@ -159,7 +161,17 @@ const el = {
 
 const confirmDialog = uiCtrl.createConfirmDialogController(el);
 const tracklistExportDialog = uiCtrl.createTracklistExportDialogController(el);
-const trackDetailDialog = trackDetail.createTrackDetailController(el);
+const trackDetailDialog = trackDetail.createTrackDetailController(el, {
+  getStartOnFirstBeatPref: () => !!state.cueStartOnFirstBeat,
+  setStartOnFirstBeatPref: (on) => {
+    state.cueStartOnFirstBeat = !!on;
+    persistSetting(
+      STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
+      FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
+      on ? "1" : "0"
+    );
+  },
+});
 
 // --- Closures that bind state/el/deps ---
 
@@ -1538,6 +1550,7 @@ function restoreStoredUiPrefs() {
       STORAGE_KEY_ANALYSIS_BPM_RANGE,
       STORAGE_KEY_ANALYSIS_ENGINE,
       STORAGE_KEY_SIDEBAR_COLLAPSED,
+      STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
     },
     normalizeAnalysisBpmRange: library.normalizeAnalysisBpmRange,
     defaultAnalysisBpmRange: library.DEFAULT_ANALYSIS_BPM_RANGE,

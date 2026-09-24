@@ -20,6 +20,9 @@ export function createInitialState() {
     usbWritable: true,
     exportPruneStale: true,
     exportBackup: true,
+    // Cue editor: start playback on the first beat (memory-only start cue)
+    // rather than on the first cue point. Applied when a track gets its first cue.
+    cueStartOnFirstBeat: false,
     analysisBpmRange: DEFAULT_ANALYSIS_BPM_RANGE,
     analysisEngine: "stratum",
     analysisEnginePersistPromise: null,

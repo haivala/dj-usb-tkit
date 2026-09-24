@@ -3446,6 +3446,16 @@ td button[data-action]:disabled,
 .track-detail-firstbeat label { font-weight: 600; }
 .track-detail-firstbeat input { width: 96px; }
 .track-detail-key-label { margin-left: 12px; }
+.track-detail-firstbeat .track-detail-start-toggle {
+  margin-left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.track-detail-firstbeat .track-detail-start-toggle input { width: auto; margin: 0; }
+.track-detail-start-toggle.is-disabled { opacity: .6; cursor: default; }
 #trackDetailKey { width: 72px; max-width: 72px; }
 .track-detail-waveform-wrap {
   position: relative;
@@ -3569,6 +3579,13 @@ td button[data-action]:disabled,
   background: linear-gradient(var(--cue-color, #4EB648), var(--cue-color, #4EB648)) top left / 16px 15px no-repeat;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
 }
+.cue-marker.is-playback-start {
+  --cue-color: #cfd6e2;
+  border-left-style: dashed;
+  color: #1b1f27;
+  text-shadow: none;
+  font-size: 8px;
+}
 .track-detail-cues {
   margin-top: 12px;
 }
@@ -3613,6 +3630,10 @@ td button[data-action]:disabled,
   border: 1px solid var(--line);
   cursor: pointer;
   padding: 0;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
 }
 .cue-row-delete {
   background: transparent;
@@ -3623,6 +3644,29 @@ td button[data-action]:disabled,
   line-height: 1;
 }
 .cue-row-delete:hover { color: var(--danger, #e12424); }
+.cue-row.is-playback-start {
+  grid-template-columns: 26px 72px 24px 1fr auto;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--line);
+}
+.cue-row-memory {
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 2px dashed var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--muted);
+}
+.cue-row-label { font-weight: 600; }
+.cue-row-badge {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
 .track-detail-color-popover {
   position: absolute;
   display: grid;

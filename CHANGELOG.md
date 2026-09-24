@@ -37,9 +37,17 @@
   at its position in the audio engine (new `pause_playback_native` /
   `resume_playback_native` commands, `paused` on playback status and events);
   "+ Cue" while paused lands on the paused spot.
-- **Fix:** clicking inside the cue editor (zoom, "+ Cue", the cue list) while
-  a track played in it stopped playback, via the app-wide "click elsewhere
-  stops playback" rule.
+- **New feature:** "Start the playback on first beat" / "…from first cue
+  point" toggle in the cue editor (the label names the current choice, and reads
+  "…from playback start position" once the start cue is moved off the first
+  beat). When on, the track gets a memory-only playback-start cue (no
+  hot-cue pad) at the first beat, listed first and marked apart from the
+  cue points, so the CDJ loads there instead of on the first cue. It can be
+  dragged but never past a hot cue, and follows the first beat until moved.
+  The choice is remembered and applied when a track gets its first cue
+  (default: start from the first cue point); with no cues the toggle is
+  disabled and shown on, since the CDJ then starts at the first audio anyway.
+  Stored as `track_cues.is_playback_start` / `playbackStart` on cues.
 
 ## 0.2.3
 
