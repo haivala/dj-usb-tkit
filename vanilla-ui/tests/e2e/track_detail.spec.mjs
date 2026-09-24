@@ -281,6 +281,94 @@ test("a cue row's play button and its waveform marker both play from that cue's 
   expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
 });
 
+test("dragging a cue marker moves the cue without starting playback; Shift snaps to the beat grid", async ({ page }) => {
+  await installTrackDetailMock(page, { seedCues: [30000] });
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+
+  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+  const marker = page.locator("#trackDetailCueMarkers .cue-marker").first();
+  const markerBox = await marker.boundingBox();
+  // Default view is 0–120 s; drag the 30 s marker to the view midpoint (≈60 s).
+  const y = markerBox.y + markerBox.height / 2;
+  await page.mouse.move(markerBox.x + 2, y);
+  await page.mouse.down();
+  await page.mouse.move(wfBox.x + wfBox.width * 0.4, y, { steps: 5 });
+  await page.mouse.move(wfBox.x + wfBox.width * 0.5, y, { steps: 5 });
+  await page.mouse.up();
+
+  const pos = page.locator("#trackDetailCueList .cue-row-pos").first();
+  await expect(pos).toHaveText(/^(0:59|1:00)\./);
+  expect(
+    await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
+  ).toBe(false);
+
+  // Shift-drag lands exactly on a beat: firstBeatMs 120, 128 BPM ⇒ 468.75 ms/beat.
+  const box2 = await marker.boundingBox();
+  await page.keyboard.down("Shift");
+  await page.mouse.move(box2.x + 2, y);
+  await page.mouse.down();
+  await page.mouse.move(wfBox.x + wfBox.width * 0.3, y, { steps: 5 });
+  await page.mouse.move(wfBox.x + wfBox.width * 0.33, y, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saveCall.request.cues).toHaveLength(1);
+  const snapped = saveCall.request.cues[0].positionMs;
+  expect(snapped).toBeGreaterThan(35000);
+  expect(snapped).toBeLessThan(45000);
+  const beats = (snapped - 120) / (60000 / 128);
+  expect(Math.abs(beats - Math.round(beats)) * (60000 / 128)).toBeLessThanOrEqual(1);
+});
+
+test("a marker tooltip never jumps to the corner when the markers re-render under the pointer", async ({ page }) => {
+  await installTrackDetailMock(page, { seedCues: [30000] });
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+
+  // Hover a marker, then re-render the markers (a BPM edit) inside the
+  // tooltip's show delay, so the hovered element is replaced mid-delay. The
+  // hover is a synthetic `mouseover` so Chromium can't re-dispatch one onto
+  // the replacement marker -- the desktop app's WebKitGTK webview doesn't,
+  // and there the stale timer used to anchor on the detached marker (0,0).
+  const tip = page.locator("#app-tooltip");
+  await page.evaluate(() => {
+    const marker = document.querySelector("#trackDetailCueMarkers .cue-marker");
+    marker.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    const bpm = document.getElementById("trackDetailBpm");
+    bpm.value = "129";
+    bpm.dispatchEvent(new Event("change"));
+  });
+  await page.waitForTimeout(400);
+  await expect(tip).not.toHaveClass(/app-tooltip--visible/);
+
+  // A tooltip whose marker is re-rendered while it is showing is dropped
+  // (or re-anchored on the replacement marker) -- never left at the corner.
+  const marker = page.locator("#trackDetailCueMarkers .cue-marker").first();
+  const nearMarker = async () => {
+    const box = await marker.boundingBox();
+    const tipBox = await tip.boundingBox();
+    expect(Math.abs(tipBox.x + tipBox.width / 2 - (box.x + box.width / 2))).toBeLessThan(40);
+    expect(tipBox.y).toBeGreaterThan(box.y - 60);
+  };
+  await marker.hover();
+  await expect(tip).toHaveClass(/app-tooltip--visible/);
+  await nearMarker();
+  await page.evaluate(() => {
+    const bpm = document.getElementById("trackDetailBpm");
+    bpm.value = "130";
+    bpm.dispatchEvent(new Event("change"));
+  });
+  await page.waitForTimeout(400);
+  if (/app-tooltip--visible/.test((await tip.getAttribute("class")) || "")) await nearMarker();
+});
+
 test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows cue markers", async ({ page }) => {
   // durationMs 180000; one cue inside the default 2-min view, one past it.
   await installTrackDetailMock(page, { seedCues: [30000, 170000] });

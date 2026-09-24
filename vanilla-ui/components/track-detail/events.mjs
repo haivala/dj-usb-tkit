@@ -35,10 +35,13 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.close(trackDetailDialog.toSavePayload());
   });
 
-  // --- Waveform: click to play, double-click to add a cue, wheel to zoom, drag to pan ---
+  // --- Waveform: click to play, double-click to add a cue, wheel to zoom, drag to pan,
+  // drag a cue marker to move it (Shift snaps to the beat grid) ---
   const wf = el.trackDetailWaveform;
   const PAN_THRESHOLD_PX = 4;
   let pan = null; // { startX, startViewMs, moved }
+  let cueDrag = null; // { tempId, startX, moved }
+  let suppressMarkerClick = false;
   let pendingPlay = null;
 
   const playFromRatio = (startRatio) => {
@@ -66,8 +69,48 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.zoomAt(ratio, factor);
   }, { passive: false });
 
+  // Marker drag tracks the pointer on the window rather than via pointer
+  // capture: capture would retarget the `click` that a plain (un-moved) press
+  // on a marker must still deliver to it for click-to-play.
+  const onCueDragMove = (event) => {
+    if (!cueDrag.moved && Math.abs(event.clientX - cueDrag.startX) < PAN_THRESHOLD_PX) return;
+    if (!cueDrag.moved) {
+      cueDrag.moved = true;
+      wf.classList.add("is-dragging-cue");
+      trackDetailDialog.setDraggingCue(cueDrag.tempId);
+    }
+    trackDetailDialog.moveCueToViewRatio(
+      cueDrag.tempId,
+      scrubRatioFromPointer(event, wf),
+      { snap: event.shiftKey }
+    );
+  };
+  const endCueDrag = () => {
+    if (!cueDrag) return;
+    const { moved } = cueDrag;
+    suppressMarkerClick = moved;
+    cueDrag = null;
+    window.removeEventListener("pointermove", onCueDragMove);
+    window.removeEventListener("pointerup", endCueDrag);
+    window.removeEventListener("pointercancel", endCueDrag);
+    // A plain press must leave the marker DOM alone: re-rendering here would
+    // detach the marker before its `click` fires.
+    if (!moved) return;
+    wf.classList.remove("is-dragging-cue");
+    trackDetailDialog.setDraggingCue(null);
+  };
+
   wf?.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || event.target.closest(".cue-marker")) return;
+    if (event.button !== 0) return;
+    suppressMarkerClick = false;
+    const marker = event.target.closest(".cue-marker");
+    if (marker) {
+      cueDrag = { tempId: marker.dataset.tempId, startX: event.clientX, moved: false };
+      window.addEventListener("pointermove", onCueDragMove);
+      window.addEventListener("pointerup", endCueDrag);
+      window.addEventListener("pointercancel", endCueDrag);
+      return;
+    }
     pan = {
       startX: event.clientX,
       startViewMs: trackDetailDialog.getView().startMs,
@@ -120,10 +163,11 @@ export function bindTrackDetailEvents(ctx) {
   el.trackDetailZoomOut?.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 2));
   el.trackDetailZoomFit?.addEventListener("click", () => trackDetailDialog.fitView());
 
-  // Click a marker → scroll its row into view and play from that cue.
+  // Click a marker → scroll its row into view and play from that cue
+  // (not when the click ends a marker drag).
   el.trackDetailCueMarkers?.addEventListener("click", (event) => {
     const marker = event.target.closest(".cue-marker");
-    if (!marker) return;
+    if (!marker || suppressMarkerClick) return;
     const row = el.trackDetailCueList?.querySelector(
       `.cue-row[data-temp-id="${marker.dataset.tempId}"]`
     );

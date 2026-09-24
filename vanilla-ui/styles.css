@@ -3463,7 +3463,22 @@ td button[data-action]:disabled,
   border-bottom: 1px solid var(--line);
   background: var(--card);
 }
-.track-detail-zoom .track-detail-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-detail-zoom .track-detail-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.35;
+}
+.track-detail-hint b { font-weight: 600; color: var(--ink-secondary); margin-right: 4px; }
+.track-detail-hint kbd {
+  font: inherit;
+  font-size: 10px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink-secondary);
+}
 .track-detail-zoom-range {
   flex: none;
   font-size: 11px;
@@ -3489,7 +3504,10 @@ td button[data-action]:disabled,
   touch-action: none;
   user-select: none;
 }
-.track-detail-canvas.is-panning { cursor: grabbing; }
+.track-detail-canvas.is-panning,
+.track-detail-canvas.is-dragging-cue,
+.track-detail-canvas.is-dragging-cue .cue-marker { cursor: grabbing; }
+.cue-marker.is-dragging { z-index: 2; filter: brightness(1.25); }
 .track-detail-canvas .waveform-canvas-el { width: 100%; height: 100%; display: block; }
 .track-detail-canvas .waveform-playhead { display: none; }
 .track-detail-playhead {
@@ -3532,7 +3550,9 @@ td button[data-action]:disabled,
   color: #fff;
   text-align: center;
   line-height: 14px;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   background: linear-gradient(var(--cue-color, #4EB648), var(--cue-color, #4EB648)) top left / 16px 15px no-repeat;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
 }

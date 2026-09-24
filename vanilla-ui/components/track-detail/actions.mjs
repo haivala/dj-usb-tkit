@@ -75,6 +75,7 @@ export function createTrackDetailController(el) {
     bytes: null, // decoded PWV5 Uint8Array
     waveNorm: null, // whole-track {lo, hi} amplitude reference (fixed across zoom)
     followSuspendUntil: 0,
+    draggingTempId: null, // cue whose marker is being dragged on the waveform
   };
 
   function beatIntervalMs() {
@@ -175,7 +176,10 @@ export function createTrackDetailController(el) {
     ordered.forEach((cue, i) => {
       const pct = msToPct(cue.positionMs);
       const marker = host.ownerDocument.createElement("i");
-      marker.className = "cue-marker" + (pct < -2 || pct > 102 ? " off-view" : "");
+      marker.className =
+        "cue-marker" +
+        (pct < -2 || pct > 102 ? " off-view" : "") +
+        (cue.tempId === working.draggingTempId ? " is-dragging" : "");
       marker.style.left = `${pct}%`;
       marker.style.setProperty("--cue-color", colorCssForId(cue.colorId));
       marker.dataset.tempId = cue.tempId;
@@ -473,6 +477,30 @@ export function createTrackDetailController(el) {
       render();
     },
 
+    /// Drag a cue marker: move the cue to a view-relative ratio (0..1, clamped
+    /// to the visible window). With `snap`, it lands on the nearest beat-grid
+    /// line. Only the markers + cue list re-render — the waveform canvas is
+    /// untouched, so this is cheap enough to call on every pointermove.
+    moveCueToViewRatio(tempId, ratio, { snap = false } = {}) {
+      const cue = working.cues.find((c) => c.tempId === tempId);
+      if (!cue) return;
+      const dur = working.durationMs || 0;
+      let ms = working.view.startMs + Math.max(0, Math.min(1, ratio)) * viewSpanMs();
+      const interval = beatIntervalMs();
+      if (snap && interval && working.firstBeatMs != null) {
+        const idx = Math.max(0, Math.round((ms - working.firstBeatMs) / interval));
+        ms = working.firstBeatMs + idx * interval;
+      }
+      cue.positionMs = Math.max(0, Math.min(dur, Math.round(ms)));
+      renderMarkers();
+      renderCueList();
+    },
+
+    setDraggingCue(tempId) {
+      working.draggingTempId = tempId || null;
+      renderMarkers();
+    },
+
     deleteCue(tempId) {
       working.cues = working.cues.filter((c) => c.tempId !== tempId);
       render();
@@ -509,6 +537,7 @@ export function createTrackDetailController(el) {
       working.key = key != null ? key : track?.key ?? null;
       working.firstBeatMs = firstBeatMs == null ? null : Math.round(firstBeatMs);
       working.followSuspendUntil = 0;
+      working.draggingTempId = null;
       working.cues = (cues || []).slice(0, MAX_CUES).map((c) => ({
         tempId: `c${(tempIdSeq += 1)}`,
         positionMs: Math.round(c.positionMs || 0),
