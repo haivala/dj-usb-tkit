@@ -33,6 +33,13 @@
 - **New feature:** cue points can be dragged along the waveform in the cue
   editor to reposition them; hold Shift while dragging to snap to the beat
   grid. A plain click on a marker still plays from that cue.
+- **New feature:** play/pause button in the cue editor. Pause holds the track
+  at its position in the audio engine (new `pause_playback_native` /
+  `resume_playback_native` commands, `paused` on playback status and events);
+  "+ Cue" while paused lands on the paused spot.
+- **Fix:** clicking inside the cue editor (zoom, "+ Cue", the cue list) while
+  a track played in it stopped playback, via the app-wide "click elsewhere
+  stops playback" rule.
 
 ## 0.2.3
 

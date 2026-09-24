@@ -70,6 +70,7 @@ export function createInitialState() {
     playbackTrackId: null,
     playbackPath: null,
     playbackActive: false,
+    playbackPaused: false,
     playbackStartPromise: null,
     playbackStopPromise: null,
     playbackGeneration: 0,

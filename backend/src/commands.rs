@@ -508,6 +508,14 @@ impl BackendCommands {
         wrap(self.service.stop_playback_native(&self.playback))
     }
 
+    pub fn pause_playback_native(&self) -> ApiResponse<PlaybackStatusData> {
+        wrap(self.service.pause_playback_native(&self.playback))
+    }
+
+    pub fn resume_playback_native(&self) -> ApiResponse<PlaybackStatusData> {
+        wrap(self.service.resume_playback_native(&self.playback))
+    }
+
     pub fn get_playback_status_native(&self) -> ApiResponse<PlaybackStatusData> {
         wrap(self.service.get_playback_status_native(&self.playback))
     }

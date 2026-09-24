@@ -581,7 +581,7 @@
     </div>
   </div>
 
-  <div class="confirm-overlay" id="trackDetailOverlay" hidden>
+  <div class="confirm-overlay" id="trackDetailOverlay" data-playback-scope hidden>
     <div class="track-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="trackDetailTitle">
       <div class="track-detail-header">
         <h3 id="trackDetailTitle">Cue Points</h3>
@@ -637,6 +637,7 @@
 
       <div class="track-detail-waveform-wrap">
         <div class="track-detail-zoom">
+          <button type="button" class="track-detail-playpause" id="trackDetailPlayPause" aria-label="Play" data-tooltip="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button>
           <div class="track-detail-hint" id="trackDetailHint">
             <span><b>Waveform</b> click to play · double-click to add a cue · scroll to zoom · drag to pan</span>
             <span><b>Cue markers</b> drag to move · <kbd>Shift</kbd>+drag snaps to the beat grid · click to play from the cue</span>

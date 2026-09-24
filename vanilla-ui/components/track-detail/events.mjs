@@ -159,6 +159,22 @@ export function bindTrackDetailEvents(ctx) {
     }
   });
 
+  el.trackDetailPlayPause?.addEventListener("click", () => {
+    clearTimeout(pendingPlay);
+    pendingPlay = null;
+    if (trackDetailDialog.isPlaying()) {
+      ctx.pausePlaybackFromUi?.().catch(() => {});
+    } else if (trackDetailDialog.isPaused()) {
+      ctx
+        .resumePlaybackFromUi?.()
+        .then(() => trackDetailDialog.notePlaybackStarted())
+        .catch(() => {});
+    } else {
+      // Nothing loaded here yet: start at the left edge of the visible window.
+      playFromRatio(trackDetailDialog.viewRatioToTrackRatio(0));
+    }
+  });
+
   el.trackDetailZoomIn?.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 0.5));
   el.trackDetailZoomOut?.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 2));
   el.trackDetailZoomFit?.addEventListener("click", () => trackDetailDialog.fitView());

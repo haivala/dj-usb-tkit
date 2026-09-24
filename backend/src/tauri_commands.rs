@@ -401,6 +401,9 @@ enum PlaybackEvent {
         path: Option<String>,
         duration_ms: Option<u64>,
     },
+    /// `playback.paused` / `playback.resumed`: the worker's status right after
+    /// the pause/resume was applied.
+    PauseChanged(PlaybackStatusData),
     Error(Option<String>),
 }
 
@@ -417,6 +420,7 @@ fn emit_playback_event<R: tauri::Runtime>(app: &AppHandle<R>, event: PlaybackEve
             event: if is_seek { "playback.seeked" } else { "playback.started" }.to_string(),
             path: Some(path),
             playing,
+            paused: false,
             position_ms,
             duration_ms,
             message: None,
@@ -427,8 +431,20 @@ fn emit_playback_event<R: tauri::Runtime>(app: &AppHandle<R>, event: PlaybackEve
             event: "playback.stopped".to_string(),
             path,
             playing: false,
+            paused: false,
             position_ms: 0,
             duration_ms,
+            message: None,
+            track_id: None,
+            timestamp: Utc::now().to_rfc3339(),
+        },
+        PlaybackEvent::PauseChanged(status) => PlaybackEventPayload {
+            event: if status.paused { "playback.paused" } else { "playback.resumed" }.to_string(),
+            path: status.path,
+            playing: status.playing,
+            paused: status.paused,
+            position_ms: status.position_ms,
+            duration_ms: status.duration_ms,
             message: None,
             track_id: None,
             timestamp: Utc::now().to_rfc3339(),
@@ -437,6 +453,7 @@ fn emit_playback_event<R: tauri::Runtime>(app: &AppHandle<R>, event: PlaybackEve
             event: "playback.error".to_string(),
             path: None,
             playing: false,
+            paused: false,
             position_ms: 0,
             duration_ms: None,
             message,
@@ -1170,6 +1187,51 @@ pub async fn stop_playback_native(
         );
     }
     Ok(response)
+}
+
+/// Shared body of pause/resume: run on the playback thread, then broadcast the
+/// resulting status so every listener sees the same backend-owned state.
+async fn run_pause_change(
+    app: AppHandle,
+    commands: BackendCommands,
+    label: &'static str,
+    op: fn(&BackendCommands) -> ApiResponse<PlaybackStatusData>,
+) -> Result<ApiResponse<PlaybackStatusData>, String> {
+    let response = match run_playback_blocking(&app, label, move || op(&commands)).await {
+        Ok(r) => r,
+        Err(r) => return Ok(r),
+    };
+    match response.data.as_ref() {
+        // Only a loaded track has a pause state worth announcing; pausing when
+        // idle is a quiet no-op.
+        Some(data) if data.path.is_some() && (data.playing || data.paused) => {
+            emit_playback_event(&app, PlaybackEvent::PauseChanged(data.clone()));
+        }
+        Some(_) => {}
+        None => emit_playback_event(
+            &app,
+            PlaybackEvent::Error(response.error.as_ref().map(|e| e.message.clone())),
+        ),
+    }
+    Ok(response)
+}
+
+#[tauri::command]
+pub async fn pause_playback_native(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+) -> Result<ApiResponse<PlaybackStatusData>, String> {
+    let commands = state.inner().clone();
+    run_pause_change(app, commands, "pause", BackendCommands::pause_playback_native).await
+}
+
+#[tauri::command]
+pub async fn resume_playback_native(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+) -> Result<ApiResponse<PlaybackStatusData>, String> {
+    let commands = state.inner().clone();
+    run_pause_change(app, commands, "resume", BackendCommands::resume_playback_native).await
 }
 
 #[tauri::command]

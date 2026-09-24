@@ -77,6 +77,7 @@ export function createTrackDetailController(el) {
     followSuspendUntil: 0,
     draggingTempId: null, // cue whose marker is being dragged on the waveform
   };
+  let playPauseShowsPlaying = null;
 
   function beatIntervalMs() {
     const bpm = Number(working.bpm) || 0;
@@ -189,10 +190,39 @@ export function createTrackDetailController(el) {
     });
   }
 
+  // Both flags are the shared playback module's projection of backend state
+  // onto this waveform (`setWaveformPlayhead`); the modal keeps no copy.
+  function isPlaying() {
+    return !!el.trackDetailWaveform?.classList.contains("is-playing");
+  }
+
+  function isPaused() {
+    return !!el.trackDetailWaveform?.classList.contains("is-paused");
+  }
+
+  /// Where "now" is: the live playhead, or the backend's paused position.
+  function currentPositionMs() {
+    return isPlaying() || isPaused() ? playheadFullRatio() * working.durationMs : 0;
+  }
+
+  function renderPlayPause() {
+    const btn = el.trackDetailPlayPause;
+    const playing = isPlaying();
+    if (!btn || playing === playPauseShowsPlaying) return;
+    playPauseShowsPlaying = playing;
+    const label = playing ? "Pause" : "Play";
+    btn.classList.toggle("is-playing", playing);
+    btn.setAttribute("aria-label", label);
+    btn.dataset.tooltip = label;
+    btn.innerHTML = playing
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="6" width="3.5" height="12" rx="1"></rect><rect x="13.5" y="6" width="3.5" height="12" rx="1"></rect></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg>';
+  }
+
   function positionModalPlayhead() {
     const ph = el.trackDetailPlayhead;
     if (!ph) return;
-    const posMs = playheadFullRatio() * working.durationMs;
+    const posMs = currentPositionMs();
     if (posMs <= 0) {
       ph.hidden = true;
       return;
@@ -204,9 +234,11 @@ export function createTrackDetailController(el) {
 
   function playheadTick() {
     const wf = el.trackDetailWaveform;
+    renderPlayPause();
     if (!open || !wf || !wf.classList.contains("is-playing")) {
       playheadRafHandle = 0;
-      if (el.trackDetailPlayhead) el.trackDetailPlayhead.hidden = true;
+      // Paused: the playhead stays at the backend's position; stopped: hidden.
+      positionModalPlayhead();
       return;
     }
     const posMs = playheadFullRatio() * working.durationMs;
@@ -316,6 +348,7 @@ export function createTrackDetailController(el) {
     renderMarkers();
     positionModalPlayhead();
     renderZoomHint();
+    renderPlayPause();
   }
 
   // A stored key can predate this stepper (e.g. essentia's flat spellings)
@@ -356,6 +389,8 @@ export function createTrackDetailController(el) {
     isOpen: () => open,
     getWorking: () => working,
     getView: () => ({ ...working.view }),
+    isPlaying,
+    isPaused,
     render,
     beatIntervalMs,
 
@@ -435,7 +470,8 @@ export function createTrackDetailController(el) {
     },
 
     /// Add a cue. With an explicit `positionMs` it lands there (double-click on
-    /// the waveform); with no argument it lands at the current playhead ("+ Cue").
+    /// the waveform); with no argument it lands at the current playhead ("+ Cue"),
+    /// or where playback was paused.
     /// Name and colour default to "Cue N" / the Nth palette colour (N = 1-based
     /// add order) — assigned once at creation, never renumbered later, and
     /// always user-editable afterward.
@@ -444,7 +480,7 @@ export function createTrackDetailController(el) {
       const dur = working.durationMs || 0;
       const pos = Number.isFinite(positionMs)
         ? Math.max(0, Math.min(dur, Math.round(positionMs)))
-        : Math.round(playheadFullRatio() * dur);
+        : Math.round(currentPositionMs());
       const ordinal = working.cues.length;
       const cue = {
         tempId: `c${(tempIdSeq += 1)}`,
@@ -538,6 +574,7 @@ export function createTrackDetailController(el) {
       working.firstBeatMs = firstBeatMs == null ? null : Math.round(firstBeatMs);
       working.followSuspendUntil = 0;
       working.draggingTempId = null;
+      playPauseShowsPlaying = null;
       working.cues = (cues || []).slice(0, MAX_CUES).map((c) => ({
         tempId: `c${(tempIdSeq += 1)}`,
         positionMs: Math.round(c.positionMs || 0),

@@ -735,6 +735,20 @@ impl BackendService {
         })
     }
 
+    pub fn pause_playback_native(
+        &self,
+        playback: &PlaybackController,
+    ) -> BackendResult<PlaybackStatusData> {
+        playback.pause()
+    }
+
+    pub fn resume_playback_native(
+        &self,
+        playback: &PlaybackController,
+    ) -> BackendResult<PlaybackStatusData> {
+        playback.resume()
+    }
+
     pub fn get_playback_status_native(
         &self,
         playback: &PlaybackController,

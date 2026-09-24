@@ -70,6 +70,22 @@ impl PlaybackController {
         )
     }
 
+    pub fn pause(&self) -> BackendResult<PlaybackStatusData> {
+        self.send_command(
+            |reply_tx| PlaybackCommand::Pause { reply_tx },
+            "pausing playback",
+            PLAYBACK_COMMAND_TIMEOUT,
+        )
+    }
+
+    pub fn resume(&self) -> BackendResult<PlaybackStatusData> {
+        self.send_command(
+            |reply_tx| PlaybackCommand::Resume { reply_tx },
+            "resuming playback",
+            PLAYBACK_COMMAND_TIMEOUT,
+        )
+    }
+
     pub fn status(&self) -> BackendResult<PlaybackStatusData> {
         self.send_command(
             |reply_tx| PlaybackCommand::Status { reply_tx },
@@ -105,6 +121,14 @@ enum PlaybackCommand {
         reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
     },
     Stop {
+        reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
+    },
+    /// Holds the loaded track at its current position (the sink stays loaded).
+    Pause {
+        reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
+    },
+    /// Continues a paused track from where it was paused.
+    Resume {
         reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
     },
     Status {
@@ -189,6 +213,14 @@ fn playback_worker(
             PlaybackCommand::Stop { reply_tx } => {
                 supersede_pending_play(&mut state);
                 stop_in_worker(&mut state);
+                let _ = reply_tx.send(Ok(snapshot(&mut state)));
+            }
+            PlaybackCommand::Pause { reply_tx } => {
+                pause_in_worker(&mut state);
+                let _ = reply_tx.send(Ok(snapshot(&mut state)));
+            }
+            PlaybackCommand::Resume { reply_tx } => {
+                resume_in_worker(&mut state);
                 let _ = reply_tx.send(Ok(snapshot(&mut state)));
             }
             PlaybackCommand::Status { reply_tx } => {
@@ -650,25 +682,59 @@ fn stop_in_worker(state: &mut WorkerState) {
     state.duration_ms = None;
 }
 
-fn snapshot(state: &mut WorkerState) -> PlaybackStatusData {
-    let playing = state.sink.as_ref().is_some_and(|sink| !sink.empty());
-    if !playing {
-        state.started_at = None;
+/// Pausing folds the elapsed wall-clock time into `start_offset_ms` and clears
+/// `started_at`, so the reported position freezes; the sink's own paused flag
+/// (`Sink::is_paused`) is the single record of "paused". A no-op unless a track
+/// is loaded and actually playing.
+fn pause_in_worker(state: &mut WorkerState) {
+    let Some(sink) = state.sink.as_ref() else {
+        return;
+    };
+    if sink.empty() || sink.is_paused() {
+        return;
     }
+    sink.pause();
+    state.start_offset_ms = position_ms(state);
+    state.started_at = None;
+}
 
+/// Restarts the wall clock from the frozen position. A no-op unless paused.
+fn resume_in_worker(state: &mut WorkerState) {
+    let Some(sink) = state.sink.as_ref() else {
+        return;
+    };
+    if sink.empty() || !sink.is_paused() {
+        return;
+    }
+    sink.play();
+    state.started_at = Some(Instant::now());
+}
+
+fn position_ms(state: &WorkerState) -> u64 {
     let elapsed_ms = state
         .started_at
         .map(|s| s.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0);
-    let mut position_ms = state.start_offset_ms.saturating_add(elapsed_ms);
-    if let Some(total) = state.duration_ms {
-        position_ms = position_ms.min(total);
+    let position_ms = state.start_offset_ms.saturating_add(elapsed_ms);
+    match state.duration_ms {
+        Some(total) => position_ms.min(total),
+        None => position_ms,
+    }
+}
+
+fn snapshot(state: &mut WorkerState) -> PlaybackStatusData {
+    let loaded = state.sink.as_ref().is_some_and(|sink| !sink.empty());
+    let paused = loaded && state.sink.as_ref().is_some_and(Sink::is_paused);
+    let playing = loaded && !paused;
+    if !playing {
+        state.started_at = None;
     }
 
     PlaybackStatusData {
         path: state.path.clone(),
         playing,
-        position_ms,
+        paused,
+        position_ms: position_ms(state),
         duration_ms: state.duration_ms,
     }
 }
@@ -907,6 +973,97 @@ mod tests {
             status.position_ms, 10,
             "position should clamp to duration_ms"
         );
+    }
+
+    /// A sink with audio queued (never drained in tests) and a known clock:
+    /// "playing" for 1 s from a 2 s offset of a 10 s track.
+    fn loaded_state_playing_at_3s() -> WorkerState {
+        let (sink, _unused_output) = Sink::new_idle();
+        sink.append(rodio::source::Zero::<f32>::new(1, 44_100));
+        WorkerState {
+            sink: Some(sink),
+            path: Some("fake/track.mp3".to_string()),
+            duration_ms: Some(10_000),
+            start_offset_ms: 2_000,
+            started_at: Some(Instant::now() - Duration::from_millis(1_000)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn pause_freezes_position_and_reports_paused() {
+        let mut state = loaded_state_playing_at_3s();
+
+        pause_in_worker(&mut state);
+        let status = snapshot(&mut state);
+
+        assert!(status.paused);
+        assert!(!status.playing);
+        assert!(state.started_at.is_none(), "wall clock stops while paused");
+        assert!(
+            (3_000..3_500).contains(&status.position_ms),
+            "position should freeze at ~3 s, got {}",
+            status.position_ms
+        );
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(
+            snapshot(&mut state).position_ms,
+            status.position_ms,
+            "position must not advance while paused"
+        );
+    }
+
+    #[test]
+    fn resume_continues_from_the_paused_position() {
+        let mut state = loaded_state_playing_at_3s();
+        pause_in_worker(&mut state);
+        let paused_at = snapshot(&mut state).position_ms;
+
+        resume_in_worker(&mut state);
+        let status = snapshot(&mut state);
+
+        assert!(status.playing);
+        assert!(!status.paused);
+        assert!(state.started_at.is_some());
+        assert!(
+            status.position_ms >= paused_at && status.position_ms < paused_at + 500,
+            "resume should pick up at the paused spot ({paused_at}), got {}",
+            status.position_ms
+        );
+    }
+
+    #[test]
+    fn pause_and_resume_are_no_ops_when_not_applicable() {
+        // Nothing loaded.
+        let mut idle = WorkerState::default();
+        pause_in_worker(&mut idle);
+        resume_in_worker(&mut idle);
+        let status = snapshot(&mut idle);
+        assert!(!status.playing && !status.paused);
+
+        // Resume while already playing leaves the clock alone.
+        let mut state = loaded_state_playing_at_3s();
+        let started_at = state.started_at;
+        resume_in_worker(&mut state);
+        assert_eq!(state.started_at, started_at);
+
+        // A second pause doesn't re-fold the (already frozen) position.
+        pause_in_worker(&mut state);
+        let offset = state.start_offset_ms;
+        pause_in_worker(&mut state);
+        assert_eq!(state.start_offset_ms, offset);
+    }
+
+    #[test]
+    fn natural_stop_not_detected_while_paused() {
+        let mut state = loaded_state_playing_at_3s();
+        pause_in_worker(&mut state);
+        let (tx, rx) = mpsc::channel();
+
+        check_natural_stop(&mut state, &tx);
+
+        assert!(rx.try_recv().is_err(), "a paused track has not ended");
+        assert!(state.sink.is_some(), "paused sink stays loaded");
     }
 
     #[test]

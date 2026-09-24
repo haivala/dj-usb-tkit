@@ -59,7 +59,7 @@ export function updateTransportButtonsInDom(state, root) {
   });
 }
 
-export function setWaveformPlayhead(element, fraction, playing) {
+export function setWaveformPlayhead(element, fraction, playing, paused = false) {
   if (!element) return;
   const clamped = Math.max(0, Math.min(1, Number(fraction) || 0));
   // Drive the playhead with a compositor-only `transform: translateX` (see
@@ -73,6 +73,7 @@ export function setWaveformPlayhead(element, fraction, playing) {
   element.style.setProperty("--playhead-x", `${clamped * width}px`);
   element.style.setProperty("--playhead-position", `${clamped * 100}%`);
   element.classList.toggle("is-playing", !!playing);
+  element.classList.toggle("is-paused", !playing && !!paused);
 }
 
 export function clearAllWaveformPlayheads(document) {
@@ -147,6 +148,68 @@ export function withBackendQueue(state, jobFn) {
   return run;
 }
 
+/// Apply a backend pause/resume status (a `pause_playback_native` /
+/// `resume_playback_native` response or a `playback.paused` / `playback.resumed`
+/// event). The backend owns the paused flag and the position; this only
+/// projects them: paused freezes the playhead at `positionMs`, resumed restarts
+/// the interpolation from there.
+export function applyPauseStatus(state, status, deps) {
+  const {
+    setWaveformPlayhead,
+    updateTransportButtonsInDom,
+    setStatus,
+    requestAnimationFrameFn,
+    cancelAnimationFrameFn
+  } = deps;
+  if (!status || !(status.playing || status.paused)) return;
+  state.playbackPaused = !!status.paused;
+  const duration = Number(status.durationMs || 0);
+  const position = Number(status.positionMs || 0);
+  const waveformEl = state.activeWaveform;
+  if (status.paused) {
+    stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
+    if (waveformEl) {
+      setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : 0, false, true);
+    }
+    setStatus("Paused");
+  } else {
+    if (waveformEl && duration > 0) {
+      startPlayheadInterpolation(state, {
+        waveformEl,
+        initialPositionMs: position,
+        durationMs: duration,
+        setWaveformPlayhead,
+        requestAnimationFrameFn,
+        cancelAnimationFrameFn
+      });
+    }
+    if (state.playbackLabelContext) {
+      const { sourceLabel, title } = state.playbackLabelContext;
+      setStatus(`Playing from ${sourceLabel}: ${title}`);
+    }
+  }
+  updateTransportButtonsInDom();
+}
+
+async function runPauseChange(state, commandName, shouldRun, deps) {
+  if (!state.playbackActive || !shouldRun()) return;
+  // A play/stop issued while this was queued wins; don't apply a stale status.
+  const generation = state.playbackGeneration;
+  return withBackendQueue(state, async () => {
+    const status = await deps.command(commandName);
+    if (!isGenerationCurrent(state, generation)) return;
+    applyPauseStatus(state, status, deps);
+  });
+}
+
+export function pausePlaybackFromUi(state, deps) {
+  return runPauseChange(state, "pause_playback_native", () => !state.playbackPaused, deps);
+}
+
+export function resumePlaybackFromUi(state, deps) {
+  return runPauseChange(state, "resume_playback_native", () => !!state.playbackPaused, deps);
+}
+
 export async function stopPlaybackFromUi(state, deps) {
   const {
     command,
@@ -166,6 +229,7 @@ export async function stopPlaybackFromUi(state, deps) {
     await command("stop_playback_native");
     if (isGenerationCurrent(state, generation)) {
       state.playbackActive = false;
+      state.playbackPaused = false;
       state.playbackTrackId = null;
       state.playbackPath = null;
       state.playbackRowKey = null;
@@ -313,6 +377,7 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
       // re-deriving a label the frontend can't always reproduce.
       const sourceLabel = playback?.sourceLabel || "";
       state.playbackActive = true;
+      state.playbackPaused = false;
       state.playbackTrackId = playback?.trackId || track?.id || null;
       state.playbackPath = playback?.path || trackPath;
       state.playbackRowKey = options.rowKey || null;
@@ -354,6 +419,7 @@ export async function stopPlaybackIfActive(state, deps) {
     }
     if (isGenerationCurrent(state, generation)) {
       state.playbackActive = false;
+      state.playbackPaused = false;
       state.playbackTrackId = null;
       state.playbackPath = null;
       state.playbackRowKey = null;
@@ -434,6 +500,7 @@ export function handlePlaybackEvent(state, payload, deps) {
 
     const pathChanged = path !== null && path !== state.playbackPath;
     state.playbackActive = playing;
+    state.playbackPaused = false;
     state.playbackPath = path;
     // Backend-owned: `playback.started` / `playback.seeked` carry the resolved
     // local track id (omitted when the backend couldn't resolve one -- then we
@@ -470,6 +537,13 @@ export function handlePlaybackEvent(state, payload, deps) {
     return;
   }
 
+  if (eventName === "playback.paused" || eventName === "playback.resumed") {
+    // Stale if we've already moved on to another track (same guard as stopped).
+    if (!state.playbackActive || (path !== null && path !== state.playbackPath)) return;
+    applyPauseStatus(state, payload, deps);
+    return;
+  }
+
   if (eventName === "playback.stopped") {
     // A natural end-of-track notification and a fresh explicit play for a different
     // track travel to us via independent threads with no ordering guarantee — if this
@@ -477,6 +551,7 @@ export function handlePlaybackEvent(state, payload, deps) {
     // blank out whatever is now actually playing.
     if (path !== null && path !== state.playbackPath) return;
     state.playbackActive = false;
+    state.playbackPaused = false;
     state.playbackPath = null;
     state.playbackTrackId = null;
     state.playbackRowKey = null;

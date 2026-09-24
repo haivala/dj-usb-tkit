@@ -831,6 +831,14 @@ fn stop_and_status_playback_native_report_idle_state_without_hardware() {
     let status = backend.get_playback_status_native();
     assert!(status.ok, "status failed: {status:?}");
     assert!(!status.data.expect("status data").playing);
+
+    // Pause/resume with nothing loaded are quiet no-ops, not errors.
+    for response in [backend.pause_playback_native(), backend.resume_playback_native()] {
+        assert!(response.ok, "pause/resume failed: {response:?}");
+        let data = response.data.expect("pause/resume data");
+        assert!(!data.playing);
+        assert!(!data.paused);
+    }
 }
 
 #[test]

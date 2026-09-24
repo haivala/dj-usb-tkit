@@ -139,7 +139,7 @@ const ELEMENT_IDS = [
   "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailAddCue",
   "trackDetailBpm", "trackDetailBpmMinus", "trackDetailBpmPlus",
   "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
-  "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailZoomRange",
+  "trackDetailPlayPause", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailZoomRange",
   "trackDetailCueList", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
 ];
 
@@ -601,8 +601,8 @@ function updateTransportButtonsInDom(root) {
 function clearAllWaveformPlayheads() {
   playback.clearAllWaveformPlayheads(document);
 }
-function setWaveformPlayhead(element, fraction, playing) {
-  playback.setWaveformPlayhead(element, fraction, playing);
+function setWaveformPlayhead(element, fraction, playing, paused = false) {
+  playback.setWaveformPlayhead(element, fraction, playing, paused);
 }
 const isTrackCurrentlyPlaying = (track) => playback.isTrackCurrentlyPlaying(track, state);
 
@@ -639,6 +639,16 @@ const stopPlaybackFromUi = async () => playback.stopPlaybackFromUi(state, {
     setStatus,
     cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
   });
+const pauseResumeDeps = () => ({
+    command,
+    setWaveformPlayhead,
+    updateTransportButtonsInDom,
+    setStatus,
+    requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
+    cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
+  });
+const pausePlaybackFromUi = async () => playback.pausePlaybackFromUi(state, pauseResumeDeps());
+const resumePlaybackFromUi = async () => playback.resumePlaybackFromUi(state, pauseResumeDeps());
 const playTrackFromOrigin = async (track, origin, options = {}) => playback.playTrackFromOriginController(state, track, origin, options, {
     playTrackFromOriginCore: playback.playTrackFromOrigin,
     command,
@@ -1674,6 +1684,8 @@ function bindEvents() {
     getPlaybackUiStateHelpers: playback.getPlaybackUiStateHelpers,
     isTrackCurrentlyPlaying,
     stopPlaybackFromUi,
+    pausePlaybackFromUi,
+    resumePlaybackFromUi,
     playTrackFromOrigin,
     scrubRatioFromPointer: playback.scrubRatioFromPointer,
     removeUsbPlaylist,

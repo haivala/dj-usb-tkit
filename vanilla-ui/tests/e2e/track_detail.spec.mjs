@@ -64,11 +64,42 @@ function installTrackDetailMock(page, opts = {}) {
               },
             };
           }
+          // Tiny stand-in for the backend player clock, so pause/resume
+          // report a real (advancing, then frozen) position like player.rs does.
+          const clock = (window.__playerClock ||= { offsetMs: 0, startedAt: null, loaded: false });
+          const positionMs = () =>
+            Math.min(180000, clock.offsetMs + (clock.startedAt == null ? 0 : Date.now() - clock.startedAt));
+          const status = () => ({
+            path: "/music/one.mp3",
+            playing: clock.loaded && clock.startedAt != null,
+            paused: clock.loaded && clock.startedAt == null,
+            positionMs: positionMs(),
+            durationMs: 180000,
+          });
           if (command === "play_resolved_track") {
-            return { ok: true, data: { started: true, positionMs: 0, durationMs: 180000 } };
+            clock.offsetMs = Math.round((payload?.request?.startRatio || 0) * 180000);
+            clock.startedAt = Date.now();
+            clock.loaded = true;
+            return { ok: true, data: { started: true, positionMs: clock.offsetMs, durationMs: 180000 } };
           }
-          if (command === "stop_playback_native" || command === "get_playback_status_native") {
-            return { ok: true, data: {} };
+          if (command === "pause_playback_native") {
+            if (clock.loaded && clock.startedAt != null) {
+              clock.offsetMs = positionMs();
+              clock.startedAt = null;
+            }
+            return { ok: true, data: status() };
+          }
+          if (command === "resume_playback_native") {
+            if (clock.loaded && clock.startedAt == null) clock.startedAt = Date.now();
+            return { ok: true, data: status() };
+          }
+          if (command === "stop_playback_native") {
+            clock.loaded = false;
+            clock.startedAt = null;
+            return { ok: true, data: { stopped: true, previousPath: null } };
+          }
+          if (command === "get_playback_status_native") {
+            return { ok: true, data: status() };
           }
           if (command === "save_track_analysis_edits") {
             return {
@@ -367,6 +398,81 @@ test("a marker tooltip never jumps to the corner when the markers re-render unde
   });
   await page.waitForTimeout(400);
   if (/app-tooltip--visible/.test((await tip.getAttribute("class")) || "")) await nearMarker();
+});
+
+// Whole-track playhead position (ms) the shared playback module projects onto
+// the modal waveform.
+const modalPlayheadMs = (page) =>
+  page.evaluate(() => {
+    const wf = document.getElementById("trackDetailWaveform");
+    return (parseFloat(wf.style.getPropertyValue("--playhead-position")) || 0) / 100 * 180000;
+  });
+
+test("play/pause pauses in the backend, freezes the playhead, and + Cue lands on the paused spot", async ({ page }) => {
+  await installTrackDetailMock(page);
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+
+  const btn = page.locator("#trackDetailPlayPause");
+  const calls = (command) =>
+    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+
+  // Nothing loaded yet: Play starts at the left edge of the visible window (0 s).
+  await expect(btn).toHaveAttribute("aria-label", "Play");
+  await btn.click();
+  await expect.poll(async () => (await calls("play_resolved_track")).length).toBe(1);
+  expect((await calls("play_resolved_track"))[0].request.startRatio).toBe(0);
+  await expect(btn).toHaveAttribute("aria-label", "Pause");
+  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(200);
+
+  // Pause goes to the backend -- not a stop + replay.
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Play");
+  expect(await calls("pause_playback_native")).toHaveLength(1);
+  expect(await calls("stop_playback_native")).toHaveLength(0);
+  expect(await calls("play_resolved_track")).toHaveLength(1);
+  await expect(page.locator("#trackDetailWaveform")).toHaveClass(/is-paused/);
+  await expect(page.locator("#trackDetailPlayhead")).toBeVisible();
+
+  // The playhead holds at the backend's paused position.
+  const pausedMs = await modalPlayheadMs(page);
+  expect(pausedMs).toBeGreaterThan(200);
+  await page.waitForTimeout(300); // prove it does NOT move while paused
+  expect(await modalPlayheadMs(page)).toBeCloseTo(pausedMs, 0);
+
+  // "+ Cue" while paused lands at the paused spot, not at 0.
+  await page.locator("#trackDetailAddCue").click();
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = (await calls("save_track_analysis_edits"))[0];
+  expect(Math.abs(saveCall.request.cues[0].positionMs - pausedMs)).toBeLessThan(50);
+  // Leaving the editor still releases the paused track.
+  await expect.poll(async () => (await calls("stop_playback_native")).length).toBe(1);
+});
+
+test("play/pause resumes in the backend from where it was paused", async ({ page }) => {
+  await installTrackDetailMock(page);
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  const btn = page.locator("#trackDetailPlayPause");
+  const calls = (command) =>
+    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Pause");
+  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(200);
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Play");
+  const pausedMs = await modalPlayheadMs(page);
+
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Pause");
+  expect(await calls("resume_playback_native")).toHaveLength(1);
+  expect(await calls("play_resolved_track")).toHaveLength(1);
+  await expect(page.locator("#trackDetailWaveform")).not.toHaveClass(/is-paused/);
+  // The playhead carries on from the paused spot.
+  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(pausedMs);
+  expect(await modalPlayheadMs(page)).toBeLessThan(pausedMs + 2000);
 });
 
 test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows cue markers", async ({ page }) => {

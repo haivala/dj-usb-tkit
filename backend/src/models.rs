@@ -1228,6 +1228,8 @@ pub struct StopPlaybackData {
 pub struct PlaybackStatusData {
     pub path: Option<String>,
     pub playing: bool,
+    /// A track is loaded but held at `position_ms` (see `pause_playback_native`).
+    pub paused: bool,
     pub position_ms: u64,
     pub duration_ms: Option<u64>,
 }
@@ -1238,6 +1240,7 @@ pub struct PlaybackEventPayload {
     pub event: String,
     pub path: Option<String>,
     pub playing: bool,
+    pub paused: bool,
     pub position_ms: u64,
     pub duration_ms: Option<u64>,
     pub message: Option<String>,

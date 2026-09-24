@@ -864,6 +864,8 @@ fn main() {
             backend::tauri_commands::play_track_native,
             backend::tauri_commands::play_resolved_track,
             backend::tauri_commands::stop_playback_native,
+            backend::tauri_commands::pause_playback_native,
+            backend::tauri_commands::resume_playback_native,
             backend::tauri_commands::get_playback_status_native,
             backend::tauri_commands::playback_preflight_native,
             clear_frontend_log,

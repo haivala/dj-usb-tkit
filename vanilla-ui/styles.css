@@ -3495,6 +3495,19 @@ td button[data-action]:disabled,
   border: 1px solid var(--line);
   border-radius: 5px;
 }
+.track-detail-zoom .track-detail-playpause {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.track-detail-playpause svg { width: 16px; height: 16px; fill: currentColor; }
+.track-detail-playpause:hover,
+.track-detail-playpause.is-playing { color: var(--accent); }
+.track-detail-zoom .track-detail-hint { margin-right: auto; }
 .track-detail-canvas {
   position: relative;
   width: 100%;
