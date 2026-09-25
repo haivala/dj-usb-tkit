@@ -140,10 +140,11 @@ const ELEMENT_IDS = [
   "eventLogList",
   "trackDetailOverlay", "trackDetailTitle", "trackDetailCloseBtn", "trackDetailWaveform",
   "trackDetailBeatgrid", "trackDetailPreStart", "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs",
-  "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailStartOnFirstBeat", "trackDetailStartOnFirstBeatText", "trackDetailAddCue",
+  "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailStartFirstCue", "trackDetailStartFirstBeat", "trackDetailStartNote", "trackDetailAddCue",
   "trackDetailBpm", "trackDetailBpmMinus", "trackDetailBpmPlus",
   "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
-  "trackDetailPlayPause", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailGridLevel", "trackDetailZoomRange", "trackDetailTotalTime",
+  "trackDetailPlayPause", "trackDetailHint", "trackDetailHintBtn",
+  "trackDetailOverview", "trackDetailOverviewCues", "trackDetailOverviewWindow", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailGridLevel", "trackDetailZoomRange", "trackDetailTotalTime",
   "trackDetailCueList", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
 ];
 

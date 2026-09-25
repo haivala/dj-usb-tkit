@@ -56,6 +56,31 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.close(trackDetailDialog.toSavePayload());
   });
 
+  // A drag (pan, cue marker, overview) must never select text, whichever
+  // engine renders the app (WebKitGTK in the Tauri build): drop any selection
+  // on press, mark the page unselectable, and cancel `selectstart` until the
+  // button is released anywhere.
+  const doc = overlay.ownerDocument;
+  let dragNoSelect = false;
+  const endDragNoSelect = () => {
+    if (!dragNoSelect) return;
+    dragNoSelect = false;
+    doc.documentElement.classList.remove("is-ui-dragging");
+    window.removeEventListener("pointerup", endDragNoSelect, true);
+    window.removeEventListener("pointercancel", endDragNoSelect, true);
+  };
+  const beginDragNoSelect = () => {
+    doc.defaultView?.getSelection?.()?.removeAllRanges();
+    if (dragNoSelect) return;
+    dragNoSelect = true;
+    doc.documentElement.classList.add("is-ui-dragging");
+    window.addEventListener("pointerup", endDragNoSelect, true);
+    window.addEventListener("pointercancel", endDragNoSelect, true);
+  };
+  doc.addEventListener("selectstart", (event) => {
+    if (dragNoSelect) event.preventDefault();
+  });
+
   // --- Waveform: click to play, double-click to add a cue, wheel to zoom, drag to pan,
   // drag a cue marker to move it (Shift snaps to the beat grid) ---
   const wf = el.trackDetailWaveform;
@@ -123,6 +148,7 @@ export function bindTrackDetailEvents(ctx) {
 
   wf?.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
+    beginDragNoSelect();
     suppressMarkerClick = false;
     const marker = event.target.closest(".cue-marker");
     if (marker) {
@@ -196,6 +222,29 @@ export function bindTrackDetailEvents(ctx) {
     }
   });
 
+  // Overview strip: press or drag to centre the view there (zoom kept).
+  const overview = el.trackDetailOverview;
+  let overviewDragging = false;
+  const overviewTo = (event) =>
+    trackDetailDialog.centerViewAtRatio(scrubRatioFromPointer(event, overview));
+  overview?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    beginDragNoSelect();
+    overviewDragging = true;
+    overview.setPointerCapture?.(event.pointerId);
+    overview.classList.add("is-dragging");
+    overviewTo(event);
+  });
+  overview?.addEventListener("pointermove", (event) => {
+    if (overviewDragging) overviewTo(event);
+  });
+  const endOverviewDrag = () => {
+    overviewDragging = false;
+    overview?.classList.remove("is-dragging");
+  };
+  overview?.addEventListener("pointerup", endOverviewDrag);
+  overview?.addEventListener("pointercancel", endOverviewDrag);
+
   el.trackDetailZoomIn?.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 0.5));
   el.trackDetailZoomOut?.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 2));
   el.trackDetailZoomFit?.addEventListener("click", () => trackDetailDialog.fitView());
@@ -238,9 +287,12 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.setBeatgridLevel(event.target.value, { remember: true })
   );
 
-  el.trackDetailStartOnFirstBeat?.addEventListener("change", (event) => {
-    trackDetailDialog.setStartOnFirstBeat(event.target.checked, { remember: true });
-  });
+  el.trackDetailStartFirstCue?.addEventListener("click", () =>
+    trackDetailDialog.setStartOnFirstBeat(false, { remember: true })
+  );
+  el.trackDetailStartFirstBeat?.addEventListener("click", () =>
+    trackDetailDialog.setStartOnFirstBeat(true, { remember: true })
+  );
 
   el.trackDetailBpmMinus?.addEventListener("click", () =>
     trackDetailDialog.nudgeBpm(-1)

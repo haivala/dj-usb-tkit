@@ -37,16 +37,14 @@
   at its position in the audio engine (new `pause_playback_native` /
   `resume_playback_native` commands, `paused` on playback status and events);
   "+ Cue" while paused lands on the paused spot.
-- **New feature:** "Start the playback on first beat" / "…from first cue
-  point" toggle in the cue editor (the label names the current choice, and reads
-  "…from playback start position" once the start cue is moved off the first
-  beat). When on, the track gets a memory-only playback-start cue (no
-  hot-cue pad) at the first beat, listed first and marked apart from the
-  cue points, so the CDJ loads there instead of on the first cue. It can be
-  dragged but never past a hot cue, and follows the first beat until moved.
-  The choice is remembered and applied when a track gets its first cue
-  (default: start from the first cue point); with no cues the toggle is
-  disabled and shown on, since the CDJ then starts at the first audio anyway.
+- **New feature:** "Playback starts at [First cue | First beat]" choice in the
+  cue editor. First beat gives the track a memory-only playback-start cue (no
+  hot-cue pad) at the first beat, listed first and marked apart from the cue
+  points, so the CDJ loads there instead of on the first cue. It can be
+  dragged but never past a hot cue, and follows the first beat until moved;
+  once moved, the choice reads "Start marker". The choice is remembered and
+  applied when a track gets its first cue (default: First cue); with no cues
+  it is disabled and a note says the CDJ starts at the first audio.
   Stored as `track_cues.is_playback_start` / `playbackStart` on cues.
 - **Improvement:** the cue editor greys out the waveform before where the CDJ
   will start playback (the playback-start cue, else the first cue point),
@@ -55,12 +53,25 @@
   strongly the beat grid shows over the waveform (remembered). The grid also
   extends into a thin strip above and below the waveform, so beats stay
   readable where the waveform is loud.
+- **Improvement:** bar starts in the cue editor's beat grid stay visible
+  whatever the "Beat grid" slider says; the slider mostly sets the ordinary
+  beats.
+- **New feature:** bar numbers under the cue editor's waveform, every bar when
+  zoomed in and every 2nd/4th/… bar when zoomed out so they never crowd.
+- **New feature:** whole-track overview strip under the cue editor's waveform,
+  with the visible part boxed and the cues marked; click or drag it to move
+  the view.
+- **Improvement:** the cue editor's usage hints fold into a "?" tooltip once
+  the track has a cue.
 - **Improvement:** the cue editor's visible-time readout ("0:56–1:04") sits
   centred under the waveform, with the track's total time at the right end,
   and without the "“Fit” shows all" hint.
 - **Improvement:** clicking outside the cue editor or pressing Escape no
   longer closes it (discarding the edits) while there are unsaved changes; the
   Save button pulses instead. With nothing changed, both still close it.
+- **Fix:** dragging in the cue editor (panning the waveform, moving a cue
+  marker, the overview strip) no longer selects text on the page when the
+  pointer passes over it.
 - **Fix:** a long folder path in a confirm dialog (e.g. "Remove Source
   Folder") wraps instead of running past the dialog's edge.
 

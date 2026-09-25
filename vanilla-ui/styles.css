@@ -89,7 +89,7 @@
   --playhead-glow: rgba(0,0,0,0.5);
   --wave-prestart-dim: rgba(255,255,255,0.6);
   --beatgrid-line: rgba(20,24,35,0.55);
-  --beatgrid-downbeat: rgba(20,24,35,0.9);
+  --beatgrid-downbeat: rgba(20,24,35,0.95);
   --beatgrid-outline: rgba(255,255,255,0.5);
   --shimmer:      rgba(255,255,255,0.4);
   --body-glow-1:  hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.04);
@@ -901,6 +901,7 @@ main {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -1547,6 +1548,7 @@ td.num, th.num {
 
 .track-grid-cell.sortable {
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
   position: relative;
   padding-right: 18px;
@@ -1807,6 +1809,7 @@ input[type="checkbox"] {
   text-align: center;
   color: var(--muted);
   cursor: grab;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -1836,6 +1839,7 @@ input[type="checkbox"] {
   text-align: center;
   color: var(--muted);
   cursor: grab;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -3460,16 +3464,34 @@ td button[data-action]:disabled,
 .track-detail-firstbeat label { font-weight: 600; }
 .track-detail-firstbeat input { width: 96px; }
 .track-detail-key-label { margin-left: 12px; }
-.track-detail-firstbeat .track-detail-start-toggle {
-  margin-left: 12px;
+.track-detail-row-label { font-size: 13px; font-weight: 600; color: var(--ink-secondary); }
+.track-detail-start-row { gap: 10px; }
+/* Two-way choice: joined buttons, the chosen one filled with the accent. */
+.track-detail-segmented {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 400;
-  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
 }
-.track-detail-firstbeat .track-detail-start-toggle input { width: auto; margin: 0; }
-.track-detail-start-toggle.is-disabled { opacity: .6; cursor: default; }
+.track-detail-segmented button {
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  box-shadow: none;
+}
+.track-detail-segmented button + button { border-left: 1px solid var(--line); }
+.track-detail-segmented button:hover { background: var(--card-hover); box-shadow: none; }
+.track-detail-segmented button:active { transform: none; }
+.track-detail-segmented button[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--ink-on-accent);
+  font-weight: 600;
+}
+.track-detail-start-note { font-size: 12px; color: var(--muted); }
+.track-detail-start-note[hidden] { display: none; }
 #trackDetailKey { width: 72px; max-width: 72px; }
 .track-detail-waveform-wrap {
   position: relative;
@@ -3502,6 +3524,43 @@ td button[data-action]:disabled,
   border: 1px solid var(--line);
   border-radius: 3px;
   color: var(--ink-secondary);
+}
+/* Whole-track overview under the waveform, with the visible window boxed. */
+.track-detail-overview {
+  position: relative;
+  height: 28px;
+  margin-top: 4px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: hidden;
+}
+.track-detail-overview .waveform-canvas-el { width: 100%; height: 100%; display: block; opacity: .7; }
+.track-detail-overview.is-dragging { cursor: grabbing; }
+.track-detail-overview-cues { position: absolute; inset: 0; pointer-events: none; }
+.overview-cue {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--cue-color, #cfd6e2);
+}
+.overview-cue.is-playback-start { background: #cfd6e2; }
+.track-detail-overview-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  min-width: 3px;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  background: var(--action-btn-hover-bg);
+  pointer-events: none;
 }
 /* Footer under the waveform: visible time window centred, total time right. */
 .track-detail-wave-footer {
@@ -3549,6 +3608,24 @@ td button[data-action]:disabled,
 .track-detail-playpause:hover,
 .track-detail-playpause.is-playing { color: var(--accent); }
 .track-detail-zoom .track-detail-hint { margin-right: auto; }
+.track-detail-zoom .track-detail-hint[hidden] { display: none; }
+/* Once the track has cues, the hints fold into this "?". */
+.track-detail-hint-btn {
+  margin-right: auto;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: help;
+}
+.track-detail-hint-btn[hidden] { display: none; }
 .track-detail-grid-level {
   flex: none;
   display: inline-flex;
@@ -3606,13 +3683,15 @@ td button[data-action]:disabled,
   cursor: grab;
   overflow: hidden;
   touch-action: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 /* A thin strip above and below the waveform where only the beat grid shows,
    so beats stay readable where the waveform is loud. (Beats the shared
    `.waveform.waveform-canvas { padding: 0 }`.) */
 .waveform.track-detail-canvas {
-  padding: 6px 0;
+  /* Bottom strip is taller: it carries the bar numbers. */
+  padding: 6px 0 12px;
   box-sizing: border-box;
   background: color-mix(in srgb, var(--ink) 8%, var(--bg));
 }
@@ -3655,8 +3734,9 @@ td button[data-action]:disabled,
   pointer-events: none;
 }
 .track-detail-prestart[hidden] { display: none; }
-/* The "Beat grid" slider sets --grid-level (0..1); never fully invisible. */
-.track-detail-beatgrid { opacity: calc(0.1 + 0.9 * var(--grid-level, 0.35)); }
+/* The "Beat grid" slider sets --grid-level (0..1). It mostly drives the
+   ordinary beats; bar starts (wider, and white rather than red, which would
+   vanish into a bass-heavy RGB waveform) always stay visible. */
 /* Lines with a contrasting outline read over any waveform colour. */
 .beatgrid-line {
   position: absolute;
@@ -3665,11 +3745,26 @@ td button[data-action]:disabled,
   width: 1px;
   background: var(--beatgrid-line);
   box-shadow: 0 0 0 1px var(--beatgrid-outline);
+  opacity: calc(0.1 + 0.9 * var(--grid-level, 0.35));
 }
 .beatgrid-line.is-downbeat {
   background: var(--beatgrid-downbeat);
   width: 3px;
   margin-left: -1px;
+  opacity: calc(0.6 + 0.4 * var(--grid-level, 0.35));
+}
+/* Bar numbers in the strip under the waveform. */
+.beatgrid-bar {
+  position: absolute;
+  bottom: 0;
+  padding-left: 3px;
+  font-size: 9px;
+  line-height: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  pointer-events: none;
+  white-space: nowrap;
 }
 .cue-marker {
   position: absolute;
@@ -3685,6 +3780,7 @@ td button[data-action]:disabled,
   line-height: 14px;
   cursor: grab;
   touch-action: none;
+  -webkit-user-select: none;
   user-select: none;
   background: linear-gradient(var(--cue-color, #4EB648), var(--cue-color, #4EB648)) top left / 16px 15px no-repeat;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
@@ -3707,6 +3803,13 @@ td button[data-action]:disabled,
 }
 .track-detail-cues-head span { font-weight: 600; margin-right: auto; }
 #trackDetailAddCue:disabled { opacity: .4; cursor: default; }
+/* While a cue-editor drag is held (pan, cue marker, overview), nothing on the
+   page is selectable, even where the pointer passes over text. */
+html.is-ui-dragging,
+html.is-ui-dragging * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
 /* Outside click with unsaved edits: the modal stays, Save pulses. */
 #trackDetailSaveBtn.is-attention { animation: track-detail-save-pulse 600ms ease-out; }
 @keyframes track-detail-save-pulse {

@@ -633,10 +633,15 @@
         <button type="button" id="trackDetailFirstBeatMinus" data-tooltip="Back one beat">&minus;</button>
         <input type="number" id="trackDetailFirstBeatMs" min="0" step="1" />
         <button type="button" id="trackDetailFirstBeatPlus" data-tooltip="Forward one beat">+</button>
-        <label class="track-detail-start-toggle" for="trackDetailStartOnFirstBeat">
-          <input type="checkbox" id="trackDetailStartOnFirstBeat" />
-          <span id="trackDetailStartOnFirstBeatText">Start the playback on first beat</span>
-        </label>
+      </div>
+
+      <div class="track-detail-firstbeat track-detail-start-row">
+        <span class="track-detail-row-label" id="trackDetailStartLabel">Playback starts at</span>
+        <div class="track-detail-segmented" role="radiogroup" aria-labelledby="trackDetailStartLabel">
+          <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstCue" data-tooltip="The CDJ loads on cue A">First cue</button>
+          <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstBeat">First beat</button>
+        </div>
+        <span class="track-detail-start-note" id="trackDetailStartNote" hidden>No cue points yet: the CDJ starts at the first audio</span>
       </div>
 
       <div class="track-detail-waveform-wrap">
@@ -646,6 +651,7 @@
             <span><b>Waveform</b> click to play · double-click to add a cue · scroll to zoom · drag to pan</span>
             <span><b>Cue markers</b> drag to move · <kbd>Shift</kbd>+drag snaps to the beat grid · click to play from the cue</span>
           </div>
+          <span class="track-detail-hint-btn" id="trackDetailHintBtn" tabindex="0" role="note" aria-label="How to use the waveform" data-tooltip="Waveform: click to play, double-click to add a cue, scroll to zoom, drag to pan. Cue markers: drag to move (Shift snaps to the beat grid), click to play from the cue." hidden>?</span>
           <label class="track-detail-grid-level" data-tooltip="How strongly the beat grid shows over the waveform">Beat grid <input type="range" id="trackDetailGridLevel" min="0" max="100" step="1" /></label>
           <div class="track-detail-zoom-btns">
             <button type="button" id="trackDetailZoomOut" data-tooltip="Zoom out">&minus;</button>
@@ -660,6 +666,11 @@
           <div class="track-detail-cue-markers" id="trackDetailCueMarkers"></div>
           <i class="waveform-playhead"></i>
           <i class="track-detail-playhead" id="trackDetailPlayhead" hidden></i>
+        </div>
+        <div class="track-detail-overview" id="trackDetailOverview" aria-label="Whole track: click or drag to move the view">
+          <canvas class="waveform-canvas-el"></canvas>
+          <div class="track-detail-overview-cues" id="trackDetailOverviewCues"></div>
+          <i class="track-detail-overview-window" id="trackDetailOverviewWindow"></i>
         </div>
         <div class="track-detail-wave-footer">
           <span class="track-detail-zoom-range" id="trackDetailZoomRange" hidden></span>

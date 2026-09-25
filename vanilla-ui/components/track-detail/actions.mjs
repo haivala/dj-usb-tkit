@@ -17,6 +17,10 @@ export const MAX_CUES = 8;
 export const MIN_SPAN_MS = 1000;
 export const DEFAULT_SPAN_MS = 120_000;
 const BPM_NUDGE_STEP = 0.01;
+// Bar numbers are shown every N bars, N the smallest of these that keeps the
+// labels at least BAR_LABEL_MIN_PX apart.
+const BAR_LABEL_STEPS = [1, 2, 4, 8, 16, 32, 64];
+const BAR_LABEL_MIN_PX = 36;
 
 // Mirrors backend `HOTCUE_PALETTE` (service/cues.rs). id -> css colour.
 export const HOTCUE_PALETTE = [
@@ -30,13 +34,10 @@ export const HOTCUE_PALETTE = [
   { id: 8, css: "#8A3FD1" },
 ];
 const DEFAULT_COLOR_ID = 5;
-const START_TOGGLE_DISABLED_TOOLTIP =
-  "With no cue points the CDJ starts at the first audio, so on the first beat";
-const START_TOGGLE_TEXT_ON = "Start the playback on first beat";
-const START_TOGGLE_TEXT_OFF = "Start the playback from first cue point";
-const START_TOGGLE_TEXT_MOVED = "Start the playback from playback start position";
-const START_TOGGLE_TOOLTIP =
-  "Adds a memory cue (no hot cue) where playback starts, at or before the first cue point";
+const START_BEAT_TOOLTIP =
+  "Adds a ▶ memory cue (no hot cue) on the first beat, so the CDJ loads there instead of on cue A";
+const START_MARKER_TOOLTIP =
+  "The CDJ loads on the ▶ start marker you placed; drag it on the waveform to move it";
 
 // Mirrors backend `KEY_OPTIONS` (service/cues.rs). 12 majors then 12 minors.
 export const KEY_OPTIONS = [
@@ -87,6 +88,9 @@ export function createTrackDetailController(el, prefs = {}) {
   let renderViewRafHandle = 0;
   let waveformRetryHandle = 0;
   let waveformRetries = 0;
+  // What the overview canvas was last drawn for; it only changes with the
+  // track or the width, not on every pan/zoom.
+  let overviewDrawnKey = "";
 
   const working = {
     track: null,
@@ -201,6 +205,7 @@ export function createTrackDetailController(el, prefs = {}) {
       durationMs: working.durationMs,
       norm: working.waveNorm,
     });
+    renderOverviewCanvas();
     if (ok) {
       waveformRetries = 0;
     } else if (!waveformRetryHandle && waveformRetries < 20) {
@@ -223,6 +228,7 @@ export function createTrackDetailController(el, prefs = {}) {
     if (!interval || !working.durationMs || working.firstBeatMs == null) return;
     const from = Math.max(working.firstBeatMs, working.view.startMs - interval);
     const to = Math.min(working.durationMs, working.view.endMs + interval);
+    const barStep = barLabelStep(interval);
     // Snap `from` to the nearest grid line at or before it.
     const firstBeatIdx = Math.max(0, Math.floor((from - working.firstBeatMs) / interval));
     let safety = 0;
@@ -230,11 +236,73 @@ export function createTrackDetailController(el, prefs = {}) {
       const t = working.firstBeatMs + idx * interval;
       if (t > to || safety > 8000) break;
       safety += 1;
+      const downbeat = idx % 4 === 0;
       const line = host.ownerDocument.createElement("i");
-      line.className = "beatgrid-line" + (idx % 4 === 0 ? " is-downbeat" : "");
+      line.className = "beatgrid-line" + (downbeat ? " is-downbeat" : "");
       line.style.left = `${msToPct(t)}%`;
       host.appendChild(line);
+      const bar = idx / 4; // 0-based
+      if (downbeat && bar % barStep === 0) {
+        const label = host.ownerDocument.createElement("b");
+        label.className = "beatgrid-bar";
+        label.style.left = `${msToPct(t)}%`;
+        label.textContent = String(bar + 1);
+        host.appendChild(label);
+      }
     }
+  }
+
+  /// Label every Nth bar so the numbers never crowd (1, 5, 9… when zoomed out).
+  function barLabelStep(interval) {
+    const width = el.trackDetailWaveform?.clientWidth || 0;
+    const pxPerBar = width ? ((4 * interval) / viewSpanMs()) * width : 0;
+    if (!pxPerBar) return 4;
+    return BAR_LABEL_STEPS.find((n) => n * pxPerBar >= BAR_LABEL_MIN_PX)
+      ?? BAR_LABEL_STEPS[BAR_LABEL_STEPS.length - 1];
+  }
+
+  /// The whole-track strip under the waveform: drawn once per track/width.
+  function renderOverviewCanvas() {
+    const host = el.trackDetailOverview;
+    if (!host || !working.bytes || !working.durationMs) return;
+    const key = `${working.track?.id ?? ""}:${host.clientWidth}:${working.bytes.length}`;
+    if (key === overviewDrawnKey) return;
+    const ok = drawDetailWaveform(host, working.bytes, {
+      startMs: 0,
+      endMs: working.durationMs,
+      durationMs: working.durationMs,
+      norm: working.waveNorm,
+    });
+    if (ok) overviewDrawnKey = key;
+  }
+
+  /// The visible-window box and cue ticks on the overview strip.
+  function renderOverview() {
+    const dur = working.durationMs || 0;
+    const box = el.trackDetailOverviewWindow;
+    if (box && dur) {
+      const left = (working.view.startMs / dur) * 100;
+      box.style.left = `${left}%`;
+      box.style.width = `${Math.min(100 - left, (viewSpanMs() / dur) * 100)}%`;
+    }
+    const cuesHost = el.trackDetailOverviewCues;
+    if (!cuesHost) return;
+    cuesHost.textContent = "";
+    if (!dur) return;
+    for (const cue of orderedCues()) {
+      const tick = cuesHost.ownerDocument.createElement("i");
+      tick.className = "overview-cue" + (cue.playbackStart ? " is-playback-start" : "");
+      tick.style.left = `${(cue.positionMs / dur) * 100}%`;
+      if (!cue.playbackStart) tick.style.setProperty("--cue-color", colorCssForId(cue.colorId));
+      cuesHost.appendChild(tick);
+    }
+  }
+
+  /// The usage hints show until the track has a cue; then they fold into "?".
+  function renderHint() {
+    const hasCues = hotCues().length > 0;
+    if (el.trackDetailHint) el.trackDetailHint.hidden = hasCues;
+    if (el.trackDetailHintBtn) el.trackDetailHintBtn.hidden = !hasCues;
   }
 
   function renderMarkers() {
@@ -260,6 +328,7 @@ export function createTrackDetailController(el, prefs = {}) {
       host.appendChild(marker);
     }
     renderPreStart();
+    renderOverview();
   }
 
   /// Grey out the waveform before where the CDJ starts playback: the
@@ -441,26 +510,24 @@ export function createTrackDetailController(el, prefs = {}) {
     if (el.trackDetailAddCue) el.trackDetailAddCue.disabled = hotCount >= MAX_CUES;
   }
 
-  function renderStartToggle() {
-    const toggle = el.trackDetailStartOnFirstBeat;
-    if (!toggle) return;
+  /// "Playback starts at [First cue | First beat]". The second choice reads
+  /// "Start marker" once the start cue sits off the first beat (dragged, or
+  /// pulled back by a hot cue). With no cues neither applies: the CDJ starts
+  /// at the first audio, which the note says.
+  function renderStartChoice() {
+    const cueBtn = el.trackDetailStartFirstCue;
+    const beatBtn = el.trackDetailStartFirstBeat;
+    if (!cueBtn || !beatBtn) return;
     const hasCues = hotCues().length > 0;
-    toggle.disabled = !hasCues;
-    toggle.checked = hasCues ? !!startCue() : true;
-    if (el.trackDetailStartOnFirstBeatText) {
-      // Once the start cue sits anywhere but the first beat (dragged, or
-      // pulled back by a hot cue), the label names that position instead.
-      const start = startCue();
-      const firstBeat = working.firstBeatMs == null ? 0 : working.firstBeatMs;
-      el.trackDetailStartOnFirstBeatText.textContent = !toggle.checked
-        ? START_TOGGLE_TEXT_OFF
-        : start && start.positionMs !== firstBeat
-          ? START_TOGGLE_TEXT_MOVED
-          : START_TOGGLE_TEXT_ON;
-    }
-    const label = toggle.closest("label") || toggle;
-    label.classList.toggle("is-disabled", !hasCues);
-    label.dataset.tooltip = hasCues ? START_TOGGLE_TOOLTIP : START_TOGGLE_DISABLED_TOOLTIP;
+    const start = startCue();
+    const firstBeat = working.firstBeatMs == null ? 0 : working.firstBeatMs;
+    const moved = !!start && start.positionMs !== firstBeat;
+    cueBtn.disabled = beatBtn.disabled = !hasCues;
+    cueBtn.setAttribute("aria-checked", String(hasCues && !start));
+    beatBtn.setAttribute("aria-checked", String(hasCues && !!start));
+    beatBtn.textContent = moved ? "Start marker" : "First beat";
+    beatBtn.dataset.tooltip = moved ? START_MARKER_TOOLTIP : START_BEAT_TOOLTIP;
+    if (el.trackDetailStartNote) el.trackDetailStartNote.hidden = hasCues;
   }
 
   // The modal opens zoomed to the first ~2 min, so make it unmistakable that
@@ -529,7 +596,8 @@ export function createTrackDetailController(el, prefs = {}) {
     syncKeySelect();
     renderView();
     renderCueList();
-    renderStartToggle();
+    renderStartChoice();
+    renderHint();
   }
 
   const api = {
@@ -583,6 +651,13 @@ export function createTrackDetailController(el, prefs = {}) {
         enforceStartOrder();
       }
       render();
+    },
+
+    /// Move the view (same zoom) so it is centred on a whole-track ratio.
+    centerViewAtRatio(ratio) {
+      const span = viewSpanMs();
+      const at = Math.max(0, Math.min(1, ratio)) * (working.durationMs || 0);
+      api.setView(at - span / 2, span);
     },
 
     nudgeFirstBeat(direction) {
@@ -659,9 +734,9 @@ export function createTrackDetailController(el, prefs = {}) {
       renderBeatgrid();
     },
 
-    /// The "Start the playback on first beat" toggle: add/remove the
-    /// playback-start cue (only while the track has cues). `remember` makes it
-    /// the setting applied to the next track's first cue.
+    /// The "Playback starts at" choice: First beat adds the playback-start
+    /// cue, First cue removes it (only while the track has cues). `remember`
+    /// makes it the setting applied to the next track's first cue.
     setStartOnFirstBeat(on, { remember = false } = {}) {
       if (!hotCues().length) {
         render();
@@ -715,7 +790,7 @@ export function createTrackDetailController(el, prefs = {}) {
       enforceStartOrder();
       renderMarkers();
       renderCueList();
-      renderStartToggle();
+      renderStartChoice();
     },
 
     setDraggingCue(tempId) {
@@ -755,6 +830,7 @@ export function createTrackDetailController(el, prefs = {}) {
       working.bytes = null;
       working.waveNorm = null;
       waveformRetries = 0;
+      overviewDrawnKey = "";
       working.durationMs = Number(durationMs) || Number(track?.durationMs) || 0;
       working.bpm = bpm != null ? bpm : track?.bpm ?? null;
       working.key = key != null ? key : track?.key ?? null;
