@@ -23,11 +23,32 @@ export function bindTrackDetailEvents(ctx) {
 
   el.trackDetailCloseBtn?.addEventListener("click", close);
   el.trackDetailCancelBtn?.addEventListener("click", close);
+  // An outside click or Escape closes the dialog only when there is nothing
+  // to lose; with unsaved edits it just points at Save (Cancel still discards).
+  const closeIfClean = () => {
+    if (!trackDetailDialog.hasUnsavedChanges()) {
+      close();
+      return;
+    }
+    const save = el.trackDetailSaveBtn;
+    if (!save) return;
+    save.classList.remove("is-attention");
+    void save.offsetWidth; // restart the animation on repeated attempts
+    save.classList.add("is-attention");
+  };
   overlay.addEventListener("mousedown", (event) => {
-    if (event.target === overlay) close();
+    if (event.target === overlay) closeIfClean();
   });
-  overlay.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") close();
+  el.trackDetailSaveBtn?.addEventListener("animationend", (event) =>
+    event.currentTarget.classList.remove("is-attention")
+  );
+  // On the document, like the shell's dialogs: deleting a cue removes the
+  // focused button, leaving focus on <body>, outside the overlay.
+  overlay.ownerDocument.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || overlay.hidden) return;
+    if (el.confirmOverlay && !el.confirmOverlay.hidden) return; // its own Escape
+    event.preventDefault();
+    closeIfClean();
   });
 
   el.trackDetailSaveBtn?.addEventListener("click", () => {
@@ -209,6 +230,13 @@ export function bindTrackDetailEvents(ctx) {
   el.trackDetailFirstBeatMs?.addEventListener("change", (event) => {
     trackDetailDialog.setFirstBeatMs(Number(event.target.value) || 0);
   });
+
+  el.trackDetailGridLevel?.addEventListener("input", (event) =>
+    trackDetailDialog.setBeatgridLevel(event.target.value)
+  );
+  el.trackDetailGridLevel?.addEventListener("change", (event) =>
+    trackDetailDialog.setBeatgridLevel(event.target.value, { remember: true })
+  );
 
   el.trackDetailStartOnFirstBeat?.addEventListener("change", (event) => {
     trackDetailDialog.setStartOnFirstBeat(event.target.checked, { remember: true });

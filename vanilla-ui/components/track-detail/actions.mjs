@@ -77,6 +77,8 @@ export function createTrackDetailController(el, prefs = {}) {
   const {
     getStartOnFirstBeatPref = () => false,
     setStartOnFirstBeatPref = () => {},
+    getBeatgridLevelPref = () => 35,
+    setBeatgridLevelPref = () => {},
   } = prefs;
   let resolveFn = null;
   let open = false;
@@ -100,6 +102,8 @@ export function createTrackDetailController(el, prefs = {}) {
     draggingTempId: null, // cue whose marker is being dragged on the waveform
   };
   let playPauseShowsPlaying = null;
+  // The save payload as opened; anything else is an unsaved edit.
+  let openedPayloadJson = "";
 
   function hotCues() {
     return working.cues.filter((c) => !c.playbackStart);
@@ -211,6 +215,9 @@ export function createTrackDetailController(el, prefs = {}) {
   function renderBeatgrid() {
     const host = el.trackDetailBeatgrid;
     if (!host) return;
+    const level = getBeatgridLevelPref();
+    el.trackDetailWaveform?.style.setProperty("--grid-level", String(level / 100));
+    if (el.trackDetailGridLevel) el.trackDetailGridLevel.value = String(level);
     host.textContent = "";
     const interval = beatIntervalMs();
     if (!interval || !working.durationMs || working.firstBeatMs == null) return;
@@ -252,6 +259,19 @@ export function createTrackDetailController(el, prefs = {}) {
         : `${marker.textContent} · ${formatMs(cue.positionMs)}`;
       host.appendChild(marker);
     }
+    renderPreStart();
+  }
+
+  /// Grey out the waveform before where the CDJ starts playback: the
+  /// playback-start cue, else the first hot cue (the start cue is never later).
+  /// With no cues the CDJ starts at the first audio, so nothing is greyed.
+  function renderPreStart() {
+    const shade = el.trackDetailPreStart;
+    if (!shade) return;
+    const first = orderedCues()[0];
+    const pct = first ? Math.max(0, Math.min(100, msToPct(first.positionMs))) : 0;
+    shade.hidden = pct <= 0;
+    shade.style.width = `${pct}%`;
   }
 
   // Both flags are the shared playback module's projection of backend state
@@ -452,13 +472,18 @@ export function createTrackDetailController(el, prefs = {}) {
     const dur = working.durationMs || 0;
     const zoomed = dur > 0 && viewSpanMs() < dur - 1;
     out.classList.toggle("is-zoomed", zoomed);
+    const total = el.trackDetailTotalTime;
+    if (total) {
+      total.hidden = !dur;
+      total.textContent = dur ? formatClock(dur) : "";
+    }
     if (!dur) {
       out.hidden = true;
       return;
     }
     out.hidden = false;
     out.textContent = zoomed
-      ? `${formatClock(working.view.startMs)}–${formatClock(working.view.endMs)} of ${formatClock(dur)} · “Fit” shows all`
+      ? `${formatClock(working.view.startMs)}–${formatClock(working.view.endMs)}`
       : "Whole track";
   }
 
@@ -625,6 +650,15 @@ export function createTrackDetailController(el, prefs = {}) {
       return cue;
     },
 
+    /// The "Beat grid" slider (0-100): how strongly the grid shows over the
+    /// waveform. `remember` saves it (on release, not every drag step).
+    setBeatgridLevel(value, { remember = false } = {}) {
+      const n = Number(value);
+      const level = Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 35;
+      setBeatgridLevelPref(level, { remember });
+      renderBeatgrid();
+    },
+
     /// The "Start the playback on first beat" toggle: add/remove the
     /// playback-start cue (only while the track has cues). `remember` makes it
     /// the setting applied to the next track's first cue.
@@ -760,10 +794,17 @@ export function createTrackDetailController(el, prefs = {}) {
       }
 
       el.trackDetailSaveBtn?.focus();
+      openedPayloadJson = JSON.stringify(api.toSavePayload());
 
       return new Promise((resolve) => {
         resolveFn = resolve;
       });
+    },
+
+    /// True once BPM, key, first beat or the cues differ from what was opened
+    /// (view state like zoom or the beat-grid slider doesn't count).
+    hasUnsavedChanges() {
+      return open && JSON.stringify(api.toSavePayload()) !== openedPayloadJson;
     },
 
     toSavePayload() {

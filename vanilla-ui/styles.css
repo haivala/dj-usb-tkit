@@ -87,6 +87,10 @@
   --badge-active-bg: hsla(calc(var(--accent-h) + 30), 75%, 55%, 0.12);
   --playhead-bg:  rgba(0,0,0,0.85);
   --playhead-glow: rgba(0,0,0,0.5);
+  --wave-prestart-dim: rgba(255,255,255,0.6);
+  --beatgrid-line: rgba(20,24,35,0.55);
+  --beatgrid-downbeat: rgba(20,24,35,0.9);
+  --beatgrid-outline: rgba(255,255,255,0.5);
   --shimmer:      rgba(255,255,255,0.4);
   --body-glow-1:  hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.04);
   --body-glow-2:  hsla(calc(var(--accent-h) + 30), 75%, 55%, 0.03);
@@ -128,6 +132,10 @@
     --badge-active-bg: hsla(calc(var(--accent-h) + 30), 75%, 60%, 0.15);
     --playhead-bg:  rgba(255,255,255,0.95);
     --playhead-glow: rgba(255,255,255,0.7);
+    --wave-prestart-dim: rgba(0,0,0,0.55);
+    --beatgrid-line: rgba(255,255,255,0.6);
+    --beatgrid-downbeat: rgba(255,255,255,0.95);
+    --beatgrid-outline: rgba(0,0,0,0.35);
     --shimmer:      rgba(255,255,255,0.15);
     --body-glow-1:  hsla(var(--accent-h), var(--accent-s), 65%, 0.06);
     --body-glow-2:  hsla(calc(var(--accent-h) + 30), 75%, 60%, 0.04);
@@ -169,6 +177,10 @@
   --badge-active-bg: hsla(calc(var(--accent-h) + 30), 75%, 60%, 0.15);
   --playhead-bg:  rgba(255,255,255,0.95);
   --playhead-glow: rgba(255,255,255,0.7);
+  --wave-prestart-dim: rgba(0,0,0,0.55);
+  --beatgrid-line: rgba(255,255,255,0.6);
+  --beatgrid-downbeat: rgba(255,255,255,0.95);
+  --beatgrid-outline: rgba(0,0,0,0.35);
   --shimmer:      rgba(255,255,255,0.15);
   --body-glow-1:  hsla(var(--accent-h), var(--accent-s), 65%, 0.06);
   --body-glow-2:  hsla(calc(var(--accent-h) + 30), 75%, 60%, 0.04);
@@ -3173,6 +3185,8 @@ td button[data-action]:disabled,
 
 .confirm-dialog p {
   white-space: pre-wrap;
+  /* Long unbroken tokens (folder paths) wrap instead of overflowing. */
+  overflow-wrap: anywhere;
   margin: 0 0 12px;
 }
 
@@ -3489,14 +3503,31 @@ td button[data-action]:disabled,
   border-radius: 3px;
   color: var(--ink-secondary);
 }
+/* Footer under the waveform: visible time window centred, total time right. */
+.track-detail-wave-footer {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 4px 8px;
+}
+.track-detail-wave-footer .track-detail-zoom-range { grid-column: 2; }
+.track-detail-total-time {
+  grid-column: 3;
+  justify-self: end;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.track-detail-total-time[hidden] { display: none; }
 .track-detail-zoom-range {
-  flex: none;
+  text-align: center;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--muted);
 }
 .track-detail-zoom-range.is-zoomed { color: var(--accent); font-weight: 600; }
+.track-detail-zoom-range[hidden] { display: none; }
 .track-detail-zoom-btns { display: flex; gap: 4px; flex: none; }
 .track-detail-zoom button {
   padding: 2px 10px;
@@ -3518,6 +3549,56 @@ td button[data-action]:disabled,
 .track-detail-playpause:hover,
 .track-detail-playpause.is-playing { color: var(--accent); }
 .track-detail-zoom .track-detail-hint { margin-right: auto; }
+.track-detail-grid-level {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* A plain slider: drop the text-input box (padding, border, focus glow,
+   transition) it would inherit, so the thumb tracks the pointer 1:1. Styled
+   like .accent-hue-slider; the track runs faint → strong. */
+.track-detail-grid-level input[type="range"] {
+  width: 90px;
+  min-width: 0;
+  height: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(to right, var(--line), var(--ink));
+  transition: none;
+  cursor: pointer;
+}
+.track-detail-grid-level input[type="range"]:focus { box-shadow: none; }
+.track-detail-grid-level input[type="range"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.track-detail-grid-level input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--card);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  cursor: grab;
+}
+.track-detail-grid-level input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--card);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  cursor: grab;
+}
 .track-detail-canvas {
   position: relative;
   width: 100%;
@@ -3527,6 +3608,15 @@ td button[data-action]:disabled,
   touch-action: none;
   user-select: none;
 }
+/* A thin strip above and below the waveform where only the beat grid shows,
+   so beats stay readable where the waveform is loud. (Beats the shared
+   `.waveform.waveform-canvas { padding: 0 }`.) */
+.waveform.track-detail-canvas {
+  padding: 6px 0;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--ink) 8%, var(--bg));
+}
+.track-detail-canvas .waveform-canvas-el { background: var(--bg); }
 .track-detail-canvas.is-panning,
 .track-detail-canvas.is-dragging-cue,
 .track-detail-canvas.is-dragging-cue .cue-marker { cursor: grabbing; }
@@ -3553,14 +3643,34 @@ td button[data-action]:disabled,
 }
 .track-detail-cue-markers { pointer-events: auto; }
 .cue-marker.off-view { display: none; }
+/* Everything before where the CDJ starts playback (the playback-start cue,
+   else the first hot cue) is greyed out. */
+.track-detail-prestart {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--wave-prestart-dim);
+  backdrop-filter: grayscale(1);
+  pointer-events: none;
+}
+.track-detail-prestart[hidden] { display: none; }
+/* The "Beat grid" slider sets --grid-level (0..1); never fully invisible. */
+.track-detail-beatgrid { opacity: calc(0.1 + 0.9 * var(--grid-level, 0.35)); }
+/* Lines with a contrasting outline read over any waveform colour. */
 .beatgrid-line {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(128, 140, 160, 0.28);
+  background: var(--beatgrid-line);
+  box-shadow: 0 0 0 1px var(--beatgrid-outline);
 }
-.beatgrid-line.is-downbeat { background: rgba(128, 140, 160, 0.6); width: 2px; }
+.beatgrid-line.is-downbeat {
+  background: var(--beatgrid-downbeat);
+  width: 3px;
+  margin-left: -1px;
+}
 .cue-marker {
   position: absolute;
   top: 0;
@@ -3597,6 +3707,13 @@ td button[data-action]:disabled,
 }
 .track-detail-cues-head span { font-weight: 600; margin-right: auto; }
 #trackDetailAddCue:disabled { opacity: .4; cursor: default; }
+/* Outside click with unsaved edits: the modal stays, Save pulses. */
+#trackDetailSaveBtn.is-attention { animation: track-detail-save-pulse 600ms ease-out; }
+@keyframes track-detail-save-pulse {
+  0% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  40% { box-shadow: 0 0 0 6px var(--accent-glow); transform: scale(1.05); }
+  100% { box-shadow: 0 0 0 0 transparent; transform: none; }
+}
 .track-detail-cue-list {
   display: flex;
   flex-direction: column;

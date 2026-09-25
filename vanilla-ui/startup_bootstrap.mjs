@@ -115,6 +115,15 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
     state.cueStartOnFirstBeat = false;
   }
 
+  state.cueBeatgridLevel = 35;
+  try {
+    const raw = localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_BEATGRID_LEVEL);
+    const level = raw == null || raw === "" ? NaN : Number(raw);
+    if (Number.isFinite(level)) state.cueBeatgridLevel = Math.max(0, Math.min(100, Math.round(level)));
+  } catch {
+    // keep the default
+  }
+
   try {
     state.sidebarCollapsed = localStorageObj?.getItem?.(constants.STORAGE_KEY_SIDEBAR_COLLAPSED) === "1";
   } catch {

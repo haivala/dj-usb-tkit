@@ -181,6 +181,14 @@ const startPersistCalls = (page) =>
       .filter((r) => JSON.stringify(r).includes("ui_cue_start_on_first_beat_v1"))
   );
 
+/// Right edge of the greyed pre-start shade, in px from the waveform's left edge.
+const preStartEdge = (page) =>
+  page.evaluate(() => {
+    const wf = document.querySelector("#trackDetailWaveform").getBoundingClientRect();
+    const shade = document.querySelector("#trackDetailPreStart");
+    return shade.hidden ? null : shade.getBoundingClientRect().right - wf.left;
+  });
+
 test("start-on-first-beat toggle: informational with no cues, then applies the remembered (default off) setting", async ({ page }) => {
   await openCueEditor(page);
   const toggle = page.locator("#trackDetailStartOnFirstBeat");
@@ -188,10 +196,15 @@ test("start-on-first-beat toggle: informational with no cues, then applies the r
   await expect(toggle).toBeDisabled();
   await expect(toggle).toBeChecked();
   await expect(toggleText).toHaveText("Start the playback on first beat");
+  // No cues: the CDJ starts at the first audio, nothing is greyed out.
+  await expect(page.locator("#trackDetailPreStart")).toBeHidden();
 
   await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
   await expect(toggle).toBeEnabled();
   await expect(toggle).not.toBeChecked();
+  // Starting from the first cue point: greyed up to cue A (snapped to the grid).
+  await expect.poll(() => preStartEdge(page)).toBeGreaterThan(290);
+  expect(await preStartEdge(page)).toBeLessThan(310);
   await expect(toggleText).toHaveText("Start the playback from first cue point");
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
   await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(0);
@@ -208,6 +221,8 @@ test("start-on-first-beat toggle: informational with no cues, then applies the r
   await expect(rows.first().locator(".cue-row-name")).toHaveCount(0);
   await expect(rows.first().locator(".cue-row-label")).toHaveText("Playback start");
   await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start")).toHaveCount(1);
+  // …and the greyed-out part shrinks to the first beat.
+  await expect.poll(() => preStartEdge(page)).toBeLessThan(10);
   // Hot cues keep their A.. lettering, the same in the list as on the waveform.
   await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)")).toHaveText("A");
   await expect(rows.nth(1).locator(".cue-row-color")).toHaveText("A");
@@ -231,12 +246,84 @@ test("start-on-first-beat toggle: informational with no cues, then applies the r
   expect(saveCall.request.cues[1].playbackStart).toBe(false);
 });
 
+test("an outside click or Escape closes the cue editor only when nothing is unsaved", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30000] });
+  const overlay = page.locator("#trackDetailOverlay");
+  const outside = { position: { x: 5, y: 5 } };
+
+  // View-only changes (zoom, beat-grid slider) aren't edits.
+  await page.locator("#trackDetailZoomFit").click();
+  await page.locator("#trackDetailGridLevel").fill("80");
+  await overlay.click(outside);
+  await expect(overlay).toBeHidden();
+
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(overlay).toBeVisible();
+  await page.locator("#trackDetailAddCue").click();
+  await overlay.click(outside);
+  await expect(overlay).toBeVisible();
+  await expect(page.locator("#trackDetailSaveBtn")).toHaveClass(/is-attention/);
+  await page.keyboard.press("Escape");
+  await expect(overlay).toBeVisible();
+
+  // Undoing the edit makes it clean again: Escape closes…
+  await page
+    .locator("#trackDetailCueList .cue-row")
+    .filter({ hasNot: page.locator(".cue-row-pos", { hasText: "0:30.00" }) })
+    .locator(".cue-row-delete")
+    .click();
+  await page.keyboard.press("Escape");
+  await expect(overlay).toBeHidden();
+  // …and so does an outside click.
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(overlay).toBeVisible();
+  await overlay.click(outside);
+  await expect(overlay).toBeHidden();
+  const saves = await page.evaluate(() =>
+    window.__calls.filter((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saves).toHaveLength(0);
+});
+
 test("cue list rows carry the same letter as their waveform marker, in position order", async ({ page }) => {
   await openCueEditor(page, { seedCues: [60000, 30000] });
   const rows = page.locator("#trackDetailCueList .cue-row");
   await expect(rows.locator(".cue-row-pos")).toHaveText(["0:30.00", "1:00.00"]);
   await expect(rows.locator(".cue-row-color")).toHaveText(["A", "B"]);
   await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveText(["A", "B"]);
+});
+
+test("the Beat grid slider sets how strongly the grid shows, and is remembered", async ({ page }) => {
+  await openCueEditor(page);
+  const slider = page.locator("#trackDetailGridLevel");
+  const gridOpacity = () =>
+    page.locator("#trackDetailBeatgrid").evaluate((n) => Number(getComputedStyle(n).opacity));
+  await expect(slider).toHaveValue("35");
+  const defaultOpacity = await gridOpacity();
+
+  // The thumb follows the pointer: a click lands on the matching value
+  // (no inherited text-input padding skewing the track).
+  const box = await slider.boundingBox();
+  await slider.click({ position: { x: box.width * 0.75, y: box.height / 2 } });
+  expect(Math.abs(Number(await slider.inputValue()) - 75)).toBeLessThanOrEqual(6);
+  await slider.click({ position: { x: box.width * 0.25, y: box.height / 2 } });
+  expect(Math.abs(Number(await slider.inputValue()) - 25)).toBeLessThanOrEqual(6);
+
+  await slider.fill("100");
+  await expect.poll(gridOpacity).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueBeatgridLevel"))).toBe("100");
+
+  await slider.fill("0");
+  const faint = await gridOpacity();
+  expect(faint).toBeGreaterThan(0);
+  expect(faint).toBeLessThan(defaultOpacity);
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueBeatgridLevel"))).toBe("0");
+
+  // The grid overflows the waveform into a strip above and below it.
+  const canvasBox = await page.locator("#trackDetailWaveform .waveform-canvas-el").boundingBox();
+  const lineBox = await page.locator("#trackDetailBeatgrid .beatgrid-line").first().boundingBox();
+  expect(lineBox.y).toBeLessThan(canvasBox.y);
+  expect(lineBox.y + lineBox.height).toBeGreaterThan(canvasBox.y + canvasBox.height);
 });
 
 test("remembered start-on-first-beat: the first cue adds the start cue; deleting the last cue removes it", async ({ page }) => {
@@ -312,6 +399,9 @@ test("the playback-start cue follows an untouched first beat and is never after 
   await drag(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start"), 0.5);
   await expect(startPos).toHaveText("0:30.00");
   await expect(toggleText).toHaveText("Start the playback from playback start position");
+  // The grey-out follows the dragged start cue.
+  const startBox = await page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start").boundingBox();
+  expect(Math.abs((await preStartEdge(page)) - (startBox.x + 1 - wfBox.x))).toBeLessThan(3);
 
   // Dragging the hot cue before it pushes it back too.
   await drag(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)"), 0.1);
@@ -666,17 +756,28 @@ test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows 
   await expect(visibleMarkers).toHaveCount(1);
 
   // The zoom-range readout makes the initial zoomed-in view unmistakable: it
-  // names the visible window vs the 3-min track and points at Fit.
+  // names the visible window, centred under the waveform; the 3-min total
+  // sits at the footer's right end.
   const zoomRange = page.locator("#trackDetailZoomRange");
+  const totalTime = page.locator("#trackDetailTotalTime");
   await expect(zoomRange).toBeVisible();
   await expect(zoomRange).toHaveClass(/is-zoomed/);
-  await expect(zoomRange).toContainText("0:00–2:00 of 3:00");
+  await expect(zoomRange).toHaveText("0:00–2:00");
+  await expect(totalTime).toHaveText("3:00");
+  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+  const rangeBox = await zoomRange.boundingBox();
+  const totalBox = await totalTime.boundingBox();
+  expect(rangeBox.y).toBeGreaterThanOrEqual(wfBox.y + wfBox.height);
+  expect(Math.abs(rangeBox.x + rangeBox.width / 2 - (wfBox.x + wfBox.width / 2))).toBeLessThan(4);
+  expect(totalBox.y).toBeGreaterThanOrEqual(wfBox.y + wfBox.height);
+  expect(wfBox.x + wfBox.width - (totalBox.x + totalBox.width)).toBeLessThan(16);
 
   await page.locator("#trackDetailZoomFit").click();
   await expect(visibleMarkers).toHaveCount(2);
   // Fully zoomed out, the readout switches to a plain "whole track" state.
   await expect(zoomRange).not.toHaveClass(/is-zoomed/);
   await expect(zoomRange).toHaveText("Whole track");
+  await expect(totalTime).toHaveText("3:00");
 
   // Scroll-wheel zoom toward the left edge → the 170 s cue leaves the view again.
   await page.locator("#trackDetailWaveform").hover({ position: { x: 15, y: 100 } });

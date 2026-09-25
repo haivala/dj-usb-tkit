@@ -23,6 +23,8 @@ export function createInitialState() {
     // Cue editor: start playback on the first beat (memory-only start cue)
     // rather than on the first cue point. Applied when a track gets its first cue.
     cueStartOnFirstBeat: false,
+    // Cue editor: how strongly the beat grid shows over the waveform (0-100).
+    cueBeatgridLevel: 35,
     analysisBpmRange: DEFAULT_ANALYSIS_BPM_RANGE,
     analysisEngine: "stratum",
     analysisEnginePersistPromise: null,

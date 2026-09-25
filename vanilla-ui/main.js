@@ -36,6 +36,7 @@ import {
   STORAGE_KEY_SIDEBAR_COLLAPSED,
   STORAGE_KEY_HELP_SEEN,
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
+  STORAGE_KEY_CUE_BEATGRID_LEVEL,
   FRONTEND_DB_KEY_THEME,
   FRONTEND_DB_KEY_ACCENT_HUE,
   FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
@@ -46,6 +47,7 @@ import {
   FRONTEND_DB_KEY_SIDEBAR_COLLAPSED,
   FRONTEND_DB_KEY_HELP_SEEN,
   FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
+  FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL,
 } from "./settings_keys.mjs";
 import {
   WAVEFORM_COLORS,
@@ -137,11 +139,11 @@ const ELEMENT_IDS = [
   "eventLogLevelFilter", "eventLogSourceFilter", "eventLogClearBtn", "eventLogSummary",
   "eventLogList",
   "trackDetailOverlay", "trackDetailTitle", "trackDetailCloseBtn", "trackDetailWaveform",
-  "trackDetailBeatgrid", "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs",
+  "trackDetailBeatgrid", "trackDetailPreStart", "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs",
   "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailStartOnFirstBeat", "trackDetailStartOnFirstBeatText", "trackDetailAddCue",
   "trackDetailBpm", "trackDetailBpmMinus", "trackDetailBpmPlus",
   "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
-  "trackDetailPlayPause", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailZoomRange",
+  "trackDetailPlayPause", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailGridLevel", "trackDetailZoomRange", "trackDetailTotalTime",
   "trackDetailCueList", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
 ];
 
@@ -170,6 +172,13 @@ const trackDetailDialog = trackDetail.createTrackDetailController(el, {
       FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
       on ? "1" : "0"
     );
+  },
+  getBeatgridLevelPref: () => state.cueBeatgridLevel,
+  setBeatgridLevelPref: (level, { remember = false } = {}) => {
+    state.cueBeatgridLevel = level;
+    if (remember) {
+      persistSetting(STORAGE_KEY_CUE_BEATGRID_LEVEL, FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL, String(level));
+    }
   },
 });
 
@@ -1551,6 +1560,7 @@ function restoreStoredUiPrefs() {
       STORAGE_KEY_ANALYSIS_ENGINE,
       STORAGE_KEY_SIDEBAR_COLLAPSED,
       STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
+      STORAGE_KEY_CUE_BEATGRID_LEVEL,
     },
     normalizeAnalysisBpmRange: library.normalizeAnalysisBpmRange,
     defaultAnalysisBpmRange: library.DEFAULT_ANALYSIS_BPM_RANGE,

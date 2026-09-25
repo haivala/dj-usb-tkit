@@ -47,14 +47,14 @@ export function computeWaveNorm(bytes) {
 /// Draw the [startMs, endMs] slice of a PWV5 payload onto the wrapper's canvas.
 /// `norm` is the whole-track {lo, hi} from `computeWaveNorm` — the vertical
 /// scale, kept fixed across zoom levels.
-/// Returns false when the wrapper has no measurable width yet (caller should
+/// Returns false when the canvas has no measurable width yet (caller should
 /// retry on rAF / resize); true otherwise.
 export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationMs, norm }) {
   if (!wrapperEl) return false;
   const canvas = wrapperEl.querySelector(".waveform-canvas-el");
   if (!canvas) return false;
 
-  const rect = wrapperEl.getBoundingClientRect();
+  const rect = canvas.getBoundingClientRect();
   if (!rect.width || rect.width < 2) return false;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const W = Math.max(1, Math.round(rect.width * dpr));

@@ -48,6 +48,21 @@
   (default: start from the first cue point); with no cues the toggle is
   disabled and shown on, since the CDJ then starts at the first audio anyway.
   Stored as `track_cues.is_playback_start` / `playbackStart` on cues.
+- **Improvement:** the cue editor greys out the waveform before where the CDJ
+  will start playback (the playback-start cue, else the first cue point),
+  updating live while cues are dragged.
+- **New feature:** "Beat grid" brightness slider in the cue editor sets how
+  strongly the beat grid shows over the waveform (remembered). The grid also
+  extends into a thin strip above and below the waveform, so beats stay
+  readable where the waveform is loud.
+- **Improvement:** the cue editor's visible-time readout ("0:56–1:04") sits
+  centred under the waveform, with the track's total time at the right end,
+  and without the "“Fit” shows all" hint.
+- **Improvement:** clicking outside the cue editor or pressing Escape no
+  longer closes it (discarding the edits) while there are unsaved changes; the
+  Save button pulses instead. With nothing changed, both still close it.
+- **Fix:** a long folder path in a confirm dialog (e.g. "Remove Source
+  Folder") wraps instead of running past the dialog's edge.
 
 ## 0.2.3
 

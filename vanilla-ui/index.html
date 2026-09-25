@@ -646,7 +646,7 @@
             <span><b>Waveform</b> click to play · double-click to add a cue · scroll to zoom · drag to pan</span>
             <span><b>Cue markers</b> drag to move · <kbd>Shift</kbd>+drag snaps to the beat grid · click to play from the cue</span>
           </div>
-          <span class="track-detail-zoom-range" id="trackDetailZoomRange" hidden></span>
+          <label class="track-detail-grid-level" data-tooltip="How strongly the beat grid shows over the waveform">Beat grid <input type="range" id="trackDetailGridLevel" min="0" max="100" step="1" /></label>
           <div class="track-detail-zoom-btns">
             <button type="button" id="trackDetailZoomOut" data-tooltip="Zoom out">&minus;</button>
             <button type="button" id="trackDetailZoomIn" data-tooltip="Zoom in">+</button>
@@ -656,9 +656,14 @@
         <div class="waveform waveform-canvas track-detail-canvas" id="trackDetailWaveform">
           <canvas class="waveform-canvas-el"></canvas>
           <div class="track-detail-beatgrid" id="trackDetailBeatgrid"></div>
+          <i class="track-detail-prestart" id="trackDetailPreStart" hidden></i>
           <div class="track-detail-cue-markers" id="trackDetailCueMarkers"></div>
           <i class="waveform-playhead"></i>
           <i class="track-detail-playhead" id="trackDetailPlayhead" hidden></i>
+        </div>
+        <div class="track-detail-wave-footer">
+          <span class="track-detail-zoom-range" id="trackDetailZoomRange" hidden></span>
+          <span class="track-detail-total-time" id="trackDetailTotalTime" hidden></span>
         </div>
       </div>
 

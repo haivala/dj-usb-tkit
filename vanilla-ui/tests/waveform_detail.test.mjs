@@ -31,7 +31,7 @@ test("computeWaveNorm is a whole-track p05..p95 of entry heights", () => {
   assert.equal(norm.hi, 28, "p95 reaches the loud band");
 });
 
-test("drawDetailWaveform does not throw and signals when the wrapper has no width", () => {
+test("drawDetailWaveform does not throw and signals when the canvas has no width", () => {
   const dom = new JSDOM(
     `<!doctype html><body><div id="w" class="waveform"><canvas class="waveform-canvas-el"></canvas></div></body>`,
     { pretendToBeVisual: true }
@@ -44,7 +44,8 @@ test("drawDetailWaveform does not throw and signals when the wrapper has no widt
     drawDetailWaveform(wrap, bytes, { startMs: 0, endMs: 60000, durationMs: 120000, norm }),
     false
   );
-  wrap.getBoundingClientRect = () => ({ width: 800, height: 200, left: 0, top: 0 });
+  // Sized from the canvas, not the wrapper (the wrapper pads a beat-grid strip).
+  wrap.querySelector("canvas").getBoundingClientRect = () => ({ width: 800, height: 188, left: 0, top: 0 });
   assert.equal(
     drawDetailWaveform(wrap, bytes, { startMs: 0, endMs: 60000, durationMs: 120000, norm }),
     true

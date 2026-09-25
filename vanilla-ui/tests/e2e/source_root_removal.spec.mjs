@@ -152,6 +152,24 @@ test("removing a source folder deletes corresponding tracks from the library", a
   await expect(page.locator("#statusText")).toContainText("removed 2 track(s)");
 });
 
+test("a long source folder path wraps inside the confirm dialog", async ({ page }) => {
+  await installSourceRemovalMock(page);
+  const longRoot =
+    "/home/someone/Data/Omat/Work/rekordbox/USB_DISCONNECTS_AUDIO_FILES/WAV_EXPORTS_WITH_A_VERY_LONG_NAME";
+  await page.addInitScript((root) => {
+    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify([root, "/music/b"]));
+  }, longRoot);
+  await page.goto("/");
+  await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
+  const message = page.locator("#confirmMessage");
+  await expect(message).toContainText(longRoot);
+  const fits = await message.evaluate((p) => {
+    const dialog = p.closest(".confirm-dialog").getBoundingClientRect();
+    return p.scrollWidth <= p.clientWidth && p.getBoundingClientRect().right <= dialog.right;
+  });
+  expect(fits).toBe(true);
+});
+
 test("after removing source A, reloading tracks still filters by remaining roots", async ({ page }) => {
   await installSourceRemovalMock(page);
   await page.goto("/");
