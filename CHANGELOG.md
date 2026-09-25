@@ -63,6 +63,29 @@
   the view.
 - **Improvement:** the cue editor's usage hints fold into a "?" tooltip once
   the track has a cue.
+- **New feature:** Quantize ("Q") in the cue editor, on by default and
+  remembered: double-clicked, "+ Cue" and dragged cues snap to the nearest
+  beat; hold Shift to place one freely (with Q off, Shift snaps instead).
+- **New feature:** cue editor keyboard shortcuts: Space play/pause, C add a
+  cue at the playhead, 1–8 jump to cue A–H, ←/→ move the selected cue one beat
+  (Shift: 10 ms). The selected cue (last added, clicked, dragged or jumped to)
+  is outlined on the waveform and tinted in the list. Keys typed into a cue
+  name or other field stay there.
+- **New feature:** Undo/Redo in the cue editor (buttons, Ctrl+Z,
+  Ctrl+Shift+Z / Ctrl+Y) for BPM, key, first beat and cue edits; a typed name
+  or one drag is one step.
+- **New feature:** ÷2 and ×2 BPM buttons in the cue editor, for a half- or
+  double-tempo analysis.
+- **New feature:** metronome toggle in the cue editor: clicks on the beat grid
+  while playing (accented on each bar start), to hear whether the grid lines up.
+  The native playback engine mixes the clicks into the track's own samples
+  (new `set_playback_metronome` command), so they sit exactly on the heard beat,
+  follow seeks and grid edits live, and need no webview audio (WebKitGTK
+  without GStreamer's `autoaudiosink` has none). Off each time the editor opens
+  and when it closes.
+- **Chore:** the "Analyze Missing" e2e test no longer flakes under parallel
+  load: its mock analysis now waits for the test instead of a 200 ms timer the
+  test's check could miss.
 - **Improvement:** the cue editor's visible-time readout ("0:56–1:04") sits
   centred under the waveform, with the track's total time at the right end,
   and without the "“Fit” shows all" hint.

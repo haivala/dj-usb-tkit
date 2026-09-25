@@ -146,6 +146,10 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
     });
 
     const analyzedRequests = [];
+    // The analysis holds until the test releases it, so its transient
+    // "analyzing" row state is guaranteed observable (a fixed 200 ms window
+    // was missed under parallel load: the poll came after it had cleared).
+    let releaseAnalysis = null;
     const listeners = new Map();
     const nowIso = () => new Date().toISOString();
 
@@ -231,7 +235,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
                 timestamp: nowIso()
               });
             }
-            await new Promise((resolve) => { setTimeout(resolve, 200); });
+            await new Promise((resolve) => { releaseAnalysis = resolve; });
             for (const trackId of ids) {
               if (trackId !== "local-missing-1") continue;
               playlistTracks["pl-1"][0].durationMs = 180000;
@@ -339,7 +343,10 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
       event: { listen }
     };
 
-    window.__playlistAnalysisTest = { analyzedRequests };
+    window.__playlistAnalysisTest = {
+      analyzedRequests,
+      releaseAnalysis: () => releaseAnalysis?.(),
+    };
   });
 
   await page.goto("/");
@@ -354,16 +361,13 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   await expect(page.locator("#exportPlaylistBtn")).toBeHidden();
 
   await page.locator("#analyzePlaylistMissingBtn").click();
-  // A transient loading-state class applied right after the click and cleared
-  // once analysis completes (see the inverse check below) -- the default 5s
-  // expect timeout is tight enough to flake under heavy parallel worker load
-  // (e.g. the full suite at high --workers), even though the underlying
-  // behavior is correct and fast under normal conditions.
+  // The row shows the analyzing state while the (held) analysis runs...
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="local-missing-1"]')).toHaveClass(
-    /is-analyzing/,
-    { timeout: 15_000 },
+    /is-analyzing/
   );
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="playlist-entry-1"]')).toHaveCount(0);
+  // ...and clears it once the analysis completes (checked below).
+  await page.evaluate(() => window.__playlistAnalysisTest.releaseAnalysis());
 
   await page.waitForFunction(() => {
     const reqs = window.__playlistAnalysisTest?.analyzedRequests || [];

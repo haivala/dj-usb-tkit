@@ -128,7 +128,7 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.moveCueToViewRatio(
       cueDrag.tempId,
       scrubRatioFromPointer(event, wf),
-      { snap: event.shiftKey }
+      { free: event.shiftKey }
     );
   };
   const endCueDrag = () => {
@@ -201,7 +201,7 @@ export function bindTrackDetailEvents(ctx) {
     const trackRatio = trackDetailDialog.viewRatioToTrackRatio(
       scrubRatioFromPointer(event, wf)
     );
-    if (!trackDetailDialog.addCueAtRatio(trackRatio)) {
+    if (!trackDetailDialog.addCueAtRatio(trackRatio, { free: event.shiftKey })) {
       ctx.emitStatus?.("Maximum 8 cue points.");
     }
   });
@@ -261,13 +261,65 @@ export function bindTrackDetailEvents(ctx) {
     const cue = trackDetailDialog
       .getWorking()
       .cues.find((c) => c.tempId === marker.dataset.tempId);
+    trackDetailDialog.selectCue(marker.dataset.tempId);
     playFromCue(cue);
   });
 
-  el.trackDetailAddCue?.addEventListener("click", () => {
-    if (!trackDetailDialog.addCue()) {
+  const addCueAtPlayhead = (free) => {
+    if (!trackDetailDialog.addCue(undefined, { free })) {
       ctx.emitStatus?.("Maximum 8 cue points.");
     }
+  };
+  el.trackDetailAddCue?.addEventListener("click", (event) => addCueAtPlayhead(event.shiftKey));
+
+  el.trackDetailQuantize?.addEventListener("click", () => trackDetailDialog.toggleQuantize());
+  el.trackDetailMetronome?.addEventListener("click", () => trackDetailDialog.toggleMetronome());
+  el.trackDetailUndo?.addEventListener("click", () => trackDetailDialog.undo());
+  el.trackDetailRedo?.addEventListener("click", () => trackDetailDialog.redo());
+  el.trackDetailBpmHalf?.addEventListener("click", () => trackDetailDialog.scaleBpm(0.5));
+  el.trackDetailBpmDouble?.addEventListener("click", () => trackDetailDialog.scaleBpm(2));
+
+  // --- Keyboard shortcuts (while the editor is open) ---
+  // Text fields, the key select and the sliders keep their own keys, including
+  // Ctrl+Z in a text field (its native text undo).
+  const isTypingTarget = (target) =>
+    !!target?.closest?.("input, select, textarea, [contenteditable='true']");
+  const jumpToCue = (index) => {
+    const cue = trackDetailDialog.hotCueAt(index);
+    if (!cue) return;
+    trackDetailDialog.selectCue(cue.tempId);
+    playFromCue(cue);
+  };
+  doc.addEventListener("keydown", (event) => {
+    if (overlay.hidden) return;
+    if (el.confirmOverlay && !el.confirmOverlay.hidden) return;
+    if (isTypingTarget(event.target)) return;
+    const mod = event.ctrlKey || event.metaKey;
+    const key = event.key;
+    let handled = true;
+    if (mod && !event.altKey && (key === "z" || key === "Z")) {
+      if (event.shiftKey) trackDetailDialog.redo();
+      else trackDetailDialog.undo();
+    } else if (mod && !event.altKey && (key === "y" || key === "Y")) {
+      trackDetailDialog.redo();
+    } else if (mod || event.altKey) {
+      handled = false;
+    } else if (key === " ") {
+      // Also keeps Space from pressing the focused button (Save has focus on open).
+      if (!event.repeat) el.trackDetailPlayPause?.click();
+    } else if (key === "c" || key === "C") {
+      if (!event.repeat) addCueAtPlayhead(event.shiftKey);
+    } else if (/^[1-8]$/.test(key)) {
+      if (!event.repeat) jumpToCue(Number(key) - 1);
+    } else if (key === "ArrowLeft" || key === "ArrowRight") {
+      handled = trackDetailDialog.nudgeSelectedCue(key === "ArrowRight" ? 1 : -1, {
+        fine: event.shiftKey,
+        repeat: event.repeat,
+      });
+    } else {
+      handled = false;
+    }
+    if (handled) event.preventDefault();
   });
 
   el.trackDetailFirstBeatMinus?.addEventListener("click", () =>
@@ -321,8 +373,18 @@ export function bindTrackDetailEvents(ctx) {
     const tempId = target.closest(".cue-row")?.dataset.tempId;
     if (tempId) trackDetailDialog.renameCue(tempId, target.value);
   });
+  el.trackDetailCueList?.addEventListener("focusin", (event) => {
+    const tempId = event.target.closest(".cue-row")?.dataset.tempId;
+    if (tempId && event.target.closest("[data-action='cue-name']")) {
+      trackDetailDialog.selectCue(tempId);
+    }
+  });
   el.trackDetailCueList?.addEventListener("click", (event) => {
+    const rowId = event.target.closest(".cue-row")?.dataset.tempId;
     const target = event.target.closest("[data-action]");
+    if (rowId && target?.dataset.action !== "cue-delete" && target?.dataset.action !== "cue-name") {
+      trackDetailDialog.selectCue(rowId);
+    }
     if (!target) return;
     const tempId = target.closest(".cue-row")?.dataset.tempId;
     if (!tempId) return;

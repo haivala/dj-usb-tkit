@@ -37,6 +37,7 @@ import {
   STORAGE_KEY_HELP_SEEN,
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
   STORAGE_KEY_CUE_BEATGRID_LEVEL,
+  STORAGE_KEY_CUE_QUANTIZE,
   FRONTEND_DB_KEY_THEME,
   FRONTEND_DB_KEY_ACCENT_HUE,
   FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
@@ -48,6 +49,7 @@ import {
   FRONTEND_DB_KEY_HELP_SEEN,
   FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
   FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL,
+  FRONTEND_DB_KEY_CUE_QUANTIZE,
 } from "./settings_keys.mjs";
 import {
   WAVEFORM_COLORS,
@@ -141,7 +143,8 @@ const ELEMENT_IDS = [
   "trackDetailOverlay", "trackDetailTitle", "trackDetailCloseBtn", "trackDetailWaveform",
   "trackDetailBeatgrid", "trackDetailPreStart", "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs",
   "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailStartFirstCue", "trackDetailStartFirstBeat", "trackDetailStartNote", "trackDetailAddCue",
-  "trackDetailBpm", "trackDetailBpmMinus", "trackDetailBpmPlus",
+  "trackDetailBpm", "trackDetailBpmMinus", "trackDetailBpmPlus", "trackDetailBpmHalf", "trackDetailBpmDouble",
+  "trackDetailQuantize", "trackDetailMetronome", "trackDetailUndo", "trackDetailRedo",
   "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
   "trackDetailPlayPause", "trackDetailHint", "trackDetailHintBtn",
   "trackDetailOverview", "trackDetailOverviewCues", "trackDetailOverviewWindow", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailGridLevel", "trackDetailZoomRange", "trackDetailTotalTime",
@@ -173,6 +176,12 @@ const trackDetailDialog = trackDetail.createTrackDetailController(el, {
       FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
       on ? "1" : "0"
     );
+  },
+  setPlaybackMetronome: (request) => command("set_playback_metronome", request),
+  getQuantizePref: () => state.cueQuantize !== false,
+  setQuantizePref: (on) => {
+    state.cueQuantize = !!on;
+    persistSetting(STORAGE_KEY_CUE_QUANTIZE, FRONTEND_DB_KEY_CUE_QUANTIZE, on ? "1" : "0");
   },
   getBeatgridLevelPref: () => state.cueBeatgridLevel,
   setBeatgridLevelPref: (level, { remember = false } = {}) => {
@@ -1562,6 +1571,7 @@ function restoreStoredUiPrefs() {
       STORAGE_KEY_SIDEBAR_COLLAPSED,
       STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
       STORAGE_KEY_CUE_BEATGRID_LEVEL,
+      STORAGE_KEY_CUE_QUANTIZE,
     },
     normalizeAnalysisBpmRange: library.normalizeAnalysisBpmRange,
     defaultAnalysisBpmRange: library.DEFAULT_ANALYSIS_BPM_RANGE,

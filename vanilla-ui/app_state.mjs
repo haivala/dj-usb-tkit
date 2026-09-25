@@ -25,6 +25,8 @@ export function createInitialState() {
     cueStartOnFirstBeat: false,
     // Cue editor: how strongly the beat grid shows over the waveform (0-100).
     cueBeatgridLevel: 35,
+    // Cue editor: snap new and dragged cues to the beat grid (Shift inverts).
+    cueQuantize: true,
     analysisBpmRange: DEFAULT_ANALYSIS_BPM_RANGE,
     analysisEngine: "stratum",
     analysisEnginePersistPromise: null,

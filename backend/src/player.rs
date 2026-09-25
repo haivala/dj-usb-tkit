@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,6 +9,7 @@ use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{OutputStream, Sink, Source};
 
 use crate::error::{BackendError, BackendResult};
+use crate::metronome::{MetronomeSettings, MetronomeSource};
 use crate::models::{PlaybackPreflightData, PlaybackStatusData};
 
 const PLAYBACK_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
@@ -33,6 +34,9 @@ pub struct PlaybackTransition {
 #[derive(Debug, Clone)]
 pub struct PlaybackController {
     tx: mpsc::Sender<PlaybackCommand>,
+    /// Read by every track's audio source; set directly (no worker round trip),
+    /// so the metronome toggles and follows grid edits while a track plays.
+    metronome: Arc<MetronomeSettings>,
 }
 
 impl PlaybackController {
@@ -40,8 +44,16 @@ impl PlaybackController {
         let (tx, rx) = mpsc::channel::<PlaybackCommand>();
         let (transition_tx, transition_rx) = mpsc::channel::<PlaybackTransition>();
         let worker_tx = tx.clone();
-        thread::spawn(move || playback_worker(rx, worker_tx, transition_tx));
-        (Self { tx }, transition_rx)
+        let metronome = Arc::new(MetronomeSettings::default());
+        let worker_metronome = metronome.clone();
+        thread::spawn(move || playback_worker(rx, worker_tx, transition_tx, worker_metronome));
+        (Self { tx, metronome }, transition_rx)
+    }
+
+    /// Clicks on the beat grid (`first_beat_ms`, `bpm`) mixed into whatever is
+    /// playing. Returns whether it is on (never without a usable BPM).
+    pub fn set_metronome(&self, enabled: bool, first_beat_ms: f64, bpm: f64) -> bool {
+        self.metronome.set(enabled, first_beat_ms, bpm)
     }
 
     pub fn play_path(
@@ -168,14 +180,19 @@ struct WorkerState {
     duration_ms: Option<u64>,
     next_play_generation: u64,
     pending_play: Option<PendingPlay>,
+    metronome: Arc<MetronomeSettings>,
 }
 
 fn playback_worker(
     rx: mpsc::Receiver<PlaybackCommand>,
     tx: mpsc::Sender<PlaybackCommand>,
     transitions: mpsc::Sender<PlaybackTransition>,
+    metronome: Arc<MetronomeSettings>,
 ) {
-    let mut state = WorkerState::default();
+    let mut state = WorkerState {
+        metronome,
+        ..WorkerState::default()
+    };
 
     loop {
         let command = if state.sink.is_some() {
@@ -398,11 +415,13 @@ fn finish_play_in_worker(
         .total_duration()
         .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64);
     let offset_ms = compute_target_offset_ms(start_offset_ms, start_ratio, duration_ms);
+    let metronome = state.metronome.clone();
     if offset_ms > 0 && decoder.try_seek(Duration::from_millis(offset_ms)).is_err() {
         // Falls back only for a source whose format genuinely has no seek table.
-        sink.append(decoder.skip_duration(Duration::from_millis(offset_ms)));
+        let skipped = decoder.skip_duration(Duration::from_millis(offset_ms));
+        sink.append(MetronomeSource::new(skipped, metronome, offset_ms));
     } else {
-        sink.append(decoder);
+        sink.append(MetronomeSource::new(decoder, metronome, offset_ms));
     }
     sink.play();
     let status = load_playback_state(state, sink, normalized_path, offset_ms, duration_ms);
@@ -1150,7 +1169,7 @@ mod tests {
     fn send_command_reports_worker_unavailable_when_command_channel_is_closed() {
         let (tx, rx) = mpsc::channel();
         drop(rx);
-        let controller = PlaybackController { tx };
+        let controller = PlaybackController { tx, metronome: Arc::default() };
 
         let err = controller
             .send_command(
@@ -1166,7 +1185,7 @@ mod tests {
     #[test]
     fn send_command_reports_timeout_when_worker_does_not_reply() {
         let (tx, _rx) = mpsc::channel();
-        let controller = PlaybackController { tx };
+        let controller = PlaybackController { tx, metronome: Arc::default() };
 
         let err = controller
             .send_command(

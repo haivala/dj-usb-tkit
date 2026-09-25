@@ -24,7 +24,8 @@ use crate::models::{
     ListTracksRequest, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
     MaterializeSourceTrackData, MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData,
     PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
+    PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
+    SetPlaybackMetronomeRequest, PruneUsbDeviceData,
     PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
@@ -518,6 +519,13 @@ impl BackendCommands {
 
     pub fn get_playback_status_native(&self) -> ApiResponse<PlaybackStatusData> {
         wrap(self.service.get_playback_status_native(&self.playback))
+    }
+
+    pub fn set_playback_metronome(
+        &self,
+        req: SetPlaybackMetronomeRequest,
+    ) -> ApiResponse<PlaybackMetronomeData> {
+        wrap(self.service.set_playback_metronome(&self.playback, req))
     }
 
     pub fn playback_preflight_native(

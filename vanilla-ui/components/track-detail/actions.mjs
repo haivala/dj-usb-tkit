@@ -21,6 +21,9 @@ const BPM_NUDGE_STEP = 0.01;
 // labels at least BAR_LABEL_MIN_PX apart.
 const BAR_LABEL_STEPS = [1, 2, 4, 8, 16, 32, 64];
 const BAR_LABEL_MIN_PX = 36;
+const UNDO_LIMIT = 100;
+// ←/→ with Shift, or without a beat grid: a fine nudge.
+const FINE_NUDGE_MS = 10;
 
 // Mirrors backend `HOTCUE_PALETTE` (service/cues.rs). id -> css colour.
 export const HOTCUE_PALETTE = [
@@ -80,6 +83,10 @@ export function createTrackDetailController(el, prefs = {}) {
     setStartOnFirstBeatPref = () => {},
     getBeatgridLevelPref = () => 35,
     setBeatgridLevelPref = () => {},
+    getQuantizePref = () => true,
+    setQuantizePref = () => {},
+    // The native engine mixes the clicks into the track (`set_playback_metronome`).
+    setPlaybackMetronome = () => Promise.resolve(),
   } = prefs;
   let resolveFn = null;
   let open = false;
@@ -104,10 +111,113 @@ export function createTrackDetailController(el, prefs = {}) {
     waveNorm: null, // whole-track {lo, hi} amplitude reference (fixed across zoom)
     followSuspendUntil: 0,
     draggingTempId: null, // cue whose marker is being dragged on the waveform
+    selectedTempId: null, // the cue ←/→ moves: last added, clicked, dragged or jumped to
   };
   let playPauseShowsPlaying = null;
   // The save payload as opened; anything else is an unsaved edit.
   let openedPayloadJson = "";
+  // Undo/redo: snapshots of the editable state (see `mutate`).
+  let undoStack = [];
+  let redoStack = [];
+  let lastMutateKey = null;
+  let mutating = false;
+  let dragSeq = 0;
+  let nudgeSeq = 0;
+  // Metronome: off on every open (a sound should never start by surprise).
+  const metronome = { on: false, sent: "" };
+
+  // --- Undo/redo ---------------------------------------------------------
+
+  function snapshotState() {
+    return JSON.stringify({
+      bpm: working.bpm,
+      key: working.key,
+      firstBeatMs: working.firstBeatMs,
+      cues: working.cues,
+    });
+  }
+
+  function restoreState(json) {
+    const s = JSON.parse(json);
+    working.bpm = s.bpm;
+    working.key = s.key;
+    working.firstBeatMs = s.firstBeatMs;
+    working.cues = s.cues;
+    working.draggingTempId = null;
+    if (!working.cues.some((c) => c.tempId === working.selectedTempId)) {
+      working.selectedTempId = null;
+    }
+  }
+
+  /// Run an edit and record the state before it for undo. Edits sharing a
+  /// `key` in a row (typing one cue's name, one drag) are one undo step; an
+  /// edit that changes nothing records nothing. Callers render themselves.
+  function mutate(key, fn) {
+    if (mutating) return fn();
+    mutating = true;
+    const before = snapshotState();
+    let result;
+    try {
+      result = fn();
+    } finally {
+      mutating = false;
+    }
+    if (snapshotState() !== before) {
+      if (!(key && key === lastMutateKey)) {
+        undoStack.push(before);
+        if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+      }
+      redoStack = [];
+      lastMutateKey = key || null;
+      renderUndo();
+    }
+    return result;
+  }
+
+  function renderUndo() {
+    if (el.trackDetailUndo) el.trackDetailUndo.disabled = !undoStack.length;
+    if (el.trackDetailRedo) el.trackDetailRedo.disabled = !redoStack.length;
+  }
+
+  // --- Quantize ------------------------------------------------------------
+
+  function hasGrid() {
+    return beatIntervalMs() > 0 && working.firstBeatMs != null;
+  }
+
+  /// Whether this placement snaps: Quantize on, unless Shift (`free`) is held;
+  /// Quantize off, only with Shift.
+  function snaps(free) {
+    return hasGrid() && getQuantizePref() !== !!free;
+  }
+
+  function snapToBeat(ms) {
+    const interval = beatIntervalMs();
+    const idx = Math.max(0, Math.round((ms - working.firstBeatMs) / interval));
+    return working.firstBeatMs + idx * interval;
+  }
+
+  function renderTools() {
+    el.trackDetailQuantize?.setAttribute("aria-pressed", String(getQuantizePref()));
+    el.trackDetailMetronome?.setAttribute("aria-pressed", String(metronome.on));
+  }
+
+  // --- Metronome -----------------------------------------------------------
+
+  /// Tell the engine the metronome state and grid whenever either changes
+  /// (toggle, BPM/first-beat edits, undo, open/close). The clicks are mixed
+  /// into the track's own samples, so they sit exactly on the heard beat.
+  function syncMetronome() {
+    const request = {
+      enabled: open && metronome.on && hasGrid(),
+      firstBeatMs: working.firstBeatMs ?? 0,
+      bpm: Number(working.bpm) || 0,
+    };
+    const key = JSON.stringify(request);
+    if (key === metronome.sent) return;
+    metronome.sent = key;
+    Promise.resolve(setPlaybackMetronome(request)).catch(() => {});
+  }
 
   function hotCues() {
     return working.cues.filter((c) => !c.playbackStart);
@@ -317,7 +427,8 @@ export function createTrackDetailController(el, prefs = {}) {
         "cue-marker" +
         (cue.playbackStart ? " is-playback-start" : "") +
         (pct < -2 || pct > 102 ? " off-view" : "") +
-        (cue.tempId === working.draggingTempId ? " is-dragging" : "");
+        (cue.tempId === working.draggingTempId ? " is-dragging" : "") +
+        (cue.tempId === working.selectedTempId ? " is-selected" : "");
       marker.style.left = `${pct}%`;
       if (!cue.playbackStart) marker.style.setProperty("--cue-color", colorCssForId(cue.colorId));
       marker.dataset.tempId = cue.tempId;
@@ -426,7 +537,10 @@ export function createTrackDetailController(el, prefs = {}) {
   function cueRow(cue, letter) {
     const doc = el.trackDetailCueList.ownerDocument;
     const row = doc.createElement("div");
-    row.className = "cue-row" + (cue.playbackStart ? " is-playback-start" : "");
+    row.className =
+      "cue-row" +
+      (cue.playbackStart ? " is-playback-start" : "") +
+      (cue.tempId === working.selectedTempId ? " is-selected" : "");
     row.dataset.tempId = cue.tempId;
 
     const play = doc.createElement("button");
@@ -598,6 +712,9 @@ export function createTrackDetailController(el, prefs = {}) {
     renderCueList();
     renderStartChoice();
     renderHint();
+    renderTools();
+    renderUndo();
+    syncMetronome();
   }
 
   const api = {
@@ -640,16 +757,18 @@ export function createTrackDetailController(el, prefs = {}) {
     },
 
     setFirstBeatMs(ms) {
-      const clamped = Math.max(0, Math.round(Number(ms) || 0));
-      working.firstBeatMs = working.durationMs
-        ? Math.min(clamped, working.durationMs - 1)
-        : clamped;
-      // An untouched playback-start cue follows the first beat.
-      const start = startCue();
-      if (start?.followsFirstBeat) {
-        start.positionMs = working.firstBeatMs;
-        enforceStartOrder();
-      }
+      mutate(null, () => {
+        const clamped = Math.max(0, Math.round(Number(ms) || 0));
+        working.firstBeatMs = working.durationMs
+          ? Math.min(clamped, working.durationMs - 1)
+          : clamped;
+        // An untouched playback-start cue follows the first beat.
+        const start = startCue();
+        if (start?.followsFirstBeat) {
+          start.positionMs = working.firstBeatMs;
+          enforceStartOrder();
+        }
+      });
       render();
     },
 
@@ -670,8 +789,16 @@ export function createTrackDetailController(el, prefs = {}) {
     setBpm(bpm) {
       const parsed = Number.parseFloat(bpm);
       if (!Number.isFinite(parsed) || parsed <= 0) return;
-      working.bpm = Math.round(Math.min(999, parsed) * 100) / 100;
+      mutate(null, () => {
+        working.bpm = Math.max(0.01, Math.round(Math.min(999, parsed) * 100) / 100);
+      });
       render();
+    },
+
+    /// ×2 / ÷2: fix a half- or double-tempo analysis in one step.
+    scaleBpm(factor) {
+      if (working.bpm == null) return;
+      api.setBpm(working.bpm * factor);
     },
 
     nudgeBpm(direction) {
@@ -681,7 +808,9 @@ export function createTrackDetailController(el, prefs = {}) {
 
     setKey(key) {
       const trimmed = typeof key === "string" ? key.trim() : "";
-      working.key = trimmed ? trimmed.slice(0, 16) : null;
+      mutate(null, () => {
+        working.key = trimmed ? trimmed.slice(0, 16) : null;
+      });
       render();
     },
 
@@ -705,24 +834,111 @@ export function createTrackDetailController(el, prefs = {}) {
     /// always user-editable afterward.
     /// The first cue on a track also applies the remembered "Start the
     /// playback on first beat" setting.
-    addCue(positionMs) {
+    /// With Quantize on it lands on the nearest beat; `free` (Shift) inverts that.
+    addCue(positionMs, { free = false } = {}) {
       const ordinal = hotCues().length;
       if (ordinal >= MAX_CUES) return null;
       const dur = working.durationMs || 0;
-      const pos = Number.isFinite(positionMs)
-        ? Math.max(0, Math.min(dur, Math.round(positionMs)))
-        : Math.round(currentPositionMs());
+      let ms = Number.isFinite(positionMs) ? positionMs : currentPositionMs();
+      if (snaps(free)) ms = snapToBeat(ms);
       const cue = {
         tempId: `c${(tempIdSeq += 1)}`,
-        positionMs: pos,
+        positionMs: Math.max(0, Math.min(dur, Math.round(ms))),
         colorId: HOTCUE_PALETTE[ordinal % HOTCUE_PALETTE.length].id,
         name: `Cue ${ordinal + 1}`,
       };
-      working.cues.push(cue);
-      if (ordinal === 0 && getStartOnFirstBeatPref()) addStartCue();
-      enforceStartOrder();
+      mutate(null, () => {
+        working.cues.push(cue);
+        if (ordinal === 0 && getStartOnFirstBeatPref()) addStartCue();
+        enforceStartOrder();
+      });
+      working.selectedTempId = cue.tempId;
       render();
       return cue;
+    },
+
+    /// The "Q" toggle (remembered): snap new and dragged cues to the grid.
+    toggleQuantize() {
+      setQuantizePref(!getQuantizePref());
+      renderTools();
+    },
+
+    /// The metronome toggle: the engine clicks on the grid while playing.
+    toggleMetronome() {
+      metronome.on = !metronome.on;
+      renderTools();
+      syncMetronome();
+    },
+
+    /// Only toggles classes: re-rendering the list would destroy a name
+    /// input being focused, or the swatch a colour popover is anchored to.
+    selectCue(tempId) {
+      if (!working.cues.some((c) => c.tempId === tempId)) return;
+      working.selectedTempId = tempId;
+      for (const host of [el.trackDetailCueMarkers, el.trackDetailCueList]) {
+        for (const node of host?.querySelectorAll("[data-temp-id]") || []) {
+          node.classList.toggle("is-selected", node.dataset.tempId === tempId);
+        }
+      }
+    },
+
+    /// Hot cue by letter order (0 = A); null when there is no such cue.
+    hotCueAt(index) {
+      return orderedCues().filter((c) => !c.playbackStart)[index] || null;
+    },
+
+    /// ←/→: move the selected cue one beat (onto the next grid line with
+    /// Quantize on), or FINE_NUDGE_MS with `fine` (Shift) or without a grid.
+    /// Each press is an undo step; a held key's auto-repeat joins its press.
+    nudgeSelectedCue(direction, { fine = false, repeat = false } = {}) {
+      const cue = working.cues.find((c) => c.tempId === working.selectedTempId);
+      if (!cue) return false;
+      if (!repeat) nudgeSeq += 1;
+      const interval = beatIntervalMs();
+      let ms;
+      if (fine || !hasGrid()) {
+        ms = cue.positionMs + direction * FINE_NUDGE_MS;
+      } else if (getQuantizePref()) {
+        // Positions are whole ms, so a cue "on" a beat can sit a fraction of a
+        // ms off it: within 1.5 ms counts as on the beat.
+        const idx = (cue.positionMs - working.firstBeatMs) / interval;
+        const nearest = Math.round(idx);
+        const onBeat = Math.abs(idx - nearest) * interval < 1.5;
+        const next = onBeat
+          ? nearest + direction
+          : direction > 0 ? Math.floor(idx) + 1 : Math.ceil(idx) - 1;
+        ms = working.firstBeatMs + Math.max(0, next) * interval;
+      } else {
+        ms = cue.positionMs + direction * interval;
+      }
+      const dur = working.durationMs || 0;
+      mutate(`nudge:${nudgeSeq}`, () => {
+        cue.positionMs = Math.max(0, Math.min(dur, Math.round(ms)));
+        if (cue.playbackStart) cue.followsFirstBeat = false;
+        enforceStartOrder();
+      });
+      render();
+      return true;
+    },
+
+    canUndo: () => undoStack.length > 0,
+
+    undo() {
+      if (!undoStack.length) return false;
+      redoStack.push(snapshotState());
+      restoreState(undoStack.pop());
+      lastMutateKey = null;
+      render();
+      return true;
+    },
+
+    redo() {
+      if (!redoStack.length) return false;
+      undoStack.push(snapshotState());
+      restoreState(redoStack.pop());
+      lastMutateKey = null;
+      render();
+      return true;
     },
 
     /// The "Beat grid" slider (0-100): how strongly the grid shows over the
@@ -743,13 +959,15 @@ export function createTrackDetailController(el, prefs = {}) {
         return;
       }
       if (remember) setStartOnFirstBeatPref(!!on);
-      if (on) addStartCue();
-      else working.cues = hotCues();
+      mutate(null, () => {
+        if (on) addStartCue();
+        else working.cues = hotCues();
+      });
       render();
     },
 
-    addCueAtRatio(ratio) {
-      return api.addCue(Math.max(0, Math.min(1, ratio)) * (working.durationMs || 0));
+    addCueAtRatio(ratio, opts) {
+      return api.addCue(Math.max(0, Math.min(1, ratio)) * (working.durationMs || 0), opts);
     },
 
     /// Rename-only: mutates data without re-rendering the cue list DOM, so the
@@ -758,14 +976,16 @@ export function createTrackDetailController(el, prefs = {}) {
     /// on a cue's name while it's being edited.
     renameCue(tempId, name) {
       const cue = working.cues.find((c) => c.tempId === tempId);
-      if (cue) cue.name = name;
+      if (cue) mutate(`name:${tempId}`, () => { cue.name = name; });
     },
 
     updateCue(tempId, patch) {
       const cue = working.cues.find((c) => c.tempId === tempId);
       if (!cue) return;
-      Object.assign(cue, patch);
-      enforceStartOrder();
+      mutate(null, () => {
+        Object.assign(cue, patch);
+        enforceStartOrder();
+      });
       render();
     },
 
@@ -773,21 +993,21 @@ export function createTrackDetailController(el, prefs = {}) {
     /// to the visible window). With `snap`, it lands on the nearest beat-grid
     /// line. Only the markers + cue list re-render — the waveform canvas is
     /// untouched, so this is cheap enough to call on every pointermove.
-    moveCueToViewRatio(tempId, ratio, { snap = false } = {}) {
+    /// With Quantize on it snaps to the nearest beat; `free` (Shift) inverts that.
+    /// One drag is one undo step.
+    moveCueToViewRatio(tempId, ratio, { free = false } = {}) {
       const cue = working.cues.find((c) => c.tempId === tempId);
       if (!cue) return;
       const dur = working.durationMs || 0;
       let ms = working.view.startMs + Math.max(0, Math.min(1, ratio)) * viewSpanMs();
-      const interval = beatIntervalMs();
-      if (snap && interval && working.firstBeatMs != null) {
-        const idx = Math.max(0, Math.round((ms - working.firstBeatMs) / interval));
-        ms = working.firstBeatMs + idx * interval;
-      }
-      cue.positionMs = Math.max(0, Math.min(dur, Math.round(ms)));
-      // Dragging the start cue pins it (no more following the first beat);
-      // it stops at the first hot cue, and a hot cue dragged before it pushes it.
-      if (cue.playbackStart) cue.followsFirstBeat = false;
-      enforceStartOrder();
+      if (snaps(free)) ms = snapToBeat(ms);
+      mutate(`drag:${dragSeq}`, () => {
+        cue.positionMs = Math.max(0, Math.min(dur, Math.round(ms)));
+        // Dragging the start cue pins it (no more following the first beat);
+        // it stops at the first hot cue, and a hot cue dragged before it pushes it.
+        if (cue.playbackStart) cue.followsFirstBeat = false;
+        enforceStartOrder();
+      });
       renderMarkers();
       renderCueList();
       renderStartChoice();
@@ -795,18 +1015,29 @@ export function createTrackDetailController(el, prefs = {}) {
 
     setDraggingCue(tempId) {
       working.draggingTempId = tempId || null;
+      if (tempId) {
+        dragSeq += 1;
+        api.selectCue(tempId);
+      }
       renderMarkers();
     },
 
     deleteCue(tempId) {
-      working.cues = working.cues.filter((c) => c.tempId !== tempId);
-      enforceStartOrder();
+      mutate(null, () => {
+        working.cues = working.cues.filter((c) => c.tempId !== tempId);
+        enforceStartOrder();
+      });
+      if (!working.cues.some((c) => c.tempId === working.selectedTempId)) {
+        working.selectedTempId = null;
+      }
       render();
     },
 
     close(result) {
       if (!open) return;
       open = false;
+      metronome.on = false;
+      syncMetronome();
       el.trackDetailOverlay.hidden = true;
       if (el.trackDetailColorPopover) el.trackDetailColorPopover.hidden = true;
       if (el.trackDetailPlayhead) el.trackDetailPlayhead.hidden = true;
@@ -837,6 +1068,11 @@ export function createTrackDetailController(el, prefs = {}) {
       working.firstBeatMs = firstBeatMs == null ? null : Math.round(firstBeatMs);
       working.followSuspendUntil = 0;
       working.draggingTempId = null;
+      working.selectedTempId = null;
+      undoStack = [];
+      redoStack = [];
+      lastMutateKey = null;
+      metronome.on = false;
       playPauseShowsPlaying = null;
       const loaded = (cues || []).map((c) => ({
         tempId: `c${(tempIdSeq += 1)}`,

@@ -593,6 +593,8 @@
         <button type="button" id="trackDetailBpmMinus" data-tooltip="-0.01 BPM">&minus;</button>
         <input type="number" id="trackDetailBpm" min="1" max="999" step="0.01" />
         <button type="button" id="trackDetailBpmPlus" data-tooltip="+0.01 BPM">+</button>
+        <button type="button" id="trackDetailBpmHalf" data-tooltip="Halve the BPM (analysis caught double tempo)">÷2</button>
+        <button type="button" id="trackDetailBpmDouble" data-tooltip="Double the BPM (analysis caught half tempo)">×2</button>
         <label for="trackDetailKey" class="track-detail-key-label">Key</label>
         <button type="button" id="trackDetailKeyMinus" data-tooltip="Previous key">&minus;</button>
         <select id="trackDetailKey">
@@ -649,9 +651,11 @@
           <button type="button" class="track-detail-playpause" id="trackDetailPlayPause" aria-label="Play" data-tooltip="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button>
           <div class="track-detail-hint" id="trackDetailHint">
             <span><b>Waveform</b> click to play · double-click to add a cue · scroll to zoom · drag to pan</span>
-            <span><b>Cue markers</b> drag to move · <kbd>Shift</kbd>+drag snaps to the beat grid · click to play from the cue</span>
+            <span><b>Cue markers</b> drag to move · <kbd>Q</kbd> on: snaps to beats, <kbd>Shift</kbd> places freely · click to play from the cue</span>
           </div>
-          <span class="track-detail-hint-btn" id="trackDetailHintBtn" tabindex="0" role="note" aria-label="How to use the waveform" data-tooltip="Waveform: click to play, double-click to add a cue, scroll to zoom, drag to pan. Cue markers: drag to move (Shift snaps to the beat grid), click to play from the cue." hidden>?</span>
+          <span class="track-detail-hint-btn" id="trackDetailHintBtn" tabindex="0" role="note" aria-label="How to use the waveform" data-tooltip="Waveform: click to play, double-click to add a cue, scroll to zoom, drag to pan. Cue markers: drag to move, click to play from the cue. With Q on, cues snap to beats; hold Shift to place freely. Keys: Space play/pause · C add cue · 1–8 jump to cue · ←/→ move the selected cue a beat (Shift: 10 ms) · Ctrl+Z undo · Ctrl+Shift+Z redo." hidden>?</span>
+          <button type="button" class="track-detail-tool" id="trackDetailQuantize" aria-pressed="true" data-tooltip="Quantize: new and dragged cues snap to the nearest beat (hold Shift to place freely)">Q</button>
+          <button type="button" class="track-detail-tool" id="trackDetailMetronome" aria-pressed="false" aria-label="Metronome" data-tooltip="Metronome: click on every beat while playing, to hear whether the grid lines up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l4 18H5zM12 17l5-10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
           <label class="track-detail-grid-level" data-tooltip="How strongly the beat grid shows over the waveform">Beat grid <input type="range" id="trackDetailGridLevel" min="0" max="100" step="1" /></label>
           <div class="track-detail-zoom-btns">
             <button type="button" id="trackDetailZoomOut" data-tooltip="Zoom out">&minus;</button>
@@ -687,6 +691,10 @@
       </div>
 
       <div class="row confirm-actions">
+        <div class="track-detail-history">
+          <button type="button" id="trackDetailUndo" data-tooltip="Undo (Ctrl+Z)" disabled>Undo</button>
+          <button type="button" id="trackDetailRedo" data-tooltip="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
+        </div>
         <button id="trackDetailCancelBtn">Cancel</button>
         <button id="trackDetailSaveBtn" data-primary>Save</button>
       </div>

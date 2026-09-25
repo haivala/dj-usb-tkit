@@ -1253,6 +1253,25 @@ pub struct PlaybackEventPayload {
     pub timestamp: String,
 }
 
+/// The cue editor's metronome: clicks on this beat grid are mixed into
+/// whatever the native engine plays (see `crate::metronome`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPlaybackMetronomeRequest {
+    pub enabled: bool,
+    #[serde(default)]
+    pub first_beat_ms: Option<f64>,
+    #[serde(default)]
+    pub bpm: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackMetronomeData {
+    /// False when asked to turn on without a usable BPM.
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackPreflightRequest {

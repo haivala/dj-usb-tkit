@@ -115,6 +115,13 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
     state.cueStartOnFirstBeat = false;
   }
 
+  try {
+    state.cueQuantize =
+      localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_QUANTIZE) !== "0";
+  } catch {
+    state.cueQuantize = true;
+  }
+
   state.cueBeatgridLevel = 35;
   try {
     const raw = localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_BEATGRID_LEVEL);

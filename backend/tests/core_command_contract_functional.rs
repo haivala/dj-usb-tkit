@@ -8,7 +8,7 @@ use backend::models::{
     DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
     GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbDeviceNameRequest, InitializeUsbRequest,
     ListTracksRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest, PlayTrackRequest,
-    PlaybackPreflightRequest, PruneUsbDeviceRequest, RefreshPlaylistExportStatusRequest,
+    PlaybackPreflightRequest, PruneUsbDeviceRequest, SetPlaybackMetronomeRequest, RefreshPlaylistExportStatusRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
     ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
     RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
@@ -838,6 +838,29 @@ fn stop_and_status_playback_native_report_idle_state_without_hardware() {
         let data = response.data.expect("pause/resume data");
         assert!(!data.playing);
         assert!(!data.paused);
+    }
+}
+
+#[test]
+fn set_playback_metronome_turns_on_only_with_a_usable_bpm() {
+    let root = tempdir().expect("temp root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+
+    let request = |enabled, bpm| SetPlaybackMetronomeRequest {
+        enabled,
+        first_beat_ms: Some(120.0),
+        bpm,
+    };
+    for (req, expected) in [
+        (request(true, Some(128.0)), true),
+        (request(true, None), false),
+        (request(true, Some(0.0)), false),
+        (request(false, Some(128.0)), false),
+    ] {
+        let response = backend.set_playback_metronome(req.clone());
+        assert!(response.ok, "metronome failed for {req:?}: {response:?}");
+        assert_eq!(response.data.expect("metronome data").enabled, expected, "{req:?}");
     }
 }
 

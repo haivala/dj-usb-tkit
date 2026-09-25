@@ -3626,6 +3626,23 @@ td button[data-action]:disabled,
   cursor: help;
 }
 .track-detail-hint-btn[hidden] { display: none; }
+/* Toolbar on/off tools (Q, metronome): accent-filled while on. */
+.track-detail-zoom .track-detail-tool {
+  flex: none;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.track-detail-tool svg { width: 16px; height: 16px; }
+.track-detail-zoom .track-detail-tool[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-on-accent);
+}
 .track-detail-grid-level {
   flex: none;
   display: inline-flex;
@@ -3700,6 +3717,12 @@ td button[data-action]:disabled,
 .track-detail-canvas.is-dragging-cue,
 .track-detail-canvas.is-dragging-cue .cue-marker { cursor: grabbing; }
 .cue-marker.is-dragging { z-index: 2; filter: brightness(1.25); }
+/* The cue ←/→ moves: a halo on its marker flag and a tint on its row. */
+.cue-marker.is-selected {
+  box-shadow: -2px 0 0 0 var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
 .track-detail-canvas .waveform-canvas-el { width: 100%; height: 100%; display: block; }
 .track-detail-canvas .waveform-playhead { display: none; }
 .track-detail-playhead {
@@ -3810,6 +3833,8 @@ html.is-ui-dragging * {
   -webkit-user-select: none !important;
   user-select: none !important;
 }
+/* Undo/Redo sit at the left of the Cancel/Save row. */
+.track-detail-history { display: flex; gap: 6px; margin-right: auto; }
 /* Outside click with unsaved edits: the modal stays, Save pulses. */
 #trackDetailSaveBtn.is-attention { animation: track-detail-save-pulse 600ms ease-out; }
 @keyframes track-detail-save-pulse {
@@ -3830,7 +3855,9 @@ html.is-ui-dragging * {
   grid-template-columns: 26px 72px 24px 1fr 28px;
   align-items: center;
   gap: 8px;
+  border-radius: 8px;
 }
+.cue-row.is-selected { background: var(--action-btn-hover-bg); box-shadow: 0 0 0 4px var(--action-btn-hover-bg); }
 .cue-row-play {
   width: 22px;
   height: 22px;

@@ -52,7 +52,8 @@ use crate::models::{
     InitializeUsbData, InitializeUsbRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
     MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
     PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
-    PlaybackPreflightRequest, PlaybackStatusData, Playlist, RelocateSourceRootData,
+    PlaybackMetronomeData, PlaybackPreflightRequest, PlaybackStatusData, Playlist,
+    SetPlaybackMetronomeRequest, RelocateSourceRootData,
     RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RenamePlaylistData,
     RenamePlaylistRequest, ReorderPlaylistTracksData, ReorderPlaylistTracksRequest,
@@ -754,6 +755,19 @@ impl BackendService {
         playback: &PlaybackController,
     ) -> BackendResult<PlaybackStatusData> {
         playback.status()
+    }
+
+    pub fn set_playback_metronome(
+        &self,
+        playback: &PlaybackController,
+        req: SetPlaybackMetronomeRequest,
+    ) -> BackendResult<PlaybackMetronomeData> {
+        let enabled = playback.set_metronome(
+            req.enabled,
+            req.first_beat_ms.unwrap_or(0.0),
+            req.bpm.unwrap_or(0.0),
+        );
+        Ok(PlaybackMetronomeData { enabled })
     }
 
     pub fn playback_preflight_native(

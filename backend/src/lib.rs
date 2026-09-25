@@ -4,6 +4,7 @@ pub mod edb;
 pub mod error;
 pub mod logging;
 pub mod metadata;
+pub mod metronome;
 pub mod models;
 pub mod pdb_reader;
 pub mod pdb_writer;

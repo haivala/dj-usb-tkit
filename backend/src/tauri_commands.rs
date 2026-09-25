@@ -32,7 +32,7 @@ use crate::models::{
     ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
     MergeUsbPlaceholderTracksData, PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData,
     PlayTrackRequest, PlaybackEventPayload, PlaybackPreflightData, PlaybackPreflightRequest,
-    PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData,
+    PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData, SetPlaybackMetronomeRequest, PruneUsbDeviceRequest, RelocateSourceRootData,
     RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
     RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
@@ -1241,6 +1241,18 @@ pub async fn get_playback_status_native(
     let commands = state.inner().clone();
     Ok(run_blocking_command("native playback status", move || {
         commands.get_playback_status_native()
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn set_playback_metronome(
+    state: State<'_, BackendCommands>,
+    request: SetPlaybackMetronomeRequest,
+) -> Result<ApiResponse<PlaybackMetronomeData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("playback metronome", move || {
+        commands.set_playback_metronome(request)
     })
     .await)
 }
