@@ -30,6 +30,8 @@
 
 ## Unreleased
 
+## 0.2.4
+
 - **New feature:** cue points can be dragged along the waveform in the cue
   editor to reposition them; hold Shift while dragging to snap to the beat
   grid. A plain click on a marker still plays from that cue.

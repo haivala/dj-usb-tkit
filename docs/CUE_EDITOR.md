@@ -191,4 +191,4 @@ Implementation anchors:
 - Editor behavior: `vanilla-ui/tests/e2e/track_detail.spec.mjs`
 - Cue save/export round-trip, playback-start cue: `backend/tests/user_flow_functional.rs`, `backend/src/service/cues.rs` (unit tests)
 - Metronome mixing: `backend/src/metronome.rs` (unit tests); command contract: `backend/tests/core_command_contract_functional.rs`
-- Hardware: `docs/CDJ_TEST_MATRIX.md` (`cue-points-and-edited-beatgrid`)
+- Hardware: `docs/CDJ_TEST_MATRIX.md` (`cue-points-and-edited-beatgrid`, `playback-start-position`)

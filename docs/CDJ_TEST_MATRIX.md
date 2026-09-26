@@ -31,7 +31,9 @@ on the hardware that originally showed them. The latest run (app 0.1.36,
 2026-09-02) re-validated every scenario on CDJ-2000NXS2, CDJ-3000, and the newly
 added CDJ-3000X; CDJ-2000NXS remains green on its last-tested versions with no
 regression reported. `cue-points-and-edited-beatgrid` is hardware-confirmed
-on CDJ-2000NX and CDJ-2000NXS2 for its first release in 0.2.0.
+on CDJ-2000NX and CDJ-2000NXS2 for its first release in 0.2.0, and re-confirmed
+on both on 0.2.4 together with the new `playback-start-position` scenario
+(the cue editor's "Playback starts at" choice).
 
 Additive export — adding tracks to a USB that was initialized by rekordbox,
 without wiping the existing library — has worked on hardware since the first
@@ -54,8 +56,10 @@ release (0.1.0) and has stayed working through every version since.
 | CDJ-3000X | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `more-than-16-tracks-fresh-usb-init` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
-| CDJ-2000NX | `cue-points-and-edited-beatgrid` | pass | 0.2.0 | 2026-09-11 | First hardware validation of the 0.2.0 cue editor; cues trigger at their saved positions. |
-| CDJ-2000NXS2 | `cue-points-and-edited-beatgrid` | pass | 0.2.0 | 2026-09-11 | First hardware validation of the 0.2.0 cue editor; cues trigger at their saved positions. |
+| CDJ-2000NX | `cue-points-and-edited-beatgrid` | pass | 0.2.4 | 2026-09-27 | First validated on 0.2.0; re-confirmed on 0.2.4 with the drag/quantize editor. |
+| CDJ-2000NX | `playback-start-position` | pass | 0.2.4 | 2026-09-27 | First hardware validation; track loads at the chosen playback start. |
+| CDJ-2000NXS2 | `cue-points-and-edited-beatgrid` | pass | 0.2.4 | 2026-09-27 | First validated on 0.2.0; re-confirmed on 0.2.4 with the drag/quantize editor. |
+| CDJ-2000NXS2 | `playback-start-position` | pass | 0.2.4 | 2026-09-27 | First hardware validation; track loads at the chosen playback start. |
 
 ## Validation History
 
@@ -98,6 +102,10 @@ Current Status table above is a summary of its latest rows.
 | CDJ-3000X | 1.31 | 0.1.36 | `more-than-16-tracks-fresh-usb-init` | Initialize a fresh USB, export a playlist with more than 16 tracks, insert USB, database mount | pass | hardware | 2026-09-02 | maintainer | First validation on CDJ-3000X. |
 | CDJ-2000NX | 1.44 | 0.2.0 | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | pass | hardware | 2026-09-11 | maintainer | First hardware validation of the 0.2.0 cue editor. Cues trigger at their saved positions. |
 | CDJ-2000NXS2 | 1.82 | 0.2.0 | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | pass | hardware | 2026-09-11 | maintainer | First hardware validation of the 0.2.0 cue editor. Cues trigger at their saved positions. |
+| CDJ-2000NX | 1.44 | 0.2.4 | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | pass | hardware | 2026-09-27 | maintainer | Cue editor works; cues trigger at their saved positions. |
+| CDJ-2000NX | 1.44 | 0.2.4 | `playback-start-position` | Set "Playback starts at" in the cue editor, export, USB insert, database mount, track load, check the load position | pass | hardware | 2026-09-27 | maintainer | First hardware validation of the playback-start editor. Track loads at the chosen start position. |
+| CDJ-2000NXS2 | 1.82 | 0.2.4 | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue | pass | hardware | 2026-09-27 | maintainer | Cue editor works; cues trigger at their saved positions. |
+| CDJ-2000NXS2 | 1.82 | 0.2.4 | `playback-start-position` | Set "Playback starts at" in the cue editor, export, USB insert, database mount, track load, check the load position | pass | hardware | 2026-09-27 | maintainer | First hardware validation of the playback-start editor. Track loads at the chosen start position. |
 
 ## Known Issues
 
