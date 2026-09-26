@@ -75,17 +75,19 @@ drive selection from being rendered against a newer selected drive.
 - `relocate_source_root`
 - `get_tracks_by_ids_with_previews`
 - `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform }` for
-  the track-detail modal (cue points + beat-grid editing). `detailWaveform` is
+  the cue editor (see `docs/CUE_EDITOR.md`). `detailWaveform` is
   the **base64** of the raw PWV5 colour-detail waveform payload from the `.EXT`
   (2 bytes/entry, BE u16; absent when the track has no analysis). Cues are
   ordered by `sortOrder`.
-- `save_track_analysis_edits` — `{ trackId, firstBeatMs?, cues? }` → atomically
-  replaces the track's cue list (`cues: Some([...])`, max 8) and/or updates the
-  beat-grid anchor (`firstBeatMs: Some(ms)`), rewrites the cached local ANLZ
-  bundle, and clears `last_exported_*` on every playlist containing the track.
-  A `null` field is left unchanged. `cues[]` entries are
-  `{ positionMs, colorId?, name? }`; each becomes a memory point + a hot-cue pad
-  on export.
+- `save_track_analysis_edits` — `{ trackId, firstBeatMs?, cues?, bpm?, key? }` →
+  atomically replaces the track's cue list (`cues: Some([...])`, max 8 hot cues)
+  and/or updates the beat-grid anchor (`firstBeatMs: Some(ms)`), BPM and key,
+  rewrites the cached local ANLZ bundle, and clears `last_exported_*` on every
+  playlist containing the track. A `null` field is left unchanged. `cues[]`
+  entries are `{ positionMs, colorId?, name?, playbackStart? }`; each hot cue
+  becomes a memory point + a hot-cue pad on export. At most one entry may have
+  `playbackStart: true`: the memory-only playback-start cue (no pad, colour or
+  name, never after the first hot cue, dropped without hot cues; outside the 8).
 - `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw }` → reads
   `{ firstBeatMs, cues, detailWaveform }` straight off an **on-USB** ANLZ bundle
   for the cue editor opened from a USB playlist / history row (no local `tracks`
@@ -218,8 +220,14 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
 - `play_resolved_track`
 - `play_track_native`
 - `stop_playback_native`
+- `pause_playback_native` / `resume_playback_native` — hold the loaded track at
+  its position / continue it; `paused` on the returned status and events.
 - `get_playback_status_native`
 - `playback_preflight_native`
+- `set_playback_metronome` — `{ enabled, firstBeatMs?, bpm? }` → `{ enabled }`.
+  The engine mixes a click on every grid beat (accented on bar starts) into
+  whatever is playing, live, until disabled. Stays off (`enabled: false`)
+  without a usable BPM. Used by the cue editor; see `docs/CUE_EDITOR.md`.
 
 ### App
 

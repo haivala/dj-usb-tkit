@@ -220,9 +220,13 @@ grid — including on the "reuse an on-USB bundle" retain path
 (`ensure_analysis_bundle_ppth`). **Each cue point is written twice**: a memory
 point (`PCPT`/`PCP2` with `hot_cue = 0`) and a hot-cue pad (`hot_cue = 1..8` by
 position order), so a CDJ surfaces it both in the CALL/memory list and on a pad.
+The optional **playback-start cue** (`is_playback_start`) is the exception: it
+is written once, as a memory point only, before the hot cues, so the CDJ loads
+the track there instead of on cue A. It is dropped when it coincides with a hot
+cue (see `docs/CUE_EDITOR.md`).
 In the eDB, `write_edb_cues_for_content` replaces the `cue` rows for the track's
 `content_id` with **two rows per cue point** (`kind = 0` memory /
-`kind = 1` hot; `inUsec = position_ms × 1000`, `colorTableIndex` = palette index
+`kind = 1` hot; one `kind = 0` row for the playback-start cue; `inUsec = position_ms × 1000`, `colorTableIndex` = palette index
 for the hot row / `-1` for memory; MPEG/decoder seek fields left `0` — the
 player recomputes them), bumps `content.cueUpdateCount`, and sets
 `isHotCueAutoLoadOn`. `hotCueBankList` is intentionally left empty. In the PDB

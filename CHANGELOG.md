@@ -83,6 +83,10 @@
   follow seeks and grid edits live, and need no webview audio (WebKitGTK
   without GStreamer's `autoaudiosink` has none). Off each time the editor opens
   and when it closes.
+- **Chore:** new `docs/CUE_EDITOR.md` covering the cue editor (beat grid,
+  cues, Quantize, playback start, keyboard shortcuts, metronome, undo, saving);
+  `docs/COMMANDS.md`, `docs/APP_DATA_MODEL.md` and `docs/USB_EXPORT.md` now
+  document the playback-start cue, `set_playback_metronome` and pause/resume.
 - **Chore:** the "Analyze Missing" e2e test no longer flakes under parallel
   load: its mock analysis now waits for the test instead of a 200 ms timer the
   test's check could miss.

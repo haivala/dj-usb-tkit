@@ -71,7 +71,9 @@ Playback resolution is source-aware:
 
 This prevents the common failure mode of matching the wrong local file by loose metadata while still preserving USB playback for unresolved tracks. It also lets older playlist entries that still reference stale USB placeholder rows self-heal on next playback when a genuine local match exists.
 
-Preflight checks (`playback_preflight_native`) and status queries (`get_playback_status_native`) allow the UI to render actionable state before or during transport actions. Stop behavior is explicit via `stop_playback_native`, which normalizes cleanup in both backend and UI.
+Preflight checks (`playback_preflight_native`) and status queries (`get_playback_status_native`) allow the UI to render actionable state before or during transport actions. Stop behavior is explicit via `stop_playback_native`, which normalizes cleanup in both backend and UI. `pause_playback_native` / `resume_playback_native` hold and continue the loaded track in the engine.
+
+The engine can also mix metronome clicks on a beat grid into the playing track (`set_playback_metronome`, `backend/src/metronome.rs`). The cue editor uses it to check a grid by ear; see `docs/CUE_EDITOR.md`.
 
 Implementation anchors:
 

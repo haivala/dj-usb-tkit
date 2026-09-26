@@ -32,6 +32,7 @@ written as *both* a memory point and a hot-cue pad (A–H by position order).
 | `color_id` | palette index (`service::cues::HOTCUE_PALETTE`, 1–8); defaults to green |
 | `name` | optional comment/label |
 | `sort_order` | insert order |
+| `is_playback_start` | `1` for the track's optional playback-start cue: a memory point only (no pad, colour or name), never after the first hot cue, not counted in the 8. `TrackCue.playbackStart` on the wire. See `docs/CUE_EDITOR.md`. |
 
 The beat-grid anchor is `tracks.first_beat_ms` (already present). A companion
 `tracks.first_beat_ms_source` column (`'estimated'` default, `'user'` once
@@ -41,7 +42,7 @@ with `estimate_first_beat_ms`.
 Cues and the first beat are read via `get_track_detail` (returns `TrackDetail`
 = `Track` + `firstBeatMs` + ordered `cues` + `detailWaveform`, the raw PWV5
 colour-detail waveform for the modal) and replaced atomically via
-`save_track_analysis_edits` (`cues: [{ positionMs, colorId, name }]`).
+`save_track_analysis_edits` (`cues: [{ positionMs, colorId, name, playbackStart }]`).
 `TrackCue` is **not** on the grid `Track` model — only the per-track modal
 fetches it. On save the local ANLZ cache (`.DAT`/`.EXT` at `waveform_peaks_path`)
 is rewritten in place (`PQTZ`/`PQT2` + `PCOB`/`PCPT` + `PCO2`/`PCP2`, each cue

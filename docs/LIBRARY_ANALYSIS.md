@@ -93,7 +93,7 @@ The beat-grid anchor `first_beat_ms` is estimated at analysis time
 (`estimate_first_beat_ms`) but is **user-editable** from the track-detail
 ("Cues") modal alongside cue points. Once edited, `first_beat_ms_source` flips
 to `'user'` and re-analysis keeps the user's value instead of re-estimating.
-See `docs/APP_DATA_MODEL.md` (TrackCue) and `docs/USB_EXPORT.md`.
+See `docs/CUE_EDITOR.md`, `docs/APP_DATA_MODEL.md` (TrackCue) and `docs/USB_EXPORT.md`.
 
 Waveform output has two resolutions. The frontend receives a downsampled preview (`2400` bins), but local `DAT/EXT/2EX` cache files are generated from detail-resolution waveform data: `max(2400, ceil(duration_seconds * 150) + 4)`. This keeps `PWV3`, `PWV5`, and `PWV7` dense enough for CDJ detailed waveform views while avoiding large UI payloads. See `docs/WAVEFORMS.md`.
 

@@ -17,6 +17,7 @@ This is the documentation set for DJ USB Tkit.
 
 - `docs/LIBRARY_ANALYSIS.md` - library scanning, analysis, and waveform behavior
 - `docs/PLAYLISTS_PLAYBACK.md` - playlist workflows and native playback behavior
+- `docs/CUE_EDITOR.md` - cue points, beat grid, playback start, keyboard shortcuts, metronome
 - `docs/USB_IMPORT.md` - USB read/merge behavior and hydration model
 - `docs/USB_EXPORT.md` - USB export behavior, mirror/additive sync modes, and strict parity expectations
 - `docs/DIAGNOSTICS_REPAIRS.md` - diagnostics scope, reports, and fix workflows
