@@ -1,4 +1,24 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DJ_USB_Tkit"
+  "productName": "DJ_USB_Tkit",
+  "bundle": {
+    "category": "Music",
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml": "art.chiph.djusbtkit.metainfo.xml"
+        }
+      },
+      "deb": {
+        "files": {
+          "/usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml": "art.chiph.djusbtkit.metainfo.xml"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml": "art.chiph.djusbtkit.metainfo.xml"
+        }
+      }
+    }
+  }
 }

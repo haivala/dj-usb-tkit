@@ -182,6 +182,8 @@ Linux packaging notes:
 
 - The AppImage bundles most GUI/runtime dependencies needed by the Tauri/WebKit stack (for example `webkit2gtk`, `gtk-3`, `libsoup`, `javascriptcoregtk`, `glib`, `gio`, `pango`, and `cairo`).
 - Core system libraries remain host-provided, following normal AppImage practice. This includes libraries such as `libc`, `libm`, `libpthread`, `libstdc++`, `libX11`, and `libasound`.
+- Release builds are made on Ubuntu 22.04, so the AppImage needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, or later).
+- The AppImage, deb, and rpm include AppStream metadata (`usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml`) for software centers and AppImage managers.
 - The Tauri UI does not require Node at runtime.
 
 Examples:

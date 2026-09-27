@@ -56,6 +56,8 @@ Windows note: `scripts/windows-build-setup.ps1` installs all prerequisites (Visu
 
 Linux note: AppImage builds require `linuxdeploy` available on `PATH`.
 
+Linux release builds (`scripts/linux-release-docker.sh`, also used by the release workflow) run in an Ubuntu 22.04 container (`scripts/Dockerfile.linux-build`). The container sets the glibc floor: the AppImage runs on glibc 2.35 or newer. Move the base image up only when 22.04 leaves standard support (April 2027).
+
 Runtime notes:
 
 - default analysis engine is Stratum

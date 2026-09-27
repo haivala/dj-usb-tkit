@@ -39,6 +39,14 @@
 
 ## Unreleased
 
+- **Fix:** the Linux AppImage runs on Ubuntu 22.04, Linux Mint 21, and other
+  distros with glibc 2.35. Release builds now use an Ubuntu 22.04 base instead
+  of Debian 12, which raised the minimum to glibc 2.36.
+- **Improvement:** the AppImage, deb, and rpm include AppStream metadata, so
+  software centers and AppImage managers (Gear Lever, AppImageLauncher) show a
+  description and screenshot. The app is also listed under Audio/Video instead
+  of having no desktop category.
+
 ## 0.2.5
 
 **Severity:** feature

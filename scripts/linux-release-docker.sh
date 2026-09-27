@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Linux release inside a Docker container (Debian Bookworm, glibc 2.36)
+# Build Linux release inside a Docker container (Ubuntu 22.04, glibc 2.35)
 # to ensure broad compatibility across distros.
 #
 # This script is intentionally isolated from scripts/release.sh so the Docker
@@ -77,8 +77,8 @@ HOST_GID="$(id -g)"
 docker run --rm \
   -v "$ROOT_DIR:/project" \
   -v "$HOST_LOG_DIR:/host-logs" \
-  -v "$CARGO_REGISTRY_CACHE_DIR:/root/.cargo/registry" \
-  -v "$CARGO_GIT_CACHE_DIR:/root/.cargo/git" \
+  -v "$CARGO_REGISTRY_CACHE_DIR:/usr/local/cargo/registry" \
+  -v "$CARGO_GIT_CACHE_DIR:/usr/local/cargo/git" \
   -v "$NPM_CACHE_DIR:/root/.npm" \
   --privileged \
   -w /project \
@@ -91,8 +91,8 @@ docker run --rm \
   bash -lc '
     set -euo pipefail
 
-    export CARGO_HOME="${CARGO_HOME:-/root/.cargo}"
-    export RUSTUP_HOME="${RUSTUP_HOME:-/root/.rustup}"
+    export CARGO_HOME="${CARGO_HOME:-/usr/local/cargo}"
+    export RUSTUP_HOME="${RUSTUP_HOME:-/usr/local/rustup}"
     export PATH="$CARGO_HOME/bin:/usr/local/cargo/bin:$PATH"
 
     UI_DIR="/project/vanilla-ui"
@@ -270,8 +270,8 @@ docker run --rm \
       /project/target \
       /project/desktop/src-tauri/target \
       /project/vanilla-ui/dist \
-      /root/.cargo/registry \
-      /root/.cargo/git \
+      /usr/local/cargo/registry \
+      /usr/local/cargo/git \
       /root/.npm \
       2>/dev/null || true
   '
