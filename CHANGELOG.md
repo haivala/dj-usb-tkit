@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.2.6
+
 - **Fix:** the Linux AppImage runs on Ubuntu 22.04, Linux Mint 21, and other
   distros with glibc 2.35. Release builds now use an Ubuntu 22.04 base instead
   of Debian 12, which raised the minimum to glibc 2.36.
