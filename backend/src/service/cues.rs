@@ -155,13 +155,17 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
             playback_start: true,
         });
     }
-    out.extend(entries.take(MAX_HOT_CUES as usize).map(|(position_ms, c)| TrackCue {
-        id: Uuid::now_v7().to_string(),
-        position_ms,
-        color_id: c.color_id,
-        name: c.name,
-        playback_start: false,
-    }));
+    out.extend(
+        entries
+            .take(MAX_HOT_CUES as usize)
+            .map(|(position_ms, c)| TrackCue {
+                id: Uuid::now_v7().to_string(),
+                position_ms,
+                color_id: c.color_id,
+                name: c.name,
+                playback_start: false,
+            }),
+    );
     out
 }
 
@@ -191,14 +195,46 @@ pub struct HotcuePaletteEntry {
 
 /// The colours the track-detail modal offers for cues (verified on a CDJ).
 pub const HOTCUE_PALETTE: &[HotcuePaletteEntry] = &[
-    HotcuePaletteEntry { id: 1, rgb: (0xDE, 0x44, 0xCF), color_code: 1 }, // pink
-    HotcuePaletteEntry { id: 2, rgb: (0xE1, 0x24, 0x24), color_code: 2 }, // red
-    HotcuePaletteEntry { id: 3, rgb: (0xE9, 0x7A, 0x1E), color_code: 3 }, // orange
-    HotcuePaletteEntry { id: 4, rgb: (0xE3, 0xC7, 0x1B), color_code: 4 }, // yellow
-    HotcuePaletteEntry { id: 5, rgb: (0x4E, 0xB6, 0x48), color_code: 5 }, // green
-    HotcuePaletteEntry { id: 6, rgb: (0x1F, 0xAD, 0xC4), color_code: 6 }, // aqua
-    HotcuePaletteEntry { id: 7, rgb: (0x2A, 0x5B, 0xD8), color_code: 7 }, // blue
-    HotcuePaletteEntry { id: 8, rgb: (0x8A, 0x3F, 0xD1), color_code: 8 }, // purple
+    HotcuePaletteEntry {
+        id: 1,
+        rgb: (0xDE, 0x44, 0xCF),
+        color_code: 1,
+    }, // pink
+    HotcuePaletteEntry {
+        id: 2,
+        rgb: (0xE1, 0x24, 0x24),
+        color_code: 2,
+    }, // red
+    HotcuePaletteEntry {
+        id: 3,
+        rgb: (0xE9, 0x7A, 0x1E),
+        color_code: 3,
+    }, // orange
+    HotcuePaletteEntry {
+        id: 4,
+        rgb: (0xE3, 0xC7, 0x1B),
+        color_code: 4,
+    }, // yellow
+    HotcuePaletteEntry {
+        id: 5,
+        rgb: (0x4E, 0xB6, 0x48),
+        color_code: 5,
+    }, // green
+    HotcuePaletteEntry {
+        id: 6,
+        rgb: (0x1F, 0xAD, 0xC4),
+        color_code: 6,
+    }, // aqua
+    HotcuePaletteEntry {
+        id: 7,
+        rgb: (0x2A, 0x5B, 0xD8),
+        color_code: 7,
+    }, // blue
+    HotcuePaletteEntry {
+        id: 8,
+        rgb: (0x8A, 0x3F, 0xD1),
+        color_code: 8,
+    }, // purple
 ];
 
 /// Default cue colour index applied when the UI omits one.
@@ -283,10 +319,10 @@ pub fn split_playback_start(cues: &[TrackCue]) -> (Vec<&TrackCue>, Option<&Track
     let mut hot: Vec<&TrackCue> = cues.iter().filter(|c| !c.playback_start).collect();
     hot.sort_by_key(|c| c.position_ms);
     hot.truncate(MAX_HOT_CUES as usize);
-    let start = cues
-        .iter()
-        .find(|c| c.playback_start)
-        .filter(|s| hot.first().is_some_and(|first| s.position_ms < first.position_ms));
+    let start = cues.iter().find(|c| c.playback_start).filter(|s| {
+        hot.first()
+            .is_some_and(|first| s.position_ms < first.position_ms)
+    });
     (hot, start)
 }
 
@@ -414,7 +450,9 @@ fn normalize_cues(
         let color_id = match input.color_id {
             Some(id) if is_valid_color_id(id) => Some(id),
             Some(id) => {
-                return Err(BackendError::Validation(format!("unknown cue colorId {id}")));
+                return Err(BackendError::Validation(format!(
+                    "unknown cue colorId {id}"
+                )));
             }
             None => Some(DEFAULT_HOTCUE_COLOR_ID),
         };
@@ -494,7 +532,10 @@ fn apply_local_analysis_edits_tx(
     }
 
     if let Some(cues) = cues {
-        tx.execute("DELETE FROM track_cues WHERE track_id = ?1", params![track_id])?;
+        tx.execute(
+            "DELETE FROM track_cues WHERE track_id = ?1",
+            params![track_id],
+        )?;
         for (index, cue) in cues.iter().enumerate() {
             tx.execute(
                 "INSERT INTO track_cues
@@ -794,8 +835,8 @@ impl BackendService {
                 "USB library database (exportLibrary.db) not found or unreadable".to_string(),
             )
         })?;
-        let content_id = find_content_id_by_path(&edb_conn, &req.usb_media_path_raw)?
-            .ok_or_else(|| {
+        let content_id =
+            find_content_id_by_path(&edb_conn, &req.usb_media_path_raw)?.ok_or_else(|| {
                 BackendError::NotFound(format!(
                     "track not in this USB's library database: {}",
                     req.usb_media_path_raw
@@ -941,8 +982,7 @@ impl BackendService {
         // 2. Authoritative link row for this device + media path.
         let media_raw = req.usb_media_path_raw.trim();
         if !media_raw.is_empty() {
-            let root_key =
-                super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
+            let root_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
             let device_id: Option<String> = conn
                 .query_row(
                     "SELECT id FROM usb_devices WHERE root_path_key = ?1",
@@ -1136,9 +1176,15 @@ mod tests {
 
     #[test]
     fn normalize_key_input_rejects_non_canonical_values() {
-        assert!(normalize_key_input("Eb").is_err(), "flat spelling not in KEY_OPTIONS");
+        assert!(
+            normalize_key_input("Eb").is_err(),
+            "flat spelling not in KEY_OPTIONS"
+        );
         assert!(normalize_key_input("").is_err(), "empty key");
-        assert!(normalize_key_input("8B").is_err(), "camelot notation not in KEY_OPTIONS");
+        assert!(
+            normalize_key_input("8B").is_err(),
+            "camelot notation not in KEY_OPTIONS"
+        );
     }
 
     #[test]
@@ -1167,7 +1213,10 @@ mod tests {
         assert_eq!(groups[0].keys.len(), 12);
         assert_eq!(groups[0].keys[..3], ["C", "C#", "D"]);
         assert_eq!(groups[1].keys.last().map(String::as_str), Some("Bm"));
-        let flat: Vec<&str> = groups.iter().flat_map(|g| g.keys.iter().map(String::as_str)).collect();
+        let flat: Vec<&str> = groups
+            .iter()
+            .flat_map(|g| g.keys.iter().map(String::as_str))
+            .collect();
         assert_eq!(flat, KEY_OPTIONS);
     }
 
@@ -1255,9 +1304,11 @@ mod tests {
 
     #[test]
     fn normalize_pulls_playback_start_back_to_the_earliest_hot_cue() {
-        let out =
-            normalize_cues(&[input(4000, None), start_input(9000), input(2000, None)], None)
-                .expect("ok");
+        let out = normalize_cues(
+            &[input(4000, None), start_input(9000), input(2000, None)],
+            None,
+        )
+        .expect("ok");
         assert!(out[0].playback_start);
         assert_eq!(out[0].position_ms, 2000);
     }
@@ -1290,7 +1341,9 @@ mod tests {
         // Hot slots count hot cues only.
         let hots: Vec<_> = anlz.iter().filter(|c| c.hot_cue != 0).collect();
         assert_eq!(
-            hots.iter().map(|c| (c.position_ms, c.hot_cue)).collect::<Vec<_>>(),
+            hots.iter()
+                .map(|c| (c.position_ms, c.hot_cue))
+                .collect::<Vec<_>>(),
             [(3000, 1), (5000, 2)]
         );
     }
@@ -1298,7 +1351,11 @@ mod tests {
     #[test]
     fn anlz_cues_skips_playback_start_on_a_hot_cue_or_without_hot_cues() {
         let on_hot = anlz_cues_from_track_cues(&[cue("c1", 3000, Some(2)), start_cue(3000)]);
-        assert_eq!(on_hot.len(), 2, "the hot cue's memory point already sits there");
+        assert_eq!(
+            on_hot.len(),
+            2,
+            "the hot cue's memory point already sits there"
+        );
         assert!(anlz_cues_from_track_cues(&[start_cue(1000)]).is_empty());
     }
 

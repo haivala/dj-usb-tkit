@@ -228,7 +228,10 @@ fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> DiagSection {
             ),
             info(
                 "Cross-check",
-                format!("t00 tracks {}, t08 entries {}", cdj.t00_tracks, cdj.t08_entries),
+                format!(
+                    "t00 tracks {}, t08 entries {}",
+                    cdj.t00_tracks, cdj.t08_entries
+                ),
             ),
             info("History pointers", history_pointers),
             info("Primitive signal", t19_line),
@@ -3644,7 +3647,13 @@ mod tests {
         d.dictionary_id_issue_tracks = 2;
         assert_eq!(
             parity_issue_labels(&d),
-            vec!["+PDB 2", "id mismatch", "sort mismatch", "PDB gaps 1", "dict issues 2"]
+            vec![
+                "+PDB 2",
+                "id mismatch",
+                "sort mismatch",
+                "PDB gaps 1",
+                "dict issues 2"
+            ]
         );
     }
     use crate::models::{DiagStatus, UsbTrack};

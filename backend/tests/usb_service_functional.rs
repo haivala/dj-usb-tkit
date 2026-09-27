@@ -11,9 +11,8 @@ use backend::error::ErrorCode;
 use backend::models::{
     AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbTracksRequest, InitializeUsbRequest,
-    InspectUsbTrackItem,
-    InspectUsbTrackRequest, InspectUsbTracksRequest, ScanLibraryRequest, SearchTracksRequest,
-    ValidateUsbRootRequest,
+    InspectUsbTrackItem, InspectUsbTrackRequest, InspectUsbTracksRequest, ScanLibraryRequest,
+    SearchTracksRequest, ValidateUsbRootRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;

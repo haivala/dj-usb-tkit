@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::path::Path;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -1169,7 +1169,10 @@ mod tests {
     fn send_command_reports_worker_unavailable_when_command_channel_is_closed() {
         let (tx, rx) = mpsc::channel();
         drop(rx);
-        let controller = PlaybackController { tx, metronome: Arc::default() };
+        let controller = PlaybackController {
+            tx,
+            metronome: Arc::default(),
+        };
 
         let err = controller
             .send_command(
@@ -1185,7 +1188,10 @@ mod tests {
     #[test]
     fn send_command_reports_timeout_when_worker_does_not_reply() {
         let (tx, _rx) = mpsc::channel();
-        let controller = PlaybackController { tx, metronome: Arc::default() };
+        let controller = PlaybackController {
+            tx,
+            metronome: Arc::default(),
+        };
 
         let err = controller
             .send_command(

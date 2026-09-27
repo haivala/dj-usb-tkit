@@ -44,23 +44,24 @@ use crate::logging::{self, Level};
 use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidateResolution,
     AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData,
-    AddTracksToPlaylistRequest, BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData,
-    CheckSourceRootsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    CreatePlaylistData, CreatePlaylistRequest, DedupeMode, DeletePlaylistData,
-    DeletePlaylistRequest, DetectExternalMasterDbData, GetFrontendSettingsData,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData, GetTracksByIdsRequest,
-    InitializeUsbData, InitializeUsbRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    AddTracksToPlaylistRequest, BrowseSourceFilesData, BrowseSourceFilesRequest,
+    CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
+    DedupeMode, DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData,
+    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
+    GetTracksByIdsRequest, InitializeUsbData, InitializeUsbRequest, ListMatchingTrackIdsData,
+    ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
     MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackPreflightData,
-    PlaybackMetronomeData, PlaybackPreflightRequest, PlaybackStatusData, Playlist,
-    SetPlaybackMetronomeRequest, RelocateSourceRootData,
-    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
-    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RenamePlaylistData,
-    RenamePlaylistRequest, ReorderPlaylistTracksData, ReorderPlaylistTracksRequest,
-    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ResolveTrackIdentityData,
-    ResolveTrackIdentityRequest, ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest,
-    SearchTracksData, SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track, WarningEntry,
+    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackMetronomeData,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, Playlist,
+    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
+    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
+    ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ResolvePlaybackSourceData,
+    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
+    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
+    SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SetPlaybackMetronomeRequest, SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData,
+    Track, WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -370,7 +371,11 @@ pub(crate) fn has_core_analysis_fields(
 }
 
 fn track_has_core_analysis_for_source_status(track: &Track) -> bool {
-    has_core_analysis_fields(track.waveform_peaks_path.as_deref(), track.bpm, track.duration_ms)
+    has_core_analysis_fields(
+        track.waveform_peaks_path.as_deref(),
+        track.bpm,
+        track.duration_ms,
+    )
 }
 
 fn non_empty_db_value(value: &str) -> Option<&str> {
@@ -3001,7 +3006,10 @@ impl BackendService {
                 .cloned()
                 .collect();
             let insert_at = match req.before_track_id.as_deref() {
-                Some(before) => order.iter().position(|id| id == before).unwrap_or(order.len()),
+                Some(before) => order
+                    .iter()
+                    .position(|id| id == before)
+                    .unwrap_or(order.len()),
                 None => order.len(),
             };
             order.insert(insert_at, move_id.to_string());
@@ -3020,7 +3028,8 @@ impl BackendService {
                     ORDER BY pt.position ASC
                     "#,
                 )?;
-                let rows = stmt.query_map(params![req.playlist_id], |row| row_to_track(row, true))?;
+                let rows =
+                    stmt.query_map(params![req.playlist_id], |row| row_to_track(row, true))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             };
             sort_tracks(&mut tracks, req.sort_by.as_deref(), req.sort_dir.as_deref());
@@ -3475,8 +3484,7 @@ pub(crate) fn row_to_track(
     let bpm: Option<f64> = row.get(5)?;
     let duration_ms: Option<u64> = row.get(13)?;
     // Pure DB-column math, correct for every caller (no separate pass).
-    let analysis_ready =
-        has_core_analysis_fields(waveform_peaks_path.as_deref(), bpm, duration_ms);
+    let analysis_ready = has_core_analysis_fields(waveform_peaks_path.as_deref(), bpm, duration_ms);
 
     let format_ext: Option<String> = row
         .get::<_, Option<String>>(9)?
@@ -3617,10 +3625,7 @@ fn best_candidate(candidates: Vec<Track>, req: &ResolvePlaybackSourceRequest) ->
 /// missing bpm/duration treated as 0, `artist` tie-broken by title). Unknown
 /// or absent `sort_by` leaves the caller's order untouched.
 fn sort_tracks(items: &mut [Track], sort_by: Option<&str>, sort_dir: Option<&str>) {
-    let Some(key) = sort_by
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
+    let Some(key) = sort_by.map(str::trim).filter(|value| !value.is_empty()) else {
         return;
     };
     let desc = matches!(sort_dir.map(str::trim), Some("desc"));
@@ -4127,7 +4132,12 @@ mod tests {
                     Some("/PIONEER/USBANLZ/a/ANLZ0000.DAT"),
                     Some("/PIONEER/Artwork/a/COVER.JPG"),
                 ),
-                (new_nulls_path.to_str().unwrap(), "Inserted Nulls", None, None),
+                (
+                    new_nulls_path.to_str().unwrap(),
+                    "Inserted Nulls",
+                    None,
+                    None,
+                ),
                 (
                     new_missing_assets_path.to_str().unwrap(),
                     "Inserted Missing Assets",
@@ -4162,7 +4172,10 @@ mod tests {
         assert_eq!(result.indexed, 2);
         assert_eq!(result.updated, 1);
         assert_eq!(result.removed, 1);
-        assert_eq!(result.not_found, vec![removed_path.to_string_lossy().to_string()]);
+        assert_eq!(
+            result.not_found,
+            vec![removed_path.to_string_lossy().to_string()]
+        );
         let warning_codes = result
             .warnings
             .iter()
@@ -4185,7 +4198,13 @@ mod tests {
         }
 
         let conn = service.db.connect().expect("service db");
-        let updated: (String, String, Option<String>, Option<String>, Option<String>) = conn
+        let updated: (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = conn
             .query_row(
                 "SELECT title, artist, tonality, waveform_peaks_path, artwork_path
                    FROM tracks WHERE id = 'existing-track'",
@@ -4205,7 +4224,12 @@ mod tests {
         assert_eq!(updated.1, "Fixture Artist");
         assert_eq!(updated.2.as_deref(), Some("8A"));
         assert_eq!(updated.3.as_deref(), Some(anlz_path.to_str().unwrap()));
-        assert!(updated.4.as_deref().is_some_and(|path| path.ends_with(".JPG")));
+        assert!(
+            updated
+                .4
+                .as_deref()
+                .is_some_and(|path| path.ends_with(".JPG"))
+        );
 
         let removed_count: i64 = conn
             .query_row(
@@ -4476,16 +4500,40 @@ mod tests {
 
     #[test]
     fn has_core_analysis_fields_requires_waveform_bpm_and_positive_duration() {
-        assert!(has_core_analysis_fields(Some("/data/a.dat"), Some(120.0), Some(200_000)));
+        assert!(has_core_analysis_fields(
+            Some("/data/a.dat"),
+            Some(120.0),
+            Some(200_000)
+        ));
         // missing / blank waveform path
         assert!(!has_core_analysis_fields(None, Some(120.0), Some(200_000)));
-        assert!(!has_core_analysis_fields(Some("   "), Some(120.0), Some(200_000)));
+        assert!(!has_core_analysis_fields(
+            Some("   "),
+            Some(120.0),
+            Some(200_000)
+        ));
         // non-positive bpm
-        assert!(!has_core_analysis_fields(Some("/data/a.dat"), Some(0.0), Some(200_000)));
-        assert!(!has_core_analysis_fields(Some("/data/a.dat"), None, Some(200_000)));
+        assert!(!has_core_analysis_fields(
+            Some("/data/a.dat"),
+            Some(0.0),
+            Some(200_000)
+        ));
+        assert!(!has_core_analysis_fields(
+            Some("/data/a.dat"),
+            None,
+            Some(200_000)
+        ));
         // non-positive / missing duration
-        assert!(!has_core_analysis_fields(Some("/data/a.dat"), Some(120.0), Some(0)));
-        assert!(!has_core_analysis_fields(Some("/data/a.dat"), Some(120.0), None));
+        assert!(!has_core_analysis_fields(
+            Some("/data/a.dat"),
+            Some(120.0),
+            Some(0)
+        ));
+        assert!(!has_core_analysis_fields(
+            Some("/data/a.dat"),
+            Some(120.0),
+            None
+        ));
     }
 
     #[test]
@@ -4973,11 +5021,22 @@ mod tests {
         let (_dir, service) = test_service();
         let conn = service.db.connect().expect("connect");
         for (id, title) in [("t1", "Charlie"), ("t2", "Alpha"), ("t3", "Bravo")] {
-            insert_full_track(&conn, id, title, "Artist", &format!("/m/{id}.mp3"), None, None, false);
+            insert_full_track(
+                &conn,
+                id,
+                title,
+                "Artist",
+                &format!("/m/{id}.mp3"),
+                None,
+                None,
+                false,
+            );
         }
         drop(conn);
         let playlist = service
-            .create_playlist(CreatePlaylistRequest { name: "PL".to_string() })
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
             .expect("create playlist");
         let pid = playlist.playlist_id.clone();
         service
@@ -4997,7 +5056,10 @@ mod tests {
             })
             .expect("page 1");
         assert_eq!(page1.total, 3);
-        assert_eq!(page1.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(), ["t1", "t2"]);
+        assert_eq!(
+            page1.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+            ["t1", "t2"]
+        );
         assert!(page1.has_more);
         let page2 = service
             .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -5007,7 +5069,10 @@ mod tests {
                 ..Default::default()
             })
             .expect("page 2");
-        assert_eq!(page2.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(), ["t3"]);
+        assert_eq!(
+            page2.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+            ["t3"]
+        );
         assert!(!page2.has_more);
 
         // Server-side title sort spans the whole playlist.
@@ -5019,7 +5084,11 @@ mod tests {
             })
             .expect("sorted");
         assert_eq!(
-            sorted.items.iter().map(|t| t.title.clone()).collect::<Vec<_>>(),
+            sorted
+                .items
+                .iter()
+                .map(|t| t.title.clone())
+                .collect::<Vec<_>>(),
             ["Alpha", "Bravo", "Charlie"]
         );
 
@@ -5199,13 +5268,21 @@ mod tests {
     fn reorder_playlist_tracks_sort_commit_mode_orders_the_whole_playlist() {
         let (_dir, service) = test_service();
         let conn = service.db.connect().expect("connect");
-        insert_full_track(&conn, "t1", "Charlie", "Artist", "/m/c.mp3", None, None, false);
-        insert_full_track(&conn, "t2", "Alpha", "Artist", "/m/a.mp3", None, None, false);
-        insert_full_track(&conn, "t3", "Bravo", "Artist", "/m/b.mp3", None, None, false);
+        insert_full_track(
+            &conn, "t1", "Charlie", "Artist", "/m/c.mp3", None, None, false,
+        );
+        insert_full_track(
+            &conn, "t2", "Alpha", "Artist", "/m/a.mp3", None, None, false,
+        );
+        insert_full_track(
+            &conn, "t3", "Bravo", "Artist", "/m/b.mp3", None, None, false,
+        );
         drop(conn);
 
         let playlist = service
-            .create_playlist(CreatePlaylistRequest { name: "PL".to_string() })
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
             .expect("create playlist");
         service
             .add_tracks_to_playlist(AddTracksToPlaylistRequest {
@@ -5232,7 +5309,11 @@ mod tests {
             })
             .expect("get playlist tracks");
         assert_eq!(
-            tracks.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+            tracks
+                .items
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<Vec<_>>(),
             vec!["t2".to_string(), "t3".to_string(), "t1".to_string()]
         );
     }
@@ -5243,11 +5324,15 @@ mod tests {
         let conn = service.db.connect().expect("connect");
         insert_full_track(&conn, "t1", "One", "Artist", "/m/1.mp3", None, None, false);
         insert_full_track(&conn, "t2", "Two", "Artist", "/m/2.mp3", None, None, false);
-        insert_full_track(&conn, "t3", "Three", "Artist", "/m/3.mp3", None, None, false);
+        insert_full_track(
+            &conn, "t3", "Three", "Artist", "/m/3.mp3", None, None, false,
+        );
         drop(conn);
 
         let playlist = service
-            .create_playlist(CreatePlaylistRequest { name: "PL".to_string() })
+            .create_playlist(CreatePlaylistRequest {
+                name: "PL".to_string(),
+            })
             .expect("create playlist");
         service
             .add_tracks_to_playlist(AddTracksToPlaylistRequest {
@@ -5290,13 +5375,15 @@ mod tests {
         assert_eq!(order(&service), vec!["t3", "t2", "t1"]);
 
         // Unknown move_track_id is rejected.
-        assert!(service
-            .reorder_playlist_tracks(ReorderPlaylistTracksRequest {
-                playlist_id: playlist.playlist_id.clone(),
-                move_track_id: Some("nope".to_string()),
-                ..Default::default()
-            })
-            .is_err());
+        assert!(
+            service
+                .reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+                    playlist_id: playlist.playlist_id.clone(),
+                    move_track_id: Some("nope".to_string()),
+                    ..Default::default()
+                })
+                .is_err()
+        );
     }
 
     #[test]
@@ -5625,14 +5712,25 @@ mod tests {
         };
         let page1 = service.browse_source_files(req(None)).expect("page 1");
         assert_eq!(
-            page1.items.iter().map(|t| t.title.clone()).collect::<Vec<_>>(),
+            page1
+                .items
+                .iter()
+                .map(|t| t.title.clone())
+                .collect::<Vec<_>>(),
             ["Zeta", "Mu"]
         );
         assert!(page1.has_more);
         let page2 = service
             .browse_source_files(req(page1.next_cursor))
             .expect("page 2");
-        assert_eq!(page2.items.iter().map(|t| t.title.clone()).collect::<Vec<_>>(), ["Alpha"]);
+        assert_eq!(
+            page2
+                .items
+                .iter()
+                .map(|t| t.title.clone())
+                .collect::<Vec<_>>(),
+            ["Alpha"]
+        );
     }
 
     #[test]
@@ -5665,7 +5763,14 @@ mod tests {
                 ..Default::default()
             })
             .expect("browse source files");
-        let by_id = |id: &str| result.items.iter().find(|t| t.id == id).unwrap().analysis_ready;
+        let by_id = |id: &str| {
+            result
+                .items
+                .iter()
+                .find(|t| t.id == id)
+                .unwrap()
+                .analysis_ready
+        };
         assert!(by_id("ready"));
         assert!(!by_id("missing"));
     }
@@ -5694,7 +5799,13 @@ mod tests {
             })
             .expect("browse source files");
         assert_eq!(
-            browsed.items.iter().find(|t| t.id == "m1").unwrap().format_ext.as_deref(),
+            browsed
+                .items
+                .iter()
+                .find(|t| t.id == "m1")
+                .unwrap()
+                .format_ext
+                .as_deref(),
             Some("flac"),
             "row_to_track must fall back to the file-path extension"
         );
@@ -5839,11 +5950,9 @@ mod tests {
         assert_eq!(blocking, vec![missing_root]);
 
         // Every track lives under a present root -> nothing blocks.
-        let clear = export_blocking_missing_source_roots(
-            &conn,
-            [format!("{present_root}/only/here.mp3")],
-        )
-        .expect("guard");
+        let clear =
+            export_blocking_missing_source_roots(&conn, [format!("{present_root}/only/here.mp3")])
+                .expect("guard");
         assert!(clear.is_empty());
     }
 
@@ -6225,8 +6334,19 @@ mod tests {
         let live_path = live_path.to_string_lossy().to_string();
 
         let conn = service.db.connect().expect("connect");
-        insert_full_track(&conn, "stale", "Song", "Artist", "/music/gone.mp3", None, None, false);
-        insert_full_track(&conn, "live", "Song", "Artist", &live_path, None, None, false);
+        insert_full_track(
+            &conn,
+            "stale",
+            "Song",
+            "Artist",
+            "/music/gone.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn, "live", "Song", "Artist", &live_path, None, None, false,
+        );
         drop(conn);
 
         let result = service
@@ -6252,8 +6372,19 @@ mod tests {
         let live_path = live_path.to_string_lossy().to_string();
 
         let conn = service.db.connect().expect("connect");
-        insert_full_track(&conn, "stale", "Song", "Artist", "/music/gone.mp3", None, None, false);
-        insert_full_track(&conn, "live", "Song", "Artist", &live_path, None, None, false);
+        insert_full_track(
+            &conn,
+            "stale",
+            "Song",
+            "Artist",
+            "/music/gone.mp3",
+            None,
+            None,
+            false,
+        );
+        insert_full_track(
+            &conn, "live", "Song", "Artist", &live_path, None, None, false,
+        );
         drop(conn);
 
         let result = service
@@ -6277,7 +6408,16 @@ mod tests {
         // library path here even when its file is gone -- don't regress that.
         let (_dir, service) = test_service();
         let conn = service.db.connect().expect("connect");
-        insert_full_track(&conn, "stale", "Song", "Artist", "/music/gone.mp3", None, None, false);
+        insert_full_track(
+            &conn,
+            "stale",
+            "Song",
+            "Artist",
+            "/music/gone.mp3",
+            None,
+            None,
+            false,
+        );
         drop(conn);
 
         let result = service
@@ -6299,7 +6439,16 @@ mod tests {
     fn resolve_playback_source_keeps_missing_self_row_as_last_resort() {
         let (_dir, service) = test_service();
         let conn = service.db.connect().expect("connect");
-        insert_full_track(&conn, "stale", "Song", "Artist", "/music/gone.mp3", None, None, false);
+        insert_full_track(
+            &conn,
+            "stale",
+            "Song",
+            "Artist",
+            "/music/gone.mp3",
+            None,
+            None,
+            false,
+        );
         drop(conn);
 
         // Metadata that matches nothing by fingerprint or title, so the search

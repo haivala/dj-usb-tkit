@@ -15,12 +15,12 @@
 //! updates while a track plays) and the audio thread, as lock-free atomics.
 
 use std::f64::consts::TAU;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
-use rodio::source::SeekError;
 use rodio::Source;
+use rodio::source::SeekError;
 
 /// How long one click rings out.
 const CLICK_MS: f64 = 30.0;
@@ -71,11 +71,25 @@ impl MetronomeSettings {
     /// grid (a non-finite or non-positive BPM). `mix` is clamped to 0..=1; a
     /// non-finite one keeps the default.
     pub fn set(&self, enabled: bool, first_beat_ms: f64, bpm: f64, mix: f64) -> bool {
-        let interval = if bpm.is_finite() && bpm > 0.0 { 60_000.0 / bpm } else { 0.0 };
-        let first_beat = if first_beat_ms.is_finite() { first_beat_ms.max(0.0) } else { 0.0 };
-        let mix = if mix.is_finite() { mix.clamp(0.0, 1.0) } else { DEFAULT_MIX };
-        self.first_beat_ms.store(first_beat.to_bits(), Ordering::Relaxed);
-        self.beat_interval_ms.store(interval.to_bits(), Ordering::Relaxed);
+        let interval = if bpm.is_finite() && bpm > 0.0 {
+            60_000.0 / bpm
+        } else {
+            0.0
+        };
+        let first_beat = if first_beat_ms.is_finite() {
+            first_beat_ms.max(0.0)
+        } else {
+            0.0
+        };
+        let mix = if mix.is_finite() {
+            mix.clamp(0.0, 1.0)
+        } else {
+            DEFAULT_MIX
+        };
+        self.first_beat_ms
+            .store(first_beat.to_bits(), Ordering::Relaxed);
+        self.beat_interval_ms
+            .store(interval.to_bits(), Ordering::Relaxed);
         self.mix.store(mix.to_bits(), Ordering::Relaxed);
         let on = enabled && interval > 0.0;
         self.enabled.store(on, Ordering::Relaxed);
@@ -120,7 +134,11 @@ fn click_at(first_beat: f64, interval: f64, t_ms: f64) -> f64 {
         return 0.0;
     }
     let downbeat = (beat as u64).is_multiple_of(4);
-    let (hz, gain) = if downbeat { (DOWNBEAT_HZ, DOWNBEAT_GAIN) } else { (BEAT_HZ, BEAT_GAIN) };
+    let (hz, gain) = if downbeat {
+        (DOWNBEAT_HZ, DOWNBEAT_GAIN)
+    } else {
+        (BEAT_HZ, BEAT_GAIN)
+    };
     gain * (-dt / CLICK_DECAY_MS).exp() * (TAU * hz * dt / 1000.0).sin()
 }
 
@@ -182,7 +200,11 @@ impl<S: Source<Item = i16>> Iterator for MetronomeSource<S> {
             return Some(sample);
         }
         let mixed = f64::from(sample) * self.music_gain + self.click;
-        Some(mixed.round().clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16)
+        Some(
+            mixed
+                .round()
+                .clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16,
+        )
     }
 }
 
@@ -251,10 +273,21 @@ mod tests {
         // 120 BPM from 100 ms: beats at 100, 600, 1100, 1600 ms.
         assert!(settings.set(true, 100.0, 120.0, DEFAULT_MIX));
         let samples = clicks(&settings, 0, 2.0);
-        assert_eq!(peak(&samples, 0.0, 0.0, 99.0), 0, "nothing before the first beat");
+        assert_eq!(
+            peak(&samples, 0.0, 0.0, 99.0),
+            0,
+            "nothing before the first beat"
+        );
         for beat in [100.0, 600.0, 1100.0, 1600.0] {
-            assert!(peak(&samples, 0.0, beat, beat + 10.0) > 3000, "click at {beat} ms");
-            assert_eq!(peak(&samples, 0.0, beat + 40.0, beat + 450.0), 0, "silent after {beat} ms");
+            assert!(
+                peak(&samples, 0.0, beat, beat + 10.0) > 3000,
+                "click at {beat} ms"
+            );
+            assert_eq!(
+                peak(&samples, 0.0, beat + 40.0, beat + 450.0),
+                0,
+                "silent after {beat} ms"
+            );
         }
     }
 
@@ -266,7 +299,10 @@ mod tests {
         let downbeat = peak(&samples, 0.0, 0.0, 30.0);
         let beat = peak(&samples, 0.0, 500.0, 530.0);
         assert!(downbeat > beat, "downbeat {downbeat} vs beat {beat}");
-        assert!(peak(&samples, 0.0, 2000.0, 2030.0) > beat, "beat 4 starts the next bar");
+        assert!(
+            peak(&samples, 0.0, 2000.0, 2030.0) > beat,
+            "beat 4 starts the next bar"
+        );
     }
 
     #[test]
@@ -279,7 +315,9 @@ mod tests {
         assert!(peak(&samples, 10_250.0, 10_500.0, 10_510.0) > 3000);
 
         let mut source = MetronomeSource::new(Zero::<i16>::new(1, RATE), settings, 0);
-        source.try_seek(Duration::from_millis(30_100)).expect("zero source seeks");
+        source
+            .try_seek(Duration::from_millis(30_100))
+            .expect("zero source seeks");
         // 30.1 s is 100 ms past a beat: silent until the 30.5 s beat.
         let after_seek: Vec<i16> = source.by_ref().take((RATE as usize) * 3 / 10).collect();
         assert!(after_seek.iter().all(|s| *s == 0));
@@ -311,7 +349,13 @@ mod tests {
         let settings = Arc::new(MetronomeSettings::default());
         // 120 BPM from 0: beats at 0 and 500 ms; 200-400 ms is between beats.
         let between = |s: &[i16]| s[(RATE as usize) / 5..(RATE as usize) * 2 / 5].to_vec();
-        let deviation = |s: &[i16]| s[..480].iter().map(|v| (v - LEVEL).saturating_abs()).max().unwrap();
+        let deviation = |s: &[i16]| {
+            s[..480]
+                .iter()
+                .map(|v| (v - LEVEL).saturating_abs())
+                .max()
+                .unwrap()
+        };
 
         // The middle: both at full level, as without a mix.
         settings.set(true, 0.0, 120.0, DEFAULT_MIX);
@@ -327,12 +371,20 @@ mod tests {
         settings.set(true, 0.0, 120.0, 1.0);
         let clicks_only = over_level(&settings, LEVEL);
         assert!(between(&clicks_only).iter().all(|v| *v == 0));
-        let peak_only = clicks_only[..480].iter().map(|v| v.saturating_abs()).max().unwrap();
+        let peak_only = clicks_only[..480]
+            .iter()
+            .map(|v| v.saturating_abs())
+            .max()
+            .unwrap();
         assert_eq!(peak_only, deviation(&both));
 
         // Three quarters: the music at half level.
         settings.set(true, 0.0, 120.0, 0.75);
-        assert!(between(&over_level(&settings, LEVEL)).iter().all(|v| *v == LEVEL / 2));
+        assert!(
+            between(&over_level(&settings, LEVEL))
+                .iter()
+                .all(|v| *v == LEVEL / 2)
+        );
 
         // Off, the mix leaves the music alone.
         settings.set(false, 0.0, 120.0, 1.0);

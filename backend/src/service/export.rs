@@ -1694,8 +1694,7 @@ impl BackendService {
         playlist.tracks = rows.collect::<Result<Vec<_>, _>>()?;
 
         let track_ids: Vec<String> = playlist.tracks.iter().map(|t| t.id.clone()).collect();
-        let mut cues_by_track =
-            crate::service::cues::load_track_cues_bulk(&conn, &track_ids)?;
+        let mut cues_by_track = crate::service::cues::load_track_cues_bulk(&conn, &track_ids)?;
         for track in &mut playlist.tracks {
             if let Some(cues) = cues_by_track.remove(&track.id) {
                 track.cues = cues;
@@ -3204,7 +3203,10 @@ mod tests {
         let p2 = additive.iter().find(|s| s.playlist_id == "p2").unwrap();
         assert!(p1.same_name_exists_on_usb);
         assert!(p1.locks_reorder);
-        assert_eq!(p1.export_button_text, "Append to (My Set) on USB: (USB_TRY)");
+        assert_eq!(
+            p1.export_button_text,
+            "Append to (My Set) on USB: (USB_TRY)"
+        );
         assert_eq!(
             p1.export_button_title,
             "Append current playlist tracks to existing USB playlist \"My Set\""

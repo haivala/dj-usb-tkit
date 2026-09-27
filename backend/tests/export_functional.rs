@@ -7,10 +7,9 @@ use backend::error::ErrorCode;
 use backend::models::{
     AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest, GetPlaylistTracksRequest,
-    InitializeUsbRequest,
-    MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ReorderPlaylistTracksRequest,
-    ReorderUsbPlaylistsRequest, RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest,
-    SetFrontendSettingRequest,
+    InitializeUsbRequest, MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest,
+    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, RunUsbParityReportRequest,
+    ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -1733,7 +1732,10 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
         limit: 150,
         ..Default::default()
     });
-    assert!(usb_page.ok, "fetch usb playlist tracks failed: {usb_page:?}");
+    assert!(
+        usb_page.ok,
+        "fetch usb playlist tracks failed: {usb_page:?}"
+    );
     let usb_track = usb_page
         .data
         .expect("usb playlist track page")

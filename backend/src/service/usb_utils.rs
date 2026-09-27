@@ -2351,8 +2351,8 @@ mod diag_tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "track-1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -2506,8 +2506,8 @@ mod diag_tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "track-1".to_string(),
                 master_db_id: None,
                 master_content_id: None,

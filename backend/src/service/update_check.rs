@@ -59,7 +59,10 @@ impl UpdateInfo {
 /// `"v1.2.3"` / `"1.2.3-beta"` -> `[1, 2, 3]`; anything without three leading
 /// numeric components is `None` (matches the old `/^(\d+)\.(\d+)\.(\d+)/`).
 pub fn parse_semver(tag: &str) -> Option<[u32; 3]> {
-    let mut parts = tag.trim().trim_start_matches(['v', 'V']).split(['.', '-', '+']);
+    let mut parts = tag
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .split(['.', '-', '+']);
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
     let patch = parts.next()?.parse().ok()?;
@@ -172,7 +175,10 @@ mod tests {
     fn any_newer_release_flagged_critical_makes_the_whole_check_critical() {
         let releases = [
             rel("v0.1.36", Some("Routine fixes.")),
-            rel("v0.1.37", Some("Heads up.\n\n**Severity:** critical\n\nUpgrade now.")),
+            rel(
+                "v0.1.37",
+                Some("Heads up.\n\n**Severity:** critical\n\nUpgrade now."),
+            ),
         ];
         let info = evaluate("0.1.35", &releases);
         assert_eq!(info.severity, "critical");

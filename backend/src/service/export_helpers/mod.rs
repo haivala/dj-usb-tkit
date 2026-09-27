@@ -56,8 +56,8 @@ use serde::Serialize;
 
 use crate::error::{BackendError, BackendResult};
 use crate::models::{ExportToUsbOptions, TrackCue, WarningEntry};
-use crate::service::cues::split_playback_start;
 use crate::pdb_reader::parse_pdb;
+use crate::service::cues::split_playback_start;
 use crate::utils::{collect_chain as collect_chain_pages, page_offset, table_ptr_fields};
 
 use super::usb_utils::{canonicalize_playlist_name, repair_utf8_mojibake};
@@ -689,8 +689,7 @@ pub fn write_edb_cues_for_content(
                 .map(|n| format!("?{n}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let values: Vec<rusqlite::types::Value> =
-                fields.into_iter().map(|(_, v)| v).collect();
+            let values: Vec<rusqlite::types::Value> = fields.into_iter().map(|(_, v)| v).collect();
             tx.execute(
                 &format!("INSERT INTO cue ({col_list}) VALUES ({placeholders})"),
                 rusqlite::params_from_iter(values.iter()),
@@ -3177,8 +3176,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: vec![],
             tracks: vec![ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -3845,7 +3844,7 @@ mod tests {
             id: "pl-last".to_string(),
             name: "Last Playlist".to_string(),
             tracks: vec![ExportTrackData {
-            cues: Vec::new(),
+                cues: Vec::new(),
                 id: "t1".to_string(),
                 title: "Song A".to_string(),
                 artist: "Artist".to_string(),
@@ -3903,8 +3902,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -4707,8 +4706,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: Some(1),
                 master_content_id: Some(1),
@@ -5545,8 +5544,8 @@ mod tests {
             warnings: Vec::new(),
             tracks: vec![
                 ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                    first_beat_ms: None,
+                    cues: Vec::new(),
                     id: "t1".to_string(),
                     master_db_id: Some(1),
                     master_content_id: Some(1),
@@ -5593,8 +5592,8 @@ mod tests {
                     duration_ms: Some(180_000),
                 },
                 ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                    first_beat_ms: None,
+                    cues: Vec::new(),
                     id: "t2".to_string(),
                     master_db_id: Some(2),
                     master_content_id: Some(2),
@@ -5763,8 +5762,8 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, (id, title, filename))| ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                    first_beat_ms: None,
+                    cues: Vec::new(),
                     id: id.to_string(),
                     master_db_id: None,
                     master_content_id: None,
@@ -5889,8 +5888,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: vec![],
             tracks: vec![ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -5978,8 +5977,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: vec![],
             tracks: vec![ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,
@@ -6231,7 +6230,7 @@ mod tests {
             id: "pl-1".to_string(),
             name: "Test".to_string(),
             tracks: vec![super::ExportTrackData {
-            cues: Vec::new(),
+                cues: Vec::new(),
                 id: "t1".to_string(),
                 title: "Track A".to_string(),
                 artist: "Artist".to_string(),
@@ -6289,8 +6288,8 @@ mod tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![super::ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                first_beat_ms: None,
+                cues: Vec::new(),
                 id: "t1".to_string(),
                 master_db_id: None,
                 master_content_id: None,

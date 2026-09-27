@@ -35,8 +35,8 @@ use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_wit
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
 use super::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash};
 use super::{
-    BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, has_core_analysis_fields, now,
-    track_has_core_analysis_for_source_status,
+    BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, has_core_analysis_fields,
+    now, track_has_core_analysis_for_source_status,
 };
 
 const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
@@ -603,7 +603,10 @@ impl BackendService {
                 let unclamped = ids.len();
                 let capped: Vec<String> =
                     ids.into_iter().take(ANALYSIS_AUTO_SELECT_LIMIT).collect();
-                (Some(unclamped), collect_tracks_for_analysis(&conn, &capped)?)
+                (
+                    Some(unclamped),
+                    collect_tracks_for_analysis(&conn, &capped)?,
+                )
             }
             None => {
                 let total = if auto_mode {
@@ -2495,12 +2498,12 @@ pub(crate) fn build_waveform_preview_from_file_bytes(
 mod tests {
     use super::{
         AnalysisEngine, EssentiaResult, build_waveform_data_from_samples,
-        build_waveform_preview_from_audio,
-        build_waveform_preview_from_file_bytes, build_waveform_preview_from_samples,
-        collect_tracks_for_analysis, combine_worker_caps, count_tracks_missing_core_fields,
-        decode_audio_mono_samples, discover_cover_art_in_dir, discover_cover_art_in_parent,
-        discover_cover_art_path, duration_ms_from_decoded, essentia_result_has_detected_values,
-        has_memory_headroom_for_engine, local_analysis_bundle_paths, normalize_essentia_result,
+        build_waveform_preview_from_audio, build_waveform_preview_from_file_bytes,
+        build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
+        count_tracks_missing_core_fields, decode_audio_mono_samples, discover_cover_art_in_dir,
+        discover_cover_art_in_parent, discover_cover_art_path, duration_ms_from_decoded,
+        essentia_result_has_detected_values, has_memory_headroom_for_engine,
+        local_analysis_bundle_paths, normalize_essentia_result,
         persist_library_artwork_thumbnail_from_image, resolve_analysis_bpm_range,
         resolve_analysis_engine, resolve_analysis_parallelism_budget_with_cap,
         resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
@@ -2805,25 +2808,49 @@ mod tests {
     #[test]
     fn resolve_analysis_bpm_range_defaults_to_70_180() {
         assert_eq!(resolve_analysis_bpm_range(None, None, None), (70, 180));
-        assert_eq!(resolve_analysis_bpm_range(Some("nonsense"), None, None), (70, 180));
+        assert_eq!(
+            resolve_analysis_bpm_range(Some("nonsense"), None, None),
+            (70, 180)
+        );
     }
 
     #[test]
     fn resolve_analysis_bpm_range_parses_the_range_string() {
-        assert_eq!(resolve_analysis_bpm_range(Some("88-175"), None, None), (88, 175));
-        assert_eq!(resolve_analysis_bpm_range(Some(" 48 - 95 "), None, None), (48, 95));
+        assert_eq!(
+            resolve_analysis_bpm_range(Some("88-175"), None, None),
+            (88, 175)
+        );
+        assert_eq!(
+            resolve_analysis_bpm_range(Some(" 48 - 95 "), None, None),
+            (48, 95)
+        );
         // range string wins over the pre-parsed fields
-        assert_eq!(resolve_analysis_bpm_range(Some("100-200"), Some(1), Some(2)), (100, 200));
+        assert_eq!(
+            resolve_analysis_bpm_range(Some("100-200"), Some(1), Some(2)),
+            (100, 200)
+        );
         // unparseable range string falls back to the pre-parsed fields
-        assert_eq!(resolve_analysis_bpm_range(Some("bad"), Some(60), Some(140)), (60, 140));
+        assert_eq!(
+            resolve_analysis_bpm_range(Some("bad"), Some(60), Some(140)),
+            (60, 140)
+        );
         // parseable-but-invalid range (min >= max) -> default
-        assert_eq!(resolve_analysis_bpm_range(Some("9-9"), Some(60), Some(140)), (70, 180));
+        assert_eq!(
+            resolve_analysis_bpm_range(Some("9-9"), Some(60), Some(140)),
+            (70, 180)
+        );
     }
 
     #[test]
     fn resolve_analysis_bpm_range_rejects_invalid_values() {
-        assert_eq!(resolve_analysis_bpm_range(None, Some(180), Some(70)), (70, 180));
-        assert_eq!(resolve_analysis_bpm_range(None, Some(0), Some(180)), (70, 180));
+        assert_eq!(
+            resolve_analysis_bpm_range(None, Some(180), Some(70)),
+            (70, 180)
+        );
+        assert_eq!(
+            resolve_analysis_bpm_range(None, Some(0), Some(180)),
+            (70, 180)
+        );
     }
 
     #[test]
@@ -3309,5 +3336,4 @@ mod tests {
         let img = image::DynamicImage::new_rgb8(0, 10);
         assert!(persist_library_artwork_thumbnail_from_image(img, dir.path(), "track-1").is_none());
     }
-
 }

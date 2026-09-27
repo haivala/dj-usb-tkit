@@ -130,7 +130,12 @@ fn main() {
         .iter()
         .map(|l| match load_track_map(&l.root) {
             Ok(m) => {
-                println!("{}: {} tracks in eDB ({})", l.name, m.len(), l.root.display());
+                println!(
+                    "{}: {} tracks in eDB ({})",
+                    l.name,
+                    m.len(),
+                    l.root.display()
+                );
                 m
             }
             Err(e) => {
@@ -147,7 +152,10 @@ fn main() {
         .collect();
 
     report_unmatched(&labels, &maps, &matched_keys);
-    println!("\nmatched across all three roots (by file size): {}\n", matched_keys.len());
+    println!(
+        "\nmatched across all three roots (by file size): {}\n",
+        matched_keys.len()
+    );
 
     let mut rows = Vec::with_capacity(matched_keys.len());
     for key in &matched_keys {
@@ -181,11 +189,7 @@ fn main() {
     }
 }
 
-fn report_unmatched(
-    labels: &[RootLabel; 3],
-    maps: &[BTreeMap<i64, TrackInfo>],
-    matched: &[i64],
-) {
+fn report_unmatched(labels: &[RootLabel; 3], maps: &[BTreeMap<i64, TrackInfo>], matched: &[i64]) {
     for (i, label) in labels.iter().enumerate() {
         let unmatched: Vec<&TrackInfo> = maps[i]
             .iter()
@@ -234,8 +238,16 @@ fn classify(row: &TrackRow, tolerance_ms: u32) -> (Option<u32>, Option<u32>, Cla
         .dat_tempo_x100
         .filter(|&t| t > 0)
         .map(|t| 6_000_000.0 / t as f64);
-    let delta_old = delta_ms(row.old_grid.dat_first_beat_ms, row.ref_grid.dat_first_beat_ms, interval_ms);
-    let delta_new = delta_ms(row.new_grid.dat_first_beat_ms, row.ref_grid.dat_first_beat_ms, interval_ms);
+    let delta_old = delta_ms(
+        row.old_grid.dat_first_beat_ms,
+        row.ref_grid.dat_first_beat_ms,
+        interval_ms,
+    );
+    let delta_new = delta_ms(
+        row.new_grid.dat_first_beat_ms,
+        row.ref_grid.dat_first_beat_ms,
+        interval_ms,
+    );
     let class = match (delta_old, delta_new) {
         (Some(o), Some(n)) => {
             if n.abs_diff(o) <= tolerance_ms {

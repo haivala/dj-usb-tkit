@@ -19,8 +19,8 @@ use crate::models::{
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, InspectUsbTrackData,
     InspectUsbTrackRequest, InspectUsbTrackResult, InspectUsbTracksData, InspectUsbTracksRequest,
     RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, ReorderUsbPlaylistsData,
-    ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts,
-    UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry,
+    ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts, UsbImportStats, UsbPlaylist,
+    UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry,
 };
 use crate::pdb_reader::{
     ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, count_pdb_playlists, parse_pdb,
@@ -129,8 +129,11 @@ fn build_usb_track_index(
             let resolved_file_path = resolve_usb_side_path(usb_root, &t.track_file_path)
                 .unwrap_or_else(|| t.track_file_path.clone());
             let usb_analysis_path = resolve_usb_side_path(usb_root, &t.anlz_path);
-            let format_ext = crate::utils::format_ext_from_path(&t.track_file_path)
-                .or_else(|| t.file_name.as_deref().and_then(crate::utils::format_ext_from_path));
+            let format_ext = crate::utils::format_ext_from_path(&t.track_file_path).or_else(|| {
+                t.file_name
+                    .as_deref()
+                    .and_then(crate::utils::format_ext_from_path)
+            });
             (
                 t.id,
                 UsbTrack {
@@ -382,7 +385,10 @@ fn hydrate_usb_track_in_place(track: &mut UsbTrack) {
             .and_then(load_waveform_preview_from_analysis_path);
     }
     if track.artwork_data_url.is_none() {
-        track.artwork_data_url = track.artwork_path.as_deref().and_then(artwork_path_to_data_url);
+        track.artwork_data_url = track
+            .artwork_path
+            .as_deref()
+            .and_then(artwork_path_to_data_url);
     }
     // USB rows only carry `format_ext` -- no sample rate / bit depth / bitrate
     // and no WAV extensible-header flag -- so this only ever flags a genuinely
@@ -1957,7 +1963,12 @@ impl BackendService {
         candidate: &crate::models::AddTrackCandidate,
         request_usb_root: Option<&str>,
     ) -> BackendResult<Option<String>> {
-        let file_path = candidate.file_path.as_deref().unwrap_or("").trim().to_string();
+        let file_path = candidate
+            .file_path
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if file_path.is_empty() {
             return Ok(None);
         }
@@ -2007,7 +2018,8 @@ impl BackendService {
         let usb_device_id = usb_utils::upsert_usb_device(&tx, &usb_root, false, &now_ts)?;
         let usb_root_paths = untainted_usb_root_paths(&tx)?;
         self.materialize_usb_track_row(&tx, &mut track, &now_ts, &usb_device_id, &usb_root_paths)?;
-        if let (Some(id), Some(path)) = (track.local_track_id.as_deref(), analysis_path.as_deref()) {
+        if let (Some(id), Some(path)) = (track.local_track_id.as_deref(), analysis_path.as_deref())
+        {
             super::cues::import_anlz_cues_for_track(&tx, id, std::path::Path::new(path))?;
         }
         tx.commit()?;
@@ -2442,9 +2454,7 @@ impl BackendService {
             .items
             .iter()
             .find(|playlist| playlist.id == req.id)
-            .ok_or_else(|| {
-                BackendError::NotFound(format!("USB playlist not found: {}", req.id))
-            })?;
+            .ok_or_else(|| BackendError::NotFound(format!("USB playlist not found: {}", req.id)))?;
         let mut data = paginate_and_hydrate_usb_tracks(
             "fetch_usb_playlist_tracks",
             &req.id,
@@ -2467,9 +2477,7 @@ impl BackendService {
             .items
             .iter()
             .find(|history| history.id == req.id)
-            .ok_or_else(|| {
-                BackendError::NotFound(format!("USB history not found: {}", req.id))
-            })?;
+            .ok_or_else(|| BackendError::NotFound(format!("USB history not found: {}", req.id)))?;
         let mut data = paginate_and_hydrate_usb_tracks(
             "fetch_usb_history_tracks",
             &req.id,
@@ -2588,8 +2596,12 @@ fn resolve_usb_track_from_sources(
                 let waveform_preview = usb_analysis_path
                     .as_deref()
                     .and_then(load_waveform_preview_from_analysis_path);
-                let format_ext = crate::utils::format_ext_from_path(&t.track_file_path)
-                    .or_else(|| t.file_name.as_deref().and_then(crate::utils::format_ext_from_path));
+                let format_ext =
+                    crate::utils::format_ext_from_path(&t.track_file_path).or_else(|| {
+                        t.file_name
+                            .as_deref()
+                            .and_then(crate::utils::format_ext_from_path)
+                    });
                 return Some((
                     "pdb".to_string(),
                     UsbTrack {
@@ -2759,7 +2771,10 @@ mod tests {
             track.key = Some("8A".to_string());
             tweak(&mut track);
             hydrate_usb_track_in_place(&mut track);
-            assert!(track.needs_hydration, "expected needs_hydration after tweak");
+            assert!(
+                track.needs_hydration,
+                "expected needs_hydration after tweak"
+            );
         }
     }
 
@@ -3394,8 +3409,8 @@ mod tests {
                 .enumerate()
                 .map(
                     |(i, (id, title, filename))| crate::edb::ExportManifestTrack {
-            first_beat_ms: None,
-            cues: Vec::new(),
+                        first_beat_ms: None,
+                        cues: Vec::new(),
                         id: id.to_string(),
                         master_db_id: None,
                         master_content_id: None,
@@ -3782,11 +3797,12 @@ mod tests {
             .expect("fetch playlists");
         let playlist_id = list.items[0].id.clone();
 
-        let req = |over: crate::models::FetchUsbTracksRequest| crate::models::FetchUsbTracksRequest {
-            usb_root: Some(root.clone()),
-            id: playlist_id.clone(),
-            ..over
-        };
+        let req =
+            |over: crate::models::FetchUsbTracksRequest| crate::models::FetchUsbTracksRequest {
+                usb_root: Some(root.clone()),
+                id: playlist_id.clone(),
+                ..over
+            };
 
         // Page 1 of 2 in PDB entry order; whole-list totals.
         let page1 = service
@@ -3823,7 +3839,11 @@ mod tests {
             }))
             .expect("sorted");
         assert_eq!(
-            sorted.items.iter().map(|t| t.title.clone()).collect::<Vec<_>>(),
+            sorted
+                .items
+                .iter()
+                .map(|t| t.title.clone())
+                .collect::<Vec<_>>(),
             ["Alpha", "Bravo", "Charlie"]
         );
 

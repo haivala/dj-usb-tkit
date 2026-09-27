@@ -286,7 +286,13 @@ fn ensure_tracks_column(
     column_name: &str,
     definition: &str,
 ) -> BackendResult<()> {
-    ensure_column(conn, "tracks", ALLOWED_TRACK_COLUMNS, column_name, definition)
+    ensure_column(
+        conn,
+        "tracks",
+        ALLOWED_TRACK_COLUMNS,
+        column_name,
+        definition,
+    )
 }
 
 fn ensure_playlists_column(
@@ -294,7 +300,13 @@ fn ensure_playlists_column(
     column_name: &str,
     definition: &str,
 ) -> BackendResult<()> {
-    ensure_column(conn, "playlists", ALLOWED_PLAYLIST_COLUMNS, column_name, definition)
+    ensure_column(
+        conn,
+        "playlists",
+        ALLOWED_PLAYLIST_COLUMNS,
+        column_name,
+        definition,
+    )
 }
 
 fn ensure_track_cues_column(
@@ -302,7 +314,13 @@ fn ensure_track_cues_column(
     column_name: &str,
     definition: &str,
 ) -> BackendResult<()> {
-    ensure_column(conn, "track_cues", ALLOWED_TRACK_CUES_COLUMNS, column_name, definition)
+    ensure_column(
+        conn,
+        "track_cues",
+        ALLOWED_TRACK_CUES_COLUMNS,
+        column_name,
+        definition,
+    )
 }
 
 /// Idempotent `ALTER TABLE {table} ADD COLUMN`, gated on `allowed`.
@@ -433,7 +451,10 @@ mod tests {
         let remaining: i64 = conn
             .query_row("SELECT COUNT(1) FROM track_cues", [], |r| r.get(0))
             .expect("count");
-        assert_eq!(remaining, 0, "track_cues should cascade-delete with the track");
+        assert_eq!(
+            remaining, 0,
+            "track_cues should cascade-delete with the track"
+        );
     }
 
     #[test]

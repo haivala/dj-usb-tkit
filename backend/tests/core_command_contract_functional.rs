@@ -8,12 +8,12 @@ use backend::models::{
     DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
     GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbDeviceNameRequest, InitializeUsbRequest,
     ListTracksRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest, PlayTrackRequest,
-    PlaybackPreflightRequest, PruneUsbDeviceRequest, SetPlaybackMetronomeRequest, RefreshPlaylistExportStatusRequest,
+    PlaybackPreflightRequest, PruneUsbDeviceRequest, RefreshPlaylistExportStatusRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
     ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
     RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
     SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksRequest,
-    SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
+    SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -144,15 +144,16 @@ fn command_surface_covers_usb_name_backup_identity_refresh_and_preflight_wrapper
     assert_eq!(identity.resolved_by, "none");
     assert!(!identity.materialized);
 
-    let refreshed = backend.refresh_playlist_export_status(RefreshPlaylistExportStatusRequest {
-        usb_root: None,
-    });
+    let refreshed = backend
+        .refresh_playlist_export_status(RefreshPlaylistExportStatusRequest { usb_root: None });
     assert!(refreshed.ok, "refresh wrapper failed: {refreshed:?}");
-    assert!(refreshed
-        .data
-        .expect("refresh data")
-        .playlist_usb_export_status
-        .is_empty());
+    assert!(
+        refreshed
+            .data
+            .expect("refresh data")
+            .playlist_usb_export_status
+            .is_empty()
+    );
 
     let get_name = backend.get_usb_device_name(GetUsbDeviceNameRequest {
         usb_root: usb_root_string.clone(),
@@ -179,13 +180,19 @@ fn command_surface_covers_usb_name_backup_identity_refresh_and_preflight_wrapper
         usb_root: usb_root_string.clone(),
         timestamp: "2020-01-01_00-00-00".to_string(),
     });
-    assert!(!restore.ok, "missing restore snapshot should fail: {restore:?}");
+    assert!(
+        !restore.ok,
+        "missing restore snapshot should fail: {restore:?}"
+    );
 
     let delete = backend.delete_usb_backup(DeleteUsbBackupRequest {
         usb_root: usb_root_string,
         timestamp: "2020-01-01_00-00-00".to_string(),
     });
-    assert!(!delete.ok, "missing delete snapshot should fail: {delete:?}");
+    assert!(
+        !delete.ok,
+        "missing delete snapshot should fail: {delete:?}"
+    );
 
     let preflight = backend.playback_preflight_native(PlaybackPreflightRequest {
         path: "  ".to_string(),
@@ -277,7 +284,10 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
     assert_eq!(readd.data.expect("re-add data").added, 1);
 
     let final_titles = backend
-        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id, ..Default::default() })
+        .get_playlist_tracks(GetPlaylistTracksRequest {
+            playlist_id,
+            ..Default::default()
+        })
         .data
         .expect("final tracks data")
         .items
@@ -351,7 +361,10 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
     assert_eq!(reorder.data.expect("reorder data").reordered, 3);
 
     let reordered_titles = backend
-        .get_playlist_tracks(GetPlaylistTracksRequest { playlist_id, ..Default::default() })
+        .get_playlist_tracks(GetPlaylistTracksRequest {
+            playlist_id,
+            ..Default::default()
+        })
         .data
         .expect("reordered tracks data")
         .items
@@ -833,7 +846,10 @@ fn stop_and_status_playback_native_report_idle_state_without_hardware() {
     assert!(!status.data.expect("status data").playing);
 
     // Pause/resume with nothing loaded are quiet no-ops, not errors.
-    for response in [backend.pause_playback_native(), backend.resume_playback_native()] {
+    for response in [
+        backend.pause_playback_native(),
+        backend.resume_playback_native(),
+    ] {
         assert!(response.ok, "pause/resume failed: {response:?}");
         let data = response.data.expect("pause/resume data");
         assert!(!data.playing);
@@ -861,7 +877,11 @@ fn set_playback_metronome_turns_on_only_with_a_usable_bpm() {
     ] {
         let response = backend.set_playback_metronome(req.clone());
         assert!(response.ok, "metronome failed for {req:?}: {response:?}");
-        assert_eq!(response.data.expect("metronome data").enabled, expected, "{req:?}");
+        assert_eq!(
+            response.data.expect("metronome data").enabled,
+            expected,
+            "{req:?}"
+        );
     }
 }
 
@@ -979,7 +999,14 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
     assert_eq!(detail.first_beat_ms, Some(321));
     assert_eq!(detail.cues.len(), 3);
     // The key picker's options come with the detail.
-    assert_eq!(detail.key_options.iter().map(|g| g.keys.len()).sum::<usize>(), 24);
+    assert_eq!(
+        detail
+            .key_options
+            .iter()
+            .map(|g| g.keys.len())
+            .sum::<usize>(),
+        24
+    );
     assert_eq!(detail.cues[1].name.as_deref(), Some("Intro"));
     // Every cue gets a colour (default green when omitted).
     assert!(detail.cues.iter().all(|c| c.color_id.is_some()));

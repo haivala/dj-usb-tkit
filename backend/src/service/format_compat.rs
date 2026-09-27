@@ -205,7 +205,13 @@ mod tests {
 
     #[test]
     fn wav_extensible_pcm_is_autofix_other_is_warn() {
-        let pcm = compute_format_compat(Some("wav"), Some(44_100), Some(24), None, Some("extensible_pcm"));
+        let pcm = compute_format_compat(
+            Some("wav"),
+            Some(44_100),
+            Some(24),
+            None,
+            Some("extensible_pcm"),
+        );
         assert_eq!(pcm.severity, FormatCompatSeverity::Autofix);
         assert!(pcm.warning.unwrap().contains("converted to standard PCM"));
 

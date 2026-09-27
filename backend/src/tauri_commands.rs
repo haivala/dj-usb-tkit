@@ -13,40 +13,38 @@ use crate::error::{ErrorCode, ErrorPayload};
 use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidatesToPlaylistData,
     AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AddTracksToPlaylistRequest,
-    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, ListMatchingTrackIdsData,
-    ListMatchingTrackIdsRequest,
-    BrowseSourceFilesData, BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest,
-    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
-    DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData,
-    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
+    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
+    BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
+    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
+    DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest,
+    FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
-    GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
-    GetUsbTrackDetailRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
-    UsbTrackAnalysisDetail,
-    GetUsbDeviceNameData,
-    GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsData,
+    GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
+    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
     InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
-    InspectUsbTracksData, InspectUsbTracksRequest, JobEventPayload, ListPlaylistsData,
-    ListTracksData, ListTracksRequest, ListUsbBackupsData, ListUsbBackupsRequest,
-    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    MergeUsbPlaceholderTracksData, PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData,
-    PlayTrackRequest, PlaybackEventPayload, PlaybackPreflightData, PlaybackPreflightRequest,
-    PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData, SetPlaybackMetronomeRequest, PruneUsbDeviceRequest, RelocateSourceRootData,
-    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
-    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
+    InspectUsbTracksData, InspectUsbTracksRequest, JobEventPayload, ListMatchingTrackIdsData,
+    ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
+    PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
+    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
+    RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
     ReorderPlaylistTracksRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
     ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
     RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    RunUsbParityReportData, RunUsbParityReportRequest, ScanLibraryData, ScanLibraryRequest,
-    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, ScanMasterDbRequest, SearchTracksData,
-    SearchTracksRequest, SetAnalysisPausedData,
-    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
-    UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, ValidateUsbRootData, ValidateUsbRootRequest,
+    RunUsbParityReportData, RunUsbParityReportRequest, SaveTrackAnalysisEditsData,
+    SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
+    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
+    SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest, SetFrontendSettingData,
+    SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameData,
+    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail, ValidateUsbRootData,
+    ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -417,7 +415,12 @@ fn emit_playback_event<R: tauri::Runtime>(app: &AppHandle<R>, event: PlaybackEve
             duration_ms,
             track_id,
         } => PlaybackEventPayload {
-            event: if is_seek { "playback.seeked" } else { "playback.started" }.to_string(),
+            event: if is_seek {
+                "playback.seeked"
+            } else {
+                "playback.started"
+            }
+            .to_string(),
             path: Some(path),
             playing,
             paused: false,
@@ -439,7 +442,12 @@ fn emit_playback_event<R: tauri::Runtime>(app: &AppHandle<R>, event: PlaybackEve
             timestamp: Utc::now().to_rfc3339(),
         },
         PlaybackEvent::PauseChanged(status) => PlaybackEventPayload {
-            event: if status.paused { "playback.paused" } else { "playback.resumed" }.to_string(),
+            event: if status.paused {
+                "playback.paused"
+            } else {
+                "playback.resumed"
+            }
+            .to_string(),
             path: status.path,
             playing: status.playing,
             paused: status.paused,
@@ -1222,7 +1230,13 @@ pub async fn pause_playback_native(
     state: State<'_, BackendCommands>,
 ) -> Result<ApiResponse<PlaybackStatusData>, String> {
     let commands = state.inner().clone();
-    run_pause_change(app, commands, "pause", BackendCommands::pause_playback_native).await
+    run_pause_change(
+        app,
+        commands,
+        "pause",
+        BackendCommands::pause_playback_native,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1231,7 +1245,13 @@ pub async fn resume_playback_native(
     state: State<'_, BackendCommands>,
 ) -> Result<ApiResponse<PlaybackStatusData>, String> {
     let commands = state.inner().clone();
-    run_pause_change(app, commands, "resume", BackendCommands::resume_playback_native).await
+    run_pause_change(
+        app,
+        commands,
+        "resume",
+        BackendCommands::resume_playback_native,
+    )
+    .await
 }
 
 #[tauri::command]

@@ -1560,8 +1560,8 @@ fn apply_pdb_wrong_track_u5_repair(
         if off + 0x24 > bytes.len() {
             continue;
         }
-        let trc = crate::utils::packed_page_row_slot_count(&bytes[off..off + page_size])
-            .unwrap_or(0);
+        let trc =
+            crate::utils::packed_page_row_slot_count(&bytes[off..off + page_size]).unwrap_or(0);
         let (u5, num_rl) = crate::pdb_writer::data_page_footer_fields(0, trc as u16);
         bytes[off + 0x20..off + 0x22].copy_from_slice(&u5.to_le_bytes());
         bytes[off + 0x22..off + 0x24].copy_from_slice(&num_rl.to_le_bytes());

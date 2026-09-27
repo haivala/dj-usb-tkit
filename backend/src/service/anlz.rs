@@ -598,7 +598,10 @@ pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) 
             out.extend_from_slice(&data[pos..]);
             break;
         };
-        if header_len < 12 || total_len < header_len || total_len == 0 || pos + total_len > data.len()
+        if header_len < 12
+            || total_len < header_len
+            || total_len == 0
+            || pos + total_len > data.len()
         {
             out.extend_from_slice(&data[pos..]);
             break;

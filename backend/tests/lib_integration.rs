@@ -74,7 +74,10 @@ fn open_export_db(path: &Path) -> rusqlite::Connection {
 /// off the USB import and onto the paginated page fetch. Tests that used to
 /// read materialized state straight off `fetch_usb_playlists` now walk every
 /// playlist's pages instead.
-fn usb_tracks_via_pages(backend: &BackendCommands, usb_root: &Path) -> Vec<backend::models::UsbTrack> {
+fn usb_tracks_via_pages(
+    backend: &BackendCommands,
+    usb_root: &Path,
+) -> Vec<backend::models::UsbTrack> {
     let root = usb_root.to_string_lossy().to_string();
     let list = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
         usb_root: Some(root.clone()),
@@ -657,7 +660,10 @@ fn playlist_tracks_persist_across_backend_restart() {
     assert_eq!(playlists.len(), 1, "expected playlist to persist");
     let playlist_id = playlists[0].id.clone();
 
-    let tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest { playlist_id, ..Default::default() });
+    let tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest {
+        playlist_id,
+        ..Default::default()
+    });
     assert!(tracks.ok, "tracks failed after restart: {tracks:?}");
     let items = tracks.data.expect("tracks data").items;
     assert_eq!(items.len(), 2, "expected playlist tracks to persist");
