@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.2.5
+
 **Severity:** feature
 
 - **New feature:** a "New features available" update banner. A release whose
@@ -46,7 +48,6 @@
   (in the accent colour, dismissible per version like the critical one)
   instead of only the quiet note in Settings. `check_for_update` reports it
   as `severity: "feature"`; a critical release still takes precedence.
-
 - **New feature:** a Mix slider next to the cue editor's metronome balances
   the music against the clicks. In the middle both play at full level; slide
   left to fade the clicks, right to fade the music so the clicks cut through a
