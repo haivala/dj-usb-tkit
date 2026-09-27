@@ -43,6 +43,8 @@
 
 **Severity:** feature
 
+Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/en/project/2026/dj-usb-tool-kit-0-2-5?utm_source=djtkit&utm_medium=changelog&utm_campaign=release).
+
 - **New feature:** a "New features available" update banner. A release whose
   notes carry `**Severity:** feature` now gets the prominent in-app banner
   (in the accent colour, dismissible per version like the critical one)

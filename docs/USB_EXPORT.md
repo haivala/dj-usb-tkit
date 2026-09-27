@@ -60,6 +60,8 @@ a snapshot. Restoring or deleting acts on both files in the pair at once. Restor
 the current live state (protected from that same reconcile pass so it can't prune the very
 snapshot being restored from), then copies the snapshot's files over the live PDB/eDB.
 
+![The Backups panel listing snapshots on the USB and on this computer](assets/backup-view.png)
+
 Implementation: `backend/src/service/usb_backups.rs` (list/restore/delete + retention/archival
 policy), `backend/src/service/usb_vendor_compat.rs` (`backup_usb_databases`, the raw timestamped
 copy every mutating operation calls through `backup_usb_databases_with_retention`).

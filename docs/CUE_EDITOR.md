@@ -9,6 +9,8 @@ playlist, a USB playlist, or USB history. The button is disabled until the track
 is analyzed. Opened from a USB row, a save writes both the USB and the local
 library (see `save_usb_track_analysis_edits` in `docs/COMMANDS.md`).
 
+![The cue editor with a start marker, one hot cue and the beat grid](assets/cue-editor.png)
+
 ### Beat grid, BPM and key
 
 - **BPM**: type it, nudge it by 0.01 with −/+, or fix a half- or double-tempo
