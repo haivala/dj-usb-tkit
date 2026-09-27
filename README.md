@@ -32,6 +32,19 @@ To run it:
 This only needs to be done once per installed version. Building from source (see
 below) also avoids the prompt.
 
+### Linux
+
+Download the `.AppImage`, `.deb`, or `.rpm` from the Releases page. The prebuilt
+packages need glibc 2.35 or newer (Ubuntu 22.04, Linux Mint 21, Debian 12,
+Fedora 36, or later).
+
+For the AppImage, make it executable and run it:
+
+```bash
+chmod +x DJ_USB_Tkit_*_amd64.AppImage
+./DJ_USB_Tkit_*_amd64.AppImage
+```
+
 ## Current Capabilities
 
 - Library scanning, playlist management, and native local playback.
@@ -182,7 +195,7 @@ Linux packaging notes:
 
 - The AppImage bundles most GUI/runtime dependencies needed by the Tauri/WebKit stack (for example `webkit2gtk`, `gtk-3`, `libsoup`, `javascriptcoregtk`, `glib`, `gio`, `pango`, and `cairo`).
 - Core system libraries remain host-provided, following normal AppImage practice. This includes libraries such as `libc`, `libm`, `libpthread`, `libstdc++`, `libX11`, and `libasound`.
-- Release builds are made on Ubuntu 22.04, so the AppImage needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, or later).
+- Published release builds are made in an Ubuntu 22.04 container (`scripts/linux-release-docker.sh`), so they need glibc 2.35 or newer. `./scripts/release.sh` builds against your own system's glibc, so its AppImage only runs on systems at least as new as yours. Use `scripts/linux-release-docker.sh` for a portable build.
 - The AppImage, deb, and rpm include AppStream metadata (`usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml`) for software centers and AppImage managers.
 - The Tauri UI does not require Node at runtime.
 

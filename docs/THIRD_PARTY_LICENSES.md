@@ -50,7 +50,7 @@ The graph is primarily permissive licenses, with some weak-copyleft MPL-2.0 comp
 
 ### Linux AppImage shared libraries
 
-AppImage bundling can vary by build host. Keep a per-release inventory of bundled shared libraries and build-host details.
+Published AppImages are built in the Ubuntu 22.04 container (`scripts/Dockerfile.linux-build`), so the bundled shared libraries come from Ubuntu 22.04 packages. A local `./scripts/release.sh` build bundles the host's libraries instead. If the build base changes, keep a per-release inventory of bundled shared libraries and build-host details.
 
 ## Release maintenance checklist
 
