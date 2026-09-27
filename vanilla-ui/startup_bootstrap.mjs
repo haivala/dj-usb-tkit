@@ -29,7 +29,7 @@ export async function checkForUpdate(state, el, deps = {}) {
   const {
     fetchUpdateInfo = async () => null,
     renderUpdateNotice = () => {},
-    renderCriticalUpdateBanner = () => {}
+    renderUpdateBanner = () => {}
   } = deps;
   try {
     // Backend-owned: `check_for_update` knows the running version and does the
@@ -38,7 +38,7 @@ export async function checkForUpdate(state, el, deps = {}) {
     if (!info) return;
     state.updateCheck = info;
     renderUpdateNotice(state, el);
-    renderCriticalUpdateBanner(state, el);
+    renderUpdateBanner(state, el);
   } catch {
     // An update check must never disrupt startup.
   }

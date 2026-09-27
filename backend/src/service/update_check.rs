@@ -1,13 +1,15 @@
 //! In-app update check against the GitHub Releases list.
 //!
-//! Pure logic only -- version comparison and "what makes a release critical".
+//! Pure logic only -- version comparison and how urgently a release is flagged.
 //! The HTTP fetch lives in `tauri_commands::check_for_update` (it needs the
 //! `tauri` feature's `reqwest`); this module takes an already-parsed release
 //! list so it stays unit-testable without a network.
 //!
-//! Severity convention: a release is "critical" when its notes body contains a
-//! line like `**Severity:** critical` (markdown bold stripped before matching).
-//! The release workflow copies the matching `## <version>` section of
+//! Severity convention: a release's notes body may carry a line like
+//! `**Severity:** critical` (a must-have fix) or `**Severity:** feature`
+//! (notable new features); markdown bold is stripped before matching. Either
+//! one gets the frontend's prominent banner instead of the quiet settings
+//! note. The release workflow copies the matching `## <version>` section of
 //! CHANGELOG.md verbatim into the GitHub Release body, so a maintainer flags a
 //! release by adding that line under the version heading.
 
@@ -36,8 +38,10 @@ pub struct GithubRelease {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInfo {
     pub update_available: bool,
-    /// `"none"` (up to date, or the check couldn't run), `"normal"`, or
-    /// `"critical"`.
+    /// `"none"` (up to date, or the check couldn't run), `"normal"`,
+    /// `"feature"` (a newer release flags notable new features), or
+    /// `"critical"` (a newer release flags a must-have fix; wins over
+    /// `"feature"`).
     pub severity: String,
     pub current_version: String,
     pub latest_version: String,
@@ -69,13 +73,24 @@ pub fn parse_semver(tag: &str) -> Option<[u32; 3]> {
     Some([major, minor, patch])
 }
 
-pub fn release_is_critical(body: &str) -> bool {
+/// Whether the body carries `Severity: <severity>`, ignoring markdown bold,
+/// extra whitespace and case.
+fn release_flags(body: &str, severity: &str) -> bool {
     body.replace('*', "")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase()
-        .contains("severity: critical")
+        .contains(&format!("severity: {severity}"))
+}
+
+pub fn release_is_critical(body: &str) -> bool {
+    release_flags(body, "critical")
+}
+
+/// `**Severity:** feature` (or `features`).
+pub fn release_has_feature_flag(body: &str) -> bool {
+    release_flags(body, "feature")
 }
 
 /// Given the running version and the fetched releases, decide whether a newer
@@ -97,13 +112,22 @@ pub fn evaluate(current_version: &str, releases: &[GithubRelease]) -> UpdateInfo
         return UpdateInfo::none(current_version);
     };
 
-    let critical = newer
-        .iter()
-        .any(|(r, _)| r.body.as_deref().is_some_and(release_is_critical));
+    let any_flagged = |flag: fn(&str) -> bool| {
+        newer
+            .iter()
+            .any(|(r, _)| r.body.as_deref().is_some_and(flag))
+    };
+    let severity = if any_flagged(release_is_critical) {
+        "critical"
+    } else if any_flagged(release_has_feature_flag) {
+        "feature"
+    } else {
+        "normal"
+    };
 
     UpdateInfo {
         update_available: true,
-        severity: if critical { "critical" } else { "normal" }.to_string(),
+        severity: severity.to_string(),
         current_version: current_version.to_string(),
         latest_version: format!(
             "{}.{}.{}",
@@ -192,6 +216,44 @@ mod tests {
         assert!(release_is_critical("intro\n*Severity:* critical\noutro"));
         assert!(!release_is_critical("Severity: normal"));
         assert!(!release_is_critical("nothing here"));
+    }
+
+    #[test]
+    fn a_newer_release_flagged_feature_makes_the_check_feature() {
+        let releases = [
+            rel("v0.3.0", Some("**Severity:** feature\n\n- New cue editor.")),
+            rel("v0.3.1", Some("Routine fixes.")),
+        ];
+        let info = evaluate("0.2.4", &releases);
+        assert_eq!(info.severity, "feature");
+        assert_eq!(info.latest_version, "0.3.1");
+    }
+
+    #[test]
+    fn critical_wins_over_feature() {
+        let releases = [
+            rel("v0.3.0", Some("**Severity:** feature")),
+            rel("v0.3.1", Some("**Severity:** critical")),
+        ];
+        assert_eq!(evaluate("0.2.4", &releases).severity, "critical");
+    }
+
+    #[test]
+    fn flags_on_already_installed_releases_are_ignored() {
+        let releases = [
+            rel("v0.2.4", Some("**Severity:** feature")),
+            rel("v0.2.3", Some("**Severity:** critical")),
+            rel("v0.2.5", Some("Routine fixes.")),
+        ];
+        assert_eq!(evaluate("0.2.4", &releases).severity, "normal");
+    }
+
+    #[test]
+    fn release_has_feature_flag_strips_markdown_and_accepts_plural() {
+        assert!(release_has_feature_flag("**Severity:** feature"));
+        assert!(release_has_feature_flag("*Severity:*  Features"));
+        assert!(!release_has_feature_flag("**Severity:** critical"));
+        assert!(!release_has_feature_flag("New feature: something"));
     }
 
     #[test]

@@ -233,8 +233,11 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
 
 - `check_for_update` — fetches GitHub Releases, compares against the running
   version, and returns `{ updateAvailable, severity, currentVersion,
-  latestVersion, releaseUrl }`. Never fails: a network/parse error logs a
-  warning and returns a "no update" verdict.
+  latestVersion, releaseUrl }`. `severity` is `"none"`, `"normal"`,
+  `"feature"` (a newer release's notes carry `**Severity:** feature`) or
+  `"critical"` (`**Severity:** critical`; wins over `"feature"`); the last two
+  show the in-app banner. Never fails: a network/parse error logs a warning
+  and returns a "no update" verdict.
 
 ## Host utility commands
 

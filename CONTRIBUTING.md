@@ -65,7 +65,7 @@ Project structure:
 - `vanilla-ui/` — frontend shell and browser-side tests
 - `docs/` — product, backend, command, and operational documentation
 
-The app checks GitHub Releases for newer versions on startup (`vanilla-ui/update_check.mjs`). To flag a release as critical — shown as a prominent in-app banner instead of the default quiet notice — add `**Severity:** critical` right under that version's heading in `CHANGELOG.md`; see the comment at the top of that file.
+The app checks GitHub Releases for newer versions on startup (`vanilla-ui/update_check.mjs`). To flag a release as critical — shown as a prominent in-app banner instead of the default quiet notice — add `**Severity:** critical` right under that version's heading in `CHANGELOG.md`. For a release with notable new features, `**Severity:** feature` shows the same banner as "New features available" instead. See the comment at the top of that file.
 
 Every `CHANGELOG.md` entry is prefixed with its category — `**New feature:**`, `**Fix:**`, `**Improvement:**`, or `**Chore:**`. When a release is flagged critical, mark the specific critical entry/entries with `(CRITICAL)` appended to their prefix (e.g. `**Fix (CRITICAL):**`) and have the `**Severity:**` line point at them, since not every entry in a critical release is necessarily itself critical. Full convention and examples are in the comment at the top of `CHANGELOG.md`.
 

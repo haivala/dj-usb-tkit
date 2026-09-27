@@ -4,10 +4,19 @@
   The in-app update checker reads this file's content via the GitHub Release
   body (release.yml copies each `## <version>` section verbatim into the
   release notes). To flag a release as critical — shown as a prominent
-  in-app banner instead of the quiet default notice — add a line right
+  red in-app banner instead of the quiet default notice — add a line right
   under the version heading:
 
   **Severity:** critical
+
+  For a release worth updating to for its new features (not a must-have
+  fix), use this instead; it gets the same banner in the accent colour,
+  reading "New features available":
+
+  **Severity:** feature
+
+  Critical wins: if any release newer than the user's version is critical,
+  they see the critical banner.
 
   Every entry is prefixed with its category, bolded, followed by a colon:
 
@@ -29,6 +38,14 @@
 -->
 
 ## Unreleased
+
+**Severity:** feature
+
+- **New feature:** a "New features available" update banner. A release whose
+  notes carry `**Severity:** feature` now gets the prominent in-app banner
+  (in the accent colour, dismissible per version like the critical one)
+  instead of only the quiet note in Settings. `check_for_update` reports it
+  as `severity: "feature"`; a critical release still takes precedence.
 
 - **New feature:** a Mix slider next to the cue editor's metronome balances
   the music against the clicks. In the middle both play at full level; slide

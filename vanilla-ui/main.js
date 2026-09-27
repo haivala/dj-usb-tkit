@@ -80,7 +80,7 @@ import { createMessageBus, shouldPersistStatusToEventLog } from "./message_bus.m
 import { openExternalUrl } from "./components/settings/events.mjs";
 import {
   renderUpdateNotice,
-  renderCriticalUpdateBanner,
+  renderUpdateBanner,
 } from "./update_check.mjs";
 
 const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
@@ -110,8 +110,8 @@ const ELEMENT_IDS = [
   "playlistPanelTitle", "playlistSearchInput", "playlistTracksBody", "playlistTableWrap",
   "playlistEmptyState", "playlistTotalDuration", "playlistExportStatus", "analyzePlaylistMissingBtn",
   "exportPlaylistBtn", "settingsBtn", "settingsDrawer", "settingsBackdrop",
-  "settingsCloseBtn", "settingsVersionText", "settingsUpdateNote", "criticalUpdateBanner",
-  "criticalUpdateText", "criticalUpdateDismissBtn", "openEventLogBtn", "accentHueSlider",
+  "settingsCloseBtn", "settingsVersionText", "settingsUpdateNote", "updateBanner",
+  "updateBannerText", "updateBannerDismissBtn", "openEventLogBtn", "accentHueSlider",
   "accentSwatch", "accentResetBtn", "sourceFilterIndicator", "selectionActions",
   "usbConnectionBar", "usbSelectedControls", "usbInitRow", "usbInitHint",
   "usbHealthDot", "initializeUsbBtn", "sourceChipsContainer", "sourceBar",
@@ -1562,8 +1562,8 @@ const checkForUpdate = () => bootstrap.checkForUpdate(state, el, {
     },
     renderUpdateNotice: (s, e) =>
       renderUpdateNotice(s, e, { openUrl: (url) => openExternalUrl(window, url) }),
-    renderCriticalUpdateBanner: (s, e) =>
-      renderCriticalUpdateBanner(s, e, {
+    renderUpdateBanner: (s, e) =>
+      renderUpdateBanner(s, e, {
         localStorageObj: localStorage,
         openUrl: (url) => openExternalUrl(window, url),
       }),

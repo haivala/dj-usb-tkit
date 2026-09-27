@@ -7,6 +7,16 @@ function installBasicTauriMock(page, opts = {}) {
     const playlists = [];
     const failRename = !!opts?.failRename;
 
+    if (opts?.updateCheck) {
+      // The update check only runs under the Tauri runtime (isTauriRuntime()
+      // reads window.isTauri); the bundled @tauri-apps/api then invokes via
+      // __TAURI_INTERNALS__, so forward that to the mock below.
+      window.isTauri = true;
+      window.__TAURI_INTERNALS__ = {
+        invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
+      };
+    }
+
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
@@ -62,6 +72,9 @@ function installBasicTauriMock(page, opts = {}) {
           }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
+          }
+          if (command === "check_for_update" && opts?.updateCheck) {
+            return { ok: true, data: opts.updateCheck };
           }
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
         }
@@ -197,4 +210,51 @@ test("sidebar playlist rename failure keeps original name and sets status", asyn
 
   await expect(item).toContainText("Rename Fail");
   await expect(page.locator("#statusText")).toContainText("Rename failed");
+});
+
+const updateCheck = (severity) => ({
+  updateAvailable: true,
+  severity,
+  currentVersion: "0.2.4",
+  latestVersion: "0.3.0",
+  releaseUrl: "https://example.test/v0.3.0",
+});
+
+test("a feature release shows the new-features banner; dismissing it sticks for that version", async ({ page }) => {
+  await installBasicTauriMock(page, { updateCheck: updateCheck("feature") });
+  await page.goto("/");
+
+  const banner = page.locator("#updateBanner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toHaveClass(/is-feature/);
+  await expect(banner).not.toHaveClass(/is-critical/);
+  await expect(banner).toHaveAttribute("role", "status");
+  await expect(page.locator("#updateBannerText")).toHaveText("New features available: 0.3.0 — view release");
+
+  await page.locator("#updateBannerDismissBtn").click();
+  await expect(banner).toBeHidden();
+  await page.reload();
+  await expect(page.locator("#panel-library")).toHaveClass(/active/);
+  await expect(banner).toBeHidden();
+});
+
+test("a critical release shows the critical banner", async ({ page }) => {
+  await installBasicTauriMock(page, { updateCheck: updateCheck("critical") });
+  await page.goto("/");
+
+  const banner = page.locator("#updateBanner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toHaveClass(/is-critical/);
+  await expect(banner).toHaveAttribute("role", "alert");
+  await expect(page.locator("#updateBannerText")).toHaveText("Critical update available: 0.3.0 — view release");
+});
+
+test("a normal release shows no banner", async ({ page }) => {
+  await installBasicTauriMock(page, { updateCheck: updateCheck("normal") });
+  await page.goto("/");
+
+  // The check has landed (the settings note shows it)…
+  await expect(page.locator("#settingsUpdateNote")).toHaveText("Update available: 0.3.0");
+  // …and a routine release stays out of the way.
+  await expect(page.locator("#updateBanner")).toBeHidden();
 });

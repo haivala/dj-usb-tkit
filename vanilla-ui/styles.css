@@ -2924,29 +2924,38 @@ td button[data-action]:disabled,
   cursor: pointer;
 }
 
-/* ── critical update banner ─────────────────────────── */
+/* ── update banner (critical fix / new features) ─────── */
 
-.critical-update-banner {
+.update-banner {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 12px;
   padding: 8px 16px;
-  background: var(--danger-glow);
-  border-bottom: 1px solid var(--danger);
-  color: var(--danger);
   font-family: 'Outfit', sans-serif;
   font-size: 13px;
   font-weight: 500;
 }
 
-.critical-update-banner .critical-update-link {
+.update-banner.is-critical {
+  background: var(--danger-glow);
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
+}
+
+.update-banner.is-feature {
+  background: var(--accent-glow);
+  border-bottom: 1px solid var(--accent);
+  color: var(--accent-hover);
+}
+
+.update-banner .update-banner-link {
   color: inherit;
   text-decoration: underline;
   cursor: pointer;
 }
 
-.critical-update-dismiss {
+.update-banner-dismiss {
   width: 22px;
   height: 22px;
   padding: 0;
@@ -2962,7 +2971,7 @@ td button[data-action]:disabled,
   justify-content: center;
 }
 
-.critical-update-dismiss:hover {
+.update-banner-dismiss:hover {
   opacity: 1;
 }
 

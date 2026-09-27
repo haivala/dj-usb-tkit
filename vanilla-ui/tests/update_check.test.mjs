@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { STORAGE_KEY_UPDATE_DISMISSED } from "../settings_keys.mjs";
 import {
-  dismissCriticalUpdateBanner,
-  renderCriticalUpdateBanner,
+  dismissUpdateBanner,
+  renderUpdateBanner,
   renderUpdateNotice
 } from "../update_check.mjs";
 
@@ -20,8 +20,8 @@ function makeEls() {
   const document = dom.window.document;
   return {
     settingsUpdateNote: document.querySelector("#note"),
-    criticalUpdateBanner: document.querySelector("#banner"),
-    criticalUpdateText: document.querySelector("#text")
+    updateBanner: document.querySelector("#banner"),
+    updateBannerText: document.querySelector("#text")
   };
 }
 
@@ -59,7 +59,7 @@ test("renderUpdateNotice toggles the note and opens the release link", () => {
   assert.equal(opened, "https://example.com/release");
 });
 
-test("renderCriticalUpdateBanner handles visibility, dismissal, links, and persistence", () => {
+test("renderUpdateBanner handles visibility, dismissal, links, and persistence", () => {
   const state = {
     updateCheck: {
       updateAvailable: true,
@@ -70,34 +70,34 @@ test("renderCriticalUpdateBanner handles visibility, dismissal, links, and persi
   };
 
   const el = makeEls();
-  renderCriticalUpdateBanner({ updateCheck: null }, el);
-  assert.equal(el.criticalUpdateBanner.classList.contains("hidden"), true);
-  renderCriticalUpdateBanner({ updateCheck: { severity: "normal" } }, el);
-  assert.equal(el.criticalUpdateBanner.classList.contains("hidden"), true);
+  renderUpdateBanner({ updateCheck: null }, el);
+  assert.equal(el.updateBanner.classList.contains("hidden"), true);
+  renderUpdateBanner({ updateCheck: { severity: "normal" } }, el);
+  assert.equal(el.updateBanner.classList.contains("hidden"), true);
 
   let opened = null;
-  renderCriticalUpdateBanner(state, el, {
+  renderUpdateBanner(state, el, {
     localStorageObj: fakeStorage(),
     openUrl: (url) => { opened = url; }
   });
-  assert.equal(el.criticalUpdateBanner.classList.contains("hidden"), false);
-  assert.match(el.criticalUpdateText.textContent, /0\.1\.5/);
-  el.criticalUpdateText.querySelector(".critical-update-link").dispatchEvent(
-    new el.criticalUpdateText.ownerDocument.defaultView.Event("click", { bubbles: true, cancelable: true })
+  assert.equal(el.updateBanner.classList.contains("hidden"), false);
+  assert.match(el.updateBannerText.textContent, /0\.1\.5/);
+  el.updateBannerText.querySelector(".update-banner-link").dispatchEvent(
+    new el.updateBannerText.ownerDocument.defaultView.Event("click", { bubbles: true, cancelable: true })
   );
   assert.equal(opened, "https://example.com/v0.1.5");
 
-  renderCriticalUpdateBanner(state, el, {
+  renderUpdateBanner(state, el, {
     localStorageObj: fakeStorage({ [STORAGE_KEY_UPDATE_DISMISSED]: "0.1.5" })
   });
-  assert.equal(el.criticalUpdateBanner.classList.contains("hidden"), true);
-  renderCriticalUpdateBanner(state, el, {
+  assert.equal(el.updateBanner.classList.contains("hidden"), true);
+  renderUpdateBanner(state, el, {
     localStorageObj: fakeStorage({ [STORAGE_KEY_UPDATE_DISMISSED]: "0.1.4" })
   });
-  assert.equal(el.criticalUpdateBanner.classList.contains("hidden"), false);
+  assert.equal(el.updateBanner.classList.contains("hidden"), false);
 
   const storage = fakeStorage();
-  dismissCriticalUpdateBanner({ updateCheck: { latestVersion: "0.1.5" } }, el, { localStorageObj: storage });
-  assert.equal(el.criticalUpdateBanner.classList.contains("hidden"), true);
+  dismissUpdateBanner({ updateCheck: { latestVersion: "0.1.5" } }, el, { localStorageObj: storage });
+  assert.equal(el.updateBanner.classList.contains("hidden"), true);
   assert.equal(storage.getItem(STORAGE_KEY_UPDATE_DISMISSED), "0.1.5");
 });

@@ -1769,7 +1769,7 @@ const RELEASES_API_URL: &str =
     "https://api.github.com/repos/haivala/dj-usb-tkit/releases?per_page=10";
 
 /// Checks GitHub Releases for a newer stable build than the running one.
-/// Version comparison and the "critical" rule live in
+/// Version comparison and the severity rules live in
 /// `service::update_check`; this only does the fetch. A failed check is
 /// background noise -- it logs quietly and reports "no update" rather than
 /// surfacing an error.
