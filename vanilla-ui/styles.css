@@ -2181,7 +2181,7 @@ input[type="checkbox"] {
   font-size: 12px;
   line-height: 1.4;
   white-space: normal;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
@@ -3668,6 +3668,11 @@ td button[data-action]:disabled,
   background: linear-gradient(to right, var(--line), var(--ink));
   transition: none;
   cursor: pointer;
+}
+.track-detail-metronome-mix[hidden] { display: none; }
+.track-detail-metronome-mix input[type="range"] {
+  width: 70px;
+  background: linear-gradient(to right, var(--ink), var(--line) 50%, var(--ink));
 }
 .track-detail-grid-level input[type="range"]:focus { box-shadow: none; }
 .track-detail-grid-level input[type="range"]:focus-visible {

@@ -99,6 +99,11 @@ undo). Space never presses the focused button (Save has focus on open).
   louder on bar starts, so you can hear whether the grid lines up. Grid edits
   apply while it plays. It is off each time the editor opens and switches off
   when it closes.
+- **Mix** (next to the metronome): balances the music against the clicks. In
+  the middle both play at full level; to the left the clicks fade out, to the
+  right the music does (all the way right plays the clicks alone). It only
+  changes the sound while the metronome is on, applies while playing, and is
+  remembered.
 
 ### Undo, saving and closing
 
@@ -156,8 +161,11 @@ that precedes every hot-cue pad is read back as the playback-start cue.
 ### Metronome
 
 The clicks come from the native playback engine, not the webview. The editor
-sends `set_playback_metronome` (`{ enabled, firstBeatMs, bpm }`) whenever the
-toggle or the grid changes, and `enabled: false` on close.
+sends `set_playback_metronome` (`{ enabled, firstBeatMs, bpm, mix }`) whenever
+the toggle, the grid or the Mix slider changes, and `enabled: false` on close.
+`mix` runs 0..1 (default 0.5): the music's gain is `min(1, 2·(1−mix))` and the
+clicks' `min(1, 2·mix)`, so both are at full level in the middle. While the
+metronome is off the music passes through untouched.
 `backend/src/metronome.rs` wraps every playing track's decoded source in a
 `MetronomeSource` that adds a short decaying sine click (1600 Hz on bar starts,
 1000 Hz otherwise) to the samples at each grid beat. It tracks its own position

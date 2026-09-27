@@ -766,6 +766,7 @@ impl BackendService {
             req.enabled,
             req.first_beat_ms.unwrap_or(0.0),
             req.bpm.unwrap_or(0.0),
+            req.mix.unwrap_or(crate::metronome::DEFAULT_MIX),
         );
         Ok(PlaybackMetronomeData { enabled })
     }

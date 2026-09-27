@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    GetTrackDetailRequest, GetUsbTrackDetailRequest, ResolvePlaybackSourceRequest,
+    GetTrackDetailRequest, GetUsbTrackDetailRequest, KeyOptionGroup, ResolvePlaybackSourceRequest,
     SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
     SaveUsbTrackAnalysisEditsRequest, TrackCue, TrackCueInput, TrackDetail, UsbTrackAnalysisDetail,
     WarningEntry,
@@ -189,10 +189,7 @@ pub struct HotcuePaletteEntry {
     pub color_code: u8,
 }
 
-/// The colours the track-detail modal offers for cues.
-///
-/// TODO(cue-palette): the exact index↔RGB↔code mapping is a hardware-verification
-/// item (`docs/CDJ_TEST_MATRIX.md`) — a wrong index only mis-tints the pad.
+/// The colours the track-detail modal offers for cues (verified on a CDJ).
 pub const HOTCUE_PALETTE: &[HotcuePaletteEntry] = &[
     HotcuePaletteEntry { id: 1, rgb: (0xDE, 0x44, 0xCF), color_code: 1 }, // pink
     HotcuePaletteEntry { id: 2, rgb: (0xE1, 0x24, 0x24), color_code: 2 }, // red
@@ -213,6 +210,15 @@ pub fn palette_entry(color_id: u8) -> Option<HotcuePaletteEntry> {
 
 pub fn is_valid_color_id(color_id: u8) -> bool {
     palette_entry(color_id).is_some()
+}
+
+/// A cue list as the cue editor gets it: every hot cue carries a colour (the
+/// default when the ANLZ had none), exactly as a save would store it.
+fn cues_for_editor(mut cues: Vec<TrackCue>) -> Vec<TrackCue> {
+    for cue in cues.iter_mut().filter(|c| !c.playback_start) {
+        cue.color_id.get_or_insert(DEFAULT_HOTCUE_COLOR_ID);
+    }
+    cues
 }
 
 fn row_to_track_cue(row: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<TrackCue> {
@@ -324,12 +330,24 @@ pub fn anlz_cues_from_track_cues(cues: &[TrackCue]) -> Vec<AnlzCue> {
 /// The musical keys the track-detail modal's key stepper offers, in standard
 /// notation exactly as `stratum-dsp`'s `Key::name()` and the essentia runner
 /// emit it (sharp-only, e.g. "C#" never "Db"): 12 majors then 12 minors.
-/// Mirrored in `vanilla-ui/components/track-detail/actions.mjs` as
-/// `KEY_OPTIONS`.
+/// The cue editor gets them from [`key_option_groups`] on the track detail.
 pub const KEY_OPTIONS: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "Cm", "C#m", "Dm", "D#m",
     "Em", "Fm", "F#m", "Gm", "G#m", "Am", "A#m", "Bm",
 ];
+
+/// [`KEY_OPTIONS`] as the cue editor's picker shows them: majors, then minors.
+pub fn key_option_groups() -> Vec<KeyOptionGroup> {
+    let group = |label: &str, minor: bool| KeyOptionGroup {
+        label: label.to_string(),
+        keys: KEY_OPTIONS
+            .iter()
+            .filter(|k| k.ends_with('m') == minor)
+            .map(|k| k.to_string())
+            .collect(),
+    };
+    vec![group("Major", false), group("Minor", true)]
+}
 
 /// Trim and validate a user-entered musical key against `KEY_OPTIONS`. Only
 /// gates new *user* edits through the save endpoints — a track's stored key
@@ -566,13 +584,14 @@ impl BackendService {
             .and_then(read_pwv5_from_anlz)
             .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
 
-        let cues = load_track_cues(&conn, track_id)?;
+        let cues = cues_for_editor(load_track_cues(&conn, track_id)?);
 
         Ok(TrackDetail {
             track,
             first_beat_ms,
             cues,
             detail_waveform,
+            key_options: key_option_groups(),
         })
     }
 
@@ -709,9 +728,10 @@ impl BackendService {
 
         Ok(UsbTrackAnalysisDetail {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
-            cues: collapse_anlz_cues(&bytes),
+            cues: cues_for_editor(collapse_anlz_cues(&bytes)),
             detail_waveform: read_pwv5_from_anlz(&dat_abs)
                 .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
+            key_options: key_option_groups(),
         })
     }
 
@@ -1119,6 +1139,36 @@ mod tests {
         assert!(normalize_key_input("Eb").is_err(), "flat spelling not in KEY_OPTIONS");
         assert!(normalize_key_input("").is_err(), "empty key");
         assert!(normalize_key_input("8B").is_err(), "camelot notation not in KEY_OPTIONS");
+    }
+
+    #[test]
+    fn cues_for_editor_gives_uncoloured_hot_cues_the_default_colour_only() {
+        let cue = |color_id, playback_start| TrackCue {
+            id: String::new(),
+            position_ms: 0,
+            color_id,
+            name: None,
+            playback_start,
+        };
+        let out = cues_for_editor(vec![cue(None, true), cue(None, false), cue(Some(2), false)]);
+        assert_eq!(
+            out.iter().map(|c| c.color_id).collect::<Vec<_>>(),
+            [None, Some(DEFAULT_HOTCUE_COLOR_ID), Some(2)]
+        );
+    }
+
+    #[test]
+    fn key_option_groups_are_the_majors_then_the_minors_in_key_options_order() {
+        let groups = key_option_groups();
+        assert_eq!(
+            groups.iter().map(|g| g.label.as_str()).collect::<Vec<_>>(),
+            ["Major", "Minor"]
+        );
+        assert_eq!(groups[0].keys.len(), 12);
+        assert_eq!(groups[0].keys[..3], ["C", "C#", "D"]);
+        assert_eq!(groups[1].keys.last().map(String::as_str), Some("Bm"));
+        let flat: Vec<&str> = groups.iter().flat_map(|g| g.keys.iter().map(String::as_str)).collect();
+        assert_eq!(flat, KEY_OPTIONS);
     }
 
     #[test]

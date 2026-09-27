@@ -131,6 +131,15 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
     // keep the default
   }
 
+  state.cueMetronomeMix = 50;
+  try {
+    const raw = localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_METRONOME_MIX);
+    const mix = raw == null || raw === "" ? NaN : Number(raw);
+    if (Number.isFinite(mix)) state.cueMetronomeMix = Math.max(0, Math.min(100, Math.round(mix)));
+  } catch {
+    // keep the default
+  }
+
   try {
     state.sidebarCollapsed = localStorageObj?.getItem?.(constants.STORAGE_KEY_SIDEBAR_COLLAPSED) === "1";
   } catch {

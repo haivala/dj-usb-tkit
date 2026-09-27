@@ -30,6 +30,22 @@
 
 ## Unreleased
 
+- **New feature:** a Mix slider next to the cue editor's metronome balances
+  the music against the clicks. In the middle both play at full level; slide
+  left to fade the clicks, right to fade the music so the clicks cut through a
+  loud track. Applies while playing and is remembered. It shows only while the
+  metronome is on.
+- **Fix:** tooltips wrap between words instead of splitting a word mid-way
+  (e.g. "bea / t"); long unbroken text such as file paths still wraps.
+- **Improvement:** the cue editor's key list comes from the backend
+  (`keyOptions` on `get_track_detail` / `get_usb_track_detail`), so the picker
+  always offers exactly the keys a save accepts.
+- **Improvement:** the backend alone checks cue lists: the cue editor no
+  longer re-checks the cues it loads or saves. Hot cues read without a colour
+  get the default colour from the backend, as a save would store them.
+- **Chore:** removed the stale hardware-check TODO on the hot-cue colour
+  palette (verified on a CDJ).
+
 ## 0.2.4
 
 - **New feature:** cue points can be dragged along the waveform in the cue

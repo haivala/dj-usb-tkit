@@ -18,6 +18,7 @@ export const STORAGE_KEY_SOURCES_EVER_CONFIGURED = "djusbtkit.sourcesEverConfigu
 export const STORAGE_KEY_CUE_START_ON_FIRST_BEAT = "djusbtkit.cueStartOnFirstBeat";
 export const STORAGE_KEY_CUE_BEATGRID_LEVEL = "djusbtkit.cueBeatgridLevel";
 export const STORAGE_KEY_CUE_QUANTIZE = "djusbtkit.cueQuantize";
+export const STORAGE_KEY_CUE_METRONOME_MIX = "djusbtkit.cueMetronomeMix";
 export const STORAGE_KEY_UPDATE_DISMISSED = "djusbtkit.updateDismissedVersion";
 
 export const FRONTEND_DB_KEY_THEME = "ui_theme_v1";
@@ -37,6 +38,7 @@ export const FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED = "ui_sources_ever_configur
 export const FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT = "ui_cue_start_on_first_beat_v1";
 export const FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL = "ui_cue_beatgrid_level_v1";
 export const FRONTEND_DB_KEY_CUE_QUANTIZE = "ui_cue_quantize_v1";
+export const FRONTEND_DB_KEY_CUE_METRONOME_MIX = "ui_cue_metronome_mix_v1";
 
 export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_THEME, dbKey: FRONTEND_DB_KEY_THEME },
@@ -55,5 +57,6 @@ export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_SOURCES_EVER_CONFIGURED, dbKey: FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED },
   { storageKey: STORAGE_KEY_CUE_START_ON_FIRST_BEAT, dbKey: FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT },
   { storageKey: STORAGE_KEY_CUE_BEATGRID_LEVEL, dbKey: FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL },
-  { storageKey: STORAGE_KEY_CUE_QUANTIZE, dbKey: FRONTEND_DB_KEY_CUE_QUANTIZE }
+  { storageKey: STORAGE_KEY_CUE_QUANTIZE, dbKey: FRONTEND_DB_KEY_CUE_QUANTIZE },
+  { storageKey: STORAGE_KEY_CUE_METRONOME_MIX, dbKey: FRONTEND_DB_KEY_CUE_METRONOME_MIX }
 ];

@@ -27,6 +27,8 @@ export function createInitialState() {
     cueBeatgridLevel: 35,
     // Cue editor: snap new and dragged cues to the beat grid (Shift inverts).
     cueQuantize: true,
+    // Cue editor: metronome music/click balance (0 music only, 50 both full, 100 clicks only).
+    cueMetronomeMix: 50,
     analysisBpmRange: DEFAULT_ANALYSIS_BPM_RANGE,
     analysisEngine: "stratum",
     analysisEnginePersistPromise: null,

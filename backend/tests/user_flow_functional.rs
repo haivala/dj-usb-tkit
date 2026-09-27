@@ -1214,6 +1214,7 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
         .expect("usb detail");
     assert_eq!(detail.cues.len(), 2);
     assert!(detail.detail_waveform.is_some());
+    assert_eq!(detail.key_options.iter().map(|g| g.keys.len()).sum::<usize>(), 24);
 
     // Now edit the cue list from the USB view: one cue, moved.
     let saved = backend

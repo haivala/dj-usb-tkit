@@ -36,17 +36,10 @@ export const HOTCUE_PALETTE = [
   { id: 7, css: "#2A5BD8" },
   { id: 8, css: "#8A3FD1" },
 ];
-const DEFAULT_COLOR_ID = 5;
 const START_BEAT_TOOLTIP =
   "Adds a ▶ memory cue (no hot cue) on the first beat, so the CDJ loads there instead of on cue A";
 const START_MARKER_TOOLTIP =
   "The CDJ loads on the ▶ start marker you placed; drag it on the waveform to move it";
-
-// Mirrors backend `KEY_OPTIONS` (service/cues.rs). 12 majors then 12 minors.
-export const KEY_OPTIONS = [
-  "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-  "Cm", "C#m", "Dm", "D#m", "Em", "Fm", "F#m", "Gm", "G#m", "Am", "A#m", "Bm",
-];
 
 export function colorCssForId(colorId) {
   return HOTCUE_PALETTE.find((c) => c.id === colorId)?.css || "#8892a0";
@@ -87,6 +80,8 @@ export function createTrackDetailController(el, prefs = {}) {
     setQuantizePref = () => {},
     // The native engine mixes the clicks into the track (`set_playback_metronome`).
     setPlaybackMetronome = () => Promise.resolve(),
+    getMetronomeMixPref = () => 50,
+    setMetronomeMixPref = () => {},
   } = prefs;
   let resolveFn = null;
   let open = false;
@@ -98,12 +93,16 @@ export function createTrackDetailController(el, prefs = {}) {
   // What the overview canvas was last drawn for; it only changes with the
   // track or the width, not on every pan/zoom.
   let overviewDrawnKey = "";
+  // What the key <select> was last built from.
+  let keySelectBuiltFor = "";
 
   const working = {
     track: null,
     durationMs: 0,
     bpm: null,
     key: null,
+    // The key picker's `{ label, keys }` groups, from the backend's track detail.
+    keyGroups: [],
     firstBeatMs: null,
     cues: [],
     view: { startMs: 0, endMs: 0 },
@@ -200,6 +199,13 @@ export function createTrackDetailController(el, prefs = {}) {
   function renderTools() {
     el.trackDetailQuantize?.setAttribute("aria-pressed", String(getQuantizePref()));
     el.trackDetailMetronome?.setAttribute("aria-pressed", String(metronome.on));
+    const mix = el.trackDetailMetronomeMix;
+    if (mix) {
+      mix.value = String(getMetronomeMixPref());
+      // The Mix slider only matters while the metronome is on.
+      const wrap = mix.closest("label");
+      if (wrap) wrap.hidden = !metronome.on;
+    }
   }
 
   // --- Metronome -----------------------------------------------------------
@@ -212,6 +218,7 @@ export function createTrackDetailController(el, prefs = {}) {
       enabled: open && metronome.on && hasGrid(),
       firstBeatMs: working.firstBeatMs ?? 0,
       bpm: Number(working.bpm) || 0,
+      mix: getMetronomeMixPref() / 100,
     };
     const key = JSON.stringify(request);
     if (key === metronome.sent) return;
@@ -678,15 +685,41 @@ export function createTrackDetailController(el, prefs = {}) {
     renderPlayPause();
   }
 
+  /// The backend's key options in stepper order (majors, then minors).
+  function keyOptions() {
+    return working.keyGroups.flatMap((g) => g.keys);
+  }
+
+  /// Build the key <select> from the backend's groups (once per change).
+  function buildKeySelect(select) {
+    const built = JSON.stringify(working.keyGroups);
+    if (built === keySelectBuiltFor) return;
+    keySelectBuiltFor = built;
+    const doc = select.ownerDocument;
+    select.textContent = "";
+    for (const group of working.keyGroups) {
+      const optgroup = doc.createElement("optgroup");
+      optgroup.label = group.label;
+      for (const key of group.keys) {
+        const option = doc.createElement("option");
+        option.value = key;
+        option.textContent = key;
+        optgroup.appendChild(option);
+      }
+      select.appendChild(optgroup);
+    }
+  }
+
   // A stored key can predate this stepper (e.g. essentia's flat spellings)
-  // and won't match any canonical `KEY_OPTIONS` entry -- rather than silently
+  // and won't match any of the backend's key options -- rather than silently
   // dropping it, keep it visible via a synthetic option so the select always
   // reflects the real current value.
   function syncKeySelect() {
     const select = el.trackDetailKey;
     if (!select) return;
+    buildKeySelect(select);
     const synthetic = select.querySelector("option[data-synthetic]");
-    if (working.key != null && !KEY_OPTIONS.includes(working.key)) {
+    if (working.key != null && !keyOptions().includes(working.key)) {
       const option = synthetic || select.ownerDocument.createElement("option");
       option.value = working.key;
       option.textContent = working.key;
@@ -814,16 +847,18 @@ export function createTrackDetailController(el, prefs = {}) {
       render();
     },
 
-    /// Step to the next/previous entry in `KEY_OPTIONS`. A current value
-    /// outside that list (a legacy/non-canonical stored key) jumps onto the
-    /// nearest end instead of stepping relative to a position it doesn't have.
+    /// Step to the next/previous key option. A current value outside the
+    /// list (a legacy/non-canonical stored key) jumps onto the nearest end
+    /// instead of stepping relative to a position it doesn't have.
     nudgeKey(direction) {
-      const count = KEY_OPTIONS.length;
-      const index = working.key == null ? -1 : KEY_OPTIONS.indexOf(working.key);
+      const options = keyOptions();
+      const count = options.length;
+      if (!count) return;
+      const index = working.key == null ? -1 : options.indexOf(working.key);
       const nextIndex = index === -1
         ? (direction > 0 ? 0 : count - 1)
         : (index + direction + count) % count;
-      api.setKey(KEY_OPTIONS[nextIndex]);
+      api.setKey(options[nextIndex]);
     },
 
     /// Add a cue. With an explicit `positionMs` it lands there (double-click on
@@ -950,6 +985,17 @@ export function createTrackDetailController(el, prefs = {}) {
       renderBeatgrid();
     },
 
+    /// The metronome "Mix" slider (0-100): music only, both at full level at
+    /// 50, clicks only. Applies live while playing; `remember` saves it (on
+    /// release, not every drag step).
+    setMetronomeMix(value, { remember = false } = {}) {
+      const n = Number(value);
+      const mix = Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 50;
+      setMetronomeMixPref(mix, { remember });
+      renderTools();
+      syncMetronome();
+    },
+
     /// The "Playback starts at" choice: First beat adds the playback-start
     /// cue, First cue removes it (only while the track has cues). `remember`
     /// makes it the setting applied to the next track's first cue.
@@ -1054,7 +1100,7 @@ export function createTrackDetailController(el, prefs = {}) {
       if (resolver) resolver(result || null);
     },
 
-    open({ track, firstBeatMs, cues, durationMs, bpm, key }) {
+    open({ track, firstBeatMs, cues, durationMs, bpm, key, keyOptions: keyGroups }) {
       if (open) api.close(null);
       open = true;
       working.track = track || {};
@@ -1065,7 +1111,8 @@ export function createTrackDetailController(el, prefs = {}) {
       working.durationMs = Number(durationMs) || Number(track?.durationMs) || 0;
       working.bpm = bpm != null ? bpm : track?.bpm ?? null;
       working.key = key != null ? key : track?.key ?? null;
-      working.firstBeatMs = firstBeatMs == null ? null : Math.round(firstBeatMs);
+      working.keyGroups = Array.isArray(keyGroups) ? keyGroups : [];
+      working.firstBeatMs = firstBeatMs ?? null;
       working.followSuspendUntil = 0;
       working.draggingTempId = null;
       working.selectedTempId = null;
@@ -1074,20 +1121,18 @@ export function createTrackDetailController(el, prefs = {}) {
       lastMutateKey = null;
       metronome.on = false;
       playPauseShowsPlaying = null;
-      const loaded = (cues || []).map((c) => ({
+      // The backend sends the cues already valid (capped, coloured, the
+      // start cue first and never after a hot cue); only the editor's own
+      // fields are added here.
+      working.cues = (cues || []).map((c) => ({
         tempId: `c${(tempIdSeq += 1)}`,
-        positionMs: Math.round(c.positionMs || 0),
-        colorId: c.playbackStart ? null : c.colorId ?? DEFAULT_COLOR_ID,
+        positionMs: c.positionMs,
+        colorId: c.colorId ?? null,
         name: c.name || "",
         playbackStart: !!c.playbackStart,
       }));
-      const start = loaded.find((c) => c.playbackStart);
+      const start = startCue();
       if (start) start.followsFirstBeat = start.positionMs === working.firstBeatMs;
-      working.cues = [
-        ...(start ? [start] : []),
-        ...loaded.filter((c) => !c.playbackStart).slice(0, MAX_CUES),
-      ];
-      enforceStartOrder();
       applyView(0, Math.min(DEFAULT_SPAN_MS, working.durationMs || DEFAULT_SPAN_MS));
 
       const t = working.track;
@@ -1124,10 +1169,11 @@ export function createTrackDetailController(el, prefs = {}) {
         firstBeatMs: working.firstBeatMs == null ? null : working.firstBeatMs,
         bpm: working.bpm == null ? null : working.bpm,
         key: working.key == null ? null : working.key,
+        // The backend trims names and validates the list on save.
         cues: orderedCues().map((c) => ({
-          positionMs: Math.round(c.positionMs),
-          colorId: c.playbackStart ? null : c.colorId ?? DEFAULT_COLOR_ID,
-          name: !c.playbackStart && c.name?.trim() ? c.name.trim() : null,
+          positionMs: c.positionMs,
+          colorId: c.colorId,
+          name: c.name || null,
           playbackStart: !!c.playbackStart,
         })),
       };
@@ -1183,6 +1229,7 @@ async function openUsbTrackDetail(track, deps) {
     durationMs: track.durationMs,
     bpm: track.bpm,
     key: track.key,
+    keyOptions: detail.keyOptions,
   });
   if (!payload) return;
 
@@ -1259,6 +1306,7 @@ export async function openTrackDetail(track, deps) {
     durationMs: detail.track?.durationMs,
     bpm: detail.track?.bpm,
     key: detail.track?.key,
+    keyOptions: detail.keyOptions,
   });
   if (!payload) return;
 

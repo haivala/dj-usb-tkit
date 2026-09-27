@@ -52,8 +52,8 @@ impl PlaybackController {
 
     /// Clicks on the beat grid (`first_beat_ms`, `bpm`) mixed into whatever is
     /// playing. Returns whether it is on (never without a usable BPM).
-    pub fn set_metronome(&self, enabled: bool, first_beat_ms: f64, bpm: f64) -> bool {
-        self.metronome.set(enabled, first_beat_ms, bpm)
+    pub fn set_metronome(&self, enabled: bool, first_beat_ms: f64, bpm: f64, mix: f64) -> bool {
+        self.metronome.set(enabled, first_beat_ms, bpm, mix)
     }
 
     pub fn play_path(

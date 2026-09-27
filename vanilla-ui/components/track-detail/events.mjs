@@ -339,6 +339,13 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.setBeatgridLevel(event.target.value, { remember: true })
   );
 
+  el.trackDetailMetronomeMix?.addEventListener("input", (event) =>
+    trackDetailDialog.setMetronomeMix(event.target.value)
+  );
+  el.trackDetailMetronomeMix?.addEventListener("change", (event) =>
+    trackDetailDialog.setMetronomeMix(event.target.value, { remember: true })
+  );
+
   el.trackDetailStartFirstCue?.addEventListener("click", () =>
     trackDetailDialog.setStartOnFirstBeat(false, { remember: true })
   );

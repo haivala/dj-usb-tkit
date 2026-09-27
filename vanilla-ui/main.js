@@ -38,6 +38,7 @@ import {
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
   STORAGE_KEY_CUE_BEATGRID_LEVEL,
   STORAGE_KEY_CUE_QUANTIZE,
+  STORAGE_KEY_CUE_METRONOME_MIX,
   FRONTEND_DB_KEY_THEME,
   FRONTEND_DB_KEY_ACCENT_HUE,
   FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
@@ -50,6 +51,7 @@ import {
   FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
   FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL,
   FRONTEND_DB_KEY_CUE_QUANTIZE,
+  FRONTEND_DB_KEY_CUE_METRONOME_MIX,
 } from "./settings_keys.mjs";
 import {
   WAVEFORM_COLORS,
@@ -147,7 +149,7 @@ const ELEMENT_IDS = [
   "trackDetailQuantize", "trackDetailMetronome", "trackDetailUndo", "trackDetailRedo",
   "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
   "trackDetailPlayPause", "trackDetailHint", "trackDetailHintBtn",
-  "trackDetailOverview", "trackDetailOverviewCues", "trackDetailOverviewWindow", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailGridLevel", "trackDetailZoomRange", "trackDetailTotalTime",
+  "trackDetailOverview", "trackDetailOverviewCues", "trackDetailOverviewWindow", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailGridLevel", "trackDetailMetronomeMix", "trackDetailZoomRange", "trackDetailTotalTime",
   "trackDetailCueList", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
 ];
 
@@ -188,6 +190,13 @@ const trackDetailDialog = trackDetail.createTrackDetailController(el, {
     state.cueBeatgridLevel = level;
     if (remember) {
       persistSetting(STORAGE_KEY_CUE_BEATGRID_LEVEL, FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL, String(level));
+    }
+  },
+  getMetronomeMixPref: () => state.cueMetronomeMix,
+  setMetronomeMixPref: (mix, { remember = false } = {}) => {
+    state.cueMetronomeMix = mix;
+    if (remember) {
+      persistSetting(STORAGE_KEY_CUE_METRONOME_MIX, FRONTEND_DB_KEY_CUE_METRONOME_MIX, String(mix));
     }
   },
 });
@@ -1572,6 +1581,7 @@ function restoreStoredUiPrefs() {
       STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
       STORAGE_KEY_CUE_BEATGRID_LEVEL,
       STORAGE_KEY_CUE_QUANTIZE,
+      STORAGE_KEY_CUE_METRONOME_MIX,
     },
     normalizeAnalysisBpmRange: library.normalizeAnalysisBpmRange,
     defaultAnalysisBpmRange: library.DEFAULT_ANALYSIS_BPM_RANGE,

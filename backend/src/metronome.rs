@@ -7,6 +7,10 @@
 //! seeks, and need no second audio path (the webview's audio may be missing
 //! entirely, e.g. WebKitGTK without GStreamer's `autoaudiosink`).
 //!
+//! A mix setting balances the two: at the middle both play at full level, to
+//! one side the clicks fade out, to the other the music does (so the clicks
+//! can be heard over a loud track).
+//!
 //! [`MetronomeSettings`] is shared between the controller (which the frontend
 //! updates while a track plays) and the audio thread, as lock-free atomics.
 
@@ -27,47 +31,86 @@ const DOWNBEAT_HZ: f64 = 1600.0;
 const BEAT_HZ: f64 = 1000.0;
 const DOWNBEAT_GAIN: f64 = 0.45;
 const BEAT_GAIN: f64 = 0.3;
+/// The mix position where both music and clicks play at full level.
+pub const DEFAULT_MIX: f64 = 0.5;
 
-/// The metronome's on/off switch and beat grid.
-#[derive(Debug, Default)]
+/// The metronome's on/off switch, beat grid and music/click mix.
+#[derive(Debug)]
 pub struct MetronomeSettings {
     enabled: AtomicBool,
     /// f64 bits.
     first_beat_ms: AtomicU64,
     /// f64 bits; 0 when there is no usable BPM.
     beat_interval_ms: AtomicU64,
+    /// f64 bits, 0..=1: 0 is music only, 1 clicks only.
+    mix: AtomicU64,
+}
+
+impl Default for MetronomeSettings {
+    fn default() -> Self {
+        Self {
+            enabled: AtomicBool::new(false),
+            first_beat_ms: AtomicU64::new(0),
+            beat_interval_ms: AtomicU64::new(0),
+            mix: AtomicU64::new(DEFAULT_MIX.to_bits()),
+        }
+    }
+}
+
+/// What the audio thread needs for one frame while the metronome is on.
+#[derive(Debug, Clone, Copy)]
+struct Active {
+    first_beat_ms: f64,
+    beat_interval_ms: f64,
+    music_gain: f64,
+    click_gain: f64,
 }
 
 impl MetronomeSettings {
     /// Returns whether the metronome is now on: it stays off without a usable
-    /// grid (a non-finite or non-positive BPM).
-    pub fn set(&self, enabled: bool, first_beat_ms: f64, bpm: f64) -> bool {
+    /// grid (a non-finite or non-positive BPM). `mix` is clamped to 0..=1; a
+    /// non-finite one keeps the default.
+    pub fn set(&self, enabled: bool, first_beat_ms: f64, bpm: f64, mix: f64) -> bool {
         let interval = if bpm.is_finite() && bpm > 0.0 { 60_000.0 / bpm } else { 0.0 };
         let first_beat = if first_beat_ms.is_finite() { first_beat_ms.max(0.0) } else { 0.0 };
+        let mix = if mix.is_finite() { mix.clamp(0.0, 1.0) } else { DEFAULT_MIX };
         self.first_beat_ms.store(first_beat.to_bits(), Ordering::Relaxed);
         self.beat_interval_ms.store(interval.to_bits(), Ordering::Relaxed);
+        self.mix.store(mix.to_bits(), Ordering::Relaxed);
         let on = enabled && interval > 0.0;
         self.enabled.store(on, Ordering::Relaxed);
         on
     }
 
-    /// `(first_beat_ms, beat_interval_ms)` while on.
-    fn grid(&self) -> Option<(f64, f64)> {
+    /// The grid and gains while on. Off, the music plays untouched whatever
+    /// the mix.
+    fn active(&self) -> Option<Active> {
         if !self.enabled.load(Ordering::Relaxed) {
             return None;
         }
         let interval = f64::from_bits(self.beat_interval_ms.load(Ordering::Relaxed));
-        (interval > 0.0).then(|| {
-            (f64::from_bits(self.first_beat_ms.load(Ordering::Relaxed)), interval)
+        if interval <= 0.0 {
+            return None;
+        }
+        let (music_gain, click_gain) = mix_gains(f64::from_bits(self.mix.load(Ordering::Relaxed)));
+        Some(Active {
+            first_beat_ms: f64::from_bits(self.first_beat_ms.load(Ordering::Relaxed)),
+            beat_interval_ms: interval,
+            music_gain,
+            click_gain,
         })
     }
 }
 
-/// The click sample (as a fraction of full scale) at track time `t_ms`.
-fn click_at(grid: Option<(f64, f64)>, t_ms: f64) -> f64 {
-    let Some((first_beat, interval)) = grid else {
-        return 0.0;
-    };
+/// `(music_gain, click_gain)` for a mix position: both 1 at the middle, the
+/// music fading out towards 1 and the clicks towards 0.
+fn mix_gains(mix: f64) -> (f64, f64) {
+    ((2.0 * (1.0 - mix)).min(1.0), (2.0 * mix).min(1.0))
+}
+
+/// The click sample (as a fraction of full scale, before the mix) at track
+/// time `t_ms`.
+fn click_at(first_beat: f64, interval: f64, t_ms: f64) -> f64 {
     if t_ms < first_beat {
         return 0.0;
     }
@@ -92,8 +135,10 @@ pub struct MetronomeSource<S> {
     position_ms: f64,
     sample_in_frame: u16,
     channels: u16,
-    /// The click for the current frame, the same on every channel.
-    click: i16,
+    /// The music gain and the click for the current frame, the same on every
+    /// channel.
+    music_gain: f64,
+    click: f64,
 }
 
 impl<S: Source<Item = i16>> MetronomeSource<S> {
@@ -104,7 +149,8 @@ impl<S: Source<Item = i16>> MetronomeSource<S> {
             position_ms: start_ms as f64,
             sample_in_frame: 0,
             channels: 1,
-            click: 0,
+            music_gain: 1.0,
+            click: 0.0,
         }
     }
 }
@@ -117,15 +163,26 @@ impl<S: Source<Item = i16>> Iterator for MetronomeSource<S> {
         if self.sample_in_frame == 0 {
             self.channels = self.inner.channels().max(1);
             let rate = f64::from(self.inner.sample_rate().max(1));
-            let click = click_at(self.settings.grid(), self.position_ms);
-            self.click = (click * f64::from(i16::MAX)).round() as i16;
+            (self.music_gain, self.click) = match self.settings.active() {
+                Some(a) => (
+                    a.music_gain,
+                    a.click_gain
+                        * click_at(a.first_beat_ms, a.beat_interval_ms, self.position_ms)
+                        * f64::from(i16::MAX),
+                ),
+                None => (1.0, 0.0),
+            };
             self.position_ms += 1000.0 / rate;
         }
         self.sample_in_frame += 1;
         if self.sample_in_frame >= self.channels {
             self.sample_in_frame = 0;
         }
-        Some(sample.saturating_add(self.click))
+        if self.music_gain == 1.0 && self.click == 0.0 {
+            return Some(sample);
+        }
+        let mixed = f64::from(sample) * self.music_gain + self.click;
+        Some(mixed.round().clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16)
     }
 }
 
@@ -183,8 +240,8 @@ mod tests {
     fn off_by_default_and_without_a_usable_bpm() {
         let settings = Arc::new(MetronomeSettings::default());
         assert!(clicks(&settings, 0, 1.0).iter().all(|s| *s == 0));
-        assert!(!settings.set(true, 0.0, 0.0));
-        assert!(!settings.set(true, 0.0, f64::NAN));
+        assert!(!settings.set(true, 0.0, 0.0, DEFAULT_MIX));
+        assert!(!settings.set(true, 0.0, f64::NAN, DEFAULT_MIX));
         assert!(clicks(&settings, 0, 1.0).iter().all(|s| *s == 0));
     }
 
@@ -192,7 +249,7 @@ mod tests {
     fn clicks_on_each_beat_from_the_first_beat_and_is_silent_between() {
         let settings = Arc::new(MetronomeSettings::default());
         // 120 BPM from 100 ms: beats at 100, 600, 1100, 1600 ms.
-        assert!(settings.set(true, 100.0, 120.0));
+        assert!(settings.set(true, 100.0, 120.0, DEFAULT_MIX));
         let samples = clicks(&settings, 0, 2.0);
         assert_eq!(peak(&samples, 0.0, 0.0, 99.0), 0, "nothing before the first beat");
         for beat in [100.0, 600.0, 1100.0, 1600.0] {
@@ -204,7 +261,7 @@ mod tests {
     #[test]
     fn bar_starts_are_louder() {
         let settings = Arc::new(MetronomeSettings::default());
-        settings.set(true, 0.0, 120.0);
+        settings.set(true, 0.0, 120.0, DEFAULT_MIX);
         let samples = clicks(&settings, 0, 2.5);
         let downbeat = peak(&samples, 0.0, 0.0, 30.0);
         let beat = peak(&samples, 0.0, 500.0, 530.0);
@@ -215,7 +272,7 @@ mod tests {
     #[test]
     fn starts_from_the_playback_offset_and_follows_seeks() {
         let settings = Arc::new(MetronomeSettings::default());
-        settings.set(true, 0.0, 120.0);
+        settings.set(true, 0.0, 120.0, DEFAULT_MIX);
         // Playback began at 10.25 s: the next beat is at 10.5 s (0.25 s in).
         let samples = clicks(&settings, 10_250, 0.5);
         assert_eq!(peak(&samples, 10_250.0, 10_250.0, 10_490.0), 0);
@@ -237,15 +294,70 @@ mod tests {
         let mut source = MetronomeSource::new(Zero::<i16>::new(1, RATE), settings.clone(), 0);
         let first: Vec<i16> = source.by_ref().take(RATE as usize).collect();
         assert!(first.iter().all(|s| *s == 0));
-        settings.set(true, 0.0, 120.0);
+        settings.set(true, 0.0, 120.0, DEFAULT_MIX);
         let second: Vec<i16> = source.take(RATE as usize).collect();
         assert!(second.iter().any(|s| s.saturating_abs() > 3000));
+    }
+
+    /// One second of a constant mono level through the metronome.
+    fn over_level(settings: &Arc<MetronomeSettings>, level: i16) -> Vec<i16> {
+        let music = rodio::buffer::SamplesBuffer::new(1, RATE, vec![level; RATE as usize]);
+        MetronomeSource::new(music, settings.clone(), 0).collect()
+    }
+
+    #[test]
+    fn mix_fades_the_clicks_or_the_music() {
+        const LEVEL: i16 = 10_000;
+        let settings = Arc::new(MetronomeSettings::default());
+        // 120 BPM from 0: beats at 0 and 500 ms; 200-400 ms is between beats.
+        let between = |s: &[i16]| s[(RATE as usize) / 5..(RATE as usize) * 2 / 5].to_vec();
+        let deviation = |s: &[i16]| s[..480].iter().map(|v| (v - LEVEL).saturating_abs()).max().unwrap();
+
+        // The middle: both at full level, as without a mix.
+        settings.set(true, 0.0, 120.0, DEFAULT_MIX);
+        let both = over_level(&settings, LEVEL);
+        assert!(between(&both).iter().all(|v| *v == LEVEL));
+        assert!(deviation(&both) > 3000);
+
+        // Music only: no clicks.
+        settings.set(true, 0.0, 120.0, 0.0);
+        assert!(over_level(&settings, LEVEL).iter().all(|v| *v == LEVEL));
+
+        // Clicks only: the music is gone, the clicks as loud as at the middle.
+        settings.set(true, 0.0, 120.0, 1.0);
+        let clicks_only = over_level(&settings, LEVEL);
+        assert!(between(&clicks_only).iter().all(|v| *v == 0));
+        let peak_only = clicks_only[..480].iter().map(|v| v.saturating_abs()).max().unwrap();
+        assert_eq!(peak_only, deviation(&both));
+
+        // Three quarters: the music at half level.
+        settings.set(true, 0.0, 120.0, 0.75);
+        assert!(between(&over_level(&settings, LEVEL)).iter().all(|v| *v == LEVEL / 2));
+
+        // Off, the mix leaves the music alone.
+        settings.set(false, 0.0, 120.0, 1.0);
+        assert!(over_level(&settings, LEVEL).iter().all(|v| *v == LEVEL));
+    }
+
+    #[test]
+    fn mix_is_clamped_and_a_bad_one_keeps_the_default() {
+        let settings = Arc::new(MetronomeSettings::default());
+        settings.set(true, 0.0, 120.0, 7.0);
+        assert!(between_is(&settings, 0));
+        settings.set(true, 0.0, 120.0, f64::NAN);
+        assert!(between_is(&settings, 10_000));
+    }
+
+    fn between_is(settings: &Arc<MetronomeSettings>, expected: i16) -> bool {
+        over_level(settings, 10_000)[(RATE as usize) / 5..(RATE as usize) * 2 / 5]
+            .iter()
+            .all(|v| *v == expected)
     }
 
     #[test]
     fn same_click_on_every_channel_of_a_frame() {
         let settings = Arc::new(MetronomeSettings::default());
-        settings.set(true, 0.0, 120.0);
+        settings.set(true, 0.0, 120.0, DEFAULT_MIX);
         let stereo: Vec<i16> = MetronomeSource::new(Zero::<i16>::new(2, RATE), settings, 0)
             .take(2 * 480)
             .collect();

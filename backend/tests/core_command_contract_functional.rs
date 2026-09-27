@@ -851,6 +851,7 @@ fn set_playback_metronome_turns_on_only_with_a_usable_bpm() {
         enabled,
         first_beat_ms: Some(120.0),
         bpm,
+        mix: Some(0.8),
     };
     for (req, expected) in [
         (request(true, Some(128.0)), true),
@@ -977,6 +978,8 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
         .expect("detail data");
     assert_eq!(detail.first_beat_ms, Some(321));
     assert_eq!(detail.cues.len(), 3);
+    // The key picker's options come with the detail.
+    assert_eq!(detail.key_options.iter().map(|g| g.keys.len()).sum::<usize>(), 24);
     assert_eq!(detail.cues[1].name.as_deref(), Some("Intro"));
     // Every cue gets a colour (default green when omitted).
     assert!(detail.cues.iter().all(|c| c.color_id.is_some()));

@@ -1263,6 +1263,10 @@ pub struct SetPlaybackMetronomeRequest {
     pub first_beat_ms: Option<f64>,
     #[serde(default)]
     pub bpm: Option<f64>,
+    /// Music/click balance, 0..=1: 0 music only, 0.5 both at full level
+    /// (the default), 1 clicks only.
+    #[serde(default)]
+    pub mix: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1961,6 +1965,17 @@ pub struct TrackDetail {
     /// and a JSON number array would be ~3× that on the wire.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail_waveform: Option<String>,
+    /// The keys the cue editor offers, grouped for its picker. A save only
+    /// accepts one of these.
+    pub key_options: Vec<KeyOptionGroup>,
+}
+
+/// One group of the cue editor's key picker ("Major" / "Minor"), in order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyOptionGroup {
+    pub label: String,
+    pub keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2021,6 +2036,8 @@ pub struct UsbTrackAnalysisDetail {
     /// Base64 PWV5 colour-detail waveform, same encoding as `TrackDetail`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail_waveform: Option<String>,
+    /// Same as `TrackDetail::key_options`.
+    pub key_options: Vec<KeyOptionGroup>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

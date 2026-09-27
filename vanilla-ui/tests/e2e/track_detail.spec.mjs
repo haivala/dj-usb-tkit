@@ -34,6 +34,7 @@ function installTrackDetailMock(page, opts = {}) {
     }
     const detailWaveformB64 = btoa(String.fromCharCode.apply(null, pwv5));
 
+    const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
@@ -68,6 +69,7 @@ function installTrackDetailMock(page, opts = {}) {
                   ...(opts.seedCues || []).map((positionMs) => ({ positionMs, colorId: 5, name: "" })),
                 ],
                 detailWaveform: detailWaveformB64,
+                keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys })),
               },
             };
           }
@@ -719,7 +721,7 @@ test("undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name ty
   await expect(page.locator("#trackDetailOverlay")).toBeHidden();
 });
 
-test("the metronome has the native engine click on the grid, following grid edits, off on close", async ({ page }) => {
+test("the metronome has the native engine click on the grid, following grid edits and the mix, off on close", async ({ page }) => {
   await openCueEditor(page);
   const sent = () =>
     page.evaluate(() =>
@@ -730,34 +732,53 @@ test("the metronome has the native engine click on the grid, following grid edit
   const last = async () => (await sent()).at(-1);
   const metronome = page.locator("#trackDetailMetronome");
   await expect(metronome).toHaveAttribute("aria-pressed", "false");
+  // The Mix slider only shows while the metronome is on.
+  const mix = page.locator("#trackDetailMetronomeMix");
+  await expect(mix).toBeHidden();
   // Never on by surprise: opening reports it off (or says nothing at all).
   expect((await sent()).every((r) => r.enabled === false)).toBe(true);
 
   await metronome.click();
   await expect(metronome).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 128 });
+  await expect(mix).toBeVisible();
+  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 128, mix: 0.5 });
 
   // Grid edits (and their undo) reach the engine while it's on.
   await page.locator("#trackDetailBpmDouble").click();
-  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 256 });
+  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 256, mix: 0.5 });
   await page.locator("#trackDetailFirstBeatPlus").click();
   await expect.poll(async () => (await last()).firstBeatMs).toBeGreaterThan(120);
   await page.keyboard.press("Control+z");
-  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 256 });
+  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 256, mix: 0.5 });
 
   // No repeat sends when nothing changed (e.g. zooming).
   const count = (await sent()).length;
   await page.locator("#trackDetailZoomIn").click();
   expect((await sent()).length).toBe(count);
 
+  // The Mix slider (both at full level in the middle) reaches the engine live
+  // and is remembered.
+  await expect(mix).toHaveValue("50");
+  await mix.fill("80");
+  await expect.poll(async () => (await last()).mix).toBe(0.8);
+  expect((await last()).enabled).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueMetronomeMix"))).toBe("80");
+
   await metronome.click();
   await expect.poll(async () => (await last()).enabled).toBe(false);
+  await expect(mix).toBeHidden();
 
   // Closing the editor turns it off in the engine.
   await metronome.click();
   await expect.poll(async () => (await last()).enabled).toBe(true);
   await page.locator("#trackDetailCancelBtn").click();
   await expect.poll(async () => (await last()).enabled).toBe(false);
+
+  // Reopened, the metronome is off (so Mix is hidden) and the mix is where it was left.
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(mix).toBeHidden();
+  await metronome.click();
+  await expect(mix).toHaveValue("80");
 });
 
 test("track-detail modal edits BPM, saves it, and the library row/tooltip update", async ({ page }) => {
@@ -806,7 +827,7 @@ test("track-detail modal edits the musical key, saves it, and the library row up
   await expect(keyPill).toHaveText("F#m");
 });
 
-test("key stepper steps through KEY_OPTIONS and wraps at the ends", async ({ page }) => {
+test("key stepper steps through the backend's key options and wraps at the ends", async ({ page }) => {
   await installTrackDetailMock(page);
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
@@ -1172,6 +1193,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
       waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
     };
 
+    const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
@@ -1198,7 +1220,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
             return { ok: true, data: { trackId: "local-1", resolvedBy: "self", materialized: false } };
           }
           if (command === "get_track_detail") {
-            return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64 } };
+            return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys })) } };
           }
           if (command === "save_track_analysis_edits") {
             return { ok: true, data: { trackId: "local-1", firstBeatMs: request?.firstBeatMs ?? null, cues: request?.cues ?? [], anlzRegenerated: true } };
@@ -1280,6 +1302,7 @@ function installUsbTrackDetailMock(page) {
     // When set, save_usb_track_analysis_edits fails (USB yanked mid-edit).
     window.__usbSaveFails = false;
 
+    const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
@@ -1326,7 +1349,7 @@ function installUsbTrackDetailMock(page) {
           }
           if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") return tracksResponse;
           if (command === "get_usb_track_detail") {
-            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64 } };
+            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys })) } };
           }
           if (command === "save_usb_track_analysis_edits") {
             if (window.__usbSaveFails) {
