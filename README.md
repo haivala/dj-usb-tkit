@@ -37,6 +37,9 @@ below) also avoids the prompt.
 - Library scanning, playlist management, and native local playback.
 - USB import/export with `mirror` and `additive` playlist sync modes.
 - Local BPM, key, waveform, and artwork analysis for missing track metadata.
+- A cue editor for setting a track's hot cues, beat grid, key, and where the
+  CDJ starts playback, from the library or straight on a connected USB (see
+  [Cue Editor](#cue-editor) below).
 - USB diagnostics, strict parity reporting, and preview-first repair actions.
 - Repair tools can help recover some broken USB database states; backups are
   created before repair writes, but recovery is not guaranteed.
@@ -48,6 +51,31 @@ below) also avoids the prompt.
   snapshots, with configurable retention.
 - Automated backend and frontend coverage for core workflows, export behavior,
   diagnostics, and UI interactions.
+
+## Cue Editor
+
+Open it with the magnifier button next to an analyzed track's waveform, in the
+library, an app playlist, a USB playlist, or USB history. It shows the track's
+full-detail colour waveform with the beat grid over it.
+
+- **Hot cues**: up to 8, lettered A–H by position, each with a name and
+  colour. Add them by double-clicking the waveform, with "+ Cue" or with C
+  while playing; drag markers to move them. Quantize (Q) snaps cues to the
+  beat, and Shift places one freely.
+- **Beat grid**: fix the BPM (type it, nudge it by 0.01, or ×2 / ÷2 for a half
+  or double tempo analysis), move the first beat, and set the key.
+- **Playback start**: choose whether the CDJ loads the track on the first cue
+  or on the first beat, as a memory cue with no hot-cue pad.
+- **Listening**: play and pause in the editor, with a metronome that clicks on
+  the grid so you can hear whether it lines up, and a Mix slider to balance
+  the clicks against the music.
+- **Editing**: undo/redo, keyboard shortcuts, and zoom, pan and a whole-track
+  overview strip.
+
+Each hot cue is exported as both a memory point and a hot-cue pad. Saving from
+a USB row writes the change straight onto the USB (no re-export needed) and
+into the local library. Full details, shortcuts and the storage format are in
+[`docs/CUE_EDITOR.md`](docs/CUE_EDITOR.md).
 
 ## Design Goals
 

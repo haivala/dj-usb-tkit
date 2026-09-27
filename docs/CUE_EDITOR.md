@@ -123,6 +123,7 @@ undo). Space never presses the focused button (Save has focus on open).
 | Quantize (Q) | on | `djusbtkit.cueQuantize` / `ui_cue_quantize_v1` |
 | Beat grid slider | 35 | `djusbtkit.cueBeatgridLevel` / `ui_cue_beatgrid_level_v1` |
 | Playback start choice for a track's first cue | First cue | `djusbtkit.cueStartOnFirstBeat` / `ui_cue_start_on_first_beat_v1` |
+| Metronome Mix slider | 50 (both at full level) | `djusbtkit.cueMetronomeMix` / `ui_cue_metronome_mix_v1` |
 
 Each is kept in `localStorage` and mirrored to the local database through
 `set_frontend_setting` (`vanilla-ui/settings_keys.mjs`).
@@ -130,7 +131,9 @@ Each is kept in `localStorage` and mirrored to the local database through
 ## Deep technical details
 
 The editor loads a track with `get_track_detail` (or `get_usb_track_detail` for
-a USB row) and keeps a working copy in the frontend controller
+a USB row). Both return the cues ready to edit (every hot cue coloured) and
+`keyOptions`, the key picker's Major/Minor groups: exactly the keys a save
+accepts. The editor keeps a working copy in the frontend controller
 (`vanilla-ui/components/track-detail/actions.mjs`). Nothing is written until
 Save, which sends the whole state in one `save_track_analysis_edits` /
 `save_usb_track_analysis_edits` call: `firstBeatMs`, `bpm`, `key`, and the full
