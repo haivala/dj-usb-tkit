@@ -82,7 +82,7 @@ export function bindTrackDetailEvents(ctx) {
   });
 
   // --- Waveform: click to play, double-click to add a cue, wheel to zoom, drag to pan,
-  // drag a cue marker to move it (Shift snaps to the beat grid) ---
+  // drag a cue marker to move it (Shift inverts Quantize: free with Q on, snapped with Q off) ---
   const wf = el.trackDetailWaveform;
   const PAN_THRESHOLD_PX = 4;
   let pan = null; // { startX, startViewMs, moved }
