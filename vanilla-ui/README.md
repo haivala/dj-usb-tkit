@@ -126,3 +126,20 @@ Playwright tests live under `vanilla-ui/tests/e2e/`. The test suite covers core
 rendering, command wiring, playlist workflows, source-root filtering, USB flows,
 diagnostics/repair UI behavior, playback state, event-log behavior, and
 message-routing contracts.
+
+## Docs GIFs
+
+The cue-editor GIFs in `docs/assets/` (used by `docs/CUE_EDITOR.md` and the
+top-level README) are recorded from the real frontend build. Re-record them
+after a cue-editor UI change:
+
+```bash
+npm run docs:gifs --prefix vanilla-ui
+```
+
+It needs `cargo` and `ffmpeg`. The script synthesises a 129 BPM demo track,
+scans and analyzes it together with the backend's fixture tracks through the
+real backend (`dump_doc_gif_fixture` bin), and drives the cue editor in
+headless Chromium with Tauri's invoke answered from that data. To record only
+some scenes, name them: `npm run docs:gifs -- cue-editor-drag-cues`. See
+`scripts/doc-gifs/record.mjs`.

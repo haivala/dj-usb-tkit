@@ -71,6 +71,11 @@ path = "src/bin/analyze_playlist_tracks.rs"
 required-features = ["dev-tools"]
 
 [[bin]]
+name = "dump_doc_gif_fixture"
+path = "src/bin/dump_doc_gif_fixture.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
 name = "compare_usb_dbs"
 path = "src/bin/compare_usb_dbs.rs"
 required-features = ["dev-tools"]

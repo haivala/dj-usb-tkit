@@ -17,6 +17,12 @@ library (see `save_usb_track_analysis_edits` in `docs/COMMANDS.md`).
 - **First beat (ms)**: where the grid starts. Type it or move it one beat at a
   time with −/+ (the field's own arrows step 1 ms).
 
+The grid redraws as you edit, so it can be lined up by eye: here a wrong BPM
+(127) drifts off the kicks, 129 runs parallel, typing the first beat puts it on
+them, and ± moves the bar starts one beat.
+
+![Beat grid following BPM and first-beat edits](assets/cue-editor-beatgrid.gif)
+
 ### Waveform
 
 The editor shows the full-detail colour waveform, zoomed to the first 2 minutes
@@ -57,6 +63,8 @@ point **and** a hot-cue pad (see `docs/USB_EXPORT.md`).
   other way round: Shift snaps.
 - **Delete**: × on the cue's row.
 
+![Dragging cues: A snaps beat to beat with Q on, B moves freely with Shift](assets/cue-editor-drag-cues.gif)
+
 ### Playback start
 
 "Playback starts at [First cue | First beat]" sets where a CDJ loads the track:
@@ -71,6 +79,8 @@ point **and** a hot-cue pad (see `docs/USB_EXPORT.md`).
 The choice is remembered and applied when a track gets its first cue (default:
 First cue). With no cues both options are disabled and a note says the CDJ
 starts at the first audio.
+
+![Choosing First beat adds the start marker; dragging it makes it a Start marker](assets/cue-editor-playback-start.gif)
 
 ### Keyboard shortcuts
 
