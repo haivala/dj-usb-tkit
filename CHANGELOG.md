@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.2.7
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** saving BPM or key in the cue editor from a USB row now
