@@ -861,11 +861,14 @@ impl BackendService {
             edb_playlist_tracks.as_ref(),
         );
         if let Some((parsed, _)) = parsed_opt.as_ref() {
-            let mismatches = detect_tempo_mismatches(&usb_root, parsed, conn);
+            // Database-only: the ANLZ beat grids are compared by the repair
+            // preview, which scans the analysis files anyway.
+            let mismatches = detect_bpm_key_mismatches(&usb_root, parsed, conn, false);
             let (status, detail) = if mismatches.is_empty() {
                 (
                     DiagStatus::Pass,
-                    "PDB tempo, ANLZ beat grid and eDB BPM agree for every track".to_string(),
+                    "export.pdb and exportLibrary.db agree on BPM and key for every track"
+                        .to_string(),
                 )
             } else {
                 let examples = mismatches
@@ -877,8 +880,10 @@ impl BackendService {
                 (
                     DiagStatus::Warn,
                     format!(
-                        "{} track(s) whose ANLZ beat-grid tempo or eDB BPM differs from the PDB \
-                         tempo; e.g. {examples}; run fix_tempo_mismatch to fix",
+                        "{} track(s) whose BPM/key in exportLibrary.db differs from export.pdb \
+                         -- CDJs may show a different BPM/key than the app; e.g. {examples}; \
+                         run the repair (fix_bpm_key_mismatch, which also checks the ANLZ beat \
+                         grids) to fix",
                         mismatches.len()
                     ),
                 )
@@ -887,12 +892,12 @@ impl BackendService {
                 raw_warnings.push(logging::log(
                     Level::Warn,
                     "usb-diagnostics",
-                    "usb.diagnostics.tempo-mismatch",
+                    "usb.diagnostics.bpm-key-mismatch",
                     detail.clone(),
                 ));
             }
             analysis_integrity.checks.push(DiagCheck {
-                label: "Tempo consistency".to_string(),
+                label: "BPM/key consistency".to_string(),
                 status,
                 detail,
                 link: None,
@@ -1832,11 +1837,11 @@ pub(crate) fn diagnose_contents_integrity_db_only(
     }
 }
 
-/// A track whose tempo disagrees between its PDB row and its ANLZ beat grid
-/// and/or eDB `content.bpmx100`. The PDB `tempo_x100` is the reference: it is
-/// what older CDJs read and what `fix_empty_analysis_files` already trusts.
+/// A track whose BPM or key disagrees between its PDB row and its ANLZ beat
+/// grid / eDB `content` row. The PDB is the reference: it is what older CDJs
+/// read and what `fix_empty_analysis_files` already trusts.
 #[derive(Debug, Clone)]
-pub(crate) struct TempoMismatch {
+pub(crate) struct BpmKeyMismatch {
     pub track_path: String,
     pub pdb_tempo_x100: u32,
     pub duration_ms: Option<u64>,
@@ -1844,42 +1849,59 @@ pub(crate) struct TempoMismatch {
     pub anlz_dat_path: Option<std::path::PathBuf>,
     /// Current eDB `bpmx100`, set when it differs.
     pub edb_bpmx100: Option<i64>,
+    /// The PDB key name, set when the eDB key differs (or is missing).
+    pub pdb_key_for_edb: Option<String>,
 }
 
-/// Compare each PDB track's `tempo_x100` against its ANLZ beat grid (`.DAT`
-/// and `.EXT`) and, when an eDB connection is given, `content.bpmx100`.
-/// Tracks with no PDB tempo, or with missing/unparseable bundles, are skipped
-/// (those are other checks' business).
-pub(crate) fn detect_tempo_mismatches(
+/// Compare each PDB track's tempo and key against, when an eDB connection is
+/// given, `content.bpmx100` and the `key` row `content.key_id` points at, and
+/// -- only with `scan_anlz` -- its ANLZ beat grid (`.DAT` and `.EXT`, tempo
+/// only; ANLZ has no key). `scan_anlz` reads two files per track off the
+/// stick, so the automatic USB diagnosis (a database-only check) leaves it
+/// off and only the repair flow, which scans analysis files anyway, turns it
+/// on. Key names match by export's rule (`key_names_match`: `Db` == `C#`).
+/// Tracks without a PDB tempo/key, without an eDB row, or with a
+/// missing/unparseable bundle are skipped for that field.
+pub(crate) fn detect_bpm_key_mismatches(
     usb_root: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
     edb: Option<&rusqlite::Connection>,
-) -> Vec<TempoMismatch> {
-    let edb_bpm_by_path: HashMap<String, i64> = edb
+    scan_anlz: bool,
+) -> Vec<BpmKeyMismatch> {
+    type EdbBpmKey = (Option<i64>, Option<String>);
+    let edb_by_path: HashMap<String, EdbBpmKey> = edb
         .and_then(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT path, bpmx100 FROM content WHERE path IS NOT NULL")
-                .ok()?;
+            let with_key = table_exists(conn, "key");
+            let sql = if with_key {
+                r#"SELECT c.path, c.bpmx100, k.name FROM content c
+                   LEFT JOIN "key" k ON k.key_id = c.key_id WHERE c.path IS NOT NULL"#
+            } else {
+                "SELECT path, bpmx100, NULL FROM content WHERE path IS NOT NULL"
+            };
+            let mut stmt = conn.prepare(sql).ok()?;
             let rows = stmt
                 .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        (
+                            row.get::<_, Option<i64>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ),
+                    ))
                 })
                 .ok()?;
-            Some(
-                rows.filter_map(Result::ok)
-                    .filter_map(|(path, bpm)| Some((path, bpm?)))
-                    .collect(),
-            )
+            Some(rows.filter_map(Result::ok).collect())
         })
         .unwrap_or_default();
 
     let mut out = Vec::new();
     for track in &parsed.tracks {
         let pdb_tempo_x100 = track.tempo_x100;
-        if pdb_tempo_x100 == 0 {
-            continue;
-        }
-        let anlz_dat_path = super::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path)
+        let edb_row = edb_by_path.get(&track.track_file_path);
+
+        let anlz_dat_path = (scan_anlz && pdb_tempo_x100 > 0)
+            .then(|| super::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path))
+            .flatten()
             .map(std::path::PathBuf::from)
             .filter(|dat| {
                 [dat.clone(), dat.with_extension("EXT")].iter().any(|p| {
@@ -1889,17 +1911,31 @@ pub(crate) fn detect_tempo_mismatches(
                         .is_some_and(|t| u32::from(t) != pdb_tempo_x100)
                 })
             });
-        let edb_bpmx100 = edb_bpm_by_path
-            .get(&track.track_file_path)
-            .copied()
-            .filter(|v| *v != i64::from(pdb_tempo_x100));
-        if anlz_dat_path.is_some() || edb_bpmx100.is_some() {
-            out.push(TempoMismatch {
+        let edb_bpmx100 = edb_row
+            .and_then(|(bpm, _)| *bpm)
+            .filter(|v| pdb_tempo_x100 > 0 && *v != i64::from(pdb_tempo_x100));
+        let pdb_key_for_edb = parsed
+            .keys
+            .get(&track.key_id)
+            .map(|name| name.trim())
+            .filter(|name| !name.is_empty())
+            .filter(|pdb_key| {
+                edb_row.is_some_and(|(_, edb_key)| {
+                    !edb_key.as_deref().is_some_and(|edb_key| {
+                        super::export_helpers::key_names_match(pdb_key, edb_key)
+                    })
+                })
+            })
+            .map(str::to_string);
+
+        if anlz_dat_path.is_some() || edb_bpmx100.is_some() || pdb_key_for_edb.is_some() {
+            out.push(BpmKeyMismatch {
                 track_path: track.track_file_path.clone(),
                 pdb_tempo_x100,
                 duration_ms: track.duration_seconds.map(|s| u64::from(s) * 1000),
                 anlz_dat_path,
                 edb_bpmx100,
+                pdb_key_for_edb,
             });
         }
     }

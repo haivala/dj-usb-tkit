@@ -7,7 +7,10 @@ key, and where a CDJ starts playback. Open it with the magnifier button next to
 a track's waveform ("Edit cue points & beat grid") in the library, an app
 playlist, a USB playlist, or USB history. The button is disabled until the track
 is analyzed. Opened from a USB row, a save writes both the USB and the local
-library (see `save_usb_track_analysis_edits` in `docs/COMMANDS.md`).
+library (see `save_usb_track_analysis_edits` in `docs/COMMANDS.md`). On the USB
+that is the ANLZ bundle, `exportLibrary.db` and `export.pdb` (tempo and key), so
+every CDJ reads the same values. Opened from the library or an app playlist, a
+save writes the library track, which every app playlist containing it shows.
 
 ![The cue editor with a start marker, one hot cue and the beat grid](assets/cue-editor.png)
 

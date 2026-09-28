@@ -288,6 +288,7 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
     log,
     warn,
     patchLibraryRowByTrackId,
+    patchPlaylistRowByTrackId = () => false,
     hydrateTrackPreviewFromBackend
   } = deps;
 
@@ -337,6 +338,9 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
       patchTrackAnalysisFields(track, payload);
     }
   }
+  // The open app playlist shows the same library track: redraw its row too,
+  // or it keeps the old BPM/key until the playlist is reloaded.
+  patchPlaylistRowByTrackId(trackId);
 
   const payloadHasPreview = Array.isArray(payload?.waveformPreview) && payload.waveformPreview.length > 0;
   const payloadHasWaveformPath = typeof payload?.waveformPeaksPath === "string"

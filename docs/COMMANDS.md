@@ -93,14 +93,18 @@ drive selection from being rendered against a newer selected drive.
   for the cue editor opened from a USB playlist / history row (no local `tracks`
   row need exist).
 - `save_usb_track_analysis_edits` — `{ usbRoot, usbAnalysisPathRaw,
-  usbMediaPathRaw, bpm?, durationMs?, firstBeatMs?, cues?, localTrackId?,
-  title?, artist?, album? }` → writes the on-device ANLZ + eDB **in place** and
-  also writes the resolved local master (so the two never diverge), clearing
+  usbMediaPathRaw, bpm?, key?, durationMs?, firstBeatMs?, cues?, localTrackId?,
+  title?, artist?, album? }` → writes the on-device ANLZ, eDB and `export.pdb`
+  (t00 tempo and key; a new key gets a t05 row) **in place**, and also writes
+  the resolved local master (so they never diverge), clearing
   `last_exported_*` on every playlist containing the track. The USB must be
   connected: a not-connected root, a missing bundle, or a track absent from the
-  USB's eDB blocks the save with an error rather than a silent local-only
-  downgrade. Returns `{ firstBeatMs, cues, anlzUpdated, edbUpdated, localUpdated }`
-  (`localUpdated: false` only when no local track matched).
+  USB's eDB or PDB blocks the save with an error before anything is written,
+  rather than a silent partial write. Returns `{ firstBeatMs, cues, bpm,
+  bpmAnalyzer, key, keySource, anlzUpdated, edbUpdated, localUpdated,
+  localTrackId }` (`localUpdated: false` / no `localTrackId` only when no local
+  track matched; `localTrackId` is the library track the backend resolved, which
+  the UI refreshes).
 
 ### Settings
 

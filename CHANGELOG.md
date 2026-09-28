@@ -39,15 +39,25 @@
 
 ## Unreleased
 
-- **Fix:** changing a track's BPM in the cue editor while it plays from a
-  connected USB now also updates the tempo in `export.pdb`. Before, only the
-  beat grid and `exportLibrary.db` changed, so older CDJs kept showing the old
-  BPM until the next export.
-- **New feature:** USB diagnostics checks that each track's BPM matches across
-  `export.pdb`, the ANLZ beat grid and `exportLibrary.db`. A new repair, "Fix
-  Tempo Mismatch" (`fix_tempo_mismatch`), rebuilds the beat grid and sets the
-  eDB BPM from the PDB tempo in one pass, and keeps waveforms, cues and the
-  first beat.
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** saving BPM or key in the cue editor from a USB row now
+  writes them to `export.pdb` too. Before, only the beat grid and
+  `exportLibrary.db` changed, so the databases on the stick disagreed and
+  CDJs that read `export.pdb` kept showing the old BPM and key. Update before
+  editing more tracks on a USB, then run the repair below on sticks you've
+  already edited.
+- **New feature:** a "BPM/key consistency" check and a "Fix BPM/Key Mismatch"
+  repair (`fix_bpm_key_mismatch`). The automatic USB diagnosis compares BPM
+  and key between `export.pdb` and `exportLibrary.db` (databases only). The
+  repair also compares each ANLZ beat grid, then rebuilds the grid and sets
+  the eDB BPM and key from `export.pdb` in one pass. Waveforms, cues and the
+  first beat are kept.
+- **Fix:** after saving in the cue editor, every view shows the new BPM and
+  key without a reload: the open app playlist's row, every loaded USB
+  playlist and history row of the same file, and the library track a USB
+  save also updated (even when the USB row didn't know which library track it
+  was).
 - **Fix:** a library scan now finds the app's ANLZ cache files for real. The
   check that sends outdated caches (no 3-band `PWV6` waveform) back for
   reanalysis never ran, and removing a track from the library left its cache

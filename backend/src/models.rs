@@ -2092,4 +2092,9 @@ pub struct SaveUsbTrackAnalysisEditsData {
     pub edb_updated: bool,
     /// `false` only when no local `tracks` row could be matched.
     pub local_updated: bool,
+    /// The local `tracks` row the save also wrote (resolved by the backend,
+    /// not just the request's hint), so the UI can refresh that library track
+    /// and the app playlists that contain it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_track_id: Option<String>,
 }

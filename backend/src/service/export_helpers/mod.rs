@@ -1190,6 +1190,15 @@ fn key_lookup_variants(value: &str) -> Vec<String> {
     }
 }
 
+/// Whether two key names denote the same key, by the same rule export uses
+/// to reuse a PDB key row (case-insensitive, sharp/flat spellings equal).
+pub(crate) fn key_names_match(a: &str, b: &str) -> bool {
+    let b_variants = key_lookup_variants(b);
+    key_lookup_variants(a)
+        .iter()
+        .any(|v| !v.is_empty() && b_variants.contains(v))
+}
+
 fn resolve_key_id_by_name(key_id_by_name: &HashMap<String, u32>, key_name: &str) -> Option<u32> {
     key_lookup_variants(key_name)
         .into_iter()

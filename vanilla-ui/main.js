@@ -662,6 +662,8 @@ const openTrackDetail = (track) => trackDetail.openTrackDetail(track, {
     emitStatus,
     applyRealtimeAnalyzedTrackUpdate,
     patchTrackAnalysisFields,
+    // Lazy: the USB track-list controllers are created further down.
+    getUsbTrackListControllers: () => [usbPlaylistTracksCtl, usbHistoryTracksCtl],
   });
 
 const stopPlaybackIfActive = async () => playback.stopPlaybackIfActive(state, {
@@ -939,6 +941,7 @@ const applyRealtimeAnalyzedTrackUpdate = async (payload) => library.applyRealtim
     log: (...a) => console.log(...a),
     warn: (...a) => console.warn(...a),
     patchLibraryRowByTrackId,
+    patchPlaylistRowByTrackId,
     hydrateTrackPreviewFromBackend,
   });
 const hydrateTrackPreviewFromBackend = async (trackId) => library.hydrateTrackPreviewFromBackend(state, trackId, {

@@ -35,7 +35,9 @@ use super::anlz::{
     AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, atomic_write_bytes,
     read_cues_from_anlz, read_first_beat_from_anlz,
 };
-use super::export_helpers::{PdbLayoutProfile, load_table_columns_tx, write_edb_cues_for_content};
+use super::export_helpers::{
+    PdbLayoutProfile, key_names_match, load_table_columns_tx, write_edb_cues_for_content,
+};
 use super::usb_utils::{read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path};
 use super::{BackendService, TRACK_COLS, apply_is_usb_path, now, row_to_track};
 
@@ -169,16 +171,23 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
     out
 }
 
-/// Stage the device `export.pdb` and build its bytes with the t00 tempo of
-/// the track at `media_path` set to `bpm` (same `round(bpm*100)` as export,
-/// eDB `bpmx100` and the ANLZ beat grid). Returns the staged path + new bytes
-/// to write, or `None` when the tempo already matches. Nothing is written
-/// here, so the caller can block before touching the device.
-fn build_pdb_tempo_patch(
+/// Stage the device `export.pdb` and build its bytes with the t00 tempo and/or
+/// key of the track at `media_path` set to `bpm` / `key` -- the same values the
+/// USB save writes to the ANLZ beat grid and eDB `content`, so the three never
+/// disagree (older CDJs read the PDB). Tempo uses export's `round(bpm*100)`; a
+/// key the PDB doesn't have yet gets a new t05 row, matched with export's own
+/// rule (`key_names_match`). Returns the staged path + new bytes to write, or
+/// `None` when nothing changes. Nothing is written here, so the caller can
+/// block before touching the device.
+fn build_pdb_track_patch(
     usb_root: &Path,
     media_path: &str,
-    bpm: f64,
+    bpm: Option<f64>,
+    key: Option<&str>,
 ) -> BackendResult<Option<(PathBuf, Vec<u8>)>> {
+    if bpm.is_none() && key.is_none() {
+        return Ok(None);
+    }
     let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&staged_pdb)?;
     let page_size = bytes
@@ -202,16 +211,50 @@ fn build_pdb_tempo_patch(
             BackendError::NotFound(format!("track not in this USB's export.pdb: {media_path}"))
         })?;
     let mut data = super::repair::track_row_data_from_reader_row(row);
-    data.bpm = Some(bpm);
-    let tempo_x100 = (bpm * 100.0).round().max(0.0) as u32;
-    if row.tempo_x100 == tempo_x100 {
+    let mut changed_fields = Vec::<&'static str>::new();
+
+    if let Some(bpm) = bpm {
+        let tempo_x100 = (bpm * 100.0).round().max(0.0) as u32;
+        if row.tempo_x100 != tempo_x100 {
+            data.bpm = Some(bpm);
+            changed_fields.push("tempo_x100");
+        }
+    }
+
+    if let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) {
+        let current = parsed.keys.get(&row.key_id);
+        if !current.is_some_and(|name| key_names_match(name, key)) {
+            let key_id = match parsed
+                .keys
+                .iter()
+                .filter(|(_, name)| key_names_match(name, key))
+                .map(|(id, _)| *id)
+                .min()
+            {
+                Some(id) => id,
+                None => {
+                    let new_id = parsed.keys.keys().copied().max().unwrap_or(0) + 1;
+                    crate::pdb_writer::append_keys_in_place(
+                        &mut bytes,
+                        &[(new_id, key)],
+                        page_size,
+                    )?;
+                    new_id
+                }
+            };
+            data.key_id = key_id;
+            changed_fields.push("key_id");
+        }
+    }
+
+    if changed_fields.is_empty() {
         return Ok(None);
     }
     crate::pdb_writer::mutate_tracks_in_place(
         &mut bytes,
         &[crate::pdb_writer::PdbTrackRowMutation {
             row: data,
-            changed_fields: vec!["tempo_x100"],
+            changed_fields,
         }],
         PdbLayoutProfile::DEFAULT,
         page_size,
@@ -897,10 +940,8 @@ impl BackendService {
         // (what older CDJs read) must follow or the three disagree until the
         // next export. Resolve and build the patch before writing anything so
         // a track missing from the PDB blocks the save cleanly.
-        let pdb_tempo_patch = match req.bpm {
-            Some(bpm) => build_pdb_tempo_patch(&usb_root, &req.usb_media_path_raw, bpm)?,
-            None => None,
-        };
+        let pdb_patch =
+            build_pdb_track_patch(&usb_root, &req.usb_media_path_raw, req.bpm, key.as_deref())?;
 
         // The cue list to reconcile onto the device: the new list when this is
         // a cue edit (empty list clears), otherwise the bundle's current list
@@ -927,14 +968,14 @@ impl BackendService {
         )?;
 
         // 5b. PDB tempo, in place on the device.
-        if let Some((staged_pdb, bytes)) = pdb_tempo_patch {
+        if let Some((staged_pdb, bytes)) = pdb_patch {
             atomic_write_bytes(&staged_pdb, &bytes)?;
             super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)?;
         }
 
         // 6. Local master write (mandatory when a match is found) — before the
         //    eDB commit so a local failure aborts before the device diverges.
-        let local_updated = match self.resolve_local_track_id_for_usb(&usb_root, &req) {
+        let local_track_id = match self.resolve_local_track_id_for_usb(&usb_root, &req) {
             Some(track_id) => {
                 let mut conn = self.db.connect()?;
                 let now = now();
@@ -956,7 +997,7 @@ impl BackendService {
                         &format!("could not rewrite cached ANLZ for {track_id}: {err}"),
                     );
                 }
-                true
+                Some(track_id)
             }
             None => {
                 logging::emit(
@@ -967,7 +1008,7 @@ impl BackendService {
                         req.usb_media_path_raw
                     ),
                 );
-                false
+                None
             }
         };
 
@@ -1012,7 +1053,8 @@ impl BackendService {
             key_source: key.map(|_| "user".to_string()),
             anlz_updated: true,
             edb_updated: true,
-            local_updated,
+            local_updated: local_track_id.is_some(),
+            local_track_id,
         })
     }
 

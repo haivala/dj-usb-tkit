@@ -3690,17 +3690,33 @@ fn repair_fix_empty_analysis_files_skips_unmapped_stray_bundle() {
     );
 }
 
-// ── fix_tempo_mismatch ────────────────────────────────────────────────────
+// ── fix_bpm_key_mismatch ────────────────────────────────────────────────────
+
+fn bpm_key_check_status(backend: &BackendCommands, usb: &Path) -> backend::models::DiagStatus {
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
+    diagnostics
+        .data
+        .expect("diagnostics data")
+        .analysis_integrity
+        .checks
+        .into_iter()
+        .find(|c| c.label == "BPM/key consistency")
+        .expect("BPM/key consistency check")
+        .status
+}
 
 #[test]
-fn repair_fix_tempo_mismatch_aligns_anlz_and_edb_to_pdb_tempo_in_one_pass() {
+fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
     use backend::service::anlz::{
         WaveformData, build_anlz_dat_file, build_anlz_ext_file, read_beatgrid_tempo_from_anlz,
     };
 
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
     // A normal export must never look mismatched.
-    assert_fix_not_proposed(&backend, &usb, "fix_tempo_mismatch");
+    assert_fix_not_proposed(&backend, &usb, "fix_bpm_key_mismatch");
 
     let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
     let track = parsed
@@ -3710,9 +3726,14 @@ fn repair_fix_tempo_mismatch_aligns_anlz_and_edb_to_pdb_tempo_in_one_pass() {
         .expect("a PDB track with a tempo");
     let pdb_tempo = track.tempo_x100;
     let wrong_bpm = if pdb_tempo == 9_000 { 91.0 } else { 90.0 };
+    let pdb_key = parsed
+        .keys
+        .get(&track.key_id)
+        .cloned()
+        .expect("fixture track has a PDB key");
 
     // Replace the fixture's placeholder bundle with a real one whose beat
-    // grid is at a wrong tempo, and skew the eDB BPM.
+    // grid is at a wrong tempo, and skew the eDB BPM and key.
     let dat_path = find_exported_anlz_dat(&usb);
     let waveform = WaveformData::from_peaks(vec![128; 400]);
     let track_path = track.track_file_path.as_str();
@@ -3726,6 +3747,12 @@ fn repair_fix_tempo_mismatch_aligns_anlz_and_edb_to_pdb_tempo_in_one_pass() {
         build_anlz_ext_file(&waveform, track_path, Some(wrong_bpm), Some(200_000)),
     )
     .expect("write EXT");
+    // The automatic diagnosis is database-only: a beat grid alone never
+    // trips it (it doesn't read the analysis files) ...
+    assert!(matches!(
+        bpm_key_check_status(&backend, &usb),
+        backend::models::DiagStatus::Pass
+    ));
     let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
     open_edb(&edb_path)
         .execute(
@@ -3733,19 +3760,30 @@ fn repair_fix_tempo_mismatch_aligns_anlz_and_edb_to_pdb_tempo_in_one_pass() {
             rusqlite::params![12_345, track.track_file_path],
         )
         .expect("skew eDB bpm");
+    open_edb(&edb_path)
+        .execute(
+            "UPDATE content SET key_id = NULL WHERE path = ?1",
+            [&track.track_file_path],
+        )
+        .expect("skew eDB key");
+    // ... but a PDB/eDB disagreement does.
+    assert!(matches!(
+        bpm_key_check_status(&backend, &usb),
+        backend::models::DiagStatus::Warn
+    ));
 
-    assert_fix_proposed(&backend, &usb, "fix_tempo_mismatch");
+    assert_fix_proposed(&backend, &usb, "fix_bpm_key_mismatch");
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
-        selected_fix_ids: vec!["fix_tempo_mismatch".to_string()],
+        selected_fix_ids: vec!["fix_bpm_key_mismatch".to_string()],
     });
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
         data.applied_fixes
             .iter()
-            .any(|m| m.contains("Fix Tempo Mismatch") && m.contains("updated 1 eDB row")),
+            .any(|m| m.contains("Fix BPM/Key Mismatch") && m.contains("updated 1 eDB row")),
         "expected the mismatch to be fixed: {:#?}",
         data.applied_fixes
     );
@@ -3754,16 +3792,21 @@ fn repair_fix_tempo_mismatch_aligns_anlz_and_edb_to_pdb_tempo_in_one_pass() {
         let tempo = read_beatgrid_tempo_from_anlz(&fs::read(&path).expect("read bundle"));
         assert_eq!(tempo.map(u32::from), Some(pdb_tempo), "{}", path.display());
     }
-    let edb_bpm: i64 = open_edb(&edb_path)
+    let (edb_bpm, edb_key): (i64, String) = open_edb(&edb_path)
         .query_row(
-            "SELECT bpmx100 FROM content WHERE path = ?1",
+            r#"SELECT c.bpmx100, k.name FROM content c JOIN "key" k ON k.key_id = c.key_id
+               WHERE c.path = ?1"#,
             [&track.track_file_path],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
-        .expect("eDB bpm");
+        .expect("eDB bpm/key");
     assert_eq!(edb_bpm, i64::from(pdb_tempo));
+    assert!(
+        edb_key.eq_ignore_ascii_case(&pdb_key),
+        "eDB key {edb_key} != PDB key {pdb_key}"
+    );
     // One pass is enough: nothing left to propose.
-    assert_fix_not_proposed(&backend, &usb, "fix_tempo_mismatch");
+    assert_fix_not_proposed(&backend, &usb, "fix_bpm_key_mismatch");
 }
 
 // ── remove_missing_audio_references ───────────────────────────────────────

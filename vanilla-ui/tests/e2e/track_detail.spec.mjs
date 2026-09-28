@@ -1223,7 +1223,19 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
             return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys })) } };
           }
           if (command === "save_track_analysis_edits") {
-            return { ok: true, data: { trackId: "local-1", firstBeatMs: request?.firstBeatMs ?? null, cues: request?.cues ?? [], anlzRegenerated: true } };
+            return {
+              ok: true,
+              data: {
+                trackId: "local-1",
+                firstBeatMs: request?.firstBeatMs ?? null,
+                cues: request?.cues ?? [],
+                bpm: request?.bpm ?? null,
+                bpmAnalyzer: request?.bpm != null ? "user" : null,
+                key: request?.key ?? null,
+                keySource: request?.key != null ? "user" : null,
+                anlzRegenerated: true,
+              },
+            };
           }
           if (command === "stop_playback_native" || command === "get_playback_status_native") return { ok: true, data: {} };
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
@@ -1244,6 +1256,9 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
 
   await page.locator("#trackDetailAddCue").click();
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+  await page.locator("#trackDetailBpm").fill("131.5");
+  await page.locator("#trackDetailBpm").dispatchEvent("change");
+  await page.locator("#trackDetailKey").selectOption("Em");
 
   await page.locator("#trackDetailSaveBtn").click();
   await expect(page.locator("#trackDetailOverlay")).toBeHidden();
@@ -1252,6 +1267,10 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
   expect(saveCall).toBeTruthy();
   expect(saveCall.request.trackId).toBe("local-1");
   expect(saveCall.request.cues).toHaveLength(1);
+
+  // The open playlist's row redraws without a reload.
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("131.5");
+  await expect(row.locator(".td-key .key-pill")).toHaveText("Em");
 });
 
 // --- Cue editor opened from a USB view (playlists / history) ---------------
@@ -1260,8 +1279,11 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
 // get_usb_track_detail, save through save_usb_track_analysis_edits with the
 // row's raw on-device paths, and a not-connected USB blocks the flow.
 
-function installUsbTrackDetailMock(page) {
-  return page.addInitScript(() => {
+// `rowLocalTrackId`: the USB row's localTrackId hint (null = the row doesn't
+// know its library track; the save response still names it).
+// `libraryTracks`: rows the library table loads, to watch cross-view updates.
+function installUsbTrackDetailMock(page, mockOpts = {}) {
+  return page.addInitScript((opts) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
     window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
@@ -1278,7 +1300,7 @@ function installUsbTrackDetailMock(page) {
 
     const usbTrack = {
       id: "usbrow-1",
-      localTrackId: "local-1",
+      localTrackId: opts.rowLocalTrackId === undefined ? "local-1" : opts.rowLocalTrackId,
       title: "USB Cue Track",
       artist: "USB Artist",
       album: "USB Album",
@@ -1317,7 +1339,10 @@ function installUsbTrackDetailMock(page) {
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
           if (command === "list_tracks" || command === "search_tracks") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [], nextCursor: null, hasMore: false } };
+          if (command === "browse_source_files") {
+            const items = opts.libraryTracks || [];
+            return { ok: true, data: { total: items.length, items, nextCursor: null, hasMore: false } };
+          }
           if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
           if (command === "validate_usb_root") {
             return {
@@ -1365,6 +1390,8 @@ function installUsbTrackDetailMock(page) {
                 key: payload?.request?.key ?? null,
                 keySource: payload?.request?.key != null ? "user" : null,
                 anlzUpdated: true, edbUpdated: true, localUpdated: true,
+                // The backend resolves the library track itself (not only the hint).
+                localTrackId: "local-1",
               },
             };
           }
@@ -1374,7 +1401,7 @@ function installUsbTrackDetailMock(page) {
       },
       event: { listen: async () => () => {} },
     };
-  });
+  }, mockOpts);
 }
 
 async function openUsbView(page, subView) {
@@ -1416,9 +1443,26 @@ test("cue editor opens + saves from a USB playlist row through the USB commands"
   await expect(page.locator("#statusText")).toContainText("to USB");
 });
 
-test("cue editor edits BPM from a USB playlist row and saves it through the USB commands", async ({ page }) => {
-  await installUsbTrackDetailMock(page);
+test("cue editor edits BPM from a USB playlist row, saves it through the USB commands, and every view updates", async ({ page }) => {
+  // The row doesn't know its library track: the save response names it, and
+  // that library row must update too.
+  await installUsbTrackDetailMock(page, {
+    rowLocalTrackId: null,
+    libraryTracks: [{
+      id: "local-1",
+      title: "USB Cue Track",
+      artist: "USB Artist",
+      bpm: 126,
+      key: "Bm",
+      durationMs: 200000,
+      filePath: "/music/track.mp3",
+      analysisReady: true,
+      waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
+    }],
+  });
   await page.goto("/");
+  const libraryBpm = page.locator('#libraryTableBody .track-grid-row[data-track-id="local-1"] .td-bpm .bpm-pill');
+  await expect(libraryBpm).toHaveText("126");
 
   await openUsbView(page, "usb-playlists");
   await page.locator("#refreshUsbBtn").click();
@@ -1436,6 +1480,11 @@ test("cue editor edits BPM from a USB playlist row and saves it through the USB 
 
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
   expect(saveCall.request.bpm).toBe(128.5);
+  expect(saveCall.request.localTrackId).toBeNull();
+
+  // The USB row redraws with the new BPM, and so does the library track.
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.5");
+  await expect(libraryBpm).toHaveText("128.5");
 });
 
 test("cue editor edits the musical key from a USB playlist row and saves it through the USB commands", async ({ page }) => {
@@ -1457,6 +1506,7 @@ test("cue editor edits the musical key from a USB playlist row and saves it thro
 
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
   expect(saveCall.request.key).toBe("Dm");
+  await expect(row.locator(".td-key .key-pill")).toHaveText("Dm");
 });
 
 test("cue editor also opens from a USB history row", async ({ page }) => {

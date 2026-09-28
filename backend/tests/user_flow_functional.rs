@@ -1376,17 +1376,23 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
     assert_eq!(detail.cues[0].position_ms, 3_500);
 }
 
-/// A BPM edit saved straight onto the USB must land in all three places a
-/// player can read it: PDB t00 tempo (older CDJs), eDB `bpmx100`, and the
-/// ANLZ beat grid -- otherwise they disagree until the next export.
+/// A BPM/key edit saved straight onto the USB must land everywhere a player
+/// or the app reads it: PDB t00 tempo + key (older CDJs), eDB `bpmx100` +
+/// key, the ANLZ beat grid, and the local library track -- otherwise they
+/// disagree until the next export.
 #[test]
-fn save_usb_track_analysis_edits_bpm_keeps_pdb_edb_and_anlz_in_sync() {
+fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sync() {
     let root = tempdir().expect("temp root");
-    let (backend, _data_dir, usb, _track_id, _playlist_id) =
+    let (backend, data_dir, usb, track_id, _playlist_id) =
         export_one_track_with_cues(root.path(), Vec::new());
     let usb_track = first_usb_playlist_track(&backend, &usb);
     let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
     assert_ne!(usb_track.bpm, Some(137.25), "pick a BPM that differs");
+    let before = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
+    assert!(
+        !before.keys.values().any(|k| k.eq_ignore_ascii_case("G#m")),
+        "pick a key the stick doesn't have yet, to cover the new key row"
+    );
 
     let saved = backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
         usb_root: usb.to_string_lossy().to_string(),
@@ -1396,36 +1402,55 @@ fn save_usb_track_analysis_edits_bpm_keeps_pdb_edb_and_anlz_in_sync() {
             .expect("usb analysis path raw"),
         usb_media_path_raw: media_raw.clone(),
         bpm: Some(137.25),
-        key: None,
+        key: Some("G#m".to_string()),
         duration_ms: usb_track.duration_ms,
         first_beat_ms: None,
         cues: None,
-        local_track_id: usb_track.local_track_id.clone(),
+        // No hint: the backend resolves the library track itself and says which.
+        local_track_id: None,
         title: Some(usb_track.title.clone()),
         artist: Some(usb_track.artist.clone()),
         album: usb_track.album.clone(),
     });
     assert!(saved.ok, "usb save failed: {saved:?}");
+    let saved = saved.data.expect("usb save data");
+    assert_eq!(saved.local_track_id.as_deref(), Some(track_id.as_str()));
 
     let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
-    let pdb_tempo = parsed
+    let pdb_row = parsed
         .tracks
         .iter()
         .find(|t| t.track_file_path == media_raw)
-        .expect("pdb track row")
-        .tempo_x100;
-    let edb_bpmx100: i64 = open_usb_edb(&usb)
+        .expect("pdb track row");
+    let (edb_bpmx100, edb_key): (i64, String) = open_usb_edb(&usb)
         .query_row(
-            "SELECT bpmx100 FROM content WHERE path = ?1",
+            r#"SELECT c.bpmx100, k.name FROM content c JOIN "key" k ON k.key_id = c.key_id
+               WHERE c.path = ?1"#,
             [&media_raw],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
-        .expect("edb bpmx100");
+        .expect("edb bpm/key");
     let anlz_tempo = read_beatgrid_tempo_from_anlz(&fs::read(only_exported_ext(&usb)).unwrap());
+    let (local_bpm, local_key): (f64, String) =
+        rusqlite::Connection::open(data_dir.join("backend.db"))
+            .expect("open db")
+            .query_row(
+                "SELECT bpm, tonality FROM tracks WHERE id = ?1",
+                [&track_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("local track");
 
-    assert_eq!(pdb_tempo, 13_725);
+    assert_eq!(pdb_row.tempo_x100, 13_725);
+    assert_eq!(
+        parsed.keys.get(&pdb_row.key_id).map(String::as_str),
+        Some("G#m")
+    );
     assert_eq!(edb_bpmx100, 13_725);
+    assert_eq!(edb_key, "G#m");
     assert_eq!(anlz_tempo, Some(13_725));
+    assert_eq!(local_bpm, 137.25);
+    assert_eq!(local_key, "G#m");
 }
 
 #[test]

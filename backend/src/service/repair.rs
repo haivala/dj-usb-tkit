@@ -8,7 +8,7 @@ use std::path::Path;
 use rusqlite::params;
 
 use crate::edb::{
-    ExportDbPlaylist, open_edb_from_usb_root, open_edb_rw,
+    ExportDbPlaylist, find_key_id_by_name, open_edb_from_usb_root, open_edb_rw,
     try_read_playlists_with_metadata_from_edb, try_read_playlists_with_metadata_from_edb_with_conn,
 };
 use crate::error::{BackendError, BackendResult};
@@ -54,12 +54,12 @@ fn player_menu_kind_removable(kind: u32) -> bool {
 }
 
 use super::diagnostics::{
-    TempoMismatch, build_meta_key, collect_edb_indexed_paths, contents_path_match_key,
-    detect_tempo_mismatches, normalize_analysis_path_for_identity,
+    BpmKeyMismatch, build_meta_key, collect_edb_indexed_paths, contents_path_match_key,
+    detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
     normalize_path_for_contents_match, normalize_pdb_path_for_edb_lookup, track_identity_key,
 };
 
-const TEMPO_MISMATCH_FIX_ID: &str = "fix_tempo_mismatch";
+const BPM_KEY_MISMATCH_FIX_ID: &str = "fix_bpm_key_mismatch";
 const STRICT_PARITY_UPGRADE_FIX_ID: &str = "upgrade_export_data_to_strict_parity";
 const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
 const SYNC_EDB_HISTORY_FROM_PDB_FIX_ID: &str = "sync_edb_history_from_pdb";
@@ -123,7 +123,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_TRACK_STRING_ALIGNMENT_FIX_ID,
     PDB_ALBUM_STRING_ALIGNMENT_FIX_ID,
     PDB_HEADER_COMPATIBILITY_FIX_ID,
-    TEMPO_MISMATCH_FIX_ID,
+    BPM_KEY_MISMATCH_FIX_ID,
     "manual_reimport_unindexed_audio",
     "remove_missing_audio_references",
     SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
@@ -2866,23 +2866,23 @@ impl<'a> EdbConnHandle<'a> {
     }
 }
 
-/// Align every track's ANLZ beat grid and eDB `bpmx100` to its PDB tempo
-/// (`fix_tempo_mismatch`). Mismatches are re-detected against the current
-/// staged PDB and the given eDB connection, so earlier fixes in the same
-/// apply pass (e.g. strict parity rewriting the databases) are accounted for
-/// and one pass leaves nothing behind. The grid is rebuilt exactly as export
-/// does it -- `apply_analysis_edits_to_anlz` with the tempo only, reusing the
-/// bundle's own first-beat anchor and leaving cues, waveforms and `PSSI` as
-/// they are. Returns (ANLZ bundles rewritten, eDB rows updated).
-fn apply_tempo_mismatch_repair(
+/// Align every track's ANLZ beat grid, eDB `bpmx100` and eDB key to its PDB
+/// row (`fix_bpm_key_mismatch`). Mismatches are re-detected against the
+/// current staged PDB and the given eDB connection, so earlier fixes in the
+/// same apply pass (e.g. strict parity rewriting the databases) are accounted
+/// for and one pass leaves nothing behind. The grid is rebuilt exactly as
+/// export does it -- `apply_analysis_edits_to_anlz` with the tempo only,
+/// reusing the bundle's own first-beat anchor and leaving cues, waveforms and
+/// `PSSI` as they are. Returns (ANLZ bundles rewritten, eDB rows updated).
+fn apply_bpm_key_mismatch_repair(
     usb_root: &std::path::Path,
     edb_conn: Option<&mut rusqlite::Connection>,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(usize, usize)> {
     let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
     let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings));
-    let mismatches: Vec<TempoMismatch> =
-        detect_tempo_mismatches(usb_root, &parsed, handle.as_mut().map(|h| &*h.conn()));
+    let mismatches: Vec<BpmKeyMismatch> =
+        detect_bpm_key_mismatches(usb_root, &parsed, handle.as_mut().map(|h| &*h.conn()), true);
 
     let mut anlz_fixed = 0usize;
     for m in &mismatches {
@@ -2907,18 +2907,35 @@ fn apply_tempo_mismatch_repair(
     }
 
     let mut edb_fixed = 0usize;
-    if mismatches.iter().any(|m| m.edb_bpmx100.is_some()) {
+    let edb_targets: Vec<&BpmKeyMismatch> = mismatches
+        .iter()
+        .filter(|m| m.edb_bpmx100.is_some() || m.pdb_key_for_edb.is_some())
+        .collect();
+    if !edb_targets.is_empty() {
         let Some(handle) = handle.as_mut() else {
             return Err(BackendError::Internal(
-                "unable to open eDB to align content.bpmx100".to_string(),
+                "unable to open eDB to align content BPM/key".to_string(),
             ));
         };
         let tx = handle.conn().transaction()?;
-        for m in mismatches.iter().filter(|m| m.edb_bpmx100.is_some()) {
-            edb_fixed += tx.execute(
-                "UPDATE content SET bpmx100 = ?1 WHERE path = ?2",
-                params![i64::from(m.pdb_tempo_x100), m.track_path],
-            )?;
+        for m in edb_targets {
+            let mut changed = false;
+            if m.edb_bpmx100.is_some() {
+                changed |= tx.execute(
+                    "UPDATE content SET bpmx100 = ?1 WHERE path = ?2",
+                    params![i64::from(m.pdb_tempo_x100), m.track_path],
+                )? > 0;
+            }
+            if let Some(key) = m.pdb_key_for_edb.as_deref() {
+                let key_id = find_key_id_by_name(&tx, Some(key))?;
+                changed |= tx.execute(
+                    "UPDATE content SET key_id = ?1 WHERE path = ?2",
+                    params![key_id, m.track_path],
+                )? > 0;
+            }
+            if changed {
+                edb_fixed += 1;
+            }
         }
         tx.commit()?;
     }
@@ -3605,30 +3622,30 @@ impl BackendService {
         // and this one) -- only falls back to a fresh parse if diagnostics'
         // own parse failed.
         let parsed_pdb = parsed_pdb_from_diagnostics.or_else(|| parse_pdb(&staged_pdb_path).ok());
-        let tempo_mismatches: Vec<TempoMismatch> = parsed_pdb
+        let bpm_key_mismatches: Vec<BpmKeyMismatch> = parsed_pdb
             .as_ref()
-            .map(|parsed| detect_tempo_mismatches(&usb_root, parsed, edb_conn.as_ref()))
+            .map(|parsed| detect_bpm_key_mismatches(&usb_root, parsed, edb_conn.as_ref(), true))
             .unwrap_or_default();
-        if !tempo_mismatches.is_empty() {
+        if !bpm_key_mismatches.is_empty() {
             detected_issues.push(format!(
-                "{} track(s) with ANLZ beat-grid tempo or eDB BPM differing from the PDB tempo",
-                tempo_mismatches.len()
+                "{} track(s) with ANLZ beat-grid tempo or eDB BPM/key differing from the PDB",
+                bpm_key_mismatches.len()
             ));
-            let anlz_writes = tempo_mismatches
+            let anlz_writes = bpm_key_mismatches
                 .iter()
                 .filter(|m| m.anlz_dat_path.is_some())
                 .count()
                 * 2;
-            let edb_writes = tempo_mismatches
+            let edb_writes = bpm_key_mismatches
                 .iter()
-                .filter(|m| m.edb_bpmx100.is_some())
+                .filter(|m| m.edb_bpmx100.is_some() || m.pdb_key_for_edb.is_some())
                 .count();
             proposed_fixes.push(RepairFixProposal {
-                id: TEMPO_MISMATCH_FIX_ID.to_string(),
-                title: "Fix Tempo Mismatch".to_string(),
-                description: "Rebuild the ANLZ beat grid and set eDB BPM from each track's PDB \
-                              tempo, so every player reads the same BPM. Waveforms, cues and the \
-                              first beat are kept."
+                id: BPM_KEY_MISMATCH_FIX_ID.to_string(),
+                title: "Fix BPM/Key Mismatch".to_string(),
+                description: "Rebuild the ANLZ beat grid and set the eDB BPM and key from each \
+                              track's PDB row, so every player reads the same BPM and key. \
+                              Waveforms, cues and the first beat are kept."
                     .to_string(),
                 supported: true,
                 destructive: false,
@@ -4859,23 +4876,25 @@ impl BackendService {
                 skipped_fixes.push("Remove Missing Audio References: not selected".to_string());
             }
 
-            if selected.contains(TEMPO_MISMATCH_FIX_ID) {
-                if tempo_mismatches.is_empty() {
-                    skipped_fixes.push("Fix Tempo Mismatch: nothing to apply".to_string());
+            if selected.contains(BPM_KEY_MISMATCH_FIX_ID) {
+                if bpm_key_mismatches.is_empty() {
+                    skipped_fixes.push("Fix BPM/Key Mismatch: nothing to apply".to_string());
                 } else {
-                    match apply_tempo_mismatch_repair(
+                    match apply_bpm_key_mismatch_repair(
                         &usb_root,
                         fix_edb_conn.as_mut(),
                         &mut warnings,
                     ) {
                         Ok((anlz_fixed, edb_fixed)) => applied_fixes.push(format!(
-                            "Fix Tempo Mismatch: rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)"
+                            "Fix BPM/Key Mismatch: rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)"
                         )),
-                        Err(err) => failed_fixes.push(format!("Fix Tempo Mismatch failed: {err}")),
+                        Err(err) => {
+                            failed_fixes.push(format!("Fix BPM/Key Mismatch failed: {err}"))
+                        }
                     }
                 }
-            } else if !tempo_mismatches.is_empty() {
-                skipped_fixes.push("Fix Tempo Mismatch: not selected".to_string());
+            } else if !bpm_key_mismatches.is_empty() {
+                skipped_fixes.push("Fix BPM/Key Mismatch: not selected".to_string());
             }
 
             if selected.contains(SYNC_EDB_HISTORY_FROM_PDB_FIX_ID) {

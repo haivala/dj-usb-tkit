@@ -1195,6 +1195,7 @@ async function openUsbTrackDetail(track, deps) {
     state,
     applyRealtimeAnalyzedTrackUpdate,
     patchTrackAnalysisFields,
+    getUsbTrackListControllers = () => [],
   } = deps;
 
   if (!state?.usbRootValid || !state?.usbRoot) {
@@ -1247,14 +1248,25 @@ async function openUsbTrackDetail(track, deps) {
     });
     const n = saved.cues.length;
     emitStatus(`Saved ${n} cue${n === 1 ? "" : "s"} to USB`);
-    patchTrackAnalysisFields?.(track, { bpm: saved.bpm, bpmAnalyzer: saved.bpmAnalyzer, key: saved.key });
-    if (track.localTrackId) {
-      applyRealtimeAnalyzedTrackUpdate?.({
-        trackId: track.localTrackId,
-        bpm: saved.bpm,
-        bpmAnalyzer: saved.bpmAnalyzer,
-        key: saved.key,
-      });
+    const fields = { bpm: saved.bpm, bpmAnalyzer: saved.bpmAnalyzer, key: saved.key };
+    // Every loaded USB row of this file -- the same track can sit in several
+    // USB playlists and the history -- not just the row that was clicked.
+    const mediaPath = String(track.usbMediaPath || "").trim();
+    for (const ctl of getUsbTrackListControllers()) {
+      let changed = false;
+      for (const item of ctl?.items || []) {
+        const sameFile = item === track
+          || (mediaPath && String(item?.usbMediaPath || "").trim() === mediaPath);
+        if (sameFile) changed = patchTrackAnalysisFields?.(item, fields) || changed;
+      }
+      if (changed) await ctl.rerender();
+    }
+    patchTrackAnalysisFields?.(track, fields);
+    // The backend also wrote the library track it resolved (not only the
+    // row's hint), so refresh that one and the app playlists containing it.
+    const localTrackId = saved.localTrackId || track.localTrackId;
+    if (localTrackId) {
+      applyRealtimeAnalyzedTrackUpdate?.({ trackId: localTrackId, ...fields });
     }
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);
