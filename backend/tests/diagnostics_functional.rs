@@ -3690,6 +3690,82 @@ fn repair_fix_empty_analysis_files_skips_unmapped_stray_bundle() {
     );
 }
 
+// ── fix_tempo_mismatch ────────────────────────────────────────────────────
+
+#[test]
+fn repair_fix_tempo_mismatch_aligns_anlz_and_edb_to_pdb_tempo_in_one_pass() {
+    use backend::service::anlz::{
+        WaveformData, build_anlz_dat_file, build_anlz_ext_file, read_beatgrid_tempo_from_anlz,
+    };
+
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    // A normal export must never look mismatched.
+    assert_fix_not_proposed(&backend, &usb, "fix_tempo_mismatch");
+
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    let track = parsed
+        .tracks
+        .iter()
+        .find(|t| t.tempo_x100 > 0)
+        .expect("a PDB track with a tempo");
+    let pdb_tempo = track.tempo_x100;
+    let wrong_bpm = if pdb_tempo == 9_000 { 91.0 } else { 90.0 };
+
+    // Replace the fixture's placeholder bundle with a real one whose beat
+    // grid is at a wrong tempo, and skew the eDB BPM.
+    let dat_path = find_exported_anlz_dat(&usb);
+    let waveform = WaveformData::from_peaks(vec![128; 400]);
+    let track_path = track.track_file_path.as_str();
+    fs::write(
+        &dat_path,
+        build_anlz_dat_file(&waveform, track_path, Some(wrong_bpm), Some(200_000)),
+    )
+    .expect("write DAT");
+    fs::write(
+        dat_path.with_extension("EXT"),
+        build_anlz_ext_file(&waveform, track_path, Some(wrong_bpm), Some(200_000)),
+    )
+    .expect("write EXT");
+    let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
+    open_edb(&edb_path)
+        .execute(
+            "UPDATE content SET bpmx100 = ?1 WHERE path = ?2",
+            rusqlite::params![12_345, track.track_file_path],
+        )
+        .expect("skew eDB bpm");
+
+    assert_fix_proposed(&backend, &usb, "fix_tempo_mismatch");
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["fix_tempo_mismatch".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m.contains("Fix Tempo Mismatch") && m.contains("updated 1 eDB row")),
+        "expected the mismatch to be fixed: {:#?}",
+        data.applied_fixes
+    );
+
+    for path in [dat_path.clone(), dat_path.with_extension("EXT")] {
+        let tempo = read_beatgrid_tempo_from_anlz(&fs::read(&path).expect("read bundle"));
+        assert_eq!(tempo.map(u32::from), Some(pdb_tempo), "{}", path.display());
+    }
+    let edb_bpm: i64 = open_edb(&edb_path)
+        .query_row(
+            "SELECT bpmx100 FROM content WHERE path = ?1",
+            [&track.track_file_path],
+            |r| r.get(0),
+        )
+        .expect("eDB bpm");
+    assert_eq!(edb_bpm, i64::from(pdb_tempo));
+    // One pass is enough: nothing left to propose.
+    assert_fix_not_proposed(&backend, &usb, "fix_tempo_mismatch");
+}
+
 // ── remove_missing_audio_references ───────────────────────────────────────
 
 fn find_contents_audio_file(usb: &Path) -> PathBuf {

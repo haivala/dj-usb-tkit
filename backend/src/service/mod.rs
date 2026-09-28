@@ -464,6 +464,23 @@ fn master_db_analysis_file_candidates(master_path: &Path, db_path: &str) -> Vec<
     candidates
 }
 
+/// The `.DAT` path of a track's bundle in the app's local ANLZ cache, or
+/// `None` when `waveform_peaks_path` points anywhere else. A USB-imported
+/// track's path can point at a bundle on the stick (possibly rekordbox-made,
+/// possibly without `PWV6`/`.2EX`), and cache maintenance must never touch it.
+/// Cache files are named by `local_analysis_bundle_paths`' source-path hash,
+/// not the track id, so the stored path is the only reliable way to find them.
+fn local_cache_bundle_dat(waveform_dir: &Path, waveform_peaks_path: &str) -> Option<PathBuf> {
+    let dat = PathBuf::from(waveform_peaks_path.trim());
+    (dat.parent() == Some(waveform_dir)).then_some(dat)
+}
+
+fn remove_bundle_files(dat: &Path) {
+    for ext in ["DAT", "EXT", "2EX"] {
+        let _ = std::fs::remove_file(dat.with_extension(ext));
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BackendService {
     pub db: Db,
@@ -1047,6 +1064,7 @@ impl BackendService {
 
         let scanned_paths = unique_paths(&scanned);
         let mut removed = 0usize;
+        let mut orphaned_cache_bundles = Vec::<PathBuf>::new();
         let analysis_dir = self.db.data_dir().join("analysis");
         let waveform_dir = analysis_dir.join("waveforms");
         let artwork_dir = analysis_dir.join("artwork");
@@ -1058,19 +1076,25 @@ impl BackendService {
             let slash_like = format!("{escaped_root}/%");
             let backslash_like = format!("{escaped_root}\\\\%");
             let mut stmt = tx.prepare(
-                "SELECT id, file_path FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\' OR file_path LIKE ?3 ESCAPE '\\'",
+                "SELECT id, file_path, waveform_peaks_path FROM tracks WHERE file_path = ?1 OR file_path LIKE ?2 ESCAPE '\\' OR file_path LIKE ?3 ESCAPE '\\'",
             )?;
             let rows = stmt.query_map(params![root, slash_like, backslash_like], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
             })?;
 
             for row in rows {
-                let (id, path) = row?;
+                let (id, path, waveform_peaks_path) = row?;
                 if !scanned_paths.contains(path.as_str()) {
                     tx.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
-                    // Clean up ANLZ cache and artwork files
-                    for ext in ["DAT", "EXT", "2EX"] {
-                        let _ = std::fs::remove_file(waveform_dir.join(format!("{id}.{ext}")));
+                    if let Some(dat) = waveform_peaks_path
+                        .as_deref()
+                        .and_then(|p| local_cache_bundle_dat(&waveform_dir, p))
+                    {
+                        orphaned_cache_bundles.push(dat);
                     }
                     let _ = std::fs::remove_file(artwork_dir.join(format!("{id}.jpg")));
                     removed += 1;
@@ -1078,27 +1102,44 @@ impl BackendService {
             }
         }
 
-        // Detect stale ANLZ cache (missing PWV6 in .2EX) and mark for re-analysis
+        // Clean up the removed tracks' local ANLZ cache, unless a remaining
+        // track shares the bundle (the cache name hashes the lower-cased
+        // source path, so case-variant paths map to one bundle).
+        for dat in &orphaned_cache_bundles {
+            let still_referenced: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tracks WHERE waveform_peaks_path = ?1)",
+                params![dat.to_string_lossy()],
+                |row| row.get(0),
+            )?;
+            if !still_referenced {
+                remove_bundle_files(dat);
+            }
+        }
+
+        // Detect stale local ANLZ cache (missing PWV6 in .2EX) and mark for
+        // re-analysis. Only the app's own cache is checked: a bundle on a USB
+        // stick is never cleared or deleted here.
         {
-            let mut stmt =
-                tx.prepare("SELECT id FROM tracks WHERE waveform_peaks_path IS NOT NULL")?;
-            let ids: Vec<String> = stmt
-                .query_map([], |row| row.get::<_, String>(0))?
+            let mut stmt = tx.prepare(
+                "SELECT id, waveform_peaks_path FROM tracks WHERE waveform_peaks_path IS NOT NULL",
+            )?;
+            let rows: Vec<(String, String)> = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                 .filter_map(|r| r.ok())
                 .collect();
-            for id in &ids {
-                let twoex = waveform_dir.join(format!("{id}.2EX"));
-                if twoex.is_file()
-                    && let Ok(bytes) = std::fs::read(&twoex)
+            for (id, waveform_peaks_path) in &rows {
+                let Some(dat) = local_cache_bundle_dat(&waveform_dir, waveform_peaks_path) else {
+                    continue;
+                };
+                if let Ok(bytes) = std::fs::read(dat.with_extension("2EX"))
+                    && bytes.starts_with(b"PMAI")
                     && !bytes.windows(4).any(|w| w == b"PWV6")
                 {
                     tx.execute(
                         "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",
                         params![id],
                     )?;
-                    for ext in ["DAT", "EXT", "2EX"] {
-                        let _ = std::fs::remove_file(waveform_dir.join(format!("{id}.{ext}")));
-                    }
+                    remove_bundle_files(&dat);
                 }
             }
         }

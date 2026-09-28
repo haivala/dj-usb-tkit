@@ -856,10 +856,55 @@ impl BackendService {
 
         // --- 4. Analysis Integrity ---
         on_progress(70, 100, "USB: Checking analysis references");
-        let analysis_integrity = diagnose_analysis_integrity(
+        let mut analysis_integrity = diagnose_analysis_integrity(
             parsed_opt.as_ref().map(|p| &p.0),
             edb_playlist_tracks.as_ref(),
         );
+        if let Some((parsed, _)) = parsed_opt.as_ref() {
+            let mismatches = detect_tempo_mismatches(&usb_root, parsed, conn);
+            let (status, detail) = if mismatches.is_empty() {
+                (
+                    DiagStatus::Pass,
+                    "PDB tempo, ANLZ beat grid and eDB BPM agree for every track".to_string(),
+                )
+            } else {
+                let examples = mismatches
+                    .iter()
+                    .take(3)
+                    .map(|m| m.track_path.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (
+                    DiagStatus::Warn,
+                    format!(
+                        "{} track(s) whose ANLZ beat-grid tempo or eDB BPM differs from the PDB \
+                         tempo; e.g. {examples}; run fix_tempo_mismatch to fix",
+                        mismatches.len()
+                    ),
+                )
+            };
+            if matches!(status, DiagStatus::Warn) {
+                raw_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.tempo-mismatch",
+                    detail.clone(),
+                ));
+            }
+            analysis_integrity.checks.push(DiagCheck {
+                label: "Tempo consistency".to_string(),
+                status,
+                detail,
+                link: None,
+            });
+            analysis_integrity.status = DiagStatus::worst_of(
+                &analysis_integrity
+                    .checks
+                    .iter()
+                    .map(|c| &c.status)
+                    .collect::<Vec<_>>(),
+            );
+        }
         note_stage("analysis integrity", &mut raw_warnings);
 
         // --- 5. Playlist Resolution ---
@@ -1785,6 +1830,80 @@ pub(crate) fn diagnose_contents_integrity_db_only(
             mismatch_count: pdb_only_count as i64 - edb_only_count as i64,
         }),
     }
+}
+
+/// A track whose tempo disagrees between its PDB row and its ANLZ beat grid
+/// and/or eDB `content.bpmx100`. The PDB `tempo_x100` is the reference: it is
+/// what older CDJs read and what `fix_empty_analysis_files` already trusts.
+#[derive(Debug, Clone)]
+pub(crate) struct TempoMismatch {
+    pub track_path: String,
+    pub pdb_tempo_x100: u32,
+    pub duration_ms: Option<u64>,
+    /// Absolute `.DAT` path, set when the DAT or EXT beat-grid tempo differs.
+    pub anlz_dat_path: Option<std::path::PathBuf>,
+    /// Current eDB `bpmx100`, set when it differs.
+    pub edb_bpmx100: Option<i64>,
+}
+
+/// Compare each PDB track's `tempo_x100` against its ANLZ beat grid (`.DAT`
+/// and `.EXT`) and, when an eDB connection is given, `content.bpmx100`.
+/// Tracks with no PDB tempo, or with missing/unparseable bundles, are skipped
+/// (those are other checks' business).
+pub(crate) fn detect_tempo_mismatches(
+    usb_root: &std::path::Path,
+    parsed: &crate::pdb_reader::ParsedPdb,
+    edb: Option<&rusqlite::Connection>,
+) -> Vec<TempoMismatch> {
+    let edb_bpm_by_path: HashMap<String, i64> = edb
+        .and_then(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT path, bpmx100 FROM content WHERE path IS NOT NULL")
+                .ok()?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+                })
+                .ok()?;
+            Some(
+                rows.filter_map(Result::ok)
+                    .filter_map(|(path, bpm)| Some((path, bpm?)))
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
+
+    let mut out = Vec::new();
+    for track in &parsed.tracks {
+        let pdb_tempo_x100 = track.tempo_x100;
+        if pdb_tempo_x100 == 0 {
+            continue;
+        }
+        let anlz_dat_path = super::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path)
+            .map(std::path::PathBuf::from)
+            .filter(|dat| {
+                [dat.clone(), dat.with_extension("EXT")].iter().any(|p| {
+                    std::fs::read(p)
+                        .ok()
+                        .and_then(|bytes| super::anlz::read_beatgrid_tempo_from_anlz(&bytes))
+                        .is_some_and(|t| u32::from(t) != pdb_tempo_x100)
+                })
+            });
+        let edb_bpmx100 = edb_bpm_by_path
+            .get(&track.track_file_path)
+            .copied()
+            .filter(|v| *v != i64::from(pdb_tempo_x100));
+        if anlz_dat_path.is_some() || edb_bpmx100.is_some() {
+            out.push(TempoMismatch {
+                track_path: track.track_file_path.clone(),
+                pdb_tempo_x100,
+                duration_ms: track.duration_seconds.map(|s| u64::from(s) * 1000),
+                anlz_dat_path,
+                edb_bpmx100,
+            });
+        }
+    }
+    out
 }
 
 pub(crate) fn diagnose_analysis_integrity(

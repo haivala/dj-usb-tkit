@@ -13,7 +13,7 @@ use backend::models::{
     SearchTracksRequest, TrackCueInput,
 };
 use backend::pdb_reader::parse_pdb;
-use backend::service::anlz::read_cues_from_anlz;
+use backend::service::anlz::{read_beatgrid_tempo_from_anlz, read_cues_from_anlz};
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 
 fn find_files_named(dir: &Path, name: &str, out: &mut Vec<PathBuf>) {
@@ -1374,6 +1374,58 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
         .expect("usb detail 2");
     assert_eq!(detail.cues.len(), 1);
     assert_eq!(detail.cues[0].position_ms, 3_500);
+}
+
+/// A BPM edit saved straight onto the USB must land in all three places a
+/// player can read it: PDB t00 tempo (older CDJs), eDB `bpmx100`, and the
+/// ANLZ beat grid -- otherwise they disagree until the next export.
+#[test]
+fn save_usb_track_analysis_edits_bpm_keeps_pdb_edb_and_anlz_in_sync() {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, _playlist_id) =
+        export_one_track_with_cues(root.path(), Vec::new());
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
+    assert_ne!(usb_track.bpm, Some(137.25), "pick a BPM that differs");
+
+    let saved = backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+        usb_analysis_path_raw: usb_track
+            .usb_analysis_path_raw
+            .clone()
+            .expect("usb analysis path raw"),
+        usb_media_path_raw: media_raw.clone(),
+        bpm: Some(137.25),
+        key: None,
+        duration_ms: usb_track.duration_ms,
+        first_beat_ms: None,
+        cues: None,
+        local_track_id: usb_track.local_track_id.clone(),
+        title: Some(usb_track.title.clone()),
+        artist: Some(usb_track.artist.clone()),
+        album: usb_track.album.clone(),
+    });
+    assert!(saved.ok, "usb save failed: {saved:?}");
+
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
+    let pdb_tempo = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == media_raw)
+        .expect("pdb track row")
+        .tempo_x100;
+    let edb_bpmx100: i64 = open_usb_edb(&usb)
+        .query_row(
+            "SELECT bpmx100 FROM content WHERE path = ?1",
+            [&media_raw],
+            |r| r.get(0),
+        )
+        .expect("edb bpmx100");
+    let anlz_tempo = read_beatgrid_tempo_from_anlz(&fs::read(only_exported_ext(&usb)).unwrap());
+
+    assert_eq!(pdb_tempo, 13_725);
+    assert_eq!(edb_bpmx100, 13_725);
+    assert_eq!(anlz_tempo, Some(13_725));
 }
 
 #[test]

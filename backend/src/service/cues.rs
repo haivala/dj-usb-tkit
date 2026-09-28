@@ -14,7 +14,7 @@
 //! (see `service::anlz`, `service::export`).
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -35,7 +35,7 @@ use super::anlz::{
     AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, atomic_write_bytes,
     read_cues_from_anlz, read_first_beat_from_anlz,
 };
-use super::export_helpers::{load_table_columns_tx, write_edb_cues_for_content};
+use super::export_helpers::{PdbLayoutProfile, load_table_columns_tx, write_edb_cues_for_content};
 use super::usb_utils::{read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path};
 use super::{BackendService, TRACK_COLS, apply_is_usb_path, now, row_to_track};
 
@@ -167,6 +167,56 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
             }),
     );
     out
+}
+
+/// Stage the device `export.pdb` and build its bytes with the t00 tempo of
+/// the track at `media_path` set to `bpm` (same `round(bpm*100)` as export,
+/// eDB `bpmx100` and the ANLZ beat grid). Returns the staged path + new bytes
+/// to write, or `None` when the tempo already matches. Nothing is written
+/// here, so the caller can block before touching the device.
+fn build_pdb_tempo_patch(
+    usb_root: &Path,
+    media_path: &str,
+    bpm: f64,
+) -> BackendResult<Option<(PathBuf, Vec<u8>)>> {
+    let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
+    let mut bytes = std::fs::read(&staged_pdb)?;
+    let page_size = bytes
+        .get(4..8)
+        .and_then(|b| b.try_into().ok())
+        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
+        .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))?;
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
+    let media_path = media_path.trim();
+    let row = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == media_path)
+        .or_else(|| {
+            parsed
+                .tracks
+                .iter()
+                .find(|t| t.track_file_path.eq_ignore_ascii_case(media_path))
+        })
+        .ok_or_else(|| {
+            BackendError::NotFound(format!("track not in this USB's export.pdb: {media_path}"))
+        })?;
+    let mut data = super::repair::track_row_data_from_reader_row(row);
+    data.bpm = Some(bpm);
+    let tempo_x100 = (bpm * 100.0).round().max(0.0) as u32;
+    if row.tempo_x100 == tempo_x100 {
+        return Ok(None);
+    }
+    crate::pdb_writer::mutate_tracks_in_place(
+        &mut bytes,
+        &[crate::pdb_writer::PdbTrackRowMutation {
+            row: data,
+            changed_fields: vec!["tempo_x100"],
+        }],
+        PdbLayoutProfile::DEFAULT,
+        page_size,
+    )?;
+    Ok(Some((staged_pdb, bytes)))
 }
 
 /// Read/rewrite an ANLZ `.DAT` bundle and its sibling `.EXT` in place with
@@ -843,6 +893,15 @@ impl BackendService {
                 ))
             })?;
 
+        // A BPM edit re-grids the ANLZ and sets eDB `bpmx100`; the PDB tempo
+        // (what older CDJs read) must follow or the three disagree until the
+        // next export. Resolve and build the patch before writing anything so
+        // a track missing from the PDB blocks the save cleanly.
+        let pdb_tempo_patch = match req.bpm {
+            Some(bpm) => build_pdb_tempo_patch(&usb_root, &req.usb_media_path_raw, bpm)?,
+            None => None,
+        };
+
         // The cue list to reconcile onto the device: the new list when this is
         // a cue edit (empty list clears), otherwise the bundle's current list
         // (a first-beat-only edit must not drop existing cues).
@@ -866,6 +925,12 @@ impl BackendService {
                 cues: Some(&anlz_cues),
             },
         )?;
+
+        // 5b. PDB tempo, in place on the device.
+        if let Some((staged_pdb, bytes)) = pdb_tempo_patch {
+            atomic_write_bytes(&staged_pdb, &bytes)?;
+            super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)?;
+        }
 
         // 6. Local master write (mandatory when a match is found) — before the
         //    eDB commit so a local failure aborts before the device diverges.

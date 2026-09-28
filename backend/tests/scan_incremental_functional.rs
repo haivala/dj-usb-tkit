@@ -198,3 +198,122 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     assert_eq!(playlist_tracks.items[0].id, track_id);
     assert!(playlist_tracks.items[0].file_path.starts_with(&new_root));
 }
+
+fn set_waveform_path(data_dir: &std::path::Path, file_name: &str, dat: &std::path::Path) {
+    let conn = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open backend db");
+    let updated = conn
+        .execute(
+            "UPDATE tracks SET waveform_peaks_path = ?1 WHERE file_path LIKE ?2",
+            rusqlite::params![dat.to_string_lossy(), format!("%{file_name}")],
+        )
+        .expect("set waveform path");
+    assert_eq!(updated, 1, "expected one track row for {file_name}");
+}
+
+fn waveform_path(data_dir: &std::path::Path, file_name: &str) -> Option<String> {
+    let conn = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open backend db");
+    conn.query_row(
+        "SELECT waveform_peaks_path FROM tracks WHERE file_path LIKE ?1",
+        rusqlite::params![format!("%{file_name}")],
+        |row| row.get(0),
+    )
+    .expect("query waveform path")
+}
+
+fn write_bundle(dat: &std::path::Path, twoex: &[u8]) {
+    fs::create_dir_all(dat.parent().unwrap()).expect("create bundle dir");
+    fs::write(dat, b"PMAI-dat").expect("write DAT");
+    fs::write(dat.with_extension("EXT"), b"PMAI-ext").expect("write EXT");
+    fs::write(dat.with_extension("2EX"), twoex).expect("write 2EX");
+}
+
+fn scan(backend: &BackendCommands, media: &std::path::Path) {
+    let res = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(res.ok, "scan failed: {res:?}");
+}
+
+/// Local cache bundles are named by a source-path hash, not the track id, so
+/// the stale-PWV6 check must follow `waveform_peaks_path` -- and must never
+/// touch a bundle outside the local cache (e.g. one on a USB stick).
+#[test]
+fn scan_clears_stale_local_anlz_cache_but_never_usb_bundles() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    for name in ["Stale.mp3", "Fresh.mp3", "Usb.mp3"] {
+        fs::write(media.join(name), name.as_bytes()).expect("write track");
+    }
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    scan(&backend, &media);
+
+    let cache = data_dir.join("analysis").join("waveforms");
+    let stale = cache.join("0A1B2C3D.DAT");
+    let fresh = cache.join("4E5F6071.DAT");
+    let usb = root
+        .path()
+        .join("usb/PIONEER/USBANLZ/P001/0000ABCD/ANLZ0000.DAT");
+    write_bundle(&stale, b"PMAI-PPTH-PWV7");
+    write_bundle(&fresh, b"PMAI-PPTH-PWV7-PWV6");
+    write_bundle(&usb, b"PMAI-PPTH-PWV7");
+    set_waveform_path(&data_dir, "Stale.mp3", &stale);
+    set_waveform_path(&data_dir, "Fresh.mp3", &fresh);
+    set_waveform_path(&data_dir, "Usb.mp3", &usb);
+
+    scan(&backend, &media);
+
+    assert_eq!(waveform_path(&data_dir, "Stale.mp3"), None);
+    for ext in ["DAT", "EXT", "2EX"] {
+        assert!(
+            !stale.with_extension(ext).exists(),
+            "stale .{ext} not deleted"
+        );
+        assert!(fresh.with_extension(ext).exists(), "fresh .{ext} deleted");
+        assert!(usb.with_extension(ext).exists(), "USB .{ext} deleted");
+    }
+    assert_eq!(
+        waveform_path(&data_dir, "Fresh.mp3").as_deref(),
+        Some(fresh.to_string_lossy().as_ref())
+    );
+    assert_eq!(
+        waveform_path(&data_dir, "Usb.mp3").as_deref(),
+        Some(usb.to_string_lossy().as_ref())
+    );
+}
+
+#[test]
+fn scan_removing_a_track_deletes_its_hashed_cache_bundle_unless_shared() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    for name in ["Gone.mp3", "GoneShared.mp3", "Kept.mp3"] {
+        fs::write(media.join(name), name.as_bytes()).expect("write track");
+    }
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    scan(&backend, &media);
+
+    let cache = data_dir.join("analysis").join("waveforms");
+    let own = cache.join("11111111.DAT");
+    let shared = cache.join("22222222.DAT");
+    write_bundle(&own, b"PMAI-PWV6");
+    write_bundle(&shared, b"PMAI-PWV6");
+    set_waveform_path(&data_dir, "Gone.mp3", &own);
+    set_waveform_path(&data_dir, "GoneShared.mp3", &shared);
+    set_waveform_path(&data_dir, "Kept.mp3", &shared);
+
+    fs::remove_file(media.join("Gone.mp3")).expect("remove Gone");
+    fs::remove_file(media.join("GoneShared.mp3")).expect("remove GoneShared");
+    scan(&backend, &media);
+
+    for ext in ["DAT", "EXT", "2EX"] {
+        assert!(
+            !own.with_extension(ext).exists(),
+            "orphaned .{ext} not deleted"
+        );
+        assert!(shared.with_extension(ext).exists(), "shared .{ext} deleted");
+    }
+}

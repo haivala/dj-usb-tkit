@@ -39,6 +39,21 @@
 
 ## Unreleased
 
+- **Fix:** changing a track's BPM in the cue editor while it plays from a
+  connected USB now also updates the tempo in `export.pdb`. Before, only the
+  beat grid and `exportLibrary.db` changed, so older CDJs kept showing the old
+  BPM until the next export.
+- **New feature:** USB diagnostics checks that each track's BPM matches across
+  `export.pdb`, the ANLZ beat grid and `exportLibrary.db`. A new repair, "Fix
+  Tempo Mismatch" (`fix_tempo_mismatch`), rebuilds the beat grid and sets the
+  eDB BPM from the PDB tempo in one pass, and keeps waveforms, cues and the
+  first beat.
+- **Fix:** a library scan now finds the app's ANLZ cache files for real. The
+  check that sends outdated caches (no 3-band `PWV6` waveform) back for
+  reanalysis never ran, and removing a track from the library left its cache
+  files on disk. Both now use the track's stored bundle path, and neither ever
+  touches bundles on a USB stick.
+
 ## 0.2.6
 
 - **Fix:** the Linux AppImage runs on Ubuntu 22.04, Linux Mint 21, and other

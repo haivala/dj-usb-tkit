@@ -24,7 +24,10 @@ use crate::pdb_reader::parse_pdb;
 
 use super::BackendService;
 use super::analysis::build_waveform_preview_from_audio;
-use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle};
+use super::anlz::{
+    AnlzAnalysisEdits, AnlzBundlePaths, WaveformData, apply_analysis_edits_to_anlz,
+    atomic_write_bytes, write_generated_anlz_bundle,
+};
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRowData,
     encode_album_row, load_table_columns, remove_track_ids_from_pdb_playlist_entries,
@@ -51,11 +54,12 @@ fn player_menu_kind_removable(kind: u32) -> bool {
 }
 
 use super::diagnostics::{
-    build_meta_key, collect_edb_indexed_paths, contents_path_match_key,
-    normalize_analysis_path_for_identity, normalize_path_for_contents_match,
-    normalize_pdb_path_for_edb_lookup, track_identity_key,
+    TempoMismatch, build_meta_key, collect_edb_indexed_paths, contents_path_match_key,
+    detect_tempo_mismatches, normalize_analysis_path_for_identity,
+    normalize_path_for_contents_match, normalize_pdb_path_for_edb_lookup, track_identity_key,
 };
 
+const TEMPO_MISMATCH_FIX_ID: &str = "fix_tempo_mismatch";
 const STRICT_PARITY_UPGRADE_FIX_ID: &str = "upgrade_export_data_to_strict_parity";
 const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
 const SYNC_EDB_HISTORY_FROM_PDB_FIX_ID: &str = "sync_edb_history_from_pdb";
@@ -119,6 +123,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_TRACK_STRING_ALIGNMENT_FIX_ID,
     PDB_ALBUM_STRING_ALIGNMENT_FIX_ID,
     PDB_HEADER_COMPATIBILITY_FIX_ID,
+    TEMPO_MISMATCH_FIX_ID,
     "manual_reimport_unindexed_audio",
     "remove_missing_audio_references",
     SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
@@ -1343,7 +1348,9 @@ fn apply_pdb_torn_growth_pages_repair(
 /// Round-trip an existing decoded track row into the writer's input struct, unchanged. Used
 /// only to force a re-encode via the current (alignment-fixed) `encode_track_row_with_profile` —
 /// no dictionary lookups needed since nothing semantic changes, unlike `build_merged_pdb_track_row`.
-fn track_row_data_from_reader_row(row: &crate::pdb_reader::PdbTrackRow) -> PdbTrackRowData {
+pub(crate) fn track_row_data_from_reader_row(
+    row: &crate::pdb_reader::PdbTrackRow,
+) -> PdbTrackRowData {
     PdbTrackRowData {
         header_flags_u32: None,
         content_link: row.content_link,
@@ -2859,6 +2866,65 @@ impl<'a> EdbConnHandle<'a> {
     }
 }
 
+/// Align every track's ANLZ beat grid and eDB `bpmx100` to its PDB tempo
+/// (`fix_tempo_mismatch`). Mismatches are re-detected against the current
+/// staged PDB and the given eDB connection, so earlier fixes in the same
+/// apply pass (e.g. strict parity rewriting the databases) are accounted for
+/// and one pass leaves nothing behind. The grid is rebuilt exactly as export
+/// does it -- `apply_analysis_edits_to_anlz` with the tempo only, reusing the
+/// bundle's own first-beat anchor and leaving cues, waveforms and `PSSI` as
+/// they are. Returns (ANLZ bundles rewritten, eDB rows updated).
+fn apply_tempo_mismatch_repair(
+    usb_root: &std::path::Path,
+    edb_conn: Option<&mut rusqlite::Connection>,
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<(usize, usize)> {
+    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
+    let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings));
+    let mismatches: Vec<TempoMismatch> =
+        detect_tempo_mismatches(usb_root, &parsed, handle.as_mut().map(|h| &*h.conn()));
+
+    let mut anlz_fixed = 0usize;
+    for m in &mismatches {
+        let Some(dat) = m.anlz_dat_path.as_deref() else {
+            continue;
+        };
+        let edits = AnlzAnalysisEdits {
+            bpm: Some(f64::from(m.pdb_tempo_x100) / 100.0),
+            duration_ms: m.duration_ms,
+            first_beat_ms: None,
+            cues: None,
+        };
+        for path in [dat.to_path_buf(), dat.with_extension("EXT")] {
+            if let Ok(bytes) = std::fs::read(&path) {
+                let rebuilt = apply_analysis_edits_to_anlz(&bytes, &edits);
+                if rebuilt != bytes {
+                    atomic_write_bytes(&path, &rebuilt)?;
+                }
+            }
+        }
+        anlz_fixed += 1;
+    }
+
+    let mut edb_fixed = 0usize;
+    if mismatches.iter().any(|m| m.edb_bpmx100.is_some()) {
+        let Some(handle) = handle.as_mut() else {
+            return Err(BackendError::Internal(
+                "unable to open eDB to align content.bpmx100".to_string(),
+            ));
+        };
+        let tx = handle.conn().transaction()?;
+        for m in mismatches.iter().filter(|m| m.edb_bpmx100.is_some()) {
+            edb_fixed += tx.execute(
+                "UPDATE content SET bpmx100 = ?1 WHERE path = ?2",
+                params![i64::from(m.pdb_tempo_x100), m.track_path],
+            )?;
+        }
+        tx.commit()?;
+    }
+    Ok((anlz_fixed, edb_fixed))
+}
+
 pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
     usb_root: &std::path::Path,
     edb_conn: Option<&mut rusqlite::Connection>,
@@ -3539,6 +3605,38 @@ impl BackendService {
         // and this one) -- only falls back to a fresh parse if diagnostics'
         // own parse failed.
         let parsed_pdb = parsed_pdb_from_diagnostics.or_else(|| parse_pdb(&staged_pdb_path).ok());
+        let tempo_mismatches: Vec<TempoMismatch> = parsed_pdb
+            .as_ref()
+            .map(|parsed| detect_tempo_mismatches(&usb_root, parsed, edb_conn.as_ref()))
+            .unwrap_or_default();
+        if !tempo_mismatches.is_empty() {
+            detected_issues.push(format!(
+                "{} track(s) with ANLZ beat-grid tempo or eDB BPM differing from the PDB tempo",
+                tempo_mismatches.len()
+            ));
+            let anlz_writes = tempo_mismatches
+                .iter()
+                .filter(|m| m.anlz_dat_path.is_some())
+                .count()
+                * 2;
+            let edb_writes = tempo_mismatches
+                .iter()
+                .filter(|m| m.edb_bpmx100.is_some())
+                .count();
+            proposed_fixes.push(RepairFixProposal {
+                id: TEMPO_MISMATCH_FIX_ID.to_string(),
+                title: "Fix Tempo Mismatch".to_string(),
+                description: "Rebuild the ANLZ beat grid and set eDB BPM from each track's PDB \
+                              tempo, so every player reads the same BPM. Waveforms, cues and the \
+                              first beat are kept."
+                    .to_string(),
+                supported: true,
+                destructive: false,
+                always_applied: false,
+                estimated_writes: anlz_writes + edb_writes,
+                estimated_deletes: 0,
+            });
+        }
         let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_path);
         let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_path);
         let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&staged_pdb_path);
@@ -4759,6 +4857,25 @@ impl BackendService {
                 }
             } else {
                 skipped_fixes.push("Remove Missing Audio References: not selected".to_string());
+            }
+
+            if selected.contains(TEMPO_MISMATCH_FIX_ID) {
+                if tempo_mismatches.is_empty() {
+                    skipped_fixes.push("Fix Tempo Mismatch: nothing to apply".to_string());
+                } else {
+                    match apply_tempo_mismatch_repair(
+                        &usb_root,
+                        fix_edb_conn.as_mut(),
+                        &mut warnings,
+                    ) {
+                        Ok((anlz_fixed, edb_fixed)) => applied_fixes.push(format!(
+                            "Fix Tempo Mismatch: rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)"
+                        )),
+                        Err(err) => failed_fixes.push(format!("Fix Tempo Mismatch failed: {err}")),
+                    }
+                }
+            } else if !tempo_mismatches.is_empty() {
+                skipped_fixes.push("Fix Tempo Mismatch: not selected".to_string());
             }
 
             if selected.contains(SYNC_EDB_HISTORY_FROM_PDB_FIX_ID) {
