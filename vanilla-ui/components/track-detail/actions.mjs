@@ -1196,6 +1196,8 @@ async function openUsbTrackDetail(track, deps) {
     applyRealtimeAnalyzedTrackUpdate,
     patchTrackAnalysisFields,
     getUsbTrackListControllers = () => [],
+    isUsbJobRunning = () => false,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   } = deps;
 
   if (!state?.usbRootValid || !state?.usbRoot) {
@@ -1233,6 +1235,13 @@ async function openUsbTrackDetail(track, deps) {
     keyOptions: detail.keyOptions,
   });
   if (!payload) return;
+
+  // Another USB job (an export, diagnostics, another save) writes the same
+  // databases on the stick: wait for it instead of dropping the edits.
+  if (isUsbJobRunning()) {
+    emitStatus("Waiting for the running USB job to finish before saving cues...");
+    while (isUsbJobRunning()) await sleep(200);
+  }
 
   try {
     const saved = await command("save_usb_track_analysis_edits", {

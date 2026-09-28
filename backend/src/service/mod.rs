@@ -492,6 +492,10 @@ pub struct BackendService {
     /// re-parse on every page. Shared across `.clone()`s of the service.
     pub(crate) usb_playlists_cache: Arc<usb::UsbPlaylistsCache>,
     pub(crate) usb_histories_cache: Arc<usb::UsbHistoriesCache>,
+    /// Serializes cue-editor saves to a USB: they run as background jobs, and
+    /// each one read-modify-writes the same staged `export.pdb` / eDB.
+    /// Shared across `.clone()`s (the Tauri state and the job threads).
+    pub(crate) usb_write_lock: Arc<std::sync::Mutex<()>>,
 }
 
 impl BackendService {
@@ -502,6 +506,7 @@ impl BackendService {
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),
+            usb_write_lock: Arc::new(std::sync::Mutex::new(())),
         };
         // Deliberately NOT called here (see `usb_staging::init_cache_root`'s
         // doc comment): `BackendService::new`/`BackendCommands::new` are the

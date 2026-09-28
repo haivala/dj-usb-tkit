@@ -148,6 +148,20 @@ impl BackendCommands {
         wrap(self.service.save_usb_track_analysis_edits(req))
     }
 
+    pub fn save_usb_track_analysis_edits_with_progress<F>(
+        &self,
+        req: SaveUsbTrackAnalysisEditsRequest,
+        on_progress: F,
+    ) -> ApiResponse<SaveUsbTrackAnalysisEditsData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        wrap(
+            self.service
+                .save_usb_track_analysis_edits_with_progress(req, on_progress),
+        )
+    }
+
     pub fn relocate_source_root(
         &self,
         req: RelocateSourceRootRequest,

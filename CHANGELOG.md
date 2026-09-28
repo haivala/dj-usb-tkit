@@ -39,6 +39,12 @@
 
 ## Unreleased
 
+- **Fix:** saving the cue editor to a USB no longer freezes the window while
+  the stick is written. The progress bar shows each write (analysis files,
+  `export.pdb`, library, `exportLibrary.db`). If an export or another USB job
+  is running, the save waits for it to finish instead of writing at the same
+  time, and back-to-back saves never overwrite each other's changes.
+
 ## 0.2.7
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

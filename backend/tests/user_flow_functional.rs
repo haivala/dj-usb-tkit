@@ -1394,7 +1394,8 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
         "pick a key the stick doesn't have yet, to cover the new key row"
     );
 
-    let saved = backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+    let mut steps = Vec::<(usize, usize, String)>::new();
+    let request = SaveUsbTrackAnalysisEditsRequest {
         usb_root: usb.to_string_lossy().to_string(),
         usb_analysis_path_raw: usb_track
             .usb_analysis_path_raw
@@ -1411,10 +1412,26 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
         title: Some(usb_track.title.clone()),
         artist: Some(usb_track.artist.clone()),
         album: usb_track.album.clone(),
+    };
+    let saved = backend.save_usb_track_analysis_edits_with_progress(request, |c, t, m| {
+        steps.push((c, t, m.to_string()))
     });
     assert!(saved.ok, "usb save failed: {saved:?}");
     let saved = saved.data.expect("usb save data");
     assert_eq!(saved.local_track_id.as_deref(), Some(track_id.as_str()));
+    // Each write phase is reported, so the UI shows progress instead of hanging.
+    assert_eq!(
+        steps,
+        [
+            (0, 5, "USB: Checking track"),
+            (1, 5, "USB: Writing analysis files"),
+            (2, 5, "USB: Writing export.pdb"),
+            (3, 5, "Updating library track"),
+            (4, 5, "USB: Writing exportLibrary.db"),
+            (5, 5, "USB: Cue edits saved"),
+        ]
+        .map(|(c, t, m)| (c, t, m.to_string()))
+    );
 
     let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
     let pdb_row = parsed
@@ -1451,6 +1468,61 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
     assert_eq!(anlz_tempo, Some(13_725));
     assert_eq!(local_bpm, 137.25);
     assert_eq!(local_key, "G#m");
+}
+
+/// Saves run as background jobs, so two can overlap. Each read-modify-writes
+/// the same staged `export.pdb`; without serialization one edit would be lost.
+#[test]
+fn concurrent_usb_saves_both_land_in_export_pdb() {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, _playlist_id) =
+        export_one_track_with_cues(root.path(), Vec::new());
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
+    let request = |bpm: Option<f64>, key: Option<&str>| SaveUsbTrackAnalysisEditsRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+        usb_analysis_path_raw: usb_track
+            .usb_analysis_path_raw
+            .clone()
+            .expect("usb analysis path raw"),
+        usb_media_path_raw: media_raw.clone(),
+        bpm,
+        key: key.map(str::to_string),
+        duration_ms: usb_track.duration_ms,
+        first_beat_ms: None,
+        cues: None,
+        local_track_id: None,
+        title: None,
+        artist: None,
+        album: None,
+    };
+
+    let bpm_save = {
+        let backend = backend.clone();
+        let req = request(Some(133.33), None);
+        std::thread::spawn(move || backend.save_usb_track_analysis_edits(req))
+    };
+    let key_save = {
+        let backend = backend.clone();
+        let req = request(None, Some("D#m"));
+        std::thread::spawn(move || backend.save_usb_track_analysis_edits(req))
+    };
+    for handle in [bpm_save, key_save] {
+        let res = handle.join().expect("save thread");
+        assert!(res.ok, "usb save failed: {res:?}");
+    }
+
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
+    let row = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == media_raw)
+        .expect("pdb track row");
+    assert_eq!(row.tempo_x100, 13_333);
+    assert_eq!(
+        parsed.keys.get(&row.key_id).map(String::as_str),
+        Some("D#m")
+    );
 }
 
 #[test]

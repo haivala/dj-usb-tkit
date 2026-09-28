@@ -720,12 +720,29 @@ pub fn get_usb_track_detail(
     state.get_usb_track_detail(request)
 }
 
+/// Runs as a background `usb_write` job (not on the main thread): the save
+/// writes the ANLZ bundle, `export.pdb`, the library and `exportLibrary.db`,
+/// and the window must not freeze meanwhile. Progress drives the footer bar.
 #[tauri::command]
-pub fn save_usb_track_analysis_edits(
+pub async fn save_usb_track_analysis_edits(
+    app: AppHandle,
     state: State<'_, BackendCommands>,
     request: SaveUsbTrackAnalysisEditsRequest,
-) -> ApiResponse<SaveUsbTrackAnalysisEditsData> {
-    state.save_usb_track_analysis_edits(request)
+) -> Result<ApiResponse<SaveUsbTrackAnalysisEditsData>, String> {
+    let commands = state.inner().clone();
+    run_usb_job_with_progress(
+        &app,
+        "usb_write",
+        "save_usb_track_analysis_edits",
+        "USB: Saving cue edits",
+        "USB: Cue edits saved",
+        move |mut progress| {
+            commands.save_usb_track_analysis_edits_with_progress(request, move |c, t, m| {
+                progress(c, t, m);
+            })
+        },
+    )
+    .await
 }
 
 #[tauri::command]

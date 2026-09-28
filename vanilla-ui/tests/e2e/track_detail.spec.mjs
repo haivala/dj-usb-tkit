@@ -1282,8 +1282,24 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
 // `rowLocalTrackId`: the USB row's localTrackId hint (null = the row doesn't
 // know its library track; the save response still names it).
 // `libraryTracks`: rows the library table loads, to watch cross-view updates.
+// `tauriEvents`: subscribe the app to `job:event` (window.__emitJobEvent fires
+// one), and hold the USB save open until window.__releaseUsbSave() while it
+// emits the backend's usb_write job progress.
 function installUsbTrackDetailMock(page, mockOpts = {}) {
   return page.addInitScript((opts) => {
+    const listeners = new Map();
+    window.__emitJobEvent = (payload) => {
+      for (const cb of (listeners.get("job:event") || []).slice()) cb({ event: "job:event", payload });
+    };
+    let releaseUsbSave = () => {};
+    const usbSaveGate = new Promise((resolve) => { releaseUsbSave = resolve; });
+    window.__releaseUsbSave = () => releaseUsbSave();
+    if (opts.tauriEvents) {
+      // registerBackendJobEvents() only listens when window.isTauri is set, and
+      // the bundled invoke then routes through __TAURI_INTERNALS__.
+      window.isTauri = true;
+      window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args) };
+    }
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
     window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
@@ -1380,6 +1396,13 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
             if (window.__usbSaveFails) {
               return { ok: false, error: { code: "NOT_FOUND", message: "USB disconnected mid-edit" } };
             }
+            if (opts.tauriEvents) {
+              const job = { jobId: "usb-save-1", jobType: "usb_write", stage: "save_usb_track_analysis_edits" };
+              window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "USB: Saving cue edits" });
+              window.__emitJobEvent({ ...job, event: "job.progress", percent: 40, message: "USB: Writing export.pdb" });
+              await usbSaveGate;
+              window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Cue edits saved" });
+            }
             return {
               ok: true,
               data: {
@@ -1399,7 +1422,13 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
           return { ok: true, data: {} };
         },
       },
-      event: { listen: async () => () => {} },
+      event: {
+        listen: async (eventName, callback) => {
+          const key = String(eventName || "");
+          listeners.set(key, [...(listeners.get(key) || []), callback]);
+          return () => listeners.set(key, (listeners.get(key) || []).filter((fn) => fn !== callback));
+        },
+      },
     };
   }, mockOpts);
 }
@@ -1507,6 +1536,58 @@ test("cue editor edits the musical key from a USB playlist row and saves it thro
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
   expect(saveCall.request.key).toBe("Dm");
   await expect(row.locator(".td-key .key-pill")).toHaveText("Dm");
+});
+
+test("a USB save runs as a background job: the progress bar shows each write and the window stays usable", async ({ page }) => {
+  await installUsbTrackDetailMock(page, { tauriEvents: true });
+  await page.goto("/");
+
+  await openUsbView(page, "usb-playlists");
+  await page.locator("#refreshUsbBtn").click();
+  await page.locator('[data-usb-playlist-index="0"]').click();
+  const row = page.locator("#usbPlaylistTracks .track-grid-row");
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await page.locator("#trackDetailBpm").fill("128.5");
+  await page.locator("#trackDetailBpm").dispatchEvent("change");
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  // While the stick is being written, the footer shows the backend's step.
+  await expect(page.locator("#progressFooter")).toHaveClass(/active/);
+  await expect(page.locator("#progressText")).toContainText("USB: Writing export.pdb");
+  // ... and the UI still responds (switch to USB history and back).
+  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+
+  await page.evaluate(() => window.__releaseUsbSave());
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.5");
+  await expect(page.locator("#progressFooter")).not.toHaveClass(/active/, { timeout: 3000 });
+});
+
+test("a USB save waits for a running USB job instead of writing alongside it", async ({ page }) => {
+  await installUsbTrackDetailMock(page, { tauriEvents: true });
+  await page.goto("/");
+
+  await openUsbView(page, "usb-playlists");
+  await page.locator("#refreshUsbBtn").click();
+  await page.locator('[data-usb-playlist-index="0"]').click();
+  const row = page.locator("#usbPlaylistTracks .track-grid-row");
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await page.locator("#trackDetailAddCue").click();
+
+  // An export starts while the editor is open.
+  const exportJob = { jobId: "export-1", jobType: "export", stage: "export_to_usb" };
+  await page.evaluate((job) => window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "USB: Exporting playlist" }), exportJob);
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Waiting for the running USB job");
+  const saveCalls = () => page.evaluate(() => window.__calls.filter((c) => c.command === "save_usb_track_analysis_edits").length);
+  expect(await saveCalls()).toBe(0);
+
+  // Once the export finishes, the edits are saved -- nothing was dropped.
+  await page.evaluate((job) => window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Export complete" }), exportJob);
+  await expect.poll(saveCalls).toBe(1);
+  await page.evaluate(() => window.__releaseUsbSave());
+  await expect(page.locator("#statusText")).toContainText("to USB");
 });
 
 test("cue editor also opens from a USB history row", async ({ page }) => {

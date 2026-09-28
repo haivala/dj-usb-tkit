@@ -104,7 +104,14 @@ drive selection from being rendered against a newer selected drive.
   bpmAnalyzer, key, keySource, anlzUpdated, edbUpdated, localUpdated,
   localTrackId }` (`localUpdated: false` / no `localTrackId` only when no local
   track matched; `localTrackId` is the library track the backend resolved, which
-  the UI refreshes).
+  the UI refreshes). Runs as a background `usb_write` job
+  (`run_usb_job_with_progress`), so the window never freezes: `job:event`
+  progress reports each write (checking, ANLZ, `export.pdb`, library,
+  `exportLibrary.db`) to the footer bar. Saves are serialized by
+  `BackendService::usb_write_lock` (each one read-modify-writes the staged
+  `export.pdb`), and the UI waits for any running USB job (export,
+  diagnostics, another save) to finish before starting one. No backup is taken
+  per save.
 
 ### Settings
 

@@ -664,6 +664,7 @@ const openTrackDetail = (track) => trackDetail.openTrackDetail(track, {
     patchTrackAnalysisFields,
     // Lazy: the USB track-list controllers are created further down.
     getUsbTrackListControllers: () => [usbPlaylistTracksCtl, usbHistoryTracksCtl],
+    isUsbJobRunning: () => usb.isUsbRootChangeBlocked(state),
   });
 
 const stopPlaybackIfActive = async () => playback.stopPlaybackIfActive(state, {

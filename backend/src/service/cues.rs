@@ -879,6 +879,29 @@ impl BackendService {
         &self,
         req: SaveUsbTrackAnalysisEditsRequest,
     ) -> BackendResult<SaveUsbTrackAnalysisEditsData> {
+        self.save_usb_track_analysis_edits_with_progress(req, |_, _, _| {})
+    }
+
+    /// [`Self::save_usb_track_analysis_edits`], reporting each write phase
+    /// (`USB_SAVE_STEPS` total) so the UI shows progress instead of hanging
+    /// while the stick is written. Holds `usb_write_lock` for the whole save:
+    /// run as a background job, two saves could otherwise interleave their
+    /// read-modify-write of the same staged `export.pdb` and lose an edit.
+    pub fn save_usb_track_analysis_edits_with_progress<F>(
+        &self,
+        req: SaveUsbTrackAnalysisEditsRequest,
+        mut on_progress: F,
+    ) -> BackendResult<SaveUsbTrackAnalysisEditsData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        const USB_SAVE_STEPS: usize = 5;
+        let _usb_write_guard = self
+            .usb_write_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        on_progress(0, USB_SAVE_STEPS, "USB: Checking track");
+
         // 1. USB connected? A failure here is the "block the save" contract.
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
 
@@ -956,6 +979,7 @@ impl BackendService {
         };
 
         // 5. ANLZ write, in place on the device.
+        on_progress(1, USB_SAVE_STEPS, "USB: Writing analysis files");
         let anlz_cues = anlz_cues_from_track_cues(&effective_cues);
         rewrite_anlz_bundle_files(
             dat_path,
@@ -967,12 +991,14 @@ impl BackendService {
             },
         )?;
 
-        // 5b. PDB tempo, in place on the device.
+        // 5b. PDB tempo/key, in place on the device.
+        on_progress(2, USB_SAVE_STEPS, "USB: Writing export.pdb");
         if let Some((staged_pdb, bytes)) = pdb_patch {
             atomic_write_bytes(&staged_pdb, &bytes)?;
             super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)?;
         }
 
+        on_progress(3, USB_SAVE_STEPS, "Updating library track");
         // 6. Local master write (mandatory when a match is found) — before the
         //    eDB commit so a local failure aborts before the device diverges.
         let local_track_id = match self.resolve_local_track_id_for_usb(&usb_root, &req) {
@@ -1013,6 +1039,7 @@ impl BackendService {
         };
 
         // 7. eDB write + write-back to the device.
+        on_progress(4, USB_SAVE_STEPS, "USB: Writing exportLibrary.db");
         let tx = edb_conn.transaction()?;
         let content_columns = load_table_columns_tx(&tx, "content")?;
         write_edb_cues_for_content(&tx, content_id, &effective_cues, &content_columns)?;
@@ -1040,6 +1067,7 @@ impl BackendService {
 
         self.invalidate_usb_parse_cache();
 
+        on_progress(USB_SAVE_STEPS, USB_SAVE_STEPS, "USB: Cue edits saved");
         // 8. Re-read the device bundle for the response.
         let bytes = std::fs::read(dat_path.with_extension("EXT"))
             .or_else(|_| std::fs::read(dat_path))
