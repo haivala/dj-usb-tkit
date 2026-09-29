@@ -32,6 +32,7 @@ use super::export_helpers::{
     analysis_bundle_path_variants, prune_stale_export_owned_files,
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
 };
+use super::key_notation::KeyNotation;
 use super::usb_helpers::{
     PlaylistCandidate, build_usb_track_id_index, decode_history_playlist_id,
     decode_history_track_id, dedupe_usb_playlists_by_name, history_entry_sort_key,
@@ -153,6 +154,8 @@ fn build_usb_track_index(
                         None
                     },
                     key,
+                    key_display: None,
+                    key_color: None,
                     file_path: resolved_file_path,
                     needs_hydration: false,
                     format_compat: super::format_compat::compute_format_compat(
@@ -366,8 +369,7 @@ fn sort_usb_tracks(items: &mut [UsbTrack], sort_by: Option<&str>, sort_dir: Opti
                 .partial_cmp(&b.bpm.unwrap_or(0.0))
                 .unwrap_or(std::cmp::Ordering::Equal),
             "durationMs" => a.duration_ms.unwrap_or(0).cmp(&b.duration_ms.unwrap_or(0)),
-            "key" => ci(a.key.as_deref().unwrap_or_default())
-                .cmp(&ci(b.key.as_deref().unwrap_or_default())),
+            "key" => super::key_notation::compare_keys(a.key.as_deref(), b.key.as_deref()),
             _ => std::cmp::Ordering::Equal,
         };
         if desc { ord.reverse() } else { ord }
@@ -377,7 +379,7 @@ fn sort_usb_tracks(items: &mut [UsbTrack], sort_by: Option<&str>, sort_dir: Opti
 /// Fills in the expensive payload fields (waveform-preview bytes, artwork data
 /// URL) on an already-resolved cheap `UsbTrack`. Called only for the tracks on
 /// the returned page.
-fn hydrate_usb_track_in_place(track: &mut UsbTrack) {
+fn hydrate_usb_track_in_place(track: &mut UsbTrack, notation: KeyNotation) {
     if track.waveform_preview.is_none() {
         track.waveform_preview = track
             .usb_analysis_path
@@ -424,6 +426,8 @@ fn hydrate_usb_track_in_place(track: &mut UsbTrack) {
         .as_deref()
         .is_some_and(|key| !key.trim().is_empty());
     track.needs_hydration = !(has_waveform && has_artwork && has_bpm && has_key);
+    (track.key_display, track.key_color) =
+        super::key_notation::key_display_fields(track.key.as_deref(), notation);
 }
 
 /// Filter → whole-list aggregates → sort → offset-slice → hydrate the page.
@@ -434,6 +438,7 @@ fn paginate_and_hydrate_usb_tracks(
     mut tracks: Vec<UsbTrack>,
     req: &crate::models::FetchUsbTracksRequest,
     warnings: Vec<WarningEntry>,
+    notation: KeyNotation,
 ) -> BackendResult<crate::models::FetchUsbTracksData> {
     let query = req.query.trim().to_lowercase();
     if !query.is_empty() {
@@ -468,7 +473,7 @@ fn paginate_and_hydrate_usb_tracks(
     let next_cursor = has_more.then(|| super::encode_offset_cursor(&signature, next_offset));
 
     for track in &mut page {
-        hydrate_usb_track_in_place(track);
+        hydrate_usb_track_in_place(track, notation);
     }
 
     Ok(crate::models::FetchUsbTracksData {
@@ -1790,6 +1795,8 @@ impl BackendService {
                                         track_number: None,
                                         bpm: None,
                                         key: None,
+                                        key_display: None,
+                                        key_color: None,
                                         file_path: String::new(),
                                         format_ext: None,
                                         needs_hydration: false,
@@ -1997,6 +2004,8 @@ impl BackendService {
             track_number: candidate.track_number,
             bpm: candidate.bpm,
             key: candidate.key.clone(),
+            key_display: None,
+            key_color: None,
             file_path,
             format_ext: candidate.format_ext.clone(),
             usb_media_path: None,
@@ -2309,7 +2318,7 @@ impl BackendService {
             edb_index.as_ref(),
         ) {
             Some((source, mut track)) => {
-                hydrate_usb_track_in_place(&mut track);
+                hydrate_usb_track_in_place(&mut track, self.key_notation()?);
                 Ok(InspectUsbTrackData {
                     source,
                     track,
@@ -2377,6 +2386,7 @@ impl BackendService {
         // rescanning `parsed.tracks` per item (see `build_pdb_track_index`).
         let pdb_track_index = build_pdb_track_index(parsed.as_ref());
         let pdb = parsed.as_ref().zip(pdb_track_index.as_ref());
+        let notation = self.key_notation()?;
 
         let items = req
             .items
@@ -2420,7 +2430,7 @@ impl BackendService {
                     edb_index.as_ref(),
                 ) {
                     Some((source, mut track)) => {
-                        hydrate_usb_track_in_place(&mut track);
+                        hydrate_usb_track_in_place(&mut track, notation);
                         InspectUsbTrackResult {
                             track_id: item.track_id,
                             source: Some(source),
@@ -2461,6 +2471,7 @@ impl BackendService {
             playlist.tracks.clone(),
             &req,
             resolved.warnings.clone(),
+            self.key_notation()?,
         )?;
         self.materialize_usb_track_page(&mut data.items, &usb_root)?;
         Ok(data)
@@ -2484,6 +2495,7 @@ impl BackendService {
             history.tracks.clone(),
             &req,
             all.warnings.clone(),
+            self.key_notation()?,
         )?;
         self.materialize_usb_track_page(&mut data.items, &usb_root)?;
         Ok(data)
@@ -2621,6 +2633,8 @@ fn resolve_usb_track_from_sources(
                             None
                         },
                         key,
+                        key_display: None,
+                        key_color: None,
                         file_path: resolved_file_path,
                         needs_hydration: false,
                         format_compat: super::format_compat::compute_format_compat(
@@ -2694,6 +2708,8 @@ mod tests {
             track_number: None,
             bpm: None,
             key: None,
+            key_display: None,
+            key_color: None,
             file_path: file_path.to_string(),
             format_ext: crate::utils::format_ext_from_path(file_path),
             needs_hydration: false,
@@ -2751,7 +2767,7 @@ mod tests {
         complete.artwork_path = Some("/USB/art/a.jpg".to_string());
         complete.bpm = Some(128.0);
         complete.key = Some("8A".to_string());
-        hydrate_usb_track_in_place(&mut complete);
+        hydrate_usb_track_in_place(&mut complete, super::KeyNotation::Classic);
         assert!(!complete.needs_hydration);
 
         // Any missing piece -> needs hydration.
@@ -2770,7 +2786,7 @@ mod tests {
             track.bpm = Some(128.0);
             track.key = Some("8A".to_string());
             tweak(&mut track);
-            hydrate_usb_track_in_place(&mut track);
+            hydrate_usb_track_in_place(&mut track, super::KeyNotation::Classic);
             assert!(
                 track.needs_hydration,
                 "expected needs_hydration after tweak"

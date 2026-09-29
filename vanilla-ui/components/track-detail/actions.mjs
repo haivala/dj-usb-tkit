@@ -685,9 +685,9 @@ export function createTrackDetailController(el, prefs = {}) {
     renderPlayPause();
   }
 
-  /// The backend's key options in stepper order (majors, then minors).
+  /// The backend's key option values in stepper order (majors, then minors).
   function keyOptions() {
-    return working.keyGroups.flatMap((g) => g.keys);
+    return working.keyGroups.flatMap((g) => g.keys.map((k) => k.value));
   }
 
   /// Build the key <select> from the backend's groups (once per change).
@@ -700,10 +700,12 @@ export function createTrackDetailController(el, prefs = {}) {
     for (const group of working.keyGroups) {
       const optgroup = doc.createElement("optgroup");
       optgroup.label = group.label;
+      // `value` is the classic key a save sends; `label` is it in the
+      // user's key notation (both from the backend).
       for (const key of group.keys) {
         const option = doc.createElement("option");
-        option.value = key;
-        option.textContent = key;
+        option.value = key.value;
+        option.textContent = key.label;
         optgroup.appendChild(option);
       }
       select.appendChild(optgroup);
@@ -722,7 +724,10 @@ export function createTrackDetailController(el, prefs = {}) {
     if (working.key != null && !keyOptions().includes(working.key)) {
       const option = synthetic || select.ownerDocument.createElement("option");
       option.value = working.key;
-      option.textContent = working.key;
+      // The backend's label for the stored key when it's still the row's key.
+      option.textContent = working.key === working.track?.key && working.track?.keyDisplay
+        ? working.track.keyDisplay
+        : working.key;
       option.dataset.synthetic = "1";
       if (!synthetic) select.prepend(option);
     } else if (synthetic) {
@@ -1257,7 +1262,13 @@ async function openUsbTrackDetail(track, deps) {
     });
     const n = saved.cues.length;
     emitStatus(`Saved ${n} cue${n === 1 ? "" : "s"} to USB`);
-    const fields = { bpm: saved.bpm, bpmAnalyzer: saved.bpmAnalyzer, key: saved.key };
+    const fields = {
+      bpm: saved.bpm,
+      bpmAnalyzer: saved.bpmAnalyzer,
+      key: saved.key,
+      keyDisplay: saved.keyDisplay,
+      keyColor: saved.keyColor,
+    };
     // Every loaded USB row of this file -- the same track can sit in several
     // USB playlists and the history -- not just the row that was clicked.
     const mediaPath = String(track.usbMediaPath || "").trim();
@@ -1348,6 +1359,8 @@ export async function openTrackDetail(track, deps) {
       bpm: saved.bpm,
       bpmAnalyzer: saved.bpmAnalyzer,
       key: saved.key,
+      keyDisplay: saved.keyDisplay,
+      keyColor: saved.keyColor,
     });
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);

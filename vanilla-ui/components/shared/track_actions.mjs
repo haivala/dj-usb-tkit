@@ -15,7 +15,7 @@ export function catchErr(emitStatus) {
 
 // Stable fingerprint of the metadata fields that hydration may populate.
 export function trackMetaFingerprint(track) {
-  return `${Array.isArray(track?.waveformPreview) ? track.waveformPreview.join(",") : ""}|${String(track?.artworkUrl || track?.artworkDataUrl || "")}|${track?.artworkChecked === true ? "art-ok" : ""}|${String(track?.bpm || "")}|${String(track?.key || "")}`;
+  return `${Array.isArray(track?.waveformPreview) ? track.waveformPreview.join(",") : ""}|${String(track?.artworkUrl || track?.artworkDataUrl || "")}|${track?.artworkChecked === true ? "art-ok" : ""}|${String(track?.bpm || "")}|${String(track?.key || "")}|${String(track?.keyDisplay || "")}|${String(track?.keyColor ?? "")}`;
 }
 
 // Resolve the track a row action/click targets, from the array the table

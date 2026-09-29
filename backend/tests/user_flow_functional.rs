@@ -10,7 +10,7 @@ use backend::models::{
     FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsRequest,
     GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
     SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsRequest, ScanLibraryRequest,
-    SearchTracksRequest, TrackCueInput,
+    SearchTracksRequest, SetFrontendSettingRequest, TrackCueInput,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{read_beatgrid_tempo_from_anlz, read_cues_from_anlz};
@@ -1385,6 +1385,16 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
     let root = tempdir().expect("temp root");
     let (backend, data_dir, usb, track_id, _playlist_id) =
         export_one_track_with_cues(root.path(), Vec::new());
+    // Camelot is display-only: the responses carry "1A", the device and the
+    // library keep the classic "G#m".
+    assert!(
+        backend
+            .set_frontend_setting(SetFrontendSettingRequest {
+                key: "ui_key_notation_v1".to_string(),
+                value: Some("camelot".to_string()),
+            })
+            .ok
+    );
     let usb_track = first_usb_playlist_track(&backend, &usb);
     let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
     assert_ne!(usb_track.bpm, Some(137.25), "pick a BPM that differs");
@@ -1419,6 +1429,9 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
     assert!(saved.ok, "usb save failed: {saved:?}");
     let saved = saved.data.expect("usb save data");
     assert_eq!(saved.local_track_id.as_deref(), Some(track_id.as_str()));
+    assert_eq!(saved.key.as_deref(), Some("G#m"));
+    assert_eq!(saved.key_display.as_deref(), Some("1A"));
+    assert_eq!(saved.key_color, Some(0));
     // Each write phase is reported, so the UI shows progress instead of hanging.
     assert_eq!(
         steps,

@@ -33,7 +33,6 @@ function rowDeps(overrides = {}) {
     buildCoverSrcCandidates: () => [],
     isTrackCurrentlyPlaying: () => false,
     escapeHtml,
-    getKeyHue: () => 180,
     ...overrides
   };
 }
@@ -65,8 +64,7 @@ function formatBadgeRow(track) {
     secondaryActionLabel: undefined,
     secondaryActionType: undefined
   }, {
-    state: {},
-    getKeyHue: () => 0
+    state: {}
   });
 }
 

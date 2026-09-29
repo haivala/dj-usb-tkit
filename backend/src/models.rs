@@ -63,6 +63,10 @@ pub struct JobEventPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_color: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub artwork_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waveform_peaks_path: Option<String>,
@@ -102,6 +106,13 @@ pub struct Track {
     pub key: Option<String>,
     /// `"stratum"` / `"essentia"` for a detected value, `"user"` after a manual edit.
     pub key_source: Option<String>,
+    /// `key` in the user's display notation (Classic/Camelot). Display only;
+    /// set by `service::apply_frontend_track_fields`.
+    #[serde(default)]
+    pub key_display: Option<String>,
+    /// Key pill colour group 0..=11 (Camelot wheel number − 1).
+    #[serde(default)]
+    pub key_color: Option<u8>,
     pub file_path: String,
     pub file_size_bytes: Option<i64>,
     pub format_ext: Option<String>,
@@ -939,6 +950,12 @@ pub struct UsbTrack {
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,
     pub key: Option<String>,
+    /// Same as `Track::key_display`; set when the row is hydrated for the UI.
+    #[serde(default)]
+    pub key_display: Option<String>,
+    /// Same as `Track::key_color`.
+    #[serde(default)]
+    pub key_color: Option<u8>,
     pub file_path: String,
     /// Lowercase file extension, derived from the PDB track path so the
     /// frontend never has to infer the format badge (mirrors `Track.format_ext`).
@@ -1975,7 +1992,16 @@ pub struct TrackDetail {
 #[serde(rename_all = "camelCase")]
 pub struct KeyOptionGroup {
     pub label: String,
-    pub keys: Vec<String>,
+    pub keys: Vec<KeyOption>,
+}
+
+/// One entry of the key picker: `value` is the classic key a save sends,
+/// `label` is how it's shown in the user's key notation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyOption {
+    pub value: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2011,6 +2037,10 @@ pub struct SaveTrackAnalysisEditsData {
     pub key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_color: Option<u8>,
     /// Whether the cached local ANLZ bundle was successfully rewritten with the
     /// new cues / beat grid. `false` when the track has no analysis cache yet
     /// (the edits are still persisted and applied at the next analysis/export).
@@ -2088,6 +2118,10 @@ pub struct SaveUsbTrackAnalysisEditsData {
     pub key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_color: Option<u8>,
     pub anlz_updated: bool,
     pub edb_updated: bool,
     /// `false` only when no local `tracks` row could be matched.

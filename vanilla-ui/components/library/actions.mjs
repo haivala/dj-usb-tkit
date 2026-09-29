@@ -1,5 +1,5 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
-import { formatDurationMs, formatBpm, renderTrackListDurationSummary } from "../../track_utils.mjs";
+import { formatDurationMs, formatBpm, renderKeyPill, renderTrackListDurationSummary } from "../../track_utils.mjs";
 
 export function warningEntryText(entry) {
   return String(entry?.message ?? entry ?? "").trim();
@@ -74,6 +74,10 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
     bpm: toFiniteOrNull(track?.bpm),
     bpmAnalyzer: track?.bpmAnalyzer || "",
     key: track?.key || "",
+    // Backend-owned: `key` in the user's notation (Classic/Camelot) and the
+    // key pill's colour group 0..11 (service::key_notation).
+    keyDisplay: track?.keyDisplay || "",
+    keyColor: Number.isInteger(track?.keyColor) ? track.keyColor : null,
     artworkUrl: convertedArtwork,
     artworkDataUrl: track?.artworkDataUrl || "",
     artworkPath: track?.artworkPath || "",
@@ -143,7 +147,11 @@ export function mergeTrackPreservingBestFields(existing, normalized) {
   if (normalized.artworkChecked || existing.artworkChecked) merged.artworkChecked = true;
   if (!normalized.waveformPeaksPath && existing.waveformPeaksPath) merged.waveformPeaksPath = existing.waveformPeaksPath;
   if (!normalized.bpm && existing.bpm) merged.bpm = existing.bpm;
-  if (!normalized.key && existing.key) merged.key = existing.key;
+  if (!normalized.key && existing.key) {
+    merged.key = existing.key;
+    merged.keyDisplay = existing.keyDisplay;
+    merged.keyColor = existing.keyColor;
+  }
   // Backend-owned readiness only ever moves false -> true; a partial merge that
   // lacks the flag must not drop a previously-analyzed row back to "needs analysis".
   merged.analysisReady = !!(existing.analysisReady || normalized.analysisReady);
@@ -1015,6 +1023,8 @@ export function patchTrackAnalysisFields(track, payload, deps) {
   }
   if (typeof payload.key === "string" && payload.key.trim()) {
     setIfChanged("key", payload.key.trim());
+    setIfChanged("keyDisplay", typeof payload.keyDisplay === "string" ? payload.keyDisplay : "");
+    setIfChanged("keyColor", Number.isInteger(payload.keyColor) ? payload.keyColor : null);
   }
   if (typeof payload.filePath === "string" && payload.filePath.trim()) {
     setIfChanged("filePath", payload.filePath.trim());
@@ -1054,7 +1064,7 @@ export function patchTrackAnalysisFields(track, payload, deps) {
 
 export function patchLibraryRowCells(row, track, deps) {
   if (!row || !track) return false;
-  const { escapeHtml, getKeyHue, buildCoverSrcCandidates, attachCoverFallbackHandlers, drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } = deps;
+  const { escapeHtml, buildCoverSrcCandidates, attachCoverFallbackHandlers, drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } = deps;
 
   const cells = row.querySelectorAll('[role="cell"]');
   if (cells.length < 3) return false;
@@ -1080,11 +1090,7 @@ export function patchLibraryRowCells(row, track, deps) {
 
   const keyTd = row.querySelector(".td-key");
   if (keyTd) {
-    const keyHue = getKeyHue(track.key);
-    const keyHueClass = `key-pill--h${((Math.round(Number(keyHue) / 30) % 12) + 12) % 12}`;
-    keyTd.innerHTML = track.key
-      ? `<span class="key-pill ${keyHueClass}">${escapeHtml(track.key)}</span>`
-      : "-";
+    keyTd.innerHTML = renderKeyPill(track, escapeHtml);
   }
 
   const coverTd = row.querySelector(".td-cover");

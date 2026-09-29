@@ -1,4 +1,4 @@
-import { formatDurationMs, formatBpm } from "./track_utils.mjs";
+import { formatDurationMs, formatBpm, renderKeyPill } from "./track_utils.mjs";
 
 export function createTrackRow(track, options, deps) {
   const {
@@ -6,7 +6,6 @@ export function createTrackRow(track, options, deps) {
     buildCoverSrcCandidates,
     isTrackCurrentlyPlaying,
     escapeHtml,
-    getKeyHue,
   } = deps;
 
   const localRenderId = options.origin === "local"
@@ -95,11 +94,7 @@ export function createTrackRow(track, options, deps) {
     ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(bpmText)}</span>`
     : "-";
 
-  const keyHue = getKeyHue(track.key);
-  const keyHueClass = `key-pill--h${((Math.round(Number(keyHue) / 30) % 12) + 12) % 12}`;
-  const keyCell = track.key
-    ? `<span class="key-pill ${keyHueClass}">${escapeHtml(track.key)}</span>`
-    : "-";
+  const keyCell = renderKeyPill(track, escapeHtml);
   const formatInfo = describeTrackFormat(track);
   const formatTooltip = formatTrackFormatTooltip(formatInfo);
   const formatTooltipAttr = formatTooltip ? ` data-tooltip="${escapeHtml(formatTooltip)}"` : "";

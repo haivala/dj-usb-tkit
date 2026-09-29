@@ -39,6 +39,7 @@ import {
   STORAGE_KEY_CUE_BEATGRID_LEVEL,
   STORAGE_KEY_CUE_QUANTIZE,
   STORAGE_KEY_CUE_METRONOME_MIX,
+  STORAGE_KEY_KEY_NOTATION,
   FRONTEND_DB_KEY_THEME,
   FRONTEND_DB_KEY_ACCENT_HUE,
   FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
@@ -46,6 +47,7 @@ import {
   FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT,
   FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
   FRONTEND_DB_KEY_ANALYSIS_ENGINE,
+  FRONTEND_DB_KEY_KEY_NOTATION,
   FRONTEND_DB_KEY_SIDEBAR_COLLAPSED,
   FRONTEND_DB_KEY_HELP_SEEN,
   FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
@@ -61,7 +63,6 @@ import {
   invalidateWaveformCache,
   setWaveformColorData,
 } from "./waveform.mjs";
-import { getKeyHue } from "./key_hue.mjs";
 import {
   normalizeDurationMs,
   formatDurationMs,
@@ -127,7 +128,7 @@ const ELEMENT_IDS = [
   "exportSyncModeMirror", "exportSyncModeAdditive", "exportBackupCheckbox", "backupRetentionCountInput",
   "openBackupsBtn", "backupsList", "backupsSummary", "backupsRefreshBtn",
   "driveNameOverlay", "driveNameInput", "driveNameError", "driveNameOkBtn", "driveNameSkipBtn", "analysisBpmRangeSelect",
-  "analysisEngineSelect", "analysisEngineStatus", "essentiaInstallRow", "essentiaNodeStatus",
+  "analysisEngineSelect", "keyNotationSelect", "analysisEngineStatus", "essentiaInstallRow", "essentiaNodeStatus",
   "essentiaDownloadBtn", "essentiaCancelBtn", "essentiaRemoveBtn", "selectUsbFolderBtn",
   "usbRecentRow", "usbRecentList", "usbRootPathText", "externalMasterDbToggle",
   "externalMasterDbCheckbox", "externalMasterDbPath", "usbCountsText", "historyCountsText",
@@ -204,7 +205,7 @@ const trackDetailDialog = trackDetail.createTrackDetailController(el, {
 // --- Closures that bind state/el/deps ---
 
 function persistSetting(storageKey, dbKey, value) {
-  settings.persistSetting(command, storageKey, dbKey, value);
+  return settings.persistSetting(command, storageKey, dbKey, value);
 }
 
 ThemeManager = settings.createThemeManager({
@@ -472,7 +473,6 @@ const createTrackRow = (track, options) => trackTable.createTrackRow(track, opti
     buildCoverSrcCandidates,
     isTrackCurrentlyPlaying,
     escapeHtml,
-    getKeyHue,
   });
 
 async function renderTrackTable(tbody, tracks, options = {}) {
@@ -716,7 +716,6 @@ function handlePlaybackEvent(payload) {
 
 const patchRowCellDeps = {
   escapeHtml,
-  getKeyHue,
   buildCoverSrcCandidates,
   attachCoverFallbackHandlers,
   drawWaveformCanvas,
@@ -1215,6 +1214,17 @@ const usbPlaylistTracksCtl = createTrackListController({
   getTableSortState: () => tableSortState,
 });
 // Sort-header clicks route here via bodyToRendererMap.
+// Key labels are rendered by the backend in the user's notation, so a notation
+// change re-fetches every loaded list (page 1) instead of relabelling rows here.
+async function reloadTrackListsForKeyNotation() {
+  const reloads = [];
+  if (libraryTracksCtl.items.length) reloads.push(resetAndLoadLibraryTracks(state.libraryQuery));
+  if (getCurrentPlaylist()) reloads.push(refreshCurrentPlaylistTracks());
+  for (const ctl of [usbPlaylistTracksCtl, usbHistoryTracksCtl]) {
+    if (ctl.scopeId) reloads.push(ctl.reload());
+  }
+  await Promise.all(reloads);
+}
 async function renderUsbPlaylistTracks() {
   await usbPlaylistTracksCtl.applyHeaderSort();
 }
@@ -1581,6 +1591,7 @@ function restoreStoredUiPrefs() {
       STORAGE_KEY_BACKUP_RETENTION_COUNT,
       STORAGE_KEY_ANALYSIS_BPM_RANGE,
       STORAGE_KEY_ANALYSIS_ENGINE,
+      STORAGE_KEY_KEY_NOTATION,
       STORAGE_KEY_SIDEBAR_COLLAPSED,
       STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
       STORAGE_KEY_CUE_BEATGRID_LEVEL,
@@ -1653,6 +1664,8 @@ function bindEvents() {
       FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
       STORAGE_KEY_ANALYSIS_ENGINE,
       FRONTEND_DB_KEY_ANALYSIS_ENGINE,
+      STORAGE_KEY_KEY_NOTATION,
+      FRONTEND_DB_KEY_KEY_NOTATION,
       LIBRARY_LOAD_LIMIT_DEFAULT,
     },
     setStatus,
@@ -1749,6 +1762,7 @@ function bindEvents() {
     commitActivePlaylistSort,
     isPlaylistSortActive: () => !!tableSortState.playlistTracksBody,
     refreshPlaylistExportStatus,
+    reloadTrackListsForKeyNotation,
     loadPlaylists,
     updateModeText,
     exportPlaylistToUsb,

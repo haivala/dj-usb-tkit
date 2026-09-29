@@ -421,6 +421,8 @@ pub fn try_read_track_index_from_edb_with_conn(
                 track_number: None,
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
                 key: key_name,
+                key_display: None,
+                key_color: None,
                 file_path: resolved_file_path,
                 needs_hydration: false,
                 format_compat: crate::service::format_compat::compute_format_compat(
@@ -791,6 +793,8 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
                 track_number: track_no.and_then(|value| u32::try_from(value).ok()),
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
                 key: key_name,
+                key_display: None,
+                key_color: None,
                 file_path: resolved_file_path,
                 needs_hydration: false,
                 format_compat: crate::service::format_compat::compute_format_compat(

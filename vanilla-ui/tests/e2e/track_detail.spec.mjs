@@ -18,11 +18,16 @@ function installTrackDetailMock(page, opts = {}) {
         filePath: "/music/one.mp3",
         bpm: 128,
         key: "Am",
+        ...(opts.camelot ? { keyDisplay: "8A", keyColor: 7 } : {}),
         durationMs: 180000,
         analysisReady: true,
         waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
       },
     ];
+    // What the backend's key_notation renders for the keys these tests use.
+    const CAMELOT = { "Am": "8A", "F#m": "11A", "C": "8B" };
+    const keyLabel = (k) => (opts.camelot && CAMELOT[k]) || k;
+    const withKeyLabel = (t) => ({ ...t, keyDisplay: keyLabel(t.key) });
 
     // Base64 of a small PWV5 payload (2 bytes/entry).
     const pwv5 = new Uint8Array(4000);
@@ -42,7 +47,11 @@ function installTrackDetailMock(page, opts = {}) {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "set_frontend_setting") return { ok: true, data: null };
+          if (command === "set_frontend_setting") {
+            const r = payload?.request || {};
+            if (r.key === "ui_key_notation_v1") opts.camelot = r.value === "camelot";
+            return { ok: true, data: null };
+          }
           if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_backend_log_buffer") return [];
@@ -50,10 +59,10 @@ function installTrackDetailMock(page, opts = {}) {
             return { ok: true, data: { items: [], warnings: [] } };
           }
           if (command === "list_tracks" || command === "search_tracks") {
-            return { ok: true, data: { total: tracks.length, items: tracks } };
+            return { ok: true, data: { total: tracks.length, items: tracks.map(withKeyLabel) } };
           }
           if (command === "browse_source_files") {
-            return { ok: true, data: { total: tracks.length, items: tracks, nextCursor: null, hasMore: false } };
+            return { ok: true, data: { total: tracks.length, items: tracks.map(withKeyLabel), nextCursor: null, hasMore: false } };
           }
           if (command === "resolve_track_identity") {
             return { ok: true, data: { trackId: "t1", resolvedBy: "self", materialized: false } };
@@ -69,7 +78,7 @@ function installTrackDetailMock(page, opts = {}) {
                   ...(opts.seedCues || []).map((positionMs) => ({ positionMs, colorId: 5, name: "" })),
                 ],
                 detailWaveform: detailWaveformB64,
-                keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys })),
+                keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: keyLabel(k) })) })),
               },
             };
           }
@@ -125,6 +134,7 @@ function installTrackDetailMock(page, opts = {}) {
                 bpmAnalyzer: payload?.request?.bpm != null ? "user" : null,
                 key: payload?.request?.key ?? null,
                 keySource: payload?.request?.key != null ? "user" : null,
+                ...(opts.camelot && payload?.request?.key === "F#m" ? { keyDisplay: "11A", keyColor: 10 } : {}),
                 anlzRegenerated: true,
               },
             };
@@ -827,6 +837,56 @@ test("track-detail modal edits the musical key, saves it, and the library row up
   await expect(keyPill).toHaveText("F#m");
 });
 
+test("Camelot notation shows the backend's labels but saves the classic key", async ({ page }) => {
+  await installTrackDetailMock(page, { camelot: true });
+  await page.goto("/");
+
+  const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
+  await expect(keyPill).toHaveText("8A");
+  await expect(keyPill).toHaveClass(/key-pill--h7/);
+
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
+  await expect(page.locator("#trackDetailKey option:checked")).toHaveText("8A");
+
+  await page.locator("#trackDetailKey").selectOption({ label: "11A" });
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saveCall.request.key).toBe("F#m");
+  await expect(keyPill).toHaveText("11A");
+  await expect(keyPill).toHaveClass(/key-pill--h10/);
+});
+
+test("switching key notation in settings persists it and re-fetches the backend's labels", async ({ page }) => {
+  await installTrackDetailMock(page);
+  await page.goto("/");
+
+  const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
+  await expect(keyPill).toHaveText("Am");
+
+  await page.locator("#settingsBtn").click();
+  await expect(page.locator("#keyNotationSelect")).toHaveValue("classic");
+  await page.locator("#keyNotationSelect").selectOption("camelot");
+  await page.locator("#settingsCloseBtn").click();
+
+  await expect(keyPill).toHaveText("8A");
+  const saved = await page.evaluate(() =>
+    window.__calls.filter((c) => c.command === "set_frontend_setting" && c.request?.key === "ui_key_notation_v1")
+  );
+  expect(saved.map((c) => c.request.value)).toEqual(["camelot"]);
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.keyNotation"))).toBe("camelot");
+
+  await page.locator("#settingsBtn").click();
+  await page.locator("#keyNotationSelect").selectOption("classic");
+  await page.locator("#settingsCloseBtn").click();
+  await expect(keyPill).toHaveText("Am");
+});
+
 test("key stepper steps through the backend's key options and wraps at the ends", async ({ page }) => {
   await installTrackDetailMock(page);
   await page.goto("/");
@@ -1220,7 +1280,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
             return { ok: true, data: { trackId: "local-1", resolvedBy: "self", materialized: false } };
           }
           if (command === "get_track_detail") {
-            return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys })) } };
+            return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })) } };
           }
           if (command === "save_track_analysis_edits") {
             return {
@@ -1390,7 +1450,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
           }
           if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") return tracksResponse;
           if (command === "get_usb_track_detail") {
-            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys })) } };
+            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })) } };
           }
           if (command === "save_usb_track_analysis_edits") {
             if (window.__usbSaveFails) {

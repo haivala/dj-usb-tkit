@@ -103,6 +103,17 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
   if (el.analysisEngineSelect) {
     el.analysisEngineSelect.value = state.analysisEngine;
   }
+
+  // Display only: the backend renders key labels in this notation.
+  try {
+    const storedNotation = localStorageObj?.getItem?.(constants.STORAGE_KEY_KEY_NOTATION);
+    state.keyNotation = storedNotation === "camelot" ? "camelot" : "classic";
+  } catch {
+    state.keyNotation = "classic";
+  }
+  if (el.keyNotationSelect) {
+    el.keyNotationSelect.value = state.keyNotation;
+  }
   if (el.essentiaInstallRow) {
     const show = state.analysisEngine === "essentia";
     el.essentiaInstallRow.classList.toggle("hidden", !show);

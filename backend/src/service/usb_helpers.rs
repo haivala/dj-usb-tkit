@@ -237,6 +237,8 @@ mod tests {
             track_number: None,
             bpm: None,
             key: None,
+            key_display: None,
+            key_color: None,
             file_path: file_path.to_string(),
             format_ext: crate::utils::format_ext_from_path(file_path),
             needs_hydration: false,

@@ -39,6 +39,15 @@
 
 ## Unreleased
 
+- **New feature:** a "Key notation" setting (Settings → Classic `Am` /
+  Camelot `8A`). It changes how keys are shown in the app: the track lists,
+  USB playlists and history, and the cue editor's key picker. It's display
+  only: the library and every USB export keep the classic key name, which all
+  CDJ/XDJ models read. Newer players have their own Key display setting to
+  show Camelot on the deck.
+- **Improvement:** sorting by the Key column now follows the Camelot wheel
+  (1A, 1B, 2A … 12B) in both notations, instead of sorting key names
+  alphabetically.
 - **Fix:** saving the cue editor to a USB no longer freezes the window while
   the stick is written. The progress bar shows each write (analysis files,
   `export.pdb`, library, `exportLibrary.db`). If an export or another USB job

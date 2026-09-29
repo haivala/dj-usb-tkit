@@ -365,6 +365,8 @@ mod tests {
             track_number: None,
             bpm: None,
             key: None,
+            key_display: None,
+            key_color: None,
             file_path: usb_media_path.to_string(),
             format_ext: crate::utils::format_ext_from_path(usb_media_path),
             needs_hydration: false,

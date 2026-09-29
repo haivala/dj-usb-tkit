@@ -175,6 +175,10 @@ pub struct AnalyzeTrackProgress {
     pub bpm: Option<f64>,
     pub bpm_analyzer: Option<String>,
     pub key: Option<String>,
+    /// `key` in the user's display notation + colour group; filled once per
+    /// event by `analyze_new_tracks_with_progress` (see `key_notation`).
+    pub key_display: Option<String>,
+    pub key_color: Option<u8>,
     pub artwork_path: Option<String>,
     pub waveform_peaks_path: Option<String>,
     pub waveform_preview: Option<Vec<u8>>,
@@ -218,6 +222,8 @@ fn build_partial_progress(
         bpm: update.bpm,
         bpm_analyzer: update.bpm_analyzer,
         key: update.key,
+        key_display: None,
+        key_color: None,
         artwork_path: update.artwork_path,
         waveform_peaks_path: update.waveform_peaks_path,
         waveform_preview: update.waveform_preview,
@@ -246,6 +252,8 @@ fn build_done_progress_success(
         bpm: local.bpm,
         bpm_analyzer: local.bpm_analyzer.clone(),
         key: local.key.clone(),
+        key_display: None,
+        key_color: None,
         artwork_path: local.artwork_path.clone(),
         waveform_peaks_path: local.waveform_peaks_path.clone(),
         waveform_preview: local.waveform_preview.clone(),
@@ -278,6 +286,8 @@ fn build_done_progress_error(
         bpm: None,
         bpm_analyzer: None,
         key: None,
+        key_display: None,
+        key_color: None,
         artwork_path: None,
         waveform_peaks_path: None,
         waveform_preview: None,
@@ -553,6 +563,16 @@ impl BackendService {
         let job_id = format!("job-analysis-{}", Uuid::now_v7());
         let conn = self.db.connect()?;
         let auto_mode = req.track_ids.is_empty();
+        let notation = super::key_notation::key_notation_setting(&conn)?;
+        let mut on_progress = |progress: &AnalyzeTrackProgress| {
+            if progress.key.is_none() {
+                return on_progress(progress);
+            }
+            let mut progress = progress.clone();
+            (progress.key_display, progress.key_color) =
+                super::key_notation::key_display_fields(progress.key.as_deref(), notation);
+            on_progress(&progress)
+        };
 
         // In auto mode the caller can scope "tracks needing analysis" to one
         // playlist or to the current library filter instead of the whole DB.

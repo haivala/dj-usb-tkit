@@ -9,6 +9,7 @@ mod export;
 pub mod export_helpers;
 mod export_log;
 pub(crate) mod format_compat;
+pub(crate) mod key_notation;
 mod repair;
 pub mod update_check;
 mod usb;
@@ -84,6 +85,7 @@ pub(crate) const SETTING_UI_ANALYSIS_BPM_RANGE: &str = "ui_analysis_bpm_range_v1
 pub(crate) const SETTING_UI_ANALYSIS_ENGINE: &str = "ui_analysis_engine_v1";
 pub(crate) const SETTING_UI_SIDEBAR_COLLAPSED: &str = "ui_sidebar_collapsed_v1";
 pub(crate) const SETTING_UI_HELP_SEEN: &str = "ui_help_seen_v1";
+pub(crate) const SETTING_UI_KEY_NOTATION: &str = "ui_key_notation_v1";
 const WAVEFORM_PREVIEW_BINS: usize = 2400;
 
 const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
@@ -1647,7 +1649,7 @@ impl BackendService {
         };
 
         let (has_more, next_cursor) = paginate_tracks(&mut items, limit, &signature);
-        apply_is_usb_path(&conn, &mut items)?;
+        apply_frontend_track_fields(&conn, &mut items)?;
         Ok(SearchTracksData {
             total,
             items,
@@ -1681,7 +1683,7 @@ impl BackendService {
             rows.collect::<Result<Vec<_>, _>>()?
         };
         let (has_more, next_cursor) = paginate_tracks(&mut items, limit, &signature);
-        apply_is_usb_path(&conn, &mut items)?;
+        apply_frontend_track_fields(&conn, &mut items)?;
         Ok(ListTracksData {
             total: total as usize,
             items,
@@ -1759,6 +1761,8 @@ impl BackendService {
                         bpm: None,
                         bpm_analyzer: None,
                         key: scanned.tonality,
+                        key_display: None,
+                        key_color: None,
                         key_source: None,
                         file_path: scanned.path,
                         file_size_bytes: scanned.file_size_bytes,
@@ -1945,7 +1949,7 @@ impl BackendService {
             .take(limit + 1)
             .collect::<Vec<_>>();
         let (has_more, next_cursor) = paginate_tracks(&mut page_items, limit, &signature);
-        apply_is_usb_path(&conn, &mut page_items)?;
+        apply_frontend_track_fields(&conn, &mut page_items)?;
         Ok(BrowseSourceFilesData {
             total,
             items: page_items,
@@ -2321,7 +2325,7 @@ impl BackendService {
         let rows = stmt.query_map(params_from_iter(ids.iter()), |row| row_to_track(row, true))?;
         let mut found = rows.collect::<Result<Vec<_>, _>>()?;
         found.sort_by(|a, b| a.id.cmp(&b.id));
-        apply_is_usb_path(&conn, &mut found)?;
+        apply_frontend_track_fields(&conn, &mut found)?;
 
         Ok(GetTracksByIdsData { items: found })
     }
@@ -2537,7 +2541,7 @@ impl BackendService {
         )?;
         let rows = stmt.query_map(params![playlist_id], |row| row_to_track(row, true))?;
         let mut items = rows.collect::<Result<Vec<_>, _>>()?;
-        apply_is_usb_path(conn, &mut items)?;
+        apply_frontend_track_fields(conn, &mut items)?;
         Ok(items)
     }
 
@@ -3230,6 +3234,7 @@ fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_ANALYSIS_ENGINE,
         SETTING_UI_SIDEBAR_COLLAPSED,
         SETTING_UI_HELP_SEEN,
+        SETTING_UI_KEY_NOTATION,
     ]
 }
 
@@ -3287,20 +3292,27 @@ pub(crate) fn untainted_usb_root_paths(conn: &rusqlite::Connection) -> BackendRe
         .collect())
 }
 
-/// Sets `is_usb_path` on every track, one query for the whole batch (not
-/// per-row). Mirrors `resolve_playback_source`'s `is_usb_rooted` check
-/// exactly: matched against `file_path` only, against every known USB
-/// device root (including pruned ones -- see `untainted_usb_root_paths`).
-/// Call this from any method that returns `Track` rows to the frontend.
-pub(crate) fn apply_is_usb_path(
+/// Fills the derived fields every frontend-bound `Track` carries, one query
+/// each for the whole batch (not per-row). Call this from any method that
+/// returns `Track` rows to the frontend.
+///
+/// - `is_usb_path` mirrors `resolve_playback_source`'s `is_usb_rooted` check
+///   exactly: matched against `file_path` only, against every known USB
+///   device root (including pruned ones -- see `untainted_usb_root_paths`).
+/// - `key_display` / `key_color` follow the user's key notation setting
+///   (display only; `key` itself is what gets edited and exported).
+pub(crate) fn apply_frontend_track_fields(
     conn: &rusqlite::Connection,
     tracks: &mut [Track],
 ) -> BackendResult<()> {
     let usb_root_paths = untainted_usb_root_paths(conn)?;
+    let notation = key_notation::key_notation_setting(conn)?;
     for track in tracks.iter_mut() {
         track.is_usb_path = usb_root_paths
             .iter()
             .any(|root| browse_path_matches_root(&track.file_path, root));
+        (track.key_display, track.key_color) =
+            key_notation::key_display_fields(track.key.as_deref(), notation);
     }
     Ok(())
 }
@@ -3577,8 +3589,10 @@ pub(crate) fn row_to_track(
         updated_at: row.get(18)?,
         master_db_source: is_master_db,
         // Filled in by callers that expose Track to the frontend (see
-        // apply_is_usb_path); internal-only callers leave this false.
+        // apply_frontend_track_fields); internal-only callers leave this false.
         is_usb_path: false,
+        key_display: None,
+        key_color: None,
         analysis_ready,
         format_compat,
     })
@@ -3692,8 +3706,7 @@ fn sort_tracks(items: &mut [Track], sort_by: Option<&str>, sort_dir: Option<&str
                 .partial_cmp(&b.bpm.unwrap_or(0.0))
                 .unwrap_or(std::cmp::Ordering::Equal),
             "durationMs" => a.duration_ms.unwrap_or(0).cmp(&b.duration_ms.unwrap_or(0)),
-            "key" => ci(a.key.as_deref().unwrap_or_default())
-                .cmp(&ci(b.key.as_deref().unwrap_or_default())),
+            "key" => key_notation::compare_keys(a.key.as_deref(), b.key.as_deref()),
             _ => std::cmp::Ordering::Equal,
         };
         if desc { ord.reverse() } else { ord }
@@ -4687,6 +4700,8 @@ mod tests {
             bpm: None,
             bpm_analyzer: None,
             key: None,
+            key_display: None,
+            key_color: None,
             key_source: None,
             file_path: file_path.to_string(),
             file_size_bytes: None,

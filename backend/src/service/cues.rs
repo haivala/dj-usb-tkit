@@ -23,10 +23,10 @@ use uuid::Uuid;
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    GetTrackDetailRequest, GetUsbTrackDetailRequest, KeyOptionGroup, ResolvePlaybackSourceRequest,
-    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
-    SaveUsbTrackAnalysisEditsRequest, TrackCue, TrackCueInput, TrackDetail, UsbTrackAnalysisDetail,
-    WarningEntry,
+    GetTrackDetailRequest, GetUsbTrackDetailRequest, KeyOption, KeyOptionGroup,
+    ResolvePlaybackSourceRequest, SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest,
+    SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest, TrackCue, TrackCueInput,
+    TrackDetail, UsbTrackAnalysisDetail, WarningEntry,
 };
 
 use crate::edb::{find_content_id_by_path, find_key_id_by_name, open_edb_rw};
@@ -38,8 +38,9 @@ use super::anlz::{
 use super::export_helpers::{
     PdbLayoutProfile, key_names_match, load_table_columns_tx, write_edb_cues_for_content,
 };
+use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_setting};
 use super::usb_utils::{read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path};
-use super::{BackendService, TRACK_COLS, apply_is_usb_path, now, row_to_track};
+use super::{BackendService, TRACK_COLS, apply_frontend_track_fields, now, row_to_track};
 
 /// Highest number of cue points a track can carry (one per CDJ hot-cue pad A–H).
 pub const MAX_HOT_CUES: u8 = 8;
@@ -466,14 +467,28 @@ pub const KEY_OPTIONS: &[&str] = &[
 ];
 
 /// [`KEY_OPTIONS`] as the cue editor's picker shows them: majors, then minors.
-pub fn key_option_groups() -> Vec<KeyOptionGroup> {
-    let group = |label: &str, minor: bool| KeyOptionGroup {
-        label: label.to_string(),
-        keys: KEY_OPTIONS
+/// Values stay classic (what a save sends); labels follow `notation`, and in
+/// Camelot notation each group is in wheel order (1B, 2B, …).
+pub fn key_option_groups(notation: KeyNotation) -> Vec<KeyOptionGroup> {
+    let group = |label: &str, minor: bool| {
+        let mut keys: Vec<&str> = KEY_OPTIONS
             .iter()
+            .copied()
             .filter(|k| k.ends_with('m') == minor)
-            .map(|k| k.to_string())
-            .collect(),
+            .collect();
+        if notation == KeyNotation::Camelot {
+            keys.sort_by_key(|k| key_notation::key_sort_rank(k));
+        }
+        KeyOptionGroup {
+            label: label.to_string(),
+            keys: keys
+                .into_iter()
+                .map(|k| KeyOption {
+                    value: k.to_string(),
+                    label: key_notation::display_key(k, notation),
+                })
+                .collect(),
+        }
     };
     vec![group("Major", false), group("Minor", true)]
 }
@@ -702,7 +717,7 @@ impl BackendService {
             .query_row(params![track_id], |row| row_to_track(row, true))
             .optional()?
             .ok_or_else(|| BackendError::NotFound(format!("track not found: {track_id}")))?;
-        apply_is_usb_path(&conn, std::slice::from_mut(&mut track))?;
+        apply_frontend_track_fields(&conn, std::slice::from_mut(&mut track))?;
 
         let first_beat_ms: Option<u32> = conn
             .query_row(
@@ -725,7 +740,7 @@ impl BackendService {
             first_beat_ms,
             cues,
             detail_waveform,
-            key_options: key_option_groups(),
+            key_options: key_option_groups(key_notation_setting(&conn)?),
         })
     }
 
@@ -820,6 +835,8 @@ impl BackendService {
             },
         )?;
 
+        let (key_display, key_color) =
+            key_display_fields(key.as_deref(), key_notation_setting(&conn)?);
         Ok(SaveTrackAnalysisEditsData {
             track_id,
             first_beat_ms,
@@ -828,6 +845,8 @@ impl BackendService {
             bpm_analyzer,
             key,
             key_source,
+            key_display,
+            key_color,
             anlz_regenerated,
         })
     }
@@ -860,12 +879,13 @@ impl BackendService {
             )));
         }
 
+        let notation = self.key_notation()?;
         Ok(UsbTrackAnalysisDetail {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
             cues: cues_for_editor(collapse_anlz_cues(&bytes)),
             detail_waveform: read_pwv5_from_anlz(&dat_abs)
                 .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
-            key_options: key_option_groups(),
+            key_options: key_option_groups(notation),
         })
     }
 
@@ -1072,6 +1092,7 @@ impl BackendService {
         let bytes = std::fs::read(dat_path.with_extension("EXT"))
             .or_else(|_| std::fs::read(dat_path))
             .unwrap_or_default();
+        let (key_display, key_color) = key_display_fields(key.as_deref(), self.key_notation()?);
         Ok(SaveUsbTrackAnalysisEditsData {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
             cues: collapse_anlz_cues(&bytes),
@@ -1079,6 +1100,8 @@ impl BackendService {
             bpm_analyzer: req.bpm.map(|_| "user".to_string()),
             key: key.clone(),
             key_source: key.map(|_| "user".to_string()),
+            key_display,
+            key_color,
             anlz_updated: true,
             edb_updated: true,
             local_updated: local_track_id.is_some(),
@@ -1340,19 +1363,46 @@ mod tests {
 
     #[test]
     fn key_option_groups_are_the_majors_then_the_minors_in_key_options_order() {
-        let groups = key_option_groups();
+        let groups = key_option_groups(KeyNotation::Classic);
         assert_eq!(
             groups.iter().map(|g| g.label.as_str()).collect::<Vec<_>>(),
             ["Major", "Minor"]
         );
         assert_eq!(groups[0].keys.len(), 12);
-        assert_eq!(groups[0].keys[..3], ["C", "C#", "D"]);
-        assert_eq!(groups[1].keys.last().map(String::as_str), Some("Bm"));
-        let flat: Vec<&str> = groups
+        let values: Vec<&str> = groups
             .iter()
-            .flat_map(|g| g.keys.iter().map(String::as_str))
+            .flat_map(|g| g.keys.iter().map(|k| k.value.as_str()))
             .collect();
-        assert_eq!(flat, KEY_OPTIONS);
+        assert_eq!(values, KEY_OPTIONS);
+        assert!(
+            groups
+                .iter()
+                .flat_map(|g| &g.keys)
+                .all(|k| k.label == k.value)
+        );
+    }
+
+    #[test]
+    fn camelot_key_option_groups_keep_classic_values_in_wheel_order() {
+        let groups = key_option_groups(KeyNotation::Camelot);
+        let pairs = |idx: usize| -> Vec<(String, String)> {
+            groups[idx]
+                .keys
+                .iter()
+                .map(|k| (k.value.clone(), k.label.clone()))
+                .collect()
+        };
+        let major = pairs(0);
+        assert_eq!(major[0], ("B".to_string(), "1B".to_string()));
+        assert_eq!(major[7], ("C".to_string(), "8B".to_string()));
+        assert_eq!(major.len(), 12);
+        let minor = pairs(1);
+        assert_eq!(minor[0], ("G#m".to_string(), "1A".to_string()));
+        assert_eq!(minor[7], ("Am".to_string(), "8A".to_string()));
+        // Every value still passes the save-side validation.
+        for key in groups.iter().flat_map(|g| &g.keys) {
+            assert!(normalize_key_input(&key.value).is_ok(), "{}", key.value);
+        }
     }
 
     #[test]

@@ -79,7 +79,8 @@ export function bindSettingsEvents(ctx) {
     renderCurrentPlaylistTracksFromState,
     commitActivePlaylistSort,
     isPlaylistSortActive,
-    refreshPlaylistExportStatus
+    refreshPlaylistExportStatus,
+    reloadTrackListsForKeyNotation
   } = ctx;
   const {
     STORAGE_KEY_HELP_SEEN,
@@ -93,7 +94,9 @@ export function bindSettingsEvents(ctx) {
     STORAGE_KEY_ANALYSIS_BPM_RANGE,
     FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
     STORAGE_KEY_ANALYSIS_ENGINE,
-    FRONTEND_DB_KEY_ANALYSIS_ENGINE
+    FRONTEND_DB_KEY_ANALYSIS_ENGINE,
+    STORAGE_KEY_KEY_NOTATION,
+    FRONTEND_DB_KEY_KEY_NOTATION
   } = constants;
 
   el.settingsBtn?.addEventListener("click", () => {
@@ -227,6 +230,25 @@ export function bindSettingsEvents(ctx) {
     }
     persistSetting(STORAGE_KEY_ANALYSIS_BPM_RANGE, FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE, selected);
     setStatus(`Analysis BPM range: ${selected}`);
+  });
+
+  // Display only -- the backend renders every key label in this notation, so
+  // save it first, then re-fetch the loaded track lists.
+  el.keyNotationSelect?.addEventListener("change", async (event) => {
+    const notation = event?.target?.value === "camelot" ? "camelot" : "classic";
+    state.keyNotation = notation;
+    try {
+      await persistSetting(STORAGE_KEY_KEY_NOTATION, FRONTEND_DB_KEY_KEY_NOTATION, notation);
+    } catch {
+      setStatus("Could not save key notation");
+      return;
+    }
+    try {
+      await reloadTrackListsForKeyNotation?.();
+    } catch (err) {
+      console.error(err);
+    }
+    setStatus(`Key notation: ${notation === "camelot" ? "Camelot (8A)" : "Classic (Am)"}`);
   });
 
   el.analysisEngineSelect?.addEventListener("change", (event) => {
