@@ -61,6 +61,8 @@
   (447 KB → 211 KB). The UI also no longer re-checks and re-coerces the
   track, USB playlist and player-menu data the backend already sends fully
   typed.
+- **Chore:** retired 20 frontend unit tests that only repeated what the
+  end-to-end tests already check through the real UI.
 
 ## 0.2.9
 

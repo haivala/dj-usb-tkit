@@ -19,7 +19,6 @@ function renderPreview(payload) {
 
 const fixTitle = (li) => li.querySelector(".diag-repair-fix-title").textContent;
 const fixDesc = (li) => li.querySelector(".diag-repair-fix-desc").textContent;
-const fixMeta = (li) => li.querySelector(".diag-repair-fix-meta").textContent;
 const fixCheck = (li) => li.querySelector(".diag-repair-fix-check");
 
 test("renderRepairPreview handles no fixes and supported fix selection", () => {
@@ -86,24 +85,6 @@ test("renderRepairPreview renders each backend fix description verbatim and appe
   );
   // The standalone unsupported item renders as its own row, unmodified.
   assert.equal(fixTitle(fixes[1]), "2 malformed USBANLZ entry/entries");
-});
-
-test("renderRepairPreview locks a backend always-applied fix's checkbox checked", () => {
-  const { fixes } = renderPreview({
-    detectedIssues: ["a", "b"],
-    proposedFixes: [
-      { id: "repair_pdb_truncated_table_chain", title: "Truncated chain", description: "d", supported: true, destructive: false, alwaysApplied: true },
-      { id: "fix_regular", title: "Regular", description: "d", supported: true, destructive: false }
-    ],
-    estimatedFileWrites: 1,
-    estimatedFileDeletes: 0,
-    unsupportedItems: []
-  });
-
-  assert.equal(fixCheck(fixes[0]).checked, true);
-  assert.equal(fixCheck(fixes[0]).disabled, true);
-  assert.match(fixMeta(fixes[0]), /always applied/);
-  assert.equal(fixCheck(fixes[1]).disabled, false);
 });
 
 function makeHealthDot() {

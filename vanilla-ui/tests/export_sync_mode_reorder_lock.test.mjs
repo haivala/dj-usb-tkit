@@ -118,42 +118,6 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
   return { state, el, statuses, commitCalls, persistCalls, grid, headers, fire };
 }
 
-test("switching to mirror mode releases the open playlist's reorder lock", async () => {
-  const { state, statuses, grid, headers, fire } = setup();
-
-  await fire("mirror");
-
-  assert.equal(state.exportPruneStale, true);
-  assert.equal(state.playlistUsbExportStatusById.get("p1").locksReorder, false);
-  assert.equal(state.playlistUsbExportStatusById.get("p1").sameNameExistsOnUsb, true);
-  assert.equal(grid.dataset.sortLocked, "false");
-  assert.ok(headers().every((h) => !h.hasAttribute("data-tooltip")));
-  assert.ok(statuses.some((m) => m.includes("mirror")));
-});
-
-test("switching back to additive re-engages the lock for a same-named USB playlist", async () => {
-  const { state, statuses, grid, headers, fire } = setup();
-
-  await fire("mirror");
-  await fire("additive");
-
-  assert.equal(state.playlistUsbExportStatusById.get("p1").locksReorder, true);
-  assert.equal(grid.dataset.sortLocked, "true");
-  assert.ok(headers().every((h) => /Won't reorder on USB/.test(h.getAttribute("data-tooltip") || "")));
-  assert.ok(statuses.some((m) => m.includes("locked here")));
-});
-
-test("engaging the lock commits an active column sort first, while still unlocked", async () => {
-  const { commitCalls, fire } = setup({ sortActive: true });
-
-  await fire("mirror"); // unlock -> no commit
-  await fire("additive"); // lock -> commit the active sort first
-
-  assert.equal(commitCalls.length, 1);
-  assert.equal(commitCalls[0].id, "p1");
-  assert.equal(commitCalls[0].locksReorderAtCommit, false);
-});
-
 test("the mode change still goes through when the pre-lock sort commit fails", async () => {
   const { state, statuses, persistCalls, grid, fire } = setup({ sortActive: true, commitThrows: true });
 

@@ -4,13 +4,11 @@ import { JSDOM } from "jsdom";
 
 import {
   commitActivePlaylistSort,
-  createPlaylist,
   formatPlaylistExportStatus,
-  loadPlaylists,
   renderPlaylistList
 } from "../components/playlist/actions.mjs";
 import { bindPlaylistEvents } from "../components/playlist/events.mjs";
-import { APP_TEMPLATES, makeTestCtx } from "./test_helpers.mjs";
+import { APP_TEMPLATES } from "./test_helpers.mjs";
 
 function makeDom() {
   return new JSDOM(`<!doctype html><body>
@@ -81,34 +79,13 @@ test("renderPlaylistList marks active tabs and active playlist mode", () => {
   assert.equal(buttons[1].classList.contains("playlist-active-mode"), true);
 });
 
-test("playlist commands format export status, load lists, and select newly loaded playlists", async () => {
+test("formatPlaylistExportStatus describes the last export", () => {
+  assert.equal(formatPlaylistExportStatus({}), "Not exported yet.");
   assert.match(formatPlaylistExportStatus({
     lastExportedAt: "2026-01-01T00:00:00Z",
     lastExportedUsbRoot: "/usb",
     lastExportedTrackCount: 5
   }), /^Last exported .+ to \/usb \(5 track\(s\)\)\.$/);
-
-  const loaded = makeTestCtx({ command: async () => ({ items: [{ id: "p1", name: "One" }] }) });
-  await loadPlaylists(loaded);
-  assert.deepEqual(loaded.state.playlists, [{ id: "p1", name: "One", tracks: [] }]);
-  assert.equal(loaded.el.navPlaylistList.querySelector(".nav-playlist-item").dataset.playlistId, "p1");
-
-  const createCalls = [];
-  const ctx = makeTestCtx({
-    emitStatus: (text) => createCalls.push(`status:${text}`),
-    withProgress: async (_label, fn) => fn(() => {}),
-    command: async (name) => {
-      if (name === "create_playlist") return { playlistId: "missing-id", name: "Fresh" };
-      if (name === "list_playlists") return { items: [{ id: "p1", name: "Old" }, { id: "p2", name: "Fresh" }] };
-      return {};
-    },
-    updateModeText: () => createCalls.push("mode"),
-    switchView: async (tab) => createCalls.push(`tab:${tab}`)
-  });
-  ctx.state.currentPlaylistId = "p1";
-  await createPlaylist(ctx, "Fresh");
-  assert.equal(ctx.state.currentPlaylistId, "p2");
-  assert.deepEqual(createCalls, ["mode", "tab:p2", "status:Playlist created: Fresh"]);
 });
 
 // The active playlist sort lives in tableSortState; committing always clears
@@ -202,34 +179,4 @@ test("bindPlaylistEvents ignores playlist selection clicks while new playlist in
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(switched, []);
-});
-
-test("Analyze Missing Tracks delegates the whole playlist to the backend (no page force-load, no client id resolution)", async () => {
-  const dom = makeDom();
-  const { document, Event } = dom.window;
-  const el = {
-    ...elements(document, ["navPlaylistList", "addPlaylistBtn", "playlistSearchInput", "exportPlaylistBtn", "analyzePlaylistMissingBtn"]),
-    panels: { playlist: document.createElement("div") }
-  };
-  const analyzeCalls = [];
-  let loadMoreCalls = 0;
-
-  bindPlaylistEvents(bindDeps({
-    state: { currentPlaylistId: "pl-9", selectedTrackIds: new Set() },
-    el,
-    getCurrentPlaylist: () => ({ id: "pl-9", name: "Big", tracks: [{ id: "t1" }] }),
-    analyzeTrackIds: async (ids, label, options) => { analyzeCalls.push({ ids, label, options }); },
-    playlistTracksCtl: {
-      view: [], hasMore: true, setSearch: () => {}, rerender: async () => {},
-      loadMore: async () => { loadMoreCalls += 1; }, attachScroll: () => {},
-    },
-  }));
-
-  el.analyzePlaylistMissingBtn.dispatchEvent(new Event("click", { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  assert.equal(loadMoreCalls, 0, "must not force-load playlist pages");
-  assert.equal(analyzeCalls.length, 1);
-  assert.deepEqual(analyzeCalls[0].ids, []);
-  assert.deepEqual(analyzeCalls[0].options, { playlistId: "pl-9" });
 });
