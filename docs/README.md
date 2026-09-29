@@ -34,4 +34,4 @@ This is the documentation set for DJ USB Tkit.
 
 ## Validation Docs
 
-- `docs/CDJ_TEST_MATRIX.md` - real hardware CDJ compatibility validation matrix
+- `docs/HARDWARE_TEST_MATRIX.md` - real hardware CDJ/XDJ compatibility validation matrix

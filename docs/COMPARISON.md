@@ -82,7 +82,7 @@ playlist parity mismatches between PDB and eDB, and more. See
 catalog. Repairs default to preview mode (nothing is written until you
 apply), and repaired output has been validated on real CDJ-2000NXS,
 CDJ-2000NXS2, and CDJ-3000 hardware (see
-[`docs/CDJ_TEST_MATRIX.md`](CDJ_TEST_MATRIX.md)). Rekordbox does not expose
+[`docs/HARDWARE_TEST_MATRIX.md`](HARDWARE_TEST_MATRIX.md)). Rekordbox does not expose
 an equivalent repair surface for a broken export database — the common
 workaround is deleting the `PIONEER` folder and re-exporting from scratch,
 which loses history and any USB-only playlist state.
