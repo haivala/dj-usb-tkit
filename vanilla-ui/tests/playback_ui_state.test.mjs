@@ -1,9 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const { isTransportButtonPlaying, shouldToggleStop } = require("../playback_ui_state.js");
+import { isTransportButtonPlaying, shouldToggleStop } from "../playback_ui_state.mjs";
 
 test("USB row stays active when playback was redirected to local track id", () => {
   const state = {

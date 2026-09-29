@@ -4,7 +4,6 @@ import { JSDOM } from "jsdom";
 
 import {
   clearAllWaveformPlayheads,
-  getPlaybackUiStateHelpers,
   scrubRatioFromPointer,
   setWaveformPlayhead,
   startPlayheadInterpolation,
@@ -14,7 +13,7 @@ import {
 } from "../components/playback/actions.mjs";
 import { APP_TEMPLATES } from "./test_helpers.mjs";
 
-test("playback UI globals and transport buttons reflect playing state", () => {
+test("transport buttons reflect playing state", () => {
   const dom = new JSDOM(`
     <!doctype html><body>
       <button class="transport-btn" data-id="t1" data-row-key="row:1"></button>
@@ -22,30 +21,20 @@ test("playback UI globals and transport buttons reflect playing state", () => {
       ${APP_TEMPLATES}
     </body>
   `);
-  const original = globalThis.playbackUiState;
-  try {
-    globalThis.playbackUiState = {
-      ok: true,
-      isTransportButtonPlaying: (state, meta) => state.playbackRowKey === meta.rowKey
-    };
-    assert.equal(getPlaybackUiStateHelpers().ok, true);
 
-    updateTransportButtonsInDom({
-      state: {
-        playbackActive: true,
-        playbackRowKey: "row:1",
-        playbackTrackId: null
-      }
-    }, dom.window.document);
+  updateTransportButtonsInDom({
+    state: {
+      playbackActive: true,
+      playbackRowKey: "row:1",
+      playbackTrackId: null
+    }
+  }, dom.window.document);
 
-    const buttons = dom.window.document.querySelectorAll(".transport-btn");
-    assert.equal(buttons[0].classList.contains("is-playing"), true);
-    assert.equal(buttons[0].getAttribute("aria-label"), "Stop");
-    assert.equal(buttons[1].classList.contains("is-playing"), false);
-    assert.equal(buttons[1].getAttribute("aria-label"), "Play");
-  } finally {
-    globalThis.playbackUiState = original;
-  }
+  const buttons = dom.window.document.querySelectorAll(".transport-btn");
+  assert.equal(buttons[0].classList.contains("is-playing"), true);
+  assert.equal(buttons[0].getAttribute("aria-label"), "Stop");
+  assert.equal(buttons[1].classList.contains("is-playing"), false);
+  assert.equal(buttons[1].getAttribute("aria-label"), "Play");
 });
 
 test("waveform helpers set, clear, and clamp pointer scrub ratios", () => {
@@ -90,7 +79,7 @@ test("stopPlaybackFromUi clears playback state and updates UI", async () => {
     state,
     document: { querySelectorAll: (selector) => { calls.push(selector); return []; } },
     command: async (name) => { calls.push(name); },
-    setStatus: (text) => { calls.push(text); }
+    emitStatus: (text) => { calls.push(text); }
   });
 
   assert.deepEqual(calls, [".transport-btn", "stop_playback_native", ".waveform", ".transport-btn", "Idle"]);

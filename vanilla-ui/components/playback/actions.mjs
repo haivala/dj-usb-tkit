@@ -1,4 +1,5 @@
 import { transportIcon } from "../../track_table.mjs";
+import { isTransportButtonPlaying } from "../../playback_ui_state.mjs";
 
 export function toPlayableUrl(ctx, path) {
   if (!path) return null;
@@ -32,22 +33,10 @@ export function toPlayableUrl(ctx, path) {
 }
 // Playback UI helpers that coordinate DOM state with playback state.
 
-export function getPlaybackUiStateHelpers() {
-  return globalThis?.playbackUiState || null;
-}
-
 export function updateTransportButtonsInDom(ctx, root = ctx.document) {
   const { state } = ctx;
-  const helpers = getPlaybackUiStateHelpers();
   root.querySelectorAll(".transport-btn").forEach((btn) => {
-    const id = btn.dataset.id || "";
-    const rowKey = btn.dataset.rowKey || "";
-    const isPlaying = helpers?.isTransportButtonPlaying
-      ? helpers.isTransportButtonPlaying(state, { rowKey, trackId: id })
-      : (
-        !!(state.playbackActive && state.playbackRowKey && rowKey && state.playbackRowKey === rowKey)
-        || !!(state.playbackActive && state.playbackTrackId && id === state.playbackTrackId)
-      );
+    const isPlaying = isTransportButtonPlaying(state, { rowKey: btn.dataset.rowKey, trackId: btn.dataset.id });
     btn.classList.toggle("is-playing", isPlaying);
     btn.setAttribute("aria-label", isPlaying ? "Stop" : "Play");
     btn.dataset.tooltip = isPlaying ? "Stop" : "Play";
@@ -163,7 +152,7 @@ function resetPlaybackState(ctx) {
 /// projects them: paused freezes the playhead at `positionMs`, resumed restarts
 /// the interpolation from there.
 export function applyPauseStatus(ctx, status) {
-  const { state, setStatus } = ctx;
+  const { state, emitStatus } = ctx;
   if (!status || !(status.playing || status.paused)) return;
   state.playbackPaused = !!status.paused;
   const duration = Number(status.durationMs || 0);
@@ -174,7 +163,7 @@ export function applyPauseStatus(ctx, status) {
     if (waveformEl) {
       setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : 0, false, true);
     }
-    setStatus("Paused");
+    emitStatus("Paused");
   } else {
     if (waveformEl && duration > 0) {
       startPlayheadInterpolation(ctx, {
@@ -185,7 +174,7 @@ export function applyPauseStatus(ctx, status) {
     }
     if (state.playbackLabelContext) {
       const { sourceLabel, title } = state.playbackLabelContext;
-      setStatus(`Playing from ${sourceLabel}: ${title}`);
+      emitStatus(`Playing from ${sourceLabel}: ${title}`);
     }
   }
   updateTransportButtonsInDom(ctx);
@@ -247,10 +236,10 @@ export function moveActiveWaveform(ctx, waveformEl) {
 // playing and lets a failed stop surface. Otherwise (a context change such as
 // switching views) it's a no-op when idle and a failed stop is only logged.
 async function stopPlayback(ctx, { fromUi }) {
-  const { state, setStatus } = ctx;
+  const { state, emitStatus } = ctx;
   if (state.playbackStopPromise) return state.playbackStopPromise;
   if (!state.playbackActive && state.playbackPendingKind !== "play") {
-    if (fromUi) setStatus("Idle");
+    if (fromUi) emitStatus("Idle");
     return;
   }
   const generation = beginPlaybackIntent(state, "stop");
@@ -267,7 +256,7 @@ async function stopPlayback(ctx, { fromUi }) {
       clearPlaybackIntentIfCurrent(state, generation);
     }
     updateTransportButtonsInDom(ctx);
-    setStatus("Idle");
+    emitStatus("Idle");
   });
   try {
     await state.playbackStopPromise;
@@ -346,7 +335,7 @@ export function isTrackCurrentlyPlaying(ctx, track) {
 }
 
 async function playResolvedTrack(ctx, track, origin, options, generation) {
-  const { state, setStatus } = ctx;
+  const { state, emitStatus } = ctx;
   const trackPath = String(track?.filePath || "").trim();
   const originLower = String(origin || "").toLowerCase();
   const artist = String(track?.artist || "").trim();
@@ -402,7 +391,7 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
       state.playbackRowKey = options.rowKey || null;
       state.playbackLabelContext = { sourceLabel, title };
       updateTransportButtonsInDom(ctx);
-      setStatus(`Playing from ${sourceLabel}: ${title}`);
+      emitStatus(`Playing from ${sourceLabel}: ${title}`);
     } catch (err) {
       if (!isGenerationCurrent(state, generation)) return;
       const message = err?.message || String(err);
@@ -410,10 +399,10 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
       // track to a playable path in the Library or the selected USB -- an
       // expected, soft outcome, not a failure.
       if (err?.code === "NOT_FOUND") {
-        setStatus("Cannot play: track not found in Library or selected USB.", { level: "warn", source: "playback" });
+        emitStatus("Cannot play: track not found in Library or selected USB.", { level: "warn", source: "playback" });
         return;
       }
-      setStatus(`Playback failed: ${message}`, { level: "error", source: "playback" });
+      emitStatus(`Playback failed: ${message}`, { level: "error", source: "playback" });
     }
   });
 }
@@ -454,7 +443,7 @@ export async function playTrackFromOrigin(ctx, track, origin, options = {}) {
 }
 
 export function handlePlaybackEvent(ctx, payload) {
-  const { state, setStatus } = ctx;
+  const { state, emitStatus } = ctx;
   if (!payload || typeof payload !== "object") return;
   const eventName = String(payload.event || "");
   const path = payload.path ? String(payload.path) : null;
@@ -501,7 +490,7 @@ export function handlePlaybackEvent(ctx, payload) {
     // seek) keep it accurate without re-deriving it here.
     if (playing && state.playbackLabelContext) {
       const { sourceLabel, title } = state.playbackLabelContext;
-      setStatus(`Playing from ${sourceLabel}: ${title}`);
+      emitStatus(`Playing from ${sourceLabel}: ${title}`);
     }
     return;
   }
@@ -521,13 +510,13 @@ export function handlePlaybackEvent(ctx, payload) {
     if (path !== null && path !== state.playbackPath) return;
     resetPlaybackState(ctx);
     updateTransportButtonsInDom(ctx);
-    setStatus("Idle");
+    emitStatus("Idle");
     return;
   }
 
   if (eventName === "playback.error") {
     const message = payload.message ? String(payload.message) : "Playback failed";
-    setStatus(message);
+    emitStatus(message);
   }
 }
 

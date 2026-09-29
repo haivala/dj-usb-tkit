@@ -1,4 +1,3 @@
-import { resolveEmitStatus } from "../shared/track_actions.mjs";
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
@@ -324,7 +323,7 @@ export async function hydrateLoadedTracksPreviewsInBackground(ctx) {
 
 export async function relocateSourceRoot(ctx, oldRoot) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   const sourceRoot = String(oldRoot || "").trim();
   if (!sourceRoot) return;
 
@@ -657,7 +656,7 @@ export function enabledLibrarySourceRoots(ctx) {
 
 export async function scanLibrary(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.sourceRoots.length) {
     emitStatus("Set at least one source root path before scanning");
     return;
@@ -718,7 +717,7 @@ export async function scanLibrary(ctx) {
 }
 
 export async function analyzeSelectedTracks(ctx) {
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   const trackIds = Array.from(ctx.state.selectedTrackIds || []).filter(Boolean);
   if (!trackIds.length) {
     emitStatus("Select at least one track to analyze");
@@ -730,7 +729,7 @@ export async function analyzeSelectedTracks(ctx) {
 
 export async function scanMasterDb(ctx) {
   const { state, logWarnings } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   const path = state.externalMasterDbPath || undefined;
 
   emitStatus("Importing from desktop library...");
@@ -780,7 +779,7 @@ export async function scanMasterDb(ctx) {
 
 export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", options = {}) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (state.analysisEnginePersistPromise) {
     try {
       await state.analysisEnginePersistPromise;
@@ -872,7 +871,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
 }
 
 export async function analyzeSingleTrack(ctx, track, modeLabel = null) {
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   const localId = await ctx.resolveLocalTrackIdAsync(track);
   if (!localId) {
     emitStatus("Track is not in local library yet. Scan library first, then analyze.");

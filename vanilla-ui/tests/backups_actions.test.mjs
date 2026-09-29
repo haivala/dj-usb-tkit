@@ -9,7 +9,7 @@ function backupCtx(state, overrides = {}) {
   return {
     state,
     el: {},
-    setStatus: () => {},
+    emitStatus: () => {},
     clearUsbDiagnostics: () => {},
     resetUsbStateViews: () => {},
     ...overrides

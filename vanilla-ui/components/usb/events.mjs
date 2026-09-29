@@ -1,4 +1,4 @@
-import { catchErr, handleTrackAction, trackMetaFingerprint, resolveEmitStatus, resolveRowActionTrack } from "../shared/track_actions.mjs";
+import { catchErr, handleTrackAction, trackMetaFingerprint, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
 import { moveArrayItem } from "./actions.mjs";
@@ -36,7 +36,7 @@ export function bindUsbEvents(ctx) {
     patchUsbTrackRow,
     patchHistoryTrackRow,
   } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   // USB-playlist and USB-history track tables: fetch / paginate / search /
   // sort / scroll-load are owned by their shared track-list controllers (see
   // main.js), which fetch pre-hydrated pages from the backend. Scroll-load

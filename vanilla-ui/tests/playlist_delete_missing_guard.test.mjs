@@ -12,7 +12,7 @@ test("deletePlaylist skips when playlist not found in state", async () => {
     command: async () => { commandCalled = true; return { deleted: true }; },
     updateModeText: () => {},
     switchView: async () => {},
-    setStatus: () => {}
+    emitStatus: () => {}
   }, "missing-id");
 
   assert.ok(!commandCalled, "should not call backend for nonexistent playlist");

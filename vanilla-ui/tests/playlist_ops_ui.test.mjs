@@ -34,7 +34,7 @@ function elements(document, ids) {
 
 function bindDeps(overrides) {
   return {
-    setStatus: () => {},
+    emitStatus: () => {},
     switchView: async () => {},
     deletePlaylist: async () => {},
     startPlaylistRename: () => {},
@@ -43,7 +43,6 @@ function bindDeps(overrides) {
     getCurrentPlaylist: () => null,
     loadPlaylists: async () => {},
     updateModeText: () => {},
-    getPlaybackUiStateHelpers: () => null,
     isTrackCurrentlyPlaying: () => false,
     stopPlaybackFromUi: async () => {},
     playTrackFromOrigin: async () => {},

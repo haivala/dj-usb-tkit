@@ -31,14 +31,14 @@ function playbackState(overrides = {}) {
   };
 }
 
-function playbackCtx(state, { command, setStatus = () => {} } = {}) {
+function playbackCtx(state, { command, emitStatus = () => {} } = {}) {
   return {
     state,
     command,
     document: { querySelectorAll: () => [] },
     requestAnimationFrameFn: () => 0,
     cancelAnimationFrameFn: () => {},
-    setStatus,
+    emitStatus,
     warn: () => {},
   };
 }
@@ -65,7 +65,7 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
   let status = "";
 
   await playTrackFromOrigin(playbackCtx(state, {
-    setStatus: (text) => { status = text; },
+    emitStatus: (text) => { status = text; },
     command: async (name, payload) => {
       calls.push({ name, payload });
       assert.equal(name, "play_resolved_track");
@@ -107,7 +107,7 @@ test("playTrackFromOrigin commits a backend USB fallback result without local fa
   let status = "";
 
   await playTrackFromOrigin(playbackCtx(state, {
-    setStatus: (text) => { status = text; },
+    emitStatus: (text) => { status = text; },
     command: async (name) => {
       assert.equal(name, "play_resolved_track");
       return backendPlayback({
@@ -134,7 +134,7 @@ test("playTrackFromOrigin reports backend not-found as a warning", async () => {
   let statusMeta = null;
 
   await playTrackFromOrigin(playbackCtx(state, {
-    setStatus: (text, meta) => { status = text; statusMeta = meta; },
+    emitStatus: (text, meta) => { status = text; statusMeta = meta; },
     command: async (name) => {
       assert.equal(name, "play_resolved_track");
       // Mirrors the enriched error the api_client `command()` throws.
@@ -156,7 +156,7 @@ test("playTrackFromOrigin reports backend playback failures as event-log errors"
   let statusMeta = null;
 
   await playTrackFromOrigin(playbackCtx(state, {
-    setStatus: (text, meta) => { status = text; statusMeta = meta; },
+    emitStatus: (text, meta) => { status = text; statusMeta = meta; },
     command: async (name) => {
       assert.equal(name, "play_resolved_track");
       throw new Error("decoder error: unrecognized format");

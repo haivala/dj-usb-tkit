@@ -74,7 +74,7 @@ export function bindSettingsEvents(ctx) {
     document,
     window,
     persistSetting,
-    setStatus,
+    emitStatus,
     setProgress,
     command,
     getTauriEventListen,
@@ -174,7 +174,7 @@ export function bindSettingsEvents(ctx) {
     }
     updatePlaylistExportButtons();
 
-    setStatus(
+    emitStatus(
       willLock
         ? `Export sync mode: additive — "${openPlaylist.name}" already exists on USB, so its track order is locked here (${sortSaveFailed ? "couldn't save the current sort first" : "current order kept"}).`
         : state.exportPruneStale
@@ -190,7 +190,7 @@ export function bindSettingsEvents(ctx) {
       FRONTEND_DB_KEY_EXPORT_BACKUP,
       state.exportBackup ? "1" : "0"
     );
-    setStatus(state.exportBackup ? "Export backup: enabled" : "Export backup: disabled");
+    emitStatus(state.exportBackup ? "Export backup: enabled" : "Export backup: disabled");
   });
 
   el.backupRetentionCountInput?.addEventListener("change", (event) => {
@@ -201,14 +201,14 @@ export function bindSettingsEvents(ctx) {
       el.backupRetentionCountInput.value = String(count);
     }
     persistSetting(STORAGE_KEY_BACKUP_RETENTION_COUNT, FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT, String(count));
-    setStatus(`Backups to keep per file: ${count}`);
+    emitStatus(`Backups to keep per file: ${count}`);
   });
 
   el.openBackupsBtn?.addEventListener("click", () => {
     closeSettingsDrawer();
     switchView("backups").catch((err) => {
       console.error(err);
-      setStatus(err.message || String(err));
+      emitStatus(err.message || String(err));
     });
   });
 
@@ -219,7 +219,7 @@ export function bindSettingsEvents(ctx) {
       el.analysisBpmRangeSelect.value = selected;
     }
     persistSetting(STORAGE_KEY_ANALYSIS_BPM_RANGE, FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE, selected);
-    setStatus(`Analysis BPM range: ${selected}`);
+    emitStatus(`Analysis BPM range: ${selected}`);
   });
 
   // Display only -- the backend renders every key label in this notation, so
@@ -230,7 +230,7 @@ export function bindSettingsEvents(ctx) {
     try {
       await persistSetting(STORAGE_KEY_KEY_NOTATION, FRONTEND_DB_KEY_KEY_NOTATION, notation);
     } catch {
-      setStatus("Could not save key notation");
+      emitStatus("Could not save key notation");
       return;
     }
     try {
@@ -238,7 +238,7 @@ export function bindSettingsEvents(ctx) {
     } catch (err) {
       console.error(err);
     }
-    setStatus(`Key notation: ${notation === "camelot" ? "Camelot (8A)" : "Classic (Am)"}`);
+    emitStatus(`Key notation: ${notation === "camelot" ? "Camelot (8A)" : "Classic (Am)"}`);
   });
 
   el.analysisEngineSelect?.addEventListener("change", (event) => {
@@ -264,7 +264,7 @@ export function bindSettingsEvents(ctx) {
     });
     renderEssentiaInstallRow(ctx);
     const engineLabel = engine === "stratum" ? "Stratum (built-in)" : "Essentia";
-    setStatus(`Analysis engine: ${engineLabel}`);
+    emitStatus(`Analysis engine: ${engineLabel}`);
     if (pushEventLog) pushEventLog({ level: "info", source: "settings", message: `Analysis engine changed to ${engineLabel}` });
   });
 
@@ -296,9 +296,9 @@ export function bindSettingsEvents(ctx) {
       if (el.analysisEngineSelect) el.analysisEngineSelect.value = "stratum";
       persistSetting(STORAGE_KEY_ANALYSIS_ENGINE, FRONTEND_DB_KEY_ANALYSIS_ENGINE, "stratum");
       renderEssentiaInstallRow(ctx);
-      setStatus("Essentia removed");
+      emitStatus("Essentia removed");
     } catch (err) {
-      setStatus(`Remove failed: ${err?.message || String(err)}`);
+      emitStatus(`Remove failed: ${err?.message || String(err)}`);
     }
   });
 
@@ -315,7 +315,7 @@ export function bindSettingsEvents(ctx) {
           state.essentiaDownloadError = null;
           setProgress(false, 0, "Idle");
           renderEssentiaInstallRow(ctx);
-          setStatus("Essentia installed");
+          emitStatus("Essentia installed");
         } else if (payload.error) {
           state.essentiaDownloading = false;
           state.essentiaDownloadError = payload.error;
@@ -332,7 +332,7 @@ export function bindSettingsEvents(ctx) {
     closeSettingsDrawer();
     switchView("event-log").catch((err) => {
       console.error(err);
-      setStatus(err.message || String(err));
+      emitStatus(err.message || String(err));
     });
   });
 

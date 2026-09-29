@@ -25,7 +25,7 @@ function eventDeps(overrides = {}) {
           return [];
         }
       },
-      setStatus: (text) => { calls.status = text; },
+      emitStatus: (text) => { calls.status = text; },
       requestAnimationFrameFn: () => 0,
       cancelAnimationFrameFn: (handle) => { calls.cancelled.push(handle); },
       ...overrides

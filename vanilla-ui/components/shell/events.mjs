@@ -10,7 +10,7 @@ export function bindShellEvents(ctx) {
     confirmDialog,
     tracklistExportDialog,
     persistSetting,
-    setStatus,
+    emitStatus,
     switchView,
     handleSortHeaderClick,
     stopPlaybackIfActive
@@ -62,7 +62,7 @@ export function bindShellEvents(ctx) {
     if (!navItem) return;
     switchView(navItem.dataset.view).catch((err) => {
       console.error(err);
-      setStatus(err.message);
+      emitStatus(err.message);
     });
   });
 
@@ -72,7 +72,7 @@ export function bindShellEvents(ctx) {
     event.preventDefault();
     switchView("event-log").catch((err) => {
       console.error(err);
-      setStatus(err.message);
+      emitStatus(err.message);
     });
   });
 

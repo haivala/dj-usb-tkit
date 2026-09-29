@@ -50,7 +50,6 @@ export function startProgressHeartbeat(ctx) {
   }
   if (state.progressHeartbeatTimer) return;
   state.progressStartedAtMs = Date.now();
-  state.lastJobEventAtMs = Date.now();
   state.progressPausedAtMs = null;
   state.progressHeartbeatTimer = window.setInterval(() => {
     if (!el.progressFooter.classList.contains("active")) return;
@@ -257,8 +256,7 @@ export function handleJobEvent(ctx, payload) {
       setUsbRootControlsLocked(true);
     }
     setAnalysisControlsVisible(state, el, jobType === "analysis");
-    state.lastJobEventAtMs = Date.now();
-    setProgress(ctx, true, percent, message || "Working...");
+      setProgress(ctx, true, percent, message || "Working...");
     startProgressHeartbeat(ctx);
     if (status) {
       emitMessage({
@@ -282,8 +280,7 @@ export function handleJobEvent(ctx, payload) {
     if (isPartialAnalysisPiece) {
       return;
     }
-    state.lastJobEventAtMs = Date.now();
-    setProgress(ctx, true, percent, message || "Working...");
+      setProgress(ctx, true, percent, message || "Working...");
     if (status) {
       emitMessage({
         level: "info",
@@ -296,8 +293,7 @@ export function handleJobEvent(ctx, payload) {
   }
 
   if (eventName === "job.completed") {
-    state.lastJobEventAtMs = Date.now();
-    setProgress(ctx, true, 100, message || "Done");
+      setProgress(ctx, true, 100, message || "Done");
     if (status) {
       emitMessage({
         level: "info",
@@ -316,8 +312,7 @@ export function handleJobEvent(ctx, payload) {
   }
 
   if (eventName === "job.failed") {
-    state.lastJobEventAtMs = Date.now();
-    setProgress(ctx, true, 100, message || "Failed");
+      setProgress(ctx, true, 100, message || "Failed");
     emitMessage({
       level: "error",
       source: "job",

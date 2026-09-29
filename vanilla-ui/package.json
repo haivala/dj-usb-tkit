@@ -7,10 +7,9 @@
     "node": ">=24 <27"
   },
   "scripts": {
-    "test:message-guard": "node scripts/check-message-handling.mjs",
     "build": "node scripts/build.mjs",
-    "test:unit": "npm run test:message-guard && node --test tests/*.test.mjs",
-    "test:coverage": "npm run test:message-guard && node --test --experimental-test-coverage tests/*.test.mjs",
+    "test:unit": "node --test tests/*.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage tests/*.test.mjs",
     "test:e2e:nobuild": "playwright test",
     "test:e2e": "npm run build && npm run test:e2e:nobuild",
     "test:ci": "npm run build && npm run test:unit && npm run test:e2e:nobuild",

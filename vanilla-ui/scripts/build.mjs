@@ -11,8 +11,7 @@ const distDir = path.join(rootDir, "dist");
 const staticFiles = [
   "index.html",
   "styles.css",
-  "text-icon.svg",
-  "playback_ui_state.js"
+  "text-icon.svg"
 ];
 
 await rm(distDir, { recursive: true, force: true });

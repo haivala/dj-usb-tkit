@@ -34,7 +34,7 @@ function playbackCtx(state, overrides = {}) {
     state,
     document: { querySelectorAll: () => [] },
     command: async () => ({}),
-    setStatus: () => {},
+    emitStatus: () => {},
     warn: () => {},
     requestAnimationFrameFn: () => 0,
     cancelAnimationFrameFn: () => {},
@@ -54,7 +54,7 @@ test("stopPlaybackIfActive clears playback state and UI", async () => {
 
   await stopPlaybackIfActive(playbackCtx(state, {
     command: async (name) => { calls.push(name); },
-    setStatus: (text) => calls.push(`status:${text}`)
+    emitStatus: (text) => calls.push(`status:${text}`)
   }));
 
   assert.equal(state.playbackActive, false);

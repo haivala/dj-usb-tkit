@@ -66,7 +66,7 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
     navigator: {},
     constants: CONSTANTS,
     persistSetting: (storageKey, dbKey, value) => persistCalls.push({ dbKey, value }),
-    setStatus: (message) => statuses.push(message),
+    emitStatus: (message) => statuses.push(message),
     command: async () => {},
     getTauriEventListen: async () => null,
     setProgress: () => {},

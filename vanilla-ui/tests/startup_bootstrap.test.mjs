@@ -44,7 +44,7 @@ function deferredCtx(state, calls = [], overrides = {}) {
     usbPlaylistTracksCtl: { clear: () => { calls.push("usb"); } },
     renderWaveformsIn: () => { calls.push("wave"); },
     document: {},
-    setStatus: () => {},
+    emitStatus: () => {},
     logError: () => {},
     ...overrides
   };

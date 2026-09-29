@@ -206,7 +206,7 @@ export function runDeferredInitialLoad(ctx) {
     }).catch((error) => {
       state.startupPhase = false;
       ctx.logError(error);
-      ctx.setStatus(`Initialization failed: ${error.message}`);
+      ctx.emitStatus(`Initialization failed: ${error.message}`);
     });
   }, 0);
 }

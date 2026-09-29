@@ -22,7 +22,7 @@ test("deletePlaylist aborts when confirmation is declined", async () => {
     },
     updateModeText: () => {},
     switchView: async () => {},
-    setStatus: () => {}
+    emitStatus: () => {}
   }, "pl-1");
 
   assert.equal(commandCalled, false);

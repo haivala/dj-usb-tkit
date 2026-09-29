@@ -271,7 +271,7 @@ export async function renderTrackTable(ctx, tbody, tracks, options = {}) {
       row.querySelector(".td-track").textContent = track.title ?? "";
       tbody.append(row);
     });
-    ctx.setStatus(`Track render fallback used: ${error?.message || "unknown render error"}`);
+    ctx.emitStatus(`Track render fallback used: ${error?.message || "unknown render error"}`);
   }
 }
 

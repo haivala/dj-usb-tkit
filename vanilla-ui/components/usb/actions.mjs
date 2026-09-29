@@ -1,5 +1,4 @@
 import { warningEntryText, patchUsbRowsInContainer } from "../library/actions.mjs";
-import { resolveEmitStatus } from "../shared/track_actions.mjs";
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { STORAGE_KEY_USB_ROOT } from "../../settings_keys.mjs";
@@ -542,7 +541,7 @@ export async function detectExternalMasterDb(ctx) {
 // continue unnamed rather than blocking USB use entirely.
 async function promptDriveNameIfUnset(ctx) {
   const { state, el, command, document: doc } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   // Reset first: a stale name from whatever drive was connected before must
   // never linger on screen while this one's actual name is still unknown.
   state.usbDeviceName = null;
@@ -651,7 +650,7 @@ async function promptDriveNameIfUnset(ctx) {
 
 export async function validateAndSetUsbRoot(ctx, path, silent = false) {
   const { state, el, command } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   if (isUsbRootChangeBlocked(state)) {
     if (!silent) emitStatus("Please wait for the current USB operation to finish before switching drives");
@@ -753,7 +752,7 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
 
 export async function removeUsbPlaylist(ctx, playlist) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
@@ -795,7 +794,7 @@ export function moveArrayItem(list, fromIndex, toIndex) {
 
 export async function reorderUsbPlaylists(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
@@ -819,7 +818,7 @@ export async function reorderUsbPlaylists(ctx) {
 
 export async function refreshUsb(ctx) {
   const { state, el, setProgress, startProgressHeartbeat, stopProgressHeartbeat } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
@@ -860,7 +859,7 @@ export async function refreshUsb(ctx) {
 
 export async function runUsbDiagnostics(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
@@ -884,7 +883,7 @@ export async function runUsbDiagnostics(ctx) {
 
 export async function runUsbParityReport(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
@@ -900,7 +899,7 @@ export async function runUsbParityReport(ctx) {
 
 export async function previewUsbRepairs(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
@@ -916,7 +915,7 @@ export async function previewUsbRepairs(ctx) {
 
 export async function applyUsbRepairs(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
@@ -954,7 +953,7 @@ export async function applyUsbRepairs(ctx) {
 
 export async function refreshHistory(ctx) {
   const { state, el } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
@@ -991,7 +990,7 @@ export function sanitizeTracklistFileName(name) {
 
 export async function exportHistoryTracklist(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   const history = state.histories[state.selectedHistoryIndex];
   if (!history || !state.historyTracks.length) {
@@ -1164,7 +1163,7 @@ function applyPlayerMenuConfig(ctx, data, selection = null) {
 
 export async function syncUsbPlayerMenusEdbToPdb(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
     return;
@@ -1211,7 +1210,7 @@ export function syncUsbPlayerMenuEditorControls(ctx) {
 
 export async function loadUsbPlayerMenuConfig(ctx) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
     renderUsbPlayerMenuEditor(ctx);
@@ -1225,7 +1224,7 @@ export async function loadUsbPlayerMenuConfig(ctx) {
 
 async function updateUsbPlayerMenuConfig(ctx, currentKinds, preferredSelection = null) {
   const { state } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
     return;
@@ -1289,7 +1288,7 @@ export async function moveUsbPlayerMenuItems(ctx, direction) {
 
 export async function exportPlaylistToUsb(ctx, playlistId) {
   const { state, el, setProgress, stopProgressHeartbeat } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
   try {
@@ -1499,7 +1498,7 @@ export function patchHistoryTrackRow(ctx, track) {
 
 export async function initializeUsb(ctx) {
   const { state, el } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!state.usbRoot) return;
   try {
     await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
@@ -1514,7 +1513,7 @@ export async function initializeUsb(ctx) {
 
 export async function pickUsbFolder(ctx) {
   if (isUsbRootChangeBlocked(ctx.state)) {
-    resolveEmitStatus(ctx)("Please wait for the current USB operation to finish before switching drives");
+    ctx.emitStatus("Please wait for the current USB operation to finish before switching drives");
     return null;
   }
   const selected = await ctx.invoke("pick_usb_folder");

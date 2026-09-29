@@ -1,4 +1,4 @@
-import { catchErr, handleTrackAction, resolveEmitStatus, resolveRowActionTrack } from "../shared/track_actions.mjs";
+import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { enabledSourceRoots, LIBRARY_LOAD_LIMIT_DEFAULT } from "./actions.mjs";
 
 export function bindLibraryEvents(ctx) {
@@ -28,7 +28,7 @@ export function bindLibraryEvents(ctx) {
     addLibrarySelectionToCurrentPlaylist,
     libraryTracksCtl,
   } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   el.sourceChipsContainer.addEventListener("click", (event) => {
     const removeBtn = event.target.closest(".source-chip-remove");

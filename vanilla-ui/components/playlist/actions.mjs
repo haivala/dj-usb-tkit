@@ -1,4 +1,3 @@
-import { resolveEmitStatus } from "../shared/track_actions.mjs";
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
@@ -60,7 +59,7 @@ export function renderPlaylistList(ctx) {
 
 export function promptNewPlaylist(ctx) {
   const { el, document, requestAnimationFrameFn } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   const existing = el.navPlaylistList.querySelector(".nav-new-input-wrap");
   if (existing) {
     existing.querySelector(".nav-new-input")?.focus();
@@ -118,7 +117,7 @@ export function promptNewPlaylist(ctx) {
 
 export function startPlaylistRename(ctx, playlistId) {
   const { state, el, document, requestAnimationFrameFn, command } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
 
@@ -255,7 +254,7 @@ export function updatePlaylistExportButtons(ctx) {
 
 export async function createPlaylist(ctx, name) {
   const { state, withProgress, command, updateModeText, switchView } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
   if (!name) {
     emitStatus("Playlist name is required");
     return;
@@ -288,7 +287,7 @@ export async function createPlaylist(ctx, name) {
 
 export async function deletePlaylist(ctx, playlistId) {
   const { state, openConfirmDialog, command, updateModeText, switchView } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   if (!playlistId || state.deletingPlaylistId === playlistId) return;
   const playlist = state.playlists.find((p) => p.id === playlistId);
@@ -325,7 +324,7 @@ export async function deletePlaylist(ctx, playlistId) {
 
 export async function addTracksToCurrentPlaylist(ctx, tracks) {
   const { state, pushEventLog, withProgress, command, promoteTrackIdentity } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;
@@ -395,7 +394,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
 // appends -- the frontend just forwards the ids / `allMatching` flag.
 export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [], allMatching = false } = {}) {
   const { state, pushEventLog, withProgress, command } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;

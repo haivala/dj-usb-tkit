@@ -30,5 +30,5 @@ bindBeforeUnloadCleanup(ctx);
 initApp(ctx).catch((error) => {
   ctx.state.startupPhase = false;
   console.error(error);
-  ctx.setStatus(`Initialization failed: ${error.message}`);
+  ctx.emitStatus(`Initialization failed: ${error.message}`);
 });

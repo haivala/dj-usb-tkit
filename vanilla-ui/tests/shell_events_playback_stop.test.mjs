@@ -35,7 +35,7 @@ function setup(playbackRowKey) {
     confirmDialog: { isOpen: () => false, close: () => {} },
     constants: {},
     persistSetting: () => {},
-    setStatus: () => {},
+    emitStatus: () => {},
     switchView: async () => {},
     handleSortHeaderClick: () => {},
     stopPlaybackIfActive

@@ -1,11 +1,5 @@
-import { getPlaybackUiStateHelpers, scrubRatioFromPointer } from "../playback/actions.mjs";
-
-// Resolves the emitStatus function from ctx, falling back to setStatus or a no-op.
-export function resolveEmitStatus(ctx) {
-  return typeof ctx.emitStatus === "function"
-    ? ctx.emitStatus
-    : (typeof ctx.setStatus === "function" ? ctx.setStatus : () => {});
-}
+import { scrubRatioFromPointer } from "../playback/actions.mjs";
+import { shouldToggleStop } from "../../playback_ui_state.mjs";
 
 // Returns a .catch() handler that logs and emits the error message.
 export function catchErr(emitStatus) {
@@ -54,7 +48,7 @@ export function handleTrackAction({ action, track, origin, target, event, state,
     stopPlaybackFromUi,
     playTrackFromOrigin,
   } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   if (action === "add-library" || action === "add-usb" || action === "add-history") {
     addTracksToCurrentPlaylist([track]).catch(catchErr(emitStatus));
@@ -77,17 +71,7 @@ export function handleTrackAction({ action, track, origin, target, event, state,
   }
 
   if (action === "play-library" || action === "play-usb" || action === "play-history") {
-    const helpers = getPlaybackUiStateHelpers();
-    const stopRequested = helpers?.shouldToggleStop
-      ? helpers.shouldToggleStop(state, rowKey, isTrackCurrentlyPlaying(track))
-      : (
-        state?.playbackPendingKind === "stop"
-          ? false
-          : state?.playbackPendingKind === "play"
-            ? ((rowKey && state.playbackPendingRowKey === rowKey) || isTrackCurrentlyPlaying(track))
-            : ((rowKey && state.playbackRowKey === rowKey) || isTrackCurrentlyPlaying(track))
-      );
-    if (stopRequested) {
+    if (shouldToggleStop(state, rowKey, isTrackCurrentlyPlaying(track))) {
       stopPlaybackFromUi().catch((err) => {
         console.error(err);
         emitStatus(`Stop failed: ${err?.message}`);

@@ -76,7 +76,7 @@ export async function renderBackups(ctx) {
 }
 
 export async function restoreUsbBackup(ctx, timestamp) {
-  const { state, command, openConfirmDialog, setStatus } = ctx;
+  const { state, command, openConfirmDialog, emitStatus } = ctx;
   if (!state.usbRoot) return;
 
   const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
@@ -91,7 +91,7 @@ export async function restoreUsbBackup(ctx, timestamp) {
 
   try {
     await command("restore_usb_backup", { usbRoot: state.usbRoot, timestamp });
-    setStatus(`Restored ${label} from backup`);
+    emitStatus(`Restored ${label} from backup`);
     // The restored files may no longer match whatever diagnostics report,
     // playlists, histories, or player-menu state are on screen -- clear
     // them rather than show stale results; the user can reload if they
@@ -100,13 +100,13 @@ export async function restoreUsbBackup(ctx, timestamp) {
     ctx.clearUsbDiagnostics();
     ctx.resetUsbStateViews({ hideDiagnostics: false });
   } catch (err) {
-    setStatus(`Restore failed: ${err?.message || err}`);
+    emitStatus(`Restore failed: ${err?.message || err}`);
   }
   await renderBackups(ctx);
 }
 
 export async function deleteUsbBackup(ctx, timestamp) {
-  const { state, command, openConfirmDialog, setStatus } = ctx;
+  const { state, command, openConfirmDialog, emitStatus } = ctx;
   if (!state.usbRoot) return;
 
   const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
@@ -120,9 +120,9 @@ export async function deleteUsbBackup(ctx, timestamp) {
 
   try {
     await command("delete_usb_backup", { usbRoot: state.usbRoot, timestamp });
-    setStatus(`Deleted ${label} backup`);
+    emitStatus(`Deleted ${label} backup`);
   } catch (err) {
-    setStatus(`Delete failed: ${err?.message || err}`);
+    emitStatus(`Delete failed: ${err?.message || err}`);
   }
   await renderBackups(ctx);
 }

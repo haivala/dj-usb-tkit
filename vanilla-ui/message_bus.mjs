@@ -137,7 +137,7 @@ export function emitMessage(ctx, input = {}) {
   return message;
 }
 
-export function setStatus(ctx, text, meta = {}) {
+export function emitStatus(ctx, text, meta = {}) {
   const statusText = String(text || "");
   const level = meta.level || "info";
   const startupPhase = ctx.state.startupPhase;

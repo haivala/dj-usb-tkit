@@ -52,7 +52,6 @@ function makeState() {
     progressHeartbeatTimer: null,
     progressStartedAtMs: 0,
     progressPausedAtMs: null,
-    lastJobEventAtMs: 0,
     activeJobId: null,
     activeJobType: null,
     usbJobIdleWaiters: []

@@ -97,7 +97,6 @@ export function createInitialState() {
     progressHeartbeatTimer: null,
     progressStartedAtMs: 0,
     progressPausedAtMs: null,
-    lastJobEventAtMs: 0,
     librarySearchDebounceTimer: null,
     trackPreviewHydrateInFlight: new Set(),
     loadedPreviewHydrationSeq: 0,

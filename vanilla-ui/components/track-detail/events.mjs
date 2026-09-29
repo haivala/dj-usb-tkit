@@ -18,10 +18,10 @@ export function bindTrackDetailEvents(ctx) {
     if (adopted) {
       const { from } = adopted;
       adopted = null;
-      ctx.moveActiveWaveform?.(from?.isConnected ? from : null).catch(() => {});
+      ctx.moveActiveWaveform(from?.isConnected ? from : null).catch(() => {});
       return;
     }
-    if (playbackStartedHere && ctx.stopPlaybackFromUi) {
+    if (playbackStartedHere) {
       playbackStartedHere = false;
       ctx.stopPlaybackFromUi().catch(() => {});
     }
@@ -32,10 +32,10 @@ export function bindTrackDetailEvents(ctx) {
   trackDetailDialog.onOpened?.(() => {
     playbackStartedHere = false;
     adopted = null;
-    if (!ctx.state?.playbackActive) return;
-    if (ctx.isTrackCurrentlyPlaying?.(trackDetailDialog.getWorking().track)) {
+    if (!ctx.state.playbackActive) return;
+    if (ctx.isTrackCurrentlyPlaying(trackDetailDialog.getWorking().track)) {
       ctx
-        .moveActiveWaveform?.(el.trackDetailWaveform)
+        .moveActiveWaveform(el.trackDetailWaveform)
         .then((from) => {
           if (from === undefined) return;
           adopted = { from };
@@ -47,7 +47,7 @@ export function bindTrackDetailEvents(ctx) {
         })
         .catch(() => {});
     } else {
-      ctx.stopPlaybackFromUi?.().catch(() => {});
+      ctx.stopPlaybackFromUi().catch(() => {});
     }
   });
   const close = () => {
@@ -126,7 +126,7 @@ export function bindTrackDetailEvents(ctx) {
 
   const playFromRatio = (startRatio) => {
     const track = trackDetailDialog.getWorking().track;
-    if (!track || !ctx.playTrackFromOrigin) return;
+    if (!track) return;
     if (!adopted) playbackStartedHere = true;
     ctx
       .playTrackFromOrigin(track, "local", { startRatio, waveformEl: wf })
@@ -236,7 +236,7 @@ export function bindTrackDetailEvents(ctx) {
       scrubRatioFromPointer(event, wf)
     );
     if (!trackDetailDialog.addCueAtRatio(trackRatio, { free: event.shiftKey })) {
-      ctx.emitStatus?.("Maximum 8 cue points.");
+      ctx.emitStatus("Maximum 8 cue points.");
     }
   });
 
@@ -244,10 +244,10 @@ export function bindTrackDetailEvents(ctx) {
     clearTimeout(pendingPlay);
     pendingPlay = null;
     if (trackDetailDialog.isPlaying()) {
-      ctx.pausePlaybackFromUi?.().catch(() => {});
+      ctx.pausePlaybackFromUi().catch(() => {});
     } else if (trackDetailDialog.isPaused()) {
       ctx
-        .resumePlaybackFromUi?.()
+        .resumePlaybackFromUi()
         .then(() => trackDetailDialog.notePlaybackStarted())
         .catch(() => {});
     } else {
@@ -301,7 +301,7 @@ export function bindTrackDetailEvents(ctx) {
 
   const addCueAtPlayhead = (free) => {
     if (!trackDetailDialog.addCue(undefined, { free })) {
-      ctx.emitStatus?.("Maximum 8 cue points.");
+      ctx.emitStatus("Maximum 8 cue points.");
     }
   };
   el.trackDetailAddCue?.addEventListener("click", (event) => addCueAtPlayhead(event.shiftKey));

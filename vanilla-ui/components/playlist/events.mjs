@@ -1,4 +1,4 @@
-import { catchErr, handleTrackAction, resolveEmitStatus, resolveRowActionTrack } from "../shared/track_actions.mjs";
+import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 
 export function bindPlaylistEvents(ctx) {
@@ -20,7 +20,7 @@ export function bindPlaylistEvents(ctx) {
     commitActivePlaylistSort,
     isPlaylistSortActive
   } = ctx;
-  const emitStatus = resolveEmitStatus(ctx);
+  const { emitStatus } = ctx;
 
   // Scroll-load more of the (now paginated) playlist track list.
   playlistTracksCtl.attachScroll();

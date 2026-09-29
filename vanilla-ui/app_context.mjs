@@ -111,8 +111,7 @@ export function createAppContext(env) {
     }
   }
 
-  bindActions(messages, "emitMessage setStatus pushEventLog");
-  ctx.emitStatus = ctx.setStatus;
+  bindActions(messages, "emitMessage emitStatus pushEventLog");
   bindActions(eventLog, `storeEventLogEntry renderEventLog logWarnings setupConsoleFileLogging
     setupRuntimeErrorLogging`);
   bindActions(backupsUi, "renderBackups restoreUsbBackup deleteUsbBackup");
