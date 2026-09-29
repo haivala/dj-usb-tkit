@@ -27,8 +27,9 @@
     <binary>dj_usb_tkit_desktop</binary>
   </provides>
 
-  <url type="homepage">https://github.com/haivala/dj-usb-tkit</url>
+  <url type="homepage">https://chiph.art/en/projects/dj-usb-tkit</url>
   <url type="bugtracker">https://github.com/haivala/dj-usb-tkit/issues</url>
+  <url type="vcs-browser">https://github.com/haivala/dj-usb-tkit</url>
 
   <screenshots>
     <screenshot type="default">

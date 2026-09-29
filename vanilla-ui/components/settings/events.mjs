@@ -1,5 +1,5 @@
 const NODE_JS_URL = "https://nodejs.org/";
-const WEBSITE_URL = "https://chiph.art?utm_source=djtkit&utm_medium=app&utm_campaign=sidebar";
+const WEBSITE_URL = "https://chiph.art/en/projects/dj-usb-tkit?utm_source=djtkit&utm_medium=app&utm_campaign=sidebar";
 const SUPPORT_URL = "https://chiph.art/en/dj-usb-tkit/support?utm_source=djtkit&utm_medium=app&utm_campaign=support";
 
 export function openExternalUrl(window, url) {

@@ -107,7 +107,7 @@ Detailed behavior and requirements are documented under `docs/`, starting with [
 >
 > The app creates timestamped backups of the existing PDB/eDB database files before every export, playlist reorder/removal, repair, or menu-config write. The newest backup always stays on the USB drive in `PIONEER/rekordbox/backups/`; older ones are moved to a local cache to avoid filling up the drive. Backups can be browsed, restored, or deleted from the **Backups** panel (Settings → Open Backups). The repair tools have also recovered broken USB database states in real use, but recovery is not guaranteed. This software is provided without warranty; see [LICENSE](LICENSE).
 
-Project code is licensed under `AGPL-3.0-or-later`; contributions are accepted under the same terms (inbound = outbound). See `CONTRIBUTING.md`. A redistribution-focused dependency/license audit is tracked in [`docs/THIRD_PARTY_LICENSES.md`](docs/THIRD_PARTY_LICENSES.md).
+Copyright (c) DJ USB Tkit contributors. Project code is licensed under `AGPL-3.0-or-later` (full text in [LICENSE](LICENSE)); contributions are accepted under the same terms (inbound = outbound). See `CONTRIBUTING.md`. A redistribution-focused dependency/license audit is tracked in [`docs/THIRD_PARTY_LICENSES.md`](docs/THIRD_PARTY_LICENSES.md).
 
 ## Prerequisites
 
