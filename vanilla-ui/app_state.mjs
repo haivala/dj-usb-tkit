@@ -66,7 +66,7 @@ export function createInitialState() {
     usbPlayerMenuAvailable: [],
     usbPlayerMenuCurrentSelectedKind: null,
     usbPlayerMenuAvailableSelectedKind: null,
-    usbPlayerMenuDivergence: { inEdbVisibleOnly: [], inPdbOnly: [], orderMismatch: false },
+    usbPlayerMenuDivergence: null,
     activeTab: "library",
     sidebarCollapsed: false,
     externalMasterDbPath: null,

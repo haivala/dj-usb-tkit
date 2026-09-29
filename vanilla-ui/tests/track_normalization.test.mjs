@@ -4,85 +4,49 @@ import {
   normalizeTrack,
   normalizeUsbPlaylist
 } from "../components/library/actions.mjs";
-import { normalizeDurationMs } from "../track_utils.mjs";
 
-const CTX = { toPlayableUrl: (v) => v };
+// The backend sends tracks fully typed (models.rs Track / UsbTrack);
+// normalizeTrack only adds the frontend-owned bits.
+const CTX = { toPlayableUrl: (path) => (path ? `asset://localhost${path}` : null) };
 
-test("normalizeTrack maps the camelCase backend fields and clamps waveform preview", () => {
-  const normalized = normalizeTrack(CTX, {
+test("normalizeTrack passes backend fields through and adds the cover's asset URL", () => {
+  const track = {
     id: "1",
-    localTrackId: "local-1",
     title: "Song",
     artist: "Artist",
-    album: "Album",
-    formatExt: "mp3",
-    sampleRateHz: "44100",
-    bitDepth: "16",
-    bitrateKbps: "320",
-    bpmAnalyzer: "stratum",
-    durationMs: 12345,
-    waveformPreview: [-10, 40, 500],
-    filePath: "/music/song.mp3",
-    updatedAt: "2024-01-01T00:00:00Z"
-  }, "x");
+    bpm: 128,
+    waveformPreview: [0, 40, 100],
+    formatCompat: { severity: "ok" },
+    artworkPath: "/covers/a.jpg",
+    updatedAt: "2026-01-01T00:00:00Z"
+  };
+  const normalized = normalizeTrack(CTX, track);
 
-  assert.equal(normalized.id, "1");
-  assert.equal(normalized.localTrackId, "local-1");
-  assert.equal(normalized.sampleRateHz, 44100);
-  assert.equal(normalized.bitDepth, 16);
-  assert.equal(normalized.bitrateKbps, 320);
-  assert.equal(normalized.bpmAnalyzer, "stratum");
+  assert.equal(normalized.bpm, 128);
   assert.deepEqual(normalized.waveformPreview, [0, 40, 100]);
-  assert.equal(normalized.durationMs, 12345);
+  assert.deepEqual(normalized.formatCompat, { severity: "ok" });
+  assert.equal(normalized.artworkUrl, "asset://localhost/covers/a.jpg?rev=2026-01-01T00%3A00%3A00Z");
+  assert.equal(normalized.artworkChecked, false);
+  assert.equal(normalized.needsHydration, false);
 });
 
-test("normalizeDurationMs reads the canonical durationMs (ms) and rejects non-positive values", () => {
-  assert.equal(normalizeDurationMs({ durationMs: 240000 }), 240000);
-  assert.equal(normalizeDurationMs({ durationMs: 1234.6 }), 1235);
-  assert.equal(normalizeDurationMs({ durationMs: 0 }), null);
-  assert.equal(normalizeDurationMs({ durationMs: null }), null);
-  assert.equal(normalizeDurationMs({}), null);
-  assert.equal(normalizeDurationMs(null), null);
+test("normalizeTrack fills the display defaults for an untitled row", () => {
+  const normalized = normalizeTrack(CTX, { id: "2", title: "", artist: "" });
+  assert.equal(normalized.title, "Unknown Title");
+  assert.equal(normalized.artist, "Unknown Artist");
+  assert.equal(normalized.artworkUrl, "");
 });
 
-test("normalizeTrack maps camelCase bpmAnalyzer", () => {
-  const normalized = normalizeTrack(CTX, {
-    id: "2",
-    title: "Song B",
-    artist: "Artist B",
-    bpmAnalyzer: "essentia",
-    filePath: "/music/song-b.wav"
-  }, "x");
-
-  assert.equal(normalized.bpmAnalyzer, "essentia");
-});
-
-test("normalizeTrack creates fallback id when missing and passes formatExt through verbatim", () => {
-  const normalized = normalizeTrack(CTX, {
-    title: "Song",
-    artist: "Artist",
-    filePath: "/music/song.flac",
-    formatExt: "flac"
-  }, "lib");
-  assert.match(normalized.id, /^lib-\w+$/);
-  assert.equal(normalized.formatExt, "flac");
-  // The frontend no longer infers format from the path -- the backend always
-  // populates formatExt, so an absent value stays empty.
-  const noFormat = normalizeTrack(CTX, { title: "X", artist: "Y", filePath: "/a/b.mp3" }, "lib");
-  assert.equal(noFormat.formatExt, "");
-});
-
-test("normalizeUsbPlaylist normalizes tracks and keeps max trackCount", () => {
+test("normalizeUsbPlaylist normalizes each track", () => {
   const playlist = normalizeUsbPlaylist(CTX, {
+    id: "u1",
     name: "USB Set",
     source: "pdb",
-    trackCount: 1,
-    items: [{ id: "t1", title: "A", artist: "B", filePath: "/usb/a.mp3" }, { id: "t2", title: "C", artist: "D", filePath: "/usb/c.mp3" }]
+    trackCount: 2,
+    tracks: [{ id: "t1", title: "A", artist: "B" }, { id: "t2", title: "", artist: "D", needsHydration: true }]
   });
 
-  assert.equal(playlist.source, "pdb");
-  assert.equal(playlist.tracks.length, 2);
   assert.equal(playlist.trackCount, 2);
-  assert.equal(playlist.tracks[0].title, "A");
-  assert.equal(playlist.tracks[0].filePath, "/usb/a.mp3");
+  assert.equal(playlist.tracks[1].title, "Unknown Title");
+  assert.equal(playlist.tracks[1].needsHydration, true);
 });

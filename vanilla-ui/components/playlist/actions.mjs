@@ -539,7 +539,7 @@ export function createPlaylistTracksController(ctx) {
         cursor: cursor || null,
         limit,
       }),
-    normalize: (track) => ctx.normalizeTrack(track, "plt"),
+    normalize: (track) => ctx.normalizeTrack(track),
     getItems: () => getCurrentPlaylist(ctx)?.tracks || [],
     setItems: (value) => {
       const p = getCurrentPlaylist(ctx);

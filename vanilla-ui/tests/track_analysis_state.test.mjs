@@ -9,10 +9,10 @@ import { normalizeTrack, trackArtworkChecked } from "../components/library/actio
 const ctx = { toPlayableUrl: (v) => v };
 
 test("normalizeTrack carries the backend needsHydration flag (USB rows)", () => {
-  assert.equal(normalizeTrack(ctx, { id: "1", needsHydration: true }, "usb").needsHydration, true);
-  assert.equal(normalizeTrack(ctx, { id: "2", needsHydration: false }, "usb").needsHydration, false);
+  assert.equal(normalizeTrack(ctx, { id: "1", needsHydration: true }).needsHydration, true);
+  assert.equal(normalizeTrack(ctx, { id: "2", needsHydration: false }).needsHydration, false);
   // absent / non-boolean -> false
-  assert.equal(normalizeTrack(ctx, { id: "3" }, "lib").needsHydration, false);
+  assert.equal(normalizeTrack(ctx, { id: "3" }).needsHydration, false);
 });
 
 test("trackArtworkChecked reflects the frontend runtime flag", () => {

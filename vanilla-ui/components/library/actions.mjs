@@ -6,7 +6,6 @@ import { fillBpmCell, fillKeyCell, coverElement } from "../../track_table.mjs";
 import {
   formatDurationMs,
   renderTrackListDurationSummary,
-  normalizeDurationMs,
   loadMoreIfNearBottom,
 } from "../../track_utils.mjs";
 import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
@@ -33,112 +32,30 @@ export function trackArtworkChecked(track) {
   return track?.artworkChecked === true;
 }
 
-// Whether a track still needs core analysis (`analysisReady`) or a deeper USB
-// metadata fetch (`needsHydration`, on USB rows) is owned entirely by the
-// backend -- see `has_core_analysis_fields` / `hydrate_usb_track_in_place`.
-// The frontend reads the fields directly and never recomputes them.
-
-function clampWaveformPreview(value) {
-  if (!Array.isArray(value)) return [];
-  return value.map((v) => Math.max(0, Math.min(100, Number(v) || 0)));
-}
-
-function toFiniteOrNull(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-const FORMAT_COMPAT_SEVERITIES = new Set(["ok", "autofix", "warn"]);
-
-// Coerce the backend `formatCompat` object into a stable `{ severity, warning }`
-// shape. The rule itself lives in Rust (service::format_compat) -- this only
-// guards against a missing/legacy field.
-function normalizeFormatCompat(value) {
-  const severityRaw = String(value?.severity || "ok").toLowerCase();
-  const severity = FORMAT_COMPAT_SEVERITIES.has(severityRaw) ? severityRaw : "ok";
-  const warning = typeof value?.warning === "string" && value.warning.trim()
-    ? value.warning
-    : null;
-  return { severity, warning };
-}
-
-const randomId = () => Math.random().toString(36).slice(2, 9);
-
-export function normalizeTrack(ctx, track, fallbackIdPrefix = "t") {
-  const rawArtwork = track?.artworkDataUrl || track?.artworkUrl || track?.artworkPath || "";
-  const artworkRevision = track?.updatedAt || "";
-  const convertedArtwork = appendUrlRevision(ctx.toPlayableUrl(rawArtwork) || "", artworkRevision);
-  const filePath = String(track?.filePath || "").trim();
-  const waveformPreview = clampWaveformPreview(track?.waveformPreview);
-  const title = track?.title || "Unknown Title";
-  const artist = track?.artist || "Unknown Artist";
-  const album = track?.album || "";
-  const durationMs = normalizeDurationMs(track);
-
+// The backend sends every track fully typed (models.rs `Track` / `UsbTrack`):
+// analysis readiness, format compatibility, key display, the 0-100 waveform
+// preview. This adds only what the frontend owns: the cover's asset URL
+// (Tauri's convertFileSrc), the display defaults for an untitled row, and the
+// UI-side flags.
+export function normalizeTrack(ctx, track) {
+  const rawArtwork = track.artworkDataUrl || track.artworkUrl || track.artworkPath || "";
   return {
-    id: track?.id || `${fallbackIdPrefix}-${randomId()}`,
-    localTrackId: track?.localTrackId || null,
-    title,
-    artist,
-    album,
-    trackNumber: toFiniteOrNull(track?.trackNumber),
-    bpm: toFiniteOrNull(track?.bpm),
-    bpmAnalyzer: track?.bpmAnalyzer || "",
-    key: track?.key || "",
-    // Backend-owned: `key` in the user's notation (Classic/Camelot) and the
-    // key pill's colour group 0..11 (service::key_notation).
-    keyDisplay: track?.keyDisplay || "",
-    keyColor: Number.isInteger(track?.keyColor) ? track.keyColor : null,
-    artworkUrl: convertedArtwork,
-    artworkDataUrl: track?.artworkDataUrl || "",
-    artworkPath: track?.artworkPath || "",
+    ...track,
+    title: track.title || "Unknown Title",
+    artist: track.artist || "Unknown Artist",
+    // Revision-tagged so an updated cover isn't served from cache.
+    artworkUrl: appendUrlRevision(ctx.toPlayableUrl(rawArtwork) || "", track.updatedAt || ""),
     artworkChecked: trackArtworkChecked(track),
-    filePath,
-    durationMs,
-    waveformPeaksPath: track?.waveformPeaksPath || "",
-    usbAnalysisPath: track?.usbAnalysisPath || "",
-    // USB rows only: the un-resolved on-device ANLZ / media paths the cue
-    // editor needs to open + save straight onto the stick.
-    usbAnalysisPathRaw: track?.usbAnalysisPathRaw || "",
-    usbMediaPath: track?.usbMediaPath || "",
-    // Backend-owned on every track-returning command (derived from the file
-    // path server-side when the DB column / PDB row omits it).
-    formatExt: track?.formatExt || "",
-    sampleRateHz: toFiniteOrNull(track?.sampleRateHz),
-    bitDepth: toFiniteOrNull(track?.bitDepth),
-    bitrateKbps: toFiniteOrNull(track?.bitrateKbps),
-    // Backend-owned CDJ format-compatibility verdict (service::format_compat).
-    // `{ severity: "ok" | "autofix" | "warn", warning: string | null }`.
-    formatCompat: normalizeFormatCompat(track?.formatCompat),
-    waveformPreview,
-    waveformColorData: Array.isArray(track?.waveformColorData) ? track.waveformColorData : null,
-    createdAt: track?.createdAt || "",
-    updatedAt: track?.updatedAt || "",
-    masterDbSource: !!track?.masterDbSource,
-    isUsbPath: !!track?.isUsbPath,
-    analysisReady: !!track?.analysisReady,
-    // USB rows only: backend flag for "still missing display data an
-    // inspect_usb_track could fill" (service::usb::hydrate_usb_track_in_place).
-    // Cleared to false by hydrateUsbTrackMetadata after it inspects the row.
-    needsHydration: track?.needsHydration === true
+    // USB rows: "an inspect_usb_track could still fill display data in"; cleared
+    // by hydrateUsbTrackMetadata once it has inspected the row.
+    needsHydration: track.needsHydration === true
   };
 }
 
 export function normalizeUsbPlaylist(ctx, playlist) {
-  const rawTracks = Array.isArray(playlist?.tracks)
-    ? playlist.tracks
-    : Array.isArray(playlist?.items)
-      ? playlist.items
-      : [];
-  const tracks = rawTracks.map((track) => normalizeTrack(ctx, track, "usb"));
-  const declared = Number(playlist?.trackCount ?? 0);
-  return {
-    ...playlist,
-    source: String(playlist?.source || "unknown"),
-    tracks,
-    trackCount: Math.max(Number.isFinite(declared) ? declared : 0, tracks.length)
-  };
+  return { ...playlist, tracks: playlist.tracks.map((track) => normalizeTrack(ctx, track)) };
 }
+
 export function mergeTrackPreservingBestFields(existing, normalized) {
   const merged = { ...existing, ...normalized };
   if ((!Array.isArray(normalized.waveformPreview) || normalized.waveformPreview.length === 0)
@@ -265,7 +182,7 @@ export function trackNeedsPreviewHydration(track) {
 
 export function mergeHydratedTrackIntoState(ctx, rawTrack) {
   const { state } = ctx;
-  const normalized = normalizeTrack(ctx, rawTrack, "lib");
+  const normalized = normalizeTrack(ctx, rawTrack);
   const trackId = String(normalized.id || "").trim();
   if (!trackId) return false;
   let changed = false;
@@ -611,7 +528,7 @@ export function createLibraryTracksController(ctx) {
       });
     },
     normalize: (track) => {
-      const normalized = normalizeTrack(ctx, track, "lib");
+      const normalized = normalizeTrack(ctx, track);
       const prev = ctl.prevById.get(String(normalized.id));
       return prev ? mergeTrackPreservingBestFields(prev, normalized) : normalized;
     },

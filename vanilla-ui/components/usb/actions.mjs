@@ -964,7 +964,7 @@ export async function refreshHistory(ctx) {
 
   state.histories = (data.items || []).map((history) => ({
     ...history,
-    tracks: (history.tracks || []).map((track) => ctx.normalizeTrack(track, "hist"))
+    tracks: (history.tracks || []).map((track) => ctx.normalizeTrack(track))
   }));
   // Backend-owned: `fetch_usb_histories` always returns `counts` computed over
   // the full import -- the frontend renders them, never re-tallies.
@@ -1156,7 +1156,7 @@ function applyPlayerMenuConfig(ctx, data, selection = null) {
   const { state } = ctx;
   state.usbPlayerMenuCurrent = Array.isArray(data?.currentItems) ? data.currentItems : [];
   state.usbPlayerMenuAvailable = Array.isArray(data?.availableItems) ? data.availableItems : [];
-  state.usbPlayerMenuDivergence = normalizeDivergence(data?.divergence);
+  state.usbPlayerMenuDivergence = data?.divergence ?? null;
   state.usbPlayerMenuCurrentSelectedKind = selection?.side === "current" ? normalizeMenuKind(selection.kind) : null;
   state.usbPlayerMenuAvailableSelectedKind = selection?.side === "available" ? normalizeMenuKind(selection.kind) : null;
   renderUsbPlayerMenuEditor(ctx);
@@ -1207,18 +1207,6 @@ export function syncUsbPlayerMenuEditorControls(ctx) {
   if (el.usbPlayerMenuDownBtn) {
     el.usbPlayerMenuDownBtn.disabled = !hasRoot || currentIdx < 0 || currentIdx >= currentKinds.length - 1;
   }
-}
-
-function normalizeDivergence(raw) {
-  return {
-    inEdbVisibleOnly: Array.isArray(raw?.inEdbVisibleOnly) ? raw.inEdbVisibleOnly : [],
-    inPdbOnly: Array.isArray(raw?.inPdbOnly) ? raw.inPdbOnly : [],
-    orderMismatch: !!raw?.orderMismatch,
-    pdbMissingKinds: Array.isArray(raw?.pdbMissingKinds) ? raw.pdbMissingKinds : [],
-    summary: String(raw?.summary || ""),
-    canSync: !!raw?.canSync,
-    canRestore: !!raw?.canRestore,
-  };
 }
 
 export async function loadUsbPlayerMenuConfig(ctx) {
@@ -1447,7 +1435,7 @@ export function renderHistoryList(ctx) {
 // The USB-playlist and USB-history track tables' data layer: paginated +
 // searched + sorted + per-page-hydrated by the backend, rendered via the shared
 // controller. Selection/search/sort/scroll all go through it.
-function createUsbTracksController(ctx, { bodyId, fetchCommand, prefix, secondaryActionType, actionType }) {
+function createUsbTracksController(ctx, { bodyId, fetchCommand, secondaryActionType, actionType }) {
   return createTrackListController({
     bodyId,
     getElements: () => ({
@@ -1465,7 +1453,7 @@ function createUsbTracksController(ctx, { bodyId, fetchCommand, prefix, secondar
         cursor: cursor || null,
         limit,
       }),
-    normalize: (track) => ctx.normalizeTrack(track, prefix),
+    normalize: (track) => ctx.normalizeTrack(track),
     rowOptions: () => ({
       withCheckbox: false,
       actionLabel: "+",
@@ -1487,7 +1475,6 @@ export function createUsbPlaylistTracksController(ctx) {
   return createUsbTracksController(ctx, {
     bodyId: "usbPlaylistTracks",
     fetchCommand: "fetch_usb_playlist_tracks",
-    prefix: "usb",
     actionType: "add-usb",
     secondaryActionType: "play-usb",
   });
@@ -1497,7 +1484,6 @@ export function createUsbHistoryTracksController(ctx) {
   return createUsbTracksController(ctx, {
     bodyId: "historyTracks",
     fetchCommand: "fetch_usb_history_tracks",
-    prefix: "hist",
     actionType: "add-history",
     secondaryActionType: "play-history",
   });
@@ -1565,7 +1551,7 @@ function applyHydratedTrackResult(ctx, track, inspectedTrack) {
     track.artworkChecked = true;
     return;
   }
-  const normalized = ctx.normalizeTrack({ ...track, ...inspectedTrack }, "usb") || {};
+  const normalized = ctx.normalizeTrack({ ...track, ...inspectedTrack });
   if (!normalized.localTrackId && track.localTrackId) {
     normalized.localTrackId = track.localTrackId;
   }

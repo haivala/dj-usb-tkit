@@ -88,13 +88,13 @@ test("diagnostics guard, history refresh, and tracklist filename sanitizing stay
       counts: { importedPlaylists: 1, importedTracks: 1 },
       warnings: ["warn"]
     }),
-    normalizeTrack: (track, prefix) => ({ ...track, normalizedWith: prefix }),
+    normalizeTrack: (track) => ({ ...track, normalized: true }),
     countWarningsForStatus: () => 1
   });
   ctx.state.usbRoot = "/USB";
   await refreshHistory(ctx);
 
-  assert.equal(ctx.state.histories[0].tracks[0].normalizedWith, "hist");
+  assert.equal(ctx.state.histories[0].tracks[0].normalized, true);
   assert.equal(ctx.el.historyCountsText.textContent, "1 sessions, 1 tracks");
   assert.equal(ctx.el.historyList.querySelectorAll("[data-history-index]").length, 1);
   assert.match(status, /USB histories loaded: 1 \| \(1 warning\(s\)\)/);

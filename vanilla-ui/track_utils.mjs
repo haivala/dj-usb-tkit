@@ -1,4 +1,4 @@
-// Track normalization and formatting utilities.
+// Track formatting utilities.
 
 // Shared "infinite scroll" check: if `wrap` is scrolled within `thresholdPx`
 // of its bottom, and nothing else is already loading/blocking it, load the
@@ -13,13 +13,8 @@ export function loadMoreIfNearBottom(wrap, thresholdPx, isBusy, hasMore, loadMor
   return loadMore();
 }
 
-// The backend sends exactly one canonical duration field, `durationMs`
-// (Option<u64> milliseconds), on every track-bearing response.
-export function normalizeDurationMs(track) {
-  const ms = Number(track?.durationMs);
-  return Number.isFinite(ms) && ms > 0 ? Math.round(ms) : null;
-}
-
+// `m:ss` / `h:mm:ss` for a millisecond duration (tracks carry `durationMs`,
+// Option<u64>).
 export function formatDurationMs(value) {
   const ms = Math.max(0, Math.round(Number(value) || 0));
   const totalSeconds = Math.floor(ms / 1000);

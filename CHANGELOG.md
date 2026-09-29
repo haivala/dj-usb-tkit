@@ -58,7 +58,9 @@
   of passing dependencies around by hand, all HTML now lives as templates in
   `index.html` rather than being built in JavaScript (`main.js` went from
   about 1,800 lines to 34), and the production bundle is minified
-  (447 KB → 211 KB).
+  (447 KB → 211 KB). The UI also no longer re-checks and re-coerces the
+  track, USB playlist and player-menu data the backend already sends fully
+  typed.
 
 ## 0.2.9
 
