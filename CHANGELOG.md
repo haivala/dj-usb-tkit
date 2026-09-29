@@ -42,6 +42,14 @@
 - **Fix:** the app version (and the "Update available" link) now shows in the
   Settings header next to the close button. Before, it sat at the bottom of
   the settings list and was hidden below the fold on shorter windows.
+- **Improvement:** the cue editor always shows all eight hot cue slots (A–H)
+  in a grid of up to four columns, with the unused slots dimmed. The window no
+  longer changes height as cues are added or removed, and each cue has its
+  own outlined box so it's easier to tell apart. The playback-start cue now
+  sits next to the "Cues" heading, marked with the same ▶ flag it has on the
+  waveform.
+- **Fix:** the cue letters on the cue editor's waveform are no longer
+  italic.
 
 ## 0.2.8
 

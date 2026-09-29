@@ -615,21 +615,56 @@ export function createTrackDetailController(el, prefs = {}) {
     return row;
   }
 
+  /// A free A–H slot. Letters follow position, so it only marks room for one
+  /// more cue; it isn't a pad that can be filled directly.
+  function emptySlot(letter) {
+    const doc = el.trackDetailCueList.ownerDocument;
+    const slot = doc.createElement("div");
+    slot.className = "cue-slot-empty";
+    slot.setAttribute("aria-hidden", "true");
+    const play = doc.createElement("button");
+    play.type = "button";
+    play.className = "cue-row-play";
+    play.disabled = true;
+    play.tabIndex = -1;
+    play.innerHTML =
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg>';
+    const pos = doc.createElement("span");
+    pos.className = "cue-row-pos";
+    pos.textContent = "–";
+    const swatch = doc.createElement("span");
+    swatch.className = "cue-row-color";
+    swatch.textContent = letter;
+    const name = doc.createElement("input");
+    name.type = "text";
+    name.className = "cue-row-name";
+    name.placeholder = "Name";
+    name.disabled = true;
+    name.tabIndex = -1;
+    slot.append(play, pos, swatch, name);
+    return slot;
+  }
+
+  /// Always all eight A–H slots, so the modal keeps its height as cues come
+  /// and go. The playback-start cue sits in the "Playback starts at" row.
   function renderCueList() {
     const host = el.trackDetailCueList;
     if (!host) return;
     host.textContent = "";
-    const hotCount = hotCues().length;
-    if (!hotCount) {
-      const empty = host.ownerDocument.createElement("p");
-      empty.className = "muted cue-list-empty";
-      empty.textContent = "No cues yet. Double-click the waveform to add one, or play and hit “+ Cue”.";
-      host.appendChild(empty);
-    } else {
-      const labels = cueLabels();
-      for (const cue of orderedCues()) host.appendChild(cueRow(cue, labels.get(cue.tempId)));
+    const hot = hotCues().sort(byPosition);
+    const labels = cueLabels();
+    for (const cue of hot) host.appendChild(cueRow(cue, labels.get(cue.tempId)));
+    for (let i = hot.length; i < MAX_CUES; i++) {
+      host.appendChild(emptySlot(String.fromCharCode(65 + i)));
     }
-    if (el.trackDetailAddCue) el.trackDetailAddCue.disabled = hotCount >= MAX_CUES;
+    const startHost = el.trackDetailStartCue;
+    if (startHost) {
+      startHost.textContent = "";
+      const start = startCue();
+      if (start) startHost.appendChild(cueRow(start, labels.get(start.tempId)));
+      startHost.hidden = !start;
+    }
+    if (el.trackDetailAddCue) el.trackDetailAddCue.disabled = hot.length >= MAX_CUES;
   }
 
   /// "Playback starts at [First cue | First beat]". The second choice reads
@@ -921,7 +956,7 @@ export function createTrackDetailController(el, prefs = {}) {
     selectCue(tempId) {
       if (!working.cues.some((c) => c.tempId === tempId)) return;
       working.selectedTempId = tempId;
-      for (const host of [el.trackDetailCueMarkers, el.trackDetailCueList]) {
+      for (const host of [el.trackDetailCueMarkers, el.trackDetailCueList, el.trackDetailStartCue]) {
         for (const node of host?.querySelectorAll("[data-temp-id]") || []) {
           node.classList.toggle("is-selected", node.dataset.tempId === tempId);
         }

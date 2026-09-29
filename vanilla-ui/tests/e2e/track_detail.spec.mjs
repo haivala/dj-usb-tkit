@@ -166,8 +166,15 @@ test("track-detail modal adds a cue at the playhead and saves it", async ({ page
     .poll(() => page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track")))
     .toBe(true);
 
+  // All eight A–H slots are always there, so adding a cue doesn't change the height.
+  const cells = page.locator("#trackDetailCueList > *");
+  await expect(cells).toHaveCount(8);
+  const listHeight = (await page.locator("#trackDetailCueList").boundingBox()).height;
   await page.locator("#trackDetailAddCue").click();
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+  await expect(cells).toHaveCount(8);
+  await expect(page.locator("#trackDetailCueList .cue-slot-empty").first().locator(".cue-row-color")).toHaveText("B");
+  expect((await page.locator("#trackDetailCueList").boundingBox()).height).toBe(listHeight);
 
   await page.locator("#trackDetailSaveBtn").click();
   await expect(page.locator("#trackDetailOverlay")).toBeHidden();
@@ -233,28 +240,30 @@ test("playback-start choice: informational with no cues, then applies the rememb
   expect(await preStartEdge(page)).toBeLessThan(310);
   await expect(firstBeat).toHaveAttribute("aria-checked", "false");
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
-  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(0);
+  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
 
-  // Choosing First beat adds the memory-only start cue there (120 ms), listed first.
+  // Choosing First beat adds the memory-only start cue there (120 ms), shown
+  // in the "Playback starts at" row rather than among the A–H slots.
   await firstBeat.click();
   await expect(firstBeat).toHaveAttribute("aria-checked", "true");
   await expect(firstCue).toHaveAttribute("aria-checked", "false");
   await expect(firstBeat).toHaveText("First beat");
   const rows = page.locator("#trackDetailCueList .cue-row");
-  await expect(rows).toHaveCount(2);
-  await expect(rows.first()).toHaveClass(/is-playback-start/);
-  await expect(rows.first().locator(".cue-row-pos")).toHaveText("0:00.12");
-  await expect(rows.first().locator(".cue-row-delete")).toHaveCount(0);
-  await expect(rows.first().locator(".cue-row-color")).toHaveCount(0);
-  await expect(rows.first().locator(".cue-row-name")).toHaveCount(0);
-  await expect(rows.first().locator(".cue-row-label")).toHaveText("Playback start");
+  await expect(rows).toHaveCount(1);
+  const start = page.locator("#trackDetailStartCue .cue-row.is-playback-start");
+  await expect(start).toHaveCount(1);
+  await expect(start.locator(".cue-row-pos")).toHaveText("0:00.12");
+  await expect(start.locator(".cue-row-delete")).toHaveCount(0);
+  await expect(start.locator(".cue-row-color")).toHaveCount(0);
+  await expect(start.locator(".cue-row-name")).toHaveCount(0);
+  await expect(start.locator(".cue-row-label")).toHaveText("Playback start");
   await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start")).toHaveCount(1);
   // …and the greyed-out part shrinks to the first beat.
   await expect.poll(() => preStartEdge(page)).toBeLessThan(10);
   // Hot cues keep their A.. lettering, the same in the list as on the waveform.
   await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)")).toHaveText("A");
-  await expect(rows.nth(1).locator(".cue-row-color")).toHaveText("A");
-  await expect(rows.first().locator(".cue-row-memory")).toHaveText("▶");
+  await expect(rows.first().locator(".cue-row-color")).toHaveText("A");
+  await expect(start.locator(".cue-row-memory")).toHaveText("▶");
 
   // …and remembers the choice.
   expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("1");
@@ -370,20 +379,21 @@ test("remembered start-on-first-beat: the first cue adds the start cue; deleting
 
   await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
   const rows = page.locator("#trackDetailCueList .cue-row");
-  await expect(rows).toHaveCount(2);
-  await expect(rows.first()).toHaveClass(/is-playback-start/);
+  await expect(rows).toHaveCount(1);
+  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
   await expect(firstBeat).toHaveAttribute("aria-checked", "true");
   await expect(firstBeat).toBeEnabled();
 
   // A second cue doesn't add another start cue, nor count it toward the 8.
   await page.locator("#trackDetailAddCue").click();
-  await expect(rows).toHaveCount(3);
-  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(1);
+  await expect(rows).toHaveCount(2);
+  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
 
   for (let i = 0; i < 2; i += 1) {
     await page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-delete").first().click();
   }
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(0);
+  await expect(page.locator("#trackDetailStartCue .cue-row")).toHaveCount(0);
   await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveCount(0);
   await expect(firstBeat).toBeDisabled();
   await expect(page.locator("#trackDetailStartNote")).toBeVisible();
@@ -396,12 +406,12 @@ test("an existing track's start cue drives the choice, not the remembered settin
   const firstCue = page.locator("#trackDetailStartFirstCue");
   const firstBeat = page.locator("#trackDetailStartFirstBeat");
   await expect(firstCue).toHaveAttribute("aria-checked", "true");
-  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(0);
+  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
 
   await firstBeat.click();
-  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(1);
+  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
   await firstCue.click();
-  await expect(page.locator("#trackDetailCueList .cue-row.is-playback-start")).toHaveCount(0);
+  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("0");
 });
 
@@ -411,7 +421,7 @@ test("the playback-start cue follows an untouched first beat and is never after 
   await expect(firstBeat).toHaveAttribute("aria-checked", "true");
 
   await expect(firstBeat).toHaveText("First beat");
-  const startPos = page.locator("#trackDetailCueList .cue-row.is-playback-start .cue-row-pos");
+  const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
   const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
   await expect(startPos).toHaveText("0:00.12");
 

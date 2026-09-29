@@ -406,20 +406,28 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.setKey(event.target.value);
   });
 
-  // Cue list: play / name / colour / delete (event-delegated).
-  el.trackDetailCueList?.addEventListener("input", (event) => {
+  // Cue rows: play / name / colour / delete (event-delegated). The hot cues
+  // live in the list, the playback-start cue in the "Playback starts at" row.
+  for (const host of [el.trackDetailCueList, el.trackDetailStartCue]) {
+    bindCueRows(host, ctx, playFromCue);
+  }
+}
+
+function bindCueRows(host, ctx, playFromCue) {
+  const { trackDetailDialog } = ctx;
+  host?.addEventListener("input", (event) => {
     const target = event.target.closest("[data-action='cue-name']");
     if (!target) return;
     const tempId = target.closest(".cue-row")?.dataset.tempId;
     if (tempId) trackDetailDialog.renameCue(tempId, target.value);
   });
-  el.trackDetailCueList?.addEventListener("focusin", (event) => {
+  host?.addEventListener("focusin", (event) => {
     const tempId = event.target.closest(".cue-row")?.dataset.tempId;
     if (tempId && event.target.closest("[data-action='cue-name']")) {
       trackDetailDialog.selectCue(tempId);
     }
   });
-  el.trackDetailCueList?.addEventListener("click", (event) => {
+  host?.addEventListener("click", (event) => {
     const rowId = event.target.closest(".cue-row")?.dataset.tempId;
     const target = event.target.closest("[data-action]");
     if (rowId && target?.dataset.action !== "cue-delete" && target?.dataset.action !== "cue-name") {

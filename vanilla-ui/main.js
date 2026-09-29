@@ -151,7 +151,7 @@ const ELEMENT_IDS = [
   "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
   "trackDetailPlayPause", "trackDetailHint", "trackDetailHintBtn",
   "trackDetailOverview", "trackDetailOverviewCues", "trackDetailOverviewWindow", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailGridLevel", "trackDetailMetronomeMix", "trackDetailZoomRange", "trackDetailTotalTime",
-  "trackDetailCueList", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
+  "trackDetailCueList", "trackDetailStartCue", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
 ];
 
 const el = {
