@@ -3,7 +3,7 @@
 // made-up playlists and a connected USB, and draws a cursor and a Shift
 // keycap, which a headless screencast doesn't show.
 (() => {
-  const { tracks, detail, sourceRoots, playlists } = window.__DOC_GIF_FIXTURE__;
+  const { tracks, detail, sourceRoots, sourceRootEnabled, playlists } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
   const USB_ROOT = "/run/media/dj/Chiphead";
   const ls = window.localStorage;
@@ -11,6 +11,7 @@
   ls.setItem("djusbtkit.theme", "dark");
   ls.setItem("djusbtkit.accentHue", "270");
   ls.setItem("djusbtkit.sourceRoots", JSON.stringify(sourceRoots));
+  ls.setItem("djusbtkit.sourceRootEnabled", JSON.stringify(sourceRootEnabled));
   ls.setItem("djusbtkit.cueStartOnFirstBeat", "0");
   ls.setItem("djusbtkit.cueQuantize", "1");
 
@@ -95,16 +96,20 @@
           case "list_tracks":
           case "search_tracks":
             return ok({ total: tracks.length, items: tracks });
-          case "browse_source_files":
+          case "browse_source_files": {
+            // Only the checked folders' tracks, as the backend filters them.
+            const roots = r.sourceRoots || sourceRoots;
+            const items = tracks.filter((t) => roots.some((root) => t.filePath.startsWith(`${root}/`)));
             return ok({
-              total: tracks.length,
-              items: tracks,
+              total: items.length,
+              items,
               nextCursor: null,
               hasMore: false,
-              sourceRootAnalysis: sourceRoots.map((sourceRoot) => ({ sourceRoot, fullyAnalyzed: true })),
-              totalDurationMs: sumMs(tracks),
-              durationKnownCount: tracks.length,
+              sourceRootAnalysis: roots.map((sourceRoot) => ({ sourceRoot, fullyAnalyzed: true })),
+              totalDurationMs: sumMs(items),
+              durationKnownCount: items.length,
             });
+          }
           case "get_tracks_by_ids_with_previews":
             return ok({ items: tracks.filter((t) => (r.trackIds || []).includes(t.id)) });
           case "resolve_track_identity":

@@ -4,7 +4,8 @@
 //   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
 //   npm run docs:media -- cue-editor cue-editor-drag-cues   (only those)
 //
-// 1. Synthesises a made-up 10-track library (two albums, two source folders)
+// 1. Synthesises a made-up 10-track library (two albums, both in the checked
+//    source folder; the other, unchecked one only shows the "Filtered" badge)
 //    with ffmpeg.
 // 2. Scans and analyzes it with the real backend (`dump_doc_gif_fixture`
 //    bin) and dumps what the frontend would receive.
@@ -37,7 +38,7 @@ const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit"
 
 const ALBUMS = [
   {
-    folder: "Syyskuu",
+    folder: "Syyskuu/Night Shift EP",
     album: "Night Shift EP",
     artist: "Kaamos Unit",
     cover:
@@ -53,7 +54,7 @@ const ALBUMS = [
     ],
   },
   {
-    folder: "Heinäkuu",
+    folder: "Syyskuu/Lakeside Tapes",
     album: "Lakeside Tapes",
     artist: "Midsummer Static",
     cover:
@@ -126,11 +127,13 @@ function buildFixture(work) {
   }
   // Album order, then track number (the file name), as a tidy library shows.
   fixture.tracks.sort((a, b) => {
-    const folder = (t) => FOLDERS.indexOf(t.filePath.split("/").at(-2));
+    const folder = (t) => ALBUMS.findIndex((al) => t.filePath.includes(`/${al.folder}/`));
     return folder(a) - folder(b) || a.filePath.localeCompare(b.filePath);
   });
   fixture.detail.track = fixture.tracks.find((t) => t.id === fixture.detail.track.id);
   fixture.sourceRoots = FOLDERS.map((f) => `${SHOWN_ROOT}/${f}`);
+  // Heinäkuu unchecked, so the Library shows the "Filtered" badge.
+  fixture.sourceRootEnabled = { [fixture.sourceRoots[0]]: true, [fixture.sourceRoots[1]]: false };
   const byTitle = (...titles) => fixture.tracks.filter((t) => titles.includes(t.title));
   // Sidebar order top to bottom; `current` is the active playlist.
   fixture.playlists = [
@@ -152,7 +155,8 @@ async function openApp(browser, fixture, opts) {
   await ctx.addInitScript({ path: join(here, "page_init.js") });
   const page = await ctx.newPage();
   await page.goto(BASE_URL);
-  await page.locator("#libraryTableBody .track-grid-row").nth(fixture.tracks.length - 1).waitFor();
+  await page.locator("#libraryTableBody .track-grid-row", { hasText: EDITOR_TITLE }).waitFor();
+  await page.waitForTimeout(300);
   return { ctx, page };
 }
 
