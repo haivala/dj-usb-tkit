@@ -53,6 +53,13 @@
   `export.pdb`, library, `exportLibrary.db`). If an export or another USB job
   is running, the save waits for it to finish instead of writing at the same
   time, and back-to-back saves never overwrite each other's changes.
+- **Fix:** opening the cue editor on a track that's already playing no longer
+  shows it as stopped. The editor picks up the running playback: the playhead
+  and Play/Pause show where it is, and "+ Cue" lands there. Closing the editor
+  leaves the track playing. If a different track is playing when the editor
+  opens, it stops, so Play and "+ Cue" always apply to the track being edited.
+- **Fix:** the highlight on the selected cue in the cue editor's list no
+  longer gets cut off at the edges.
 
 ## 0.2.7
 
