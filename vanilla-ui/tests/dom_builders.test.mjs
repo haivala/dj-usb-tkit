@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
 import {
-  renderPlaylistSidebarItemContent,
-  updatePlaylistPanelTitle,
+  fillPlaylistSidebarItem,
   populatePlaylistPanel
 } from "../components/playlist/actions.mjs";
 import {
@@ -15,20 +14,13 @@ import {
   setActiveListItem,
   renderEmptyState
 } from "../components/shell/actions.mjs";
-import { escapeHtml } from "../ui_utils.mjs";
+import { APP_TEMPLATES, makeTestCtx } from "./test_helpers.mjs";
 
 function makeDom() {
   return new JSDOM(`
     <!doctype html>
     <body>
-      <template id="emptyStateTemplate">
-        <div class="empty-state">
-          <div class="empty-state-icon"></div>
-          <div class="empty-state-heading"></div>
-          <div class="empty-state-body"></div>
-          <button class="empty-state-action hidden" type="button"></button>
-        </div>
-      </template>
+      ${APP_TEMPLATES}
       <div id="usbRecentRow" class="hidden"></div>
       <div id="usbRecentList"></div>
       <div id="playlistPanelTitle"></div>
@@ -45,15 +37,16 @@ function makeDom() {
   `);
 }
 
-test("renderPlaylistSidebarItemContent escapes name and shows export marker", () => {
-  const html = renderPlaylistSidebarItemContent(
-    { id: "p1", name: `<Mix & Match>`, lastExportedAt: "2026-04-07T10:00:00Z" },
-    { escapeHtml }
-  );
+test("fillPlaylistSidebarItem shows the name as text and the export marker", () => {
+  const { document } = makeDom().window;
+  const item = document.getElementById("tplNavPlaylistItem").content.firstElementChild.cloneNode(true).firstElementChild;
+  fillPlaylistSidebarItem(item, { id: "p1", name: `<Mix & Match>`, lastExportedAt: "2026-04-07T10:00:00Z" });
 
-  assert.ok(html.includes("&lt;Mix &amp; Match&gt;"));
-  assert.ok(html.includes("nav-playlist-status exported"));
-  assert.ok(html.includes("Exported to USB"));
+  assert.equal(item.querySelector(".nav-playlist-name").textContent, "<Mix & Match>");
+  const status = item.querySelector(".nav-playlist-status");
+  assert.equal(status.classList.contains("exported"), true);
+  assert.equal(status.dataset.tooltip, "Exported to USB");
+  assert.equal(item.querySelector(".nav-playlist-delete").dataset.deletePlaylist, "p1");
 });
 
 test("renderUsbRecentRoots toggles row visibility and renders buttons", () => {
@@ -64,7 +57,7 @@ test("renderUsbRecentRoots toggles row visibility and renders buttons", () => {
     usbRecentList: document.getElementById("usbRecentList")
   };
 
-  renderUsbRecentRoots(el, ["/USB/A", "", " /USB/B "], document);
+  renderUsbRecentRoots({ el, document, state: { usbRecentRoots: ["/USB/A", "", " /USB/B "] } });
 
   assert.equal(el.usbRecentRow.classList.contains("hidden"), false);
   assert.equal(el.usbRecentList.querySelectorAll("button").length, 2);
@@ -79,22 +72,14 @@ test("populatePlaylistPanel fills export status and search input", () => {
     playlistExportStatus: document.getElementById("playlistExportStatus"),
     playlistSearchInput: document.getElementById("playlistSearchInput")
   };
-  let exportButtonUpdates = 0;
+  const ctx = makeTestCtx({ state: { ...makeTestCtx().state, playlistTrackSearch: "acid" } });
 
-  populatePlaylistPanel(
-    el,
-    { playlistTrackSearch: "acid" },
-    { name: "Set A", tracks: [] },
-    {
-      updatePlaylistPanelTitle: (playlist) => updatePlaylistPanelTitle(el, playlist, { formatDurationMs: String }),
-      formatPlaylistExportStatus: () => "Last exported recently.",
-      updatePlaylistExportButtons: () => { exportButtonUpdates += 1; }
-    }
-  );
+  populatePlaylistPanel(ctx, { name: "Set A", tracks: [], trackCount: 2, totalDurationMs: 61000 });
 
-  assert.equal(el.playlistExportStatus.textContent, "Last exported recently.");
-  assert.equal(el.playlistSearchInput.value, "acid");
-  assert.equal(exportButtonUpdates, 1);
+  assert.equal(ctx.el.playlistPanelTitle.textContent, "Set A (2 tracks, Total time: 1:01)");
+  assert.equal(ctx.el.playlistExportStatus.textContent, "Not exported yet.");
+  assert.equal(ctx.el.playlistSearchInput.value, "acid");
+  assert.equal(ctx.el.exportPlaylistBtn.textContent, "Select USB first");
 });
 
 test("updateUsbRootText renders the disconnected state", () => {
@@ -105,7 +90,7 @@ test("updateUsbRootText renders the disconnected state", () => {
     usbRootPathText: document.getElementById("usbRootPathText")
   };
 
-  updateUsbRootText(el, null, false);
+  updateUsbRootText({ el }, null, false);
   assert.equal(el.usbConnectionBar.classList.contains("hidden"), false);
   assert.equal(el.usbRootPathText.textContent, "No USB selected");
   assert.equal(el.usbRootPathText.classList.contains("usb-path-valid"), false);
@@ -129,7 +114,7 @@ test("renderEmptyState clones template and wires one-shot action", () => {
   const container = document.getElementById("container");
   let clicks = 0;
 
-  renderEmptyState(document, container, {
+  renderEmptyState(container, {
     icon: "!",
     heading: "Nothing here",
     body: "Add something",

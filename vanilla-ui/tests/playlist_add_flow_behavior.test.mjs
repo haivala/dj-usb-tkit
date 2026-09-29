@@ -1,41 +1,49 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { addTracksToCurrentPlaylist } from "../components/playlist/actions.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
+
+// An app ctx with `playlist` open. `onAdd` answers add_track_candidates_to_playlist;
+// the playlist re-fetch after a resolved add is counted in `refreshes`.
+function addCtx({ playlist = { id: "pl-1", name: "Main" }, onAdd, usbRoot = null, usbRootValid = false } = {}) {
+  const out = { status: "", refreshes: 0 };
+  out.ctx = makeTestCtx({
+    withProgress: async (_label, run) => run(() => {}),
+    pushEventLog: () => {},
+    emitStatus: (text) => { out.status = text; },
+    command: async (name, payload) => {
+      if (name === "get_playlist_tracks") {
+        out.refreshes += 1;
+        return { items: [], total: 0 };
+      }
+      return onAdd(name, payload);
+    }
+  });
+  Object.assign(out.ctx.state, {
+    playlists: playlist ? [playlist] : [],
+    currentPlaylistId: playlist?.id ?? null,
+    usbRoot,
+    usbRootValid
+  });
+  return out;
+}
 
 test("addTracksToCurrentPlaylist requires active playlist", async () => {
-  let status = "";
-
-  await addTracksToCurrentPlaylist([{ id: "1" }], {
-    requireCurrentPlaylist: () => null,
-    withProgress: async () => {
-      throw new Error("withProgress should not run without an active playlist");
-    },
-    command: async () => ({ added: 0, skipped: 0, resolved: 0 }),
-    refreshCurrentPlaylistTracks: async () => {},
-    setStatus: (text) => { status = text; }
+  const harness = addCtx({
+    playlist: null,
+    onAdd: () => { throw new Error("nothing should be sent without an active playlist"); }
   });
 
-  assert.equal(status, "");
+  await addTracksToCurrentPlaylist(harness.ctx, [{ id: "1" }]);
+
+  assert.equal(harness.status, "Create and activate a playlist first");
 });
 
 test("addTracksToCurrentPlaylist sends row candidates to backend and reports result", async () => {
   let capturedCommand = null;
-  let refreshed = 0;
-  let status = "";
 
-  await addTracksToCurrentPlaylist([{
-    id: "1",
-    localTrackId: "local-1",
-    title: "Track One",
-    artist: "Artist",
-    album: "Album",
-    bpm: 128,
-    filePath: "/music/one.mp3",
-    fileSizeBytes: 1234
-  }], {
-    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    withProgress: async (_label, run) => run(() => {}),
-    command: async (name, payload) => {
+  const harness = addCtx({
+    onAdd: async (name, payload) => {
       capturedCommand = { name, payload };
       return {
         playlistId: "pl-1",
@@ -47,11 +55,19 @@ test("addTracksToCurrentPlaylist sends row candidates to backend and reports res
         resolutions: [{ previousId: "1", trackId: "local-1", resolvedBy: "localTrackId", materialized: false }]
       };
     },
-    refreshCurrentPlaylistTracks: async () => { refreshed += 1; },
-    setStatus: (text) => { status = text; },
     usbRoot: "/media/USB",
     usbRootValid: true
   });
+  await addTracksToCurrentPlaylist(harness.ctx, [{
+    id: "1",
+    localTrackId: "local-1",
+    title: "Track One",
+    artist: "Artist",
+    album: "Album",
+    bpm: 128,
+    filePath: "/music/one.mp3",
+    fileSizeBytes: 1234
+  }]);
 
   assert.equal(capturedCommand.name, "add_track_candidates_to_playlist");
   assert.equal(capturedCommand.payload.playlistId, "pl-1");
@@ -77,8 +93,8 @@ test("addTracksToCurrentPlaylist sends row candidates to backend and reports res
     usbRoot: null,
     usbRootValid: false
   });
-  assert.equal(refreshed, 1);
-  assert.match(status, /Added 1 tracks \(skipped 0\) to Main/);
+  assert.equal(harness.refreshes, 1);
+  assert.match(harness.status, /Added 1 tracks \(skipped 0\) to Main/);
 });
 
 test("addTracksToCurrentPlaylist never sends both id and trackId (backend aliases them to the same field)", async () => {
@@ -88,16 +104,13 @@ test("addTracksToCurrentPlaylist never sends both id and trackId (backend aliase
   // from the library (the exact bug the id/trackId split payload used to trigger).
   let capturedCommand = null;
 
-  await addTracksToCurrentPlaylist([{ id: "1", title: "Track One", artist: "Artist" }], {
-    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    withProgress: async (_label, run) => run(() => {}),
-    command: async (name, payload) => {
+  const harness = addCtx({
+    onAdd: async (name, payload) => {
       capturedCommand = { name, payload };
       return { playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] };
-    },
-    refreshCurrentPlaylistTracks: async () => {},
-    setStatus: () => {}
+    }
   });
+  await addTracksToCurrentPlaylist(harness.ctx, [{ id: "1", title: "Track One", artist: "Artist" }]);
 
   assert.equal("id" in capturedCommand.payload.tracks[0], false);
   assert.equal(capturedCommand.payload.tracks[0].trackId, "1");
@@ -109,7 +122,13 @@ test("addTracksToCurrentPlaylist never sends a non-numeric bpm, even for an unan
   // Shaped like normalizeTrack() would (pre-fix) produce for a track that hasn't been
   // BPM-analyzed yet -- this is exactly the payload that used to crash the real backend
   // with "invalid type: string \"\", expected f64".
-  await addTracksToCurrentPlaylist([{
+  const harness = addCtx({
+    onAdd: async (name, payload) => {
+      capturedCommand = { name, payload };
+      return { playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] };
+    }
+  });
+  await addTracksToCurrentPlaylist(harness.ctx, [{
     id: "1",
     localTrackId: null,
     title: "Unanalyzed Track",
@@ -117,29 +136,16 @@ test("addTracksToCurrentPlaylist never sends a non-numeric bpm, even for an unan
     album: "",
     bpm: "",
     filePath: "/music/unanalyzed.mp3"
-  }], {
-    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    withProgress: async (_label, run) => run(() => {}),
-    command: async (name, payload) => {
-      capturedCommand = { name, payload };
-      return { playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] };
-    },
-    refreshCurrentPlaylistTracks: async () => {},
-    setStatus: () => {}
-  });
+  }]);
 
   assert.notEqual(typeof capturedCommand.payload.tracks[0].bpm, "string");
   assert.equal(capturedCommand.payload.tracks[0].bpm, null);
 });
 
 test("addTracksToCurrentPlaylist reports unresolved backend candidates without refreshing", async () => {
-  let refreshed = 0;
-  let status = "";
 
-  await addTracksToCurrentPlaylist([{ id: "usb-1", title: "USB Track", usbAnalysisPath: "/USB/PIONEER/USBANLZ/P001/A/ANLZ0000.DAT" }], {
-    requireCurrentPlaylist: () => ({ id: "pl-1", name: "Main" }),
-    withProgress: async (_label, run) => run(() => {}),
-    command: async () => ({
+  const harness = addCtx({
+    onAdd: async () => ({
       playlistId: "pl-1",
       requested: 1,
       resolved: 0,
@@ -147,13 +153,12 @@ test("addTracksToCurrentPlaylist reports unresolved backend candidates without r
       added: 0,
       skipped: 0,
       resolutions: [{ previousId: "usb-1", trackId: null, resolvedBy: "usbOrigin", materialized: false }]
-    }),
-    refreshCurrentPlaylistTracks: async () => { refreshed += 1; },
-    setStatus: (text) => { status = text; }
+    })
   });
+  await addTracksToCurrentPlaylist(harness.ctx, [{ id: "usb-1", title: "USB Track", usbAnalysisPath: "/USB/PIONEER/USBANLZ/P001/A/ANLZ0000.DAT" }]);
 
-  assert.equal(refreshed, 0);
-  assert.equal(status, "No imported track IDs found to add");
+  assert.equal(harness.refreshes, 0);
+  assert.equal(harness.status, "No imported track IDs found to add");
 });
 
 test("addTracksToCurrentPlaylist clears exported-to-USB status after a resolved add", async () => {
@@ -165,13 +170,11 @@ test("addTracksToCurrentPlaylist clears exported-to-USB status after a resolved 
     lastExportedTrackCount: 5
   };
 
-  await addTracksToCurrentPlaylist([{ id: "1" }], {
-    requireCurrentPlaylist: () => playlist,
-    withProgress: async (_label, run) => run(() => {}),
-    command: async () => ({ playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] }),
-    refreshCurrentPlaylistTracks: async () => {},
-    setStatus: () => {}
+  const harness = addCtx({
+    playlist: playlist,
+    onAdd: async () => ({ playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] })
   });
+  await addTracksToCurrentPlaylist(harness.ctx, [{ id: "1" }]);
 
   assert.equal(playlist.lastExportedAt, null);
   assert.equal(playlist.lastExportedUsbRoot, null);

@@ -1,8 +1,9 @@
 // Job progress bar management: set/dismiss/heartbeat/withProgress.
 
-import { USB_ROOT_LOCKING_JOB_TYPES } from "./components/usb/actions.mjs";
+import { USB_ROOT_LOCKING_JOB_TYPES, isUsbRootChangeBlocked } from "./components/usb/actions.mjs";
 
-export function setProgress(state, el, active, percent = 0, text = "", opts = {}) {
+export function setProgress(ctx, active, percent = 0, text = "", opts = {}) {
+  const { state, el } = ctx;
   el.progressFooter.classList.toggle("active", active);
   el.progressFooter.classList.toggle("error", !!opts.error);
   el.progressFooter.classList.toggle("dismissable", !!opts.dismissable);
@@ -22,11 +23,31 @@ export function setProgress(state, el, active, percent = 0, text = "", opts = {}
     : state.progressBaseText;
 }
 
-export function dismissProgress(state, el) {
-  setProgress(state, el, false, 0, "Idle");
+export function dismissProgress(ctx) {
+  setProgress(ctx, false, 0, "Idle");
 }
 
-export function startProgressHeartbeat(state, el) {
+// Hide the footer `delayMs` after a job finished, so its final text stays
+// readable. Only one hide is ever pending; a new job cancels it.
+export function scheduleProgressIdle(ctx, delayMs) {
+  const { state } = ctx;
+  clearTimeout(state.progressIdleTimer);
+  state.progressIdleTimer = setTimeout(() => {
+    state.progressIdleTimer = null;
+    setProgress(ctx, false, 0, "Idle");
+    stopProgressHeartbeat(ctx);
+  }, delayMs);
+}
+
+export function startProgressHeartbeat(ctx) {
+  const { state, el } = ctx;
+  // A new job inside the previous one's hide delay: drop that hide (it would
+  // blank this job's footer) and restart the elapsed-time clock.
+  if (state.progressIdleTimer) {
+    clearTimeout(state.progressIdleTimer);
+    state.progressIdleTimer = null;
+    stopProgressHeartbeat(ctx);
+  }
   if (state.progressHeartbeatTimer) return;
   state.progressStartedAtMs = Date.now();
   state.lastJobEventAtMs = Date.now();
@@ -47,20 +68,23 @@ export function startProgressHeartbeat(state, el) {
   }, 1000);
 }
 
-export function stopProgressHeartbeat(state) {
+export function stopProgressHeartbeat(ctx) {
+  const { state } = ctx;
   if (!state.progressHeartbeatTimer) return;
   window.clearInterval(state.progressHeartbeatTimer);
   state.progressHeartbeatTimer = null;
   state.progressPausedAtMs = null;
 }
 
-export function pauseProgressHeartbeat(state, el) {
+export function pauseProgressHeartbeat(ctx) {
+  const { state, el } = ctx;
   if (state.progressPausedAtMs) return;
   state.progressPausedAtMs = Date.now();
   el.progressText.textContent = `${state.progressBaseText} (paused)`;
 }
 
-export function resumeProgressHeartbeat(state, el) {
+export function resumeProgressHeartbeat(ctx) {
+  const { state, el } = ctx;
   if (!state.progressPausedAtMs) return;
   // Shift the start time forward by however long we were paused, so the
   // displayed elapsed time picks back up from where it left off instead of
@@ -77,29 +101,61 @@ export function nextPaint() {
   });
 }
 
-export async function withProgress(state, el, label, fn) {
-  setProgress(state, el, true, 10, `${label}...`);
-  startProgressHeartbeat(state, el);
+export async function withProgress(ctx, label, fn) {
+  setProgress(ctx, true, 10, `${label}...`);
+  startProgressHeartbeat(ctx);
   await nextPaint();
   try {
-    const result = await fn((percent, text) => setProgress(state, el, true, percent, text || `${label}...`));
-    setProgress(state, el, true, 100, `${label} done`);
-    setTimeout(() => {
-      setProgress(state, el, false, 0, "Idle");
-      stopProgressHeartbeat(state);
-    }, 350);
+    const result = await fn((percent, text) => setProgress(ctx, true, percent, text || `${label}...`));
+    setProgress(ctx, true, 100, `${label} done`);
+    scheduleProgressIdle(ctx, 350);
     return result;
   } catch (error) {
-    stopProgressHeartbeat(state);
-    setProgress(state, el, true, 100, `${label} failed`, { error: true, dismissable: true });
+    stopProgressHeartbeat(ctx);
+    setProgress(ctx, true, 100, `${label} failed`, { error: true, dismissable: true });
     throw error;
   }
+}
+
+export function toggleAnalysisPause(ctx) {
+  const { state, el } = ctx;
+  const paused = !state.analysisPaused;
+  state.analysisPaused = paused;
+  updateAnalysisPauseButtonAppearance(el, paused);
+  if (paused) {
+    // Only tracks not yet picked up are held back -- anything already in
+    // flight keeps running, so the timer keeps counting until that settles.
+    // handleJobEvent freezes it once analyzingTrackIds empties out. If
+    // nothing is in flight right now, it's already effectively stopped, so
+    // reflect that immediately.
+    if (state.analyzingTrackIds.size === 0) {
+      pauseProgressHeartbeat(ctx);
+    }
+  } else {
+    resumeProgressHeartbeat(ctx);
+  }
+  ctx.command("set_analysis_paused", { paused }).catch((err) => {
+    console.error("[analysis-ui] set_analysis_paused failed:", err);
+  });
+}
+
+export function cancelAnalysis(ctx) {
+  const { state, el } = ctx;
+  el.progressPauseBtn.hidden = true;
+  el.progressCancelAnalysisBtn.hidden = true;
+  if (state.analysisPaused) {
+    state.analysisPaused = false;
+    resumeProgressHeartbeat(ctx);
+  }
+  ctx.command("cancel_analysis").catch((err) => {
+    console.error("[analysis-ui] cancel_analysis failed:", err);
+  });
 }
 
 export function updateAnalysisPauseButtonAppearance(el, paused) {
   el.progressPauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
   el.progressPauseBtn.setAttribute("aria-label", paused ? "Resume analysis" : "Pause analysis");
-  el.progressPauseBtn.innerHTML = paused ? "&#9654;" : "&#10074;&#10074;";
+  el.progressPauseBtn.textContent = paused ? "\u25B6" : "\u275A\u275A";
 }
 
 function setAnalysisControlsVisible(state, el, visible) {
@@ -116,40 +172,18 @@ export function formatJobStatusText(_jobType, _stage, message) {
   return String(message || "");
 }
 
-function createEmitMessage(deps = {}) {
-  if (typeof deps.emitMessage === "function") {
-    return deps.emitMessage;
-  }
-  const setStatus = typeof deps.setStatus === "function" ? deps.setStatus : () => {};
-  const pushEventLog = typeof deps.pushEventLog === "function" ? deps.pushEventLog : () => {};
-  return (msg = {}) => {
-    if (msg.status?.text) {
-      setStatus(msg.status.text);
-    }
-    if (msg.eventLog?.text) {
-      pushEventLog({
-        level: msg.level,
-        source: msg.source,
-        code: msg.code,
-        message: msg.eventLog.text,
-        details: msg.eventLog.details,
-        coalesceKey: msg.eventLog.coalesceKey,
-        ts: msg.ts
-      });
-    }
-  };
-}
-
-export function handleJobEvent(state, el, payload, deps = {}) {
+export function handleJobEvent(ctx, payload) {
   const {
+    state,
+    el,
     debugFrontendLog,
+    emitMessage,
     applyRealtimeAnalyzedTrackUpdate,
-    refreshSourceRootAnalysisStatus = () => {},
-    applyLibraryDurationSummary = () => {},
-    setTrackAnalyzingState = () => {},
+    refreshSourceRootAnalysisStatus,
+    applyLibraryDurationSummary,
+    setTrackAnalyzingState,
     setUsbRootControlsLocked,
-  } = deps;
-  const emitMessage = createEmitMessage(deps);
+  } = ctx;
   const trackInfo = payload?.trackTitle || payload?.trackId;
   console.log(
     "[job-event]",
@@ -219,7 +253,7 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     // finished (no rows left in the "analyzing" state) has the batch really
     // stopped.
     if (state.analysisPaused && state.analyzingTrackIds && state.analyzingTrackIds.size === 0) {
-      pauseProgressHeartbeat(state, el);
+      pauseProgressHeartbeat(ctx);
     }
   }
 
@@ -227,12 +261,12 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     state.activeJobId = jobId;
     state.activeJobType = jobType;
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
-      setUsbRootControlsLocked?.(true);
+      setUsbRootControlsLocked(true);
     }
     setAnalysisControlsVisible(state, el, jobType === "analysis");
     state.lastJobEventAtMs = Date.now();
-    setProgress(state, el, true, percent, message || "Working...");
-    startProgressHeartbeat(state, el);
+    setProgress(ctx, true, percent, message || "Working...");
+    startProgressHeartbeat(ctx);
     if (status) {
       emitMessage({
         level: "info",
@@ -256,7 +290,7 @@ export function handleJobEvent(state, el, payload, deps = {}) {
       return;
     }
     state.lastJobEventAtMs = Date.now();
-    setProgress(state, el, true, percent, message || "Working...");
+    setProgress(ctx, true, percent, message || "Working...");
     if (status) {
       emitMessage({
         level: "info",
@@ -270,7 +304,7 @@ export function handleJobEvent(state, el, payload, deps = {}) {
 
   if (eventName === "job.completed") {
     state.lastJobEventAtMs = Date.now();
-    setProgress(state, el, true, 100, message || "Done");
+    setProgress(ctx, true, 100, message || "Done");
     if (status) {
       emitMessage({
         level: "info",
@@ -281,21 +315,16 @@ export function handleJobEvent(state, el, payload, deps = {}) {
     }
     Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
-      setUsbRootControlsLocked?.(false);
+      setUsbRootControlsLocked(false);
     }
-    state.activeJobId = null;
-    state.activeJobType = null;
-    setAnalysisControlsVisible(state, el, false);
-    setTimeout(() => {
-      setProgress(state, el, false, 0, "Idle");
-      stopProgressHeartbeat(state);
-    }, 350);
+    finishActiveJob(ctx, jobType);
+    scheduleProgressIdle(ctx, 350);
     return;
   }
 
   if (eventName === "job.failed") {
     state.lastJobEventAtMs = Date.now();
-    setProgress(state, el, true, 100, message || "Failed");
+    setProgress(ctx, true, 100, message || "Failed");
     emitMessage({
       level: "error",
       source: "job",
@@ -307,14 +336,28 @@ export function handleJobEvent(state, el, payload, deps = {}) {
       }
     });
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
-      setUsbRootControlsLocked?.(false);
+      setUsbRootControlsLocked(false);
     }
-    state.activeJobId = null;
-    state.activeJobType = null;
-    setAnalysisControlsVisible(state, el, false);
-    setTimeout(() => {
-      setProgress(state, el, false, 0, "Idle");
-      stopProgressHeartbeat(state);
-    }, 500);
+    finishActiveJob(ctx, jobType);
+    scheduleProgressIdle(ctx, 500);
   }
+}
+
+function finishActiveJob(ctx, jobType) {
+  const { state, el } = ctx;
+  state.activeJobId = null;
+  state.activeJobType = null;
+  setAnalysisControlsVisible(state, el, false);
+  if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
+    const waiters = state.usbJobIdleWaiters.splice(0);
+    waiters.forEach((resolve) => resolve());
+  }
+}
+
+// Resolves once no USB job holds the drive: at once when none is running,
+// otherwise when the running one completes or fails.
+export function waitForUsbJobIdle(ctx) {
+  const { state } = ctx;
+  if (!isUsbRootChangeBlocked(state)) return Promise.resolve();
+  return new Promise((resolve) => state.usbJobIdleWaiters.push(resolve)).then(() => waitForUsbJobIdle(ctx));
 }

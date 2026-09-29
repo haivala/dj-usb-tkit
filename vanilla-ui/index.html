@@ -62,7 +62,7 @@
   </header>
 
   <div class="update-banner hidden" id="updateBanner" role="alert">
-    <span id="updateBannerText"></span>
+    <span id="updateBannerText"><span class="update-banner-message"></span> — <a href="#" class="update-banner-link">view release</a></span>
     <button class="update-banner-dismiss" id="updateBannerDismissBtn" aria-label="Dismiss">&times;</button>
   </div>
 
@@ -425,7 +425,7 @@
       <h2>Settings</h2>
       <div class="settings-meta">
         <span class="settings-version" id="settingsVersionText">Version 0.1.0-RC3</span>
-        <span class="settings-update-note hidden" id="settingsUpdateNote"></span>
+        <span class="settings-update-note hidden" id="settingsUpdateNote"><a href="#" class="update-note-link"></a></span>
       </div>
       <button class="settings-close" id="settingsCloseBtn" aria-label="Close settings">&times;</button>
     </div>
@@ -692,6 +692,143 @@
     </div>
   </template>
 
+  <!-- Markup the JS clones (ui_utils.mjs cloneTemplate) and only fills with
+       text/attributes, dropping the optional parts an instance doesn't use. -->
+
+  <!-- Track tables (library, app playlist, USB playlist, USB history) -->
+  <template id="tplTrackRow">
+    <div role="row" class="track-grid-row">
+      <div role="cell" class="track-grid-cell td-drag"><span class="drag-handle" data-playlist-track-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">⠿</span></div>
+      <div role="cell" class="track-grid-cell td-select"><input type="checkbox" /></div>
+      <div role="cell" class="track-grid-cell td-cover"></div>
+      <div role="cell" class="track-grid-cell td-waveform"><div class="waveform-cell"><button class="transport-btn"></button><div class="waveform" data-action="scrub-play" aria-label="waveform preview" data-tooltip="Play from here"><i class="waveform-playhead" aria-hidden="true"></i></div><button class="waveform-detail-btn" data-action="edit-track-detail" aria-label="Cue points &amp; beat grid"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="21" y1="21" x2="15.5" y2="15.5"></line></svg></button></div></div>
+      <div role="cell" class="track-grid-cell td-track"><div class="track-info-cell">
+        <span class="track-title"></span>
+        <span class="track-artist"></span>
+      </div></div>
+      <div role="cell" class="track-grid-cell td-album"></div>
+      <div role="cell" class="track-grid-cell td-format"><span class="format-badge"></span></div>
+      <div role="cell" class="track-grid-cell td-length"></div>
+      <div role="cell" class="track-grid-cell td-bpm"></div>
+      <div role="cell" class="track-grid-cell td-key"></div>
+      <div role="cell" class="track-grid-cell td-action"><div class="action-buttons"><button class="track-add-btn"></button><button data-action="analyze-track"></button></div></div>
+    </div>
+  </template>
+  <template id="tplTrackRowEmpty">
+    <div role="row" class="track-grid-row track-grid-row-empty"><div role="cell" class="track-grid-cell track-grid-empty">No tracks available.</div></div>
+  </template>
+  <template id="tplTrackRowFallback">
+    <div role="row" class="track-grid-row"><div role="cell" class="track-grid-cell td-drag">-</div><div role="cell" class="track-grid-cell td-select">-</div><div role="cell" class="track-grid-cell td-cover">-</div><div role="cell" class="track-grid-cell td-waveform">-</div><div role="cell" class="track-grid-cell td-track"></div><div role="cell" class="track-grid-cell td-album">-</div><div role="cell" class="track-grid-cell td-format">-</div><div role="cell" class="track-grid-cell td-length">-</div><div role="cell" class="track-grid-cell td-bpm">-</div><div role="cell" class="track-grid-cell td-key">-</div><div role="cell" class="track-grid-cell td-action">-</div></div>
+  </template>
+  <template id="tplCoverImg"><img class="cover-thumb" alt="cover" loading="lazy" /></template>
+  <template id="tplCoverPlaceholder"><div class="cover-thumb" aria-hidden="true"></div></template>
+  <template id="tplWaveformCanvas"><canvas class="waveform-canvas-el" aria-hidden="true"></canvas></template>
+  <template id="tplBpmPill"><span class="bpm-pill"></span></template>
+  <template id="tplKeyPill"><span class="key-pill"></span></template>
+  <template id="tplIconPlay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></template>
+  <template id="tplIconStop"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg></template>
+  <template id="tplIconPause"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="6" width="3.5" height="12" rx="1"></rect><rect x="13.5" y="6" width="3.5" height="12" rx="1"></rect></svg></template>
+
+  <!-- Status line, library sources, sidebar playlists -->
+  <template id="tplStatusWarningLink"><a href="#" class="status-warning-link"></a></template>
+  <template id="tplSourceChipMasterDb">
+    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-master-db="true" aria-label="Toggle desktop library" /><span class="source-chip-path">master.db</span></span>
+  </template>
+  <template id="tplSourceChip">
+    <span class="source-chip"><input class="source-chip-toggle" type="checkbox" aria-label="Filter source" /><span class="source-chip-path"></span><button class="source-chip-remove" aria-label="Remove">&times;</button></span>
+  </template>
+  <template id="tplNavPlaylistItem">
+    <li><button class="nav-playlist-item">
+      <span class="nav-playlist-name"></span>
+      <span class="nav-playlist-status"></span>
+      <span class="nav-playlist-delete" data-tooltip="Delete playlist" aria-label="Delete playlist" role="button" tabindex="0">&times;</span>
+    </button></li>
+  </template>
+  <template id="tplNavNewPlaylist">
+    <li class="nav-new-input-wrap"><input class="nav-new-input" type="text" placeholder="Playlist name..." /><button class="nav-new-cancel" type="button">&times;</button></li>
+  </template>
+  <template id="tplNavRenameInput"><input class="nav-rename-input" type="text" /></template>
+
+  <!-- USB panels -->
+  <template id="tplMutedListItem"><li class="muted"></li></template>
+  <template id="tplUsbPlaylistItem">
+    <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-remove" data-tooltip="Remove" aria-label="Remove">&times;</span></button></li>
+  </template>
+  <template id="tplHistoryItem"><li><button><span class="playlist-label"></span></button></li></template>
+  <template id="tplUsbRecentItem">
+    <span class="usb-cfg-recent-item"><button type="button" class="usb-cfg-recent-btn" style="direction: rtl; text-align: left;"></button><button type="button" class="usb-cfg-recent-prune-btn" data-tooltip="Forget this USB device">×</button></span>
+  </template>
+  <template id="tplDiagSection">
+    <div class="diag-section"><h3><span class="diag-dot"></span> <span class="diag-section-title"></span></h3></div>
+  </template>
+  <template id="tplDiagCheck">
+    <div class="diag-check"><span class="diag-indicator"></span> <strong></strong>: <span class="diag-check-detail"></span></div>
+  </template>
+  <template id="tplDiagLogLink"><button class="diag-log-link">→ event log</button></template>
+  <template id="tplDiagResolutionHead">
+    <tr><th>Status</th><th>Playlist</th><th>Resolved</th><th>Total</th><th>Rate</th></tr>
+  </template>
+  <template id="tplDiagResolutionRow">
+    <tr><td><span class="diag-dot"></span></td><td></td><td></td><td></td><td></td></tr>
+  </template>
+  <template id="tplDiagParityHead">
+    <tr><th>Status</th><th>Playlist</th><th class="num">PDB</th><th class="num">eDB</th><th class="num">Matched</th><th>Issues</th></tr>
+  </template>
+  <template id="tplDiagParityRow">
+    <tr><td><span class="diag-dot"></span></td><td></td><td class="num"></td><td class="num"></td><td class="num"></td><td><span class="muted"></span></td></tr>
+  </template>
+  <template id="tplDiagParitySummary">
+    <div><h4>Parity Summary</h4><table class="diag-table"><thead><tr><th>Status</th><th>Metric</th><th>Count</th></tr></thead><tbody></tbody></table></div>
+  </template>
+  <template id="tplDiagParitySummaryRow">
+    <tr><td><span class="diag-dot"></span> <span class="diag-summary-status"></span></td><td></td><td></td></tr>
+  </template>
+  <template id="tplRepairFix">
+    <li><input type="checkbox" class="diag-repair-fix-check" /><div class="diag-repair-fix-content"><div class="diag-repair-fix-title"><strong></strong></div><span class="diag-repair-fix-desc"></span><span class="diag-repair-fix-meta"></span></div></li>
+  </template>
+  <template id="tplPlayerMenuItem">
+    <button type="button" class="player-menu-item" role="option"><span class="player-menu-item-label"></span><span class="player-menu-item-origin"></span></button>
+  </template>
+
+  <!-- Event log, backups, settings -->
+  <template id="tplLogMessageRow">
+    <div class="event-log-row"><div class="event-log-message muted"></div></div>
+  </template>
+  <template id="tplEventLogRow">
+    <div class="event-log-row"><div class="event-log-time"></div><div class="event-log-level"></div><div class="event-log-source"></div><div class="event-log-message"><span class="event-log-code"></span> <span class="event-log-text"></span> <span class="event-log-count" data-tooltip="Coalesced occurrences"></span></div></div>
+  </template>
+  <template id="tplBackupRow">
+    <div class="event-log-row">
+      <div class="event-log-time"></div>
+      <div class="event-log-source"></div>
+      <div class="event-log-message"></div>
+      <div class="backups-row-actions">
+        <button type="button" class="backups-restore-btn">Restore</button>
+        <button type="button" class="backups-delete-btn">Delete</button>
+      </div>
+    </div>
+  </template>
+  <template id="tplEssentiaNodeMissing">
+    <span>Node.js not found — <a href="https://nodejs.org/" class="essentia-node-link" target="_blank" rel="noopener noreferrer">Get Node.js</a></span>
+  </template>
+
+  <!-- Cue editor -->
+  <template id="tplBeatgridLine"><i class="beatgrid-line"></i></template>
+  <template id="tplBeatgridBar"><b class="beatgrid-bar"></b></template>
+  <template id="tplOverviewCue"><i class="overview-cue"></i></template>
+  <template id="tplCueMarker"><i class="cue-marker"></i></template>
+  <template id="tplCueRow">
+    <div class="cue-row"><button type="button" class="cue-row-play" data-action="cue-play" aria-label="Play from this cue" data-tooltip="Play from here"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><button type="button" class="cue-row-color" data-action="cue-color"></button><input type="text" class="cue-row-name" data-action="cue-name" placeholder="Name" /><button type="button" class="cue-row-delete" data-action="cue-delete" aria-label="Delete cue">×</button></div>
+  </template>
+  <template id="tplCueRowStart">
+    <div class="cue-row is-playback-start"><button type="button" class="cue-row-play" data-action="cue-play" aria-label="Play from this cue" data-tooltip="Play from here"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><span class="cue-row-memory" data-tooltip="Memory cue only (no hot cue)"></span><span class="cue-row-label">Playback start</span><span class="cue-row-badge">memory cue</span></div>
+  </template>
+  <template id="tplCueSlotEmpty">
+    <div class="cue-slot-empty" aria-hidden="true"><button type="button" class="cue-row-play" disabled tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos">–</span><span class="cue-row-color"></span><input type="text" class="cue-row-name" placeholder="Name" disabled tabindex="-1" /></div>
+  </template>
+  <template id="tplCueColorSwatch"><button type="button" class="cue-color-swatch"></button></template>
+  <template id="tplOptgroup"><optgroup></optgroup></template>
+
   <!-- Help overlay -->
   <div class="help-overlay hidden" id="helpOverlay">
     <div class="help-dialog" role="dialog" aria-modal="true" aria-label="Quick Start Help">
@@ -715,6 +852,9 @@
       </div>
     </div>
   </div>
+
+  <div id="app-tooltip" class="app-tooltip" role="tooltip"></div>
+  <button class="sidebar-expand-btn" id="sidebarExpandBtn" data-tooltip="Expand sidebar" aria-label="Expand sidebar">&#9656;</button>
 
   <script src="./playback_ui_state.js"></script>
   <script type="module" src="./main.js"></script>

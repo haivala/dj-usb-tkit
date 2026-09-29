@@ -12,6 +12,18 @@
 // the toggle is then disabled and shown checked, purely informational.
 
 import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_detail.mjs";
+import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
+import { cloneTemplate } from "../../ui_utils.mjs";
+import {
+  STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
+  FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
+  STORAGE_KEY_CUE_BEATGRID_LEVEL,
+  FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL,
+  STORAGE_KEY_CUE_QUANTIZE,
+  FRONTEND_DB_KEY_CUE_QUANTIZE,
+  STORAGE_KEY_CUE_METRONOME_MIX,
+  FRONTEND_DB_KEY_CUE_METRONOME_MIX,
+} from "../../settings_keys.mjs";
 
 export const MAX_CUES = 8;
 export const MIN_SPAN_MS = 1000;
@@ -355,14 +367,13 @@ export function createTrackDetailController(el, prefs = {}) {
       if (t > to || safety > 8000) break;
       safety += 1;
       const downbeat = idx % 4 === 0;
-      const line = host.ownerDocument.createElement("i");
-      line.className = "beatgrid-line" + (downbeat ? " is-downbeat" : "");
+      const line = cloneTemplate(host.ownerDocument, "tplBeatgridLine");
+      if (downbeat) line.classList.add("is-downbeat");
       line.style.left = `${msToPct(t)}%`;
       host.appendChild(line);
       const bar = idx / 4; // 0-based
       if (downbeat && bar % barStep === 0) {
-        const label = host.ownerDocument.createElement("b");
-        label.className = "beatgrid-bar";
+        const label = cloneTemplate(host.ownerDocument, "tplBeatgridBar");
         label.style.left = `${msToPct(t)}%`;
         label.textContent = String(bar + 1);
         host.appendChild(label);
@@ -408,8 +419,8 @@ export function createTrackDetailController(el, prefs = {}) {
     cuesHost.textContent = "";
     if (!dur) return;
     for (const cue of orderedCues()) {
-      const tick = cuesHost.ownerDocument.createElement("i");
-      tick.className = "overview-cue" + (cue.playbackStart ? " is-playback-start" : "");
+      const tick = cloneTemplate(cuesHost.ownerDocument, "tplOverviewCue");
+      if (cue.playbackStart) tick.classList.add("is-playback-start");
       tick.style.left = `${(cue.positionMs / dur) * 100}%`;
       if (!cue.playbackStart) tick.style.setProperty("--cue-color", colorCssForId(cue.colorId));
       cuesHost.appendChild(tick);
@@ -430,13 +441,11 @@ export function createTrackDetailController(el, prefs = {}) {
     const labels = cueLabels();
     for (const cue of orderedCues()) {
       const pct = msToPct(cue.positionMs);
-      const marker = host.ownerDocument.createElement("i");
-      marker.className =
-        "cue-marker" +
-        (cue.playbackStart ? " is-playback-start" : "") +
-        (pct < -2 || pct > 102 ? " off-view" : "") +
-        (cue.tempId === working.draggingTempId ? " is-dragging" : "") +
-        (cue.tempId === working.selectedTempId ? " is-selected" : "");
+      const marker = cloneTemplate(host.ownerDocument, "tplCueMarker");
+      marker.classList.toggle("is-playback-start", !!cue.playbackStart);
+      marker.classList.toggle("off-view", pct < -2 || pct > 102);
+      marker.classList.toggle("is-dragging", cue.tempId === working.draggingTempId);
+      marker.classList.toggle("is-selected", cue.tempId === working.selectedTempId);
       marker.style.left = `${pct}%`;
       if (!cue.playbackStart) marker.style.setProperty("--cue-color", colorCssForId(cue.colorId));
       marker.dataset.tempId = cue.tempId;
@@ -486,9 +495,7 @@ export function createTrackDetailController(el, prefs = {}) {
     btn.classList.toggle("is-playing", playing);
     btn.setAttribute("aria-label", label);
     btn.dataset.tooltip = label;
-    btn.innerHTML = playing
-      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="6" width="3.5" height="12" rx="1"></rect><rect x="13.5" y="6" width="3.5" height="12" rx="1"></rect></svg>'
-      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg>';
+    btn.replaceChildren(cloneTemplate(btn.ownerDocument, playing ? "tplIconPause" : "tplIconPlay"));
   }
 
   function positionModalPlayhead() {
@@ -544,104 +551,30 @@ export function createTrackDetailController(el, prefs = {}) {
 
   function cueRow(cue, letter) {
     const doc = el.trackDetailCueList.ownerDocument;
-    const row = doc.createElement("div");
-    row.className =
-      "cue-row" +
-      (cue.playbackStart ? " is-playback-start" : "") +
-      (cue.tempId === working.selectedTempId ? " is-selected" : "");
+    const row = cloneTemplate(doc, cue.playbackStart ? "tplCueRowStart" : "tplCueRow");
+    row.classList.toggle("is-selected", cue.tempId === working.selectedTempId);
     row.dataset.tempId = cue.tempId;
-
-    const play = doc.createElement("button");
-    play.type = "button";
-    play.className = "cue-row-play";
-    play.dataset.action = "cue-play";
-    play.setAttribute("aria-label", "Play from this cue");
-    play.dataset.tooltip = "Play from here";
-    play.innerHTML =
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg>';
-    row.appendChild(play);
-
-    const pos = doc.createElement("span");
-    pos.className = "cue-row-pos";
-    pos.textContent = formatMs(cue.positionMs);
-    row.appendChild(pos);
-
-    if (cue.playbackStart) {
-      const memory = doc.createElement("span");
-      memory.className = "cue-row-memory";
-      memory.textContent = letter;
-      memory.dataset.tooltip = "Memory cue only (no hot cue)";
-      row.appendChild(memory);
-    } else {
-      const swatch = doc.createElement("button");
-      swatch.type = "button";
-      swatch.className = "cue-row-color";
-      swatch.dataset.action = "cue-color";
-      swatch.style.background = colorCssForId(cue.colorId);
-      swatch.textContent = letter;
-      swatch.setAttribute("aria-label", `Cue ${letter} colour`);
-      row.appendChild(swatch);
-    }
+    row.querySelector(".cue-row-pos").textContent = formatMs(cue.positionMs);
 
     if (cue.playbackStart) {
       // Not nameable, and removed only by the "Start the playback…" toggle.
-      const label = doc.createElement("span");
-      label.className = "cue-row-label";
-      label.textContent = "Playback start";
-      row.appendChild(label);
-      const badge = doc.createElement("span");
-      badge.className = "cue-row-badge";
-      badge.textContent = "memory cue";
-      row.appendChild(badge);
+      row.querySelector(".cue-row-memory").textContent = letter;
       return row;
     }
 
-    const name = doc.createElement("input");
-    name.type = "text";
-    name.className = "cue-row-name";
-    name.dataset.action = "cue-name";
-    name.placeholder = "Name";
-    name.value = cue.name || "";
-    row.appendChild(name);
-
-    const del = doc.createElement("button");
-    del.type = "button";
-    del.className = "cue-row-delete";
-    del.dataset.action = "cue-delete";
-    del.textContent = "×";
-    del.setAttribute("aria-label", "Delete cue");
-    row.appendChild(del);
-
+    const swatch = row.querySelector(".cue-row-color");
+    swatch.style.background = colorCssForId(cue.colorId);
+    swatch.textContent = letter;
+    swatch.setAttribute("aria-label", `Cue ${letter} colour`);
+    row.querySelector(".cue-row-name").value = cue.name || "";
     return row;
   }
 
   /// A free A–H slot. Letters follow position, so it only marks room for one
   /// more cue; it isn't a pad that can be filled directly.
   function emptySlot(letter) {
-    const doc = el.trackDetailCueList.ownerDocument;
-    const slot = doc.createElement("div");
-    slot.className = "cue-slot-empty";
-    slot.setAttribute("aria-hidden", "true");
-    const play = doc.createElement("button");
-    play.type = "button";
-    play.className = "cue-row-play";
-    play.disabled = true;
-    play.tabIndex = -1;
-    play.innerHTML =
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg>';
-    const pos = doc.createElement("span");
-    pos.className = "cue-row-pos";
-    pos.textContent = "–";
-    const swatch = doc.createElement("span");
-    swatch.className = "cue-row-color";
-    swatch.textContent = letter;
-    const name = doc.createElement("input");
-    name.type = "text";
-    name.className = "cue-row-name";
-    name.placeholder = "Name";
-    name.disabled = true;
-    name.tabIndex = -1;
-    slot.append(play, pos, swatch, name);
+    const slot = cloneTemplate(el.trackDetailCueList.ownerDocument, "tplCueSlotEmpty");
+    slot.querySelector(".cue-row-color").textContent = letter;
     return slot;
   }
 
@@ -731,19 +664,14 @@ export function createTrackDetailController(el, prefs = {}) {
     const built = JSON.stringify(working.keyGroups);
     if (built === keySelectBuiltFor) return;
     keySelectBuiltFor = built;
-    const doc = select.ownerDocument;
     select.textContent = "";
+    const { Option } = select.ownerDocument.defaultView;
     for (const group of working.keyGroups) {
-      const optgroup = doc.createElement("optgroup");
+      const optgroup = cloneTemplate(select.ownerDocument, "tplOptgroup");
       optgroup.label = group.label;
       // `value` is the classic key a save sends; `label` is it in the
       // user's key notation (both from the backend).
-      for (const key of group.keys) {
-        const option = doc.createElement("option");
-        option.value = key.value;
-        option.textContent = key.label;
-        optgroup.appendChild(option);
-      }
+      for (const key of group.keys) optgroup.append(new Option(key.label, key.value));
       select.appendChild(optgroup);
     }
   }
@@ -758,7 +686,7 @@ export function createTrackDetailController(el, prefs = {}) {
     buildKeySelect(select);
     const synthetic = select.querySelector("option[data-synthetic]");
     if (working.key != null && !keyOptions().includes(working.key)) {
-      const option = synthetic || select.ownerDocument.createElement("option");
+      const option = synthetic || new select.ownerDocument.defaultView.Option();
       option.value = working.key;
       // The backend's label for the stored key when it's still the row's key.
       option.textContent = working.key === working.track?.key && working.track?.keyDisplay
@@ -1230,11 +1158,43 @@ export function createTrackDetailController(el, prefs = {}) {
   return api;
 }
 
+/// The cue editor's remembered preferences, kept in app state and persisted
+/// through the frontend settings.
+export function createAppTrackDetailController(ctx) {
+  return createTrackDetailController(ctx.el, {
+    getStartOnFirstBeatPref: () => !!ctx.state.cueStartOnFirstBeat,
+    setStartOnFirstBeatPref: (on) => {
+      ctx.state.cueStartOnFirstBeat = !!on;
+      ctx.persistSetting(STORAGE_KEY_CUE_START_ON_FIRST_BEAT, FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT, on ? "1" : "0");
+    },
+    setPlaybackMetronome: (request) => ctx.command("set_playback_metronome", request),
+    getQuantizePref: () => ctx.state.cueQuantize !== false,
+    setQuantizePref: (on) => {
+      ctx.state.cueQuantize = !!on;
+      ctx.persistSetting(STORAGE_KEY_CUE_QUANTIZE, FRONTEND_DB_KEY_CUE_QUANTIZE, on ? "1" : "0");
+    },
+    getBeatgridLevelPref: () => ctx.state.cueBeatgridLevel,
+    setBeatgridLevelPref: (level, { remember = false } = {}) => {
+      ctx.state.cueBeatgridLevel = level;
+      if (remember) {
+        ctx.persistSetting(STORAGE_KEY_CUE_BEATGRID_LEVEL, FRONTEND_DB_KEY_CUE_BEATGRID_LEVEL, String(level));
+      }
+    },
+    getMetronomeMixPref: () => ctx.state.cueMetronomeMix,
+    setMetronomeMixPref: (mix, { remember = false } = {}) => {
+      ctx.state.cueMetronomeMix = mix;
+      if (remember) {
+        ctx.persistSetting(STORAGE_KEY_CUE_METRONOME_MIX, FRONTEND_DB_KEY_CUE_METRONOME_MIX, String(mix));
+      }
+    },
+  });
+}
+
 /// Open the modal for a track from a USB view (playlists or history): fetch the
 /// detail straight off the on-device ANLZ bundle and, on Save, write the edit
 /// onto that USB *and* into the local master. The USB must be connected — a
 /// not-connected row is blocked here, never silently downgraded to local-only.
-async function openUsbTrackDetail(track, deps) {
+async function openUsbTrackDetail(ctx, track) {
   const {
     command,
     trackDetailDialog,
@@ -1242,10 +1202,7 @@ async function openUsbTrackDetail(track, deps) {
     state,
     applyRealtimeAnalyzedTrackUpdate,
     patchTrackAnalysisFields,
-    getUsbTrackListControllers = () => [],
-    isUsbJobRunning = () => false,
-    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  } = deps;
+  } = ctx;
 
   if (!state?.usbRootValid || !state?.usbRoot) {
     emitStatus("Connect the USB this track is on before editing its cues.");
@@ -1285,9 +1242,9 @@ async function openUsbTrackDetail(track, deps) {
 
   // Another USB job (an export, diagnostics, another save) writes the same
   // databases on the stick: wait for it instead of dropping the edits.
-  if (isUsbJobRunning()) {
+  if (isUsbRootChangeBlocked(state)) {
     emitStatus("Waiting for the running USB job to finish before saving cues...");
-    while (isUsbJobRunning()) await sleep(200);
+    await ctx.waitForUsbJobIdle();
   }
 
   try {
@@ -1314,21 +1271,21 @@ async function openUsbTrackDetail(track, deps) {
     // Every loaded USB row of this file -- the same track can sit in several
     // USB playlists and the history -- not just the row that was clicked.
     const mediaPath = String(track.usbMediaPath || "").trim();
-    for (const ctl of getUsbTrackListControllers()) {
+    for (const ctl of [ctx.usbPlaylistTracksCtl, ctx.usbHistoryTracksCtl]) {
       let changed = false;
       for (const item of ctl?.items || []) {
         const sameFile = item === track
           || (mediaPath && String(item?.usbMediaPath || "").trim() === mediaPath);
-        if (sameFile) changed = patchTrackAnalysisFields?.(item, fields) || changed;
+        if (sameFile) changed = patchTrackAnalysisFields(item, fields) || changed;
       }
       if (changed) await ctl.rerender();
     }
-    patchTrackAnalysisFields?.(track, fields);
+    patchTrackAnalysisFields(track, fields);
     // The backend also wrote the library track it resolved (not only the
     // row's hint), so refresh that one and the app playlists containing it.
     const localTrackId = saved.localTrackId || track.localTrackId;
     if (localTrackId) {
-      applyRealtimeAnalyzedTrackUpdate?.({ trackId: localTrackId, ...fields });
+      applyRealtimeAnalyzedTrackUpdate({ trackId: localTrackId, ...fields });
     }
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);
@@ -1337,17 +1294,17 @@ async function openUsbTrackDetail(track, deps) {
 
 /// Open the modal for a track: resolve to a local id, fetch detail, and on Save
 /// persist the edits.
-export async function openTrackDetail(track, deps) {
+export async function openTrackDetail(ctx, track) {
   const {
     command,
     resolveLocalTrackIdAsync,
     trackDetailDialog,
     emitStatus,
     applyRealtimeAnalyzedTrackUpdate,
-  } = deps;
+  } = ctx;
 
   if (track?.origin === "usb") {
-    return openUsbTrackDetail(track, deps);
+    return openUsbTrackDetail(ctx, track);
   }
 
   let localId = null;
@@ -1396,7 +1353,7 @@ export async function openTrackDetail(track, deps) {
       `Saved ${saved.cues.length} cue${saved.cues.length === 1 ? "" : "s"}` +
         (saved.anlzRegenerated ? "" : " (analysis cache not updated yet)")
     );
-    applyRealtimeAnalyzedTrackUpdate?.({
+    applyRealtimeAnalyzedTrackUpdate({
       trackId: localId,
       bpm: saved.bpm,
       bpmAnalyzer: saved.bpmAnalyzer,

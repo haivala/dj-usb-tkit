@@ -1,71 +1,56 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
 import {
   loadUsbRootFromStorage,
   resetUsbStateViews,
   syncAssetScopePaths,
   pickSourceFolders
 } from "../components/usb/actions.mjs";
+import { STORAGE_KEY_USB_ROOT } from "../settings_keys.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
 test("loadUsbRootFromStorage hydrates usb root and updates controls", () => {
-  const dom = new JSDOM(`<!doctype html><body><div id="row"></div></body>`);
-  const state = { usbRoot: null, usbRootValid: true, usbNeedsInit: true };
-  const el = { usbInitRow: dom.window.document.querySelector("#row") };
-  let rootText = null;
-  let configUpdates = 0;
   let exportUpdates = 0;
+  const ctx = makeTestCtx({ updatePlaylistExportButtons: () => { exportUpdates += 1; } });
+  ctx.localStorage.setItem(STORAGE_KEY_USB_ROOT, " /usb ");
+  Object.assign(ctx.state, { usbRoot: null, usbRootValid: true, usbNeedsInit: true });
 
-  loadUsbRootFromStorage(state, el, {
-    localStorageObj: { getItem: () => " /usb " },
-    storageKeyUsbRoot: "k",
-    updateUsbRootText: (path, valid) => { rootText = { path, valid }; },
-    updateUsbConfigControlsVisibility: () => { configUpdates += 1; },
-    updatePlaylistExportButtons: () => { exportUpdates += 1; }
-  });
+  loadUsbRootFromStorage(ctx);
 
-  assert.equal(state.usbRoot, "/usb");
-  assert.equal(state.usbRootValid, false);
-  assert.equal(state.usbNeedsInit, false);
-  assert.deepEqual(rootText, { path: "/usb", valid: false });
-  assert.equal(configUpdates, 1);
+  assert.equal(ctx.state.usbRoot, "/usb");
+  assert.equal(ctx.state.usbRootValid, false);
+  assert.equal(ctx.state.usbNeedsInit, false);
+  assert.equal(ctx.el.usbRootPathText.textContent, "No USB selected", "a stored root is not shown until validated");
+  assert.equal(ctx.el.usbSelectedControls.classList.contains("hidden"), true);
   assert.equal(exportUpdates, 1);
-  assert.equal(el.usbInitRow.classList.contains("hidden"), true);
+  assert.equal(ctx.el.usbInitRow.classList.contains("hidden"), true);
 });
 
 test("resetUsbStateViews clears lists and rerenders", () => {
-  const state = {
-    usbPlaylists: [{ id: 1 }],
+  const ctx = makeTestCtx();
+  Object.assign(ctx.state, {
+    usbPlaylists: [{ id: 1, name: "One" }],
     playlistUsbExportStatusById: new Map([["p1", { sameNameExistsOnUsb: true, locksReorder: false }]]),
-    usbPlaylistTracks: [{ id: 1 }],
-    usbPlaylistTracksView: [{ id: 1 }],
-    histories: [{ id: 1 }],
-    historyTracks: [{ id: 1 }],
-    historyTracksView: [{ id: 1 }]
-  };
-  const el = {
-    usbCountsText: { textContent: "x" },
-    historyCountsText: { textContent: "y" },
-    usbSelectedPlaylistText: { textContent: "z" },
-    selectedHistoryText: { textContent: "w" }
-  };
-  let renders = 0;
-  resetUsbStateViews(state, el, {
-    renderUsbPlaylists: () => { renders += 1; },
-    clearUsbPlaylistTracks: () => { renders += 1; },
-    renderHistoryList: () => { renders += 1; },
-    clearHistoryTracks: () => { renders += 1; }
+    histories: [{ id: 1, name: "Session" }],
+    historyTracks: [{ id: 1 }]
   });
-  assert.equal(state.usbPlaylists.length, 0);
-  assert.equal(state.histories.length, 0);
-  assert.equal(state.playlistUsbExportStatusById.size, 0);
-  assert.equal(renders, 4);
+  ctx.el.usbCountsText.textContent = "x";
+
+  resetUsbStateViews(ctx);
+
+  assert.equal(ctx.state.usbPlaylists.length, 0);
+  assert.equal(ctx.state.histories.length, 0);
+  assert.equal(ctx.state.playlistUsbExportStatusById.size, 0);
+  assert.equal(ctx.el.usbCountsText.textContent, "");
+  assert.match(ctx.el.usbPlaylists.textContent, /No playlists imported yet/);
+  assert.match(ctx.el.historyList.textContent, /No history imported yet/);
 });
 
 test("syncAssetScopePaths calls allow_asset_paths with roots and usb root", async () => {
   const state = { sourceRoots: ["/music"], usbRoot: "/usb" };
   let called = null;
-  await syncAssetScopePaths(state, {
+  await syncAssetScopePaths({
+    state,
     invoke: async (name, payload) => { called = { name, payload }; },
     warn: () => {}
   });

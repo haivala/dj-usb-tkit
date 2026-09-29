@@ -1,59 +1,43 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { syncUsbPlayerMenusEdbToPdb, updateUsbPlayerMenuConfig } from "../components/usb/actions.mjs";
+import { addUsbPlayerMenuItems, syncUsbPlayerMenusEdbToPdb } from "../components/usb/actions.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
+
+// A ctx showing a stale "WARN" diagnostics report; the player-menu command
+// answers `{ updated }`.
+function menuCtx(updated) {
+  const ctx = makeTestCtx({
+    command: async () => ({ updated, currentItems: [{ kind: 131 }], availableItems: [{ kind: 132 }] })
+  });
+  Object.assign(ctx.state, {
+    usbRoot: "/tmp/usb",
+    usbRootValid: true,
+    usbPlayerMenuCurrent: [{ kind: 131 }],
+    usbPlayerMenuAvailable: [{ kind: 132 }],
+    usbPlayerMenuAvailableSelectedKind: 132
+  });
+  ctx.el.diagOverallStatus.textContent = "WARN";
+  return ctx;
+}
+
+const reportCleared = (ctx) => ctx.el.diagOverallStatus.textContent === "";
 
 test("syncUsbPlayerMenusEdbToPdb clears diagnostics only when the PDB was actually updated", async () => {
-  const state = { usbRoot: "/tmp/usb", usbRootValid: true };
-  let clearCalls = 0;
+  const changed = menuCtx(true);
+  await syncUsbPlayerMenusEdbToPdb(changed);
+  assert.equal(reportCleared(changed), true);
 
-  await syncUsbPlayerMenusEdbToPdb(state, {}, {
-    setStatus: () => {},
-    command: async () => ({ updated: true, currentItems: [], availableItems: [] }),
-    clearUsbDiagnostics: () => { clearCalls += 1; },
-    documentObj: {}
-  });
-
-  assert.equal(clearCalls, 1);
+  const unchanged = menuCtx(false);
+  await syncUsbPlayerMenusEdbToPdb(unchanged);
+  assert.equal(reportCleared(unchanged), false);
 });
 
-test("syncUsbPlayerMenusEdbToPdb does not clear diagnostics when nothing changed", async () => {
-  const state = { usbRoot: "/tmp/usb", usbRootValid: true };
-  let clearCalls = 0;
+test("a player-menu config update clears diagnostics only when the config was actually updated", async () => {
+  const changed = menuCtx(true);
+  await addUsbPlayerMenuItems(changed);
+  assert.equal(reportCleared(changed), true);
 
-  await syncUsbPlayerMenusEdbToPdb(state, {}, {
-    setStatus: () => {},
-    command: async () => ({ updated: false, currentItems: [], availableItems: [] }),
-    clearUsbDiagnostics: () => { clearCalls += 1; },
-    documentObj: {}
-  });
-
-  assert.equal(clearCalls, 0);
-});
-
-test("updateUsbPlayerMenuConfig clears diagnostics only when the config was actually updated", async () => {
-  const state = { usbRoot: "/tmp/usb", usbRootValid: true };
-  let clearCalls = 0;
-
-  await updateUsbPlayerMenuConfig(state, {}, {
-    setStatus: () => {},
-    command: async () => ({ updated: true, currentItems: [], availableItems: [] }),
-    clearUsbDiagnostics: () => { clearCalls += 1; },
-    documentObj: {}
-  }, [131, 132]);
-
-  assert.equal(clearCalls, 1);
-});
-
-test("updateUsbPlayerMenuConfig does not clear diagnostics when nothing changed", async () => {
-  const state = { usbRoot: "/tmp/usb", usbRootValid: true };
-  let clearCalls = 0;
-
-  await updateUsbPlayerMenuConfig(state, {}, {
-    setStatus: () => {},
-    command: async () => ({ updated: false, currentItems: [], availableItems: [] }),
-    clearUsbDiagnostics: () => { clearCalls += 1; },
-    documentObj: {}
-  }, [131, 132]);
-
-  assert.equal(clearCalls, 0);
+  const unchanged = menuCtx(false);
+  await addUsbPlayerMenuItems(unchanged);
+  assert.equal(reportCleared(unchanged), false);
 });

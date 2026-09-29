@@ -9,12 +9,14 @@ export function clearTrackSort(tableSortState, bodyId, grid) {
   grid.querySelector(".sort-hint")?.classList.add("hidden");
 }
 
-export function handleSortHeaderClick(tableSortState, event, deps = {}) {
-  const {
-    renderMap = {},
-    bodyToRendererMap = {},
-    doc = typeof document !== "undefined" ? document : null
-  } = deps;
+// The track-list controllers, keyed by the grid's `data-body-id`.
+export function trackListControllerFor(ctx, bodyId) {
+  return [ctx.libraryTracksCtl, ctx.playlistTracksCtl, ctx.usbPlaylistTracksCtl, ctx.usbHistoryTracksCtl]
+    .find((ctl) => ctl?.bodyId === bodyId) || null;
+}
+
+export function handleSortHeaderClick(ctx, event) {
+  const { tableSortState } = ctx;
   const th = event?.target?.closest?.('.sortable[data-sort-key][role="columnheader"]');
   if (!th) return;
   const grid = th.closest("[data-track-grid]");
@@ -67,16 +69,8 @@ export function handleSortHeaderClick(tableSortState, event, deps = {}) {
     grid.querySelector(".sort-hint")?.classList.remove("hidden");
   }
 
-  const rendererName = bodyToRendererMap[bodyId];
-  const renderer = rendererName ? renderMap[rendererName] : renderMap[bodyId];
-  if (typeof renderer === "function") {
-    renderer();
-    return;
-  }
-
-  if (doc && typeof renderMap[bodyId] === "function") {
-    renderMap[bodyId]();
-  }
+  // Re-query page 1 with the new sortBy, so the sort spans the whole list.
+  trackListControllerFor(ctx, bodyId)?.applyHeaderSort();
 }
 
 export function setActiveListItem(container, activeButton) {
@@ -84,7 +78,8 @@ export function setActiveListItem(container, activeButton) {
   if (activeButton) activeButton.classList.add("active");
 }
 
-export function renderEmptyState(document, container, { icon, heading, body, actionLabel, onAction, extraActions = [] }) {
+export function renderEmptyState(container, { icon, heading, body, actionLabel, onAction, extraActions = [] }) {
+  const document = container.ownerDocument;
   const tpl = document.getElementById("emptyStateTemplate");
   if (!tpl) return;
   const clone = tpl.content.cloneNode(true);
@@ -100,13 +95,15 @@ export function renderEmptyState(document, container, { icon, heading, body, act
     actionEl.classList.remove("hidden");
     actionEl.addEventListener("click", onAction, { once: true });
   }
-  container.innerHTML = "";
+  container.replaceChildren();
   container.appendChild(clone);
   const emptyStateEl = container.querySelector(".empty-state");
   for (const extra of extraActions) {
     if (!extra.label || !extra.onAction) continue;
-    const btn = document.createElement("button");
-    btn.className = "empty-state-action";
+    // A secondary copy of the template's action button.
+    const btn = tpl.content.querySelector(".empty-state-action").cloneNode(true);
+    btn.classList.remove("hidden");
+    btn.removeAttribute("data-primary");
     btn.textContent = extra.label;
     btn.addEventListener("click", extra.onAction, { once: true });
     (emptyStateEl || container).appendChild(btn);

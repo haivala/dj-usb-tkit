@@ -2,6 +2,7 @@
 
 import { scrubRatioFromPointer } from "../playback/actions.mjs";
 import { HOTCUE_PALETTE } from "./actions.mjs";
+import { cloneTemplate } from "../../ui_utils.mjs";
 
 export function bindTrackDetailEvents(ctx) {
   const { el, trackDetailDialog } = ctx;
@@ -452,9 +453,7 @@ function openColorPopover(ctx, anchor, tempId) {
   if (!pop) return;
   pop.textContent = "";
   for (const entry of HOTCUE_PALETTE) {
-    const swatch = pop.ownerDocument.createElement("button");
-    swatch.type = "button";
-    swatch.className = "cue-color-swatch";
+    const swatch = cloneTemplate(pop.ownerDocument, "tplCueColorSwatch");
     swatch.style.background = entry.css;
     swatch.addEventListener("click", () => {
       trackDetailDialog.updateCue(tempId, { colorId: entry.id });

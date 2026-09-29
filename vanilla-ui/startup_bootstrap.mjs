@@ -1,17 +1,29 @@
+import { STATIC_TABS } from "./app_state.mjs";
+import { createThemeManager, createAccentManager } from "./components/settings/actions.mjs";
+import { renderUpdateNotice, renderUpdateBanner } from "./update_check.mjs";
+import { normalizeAnalysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE } from "./components/library/actions.mjs";
 import {
-  registerBackendJobEvents as registerBackendJobEventsCore,
-  unregisterBackendJobEvents as unregisterBackendJobEventsCore
-} from "./components/playback/actions.mjs";
+  STORAGE_KEY_EXPORT_PRUNE_STALE,
+  STORAGE_KEY_EXPORT_BACKUP,
+  STORAGE_KEY_BACKUP_RETENTION_COUNT,
+  STORAGE_KEY_ANALYSIS_BPM_RANGE,
+  STORAGE_KEY_ANALYSIS_ENGINE,
+  STORAGE_KEY_KEY_NOTATION,
+  STORAGE_KEY_SIDEBAR_COLLAPSED,
+  STORAGE_KEY_HELP_SEEN,
+  STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
+  STORAGE_KEY_CUE_BEATGRID_LEVEL,
+  STORAGE_KEY_CUE_QUANTIZE,
+  STORAGE_KEY_CUE_METRONOME_MIX,
+} from "./settings_keys.mjs";
 
-export async function hydrateAppVersionLabel(el, deps = {}) {
-  const {
-    appVersionFallback = "0.1.0",
-    tauriIsTauri = () => false,
-    tauriGetVersion = async () => appVersionFallback
-  } = deps;
+const APP_VERSION_FALLBACK = "Not set";
+const LIBRARY_LOAD_LIMIT_INIT = 200;
 
+export async function hydrateAppVersionLabel(ctx) {
+  const { el, tauriIsTauri, tauriGetVersion } = ctx;
   if (!el.settingsVersionText) return;
-  let version = appVersionFallback;
+  let version = APP_VERSION_FALLBACK;
   if (tauriIsTauri()) {
     try {
       const resolved = await tauriGetVersion();
@@ -25,35 +37,26 @@ export async function hydrateAppVersionLabel(el, deps = {}) {
   el.settingsVersionText.textContent = `Version ${version}`;
 }
 
-export async function checkForUpdate(state, el, deps = {}) {
-  const {
-    fetchUpdateInfo = async () => null,
-    renderUpdateNotice = () => {},
-    renderUpdateBanner = () => {}
-  } = deps;
+export async function checkForUpdate(ctx) {
+  if (!ctx.isTauriRuntime()) return;
   try {
     // Backend-owned: `check_for_update` knows the running version and does the
     // GitHub fetch + version compare itself (see backend/src/service/update_check.rs).
-    const info = await fetchUpdateInfo();
+    const info = await ctx.command("check_for_update");
     if (!info) return;
-    state.updateCheck = info;
-    renderUpdateNotice(state, el);
-    renderUpdateBanner(state, el);
+    ctx.state.updateCheck = info;
+    renderUpdateNotice(ctx);
+    renderUpdateBanner(ctx);
   } catch {
     // An update check must never disrupt startup.
   }
 }
 
-export function restoreStoredUiPrefs(state, el, deps = {}) {
-  const {
-    localStorageObj = typeof localStorage !== "undefined" ? localStorage : null,
-    constants,
-    normalizeAnalysisBpmRange = (v) => v,
-    defaultAnalysisBpmRange = "full"
-  } = deps;
+export function restoreStoredUiPrefs(ctx) {
+  const { state, el, localStorage } = ctx;
 
   try {
-    const stored = localStorageObj?.getItem?.(constants.STORAGE_KEY_EXPORT_PRUNE_STALE);
+    const stored = localStorage?.getItem?.(STORAGE_KEY_EXPORT_PRUNE_STALE);
     state.exportPruneStale = stored === null ? true : stored === "1";
   } catch {
     state.exportPruneStale = true;
@@ -64,7 +67,7 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
   }
 
   try {
-    const stored = localStorageObj?.getItem?.(constants.STORAGE_KEY_EXPORT_BACKUP);
+    const stored = localStorage?.getItem?.(STORAGE_KEY_EXPORT_BACKUP);
     state.exportBackup = stored === null ? true : stored === "1";
   } catch {
     state.exportBackup = true;
@@ -74,7 +77,7 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
   }
 
   try {
-    const stored = localStorageObj?.getItem?.(constants.STORAGE_KEY_BACKUP_RETENTION_COUNT);
+    const stored = localStorage?.getItem?.(STORAGE_KEY_BACKUP_RETENTION_COUNT);
     const parsed = stored === null ? NaN : Number.parseInt(stored, 10);
     state.backupRetentionCount = Number.isFinite(parsed) && parsed >= 1 ? parsed : 10;
   } catch {
@@ -85,17 +88,17 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
   }
 
   try {
-    const stored = localStorageObj?.getItem?.(constants.STORAGE_KEY_ANALYSIS_BPM_RANGE);
-    state.analysisBpmRange = normalizeAnalysisBpmRange(stored || defaultAnalysisBpmRange);
+    const stored = localStorage?.getItem?.(STORAGE_KEY_ANALYSIS_BPM_RANGE);
+    state.analysisBpmRange = normalizeAnalysisBpmRange(stored || DEFAULT_ANALYSIS_BPM_RANGE);
   } catch {
-    state.analysisBpmRange = defaultAnalysisBpmRange;
+    state.analysisBpmRange = DEFAULT_ANALYSIS_BPM_RANGE;
   }
   if (el.analysisBpmRangeSelect) {
     el.analysisBpmRangeSelect.value = state.analysisBpmRange;
   }
 
   try {
-    const storedEngine = localStorageObj?.getItem?.(constants.STORAGE_KEY_ANALYSIS_ENGINE);
+    const storedEngine = localStorage?.getItem?.(STORAGE_KEY_ANALYSIS_ENGINE);
     state.analysisEngine = storedEngine === "essentia" ? "essentia" : "stratum";
   } catch {
     state.analysisEngine = "stratum";
@@ -106,7 +109,7 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
 
   // Display only: the backend renders key labels in this notation.
   try {
-    const storedNotation = localStorageObj?.getItem?.(constants.STORAGE_KEY_KEY_NOTATION);
+    const storedNotation = localStorage?.getItem?.(STORAGE_KEY_KEY_NOTATION);
     state.keyNotation = storedNotation === "camelot" ? "camelot" : "classic";
   } catch {
     state.keyNotation = "classic";
@@ -121,21 +124,21 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
 
   try {
     state.cueStartOnFirstBeat =
-      localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_START_ON_FIRST_BEAT) === "1";
+      localStorage?.getItem?.(STORAGE_KEY_CUE_START_ON_FIRST_BEAT) === "1";
   } catch {
     state.cueStartOnFirstBeat = false;
   }
 
   try {
     state.cueQuantize =
-      localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_QUANTIZE) !== "0";
+      localStorage?.getItem?.(STORAGE_KEY_CUE_QUANTIZE) !== "0";
   } catch {
     state.cueQuantize = true;
   }
 
   state.cueBeatgridLevel = 35;
   try {
-    const raw = localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_BEATGRID_LEVEL);
+    const raw = localStorage?.getItem?.(STORAGE_KEY_CUE_BEATGRID_LEVEL);
     const level = raw == null || raw === "" ? NaN : Number(raw);
     if (Number.isFinite(level)) state.cueBeatgridLevel = Math.max(0, Math.min(100, Math.round(level)));
   } catch {
@@ -144,7 +147,7 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
 
   state.cueMetronomeMix = 50;
   try {
-    const raw = localStorageObj?.getItem?.(constants.STORAGE_KEY_CUE_METRONOME_MIX);
+    const raw = localStorage?.getItem?.(STORAGE_KEY_CUE_METRONOME_MIX);
     const mix = raw == null || raw === "" ? NaN : Number(raw);
     if (Number.isFinite(mix)) state.cueMetronomeMix = Math.max(0, Math.min(100, Math.round(mix)));
   } catch {
@@ -152,54 +155,38 @@ export function restoreStoredUiPrefs(state, el, deps = {}) {
   }
 
   try {
-    state.sidebarCollapsed = localStorageObj?.getItem?.(constants.STORAGE_KEY_SIDEBAR_COLLAPSED) === "1";
+    state.sidebarCollapsed = localStorage?.getItem?.(STORAGE_KEY_SIDEBAR_COLLAPSED) === "1";
   } catch {
     state.sidebarCollapsed = false;
   }
 }
 
-export function applySidebarCollapsedUi(state, el, deps = {}) {
-  const { sidebarExpandBtn = null } = deps;
+export function applySidebarCollapsedUi(ctx) {
+  const { state, el, document } = ctx;
   if (state.sidebarCollapsed) {
     el.navSidebar.classList.add("collapsed");
-    sidebarExpandBtn?.classList.add("visible");
+    el.sidebarExpandBtn?.classList.add("visible");
   }
+  document.body.classList.toggle("sidebar-collapsed", !!state.sidebarCollapsed);
 }
 
-export function showHelpOnFirstVisit(el, deps = {}) {
-  const {
-    localStorageObj = typeof localStorage !== "undefined" ? localStorage : null,
-    storageKeyHelpSeen = "helpSeen"
-  } = deps;
+export function showHelpOnFirstVisit(ctx) {
+  const { el, localStorage } = ctx;
   try {
-    if (!localStorageObj?.getItem?.(storageKeyHelpSeen) && el.helpOverlay) {
+    if (!localStorage?.getItem?.(STORAGE_KEY_HELP_SEEN) && el.helpOverlay) {
       el.helpOverlay.classList.remove("hidden");
     }
   } catch {}
 }
 
-export function runDeferredInitialLoad(state, deps = {}) {
-  const {
-    setTimeoutFn = (cb) => setTimeout(cb, 0),
-    withProgress = async (_label, fn) => fn(() => {}),
-    loadPlaylists = async () => {},
-    resetAndLoadLibraryTracks = async () => {},
-    libraryLoadLimitInit = 200,
-    updateModeText = () => {},
-    updateSelectionCount = () => {},
-    clearUsbPlaylistTracks = () => {},
-    renderWaveformsIn = () => {},
-    documentObj = typeof document !== "undefined" ? document : null,
-    setStatus = () => {},
-    logError = () => {}
-  } = deps;
-
-  setTimeoutFn(() => {
-    withProgress("Initializing", async (progress) => {
+export function runDeferredInitialLoad(ctx) {
+  const { state } = ctx;
+  (ctx.setTimeoutFn || setTimeout)(() => {
+    ctx.withProgress("Initializing", async (progress) => {
       progress(35, "Loading playlists...");
-      await loadPlaylists();
+      await ctx.loadPlaylists();
       progress(70, "Loading tracks...");
-      await resetAndLoadLibraryTracks("", libraryLoadLimitInit);
+      await ctx.resetAndLoadLibraryTracks("", LIBRARY_LOAD_LIMIT_INIT);
 
       if (state.playlists.length > 0) {
         const hasCurrent = state.playlists.some((playlist) => playlist.id === state.currentPlaylistId);
@@ -210,116 +197,80 @@ export function runDeferredInitialLoad(state, deps = {}) {
           state.currentPlaylistId = state.playlists.at(-1).id;
         }
       }
-      updateModeText();
-      updateSelectionCount();
-      clearUsbPlaylistTracks();
-      renderWaveformsIn(documentObj);
+      ctx.updateModeText();
+      ctx.updateSelectionCount();
+      ctx.usbPlaylistTracksCtl.clear();
+      ctx.renderWaveformsIn(ctx.document);
     }).then(() => {
       state.startupPhase = false;
     }).catch((error) => {
       state.startupPhase = false;
-      logError(error);
-      setStatus(`Initialization failed: ${error.message}`);
+      ctx.logError(error);
+      ctx.setStatus(`Initialization failed: ${error.message}`);
     });
   }, 0);
 }
 
-export async function initApp(state, deps = {}) {
-  const {
-    el,
-    constants,
-    hydrateLocalStorageFromFrontendSettingsDb,
-    themeInit,
-    accentInit,
-    hydrateAppVersionLabel,
-    checkForUpdate = () => {},
-    setupConsoleFileLogging,
-    setupRuntimeErrorLogging,
-    pushEventLog,
-    setProgress,
-    loadSourceRootsFromStorage,
-    loadSourceRootEnabledFromStorage,
-    loadMasterDbEnabledFromStorage,
-    loadSourcesEverConfiguredFromStorage,
-    loadUsbDevices,
-    renderUsbRecentRoots,
-    persistSourceRootEnabled,
-    syncAssetScopePaths,
-    loadUsbRootFromStorage,
-    restoreStoredUiPrefs,
-    applySidebarCollapsedUi,
-    checkSourceRoots = async () => {},
-    renderSourceChips,
-    refreshSourceRootAnalysisStatus = async () => {},
-    detectExternalMasterDb,
-    bindEvents,
-    switchView,
-    showHelpOnFirstVisit,
-    invoke,
-    registerBackendJobEvents,
-    handleBackendLogEvent,
-    updateUsbRootText,
-    runDeferredInitialLoad,
-    logInfo = () => {},
-    logError = () => {},
-    warn = () => {}
-  } = deps;
+export async function initApp(ctx) {
+  const { state, invoke, pushEventLog } = ctx;
 
   pushEventLog({ level: "info", source: "startup", message: "App init started" });
-  await hydrateLocalStorageFromFrontendSettingsDb();
-  themeInit();
-  accentInit();
-  await hydrateAppVersionLabel();
-  checkForUpdate();
-  await setupConsoleFileLogging();
-  logInfo("Frontend console bridge initialized");
-  setupRuntimeErrorLogging();
+  await ctx.hydrateLocalStorageFromFrontendSettingsDb();
+  const themeManager = createThemeManager(ctx);
+  const accentManager = createAccentManager(ctx, themeManager);
+  themeManager.setAccentManager(accentManager);
+  themeManager.init();
+  accentManager.init();
+  await hydrateAppVersionLabel(ctx);
+  checkForUpdate(ctx);
+  await ctx.setupConsoleFileLogging();
+  ctx.logInfo("Frontend console bridge initialized");
+  ctx.setupRuntimeErrorLogging();
   pushEventLog({ level: "info", source: "startup", message: "Console/event logging ready" });
 
-  setProgress(false, 0, "Idle");
-  loadSourceRootsFromStorage();
-  loadSourceRootEnabledFromStorage();
-  loadMasterDbEnabledFromStorage();
-  loadSourcesEverConfiguredFromStorage();
-  await loadUsbDevices();
-  renderUsbRecentRoots();
+  ctx.setProgress(false, 0, "Idle");
+  ctx.loadSourceRootsFromStorage();
+  ctx.loadSourceRootEnabledFromStorage();
+  ctx.loadMasterDbEnabledFromStorage();
+  ctx.loadSourcesEverConfiguredFromStorage();
+  await ctx.loadUsbDevices();
 
   for (const root of state.sourceRoots || []) {
     if (state.sourceRootEnabled[root] === undefined) {
       state.sourceRootEnabled[root] = true;
     }
   }
-  persistSourceRootEnabled(state.sourceRootEnabled);
-  await syncAssetScopePaths();
-  await checkSourceRoots({ silent: true });
-  loadUsbRootFromStorage();
+  ctx.persistSourceRootEnabled(state.sourceRootEnabled);
+  await ctx.syncAssetScopePaths();
+  await ctx.refreshMissingSourceRoots({ silent: true });
+  ctx.loadUsbRootFromStorage();
 
-  restoreStoredUiPrefs();
-  applySidebarCollapsedUi();
+  restoreStoredUiPrefs(ctx);
+  applySidebarCollapsedUi(ctx);
 
-  renderSourceChips();
-  refreshSourceRootAnalysisStatus().catch(() => {});
-  await detectExternalMasterDb();
-  bindEvents();
-  await switchView("library");
+  ctx.renderSourceChips();
+  ctx.refreshSourceRootAnalysisStatus().catch(() => {});
+  await ctx.detectExternalMasterDb();
+  ctx.bindEvents();
+  await ctx.switchView("library");
   pushEventLog({ level: "info", source: "startup", message: "Initial view ready" });
 
-  showHelpOnFirstVisit();
+  showHelpOnFirstVisit(ctx);
   invoke("show_window").catch(() => {});
 
   try {
-    await registerBackendJobEvents();
+    await ctx.registerBackendJobEvents();
     try {
       const startupLogs = await invoke("get_backend_log_buffer");
       if (Array.isArray(startupLogs)) {
         for (const item of startupLogs) {
-          handleBackendLogEvent(item);
+          handleBackendLogEvent(ctx, item);
         }
       }
     } catch {}
     pushEventLog({ level: "info", source: "startup", message: "Backend event listeners registered" });
   } catch (error) {
-    logError("Backend event listener registration failed:", error);
+    ctx.logError("Backend event listener registration failed:", error);
     pushEventLog({
       level: "warn",
       source: "startup",
@@ -327,29 +278,24 @@ export async function initApp(state, deps = {}) {
     });
   }
 
-  updateUsbRootText(null, false);
-  runDeferredInitialLoad();
+  ctx.updateUsbRootText(null, false);
+  runDeferredInitialLoad(ctx);
 }
 
-export function debugFrontendLog(message, meta = null, deps = {}) {
-  const {
-    isTauriRuntime = () => false,
-    invoke = async () => {}
-  } = deps;
-  if (!isTauriRuntime()) return;
+export function debugFrontendLog(ctx, message, meta = null) {
+  if (!ctx.isTauriRuntime()) return;
   const suffix = meta == null
     ? ""
     : ` ${typeof meta === "string" ? meta : JSON.stringify(meta)}`;
-  invoke("append_frontend_log", {
+  ctx.invoke("append_frontend_log", {
     level: "info",
     message: `[analysis-ui] ${message}${suffix}`
   }).catch(() => {});
 }
 
-export function handleBackendLogEvent(payload, deps = {}) {
-  const { pushEventLog = () => {} } = deps;
+export function handleBackendLogEvent(ctx, payload) {
   if (!payload || typeof payload !== "object") return;
-  pushEventLog({
+  ctx.pushEventLog({
     level: String(payload.level || "info"),
     source: String(payload.source || "backend"),
     code: String(payload.code || "").trim(),
@@ -358,55 +304,16 @@ export function handleBackendLogEvent(payload, deps = {}) {
   });
 }
 
-export async function registerBackendJobEvents(state, deps = {}) {
-  const {
-    isTauriRuntime,
-    unregisterBackendJobEvents,
-    getTauriEventListen,
-    handleJobEvent,
-    handlePlaybackEvent,
-    handleBackendLogEvent
-  } = deps;
-
-  return registerBackendJobEventsCore(state, {
-    isTauriRuntime,
-    unregisterBackendJobEvents,
-    getTauriEventListen,
-    handleJobEvent,
-    handlePlaybackEvent,
-    handleBackendLogEvent
-  });
-}
-
-export async function unregisterBackendJobEvents(state, deps = {}) {
-  const { warn = () => {} } = deps;
-  return unregisterBackendJobEventsCore(state, { warn });
-}
-
-export async function switchView(state, el, viewId, deps = {}) {
-  const {
-    staticTabs = [],
-    stopPlaybackIfActive = async () => {},
-    syncLibraryOnboardingMode = () => {},
-    updateModeText = () => {},
-    populatePlaylistPanel = () => {},
-    refreshCurrentPlaylistTracks = async () => {},
-    renderEventLog = () => {},
-    renderBackups = async () => {},
-    requestAnimationFrameFn = (cb) => cb(),
-    documentObj = typeof document !== "undefined" ? document : null,
-    renderWaveformsIn = () => {},
-    commitActivePlaylistSort = async () => {},
-    emitStatus = () => {}
-  } = deps;
+export async function switchView(ctx, viewId) {
+  const { state, el, document } = ctx;
 
   if (viewId !== state.activeTab) {
-    await stopPlaybackIfActive();
+    await ctx.stopPlaybackIfActive();
     try {
-      await commitActivePlaylistSort(state.activeTab);
+      await ctx.commitActivePlaylistSort(state.activeTab);
     } catch (err) {
       console.error(err);
-      emitStatus(`Save track order failed: ${err.message || err}`);
+      ctx.emitStatus(`Save track order failed: ${err.message || err}`);
     }
   }
   state.activeTab = viewId;
@@ -422,8 +329,7 @@ export async function switchView(state, el, viewId, deps = {}) {
     btn.classList.toggle("active", btn.dataset.playlistId === viewId);
   });
 
-  const isStaticView = staticTabs.includes(viewId);
-  const isPlaylist = !isStaticView;
+  const isPlaylist = !STATIC_TABS.includes(viewId);
   const panelKey = isPlaylist ? "playlist" : viewId;
 
   Object.entries(el.panels).forEach(([name, panel]) => {
@@ -431,20 +337,23 @@ export async function switchView(state, el, viewId, deps = {}) {
     panel.classList.toggle("active", active);
     panel.setAttribute("aria-hidden", String(!active));
   });
-  syncLibraryOnboardingMode();
+  ctx.syncLibraryOnboardingMode();
 
   if (isPlaylist) {
     const selectedPlaylist = state.playlists.find((p) => p.id === viewId);
     if (selectedPlaylist) {
       state.currentPlaylistId = selectedPlaylist.id;
-      updateModeText();
-      populatePlaylistPanel(selectedPlaylist);
-      await refreshCurrentPlaylistTracks();
+      ctx.updateModeText();
+      ctx.populatePlaylistPanel(selectedPlaylist);
+      await ctx.refreshCurrentPlaylistTracks();
     }
   } else if (viewId === "event-log") {
-    renderEventLog();
+    ctx.renderEventLog();
   } else if (viewId === "backups") {
-    await renderBackups();
+    await ctx.renderBackups();
+  } else if (viewId === "usb-player-menu") {
+    ctx.renderUsbPlayerMenuEditor();
+    await ctx.loadUsbPlayerMenuConfig();
   }
 
   // refreshCurrentPlaylistTracks() already renders and draws waveforms for
@@ -453,13 +362,9 @@ export async function switchView(state, el, viewId, deps = {}) {
   // switch, so they still need this to redraw canvases that may have been
   // sized while hidden.
   if (!isPlaylist) {
-    requestAnimationFrameFn(() => {
-      const activePanel = documentObj?.querySelector?.(".panel.active");
-      renderWaveformsIn(activePanel || documentObj);
+    ctx.requestAnimationFrameFn(() => {
+      const activePanel = document.querySelector(".panel.active");
+      ctx.renderWaveformsIn(activePanel || document);
     });
   }
-}
-
-export async function switchTab(state, el, tab, deps = {}) {
-  return switchView(state, el, tab, deps);
 }

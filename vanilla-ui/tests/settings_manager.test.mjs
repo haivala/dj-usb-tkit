@@ -53,13 +53,14 @@ test.beforeEach(() => {
 test("persistence helpers mirror localStorage values to the frontend settings DB", async () => {
   const calls = [];
   const command = async (name, payload) => { calls.push({ name, payload }); };
+  const ctx = { command, localStorage };
 
-  await persistSetting(command, STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME, "dark");
+  await persistSetting(ctx, STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME, "dark");
   localStorage.setItem(STORAGE_KEY_USB_ROOT, "/tmp/usb");
-  await persistSetting(command, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, "");
-  persistSourceRoots(command, ["/music/a", "/music/b"]);
-  persistUsbRoot(command, "/usb/root");
-  persistSourceRootEnabled(command, { "/music/a": true, "/music/b": false });
+  await persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, "");
+  persistSourceRoots(ctx, ["/music/a", "/music/b"]);
+  persistUsbRoot(ctx, "/usb/root");
+  persistSourceRootEnabled(ctx, { "/music/a": true, "/music/b": false });
 
   assert.equal(localStorage.getItem(STORAGE_KEY_THEME), "dark");
   assert.equal(localStorage.getItem(STORAGE_KEY_USB_ROOT), "/usb/root");
@@ -75,14 +76,17 @@ test("persistence helpers mirror localStorage values to the frontend settings DB
 });
 
 test("hydrateLocalStorageFromFrontendSettingsDb copies DB-backed values into localStorage", async () => {
-  await hydrateLocalStorageFromFrontendSettingsDb(async (name) => {
-    assert.equal(name, "get_frontend_settings");
-    return {
-      values: {
-        [FRONTEND_DB_KEY_THEME]: "light",
-        [FRONTEND_DB_KEY_ANALYSIS_ENGINE]: "stratum"
-      }
-    };
+  await hydrateLocalStorageFromFrontendSettingsDb({
+    localStorage,
+    command: async (name) => {
+      assert.equal(name, "get_frontend_settings");
+      return {
+        values: {
+          [FRONTEND_DB_KEY_THEME]: "light",
+          [FRONTEND_DB_KEY_ANALYSIS_ENGINE]: "stratum"
+        }
+      };
+    }
   });
 
   assert.equal(localStorage.getItem(STORAGE_KEY_THEME), "light");
@@ -93,17 +97,17 @@ test("storage loaders recover invalid JSON and derive sources-ever-configured", 
   const invalid = makeState();
   localStorage.setItem(STORAGE_KEY_SOURCE_ROOTS, "{");
   localStorage.setItem(STORAGE_KEY_SOURCE_ROOT_ENABLED, "{");
-  loadSourceRootsFromStorage(invalid);
-  loadSourceRootEnabledFromStorage(invalid);
+  loadSourceRootsFromStorage({ state: invalid, localStorage });
+  loadSourceRootEnabledFromStorage({ state: invalid, localStorage });
   assert.deepEqual(invalid.sourceRoots, []);
   assert.deepEqual(invalid.sourceRootEnabled, {});
 
   const migrated = makeState({ sourceRoots: ["/music"] });
-  loadSourcesEverConfiguredFromStorage(migrated);
+  loadSourcesEverConfiguredFromStorage({ state: migrated, localStorage });
   assert.equal(migrated.sourcesEverConfigured, true);
 
   const persisted = makeState();
   localStorage.setItem(STORAGE_KEY_SOURCES_EVER_CONFIGURED, "1");
-  loadSourcesEverConfiguredFromStorage(persisted);
+  loadSourcesEverConfiguredFromStorage({ state: persisted, localStorage });
   assert.equal(persisted.sourcesEverConfigured, true);
 });

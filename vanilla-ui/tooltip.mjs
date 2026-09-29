@@ -21,11 +21,7 @@ export function initTooltips({ document, window }) {
 
   function ensureTooltipEl() {
     if (tooltipEl) return tooltipEl;
-    tooltipEl = document.createElement("div");
-    tooltipEl.id = "app-tooltip";
-    tooltipEl.className = "app-tooltip";
-    tooltipEl.setAttribute("role", "tooltip");
-    document.body.appendChild(tooltipEl);
+    tooltipEl = document.getElementById("app-tooltip");
     return tooltipEl;
   }
 

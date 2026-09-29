@@ -42,18 +42,6 @@ export function formatBpm(value) {
   return String(Math.round(n * 100) / 100);
 }
 
-// The key cell. The backend sends the label in the user's key notation
-// (`keyDisplay`, Classic or Camelot) and the wheel colour group (`keyColor`,
-// 0..11); this only renders them. `key` itself is the classic value the
-// backend stores and exports.
-export function renderKeyPill(track, escapeHtml) {
-  const label = track?.keyDisplay || track?.key;
-  if (!label) return "-";
-  const color = Number(track?.keyColor);
-  const colorClass = Number.isInteger(color) && color >= 0 && color < 12 ? ` key-pill--h${color}` : "";
-  return `<span class="key-pill${colorClass}">${escapeHtml(label)}</span>`;
-}
-
 // The single "Total time: … (N without length)" renderer for every track-list
 // footer (app playlist, library, USB playlist/history). The totals are always
 // backend-computed and passed straight through -- no client-side summing, and

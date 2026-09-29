@@ -10,13 +10,12 @@ import {
   switchView
 } from "../startup_bootstrap.mjs";
 import { withSilencedConsole } from "./test_helpers.mjs";
-
-const prefConstants = {
-  STORAGE_KEY_EXPORT_PRUNE_STALE: "prune",
-  STORAGE_KEY_EXPORT_BACKUP: "backup",
-  STORAGE_KEY_ANALYSIS_BPM_RANGE: "bpm",
-  STORAGE_KEY_SIDEBAR_COLLAPSED: "sidebar"
-};
+import {
+  STORAGE_KEY_EXPORT_PRUNE_STALE,
+  STORAGE_KEY_EXPORT_BACKUP,
+  STORAGE_KEY_ANALYSIS_BPM_RANGE,
+  STORAGE_KEY_SIDEBAR_COLLAPSED
+} from "../settings_keys.mjs";
 
 function prefEls() {
   return {
@@ -28,28 +27,23 @@ function prefEls() {
 }
 
 function restorePrefs(state, el, values) {
-  restoreStoredUiPrefs(state, el, {
-    localStorageObj: { getItem: (key) => values[key] ?? null },
-    constants: prefConstants,
-    normalizeAnalysisBpmRange: (value) => value,
-    defaultAnalysisBpmRange: "all"
-  });
+  restoreStoredUiPrefs({ state, el, localStorage: { getItem: (key) => values[key] ?? null } });
 }
 
-function deferredDeps(calls = [], overrides = {}) {
+function deferredCtx(state, calls = [], overrides = {}) {
   return {
+    state,
     setTimeoutFn: (cb) => cb(),
     withProgress: async (_label, fn) => {
       await fn((pct, text) => calls.push(`progress:${pct}:${text}`));
     },
     loadPlaylists: async () => { calls.push("playlists"); },
     resetAndLoadLibraryTracks: async () => { calls.push("tracks"); },
-    libraryLoadLimitInit: 111,
     updateModeText: () => { calls.push("mode"); },
     updateSelectionCount: () => { calls.push("selection"); },
-    clearUsbPlaylistTracks: () => { calls.push("usb"); },
+    usbPlaylistTracksCtl: { clear: () => { calls.push("usb"); } },
     renderWaveformsIn: () => { calls.push("wave"); },
-    documentObj: {},
+    document: {},
     setStatus: () => {},
     logError: () => {},
     ...overrides
@@ -60,9 +54,9 @@ test("hydrateAppVersionLabel uses fallback and tauri override", async () => {
   const dom = new JSDOM(`<!doctype html><body><span id="v"></span></body>`);
   const el = { settingsVersionText: dom.window.document.querySelector("#v") };
 
-  for (const [tauriIsTauri, expected] of [[() => false, "0.1.0"], [() => true, "9.9.9"]]) {
-    await hydrateAppVersionLabel(el, {
-      appVersionFallback: "0.1.0",
+  for (const [tauriIsTauri, expected] of [[() => false, "Not set"], [() => true, "9.9.9"]]) {
+    await hydrateAppVersionLabel({
+      el,
       tauriIsTauri,
       tauriGetVersion: async () => "9.9.9"
     });
@@ -73,10 +67,15 @@ test("hydrateAppVersionLabel uses fallback and tauri override", async () => {
 test("restoreStoredUiPrefs reads stored controls and defaults backup to true", () => {
   const storedState = { exportPruneStale: true, exportBackup: true, analysisBpmRange: "", sidebarCollapsed: false };
   const storedEl = prefEls();
-  restorePrefs(storedState, storedEl, { prune: "0", backup: "0", bpm: "club", sidebar: "1" });
+  restorePrefs(storedState, storedEl, {
+    [STORAGE_KEY_EXPORT_PRUNE_STALE]: "0",
+    [STORAGE_KEY_EXPORT_BACKUP]: "0",
+    [STORAGE_KEY_ANALYSIS_BPM_RANGE]: "90-160",
+    [STORAGE_KEY_SIDEBAR_COLLAPSED]: "1"
+  });
   assert.equal(storedState.exportPruneStale, false);
   assert.equal(storedState.exportBackup, false);
-  assert.equal(storedState.analysisBpmRange, "club");
+  assert.equal(storedState.analysisBpmRange, "90-160");
   assert.equal(storedState.sidebarCollapsed, true);
   assert.equal(storedEl.exportSyncModeMirror.checked, false);
   assert.equal(storedEl.exportSyncModeAdditive.checked, true);
@@ -96,11 +95,12 @@ test("applySidebarCollapsedUi and showHelpOnFirstVisit update DOM", () => {
     helpOverlay: dom.window.document.querySelector("#help")
   };
   const btn = dom.window.document.createElement("button");
-  applySidebarCollapsedUi({ sidebarCollapsed: true }, el, { sidebarExpandBtn: btn });
-  showHelpOnFirstVisit(el, {
-    localStorageObj: { getItem: () => null },
-    storageKeyHelpSeen: "help"
+  applySidebarCollapsedUi({
+    state: { sidebarCollapsed: true },
+    el: { ...el, sidebarExpandBtn: btn },
+    document: dom.window.document
   });
+  showHelpOnFirstVisit({ el, localStorage: { getItem: () => null } });
 
   assert.equal(el.navSidebar.classList.contains("collapsed"), true);
   assert.equal(btn.classList.contains("visible"), true);
@@ -114,7 +114,7 @@ test("runDeferredInitialLoad loads initial data, selects fallback playlists, and
     currentPlaylistId: null,
     startupPhase: true
   };
-  runDeferredInitialLoad(first, deferredDeps(calls));
+  runDeferredInitialLoad(deferredCtx(first, calls));
   await new Promise((resolve) => setTimeout(resolve, 0));
   // Newest playlist (last in created_at ASC order) is the default selection.
   assert.equal(first.currentPlaylistId, "p3");
@@ -127,7 +127,7 @@ test("runDeferredInitialLoad loads initial data, selects fallback playlists, and
     currentPlaylistId: "p2",
     startupPhase: true
   };
-  runDeferredInitialLoad(existing, deferredDeps([], {
+  runDeferredInitialLoad(deferredCtx(existing, [], {
     loadPlaylists: async () => {},
     resetAndLoadLibraryTracks: async () => {}
   }));
@@ -135,6 +135,28 @@ test("runDeferredInitialLoad loads initial data, selects fallback playlists, and
   assert.equal(existing.currentPlaylistId, "p2");
   assert.equal(existing.startupPhase, false);
 });
+
+// Every collaborator switchView touches, as no-ops; tests override the ones
+// they observe.
+function switchViewCtx(state, el, overrides = {}) {
+  return {
+    state,
+    el,
+    document: el.navSidebar.ownerDocument,
+    stopPlaybackIfActive: async () => {},
+    commitActivePlaylistSort: async () => {},
+    syncLibraryOnboardingMode: () => {},
+    updateModeText: () => {},
+    populatePlaylistPanel: () => {},
+    refreshCurrentPlaylistTracks: async () => {},
+    renderEventLog: () => {},
+    renderBackups: async () => {},
+    requestAnimationFrameFn: () => {},
+    renderWaveformsIn: () => {},
+    emitStatus: () => {},
+    ...overrides
+  };
+}
 
 function switchViewDom() {
   const dom = new JSDOM(`<!doctype html><body>
@@ -164,19 +186,16 @@ test("switchView commits the outgoing playlist's sort only when the view actuall
   const state = { activeTab: "p1", playlists: [{ id: "p1" }] };
   const commitCalls = [];
 
-  await switchView(state, el, "usb", {
-    staticTabs: ["library", "usb"],
+  const ctx = switchViewCtx(state, el, {
     commitActivePlaylistSort: async (playlistId) => { commitCalls.push(playlistId); }
   });
+  await switchView(ctx, "usb");
 
   assert.deepEqual(commitCalls, ["p1"]);
   assert.equal(state.activeTab, "usb");
 
   // Re-selecting the same view should not fire another commit.
-  await switchView(state, el, "usb", {
-    staticTabs: ["library", "usb"],
-    commitActivePlaylistSort: async (playlistId) => { commitCalls.push(playlistId); }
-  });
+  await switchView(ctx, "usb");
   assert.deepEqual(commitCalls, ["p1"]);
 });
 
@@ -188,11 +207,10 @@ test("switchView still completes the switch when the sort commit fails", async (
   // switchView logs the caught commit error via console.error -- expected
   // here since we're deliberately exercising that path, so silence it to
   // keep the test run's terminal output clean.
-  await withSilencedConsole(() => switchView(state, el, "library", {
-    staticTabs: ["library", "usb"],
+  await withSilencedConsole(() => switchView(switchViewCtx(state, el, {
     commitActivePlaylistSort: async () => { throw new Error("boom"); },
     emitStatus: (text) => statusMessages.push(text)
-  }));
+  }), "library"));
 
   assert.equal(state.activeTab, "library");
   assert.equal(statusMessages.length, 1);

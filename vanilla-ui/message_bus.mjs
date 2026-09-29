@@ -1,3 +1,5 @@
+import { cloneTemplate } from "./ui_utils.mjs";
+
 function normalizeText(value) {
   return String(value ?? "").trim();
 }
@@ -86,61 +88,87 @@ export function normalizeUiMessage(input = {}) {
   };
 }
 
-export function createMessageBus(deps = {}) {
-  const {
-    setStatusText = () => {},
-    setProgressText = () => {},
-    pushEventLog = () => {}
-  } = deps;
+export function setStatusText(el, text, warningCount = 0) {
+  const target = el.statusText;
+  const doc = target.ownerDocument;
+  target.textContent = "";
+  const str = String(text ?? "");
+  const n = Math.max(0, Number(warningCount) || 0);
+  const pipeIdx = n > 0 ? str.indexOf("|") : -1;
+  if (pipeIdx === -1) {
+    target.append(doc.createTextNode(str));
+    return;
+  }
+  const trailing = str.slice(pipeIdx + 1);
+  const leadingSpace = trailing.match(/^\s*/)[0];
+  target.append(doc.createTextNode(str.slice(0, pipeIdx + 1) + leadingSpace));
+  const link = cloneTemplate(doc, "tplStatusWarningLink");
+  link.textContent = trailing.slice(leadingSpace.length);
+  target.append(link);
+}
 
-  function emitMessage(input = {}) {
-    const message = normalizeUiMessage(input);
-    if (!message) return null;
+// The one sink every UI message goes through: status bar, progress footer
+// and the event log.
+export function emitMessage(ctx, input = {}) {
+  const message = normalizeUiMessage(input);
+  if (!message) return null;
 
-    if (message.progress) {
-      setProgressText(message.progress);
-    }
-
-    if (message.status) {
-      setStatusText(message.status.text, message.status.warningCount);
-    }
-
-    if (message.eventLog) {
-      pushEventLog({
-        level: message.level,
-        source: message.source,
-        code: message.code,
-        message: message.eventLog.text,
-        details: message.eventLog.details,
-        coalesceKey: message.eventLog.coalesceKey,
-        ts: message.ts
-      });
-    }
-
-    return message;
+  if (message.progress) {
+    const percent = Number(message.progress.percent);
+    ctx.setProgress(true, Number.isFinite(percent) ? percent : ctx.state.progressPercent, message.progress.text);
   }
 
-  function emitStatus(text, meta = {}) {
-    return emitMessage({
-      ...meta,
-      status: { text }
+  if (message.status) {
+    setStatusText(ctx.el, message.status.text, message.status.warningCount);
+  }
+
+  if (message.eventLog) {
+    ctx.storeEventLogEntry({
+      level: message.level,
+      source: message.source,
+      code: message.code,
+      message: message.eventLog.text,
+      details: message.eventLog.details,
+      coalesceKey: message.eventLog.coalesceKey,
+      ts: message.ts
     });
   }
 
-  function emitEventLog(text, meta = {}) {
-    return emitMessage({
-      ...meta,
-      eventLog: {
-        text,
-        details: meta.details ?? null,
-        coalesceKey: meta.coalesceKey ?? null
-      }
-    });
-  }
+  return message;
+}
 
-  return {
-    emitMessage,
-    emitStatus,
-    emitEventLog
-  };
+export function setStatus(ctx, text, meta = {}) {
+  const statusText = String(text || "");
+  const level = meta.level || "info";
+  const startupPhase = ctx.state.startupPhase;
+  const eventLog = shouldPersistStatusToEventLog(level, startupPhase)
+    ? {
+      text: statusText,
+      details: meta.details ?? null,
+      coalesceKey: meta.coalesceKey ?? (startupPhase ? "startup.status" : null)
+    }
+    : null;
+  emitMessage(ctx, {
+    level,
+    source: meta.source || "ui",
+    code: meta.code || null,
+    status: { text: statusText, warningCount: meta.warningCount || 0 },
+    eventLog,
+  });
+}
+
+export function pushEventLog(ctx, entry = {}) {
+  const text = String(entry.message ?? entry.text ?? "").trim();
+  if (!text) return null;
+  return emitMessage(ctx, {
+    level: entry.level,
+    source: entry.source,
+    code: entry.code,
+    ts: entry.ts,
+    eventLog: {
+      text,
+      details: entry.details ?? null,
+      coalesceKey: entry.coalesceKey ?? null
+    }
+  });
 }

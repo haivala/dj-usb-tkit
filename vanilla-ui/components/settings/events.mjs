@@ -1,19 +1,28 @@
+import { openExternalUrl, cloneTemplate } from "../../ui_utils.mjs";
+import { normalizeAnalysisBpmRange } from "../library/actions.mjs";
+import {
+  STORAGE_KEY_HELP_SEEN,
+  FRONTEND_DB_KEY_HELP_SEEN,
+  STORAGE_KEY_EXPORT_PRUNE_STALE,
+  FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
+  STORAGE_KEY_EXPORT_BACKUP,
+  FRONTEND_DB_KEY_EXPORT_BACKUP,
+  STORAGE_KEY_BACKUP_RETENTION_COUNT,
+  FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT,
+  STORAGE_KEY_ANALYSIS_BPM_RANGE,
+  FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
+  STORAGE_KEY_ANALYSIS_ENGINE,
+  FRONTEND_DB_KEY_ANALYSIS_ENGINE,
+  STORAGE_KEY_KEY_NOTATION,
+  FRONTEND_DB_KEY_KEY_NOTATION
+} from "../../settings_keys.mjs";
+
 const NODE_JS_URL = "https://nodejs.org/";
 const WEBSITE_URL = "https://chiph.art/en/projects/dj-usb-tkit?utm_source=djtkit&utm_medium=app&utm_campaign=sidebar";
 const SUPPORT_URL = "https://chiph.art/en/dj-usb-tkit/support?utm_source=djtkit&utm_medium=app&utm_campaign=support";
 
-export function openExternalUrl(window, url) {
-  if (window.__TAURI__?.opener?.openUrl) {
-    window.__TAURI__.opener.openUrl(url);
-  } else if (window.__TAURI_INTERNALS__?.invoke) {
-    window.__TAURI_INTERNALS__.invoke("plugin:opener|open_url", { url });
-  } else {
-    window.open(url, "_blank");
-  }
-}
-
-export function renderEssentiaInstallRow(state, el, deps = {}) {
-  const { openUrl = () => {} } = deps;
+export function renderEssentiaInstallRow(ctx) {
+  const { state, el } = ctx;
   if (!el.essentiaInstallRow) return;
 
   const show = state.analysisEngine === "essentia";
@@ -25,10 +34,10 @@ export function renderEssentiaInstallRow(state, el, deps = {}) {
   // Node status line
   if (el.essentiaNodeStatus) {
     if (!nodeAvailable) {
-      el.essentiaNodeStatus.innerHTML =
-        `Node.js not found — <a href="${NODE_JS_URL}" class="essentia-node-link" target="_blank" rel="noopener noreferrer">Get Node.js</a>`;
-      el.essentiaNodeStatus.querySelector(".essentia-node-link")
-        ?.addEventListener("click", (e) => { e.preventDefault(); openUrl(NODE_JS_URL); });
+      const missing = cloneTemplate(el.essentiaNodeStatus.ownerDocument, "tplEssentiaNodeMissing");
+      missing.querySelector(".essentia-node-link")
+        .addEventListener("click", (e) => { e.preventDefault(); openExternalUrl(ctx.window, NODE_JS_URL); });
+      el.essentiaNodeStatus.replaceChildren(...missing.childNodes);
     } else if (essentiaInstalled) {
       el.essentiaNodeStatus.textContent = "✓ Essentia ready";
       el.essentiaNodeStatus.classList.add("essentia-ready");
@@ -64,7 +73,6 @@ export function bindSettingsEvents(ctx) {
     el,
     document,
     window,
-    constants,
     persistSetting,
     setStatus,
     setProgress,
@@ -73,7 +81,6 @@ export function bindSettingsEvents(ctx) {
     pushEventLog,
     closeSettingsDrawer,
     switchView,
-    normalizeAnalysisBpmRange,
     updatePlaylistExportButtons,
     getCurrentPlaylist,
     renderCurrentPlaylistTracksFromState,
@@ -82,23 +89,6 @@ export function bindSettingsEvents(ctx) {
     refreshPlaylistExportStatus,
     reloadTrackListsForKeyNotation
   } = ctx;
-  const {
-    STORAGE_KEY_HELP_SEEN,
-    FRONTEND_DB_KEY_HELP_SEEN,
-    STORAGE_KEY_EXPORT_PRUNE_STALE,
-    FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
-    STORAGE_KEY_EXPORT_BACKUP,
-    FRONTEND_DB_KEY_EXPORT_BACKUP,
-    STORAGE_KEY_BACKUP_RETENTION_COUNT,
-    FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT,
-    STORAGE_KEY_ANALYSIS_BPM_RANGE,
-    FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
-    STORAGE_KEY_ANALYSIS_ENGINE,
-    FRONTEND_DB_KEY_ANALYSIS_ENGINE,
-    STORAGE_KEY_KEY_NOTATION,
-    FRONTEND_DB_KEY_KEY_NOTATION
-  } = constants;
-
   el.settingsBtn?.addEventListener("click", () => {
     el.settingsDrawer.classList.remove("hidden");
     el.settingsBackdrop.classList.remove("hidden");
@@ -257,7 +247,7 @@ export function bindSettingsEvents(ctx) {
     if (engine !== "essentia" && state.essentiaDownloading) {
       command("cancel_essentia_download").catch(() => {});
       state.essentiaDownloading = false;
-      if (setProgress) setProgress(false, 0, "Idle");
+      setProgress(false, 0, "Idle");
     }
     state.analysisEngine = engine;
     if (el.analysisEngineSelect.value !== engine) {
@@ -272,7 +262,7 @@ export function bindSettingsEvents(ctx) {
         state.analysisEnginePersistPromise = null;
       }
     });
-    renderEssentiaInstallRow(state, el, { openUrl: (url) => openExternalUrl(window, url) });
+    renderEssentiaInstallRow(ctx);
     const engineLabel = engine === "stratum" ? "Stratum (built-in)" : "Essentia";
     setStatus(`Analysis engine: ${engineLabel}`);
     if (pushEventLog) pushEventLog({ level: "info", source: "settings", message: `Analysis engine changed to ${engineLabel}` });
@@ -282,15 +272,15 @@ export function bindSettingsEvents(ctx) {
     if (state.essentiaDownloading) return;
     state.essentiaDownloading = true;
     state.essentiaDownloadError = null;
-    renderEssentiaInstallRow(state, el, { openUrl: (url) => openExternalUrl(window, url) });
-    if (setProgress) setProgress(true, 0, "Downloading Essentia...");
+    renderEssentiaInstallRow(ctx);
+    setProgress(true, 0, "Downloading Essentia...");
     try {
       await command("download_essentia");
     } catch (err) {
       state.essentiaDownloading = false;
       state.essentiaDownloadError = err?.message || String(err);
-      if (setProgress) setProgress(false, 0, "Idle");
-      renderEssentiaInstallRow(state, el, { openUrl: (url) => openExternalUrl(window, url) });
+      setProgress(false, 0, "Idle");
+      renderEssentiaInstallRow(ctx);
     }
   });
 
@@ -305,7 +295,7 @@ export function bindSettingsEvents(ctx) {
       state.analysisEngine = "stratum";
       if (el.analysisEngineSelect) el.analysisEngineSelect.value = "stratum";
       persistSetting(STORAGE_KEY_ANALYSIS_ENGINE, FRONTEND_DB_KEY_ANALYSIS_ENGINE, "stratum");
-      renderEssentiaInstallRow(state, el, { openUrl: (url) => openExternalUrl(window, url) });
+      renderEssentiaInstallRow(ctx);
       setStatus("Essentia removed");
     } catch (err) {
       setStatus(`Remove failed: ${err?.message || String(err)}`);
@@ -323,16 +313,16 @@ export function bindSettingsEvents(ctx) {
           state.essentiaInstalled = true;
           state.essentiaDownloading = false;
           state.essentiaDownloadError = null;
-          if (setProgress) setProgress(false, 0, "Idle");
-          renderEssentiaInstallRow(state, el, { openUrl: (url) => openExternalUrl(window, url) });
+          setProgress(false, 0, "Idle");
+          renderEssentiaInstallRow(ctx);
           setStatus("Essentia installed");
         } else if (payload.error) {
           state.essentiaDownloading = false;
           state.essentiaDownloadError = payload.error;
-          if (setProgress) setProgress(false, 0, "Idle");
-          renderEssentiaInstallRow(state, el, { openUrl: (url) => openExternalUrl(window, url) });
+          setProgress(false, 0, "Idle");
+          renderEssentiaInstallRow(ctx);
         } else if (typeof payload.percent === "number") {
-          if (setProgress) setProgress(true, payload.percent, "Downloading Essentia...");
+          setProgress(true, payload.percent, "Downloading Essentia...");
         }
       }).catch(() => {});
     }).catch(() => {});
@@ -346,5 +336,5 @@ export function bindSettingsEvents(ctx) {
     });
   });
 
-  renderEssentiaInstallRow(state, el, { openUrl: (url) => openExternalUrl(window, url) });
+  renderEssentiaInstallRow(ctx);
 }

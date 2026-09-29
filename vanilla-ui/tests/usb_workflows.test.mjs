@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
 
 import {
   exportHistoryTracklist,
@@ -13,106 +12,91 @@ import {
   sanitizeTracklistFileName,
   syncUsbPlayerMenuEditorControls,
 } from "../components/usb/actions.mjs";
+import { buildTracklistText } from "../track_utils.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
+
+// An app ctx for USB refresh flows with the progress footer stubbed out.
+function usbCtx(overrides = {}) {
+  return makeTestCtx({
+    setProgress: () => {},
+    startProgressHeartbeat: () => {},
+    stopProgressHeartbeat: () => {},
+    logWarnings: () => {},
+    renderCurrentPlaylistTracksFromState: async () => {},
+    ...overrides
+  });
+}
 
 test("runUsbDiagnostics refreshes the open playlist's reorder lock from the new status", async () => {
-  const state = { usbRoot: "/USB", playlistUsbExportStatusById: new Map() };
   let renderOpenPlaylist = 0;
-  await runUsbDiagnostics(state, {
-    setStatus: () => {},
+  const ctx = usbCtx({
     command: async () => ({
+      overallStatus: "PASS",
       durationMs: 1,
       warnings: [],
       playlistUsbExportStatus: [
         { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true }
       ]
     }),
-    updatePlaylistExportButtons: () => {},
-    renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; },
-    renderDiagnosticsReport: () => {},
-    logWarnings: () => {}
+    renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; }
   });
+  ctx.state.usbRoot = "/USB";
+  await runUsbDiagnostics(ctx);
   assert.equal(renderOpenPlaylist, 1);
-  assert.equal(state.playlistUsbExportStatusById.get("p1").locksReorder, true);
+  assert.equal(ctx.state.playlistUsbExportStatusById.get("p1").locksReorder, true);
+  assert.equal(ctx.el.diagOverallStatus.textContent, "PASS");
 });
 
 test("refreshUsb re-renders the open playlist after replacing the export status map", async () => {
-  const state = { usbRoot: "/USB", usbPlaylists: [], usbPlaylistTracks: [] };
-  const el = { usbCountsText: { textContent: "" } };
   let renderOpenPlaylist = 0;
-  await refreshUsb(state, el, {
-    setStatus: () => {},
+  const ctx = usbCtx({
     command: async () => ({ items: [], warnings: [], playlistUsbExportStatus: [] }),
-    setProgress: () => {},
-    startProgressHeartbeat: () => {},
-    stopProgressHeartbeat: () => {},
-    normalizeUsbPlaylist: (p) => p,
-    renderUsbPlaylists: () => {},
-    clearUsbPlaylistTracks: () => {},
-    renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; },
-    updatePlaylistExportButtons: () => {},
-    countWarningsForStatus: () => 0,
-    logWarnings: () => {}
+    renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; }
   });
+  ctx.state.usbRoot = "/USB";
+  await refreshUsb(ctx);
   assert.equal(renderOpenPlaylist, 1);
 });
 
 test("refreshUsb renders the backend-computed playlistTrackTotal, not a client sum", async () => {
-  const state = { usbRoot: "/USB", usbPlaylists: [], usbPlaylistTracks: [] };
-  const el = { usbCountsText: { textContent: "" } };
-  await refreshUsb(state, el, {
-    setStatus: () => {},
+  const ctx = usbCtx({
     command: async () => ({
       // per-playlist trackCount sums to 5, but the header must use the
       // backend's playlistTrackTotal verbatim
-      items: [{ id: "a", trackCount: 2, tracks: [] }, { id: "b", trackCount: 3, tracks: [] }],
+      items: [{ id: "a", name: "A", trackCount: 2, tracks: [] }, { id: "b", name: "B", trackCount: 3, tracks: [] }],
       playlistTrackTotal: 5,
       warnings: [],
       playlistUsbExportStatus: []
-    }),
-    setProgress: () => {},
-    startProgressHeartbeat: () => {},
-    stopProgressHeartbeat: () => {},
-    normalizeUsbPlaylist: (p) => p,
-    renderUsbPlaylists: () => {},
-    clearUsbPlaylistTracks: () => {},
-    renderCurrentPlaylistTracksFromState: async () => {},
-    updatePlaylistExportButtons: () => {},
-    countWarningsForStatus: () => 0,
-    logWarnings: () => {}
+    })
   });
-  assert.equal(el.usbCountsText.textContent, "2 playlists, 5 tracks");
+  ctx.state.usbRoot = "/USB";
+  await refreshUsb(ctx);
+  assert.equal(ctx.el.usbCountsText.textContent, "2 playlists, 5 tracks");
+  assert.equal(ctx.el.usbPlaylists.querySelectorAll("[data-usb-playlist-index]").length, 2);
 });
 
 test("diagnostics guard, history refresh, and tracklist filename sanitizing stay stable", async () => {
   let status = "";
-  await runUsbDiagnostics({ usbRoot: null }, {
-    setStatus: (text) => { status = text; }
-  });
+  const guarded = usbCtx({ emitStatus: (text) => { status = text; } });
+  await runUsbDiagnostics(guarded);
   assert.equal(status, "Select USB folder first");
 
-  const state = { usbRoot: "/USB", histories: [], historyTracks: [] };
-  const el = { historyCountsText: { textContent: "" } };
-  let renderedLists = 0;
-  let renderedTracks = 0;
-
-  await refreshHistory(state, el, {
-    setStatus: (text) => { status = text; },
+  const ctx = usbCtx({
+    emitStatus: (text) => { status = text; },
     command: async () => ({
       items: [{ name: "H1", tracks: [{ id: "1", title: "A" }] }],
       counts: { importedPlaylists: 1, importedTracks: 1 },
       warnings: ["warn"]
     }),
     normalizeTrack: (track, prefix) => ({ ...track, normalizedWith: prefix }),
-    countWarningsForStatus: () => 1,
-    logWarnings: () => {},
-    renderHistoryList: () => { renderedLists += 1; },
-    clearHistoryTracks: () => { renderedTracks += 1; }
+    countWarningsForStatus: () => 1
   });
+  ctx.state.usbRoot = "/USB";
+  await refreshHistory(ctx);
 
-  assert.equal(state.histories[0].tracks[0].normalizedWith, "hist");
-  assert.equal(el.historyCountsText.textContent, "1 sessions, 1 tracks");
-  assert.equal(renderedLists, 1);
-  assert.equal(renderedTracks, 1);
+  assert.equal(ctx.state.histories[0].tracks[0].normalizedWith, "hist");
+  assert.equal(ctx.el.historyCountsText.textContent, "1 sessions, 1 tracks");
+  assert.equal(ctx.el.historyList.querySelectorAll("[data-history-index]").length, 1);
   assert.match(status, /USB histories loaded: 1 \| \(1 warning\(s\)\)/);
 
   assert.equal(sanitizeTracklistFileName("HISTORY 003"), "HISTORY 003.txt");
@@ -123,8 +107,9 @@ test("diagnostics guard, history refresh, and tracklist filename sanitizing stay
 test("exportHistoryTracklist guards, cancels, saves sliced tracks, and reports save dismissal", async () => {
   let status = "";
   let invokeCalls = 0;
-  await exportHistoryTracklist({ histories: [], selectedHistoryIndex: null, historyTracks: [] }, {}, {
-    setStatus: (text) => { status = text; },
+  await exportHistoryTracklist({
+    state: { histories: [], selectedHistoryIndex: null, historyTracks: [] },
+    emitStatus: (text) => { status = text; },
     invoke: async () => {
       invokeCalls += 1;
       return true;
@@ -142,33 +127,26 @@ test("exportHistoryTracklist guards, cancels, saves sliced tracks, and reports s
       { artist: "C", title: "Three", durationMs: 1000 }
     ]
   };
-  let buildCalls = 0;
-  await exportHistoryTracklist(baseState, {}, {
-    setStatus: () => {},
+  const exportCtx = (dialogChoice, overrides = {}) => ({
+    state: baseState,
+    emitStatus: (text) => { status = text; },
     invoke: async () => {
       invokeCalls += 1;
       return true;
     },
-    buildTracklistText: () => {
-      buildCalls += 1;
-      return "";
-    },
-    tracklistExportDialog: { open: async () => null }
+    tracklistExportDialog: { open: async () => dialogChoice },
+    ...overrides
   });
-  assert.equal(buildCalls, 0);
+
+  await exportHistoryTracklist(exportCtx(null));
+  assert.equal(invokeCalls, 0, "a cancelled dialog saves nothing");
 
   let invokeArgs = null;
-  let buildArgs = null;
   let openArgs = null;
-  await exportHistoryTracklist(baseState, {}, {
-    setStatus: (text) => { status = text; },
+  await exportHistoryTracklist(exportCtx(null, {
     invoke: async (cmd, payload) => {
       invokeArgs = { cmd, payload };
       return true;
-    },
-    buildTracklistText: (tracks, timeMode) => {
-      buildArgs = { tracks, timeMode };
-      return "B - Two\nC - Three";
     },
     tracklistExportDialog: {
       open: async (opts) => {
@@ -176,32 +154,22 @@ test("exportHistoryTracklist guards, cancels, saves sliced tracks, and reports s
         return { timeMode: "before", startIndex: 1 };
       }
     }
-  });
+  }));
   assert.deepEqual(openArgs.tracks, baseState.historyTracks);
-  assert.deepEqual(buildArgs.tracks, baseState.historyTracks.slice(1));
-  assert.equal(buildArgs.timeMode, "before");
   assert.equal(invokeArgs.cmd, "save_text_file");
   assert.equal(invokeArgs.payload.suggestedFileName, "HISTORY 001.txt");
-  assert.equal(invokeArgs.payload.contents, "B - Two\nC - Three");
+  assert.equal(invokeArgs.payload.contents, buildTracklistText(baseState.historyTracks.slice(1), "before"));
   assert.match(status, /Tracklist exported: HISTORY 001/);
 
-  await exportHistoryTracklist(baseState, {}, {
-    setStatus: () => {},
-    invoke: async () => true,
-    buildTracklistText: (tracks) => {
-      buildArgs = { tracks };
-      return "";
-    },
-    tracklistExportDialog: { open: async () => ({ timeMode: "off", startIndex: 99 }) }
-  });
-  assert.deepEqual(buildArgs.tracks, [baseState.historyTracks.at(-1)]);
+  await exportHistoryTracklist(exportCtx({ timeMode: "off", startIndex: 99 }, {
+    invoke: async (_cmd, payload) => {
+      invokeArgs = { payload };
+      return true;
+    }
+  }));
+  assert.equal(invokeArgs.payload.contents, "C - Three", "an out-of-range start clamps to the last track");
 
-  await exportHistoryTracklist(baseState, {}, {
-    setStatus: (text) => { status = text; },
-    invoke: async () => false,
-    buildTracklistText: () => "",
-    tracklistExportDialog: { open: async () => ({ timeMode: "off", startIndex: 0 }) }
-  });
+  await exportHistoryTracklist(exportCtx({ timeMode: "off", startIndex: 0 }, { invoke: async () => false }));
   assert.equal(status, "Tracklist export cancelled");
 });
 
@@ -218,31 +186,31 @@ function makeExportState(overrides = {}) {
     activeJobId: null,
     currentPlaylistId: null,
     usbPlaylists: [],
-    usbPlaylistTracks: [],
     ...overrides
   };
 }
 
-function makeExportDeps(overrides = {}) {
-  return {
-    setStatus: () => {},
+// An app ctx showing a stale diagnostics report, with export collaborators
+// stubbed; `overrides` replaces any of them.
+function exportCtx(state, overrides = {}) {
+  const ctx = makeTestCtx({
+    state,
     setProgress: () => {},
     startProgressHeartbeat: () => {},
-    nextPaint: async () => {},
-    command: async () => ({ exportedTracks: 1, skippedTracks: 0, warnings: [] }),
     stopProgressHeartbeat: () => {},
+    command: async () => ({ exportedTracks: 1, skippedTracks: 0, warnings: [] }),
     countWarningsForStatus: () => 0,
     warningEntryLevel: () => "info",
     logWarnings: () => {},
-    pushEventLog: () => {},
+    emitMessage: () => {},
     loadPlaylists: async () => {},
     updateModeText: () => {},
     switchView: async () => {},
-    renderUsbPlaylists: () => {},
-    clearUsbPlaylistTracks: () => {},
-    clearUsbDiagnostics: () => {},
+    commitActivePlaylistSort: async () => {},
     ...overrides
-  };
+  });
+  ctx.el.diagOverallStatus.textContent = "WARN";
+  return ctx;
 }
 
 test("exportPlaylistToUsb reports local blockers and generic command failures", async () => {
@@ -250,11 +218,11 @@ test("exportPlaylistToUsb reports local blockers and generic command failures", 
   const logged = [];
 
   await assert.rejects(
-    exportPlaylistToUsb(makeExportState(), {}, "p1", makeExportDeps({
-      setStatus: (text) => { status = text; },
+    exportPlaylistToUsb(exportCtx(makeExportState(), {
+      emitStatus: (text) => { status = text; },
       command: async () => { throw new Error("boom"); },
-      pushEventLog: (entry) => logged.push(entry)
-    }))
+      emitMessage: (message) => logged.push(message)
+    }), "p1")
   );
   assert.match(status, /Export failed: boom/);
   assert.equal(logged[0].code, "export.failure");
@@ -264,19 +232,17 @@ test("exportPlaylistToUsb reports local blockers and generic command failures", 
   // client-side path matching.
   await assert.rejects(
     exportPlaylistToUsb(
-      makeExportState({
+      exportCtx(makeExportState({
         playlists: [{ id: "p1", name: "Set", tracks: [{ id: "t1", filePath: "/music/missing/Artist - Track.mp3" }] }]
-      }),
-      {},
-      "p1",
-      makeExportDeps({
-        setStatus: (text) => { status = text; },
+      }), {
+        emitStatus: (text) => { status = text; },
         command: async () => {
           const err = new Error("export blocked: source folder is missing: /music/missing. Relocate or remove it first.");
           err.details = { validationType: "source_root_missing", missingRoots: ["/music/missing"] };
           throw err;
         }
-      })
+      }),
+      "p1"
     )
   );
   assert.match(status, /Export blocked: source folder is missing: \/music\/missing/);
@@ -284,37 +250,26 @@ test("exportPlaylistToUsb reports local blockers and generic command failures", 
 
 test("exportPlaylistToUsb clears diagnostics after success and forwards backup option", async () => {
   for (const exportBackup of [true, false]) {
-    let clearCalls = 0;
     let capturedOptions = null;
-    await exportPlaylistToUsb(
-      makeExportState({ exportBackup }),
-      {},
-      "p1",
-      makeExportDeps({
-        command: async (_cmd, args) => {
-          capturedOptions = args?.options;
-          return { exportedTracks: 1, skippedTracks: 0, warnings: [] };
-        },
-        clearUsbDiagnostics: () => { clearCalls += 1; }
-      })
-    );
+    const ctx = exportCtx(makeExportState({ exportBackup }), {
+      command: async (_cmd, args) => {
+        capturedOptions = args?.options;
+        return { exportedTracks: 1, skippedTracks: 0, warnings: [] };
+      }
+    });
+    await exportPlaylistToUsb(ctx, "p1");
 
-    assert.equal(clearCalls, 1);
+    assert.equal(ctx.el.diagOverallStatus.textContent, "", "the stale diagnostics report is cleared");
     assert.equal(capturedOptions?.backupBeforeExport, exportBackup);
   }
 });
 
 test("exportPlaylistToUsb commits an active sort before exporting", async () => {
   const calls = [];
-  await exportPlaylistToUsb(
-    makeExportState(),
-    {},
-    "p1",
-    makeExportDeps({
-      commitActivePlaylistSort: async (playlistId) => { calls.push(`commit:${playlistId}`); },
-      command: async (cmd) => { calls.push(cmd); return { exportedTracks: 1, skippedTracks: 0, warnings: [] }; }
-    })
-  );
+  await exportPlaylistToUsb(exportCtx(makeExportState(), {
+    commitActivePlaylistSort: async (playlistId) => { calls.push(`commit:${playlistId}`); },
+    command: async (cmd) => { calls.push(cmd); return { exportedTracks: 1, skippedTracks: 0, warnings: [] }; }
+  }), "p1");
 
   assert.deepEqual(calls, ["commit:p1", "export_to_usb"]);
 });
@@ -323,32 +278,20 @@ test("exportPlaylistToUsb blocks export when the sort commit fails, without call
   let status = "";
   let exportCalled = false;
 
-  await exportPlaylistToUsb(
-    makeExportState(),
-    {},
-    "p1",
-    makeExportDeps({
-      setStatus: (text) => { status = text; },
-      commitActivePlaylistSort: async () => { throw new Error("disk full"); },
-      command: async () => { exportCalled = true; return {}; }
-    })
-  );
+  await exportPlaylistToUsb(exportCtx(makeExportState(), {
+    emitStatus: (text) => { status = text; },
+    commitActivePlaylistSort: async () => { throw new Error("disk full"); },
+    command: async () => { exportCalled = true; return {}; }
+  }), "p1");
 
   assert.equal(exportCalled, false);
   assert.match(status, /Export blocked: couldn't save the current sort order \(disk full\)/);
 });
 
 test("player menu single-select clears opposite list and enables proper actions", () => {
-  const dom = new JSDOM(`<!doctype html><body>
-    <button id="add"></button>
-    <button id="remove"></button>
-    <button id="up"></button>
-    <button id="down"></button>
-    <div id="available"></div>
-    <div id="current"></div>
-  </body>`);
-  const document = dom.window.document;
-  const state = {
+  const ctx = makeTestCtx();
+  const { state, el } = ctx;
+  Object.assign(state, {
     usbRoot: "/USB",
     usbRootValid: true,
     usbPlayerMenuAvailable: [
@@ -361,37 +304,21 @@ test("player menu single-select clears opposite list and enables proper actions"
     ],
     usbPlayerMenuAvailableSelectedKind: null,
     usbPlayerMenuCurrentSelectedKind: null,
-  };
-  const el = {
-    usbPlayerMenuAddBtn: document.getElementById("add"),
-    usbPlayerMenuRemoveBtn: document.getElementById("remove"),
-    usbPlayerMenuUpBtn: document.getElementById("up"),
-    usbPlayerMenuDownBtn: document.getElementById("down"),
-    usbPlayerMenuAvailable: document.getElementById("available"),
-    usbPlayerMenuCurrent: document.getElementById("current"),
-  };
+  });
 
-  renderUsbPlayerMenuEditor(state, el, { documentObj: document });
-  handleUsbPlayerMenuListClick(
-    state,
-    el,
-    { documentObj: document },
-    "available",
-    { target: el.usbPlayerMenuAvailable.querySelector(".player-menu-item[data-menu-kind='133']") }
-  );
-  syncUsbPlayerMenuEditorControls(state, el);
+  renderUsbPlayerMenuEditor(ctx);
+  handleUsbPlayerMenuListClick(ctx, "available", {
+    target: el.usbPlayerMenuAvailable.querySelector(".player-menu-item[data-menu-kind='133']")
+  });
+  syncUsbPlayerMenuEditorControls(ctx);
   assert.equal(el.usbPlayerMenuAddBtn.disabled, false);
   assert.equal(el.usbPlayerMenuRemoveBtn.disabled, true);
   assert.equal(state.usbPlayerMenuCurrentSelectedKind, null);
 
-  handleUsbPlayerMenuListClick(
-    state,
-    el,
-    { documentObj: document },
-    "current",
-    { target: el.usbPlayerMenuCurrent.querySelector(".player-menu-item[data-menu-kind='139']") }
-  );
-  syncUsbPlayerMenuEditorControls(state, el);
+  handleUsbPlayerMenuListClick(ctx, "current", {
+    target: el.usbPlayerMenuCurrent.querySelector(".player-menu-item[data-menu-kind='139']")
+  });
+  syncUsbPlayerMenuEditorControls(ctx);
   assert.equal(el.usbPlayerMenuAddBtn.disabled, true);
   assert.equal(el.usbPlayerMenuRemoveBtn.disabled, false);
   assert.equal(el.usbPlayerMenuUpBtn.disabled, false);
@@ -403,13 +330,9 @@ test("player menu single-select clears opposite list and enables proper actions"
   );
 
   // Selecting a backend-flagged non-removable item disables the Remove button.
-  handleUsbPlayerMenuListClick(
-    state,
-    el,
-    { documentObj: document },
-    "current",
-    { target: el.usbPlayerMenuCurrent.querySelector(".player-menu-item[data-menu-kind='132']") }
-  );
-  syncUsbPlayerMenuEditorControls(state, el);
+  handleUsbPlayerMenuListClick(ctx, "current", {
+    target: el.usbPlayerMenuCurrent.querySelector(".player-menu-item[data-menu-kind='132']")
+  });
+  syncUsbPlayerMenuEditorControls(ctx);
   assert.equal(el.usbPlayerMenuRemoveBtn.disabled, true);
 });

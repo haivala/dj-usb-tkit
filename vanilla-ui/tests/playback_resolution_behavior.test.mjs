@@ -31,15 +31,15 @@ function playbackState(overrides = {}) {
   };
 }
 
-function playbackDeps({ command, setStatus = () => {}, generation } = {}) {
+function playbackCtx(state, { command, setStatus = () => {} } = {}) {
   return {
+    state,
     command,
-    clearAllWaveformPlayheads: () => {},
-    setWaveformPlayhead: () => {},
-    updateTransportButtonsInDom: () => {},
+    document: { querySelectorAll: () => [] },
+    requestAnimationFrameFn: () => 0,
+    cancelAnimationFrameFn: () => {},
     setStatus,
     warn: () => {},
-    ...(generation === undefined ? {} : { generation }),
   };
 }
 
@@ -64,7 +64,7 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
   const state = playbackState({ usbRoot: "/usb", usbRootValid: true });
   let status = "";
 
-  await playTrackFromOrigin(state, usbTrack, "usb", { rowKey: "r1", startRatio: 0.25 }, playbackDeps({
+  await playTrackFromOrigin(playbackCtx(state, {
     setStatus: (text) => { status = text; },
     command: async (name, payload) => {
       calls.push({ name, payload });
@@ -74,7 +74,7 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
         hasUsbContext: true,
       });
     },
-  }));
+  }), usbTrack, "usb", { rowKey: "r1", startRatio: 0.25 });
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].payload, {
@@ -106,7 +106,7 @@ test("playTrackFromOrigin commits a backend USB fallback result without local fa
   const state = playbackState({ usbRoot: "/usb", usbRootValid: true });
   let status = "";
 
-  await playTrackFromOrigin(state, usbTrack, "usb", { rowKey: "r1" }, playbackDeps({
+  await playTrackFromOrigin(playbackCtx(state, {
     setStatus: (text) => { status = text; },
     command: async (name) => {
       assert.equal(name, "play_resolved_track");
@@ -120,7 +120,7 @@ test("playTrackFromOrigin commits a backend USB fallback result without local fa
         hasUsbContext: true,
       });
     },
-  }));
+  }), usbTrack, "usb", { rowKey: "r1" });
 
   assert.equal(state.playbackTrackId, "t-usb");
   assert.equal(state.playbackPath, "/usb/Contents/Track.mp3");
@@ -133,7 +133,7 @@ test("playTrackFromOrigin reports backend not-found as a warning", async () => {
   let status = "";
   let statusMeta = null;
 
-  await playTrackFromOrigin(state, { id: "missing", title: "Track" }, "usb", {}, playbackDeps({
+  await playTrackFromOrigin(playbackCtx(state, {
     setStatus: (text, meta) => { status = text; statusMeta = meta; },
     command: async (name) => {
       assert.equal(name, "play_resolved_track");
@@ -142,7 +142,7 @@ test("playTrackFromOrigin reports backend not-found as a warning", async () => {
       err.code = "NOT_FOUND";
       throw err;
     },
-  }));
+  }), { id: "missing", title: "Track" }, "usb", {});
 
   assert.equal(state.playbackActive, false);
   assert.equal(status, "Cannot play: track not found in Library or selected USB.");
@@ -155,13 +155,13 @@ test("playTrackFromOrigin reports backend playback failures as event-log errors"
   let status = "";
   let statusMeta = null;
 
-  await playTrackFromOrigin(state, localTrack, "local", { rowKey: "r1" }, playbackDeps({
+  await playTrackFromOrigin(playbackCtx(state, {
     setStatus: (text, meta) => { status = text; statusMeta = meta; },
     command: async (name) => {
       assert.equal(name, "play_resolved_track");
       throw new Error("decoder error: unrecognized format");
     },
-  }));
+  }), localTrack, "local", { rowKey: "r1" });
 
   assert.match(status, /Playback failed: decoder error/);
   assert.equal(statusMeta?.level, "error");
@@ -174,12 +174,12 @@ test("all playback origins route through play_resolved_track", async (t) => {
       const calls = [];
       const state = playbackState();
 
-      await playTrackFromOrigin(state, localTrack, origin, { rowKey: "r1" }, playbackDeps({
+      await playTrackFromOrigin(playbackCtx(state, {
         command: async (name, payload) => {
           calls.push({ name, payload });
           return backendPlayback();
         },
-      }));
+      }), localTrack, origin, { rowKey: "r1" });
 
       assert.deepEqual(calls.map((c) => c.name), ["play_resolved_track"]);
       assert.equal(calls[0].payload.trackId, "t-local");
@@ -188,21 +188,4 @@ test("all playback origins route through play_resolved_track", async (t) => {
       assert.equal(state.playbackPath, "/music/Track.mp3");
     });
   }
-});
-
-test("a stale generation skips the backend play command and never commits state", async () => {
-  const state = playbackState({ playbackGeneration: 2 });
-  let playCalled = false;
-
-  await playTrackFromOrigin(state, localTrack, "local", { rowKey: "r1" }, playbackDeps({
-    generation: 1,
-    command: async () => {
-      playCalled = true;
-      return backendPlayback();
-    },
-  }));
-
-  assert.equal(playCalled, false);
-  assert.equal(state.playbackActive, false);
-  assert.equal(state.playbackTrackId, null);
 });

@@ -10,6 +10,7 @@ import {
   renderPlaylistList
 } from "../components/playlist/actions.mjs";
 import { bindPlaylistEvents } from "../components/playlist/events.mjs";
+import { APP_TEMPLATES, makeTestCtx } from "./test_helpers.mjs";
 
 function makeDom() {
   return new JSDOM(`<!doctype html><body>
@@ -25,6 +26,7 @@ function makeDom() {
     <div id="playlistTotalDuration"></div>
     <button id="exportPlaylistBtn"></button>
     <button id="analyzePlaylistMissingBtn"></button>
+    ${APP_TEMPLATES}
   </body>`, { pretendToBeVisual: true });
 }
 
@@ -51,6 +53,8 @@ function bindDeps(overrides) {
     exportPlaylistToUsb: async () => {},
     analyzeTrackIds: async () => {},
     refreshCurrentPlaylistTracks: async () => {},
+    commitActivePlaylistSort: async () => {},
+    isPlaylistSortActive: () => false,
     playlistTracksCtl: {
       view: [], hasMore: false, setSearch: () => {}, rerender: async () => {},
       loadMore: async () => {}, attachScroll: () => {},
@@ -62,12 +66,13 @@ function bindDeps(overrides) {
 test("renderPlaylistList marks active tabs and active playlist mode", () => {
   const { document } = makeDom().window;
   renderPlaylistList({
-    activeTab: "p2",
-    currentPlaylistId: "p1",
-    playlists: [{ id: "p1", name: "One" }, { id: "p2", name: "Two" }]
-  }, elements(document, ["navPlaylistList"]), {
-    document,
-    renderPlaylistSidebarItemContent: (playlist) => playlist.name
+    state: {
+      activeTab: "p2",
+      currentPlaylistId: "p1",
+      playlists: [{ id: "p1", name: "One" }, { id: "p2", name: "Two" }]
+    },
+    el: elements(document, ["navPlaylistList"]),
+    document
   });
 
   const buttons = document.querySelectorAll(".nav-playlist-item");
@@ -77,51 +82,52 @@ test("renderPlaylistList marks active tabs and active playlist mode", () => {
 });
 
 test("playlist commands format export status, load lists, and select newly loaded playlists", async () => {
-  assert.equal(formatPlaylistExportStatus({
+  assert.match(formatPlaylistExportStatus({
     lastExportedAt: "2026-01-01T00:00:00Z",
     lastExportedUsbRoot: "/usb",
     lastExportedTrackCount: 5
-  }, { formatTimestampLocal: () => "Jan 1" }), "Last exported Jan 1 to /usb (5 track(s)).");
+  }), /^Last exported .+ to \/usb \(5 track\(s\)\)\.$/);
 
-  const loaded = { playlists: [] };
-  const loadCalls = [];
-  await loadPlaylists(loaded, {
-    command: async () => ({ items: [{ id: "p1", name: "One" }] }),
-    renderPlaylistTabsAndPanels: () => loadCalls.push("render"),
-    updatePlaylistExportButtons: () => loadCalls.push("buttons")
-  });
-  assert.deepEqual(loaded.playlists, [{ id: "p1", name: "One", tracks: [] }]);
-  assert.deepEqual(loadCalls, ["render", "buttons"]);
+  const loaded = makeTestCtx({ command: async () => ({ items: [{ id: "p1", name: "One" }] }) });
+  await loadPlaylists(loaded);
+  assert.deepEqual(loaded.state.playlists, [{ id: "p1", name: "One", tracks: [] }]);
+  assert.equal(loaded.el.navPlaylistList.querySelector(".nav-playlist-item").dataset.playlistId, "p1");
 
-  const state = { currentPlaylistId: "p1", playlists: [{ id: "p1", name: "Old" }] };
   const createCalls = [];
-  await createPlaylist("Fresh", {
-    setStatus: (text) => createCalls.push(`status:${text}`),
+  const ctx = makeTestCtx({
+    emitStatus: (text) => createCalls.push(`status:${text}`),
     withProgress: async (_label, fn) => fn(() => {}),
-    command: async () => ({ playlistId: "missing-id", name: "Fresh" }),
-    loadPlaylists: async () => {
-      state.playlists = [{ id: "p1", name: "Old" }, { id: "p2", name: "Fresh" }];
-      createCalls.push("load");
+    command: async (name) => {
+      if (name === "create_playlist") return { playlistId: "missing-id", name: "Fresh" };
+      if (name === "list_playlists") return { items: [{ id: "p1", name: "Old" }, { id: "p2", name: "Fresh" }] };
+      return {};
     },
-    state,
     updateModeText: () => createCalls.push("mode"),
-    switchTab: async (tab) => createCalls.push(`tab:${tab}`)
+    switchView: async (tab) => createCalls.push(`tab:${tab}`)
   });
-  assert.equal(state.currentPlaylistId, "p2");
-  assert.deepEqual(createCalls, ["load", "mode", "tab:p2", "status:Playlist created: Fresh"]);
+  ctx.state.currentPlaylistId = "p1";
+  await createPlaylist(ctx, "Fresh");
+  assert.equal(ctx.state.currentPlaylistId, "p2");
+  assert.deepEqual(createCalls, ["mode", "tab:p2", "status:Playlist created: Fresh"]);
 });
 
-function commitDeps(overrides = {}) {
+// The active playlist sort lives in tableSortState; committing always clears
+// it (recorded as "clear") before deciding whether to persist it.
+function commitCtx(state, sort = { key: "artist", dir: "desc" }) {
   const calls = [];
-  return {
-    calls,
-    deps: {
-      command: async (cmd, payload) => { calls.push([cmd, payload]); return {}; },
-      getActiveSort: () => ({ key: "artist", dir: "desc" }),
-      clearPlaylistTrackSort: () => { calls.push(["clear"]); },
-      ...overrides
-    }
+  const tableSortState = sort ? { playlistTracksBody: sort } : {};
+  const ctx = {
+    state,
+    el: {},
+    command: async (cmd, payload) => { calls.push([cmd, payload]); return {}; },
+    tableSortState: new Proxy(tableSortState, {
+      deleteProperty(target, key) {
+        calls.push(["clear"]);
+        return delete target[key];
+      }
+    })
   };
+  return { calls, ctx };
 }
 
 test("commitActivePlaylistSort sends the active sort to the backend to persist as the new order", async () => {
@@ -129,9 +135,9 @@ test("commitActivePlaylistSort sends the active sort to the backend to persist a
     playlists: [{ id: "p1", name: "A", tracks: [{ id: "t2" }, { id: "t1" }] }],
     playlistUsbExportStatusById: new Map()
   };
-  const { calls, deps } = commitDeps();
+  const { calls, ctx } = commitCtx(state);
 
-  await commitActivePlaylistSort(state, "p1", deps);
+  await commitActivePlaylistSort(ctx, "p1");
 
   assert.deepEqual(calls, [
     ["clear"],
@@ -144,9 +150,9 @@ test("commitActivePlaylistSort no-ops (still clears) when no sort is active", as
     playlists: [{ id: "p1", name: "A", tracks: [{ id: "t1" }] }],
     playlistUsbExportStatusById: new Map()
   };
-  const { calls, deps } = commitDeps({ getActiveSort: () => null });
+  const { calls, ctx } = commitCtx(state, null);
 
-  await commitActivePlaylistSort(state, "p1", deps);
+  await commitActivePlaylistSort(ctx, "p1");
 
   assert.deepEqual(calls, [["clear"]]);
 });
@@ -156,19 +162,19 @@ test("commitActivePlaylistSort no-ops when the playlist is now additive-export-l
     playlists: [{ id: "p1", name: "A", tracks: [{ id: "t1" }] }],
     playlistUsbExportStatusById: new Map([["p1", { locksReorder: true }]])
   };
-  const { calls, deps } = commitDeps();
+  const { calls, ctx } = commitCtx(state);
 
-  await commitActivePlaylistSort(state, "p1", deps);
+  await commitActivePlaylistSort(ctx, "p1");
 
   assert.deepEqual(calls, [["clear"]]);
 });
 
 test("commitActivePlaylistSort no-ops for a missing/empty playlist id", async () => {
   const state = { playlists: [], playlistUsbExportStatusById: new Map() };
-  const { calls, deps } = commitDeps();
+  const { calls, ctx } = commitCtx(state);
 
-  await commitActivePlaylistSort(state, null, deps);
-  await commitActivePlaylistSort(state, "does-not-exist", deps);
+  await commitActivePlaylistSort(ctx, null);
+  await commitActivePlaylistSort(ctx, "does-not-exist");
 
   assert.deepEqual(calls, [["clear"], ["clear"]]);
 });

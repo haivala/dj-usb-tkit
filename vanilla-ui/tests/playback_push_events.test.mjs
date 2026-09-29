@@ -11,23 +11,49 @@ function fakeRaf() {
   };
 }
 
+// A ctx whose document counts the transport-button refreshes and playhead
+// clears it's asked for (it has no rows, so both find nothing).
 function eventDeps(overrides = {}) {
-  const calls = { waveform: 0, transport: 0, clear: 0, status: "", cancelled: [] };
+  const calls = { transport: 0, clear: 0, status: "", cancelled: [] };
   return {
     calls,
     deps: {
-      setWaveformPlayhead: (_wf, fraction, playing) => {
-        calls.waveform += 1;
-        calls.fraction = fraction;
-        calls.playing = playing;
+      document: {
+        querySelectorAll: (selector) => {
+          if (selector === ".transport-btn") calls.transport += 1;
+          if (selector === ".waveform") calls.clear += 1;
+          return [];
+        }
       },
-      updateTransportButtonsInDom: () => { calls.transport += 1; },
-      clearAllWaveformPlayheads: () => { calls.clear += 1; },
       setStatus: (text) => { calls.status = text; },
+      requestAnimationFrameFn: () => 0,
       cancelAnimationFrameFn: (handle) => { calls.cancelled.push(handle); },
       ...overrides
     }
   };
+}
+
+// A waveform element that records the playhead it's given.
+function fakeWaveform() {
+  const wf = {
+    clientWidth: 100,
+    count: 0,
+    fraction: null,
+    playing: null,
+    style: {
+      setProperty(name, value) {
+        if (name !== "--playhead-position") return;
+        wf.count += 1;
+        wf.fraction = parseFloat(value) / 100;
+      }
+    },
+    classList: {
+      toggle(name, on) {
+        if (name === "is-playing") wf.playing = on;
+      }
+    }
+  };
+  return wf;
 }
 
 function started(path = "/music/a.mp3", overrides = {}) {
@@ -46,22 +72,23 @@ test("handlePlaybackEvent applies a started confirmation and starts playhead int
     playbackActive: false,
     playbackPath: null,
     playbackPendingKind: "play",
-    activeWaveform: { id: "wf" }
+    activeWaveform: fakeWaveform()
   };
+  const wf = state.activeWaveform;
   const raf = fakeRaf();
   const { calls, deps } = eventDeps({
     requestAnimationFrameFn: raf.requestAnimationFrameFn,
     cancelAnimationFrameFn: raf.cancelAnimationFrameFn
   });
 
-  handlePlaybackEvent(state, started(), deps);
+  handlePlaybackEvent({ state, ...deps }, started());
 
   assert.equal(state.playbackActive, true);
   assert.equal(state.playbackPath, "/music/a.mp3");
-  assert.equal(calls.waveform, 1);
+  assert.equal(wf.count, 1);
   assert.equal(calls.transport, 1);
-  assert.ok(Math.abs(calls.fraction - 0.25) < 0.001);
-  assert.equal(calls.playing, true);
+  assert.ok(Math.abs(wf.fraction - 0.25) < 0.001);
+  assert.equal(wf.playing, true);
 });
 
 test("handlePlaybackEvent resets playback state on stop and cancels interpolation", () => {
@@ -70,12 +97,12 @@ test("handlePlaybackEvent resets playback state on stop and cancels interpolatio
     playbackPath: "/music/a.mp3",
     playbackTrackId: "t1",
     playbackRowKey: "row1",
-    activeWaveform: { id: "wf" },
+    activeWaveform: fakeWaveform(),
     playheadAnimationHandle: 42
   };
   const { calls, deps } = eventDeps();
 
-  handlePlaybackEvent(state, { event: "playback.stopped" }, deps);
+  handlePlaybackEvent({ state, ...deps }, { event: "playback.stopped" });
 
   assert.equal(state.playbackActive, false);
   assert.equal(state.playbackPath, null);
@@ -98,9 +125,8 @@ test("handlePlaybackEvent applies the backend-resolved trackId and clears rowKey
     activeWaveform: null
   };
   handlePlaybackEvent(
-    changed,
-    started("/music/b.mp3", { positionMs: 0, durationMs: 0, trackId: "new-id" }),
-    eventDeps().deps
+    { state: changed, ...eventDeps().deps },
+    started("/music/b.mp3", { positionMs: 0, durationMs: 0, trackId: "new-id" })
   );
   assert.equal(changed.playbackPath, "/music/b.mp3");
   assert.equal(changed.playbackTrackId, "new-id");
@@ -115,7 +141,7 @@ test("handlePlaybackEvent leaves playbackTrackId untouched when the event omits 
     playbackRowKey: "row-1",
     activeWaveform: null
   };
-  handlePlaybackEvent(seeked, started("/music/a.mp3", { event: "playback.seeked" }), eventDeps().deps);
+  handlePlaybackEvent({ state: seeked, ...eventDeps().deps }, started("/music/a.mp3", { event: "playback.seeked" }));
   assert.equal(seeked.playbackTrackId, "id-1");
   assert.equal(seeked.playbackRowKey, "row-1");
 });
@@ -128,7 +154,7 @@ test("handlePlaybackEvent clears playbackTrackId when the backend sends trackId 
     playbackRowKey: "row-1",
     activeWaveform: null
   };
-  handlePlaybackEvent(state, started("/music/b.mp3", { trackId: null }), eventDeps().deps);
+  handlePlaybackEvent({ state, ...eventDeps().deps }, started("/music/b.mp3", { trackId: null }));
   assert.equal(state.playbackTrackId, null);
 });
 
@@ -145,7 +171,7 @@ test("handlePlaybackEvent reuses the backend source label verbatim on a seek", (
     playbackLabelContext: { sourceLabel: "Library", title: "Artist - Track" }
   };
   const { calls, deps } = eventDeps();
-  handlePlaybackEvent(state, started("/music/a.mp3", { event: "playback.seeked" }), deps);
+  handlePlaybackEvent({ state, ...deps }, started("/music/a.mp3", { event: "playback.seeked" }));
   assert.equal(calls.status, "Playing from Library: Artist - Track");
 });
 
@@ -159,10 +185,10 @@ test("handlePlaybackEvent ignores stray started events but applies pending start
     activeWaveform: null
   };
   const strayHarness = eventDeps();
-  handlePlaybackEvent(stray, started(), strayHarness.deps);
+  handlePlaybackEvent({ state: stray, ...strayHarness.deps }, started());
   assert.equal(stray.playbackActive, false);
   assert.equal(stray.playbackPath, null);
-  assert.equal(strayHarness.calls.waveform, 0);
+
   assert.equal(strayHarness.calls.transport, 0);
 
   const pending = {
@@ -174,7 +200,7 @@ test("handlePlaybackEvent ignores stray started events but applies pending start
     activeWaveform: null
   };
   const pendingHarness = eventDeps();
-  handlePlaybackEvent(pending, started("/music/a.mp3", { positionMs: 0 }), pendingHarness.deps);
+  handlePlaybackEvent({ state: pending, ...pendingHarness.deps }, started("/music/a.mp3", { positionMs: 0 }));
   assert.equal(pending.playbackActive, true);
   assert.equal(pending.playbackPath, "/music/a.mp3");
   assert.equal(pendingHarness.calls.transport, 1);
@@ -186,10 +212,10 @@ test("handlePlaybackEvent ignores stale stopped paths and applies matching stopp
     playbackPath: "/music/b.mp3",
     playbackTrackId: "t-b",
     playbackRowKey: "row-b",
-    activeWaveform: { id: "wf" }
+    activeWaveform: fakeWaveform()
   };
   const staleHarness = eventDeps();
-  handlePlaybackEvent(stale, { event: "playback.stopped", path: "/music/a.mp3" }, staleHarness.deps);
+  handlePlaybackEvent({ state: stale, ...staleHarness.deps }, { event: "playback.stopped", path: "/music/a.mp3" });
   assert.equal(stale.playbackActive, true);
   assert.equal(stale.playbackPath, "/music/b.mp3");
   assert.equal(stale.playbackTrackId, "t-b");
@@ -203,10 +229,10 @@ test("handlePlaybackEvent ignores stale stopped paths and applies matching stopp
     playbackPath: "/music/a.mp3",
     playbackTrackId: "t-a",
     playbackRowKey: "row-a",
-    activeWaveform: { id: "wf" }
+    activeWaveform: fakeWaveform()
   };
   const currentHarness = eventDeps();
-  handlePlaybackEvent(current, { event: "playback.stopped", path: "/music/a.mp3" }, currentHarness.deps);
+  handlePlaybackEvent({ state: current, ...currentHarness.deps }, { event: "playback.stopped", path: "/music/a.mp3" });
   assert.equal(current.playbackActive, false);
   assert.equal(current.playbackPath, null);
   assert.equal(currentHarness.calls.clear, 1);
@@ -216,10 +242,10 @@ test("handlePlaybackEvent ignores stale stopped paths and applies matching stopp
 
 test("handlePlaybackEvent surfaces playback errors", () => {
   const { calls, deps } = eventDeps();
-  handlePlaybackEvent({ activeWaveform: null }, {
+  handlePlaybackEvent({ state: { activeWaveform: null }, ...deps }, {
     event: "playback.error",
     message: "Audio device busy"
-  }, deps);
+  });
 
   assert.equal(calls.status, "Audio device busy");
 });

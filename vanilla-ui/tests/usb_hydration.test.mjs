@@ -24,7 +24,8 @@ test("hydrateUsbTrackMetadata inspects a row flagged needsHydration and then cle
   };
   let inspectCalls = 0;
 
-  const result = await hydrateUsbTrackMetadata(state, track, {
+  const result = await hydrateUsbTrackMetadata({
+    state,
     command: async (name, payload) => {
       inspectCalls += 1;
       assert.equal(name, "inspect_usb_track");
@@ -33,7 +34,7 @@ test("hydrateUsbTrackMetadata inspects a row flagged needsHydration and then cle
       return { track: { id: "123", title: "Track", artist: "Artist" } };
     },
     normalizeTrack: (candidate) => ({ ...candidate })
-  });
+  }, track);
 
   assert.equal(result, track);
   assert.equal(inspectCalls, 1);
@@ -45,10 +46,11 @@ test("hydrateUsbTrackMetadata skips a row the backend did not flag", async () =>
   const state = { usbRoot: "/tmp/usb" };
   const track = { id: "1", title: "A", artist: "Artist A", needsHydration: false };
   let commandCalls = 0;
-  const result = await hydrateUsbTrackMetadata(state, track, {
+  const result = await hydrateUsbTrackMetadata({
+    state,
     command: async () => { commandCalls += 1; return {}; },
     normalizeTrack: (t) => ({ ...t })
-  });
+  }, track);
   assert.equal(commandCalls, 0);
   assert.equal(result, track);
   assert.equal(track.artworkChecked, undefined);
@@ -58,9 +60,10 @@ test("hydrateUsbTrackMetadata ignores a non-numeric id (eDB-only placeholder)", 
   const state = { usbRoot: "/tmp/usb" };
   const track = { id: "abc", title: "A", artist: "B", needsHydration: true };
   let commandCalls = 0;
-  await hydrateUsbTrackMetadata(state, track, {
+  await hydrateUsbTrackMetadata({
+    state,
     command: async () => { commandCalls += 1; return {}; },
     normalizeTrack: (t) => ({ ...t })
-  });
+  }, track);
   assert.equal(commandCalls, 0);
 });

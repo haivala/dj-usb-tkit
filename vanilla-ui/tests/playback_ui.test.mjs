@@ -12,12 +12,14 @@ import {
   stopPlayheadInterpolation,
   updateTransportButtonsInDom
 } from "../components/playback/actions.mjs";
+import { APP_TEMPLATES } from "./test_helpers.mjs";
 
 test("playback UI globals and transport buttons reflect playing state", () => {
   const dom = new JSDOM(`
     <!doctype html><body>
       <button class="transport-btn" data-id="t1" data-row-key="row:1"></button>
       <button class="transport-btn" data-id="t2" data-row-key="row:2"></button>
+      ${APP_TEMPLATES}
     </body>
   `);
   const original = globalThis.playbackUiState;
@@ -29,9 +31,11 @@ test("playback UI globals and transport buttons reflect playing state", () => {
     assert.equal(getPlaybackUiStateHelpers().ok, true);
 
     updateTransportButtonsInDom({
-      playbackActive: true,
-      playbackRowKey: "row:1",
-      playbackTrackId: null
+      state: {
+        playbackActive: true,
+        playbackRowKey: "row:1",
+        playbackTrackId: null
+      }
     }, dom.window.document);
 
     const buttons = dom.window.document.querySelectorAll(".transport-btn");
@@ -57,7 +61,7 @@ test("waveform helpers set, clear, and clamp pointer scrub ratios", () => {
   assert.equal(wf.style.getPropertyValue("--playhead-position"), "25%");
   assert.equal(wf.classList.contains("is-playing"), true);
 
-  clearAllWaveformPlayheads(document);
+  clearAllWaveformPlayheads({ document });
   document.querySelectorAll(".waveform").forEach((item) => {
     assert.equal(item.style.getPropertyValue("--playhead-x"), "0px");
     assert.equal(item.style.getPropertyValue("--playhead-position"), "0%");
@@ -82,14 +86,14 @@ test("stopPlaybackFromUi clears playback state and updates UI", async () => {
   };
   const calls = [];
 
-  await stopPlaybackFromUi(state, {
+  await stopPlaybackFromUi({
+    state,
+    document: { querySelectorAll: (selector) => { calls.push(selector); return []; } },
     command: async (name) => { calls.push(name); },
-    clearAllWaveformPlayheads: () => { calls.push("clear"); },
-    updateTransportButtonsInDom: () => { calls.push("transport"); },
     setStatus: (text) => { calls.push(text); }
   });
 
-  assert.deepEqual(calls, ["transport", "stop_playback_native", "clear", "transport", "Idle"]);
+  assert.deepEqual(calls, [".transport-btn", "stop_playback_native", ".waveform", ".transport-btn", "Idle"]);
   assert.equal(state.playbackActive, false);
   assert.equal(state.playbackTrackId, null);
   assert.equal(state.playbackStopPromise, null);
@@ -98,17 +102,33 @@ test("stopPlaybackFromUi clears playback state and updates UI", async () => {
   assert.equal(state.playbackLabelContext, null);
 });
 
-function startHarness({ waveformEl = { id: "wf" }, durationMs = 20000 } = {}) {
-  const state = { activeWaveform: waveformEl };
+// A waveform element that records each playhead position it's given.
+function recordingWaveform(ticks) {
+  let fraction = null;
+  return {
+    clientWidth: 100,
+    style: {
+      setProperty(name, value) {
+        if (name === "--playhead-position") fraction = parseFloat(value) / 100;
+      }
+    },
+    classList: { toggle(name, on) { if (name === "is-playing") ticks.push({ fraction, playing: on }); } }
+  };
+}
+
+function startHarness({ durationMs = 20000 } = {}) {
   const ticks = [];
+  const waveformEl = recordingWaveform(ticks);
+  const state = { activeWaveform: waveformEl };
   let scheduled = null;
-  startPlayheadInterpolation(state, {
+  startPlayheadInterpolation({
+    state,
+    requestAnimationFrameFn: (fn) => { scheduled = fn; return 7; },
+    cancelAnimationFrameFn: () => {}
+  }, {
     waveformEl,
     initialPositionMs: 5000,
     durationMs,
-    setWaveformPlayhead: (_wf, fraction, playing) => { ticks.push({ fraction, playing }); },
-    requestAnimationFrameFn: (fn) => { scheduled = fn; return 7; },
-    cancelAnimationFrameFn: () => {},
     nowFn: () => 0
   });
   return { state, ticks, scheduled };
@@ -127,27 +147,28 @@ test("startPlayheadInterpolation schedules active waveforms and ignores invalid 
   superseded.scheduled();
   assert.equal(superseded.ticks.length, 1, "tick should no-op once superseded");
 
-  for (const invalid of [{ waveformEl: null, durationMs: 10000 }, { waveformEl: { id: "wf" }, durationMs: 0 }]) {
-    let ticked = false;
-    startPlayheadInterpolation({}, {
-      ...invalid,
-      initialPositionMs: 0,
-      setWaveformPlayhead: () => { ticked = true; },
-      requestAnimationFrameFn: () => 1,
+  for (const invalid of [{ waveformEl: null, durationMs: 10000 }, { waveformEl: recordingWaveform([]), durationMs: 0 }]) {
+    let scheduledFrames = 0;
+    startPlayheadInterpolation({
+      state: {},
+      requestAnimationFrameFn: () => { scheduledFrames += 1; return 1; },
       cancelAnimationFrameFn: () => {}
+    }, {
+      ...invalid,
+      initialPositionMs: 0
     });
-    assert.equal(ticked, false);
+    assert.equal(scheduledFrames, 0);
   }
 });
 
 test("stopPlayheadInterpolation cancels a scheduled frame and no-ops without one", () => {
   const state = { playheadAnimationHandle: 42 };
   const cancelled = [];
-  stopPlayheadInterpolation(state, { cancelAnimationFrameFn: (handle) => cancelled.push(handle) });
+  stopPlayheadInterpolation({ state, cancelAnimationFrameFn: (handle) => cancelled.push(handle) });
   assert.deepEqual(cancelled, [42]);
   assert.equal(state.playheadAnimationHandle, null);
 
-  stopPlayheadInterpolation(state, { cancelAnimationFrameFn: () => cancelled.push("unexpected") });
+  stopPlayheadInterpolation({ state, cancelAnimationFrameFn: () => cancelled.push("unexpected") });
   assert.deepEqual(cancelled, [42]);
   assert.equal(state.playheadAnimationHandle, null);
 });

@@ -6,8 +6,10 @@ import {
 } from "../components/library/actions.mjs";
 import { normalizeDurationMs } from "../track_utils.mjs";
 
+const CTX = { toPlayableUrl: (v) => v };
+
 test("normalizeTrack maps the camelCase backend fields and clamps waveform preview", () => {
-  const normalized = normalizeTrack({
+  const normalized = normalizeTrack(CTX, {
     id: "1",
     localTrackId: "local-1",
     title: "Song",
@@ -22,11 +24,7 @@ test("normalizeTrack maps the camelCase backend fields and clamps waveform previ
     waveformPreview: [-10, 40, 500],
     filePath: "/music/song.mp3",
     updatedAt: "2024-01-01T00:00:00Z"
-  }, "x", {
-    toPlayableUrl: (v) => v,
-    appendUrlRevision: (url, rev) => `${url}?rev=${rev}`,
-    normalizeDurationMs
-  });
+  }, "x");
 
   assert.equal(normalized.id, "1");
   assert.equal(normalized.localTrackId, "local-1");
@@ -48,52 +46,43 @@ test("normalizeDurationMs reads the canonical durationMs (ms) and rejects non-po
 });
 
 test("normalizeTrack maps camelCase bpmAnalyzer", () => {
-  const normalized = normalizeTrack({
+  const normalized = normalizeTrack(CTX, {
     id: "2",
     title: "Song B",
     artist: "Artist B",
     bpmAnalyzer: "essentia",
     filePath: "/music/song-b.wav"
-  }, "x", {
-    normalizeDurationMs: () => null
-  });
+  }, "x");
 
   assert.equal(normalized.bpmAnalyzer, "essentia");
 });
 
 test("normalizeTrack creates fallback id when missing and passes formatExt through verbatim", () => {
-  const normalized = normalizeTrack({
+  const normalized = normalizeTrack(CTX, {
     title: "Song",
     artist: "Artist",
     filePath: "/music/song.flac",
     formatExt: "flac"
-  }, "lib", {
-    randomId: () => "abc1234",
-    normalizeDurationMs: () => null
-  });
-  assert.equal(normalized.id, "lib-abc1234");
+  }, "lib");
+  assert.match(normalized.id, /^lib-\w+$/);
   assert.equal(normalized.formatExt, "flac");
   // The frontend no longer infers format from the path -- the backend always
   // populates formatExt, so an absent value stays empty.
-  const noFormat = normalizeTrack({ title: "X", artist: "Y", filePath: "/a/b.mp3" }, "lib", {
-    randomId: () => "z",
-    normalizeDurationMs: () => null
-  });
+  const noFormat = normalizeTrack(CTX, { title: "X", artist: "Y", filePath: "/a/b.mp3" }, "lib");
   assert.equal(noFormat.formatExt, "");
 });
 
 test("normalizeUsbPlaylist normalizes tracks and keeps max trackCount", () => {
-  const playlist = normalizeUsbPlaylist({
+  const playlist = normalizeUsbPlaylist(CTX, {
     name: "USB Set",
     source: "pdb",
     trackCount: 1,
     items: [{ id: "t1", title: "A", artist: "B", filePath: "/usb/a.mp3" }, { id: "t2", title: "C", artist: "D", filePath: "/usb/c.mp3" }]
-  }, {
-    normalizeTrack: (track) => ({ ...track, normalized: true })
   });
 
   assert.equal(playlist.source, "pdb");
   assert.equal(playlist.tracks.length, 2);
   assert.equal(playlist.trackCount, 2);
-  assert.equal(playlist.tracks[0].normalized, true);
+  assert.equal(playlist.tracks[0].title, "A");
+  assert.equal(playlist.tracks[0].filePath, "/usb/a.mp3");
 });

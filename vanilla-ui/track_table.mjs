@@ -1,143 +1,208 @@
-import { formatDurationMs, formatBpm, renderKeyPill } from "./track_utils.mjs";
+import { formatDurationMs, formatBpm } from "./track_utils.mjs";
+import { cloneTemplate } from "./ui_utils.mjs";
+import { buildCoverSrcCandidates, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
+import { isTrackCurrentlyPlaying, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
+import { renderWaveformsIn, setWaveformColorData } from "./waveform.mjs";
 
-export function createTrackRow(track, options, deps) {
-  const {
-    state,
-    buildCoverSrcCandidates,
-    isTrackCurrentlyPlaying,
-    escapeHtml,
-  } = deps;
+// The BPM cell: the formatted value in a pill (tooltip = which analyzer set
+// it), or "-" before analysis.
+export function fillBpmCell(cell, track) {
+  const bpmText = formatBpm(track.bpm);
+  if (!bpmText) {
+    cell.textContent = "-";
+    return;
+  }
+  const pill = cloneTemplate(cell.ownerDocument, "tplBpmPill");
+  pill.textContent = bpmText;
+  const tooltip = track.bpmAnalyzer === "user"
+    ? "Manually set"
+    : track.bpmAnalyzer
+      ? `Analyzed with: ${track.bpmAnalyzer}`
+      : "";
+  if (tooltip) pill.dataset.tooltip = tooltip;
+  cell.replaceChildren(pill);
+}
+
+// The key cell. The backend sends the label in the user's key notation
+// (`keyDisplay`, Classic or Camelot) and the wheel colour group (`keyColor`,
+// 0..11); this only renders them. `key` itself is the classic value the
+// backend stores and exports.
+export function fillKeyCell(cell, track) {
+  const label = track?.keyDisplay || track?.key;
+  if (!label) {
+    cell.textContent = "-";
+    return;
+  }
+  const pill = cloneTemplate(cell.ownerDocument, "tplKeyPill");
+  pill.textContent = label;
+  const color = Number(track?.keyColor);
+  if (Number.isInteger(color) && color >= 0 && color < 12) pill.classList.add(`key-pill--h${color}`);
+  cell.replaceChildren(pill);
+}
+
+// A cover <img> trying `candidates` in order (see attachCoverFallbackHandlers),
+// or the empty placeholder when there are none.
+export function coverElement(doc, candidates) {
+  if (!candidates.length) return cloneTemplate(doc, "tplCoverPlaceholder");
+  const img = cloneTemplate(doc, "tplCoverImg");
+  img.src = candidates[0];
+  img.dataset.fallbacks = candidates.slice(1).join("|");
+  return img;
+}
+
+export function transportIcon(doc, playing) {
+  return cloneTemplate(doc, playing ? "tplIconStop" : "tplIconPlay");
+}
+
+export function createTrackRow(ctx, track, options) {
+  const { state } = ctx;
+  const doc = ctx.document;
+  const row = cloneTemplate(doc, "tplTrackRow");
+  const cell = (name) => row.querySelector(`.td-${name}`);
 
   const localRenderId = options.origin === "local"
     ? String(track.localTrackId || track.id || "")
     : String(track.id || "");
   const renderTrackId = localRenderId || String(track.id || options.index || "row");
   const rowKey = `${options.origin || "unknown"}:${renderTrackId || options.index || "row"}`;
-  const coverCandidates = buildCoverSrcCandidates(track);
-  const coverCell = coverCandidates.length
-    ? `<img class="cover-thumb" alt="cover" loading="lazy" src="${escapeHtml(coverCandidates[0])}" data-fallbacks="${escapeHtml(coverCandidates.slice(1).join("|"))}" />`
-    : `<div class="cover-thumb" aria-hidden="true"></div>`;
-  const isPlayingTrack = isTrackCurrentlyPlaying(track);
-  const transportLabel = isPlayingTrack ? "Stop" : "Play";
-  const transportIcon = isPlayingTrack
-    ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>`
-    : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg>`;
-  const waveformAttrs = `data-action="scrub-play" data-index="${options.index}" data-id="${escapeHtml(renderTrackId)}" data-origin="${escapeHtml(options.origin || "usb")}"`;
+  const origin = options.origin || "usb";
+  row.dataset.playbackRow = rowKey;
+  row.dataset.trackId = renderTrackId;
+  row.dataset.trackIndex = String(options.index);
+  row.dataset.trackOrigin = options.origin || "unknown";
+
+  const dragCell = cell("drag");
+  if (!options.reservesDragColumn) {
+    dragCell.remove();
+  } else if (!options.enableDragReorder) {
+    const handle = dragCell.firstElementChild;
+    if (options.dragDisabledTooltip) {
+      handle.classList.add("disabled");
+      handle.removeAttribute("draggable");
+      delete handle.dataset.playlistTrackDragHandle;
+      handle.dataset.tooltip = options.dragDisabledTooltip;
+      handle.setAttribute("aria-label", options.dragDisabledTooltip);
+    } else {
+      handle.remove();
+    }
+  }
+
+  const selectCell = cell("select");
+  if (options.withCheckbox) {
+    const checkbox = selectCell.firstElementChild;
+    checkbox.dataset.id = track.id;
+    checkbox.checked = !!options.selectedIds?.has(track.id);
+  } else {
+    selectCell.remove();
+  }
+
+  cell("cover").append(coverElement(doc, buildCoverSrcCandidates(ctx, track)));
+
+  const transport = row.querySelector(".transport-btn");
+  if (options.secondaryActionLabel) {
+    const playing = isTrackCurrentlyPlaying(ctx, track);
+    const label = playing ? "Stop" : "Play";
+    transport.classList.toggle("is-playing", playing);
+    Object.assign(transport.dataset, {
+      action: options.secondaryActionType,
+      index: String(options.index),
+      id: renderTrackId,
+      rowKey,
+      origin,
+      tooltip: label,
+    });
+    transport.setAttribute("aria-label", label);
+    transport.append(transportIcon(doc, playing));
+  } else {
+    transport.remove();
+  }
+
+  const waveform = row.querySelector(".waveform");
+  Object.assign(waveform.dataset, { index: String(options.index), id: renderTrackId, origin });
   const peaks = Array.isArray(track.waveformPreview)
     ? track.waveformPreview
       .map((v) => Math.max(0, Math.min(100, Number(v) || 0)))
       .filter((v) => Number.isFinite(v))
     : [];
   const hasColorWaveform = Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6;
-  const hasRenderableWaveform = hasColorWaveform || (peaks.length > 0 && peaks.some((v) => v > 0));
-  const peaksData = peaks.length ? escapeHtml(peaks.join(",")) : "";
-  const waveformCell = hasRenderableWaveform
-    ? `<div class="waveform waveform-canvas" ${waveformAttrs} data-peaks="${peaksData}" aria-label="waveform preview" data-tooltip="Play from here"><canvas class="waveform-canvas-el" aria-hidden="true"></canvas><i class="waveform-playhead" aria-hidden="true"></i></div>`
-    : `<div class="waveform" ${waveformAttrs} aria-label="waveform preview" data-tooltip="Play from here"><i class="waveform-playhead" aria-hidden="true"></i></div>`;
-  const playInWaveform = options.secondaryActionLabel
-    ? `<button class="transport-btn ${isPlayingTrack ? "is-playing" : ""}" data-action="${options.secondaryActionType}" data-index="${options.index}" data-id="${escapeHtml(renderTrackId)}" data-row-key="${escapeHtml(rowKey)}" data-origin="${escapeHtml(options.origin || "usb")}" aria-label="${transportLabel}" data-tooltip="${transportLabel}">${transportIcon}</button>`
-    : "";
-  // Cue editing readiness is per-origin: local rows carry `analysisReady`;
-  // USB rows (playlist/history) carry the serialized on-USB ANLZ path instead.
-  const cueReady = options.origin === "usb"
-    ? !!track.usbAnalysisPath
-    : !!track.analysisReady;
-  const cueDetailBtn = options.enableAnalyzeActions
-    ? `<button class="waveform-detail-btn" data-action="edit-track-detail" data-index="${options.index}" data-id="${escapeHtml(renderTrackId)}"${cueReady ? "" : " disabled"} aria-label="Cue points &amp; beat grid" data-tooltip="${cueReady ? "Edit cue points &amp; beat grid" : "Analyze this track first"}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="21" y1="21" x2="15.5" y2="15.5"></line></svg></button>`
-    : "";
-  const waveformWithAction = `<div class="waveform-cell">${playInWaveform}${waveformCell}${cueDetailBtn}</div>`;
+  if (hasColorWaveform || (peaks.length > 0 && peaks.some((v) => v > 0))) {
+    waveform.classList.add("waveform-canvas");
+    waveform.dataset.peaks = peaks.join(",");
+    waveform.prepend(cloneTemplate(doc, "tplWaveformCanvas"));
+  }
 
-  const selectCell = options.withCheckbox
-    ? `<div role="cell" class="track-grid-cell td-select"><input type="checkbox" data-id="${track.id}" ${options.selectedIds?.has(track.id) ? "checked" : ""} /></div>`
-    : "";
+  const cueButton = row.querySelector(".waveform-detail-btn");
+  if (options.enableAnalyzeActions) {
+    // Cue editing readiness is per-origin: local rows carry `analysisReady`;
+    // USB rows (playlist/history) carry the serialized on-USB ANLZ path instead.
+    const cueReady = options.origin === "usb" ? !!track.usbAnalysisPath : !!track.analysisReady;
+    cueButton.dataset.index = String(options.index);
+    cueButton.dataset.id = renderTrackId;
+    cueButton.disabled = !cueReady;
+    cueButton.dataset.tooltip = cueReady ? "Edit cue points & beat grid" : "Analyze this track first";
+  } else {
+    cueButton.remove();
+  }
 
-  const dragHandleCell = options.reservesDragColumn
-    ? (options.enableDragReorder
-      ? `<div role="cell" class="track-grid-cell td-drag"><span class="drag-handle" data-playlist-track-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">⠿</span></div>`
-      : options.dragDisabledTooltip
-        ? `<div role="cell" class="track-grid-cell td-drag"><span class="drag-handle disabled" data-tooltip="${escapeHtml(options.dragDisabledTooltip)}" aria-label="${escapeHtml(options.dragDisabledTooltip)}">⠿</span></div>`
-        : `<div role="cell" class="track-grid-cell td-drag"></div>`)
-    : "";
+  row.querySelector(".track-title").textContent = track.title ?? "";
+  row.querySelector(".track-artist").textContent = track.artist ?? "";
+  cell("album").textContent = track.album ?? "";
 
-  let actionCell = `<div role="cell" class="track-grid-cell td-action">-</div>`;
+  const formatInfo = describeTrackFormat(track);
+  const badge = row.querySelector(".format-badge");
+  const tooltip = formatTrackFormatTooltip(formatInfo);
+  if (tooltip) badge.dataset.tooltip = tooltip;
+  badge.textContent = formatInfo.label;
+  if (formatInfo.warning) {
+    const autofix = formatInfo.kind === "autofix";
+    badge.classList.add(autofix ? "autofix" : "warn");
+    badge.textContent += autofix ? " ⟳" : " ⚠";
+  }
+  cell("length").textContent = formatTrackDuration(track);
+  fillBpmCell(cell("bpm"), track);
+  fillKeyCell(cell("key"), track);
+
+  const actionCell = cell("action");
   if (options.actionLabel || options.enableAnalyzeActions) {
-    const isRemoveAction = options.actionType === "remove-playlist-track";
-    const playlistName = state.playlists?.find((p) => p.id === state.currentPlaylistId)?.name;
-    const disabledAttr = !isRemoveAction && !state.currentPlaylistId ? " disabled" : "";
-    const actionTitle = isRemoveAction
-      ? (playlistName ? `Remove from ${playlistName}` : "Remove from playlist")
-      : (playlistName
-        ? `Add to ${playlistName}`
-        : "Create and activate a playlist first, then add tracks to it.");
-    const primary = options.actionLabel
-      ? (options.compactAddButton
-        ? `<button class="track-add-btn" data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} data-tooltip="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`
-        : `<button data-action="${options.actionType}" data-index="${options.index}" data-id="${track.id}"${disabledAttr} data-tooltip="${escapeHtml(actionTitle)}">${options.actionLabel}</button>`)
-      : "";
+    const [primary, analyze] = actionCell.querySelectorAll("button");
+    if (options.actionLabel) {
+      const isRemoveAction = options.actionType === "remove-playlist-track";
+      const playlistName = state.playlists?.find((p) => p.id === state.currentPlaylistId)?.name;
+      primary.dataset.action = options.actionType;
+      primary.dataset.index = String(options.index);
+      primary.dataset.id = track.id;
+      primary.disabled = !isRemoveAction && !state.currentPlaylistId;
+      primary.dataset.tooltip = isRemoveAction
+        ? (playlistName ? `Remove from ${playlistName}` : "Remove from playlist")
+        : (playlistName
+          ? `Add to ${playlistName}`
+          : "Create and activate a playlist first, then add tracks to it.");
+      primary.textContent = options.actionLabel;
+      if (!options.compactAddButton) primary.removeAttribute("class");
+    } else {
+      primary.remove();
+    }
     // USB playlist / history rows (`origin: "usb"`) keep `enableAnalyzeActions`
     // on for the cue-editor button, but per-track analyze acts only on a local
     // library copy, so it doesn't belong on those lists.
-    const analysisButtons = options.enableAnalyzeActions && options.origin !== "usb"
-      ? `<button data-action="analyze-track" data-id="${escapeHtml(renderTrackId)}" data-tooltip="${track.analysisReady ? "Recompute waveform/BPM/key" : "Analyze missing waveform/BPM/key"}">${track.analysisReady ? "Reanalyze" : "Analyze"}</button>`
-      : "";
-    actionCell = `<div role="cell" class="track-grid-cell td-action"><div class="action-buttons">${primary}${analysisButtons}</div></div>`;
+    if (options.enableAnalyzeActions && options.origin !== "usb") {
+      analyze.dataset.id = renderTrackId;
+      analyze.dataset.tooltip = track.analysisReady ? "Recompute waveform/BPM/key" : "Analyze missing waveform/BPM/key";
+      analyze.textContent = track.analysisReady ? "Reanalyze" : "Analyze";
+    } else {
+      analyze.remove();
+    }
+  } else {
+    actionCell.textContent = "-";
   }
 
-  const bpmTooltipText = track.bpmAnalyzer === "user"
-    ? "Manually set"
-    : track.bpmAnalyzer
-      ? `Analyzed with: ${track.bpmAnalyzer}`
-      : "";
-  const bpmTitle = bpmTooltipText ? ` data-tooltip="${escapeHtml(bpmTooltipText)}"` : "";
-  const bpmText = formatBpm(track.bpm);
-  const bpmCell = bpmText
-    ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(bpmText)}</span>`
-    : "-";
-
-  const keyCell = renderKeyPill(track, escapeHtml);
-  const formatInfo = describeTrackFormat(track);
-  const formatTooltip = formatTrackFormatTooltip(formatInfo);
-  const formatTooltipAttr = formatTooltip ? ` data-tooltip="${escapeHtml(formatTooltip)}"` : "";
-  const formatCell = formatInfo.warning
-    ? (formatInfo.kind === "autofix"
-      ? `<div role="cell" class="track-grid-cell td-format"><span class="format-badge autofix"${formatTooltipAttr}>${escapeHtml(formatInfo.label)} ⟳</span></div>`
-      : `<div role="cell" class="track-grid-cell td-format"><span class="format-badge warn"${formatTooltipAttr}>${escapeHtml(formatInfo.label)} ⚠</span></div>`)
-    : `<div role="cell" class="track-grid-cell td-format"><span class="format-badge"${formatTooltipAttr}>${escapeHtml(formatInfo.label)}</span></div>`;
-  const durationCell = `<div role="cell" class="track-grid-cell td-length">${escapeHtml(formatTrackDuration(track))}</div>`;
-
-  return `
-    <div role="row" class="track-grid-row" data-playback-row="${escapeHtml(rowKey)}" data-track-id="${escapeHtml(renderTrackId)}" data-track-index="${options.index}" data-track-origin="${escapeHtml(options.origin || "unknown")}">
-      ${dragHandleCell}
-      ${selectCell}
-      <div role="cell" class="track-grid-cell td-cover">${coverCell}</div>
-      <div role="cell" class="track-grid-cell td-waveform">${waveformWithAction}</div>
-      <div role="cell" class="track-grid-cell td-track"><div class="track-info-cell">
-        <span class="track-title">${escapeHtml(track.title)}</span>
-        <span class="track-artist">${escapeHtml(track.artist)}</span>
-      </div></div>
-      <div role="cell" class="track-grid-cell td-album">${escapeHtml(track.album)}</div>
-      ${formatCell}
-      ${durationCell}
-      <div role="cell" class="track-grid-cell td-bpm">${bpmCell}</div>
-      <div role="cell" class="track-grid-cell td-key">${keyCell}</div>
-      ${actionCell}
-    </div>
-  `;
+  return row;
 }
 
 const trackTableRenderTokens = new WeakMap();
 const ROW_BUILD_CHUNK_SIZE = 300;
 
-export async function renderTrackTable(tbody, tracks, options = {}, deps) {
-  const {
-    createTrackRow,
-    attachCoverFallbackHandlers,
-    renderWaveformsIn,
-    setWaveformColorData,
-    updateTransportButtonsInDom,
-    escapeHtml,
-    setStatus
-  } = deps;
+export async function renderTrackTable(ctx, tbody, tracks, options = {}) {
 
   // `options.append`: add `tracks` onto the end of what's already in `tbody`
   // instead of rebuilding it (used for paginated large-selection loading,
@@ -165,12 +230,12 @@ export async function renderTrackTable(tbody, tracks, options = {}, deps) {
   const isStale = () => trackTableRenderTokens.get(tbody) !== myToken;
 
   if (!isAppend) {
-    tbody.innerHTML = "";
+    tbody.replaceChildren();
   }
 
   if (!tracks.length) {
     if (!isAppend) {
-      tbody.innerHTML = `<div role="row" class="track-grid-row track-grid-row-empty"><div role="cell" class="track-grid-cell track-grid-empty">No tracks available.</div></div>`;
+      tbody.append(cloneTemplate(tbody.ownerDocument, "tplTrackRowEmpty"));
     }
     return;
   }
@@ -180,17 +245,11 @@ export async function renderTrackTable(tbody, tracks, options = {}, deps) {
       if (isStale()) return;
       const track = tracks[i];
       const index = i + indexOffset;
-      tbody.insertAdjacentHTML("beforeend", createTrackRow(track, { ...options, index }));
-      const colorData = Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6
-        ? track.waveformColorData
-        : null;
-      if (colorData && typeof setWaveformColorData === "function") {
-        const row = tbody.lastElementChild;
-        const waveform = row?.querySelector?.(".waveform");
-        if (waveform) {
-          setWaveformColorData(waveform, colorData);
-        }
+      const row = createTrackRow(ctx, track, { ...options, index });
+      if (Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6) {
+        setWaveformColorData(row.querySelector(".waveform"), track.waveformColorData);
       }
+      tbody.append(row);
       if ((i + 1) % ROW_BUILD_CHUNK_SIZE === 0 && i + 1 < tracks.length) {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
@@ -199,25 +258,20 @@ export async function renderTrackTable(tbody, tracks, options = {}, deps) {
     attachCoverFallbackHandlers(tbody);
     await renderWaveformsIn(tbody);
     if (isStale()) return;
-    updateTransportButtonsInDom(tbody);
+    updateTransportButtonsInDom(ctx, tbody);
   } catch (error) {
     if (isStale()) return;
     if (!isAppend) {
-      tbody.innerHTML = "";
+      tbody.replaceChildren();
     }
     tracks.forEach((track) => {
-      const maybeDragCell = options.reservesDragColumn
-        ? `<div role="cell" class="track-grid-cell td-drag">-</div>`
-        : "";
-      const maybeSelectCell = options.withCheckbox
-        ? `<div role="cell" class="track-grid-cell td-select">-</div>`
-        : "";
-      tbody.insertAdjacentHTML(
-        "beforeend",
-        `<div role="row" class="track-grid-row">${maybeDragCell}${maybeSelectCell}<div role="cell" class="track-grid-cell td-cover">-</div><div role="cell" class="track-grid-cell td-waveform">-</div><div role="cell" class="track-grid-cell td-track">${escapeHtml(track.title)}</div><div role="cell" class="track-grid-cell td-album">-</div><div role="cell" class="track-grid-cell td-format">-</div><div role="cell" class="track-grid-cell td-length">-</div><div role="cell" class="track-grid-cell td-bpm">-</div><div role="cell" class="track-grid-cell td-key">-</div><div role="cell" class="track-grid-cell td-action">-</div></div>`
-      );
+      const row = cloneTemplate(tbody.ownerDocument, "tplTrackRowFallback");
+      if (!options.reservesDragColumn) row.querySelector(".td-drag").remove();
+      if (!options.withCheckbox) row.querySelector(".td-select").remove();
+      row.querySelector(".td-track").textContent = track.title ?? "";
+      tbody.append(row);
     });
-    setStatus(`Track render fallback used: ${error?.message || "unknown render error"}`);
+    ctx.setStatus(`Track render fallback used: ${error?.message || "unknown render error"}`);
   }
 }
 

@@ -4,38 +4,47 @@ import {
   initializeUsb,
   pickUsbFolder
 } from "../components/usb/actions.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
-// NOTE: library search debouncing moved to a main.js closure over
-// libraryTracksCtl.setSearch (shared TrackListController) -- see
-// tests/track_list_controller.test.mjs and the e2e library specs.
-
-test("initializeUsb initializes and revalidates root", async () => {
-  const state = { usbRoot: "/usb" };
-  const el = { usbInitRow: { classList: { add: () => {} } } };
-  const calls = [];
-  await initializeUsb(state, el, {
+// A ctx whose backend accepts `/usb` as a valid, named root; records every
+// command/invoke. Auto-diagnostics scheduling is disabled.
+function usbCtx(calls, overrides = {}) {
+  return makeTestCtx({
+    runUsbDiagnostics: async () => {},
     command: async (name, payload) => {
       calls.push([name, payload]);
+      if (name === "validate_usb_root") {
+        return { valid: true, normalizedRoot: payload.path, hasWriteAccess: true, hasVendorRoot: true, hasContents: true, hasPdb: true };
+      }
+      if (name === "get_usb_device_name") return { name: "Stick" };
+      return {};
     },
-    setStatus: (text) => calls.push(["status", text]),
-    validateAndSetUsbRoot: async (path, silent) => calls.push(["validate", path, silent]),
-    logError: () => {}
+    ...overrides
   });
-  assert.equal(calls[0][0], "initialize_usb");
-  assert.equal(calls[1][0], "status");
-  assert.equal(calls[2][0], "validate");
+}
+
+test("initializeUsb initializes and revalidates root", async () => {
+  const calls = [];
+  const ctx = usbCtx(calls, { emitStatus: (text) => calls.push(["status", text]) });
+  ctx.state.usbRoot = "/usb";
+  await initializeUsb(ctx);
+  assert.deepEqual(calls[0], ["initialize_usb", { usbRoot: "/usb" }]);
+  assert.deepEqual(calls[1], ["status", "USB initialized"]);
+  assert.deepEqual(calls[2], ["validate_usb_root", { path: "/usb" }]);
+  assert.equal(ctx.state.usbRootValid, true);
 });
 
 test("pickUsbFolder invokes picker and validates selected path", async () => {
   const calls = [];
-  const selected = await pickUsbFolder({
+  const ctx = usbCtx(calls, {
     invoke: async (name) => {
-      calls.push(name);
-      return "/usb";
-    },
-    validateAndSetUsbRoot: async (path, silent) => calls.push([path, silent])
+      calls.push([name]);
+      return name === "pick_usb_folder" ? "/usb" : null;
+    }
   });
+  const selected = await pickUsbFolder(ctx);
   assert.equal(selected, "/usb");
-  assert.equal(calls[0], "pick_usb_folder");
-  assert.deepEqual(calls[1], ["/usb", false]);
+  assert.deepEqual(calls[0], ["pick_usb_folder"]);
+  assert.deepEqual(calls[1], ["validate_usb_root", { path: "/usb" }]);
+  assert.equal(ctx.state.usbRoot, "/usb");
 });

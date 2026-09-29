@@ -4,7 +4,7 @@ function installTauriMock(page, mode) {
   return page.addInitScript(({ mode }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     const state = {
-      initialized: mode === "valid" || mode === "warning-mix" || mode === "toggle-usb" || mode === "reorder" || mode === "reorder-scroll",
+      initialized: mode === "valid" || mode === "warning-mix" || mode === "toggle-usb" || mode === "reorder" || mode === "reorder-scroll" || mode === "progress-race",
       pickCount: 0,
       usbPlaylists: mode === "valid" || mode === "warning-mix"
         ? [
@@ -83,6 +83,11 @@ function installTauriMock(page, mode) {
           }
           if (command === "list_playlists") {
             return { ok: true, data: { items: [] } };
+          }
+          if (command === "create_playlist" && mode === "progress-race") {
+            // Still saving well past the previous job's footer-hide delay.
+            await new Promise((resolve) => setTimeout(resolve, 2500));
+            return { ok: true, data: { playlistId: "p-new", name: payload?.request?.name } };
           }
           if (command === "list_usb_devices") {
             return { ok: true, data: { items: [] } };
@@ -847,4 +852,26 @@ test("USB toggle race ends in deterministic final state", async ({ page }) => {
 
   await expect(usbPlaylistsNav).not.toHaveClass(/revealed/);
   await expect(page.locator("#panel-usb")).toHaveClass(/active/);
+});
+
+test("a job started right after another finished keeps its progress footer", async ({ page }) => {
+  await installTauriMock(page, "progress-race");
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator("#refreshUsbBtn").click();
+  // The import finished; its footer is due to hide 1.2s from now.
+  await expect(page.locator("#progressText")).toContainText("Done");
+
+  await page.locator("#addPlaylistBtn").click();
+  await page.locator(".nav-new-input").fill("Race");
+  await page.locator(".nav-new-input").press("Enter");
+  await expect(page.locator("#progressText")).toContainText("Saving playlist");
+
+  // Past the import's hide delay, the still-running save keeps the footer.
+  await page.waitForTimeout(1500);
+  await expect(page.locator("#progressFooter")).toHaveClass(/active/);
+  await expect(page.locator("#progressText")).toContainText("Saving playlist");
 });

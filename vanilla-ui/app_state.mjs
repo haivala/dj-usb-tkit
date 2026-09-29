@@ -36,6 +36,10 @@ export function createInitialState() {
     essentiaInstalled: false,
     essentiaDownloading: false,
     updateCheck: null,
+    // Pending progress-footer hide (job_manager.mjs scheduleProgressIdle).
+    progressIdleTimer: null,
+    // Resolvers waiting for the running USB job to end (waitForUsbJobIdle).
+    usbJobIdleWaiters: [],
     // The loaded library page(s); owned by the library TrackListController
     // (main.js) via getItems/setItems, but read directly by playback
     // resolution, analysis patching, and selection.

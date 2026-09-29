@@ -1,22 +1,19 @@
-export function toPlayableUrl(path, deps = {}) {
-  const {
-    isTauriRuntime = () => false,
-    tauriConvertFileSrc = null,
-    windowObj = typeof window !== "undefined" ? window : globalThis
-  } = deps;
+import { transportIcon } from "../../track_table.mjs";
 
+export function toPlayableUrl(ctx, path) {
   if (!path) return null;
   const raw = String(path).trim();
   if (!raw) return null;
   if (/^https?:\/\//i.test(raw) || /^blob:/i.test(raw) || /^data:/i.test(raw)) return raw;
   if (/^file:\/\//i.test(raw)) return raw;
 
-  if (isTauriRuntime() && typeof tauriConvertFileSrc === "function") {
+  if (ctx.isTauriRuntime?.() && typeof ctx.tauriConvertFileSrc === "function") {
     try {
-      const converted = tauriConvertFileSrc(raw);
+      const converted = ctx.tauriConvertFileSrc(raw);
       if (converted) return converted;
     } catch (_) {}
   }
+  const windowObj = ctx.window || globalThis;
   if (windowObj?.__TAURI__?.core?.convertFileSrc) {
     try {
       const converted = windowObj.__TAURI__.core.convertFileSrc(raw);
@@ -39,7 +36,8 @@ export function getPlaybackUiStateHelpers() {
   return globalThis?.playbackUiState || null;
 }
 
-export function updateTransportButtonsInDom(state, root) {
+export function updateTransportButtonsInDom(ctx, root = ctx.document) {
+  const { state } = ctx;
   const helpers = getPlaybackUiStateHelpers();
   root.querySelectorAll(".transport-btn").forEach((btn) => {
     const id = btn.dataset.id || "";
@@ -53,9 +51,7 @@ export function updateTransportButtonsInDom(state, root) {
     btn.classList.toggle("is-playing", isPlaying);
     btn.setAttribute("aria-label", isPlaying ? "Stop" : "Play");
     btn.dataset.tooltip = isPlaying ? "Stop" : "Play";
-    btn.innerHTML = isPlaying
-      ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>`
-      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg>`;
+    btn.replaceChildren(transportIcon(btn.ownerDocument, isPlaying));
   });
 }
 
@@ -76,8 +72,8 @@ export function setWaveformPlayhead(element, fraction, playing, paused = false) 
   element.classList.toggle("is-paused", !playing && !!paused);
 }
 
-export function clearAllWaveformPlayheads(document) {
-  document.querySelectorAll(".waveform").forEach((wf) => {
+export function clearAllWaveformPlayheads(ctx) {
+  ctx.document.querySelectorAll(".waveform").forEach((wf) => {
     setWaveformPlayhead(wf, 0, false);
   });
 }
@@ -92,16 +88,14 @@ export function scrubRatioFromPointer(event, waveformElement) {
 
 // Drives the waveform playhead by wall-clock interpolation from a single known
 // position/duration snapshot, instead of depending on a stream of backend push events.
-export function startPlayheadInterpolation(state, {
+export function startPlayheadInterpolation(ctx, {
   waveformEl,
   initialPositionMs,
   durationMs,
-  setWaveformPlayhead: setWaveformPlayheadFn,
-  requestAnimationFrameFn,
-  cancelAnimationFrameFn,
   nowFn = () => Date.now()
 }) {
-  stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
+  const { state, requestAnimationFrameFn } = ctx;
+  stopPlayheadInterpolation(ctx);
   if (!waveformEl || !(durationMs > 0) || typeof requestAnimationFrameFn !== "function") return;
 
   const startWallClockMs = nowFn();
@@ -109,13 +103,14 @@ export function startPlayheadInterpolation(state, {
     if (state.activeWaveform !== waveformEl) return;
     const elapsedMs = nowFn() - startWallClockMs;
     const positionMs = Math.min(durationMs, initialPositionMs + elapsedMs);
-    setWaveformPlayheadFn(waveformEl, positionMs / durationMs, true);
+    setWaveformPlayhead(waveformEl, positionMs / durationMs, true);
     state.playheadAnimationHandle = requestAnimationFrameFn(tick);
   };
   tick();
 }
 
-export function stopPlayheadInterpolation(state, { cancelAnimationFrameFn } = {}) {
+export function stopPlayheadInterpolation(ctx) {
+  const { state, cancelAnimationFrameFn } = ctx;
   if (state.playheadAnimationHandle != null && typeof cancelAnimationFrameFn === "function") {
     cancelAnimationFrameFn(state.playheadAnimationHandle);
   }
@@ -148,39 +143,44 @@ export function withBackendQueue(state, jobFn) {
   return run;
 }
 
+// Drop every trace of the current playback from state + the DOM.
+function resetPlaybackState(ctx) {
+  const { state } = ctx;
+  state.playbackActive = false;
+  state.playbackPaused = false;
+  state.playbackTrackId = null;
+  state.playbackPath = null;
+  state.playbackRowKey = null;
+  state.activeWaveform = null;
+  state.playbackLabelContext = null;
+  stopPlayheadInterpolation(ctx);
+  clearAllWaveformPlayheads(ctx);
+}
+
 /// Apply a backend pause/resume status (a `pause_playback_native` /
 /// `resume_playback_native` response or a `playback.paused` / `playback.resumed`
 /// event). The backend owns the paused flag and the position; this only
 /// projects them: paused freezes the playhead at `positionMs`, resumed restarts
 /// the interpolation from there.
-export function applyPauseStatus(state, status, deps) {
-  const {
-    setWaveformPlayhead,
-    updateTransportButtonsInDom,
-    setStatus,
-    requestAnimationFrameFn,
-    cancelAnimationFrameFn
-  } = deps;
+export function applyPauseStatus(ctx, status) {
+  const { state, setStatus } = ctx;
   if (!status || !(status.playing || status.paused)) return;
   state.playbackPaused = !!status.paused;
   const duration = Number(status.durationMs || 0);
   const position = Number(status.positionMs || 0);
   const waveformEl = state.activeWaveform;
   if (status.paused) {
-    stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
+    stopPlayheadInterpolation(ctx);
     if (waveformEl) {
       setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : 0, false, true);
     }
     setStatus("Paused");
   } else {
     if (waveformEl && duration > 0) {
-      startPlayheadInterpolation(state, {
+      startPlayheadInterpolation(ctx, {
         waveformEl,
         initialPositionMs: position,
         durationMs: duration,
-        setWaveformPlayhead,
-        requestAnimationFrameFn,
-        cancelAnimationFrameFn
       });
     }
     if (state.playbackLabelContext) {
@@ -188,26 +188,27 @@ export function applyPauseStatus(state, status, deps) {
       setStatus(`Playing from ${sourceLabel}: ${title}`);
     }
   }
-  updateTransportButtonsInDom();
+  updateTransportButtonsInDom(ctx);
 }
 
-async function runPauseChange(state, commandName, shouldRun, deps) {
+async function runPauseChange(ctx, commandName, shouldRun) {
+  const { state } = ctx;
   if (!state.playbackActive || !shouldRun()) return;
   // A play/stop issued while this was queued wins; don't apply a stale status.
   const generation = state.playbackGeneration;
   return withBackendQueue(state, async () => {
-    const status = await deps.command(commandName);
+    const status = await ctx.command(commandName);
     if (!isGenerationCurrent(state, generation)) return;
-    applyPauseStatus(state, status, deps);
+    applyPauseStatus(ctx, status);
   });
 }
 
-export function pausePlaybackFromUi(state, deps) {
-  return runPauseChange(state, "pause_playback_native", () => !state.playbackPaused, deps);
+export function pausePlaybackFromUi(ctx) {
+  return runPauseChange(ctx, "pause_playback_native", () => !ctx.state.playbackPaused);
 }
 
-export function resumePlaybackFromUi(state, deps) {
-  return runPauseChange(state, "resume_playback_native", () => !!state.playbackPaused, deps);
+export function resumePlaybackFromUi(ctx) {
+  return runPauseChange(ctx, "resume_playback_native", () => !!ctx.state.playbackPaused);
 }
 
 /// Hand the running playback's playhead over to another waveform (the cue
@@ -215,16 +216,16 @@ export function resumePlaybackFromUi(state, deps) {
 /// close). Position and paused flag come from the backend's status; this only
 /// re-targets the projection. Resolves to the waveform it replaced, or
 /// `undefined` when nothing was moved (no playback, or a play/stop won).
-export function moveActiveWaveform(state, waveformEl, deps) {
-  const { command, setWaveformPlayhead, requestAnimationFrameFn, cancelAnimationFrameFn } = deps;
+export function moveActiveWaveform(ctx, waveformEl) {
+  const { state } = ctx;
   if (!state.playbackActive) return Promise.resolve(undefined);
   const generation = state.playbackGeneration;
   return withBackendQueue(state, async () => {
-    const status = await command("get_playback_status_native");
+    const status = await ctx.command("get_playback_status_native");
     if (!isGenerationCurrent(state, generation) || !state.playbackActive) return undefined;
     if (!status || !(status.playing || status.paused)) return undefined;
     const previous = state.activeWaveform;
-    stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
+    stopPlayheadInterpolation(ctx);
     if (previous && previous !== waveformEl) setWaveformPlayhead(previous, 0, false);
     state.activeWaveform = waveformEl || null;
     const duration = Number(status.durationMs || 0);
@@ -232,49 +233,40 @@ export function moveActiveWaveform(state, waveformEl, deps) {
     if (waveformEl && status.paused) {
       setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : 0, false, true);
     } else if (waveformEl && duration > 0) {
-      startPlayheadInterpolation(state, {
+      startPlayheadInterpolation(ctx, {
         waveformEl,
         initialPositionMs: position,
         durationMs: duration,
-        setWaveformPlayhead,
-        requestAnimationFrameFn,
-        cancelAnimationFrameFn
       });
     }
     return previous || null;
   });
 }
 
-export async function stopPlaybackFromUi(state, deps) {
-  const {
-    command,
-    clearAllWaveformPlayheads,
-    updateTransportButtonsInDom,
-    setStatus,
-    cancelAnimationFrameFn
-  } = deps;
+// `fromUi`: a Stop the user pressed -- reports "Idle" even when nothing was
+// playing and lets a failed stop surface. Otherwise (a context change such as
+// switching views) it's a no-op when idle and a failed stop is only logged.
+async function stopPlayback(ctx, { fromUi }) {
+  const { state, setStatus } = ctx;
   if (state.playbackStopPromise) return state.playbackStopPromise;
   if (!state.playbackActive && state.playbackPendingKind !== "play") {
-    setStatus("Idle");
+    if (fromUi) setStatus("Idle");
     return;
   }
   const generation = beginPlaybackIntent(state, "stop");
-  updateTransportButtonsInDom();
+  updateTransportButtonsInDom(ctx);
   state.playbackStopPromise = withBackendQueue(state, async () => {
-    await command("stop_playback_native");
+    try {
+      await ctx.command("stop_playback_native");
+    } catch (err) {
+      if (fromUi) throw err;
+      ctx.warn("Failed to stop playback on context change:", err);
+    }
     if (isGenerationCurrent(state, generation)) {
-      state.playbackActive = false;
-      state.playbackPaused = false;
-      state.playbackTrackId = null;
-      state.playbackPath = null;
-      state.playbackRowKey = null;
-      state.activeWaveform = null;
-      state.playbackLabelContext = null;
-      stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
-      clearAllWaveformPlayheads();
+      resetPlaybackState(ctx);
       clearPlaybackIntentIfCurrent(state, generation);
     }
-    updateTransportButtonsInDom();
+    updateTransportButtonsInDom(ctx);
     setStatus("Idle");
   });
   try {
@@ -283,6 +275,15 @@ export async function stopPlaybackFromUi(state, deps) {
     state.playbackStopPromise = null;
   }
 }
+
+export function stopPlaybackFromUi(ctx) {
+  return stopPlayback(ctx, { fromUi: true });
+}
+
+export function stopPlaybackIfActive(ctx) {
+  return stopPlayback(ctx, { fromUi: false });
+}
+
 function toNumberOrNull(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -292,18 +293,14 @@ function toNumberOrNull(value) {
 // whole library DB (the frontend only ever holds the loaded pages) and can
 // materialize a local row for an on-disk file. No client-side matching here --
 // not even as a fast path.
-export async function resolveLocalTrackIdAsync(track, state, deps) {
-  const {
-    command,
-    promoteTrackIdentity
-  } = deps;
-
+export async function resolveLocalTrackIdAsync(ctx, track) {
+  const { state } = ctx;
   if (!track) return null;
   if (track.localTrackId) return track.localTrackId;
 
   const filePath = String(track.filePath || "").trim();
   try {
-    const data = await command("resolve_track_identity", {
+    const data = await ctx.command("resolve_track_identity", {
       trackId: track.id || null,
       title: track.title || "",
       artist: track.artist || "",
@@ -324,9 +321,7 @@ export async function resolveLocalTrackIdAsync(track, state, deps) {
     if (data?.trackId) {
       const previousId = String(track.id || "").trim();
       track.localTrackId = data.trackId;
-      if (typeof promoteTrackIdentity === "function") {
-        promoteTrackIdentity(previousId, data.trackId);
-      }
+      ctx.promoteTrackIdentity(previousId, data.trackId);
       return data.trackId;
     }
   } catch (_) {
@@ -339,7 +334,8 @@ export async function resolveLocalTrackIdAsync(track, state, deps) {
 // id compare against the backend-resolved id the playback events / USB rows
 // carry -- no path or metadata scan over `state.tracks` (which is only the
 // loaded pages).
-export function isTrackCurrentlyPlaying(track, state) {
+export function isTrackCurrentlyPlaying(ctx, track) {
+  const { state } = ctx;
   if (state.playbackPendingKind === "stop") return false;
   if (state.playbackPendingKind === "play") {
     return !!(state.playbackPendingTrackId && track?.id && state.playbackPendingTrackId === track.id);
@@ -348,18 +344,9 @@ export function isTrackCurrentlyPlaying(track, state) {
   const rowId = String(track?.localTrackId || track?.id || "");
   return !!rowId && !!state.playbackTrackId && state.playbackTrackId === rowId;
 }
-export async function playTrackFromOrigin(state, track, origin, options = {}, deps) {
-  const {
-    command,
-    clearAllWaveformPlayheads,
-    setWaveformPlayhead,
-    updateTransportButtonsInDom,
-    setStatus,
-    generation,
-    requestAnimationFrameFn,
-    cancelAnimationFrameFn
-  } = deps;
 
+async function playResolvedTrack(ctx, track, origin, options, generation) {
+  const { state, setStatus } = ctx;
   const trackPath = String(track?.filePath || "").trim();
   const originLower = String(origin || "").toLowerCase();
   const artist = String(track?.artist || "").trim();
@@ -373,7 +360,7 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
   return withBackendQueue(state, async () => {
     if (!isGenerationCurrent(state, generation)) return;
     try {
-      const playback = await command("play_resolved_track", {
+      const playback = await ctx.command("play_resolved_track", {
         title: track?.title || "",
         artist: track?.artist || "",
         album: track?.album || null,
@@ -389,18 +376,15 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
       });
       if (!isGenerationCurrent(state, generation)) return;
       if (waveformEl) {
-        clearAllWaveformPlayheads();
+        clearAllWaveformPlayheads(ctx);
         state.activeWaveform = waveformEl;
         const duration = Number(playback?.durationMs || 0);
         const position = Number(playback?.positionMs || 0);
         if (duration > 0) {
-          startPlayheadInterpolation(state, {
+          startPlayheadInterpolation(ctx, {
             waveformEl,
             initialPositionMs: position,
             durationMs: duration,
-            setWaveformPlayhead,
-            requestAnimationFrameFn,
-            cancelAnimationFrameFn
           });
         } else {
           setWaveformPlayhead(waveformEl, startRatio, true);
@@ -417,7 +401,7 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
       state.playbackPath = playback?.path || trackPath;
       state.playbackRowKey = options.rowKey || null;
       state.playbackLabelContext = { sourceLabel, title };
-      updateTransportButtonsInDom();
+      updateTransportButtonsInDom(ctx);
       setStatus(`Playing from ${sourceLabel}: ${title}`);
     } catch (err) {
       if (!isGenerationCurrent(state, generation)) return;
@@ -433,49 +417,9 @@ export async function playTrackFromOrigin(state, track, origin, options = {}, de
     }
   });
 }
-export async function stopPlaybackIfActive(state, deps) {
-  const {
-    command,
-    clearAllWaveformPlayheads,
-    updateTransportButtonsInDom,
-    setStatus,
-    warn,
-    cancelAnimationFrameFn
-  } = deps;
-  if (state.playbackStopPromise) return state.playbackStopPromise;
-  if (!state.playbackActive && state.playbackPendingKind !== "play") return;
-  const generation = beginPlaybackIntent(state, "stop");
-  updateTransportButtonsInDom();
-  state.playbackStopPromise = withBackendQueue(state, async () => {
-    try {
-      await command("stop_playback_native");
-    } catch (err) {
-      warn("Failed to stop playback on context change:", err);
-    }
-    if (isGenerationCurrent(state, generation)) {
-      state.playbackActive = false;
-      state.playbackPaused = false;
-      state.playbackTrackId = null;
-      state.playbackPath = null;
-      state.playbackRowKey = null;
-      state.activeWaveform = null;
-      state.playbackLabelContext = null;
-      stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
-      clearAllWaveformPlayheads();
-      clearPlaybackIntentIfCurrent(state, generation);
-    }
-    updateTransportButtonsInDom();
-    setStatus("Idle");
-  });
-  try {
-    await state.playbackStopPromise;
-  } finally {
-    state.playbackStopPromise = null;
-  }
-}
 
-export async function playTrackFromOriginController(state, track, origin, options = {}, deps) {
-  const { playTrackFromOriginCore, updateTransportButtonsInDom } = deps;
+export async function playTrackFromOrigin(ctx, track, origin, options = {}) {
+  const { state } = ctx;
   const rowKey = options.rowKey || null;
   const trackId = track?.id || null;
 
@@ -489,14 +433,14 @@ export async function playTrackFromOriginController(state, track, origin, option
   }
 
   const generation = beginPlaybackIntent(state, "play", { rowKey, trackId });
-  updateTransportButtonsInDom?.();
+  updateTransportButtonsInDom(ctx);
 
   const run = (async () => {
     try {
-      return await playTrackFromOriginCore(state, track, origin, options, { ...deps, generation });
+      return await playResolvedTrack(ctx, track, origin, options, generation);
     } finally {
       clearPlaybackIntentIfCurrent(state, generation);
-      updateTransportButtonsInDom?.();
+      updateTransportButtonsInDom(ctx);
     }
   })();
   state.playbackStartPromise = run;
@@ -508,16 +452,9 @@ export async function playTrackFromOriginController(state, track, origin, option
     }
   }
 }
-export function handlePlaybackEvent(state, payload, deps) {
-  const {
-    setWaveformPlayhead,
-    updateTransportButtonsInDom,
-    clearAllWaveformPlayheads,
-    setStatus,
-    requestAnimationFrameFn,
-    cancelAnimationFrameFn
-  } = deps;
 
+export function handlePlaybackEvent(ctx, payload) {
+  const { state, setStatus } = ctx;
   if (!payload || typeof payload !== "object") return;
   const eventName = String(payload.event || "");
   const path = payload.path ? String(payload.path) : null;
@@ -548,19 +485,16 @@ export function handlePlaybackEvent(state, payload, deps) {
     }
     if (state.activeWaveform) {
       if (playing && duration > 0) {
-        startPlayheadInterpolation(state, {
+        startPlayheadInterpolation(ctx, {
           waveformEl: state.activeWaveform,
           initialPositionMs: position,
           durationMs: duration,
-          setWaveformPlayhead,
-          requestAnimationFrameFn,
-          cancelAnimationFrameFn
         });
       } else {
         setWaveformPlayhead(state.activeWaveform, duration > 0 ? position / duration : 0, playing);
       }
     }
-    updateTransportButtonsInDom();
+    updateTransportButtonsInDom(ctx);
     // Keep the status line a live projection of playback state rather than a
     // one-shot string frozen at play-dispatch time -- reuse the backend-owned
     // label playTrackFromOrigin stashed, verbatim, so later events (e.g. a
@@ -575,7 +509,7 @@ export function handlePlaybackEvent(state, payload, deps) {
   if (eventName === "playback.paused" || eventName === "playback.resumed") {
     // Stale if we've already moved on to another track (same guard as stopped).
     if (!state.playbackActive || (path !== null && path !== state.playbackPath)) return;
-    applyPauseStatus(state, payload, deps);
+    applyPauseStatus(ctx, payload);
     return;
   }
 
@@ -585,16 +519,8 @@ export function handlePlaybackEvent(state, payload, deps) {
     // "stopped" is for a path we've already moved on from, it's stale; don't let it
     // blank out whatever is now actually playing.
     if (path !== null && path !== state.playbackPath) return;
-    state.playbackActive = false;
-    state.playbackPaused = false;
-    state.playbackPath = null;
-    state.playbackTrackId = null;
-    state.playbackRowKey = null;
-    state.activeWaveform = null;
-    state.playbackLabelContext = null;
-    stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
-    clearAllWaveformPlayheads();
-    updateTransportButtonsInDom();
+    resetPlaybackState(ctx);
+    updateTransportButtonsInDom(ctx);
     setStatus("Idle");
     return;
   }
@@ -605,8 +531,8 @@ export function handlePlaybackEvent(state, payload, deps) {
   }
 }
 
-export async function unregisterBackendJobEvents(state, deps = {}) {
-  const warn = deps.warn || (() => {});
+export async function unregisterBackendJobEvents(ctx) {
+  const { state } = ctx;
   const unlistenFns = [state.unlistenJobEvent, state.unlistenPlaybackEvent, state.unlistenBackendLogEvent]
     .filter((fn) => typeof fn === "function");
   state.unlistenJobEvent = null;
@@ -616,53 +542,42 @@ export async function unregisterBackendJobEvents(state, deps = {}) {
     try {
       await Promise.resolve(fn());
     } catch (err) {
-      warn("Failed to unlisten backend event:", err);
+      ctx.warn("Failed to unlisten backend event:", err);
     }
   }
 }
 
-export async function registerBackendJobEvents(state, deps) {
-  const {
-    isTauriRuntime,
-    unregisterBackendJobEvents,
-    getTauriEventListen,
-    handleJobEvent,
-    handlePlaybackEvent,
-    handleBackendLogEvent
-  } = deps;
-
-  if (!isTauriRuntime()) return;
-  await unregisterBackendJobEvents();
-  const listen = await getTauriEventListen();
+export async function registerBackendJobEvents(ctx) {
+  const { state } = ctx;
+  if (!ctx.isTauriRuntime()) return;
+  await unregisterBackendJobEvents(ctx);
+  const listen = await ctx.getTauriEventListen();
   if (!listen) return;
 
   const unlisten = await listen("job:event", (event) => {
-    handleJobEvent(event?.payload);
+    ctx.handleJobEvent(event?.payload);
   });
-
   if (typeof unlisten === "function") {
     state.unlistenJobEvent = unlisten;
   }
 
   const unlistenPlayback = await listen("playback:event", (event) => {
-    handlePlaybackEvent(event?.payload);
+    handlePlaybackEvent(ctx, event?.payload);
   });
   if (typeof unlistenPlayback === "function") {
     state.unlistenPlaybackEvent = unlistenPlayback;
   }
 
-  if (typeof handleBackendLogEvent === "function") {
-    const unlistenBackendLog = await listen("backend:log", (event) => {
-      handleBackendLogEvent(event?.payload);
-    });
-    if (typeof unlistenBackendLog === "function") {
-      state.unlistenBackendLogEvent = unlistenBackendLog;
-    }
+  const unlistenBackendLog = await listen("backend:log", (event) => {
+    ctx.handleBackendLogEvent(event?.payload);
+  });
+  if (typeof unlistenBackendLog === "function") {
+    state.unlistenBackendLogEvent = unlistenBackendLog;
   }
 }
 
-export function bindBeforeUnloadCleanup(windowObj, unregisterBackendJobEvents) {
-  windowObj.addEventListener("beforeunload", () => {
-    unregisterBackendJobEvents().catch(() => {});
+export function bindBeforeUnloadCleanup(ctx) {
+  ctx.window.addEventListener("beforeunload", () => {
+    unregisterBackendJobEvents(ctx).catch(() => {});
   });
 }

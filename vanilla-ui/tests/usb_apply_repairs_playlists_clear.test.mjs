@@ -1,30 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { applyUsbRepairs } from "../components/usb/actions.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
 test("applyUsbRepairs does not clear playlists when nothing was applied", async () => {
-  const state = { usbRoot: "/tmp/usb", selectedRepairFixIds: new Set(["some_fix"]) };
-  let resetCalls = 0;
-  let renderCalls = 0;
   let renderOpenPlaylist = 0;
-
-  await applyUsbRepairs(state, {
-    setStatus: () => {},
+  const ctx = makeTestCtx({
     command: async () => ({
       appliedFixes: [],
       failedFixes: ["some_fix"],
       warnings: [],
       durationMs: 1,
-      diagnostics: { playlistDetails: [], warnings: [], durationMs: 1 }
+      diagnostics: { overallStatus: "WARN", playlistDetails: [], warnings: [], durationMs: 1 }
     }),
     logWarnings: () => {},
-    resetUsbStateViews: () => { resetCalls += 1; },
-    updatePlaylistExportButtons: () => {},
-    renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; },
-    renderDiagnosticsReport: () => { renderCalls += 1; }
+    renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; }
+  });
+  Object.assign(ctx.state, {
+    usbRoot: "/tmp/usb",
+    selectedRepairFixIds: new Set(["some_fix"]),
+    usbPlaylists: [{ id: "u1", name: "Loaded" }]
   });
 
-  assert.equal(resetCalls, 0);
-  assert.equal(renderCalls, 1);
+  await applyUsbRepairs(ctx);
+
+  assert.deepEqual(ctx.state.usbPlaylists.map((p) => p.id), ["u1"], "loaded USB playlists are kept");
+  assert.equal(ctx.el.diagOverallStatus.textContent, "WARN", "the refreshed diagnostics report is rendered");
   assert.equal(renderOpenPlaylist, 1);
 });

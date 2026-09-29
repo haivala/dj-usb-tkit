@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
+import { setStatusText } from "../message_bus.mjs";
 import {
   closeSettingsDrawer,
-  setStatusText,
   syncLibraryOnboardingMode,
   updateActivePlaylistIndicators,
   updateAddToPlaylistButtons,
@@ -18,9 +18,10 @@ import {
   updateUsbSubNavDisabledState
 } from "../ui_controller.mjs";
 import { initTooltips } from "../tooltip.mjs";
+import { APP_TEMPLATES } from "./test_helpers.mjs";
 
 function makeDom(body = "") {
-  return new JSDOM(`<!doctype html><body>${body || `
+  return new JSDOM(`<!doctype html><body>${APP_TEMPLATES}<div id="app-tooltip" class="app-tooltip" role="tooltip"></div>${body || `
     <div id="statusText"></div>
     <div id="playlistBadge" class="playlist-badge inactive"></div>
     <div id="badgeLabel"></div>
@@ -79,22 +80,22 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
     "selectionActions",
     "addSelectedBtn"
   ]);
-  let addButtonUpdates = 0;
-  let activeIndicatorUpdates = 0;
+  el.scanLibraryBtn = document.getElementById("scanLibraryBtn");
 
-  updateModeText({ currentPlaylistId: "p1" }, el, {
-    getCurrentPlaylist: () => ({ id: "p1", name: "House" }),
-    updateAddToPlaylistButtons: () => { addButtonUpdates += 1; },
-    updateActivePlaylistIndicators: () => { activeIndicatorUpdates += 1; }
+  updateModeText({
+    state: { currentPlaylistId: "p1" },
+    el,
+    document,
+    getCurrentPlaylist: () => ({ id: "p1", name: "House" })
   });
-  updateActivePlaylistIndicators({ currentPlaylistId: "p2" }, el);
-  updateAddToPlaylistButtons({ currentPlaylistId: "p1" }, document);
-  updateSelectionCount({ currentPlaylistId: "p1", selectedTrackIds: new Set(["a", "b"]) }, el);
-
   assert.equal(el.playlistBadge.className, "playlist-badge active");
   assert.equal(el.badgeLabel.textContent, "House");
-  assert.equal(addButtonUpdates, 1);
-  assert.equal(activeIndicatorUpdates, 1);
+  assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), true);
+
+  updateActivePlaylistIndicators({ state: { currentPlaylistId: "p2" }, el });
+  updateAddToPlaylistButtons({ state: { currentPlaylistId: "p1" }, document });
+  updateSelectionCount({ state: { currentPlaylistId: "p1", selectedTrackIds: new Set(["a", "b"]), sourceRoots: [] }, el });
+
   assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), false);
   assert.equal(document.querySelector('[data-playlist-id="p2"]').classList.contains("playlist-active-mode"), true);
   for (const action of ["add-library", "add-usb", "add-history"]) {
@@ -103,34 +104,33 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
   assert.equal(el.selectionCount.textContent, "2 selected");
   assert.equal(el.selectionActions.classList.contains("hidden"), false);
   assert.equal(el.addSelectedBtn.disabled, false);
+  assert.equal(el.scanLibraryBtn.textContent, "Analyze Selected");
 });
 
 test("USB nav and empty-state helpers follow the selected-root state", () => {
   const { document } = makeDom().window;
   const el = elements(document, ["navSidebar", "refreshUsbBtn", "refreshHistoryBtn"]);
   const switched = [];
-  const renderPayloads = [];
 
-  updateUsbSubNavDisabledState(
-    { usbRoot: null, usbRootValid: false, activeTab: "usb-player-menu" },
+  updateUsbSubNavDisabledState({
+    state: { usbRoot: null, usbRootValid: false, activeTab: "usb-player-menu" },
     el,
-    { switchView: async (view) => { switched.push(view); } }
-  );
-  updateUsbEmptyState(
-    { usbRoot: null, usbRootValid: false, usbRecentRoots: [] },
-    document,
-    { renderEmptyState: (_container, payload) => renderPayloads.push(payload) }
-  );
+    switchView: async (view) => { switched.push(view); }
+  });
+  updateUsbEmptyState({
+    state: { usbRoot: null, usbRootValid: false, usbRecentRoots: [] },
+    document
+  });
   assert.equal(el.refreshUsbBtn.disabled, true);
   assert.equal(el.refreshHistoryBtn.disabled, true);
   assert.deepEqual(switched, ["usb"]);
-  assert.equal(renderPayloads[0].heading, "Connect a USB drive to browse and export");
+  assert.equal(document.querySelector("#usbEmptyState .empty-state-heading").textContent, "Connect a USB drive to browse and export");
 
-  updateUsbSubNavDisabledState(
-    { usbRoot: "/USB", usbRootValid: true, activeTab: "usb" },
+  updateUsbSubNavDisabledState({
+    state: { usbRoot: "/USB", usbRootValid: true, activeTab: "usb" },
     el,
-    { switchView: async () => {} }
-  );
+    switchView: async () => {}
+  });
   assert.equal(document.querySelector('.nav-sub-item[data-view="usb-playlists"]').classList.contains("revealed"), true);
   assert.equal(el.refreshUsbBtn.disabled, false);
 });
@@ -149,21 +149,22 @@ test("source, settings, health, name badge, and onboarding helpers update compac
   ]);
 
   updateSourceFilterIndicator({
-    sourceRoots: ["/a"],
-    sourceRootEnabled: { "/a": true },
-    externalMasterDbPath: "/path/to/master.db",
-    masterDbEnabled: false
-  }, el);
-  updateScanLibraryButtonLabel({ sourceRoots: ["/a"], selectedTrackIds: new Set() }, el, {
-    scanLibraryButtonLabel: (roots) => `Scan ${roots.length}`
+    state: {
+      sourceRoots: ["/a"],
+      sourceRootEnabled: { "/a": true },
+      externalMasterDbPath: "/path/to/master.db",
+      masterDbEnabled: false
+    },
+    el
   });
-  closeSettingsDrawer(el);
-  updateUsbHealthDot(el, "WARN");
-  updateUsbNameBadge({ usbDeviceName: "Club Stick" }, el);
-  syncLibraryOnboardingMode({ activeTab: "library", sourceRoots: [] }, document);
+  updateScanLibraryButtonLabel({ state: { sourceRoots: ["/a", "/b"], selectedTrackIds: new Set() }, el });
+  closeSettingsDrawer({ el });
+  updateUsbHealthDot({ el }, "WARN");
+  updateUsbNameBadge({ state: { usbDeviceName: "Club Stick" }, el });
+  syncLibraryOnboardingMode({ state: { activeTab: "library", sourceRoots: [] }, document });
 
   assert.equal(el.sourceFilterIndicator.classList.contains("active"), true);
-  assert.equal(el.scanLibraryBtn.textContent, "Scan 1");
+  assert.equal(el.scanLibraryBtn.textContent, "Scan Libraries");
   assert.equal(el.settingsDrawer.classList.contains("hidden"), true);
   assert.equal(el.settingsBackdrop.classList.contains("hidden"), true);
   assert.equal(el.usbHealthDot.classList.contains("health-warn"), true);

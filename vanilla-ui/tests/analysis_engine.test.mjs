@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { bindSettingsEvents, renderEssentiaInstallRow } from "../components/settings/events.mjs";
+import { APP_TEMPLATES } from "./test_helpers.mjs";
 
 const ENGINE_HTML = `<!doctype html><body>
   <select id="analysisEngineSelect">
@@ -15,24 +16,8 @@ const ENGINE_HTML = `<!doctype html><body>
     <button id="essentiaCancelBtn" class="hidden">Cancel</button>
     <button id="essentiaRemoveBtn" class="hidden">Remove</button>
   </div>
+  ${APP_TEMPLATES}
 </body>`;
-
-function makeConstants() {
-  return {
-    STORAGE_KEY_HELP_SEEN: "help",
-    STORAGE_KEY_EXPORT_PRUNE_STALE: "prune",
-    STORAGE_KEY_EXPORT_BACKUP: "backup",
-    STORAGE_KEY_BACKUP_RETENTION_COUNT: "backup_retention",
-    STORAGE_KEY_ANALYSIS_BPM_RANGE: "bpm",
-    STORAGE_KEY_ANALYSIS_ENGINE: "engine",
-    FRONTEND_DB_KEY_HELP_SEEN: "ui_help_seen_v1",
-    FRONTEND_DB_KEY_EXPORT_PRUNE_STALE: "ui_export_prune_stale_v1",
-    FRONTEND_DB_KEY_EXPORT_BACKUP: "ui_export_backup_v1",
-    FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT: "ui_backup_retention_count_v1",
-    FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE: "ui_analysis_bpm_range_v1",
-    FRONTEND_DB_KEY_ANALYSIS_ENGINE: "ui_analysis_engine_v1"
-  };
-}
 
 function makeDom() {
   const dom = new JSDOM(ENGINE_HTML);
@@ -99,7 +84,7 @@ test("renderEssentiaInstallRow maps engine/install state to row text and actions
 
   for (const item of cases) {
     const { el } = makeDom();
-    renderEssentiaInstallRow(item.state, el);
+    renderEssentiaInstallRow({ state: item.state, el });
 
     assert.equal(el.essentiaInstallRow.classList.contains("hidden"), !!item.hidden);
     if (item.hidden) continue;
@@ -120,7 +105,6 @@ function bindEngineSettings({ state, el, document, dom, command, persistSetting,
     document,
     window: dom.window,
     navigator: {},
-    constants: makeConstants(),
     persistSetting,
     setStatus: (message) => statuses.push(message),
     command,
@@ -128,7 +112,6 @@ function bindEngineSettings({ state, el, document, dom, command, persistSetting,
     setProgress,
     closeSettingsDrawer: () => {},
     switchView: async () => {},
-    normalizeAnalysisBpmRange: (value) => value,
     updatePlaylistExportButtons: () => {}
   });
   return statuses;
@@ -164,7 +147,7 @@ test("settings events persist engine changes and invoke Essentia commands", asyn
   assert.ok(commands.includes("download_essentia"));
 
   state.essentiaDownloading = true;
-  renderEssentiaInstallRow(state, el);
+  renderEssentiaInstallRow({ state, el });
   el.essentiaCancelBtn.click();
   assert.ok(commands.includes("cancel_essentia_download"));
 
@@ -172,7 +155,7 @@ test("settings events persist engine changes and invoke Essentia commands", asyn
   state.essentiaInstalled = true;
   state.analysisEngine = "essentia";
   el.analysisEngineSelect.value = "essentia";
-  renderEssentiaInstallRow(state, el);
+  renderEssentiaInstallRow({ state, el });
   el.essentiaRemoveBtn.click();
   await new Promise((resolve) => setTimeout(resolve, 0));
 

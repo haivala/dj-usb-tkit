@@ -7,19 +7,22 @@ import {
   FRONTEND_DB_KEY_SOURCE_ROOTS, FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED,
   FRONTEND_DB_KEY_USB_ROOT,
   FRONTEND_DB_KEY_MASTER_DB_ENABLED, FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED,
-  FRONTEND_SETTING_BINDINGS
+  FRONTEND_SETTING_BINDINGS,
+  STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME,
+  STORAGE_KEY_ACCENT_HUE, FRONTEND_DB_KEY_ACCENT_HUE
 } from "../../settings_keys.mjs";
+import { WAVEFORM_COLORS, deriveWaveformColors } from "../../waveform.mjs";
 
-export function persistSetting(command, storageKey, dbKey, value) {
+export function persistSetting(ctx, storageKey, dbKey, value) {
   if (!storageKey || !dbKey) return;
   try {
     if (value === null || value === undefined || value === "") {
-      localStorage.removeItem(storageKey);
+      ctx.localStorage.removeItem(storageKey);
     } else {
-      localStorage.setItem(storageKey, String(value));
+      ctx.localStorage.setItem(storageKey, String(value));
     }
   } catch {}
-  return command("set_frontend_setting", {
+  return ctx.command("set_frontend_setting", {
     key: dbKey,
     value: value === null || value === undefined || value === "" ? null : String(value)
   }).catch((err) => {
@@ -28,7 +31,8 @@ export function persistSetting(command, storageKey, dbKey, value) {
   });
 }
 
-export async function hydrateLocalStorageFromFrontendSettingsDb(command, state) {
+export async function hydrateLocalStorageFromFrontendSettingsDb(ctx) {
+  const { command, state } = ctx;
   let values = {};
   let nodeAvailable = false;
   let essentiaInstalled = false;
@@ -53,24 +57,25 @@ export async function hydrateLocalStorageFromFrontendSettingsDb(command, state) 
     const hasValue = Object.prototype.hasOwnProperty.call(values, binding.dbKey);
     if (!hasValue) continue;
     try {
-      localStorage.setItem(binding.storageKey, String(values[binding.dbKey] ?? ""));
+      ctx.localStorage.setItem(binding.storageKey, String(values[binding.dbKey] ?? ""));
     } catch {}
   }
 }
 
-export function persistSourceRoots(command, roots) {
-  persistSetting(command, STORAGE_KEY_SOURCE_ROOTS, FRONTEND_DB_KEY_SOURCE_ROOTS, JSON.stringify(roots || []));
+export function persistSourceRoots(ctx, roots) {
+  persistSetting(ctx, STORAGE_KEY_SOURCE_ROOTS, FRONTEND_DB_KEY_SOURCE_ROOTS, JSON.stringify(roots || []));
 }
 
-export function persistUsbRoot(command, path) {
+export function persistUsbRoot(ctx, path) {
   if (!path) {
-    persistSetting(command, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, null);
+    persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, null);
     return;
   }
-  persistSetting(command, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, String(path));
+  persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, String(path));
 }
 
-export function loadSourceRootsFromStorage(state) {
+export function loadSourceRootsFromStorage(ctx) {
+  const { state, localStorage } = ctx;
   const raw = localStorage.getItem(STORAGE_KEY_SOURCE_ROOTS);
   if (!raw) {
     state.sourceRoots = [];
@@ -87,7 +92,8 @@ export function loadSourceRootsFromStorage(state) {
   }
 }
 
-export function loadSourceRootEnabledFromStorage(state) {
+export function loadSourceRootEnabledFromStorage(ctx) {
+  const { state, localStorage } = ctx;
   const raw = localStorage.getItem(STORAGE_KEY_SOURCE_ROOT_ENABLED);
   if (!raw) {
     state.sourceRootEnabled = {};
@@ -101,28 +107,30 @@ export function loadSourceRootEnabledFromStorage(state) {
   }
 }
 
-export function persistSourceRootEnabled(command, enabledMap) {
+export function persistSourceRootEnabled(ctx, enabledMap) {
   persistSetting(
-    command,
+    ctx,
     STORAGE_KEY_SOURCE_ROOT_ENABLED,
     FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED,
     JSON.stringify(enabledMap || {})
   );
 }
 
-export function persistMasterDbEnabled(command, enabled) {
-  persistSetting(command, STORAGE_KEY_MASTER_DB_ENABLED, FRONTEND_DB_KEY_MASTER_DB_ENABLED, enabled ? "1" : "0");
+export function persistMasterDbEnabled(ctx, enabled) {
+  persistSetting(ctx, STORAGE_KEY_MASTER_DB_ENABLED, FRONTEND_DB_KEY_MASTER_DB_ENABLED, enabled ? "1" : "0");
 }
 
-export function loadMasterDbEnabledFromStorage(state) {
+export function loadMasterDbEnabledFromStorage(ctx) {
+  const { state, localStorage } = ctx;
   state.masterDbEnabled = localStorage.getItem(STORAGE_KEY_MASTER_DB_ENABLED) === "1";
 }
 
-export function persistSourcesEverConfigured(command, value) {
-  persistSetting(command, STORAGE_KEY_SOURCES_EVER_CONFIGURED, FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED, value ? "1" : "0");
+export function persistSourcesEverConfigured(ctx, value) {
+  persistSetting(ctx, STORAGE_KEY_SOURCES_EVER_CONFIGURED, FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED, value ? "1" : "0");
 }
 
-export function loadSourcesEverConfiguredFromStorage(state) {
+export function loadSourcesEverConfiguredFromStorage(ctx) {
+  const { state, localStorage } = ctx;
   state.sourcesEverConfigured =
     localStorage.getItem(STORAGE_KEY_SOURCES_EVER_CONFIGURED) === "1" ||
     (Array.isArray(state.sourceRoots) && state.sourceRoots.length > 0) ||
@@ -131,17 +139,8 @@ export function loadSourcesEverConfiguredFromStorage(state) {
 
 const ACCENT_DEFAULT_HUE = 270;
 
-export function createThemeManager(deps) {
-  const {
-    persistSetting: persist,
-    invoke,
-    deriveWaveformColors,
-    WAVEFORM_COLORS,
-    renderWaveformsIn,
-    STORAGE_KEY_THEME,
-    FRONTEND_DB_KEY_THEME,
-    STORAGE_KEY_ACCENT_HUE
-  } = deps;
+export function createThemeManager(ctx) {
+  const { invoke, renderWaveformsIn, document, window, localStorage } = ctx;
 
   let accentManager = null;
 
@@ -197,7 +196,7 @@ export function createThemeManager(deps) {
           if (!opt) return;
           const choice = opt.dataset.themeChoice;
           if (choice) {
-            persist(STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME, choice);
+            persistSetting(ctx, STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME, choice);
             mgr.apply();
           }
         });
@@ -222,14 +221,8 @@ export function createThemeManager(deps) {
   return mgr;
 }
 
-export function createAccentManager(deps) {
-  const {
-    el,
-    persistSetting: persist,
-    themeManager,
-    STORAGE_KEY_ACCENT_HUE,
-    FRONTEND_DB_KEY_ACCENT_HUE
-  } = deps;
+export function createAccentManager(ctx, themeManager) {
+  const { el, document, localStorage } = ctx;
 
   const mgr = {
     hue() {
@@ -246,7 +239,7 @@ export function createAccentManager(deps) {
     apply(hue) {
       const h = Number.isFinite(hue) ? Math.round(hue) % 360 : mgr.hue();
       document.documentElement.style.setProperty("--accent-h", String(h));
-      persist(STORAGE_KEY_ACCENT_HUE, FRONTEND_DB_KEY_ACCENT_HUE, String(h));
+      persistSetting(ctx, STORAGE_KEY_ACCENT_HUE, FRONTEND_DB_KEY_ACCENT_HUE, String(h));
       if (el.accentSwatch) el.accentSwatch.style.background = `hsl(${h}, 82%, 55%)`;
       if (el.accentHueSlider) el.accentHueSlider.value = String(h);
       themeManager.updateWaveformColors();

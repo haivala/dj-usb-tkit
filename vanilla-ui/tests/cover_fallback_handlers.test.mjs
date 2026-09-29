@@ -2,94 +2,55 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { attachCoverFallbackHandlers } from "../components/library/actions.mjs";
 import { renderTrackTable } from "../track_table.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
 test("attachCoverFallbackHandlers advances fallback queue and replaces with placeholder", () => {
-  const listeners = {};
-  const image = {
-    dataset: { fallbacks: "next-a|next-b" },
-    src: "original",
-    addEventListener(name, fn) { listeners[name] = fn; },
-    replaceWith(node) { image.replacedWith = node; }
-  };
+  const ctx = makeTestCtx();
+  const cell = ctx.el.libraryTableBody;
+  cell.innerHTML = '<img class="cover-thumb" src="original" data-fallbacks="next-a|next-b" />';
+  const image = cell.querySelector("img");
 
-  const document = {
-    createElement: (tag) => ({
-      tagName: String(tag).toUpperCase(),
-      className: "",
-      attrs: {},
-      setAttribute(k, v) { this.attrs[k] = v; }
-    })
-  };
-
-  attachCoverFallbackHandlers({ querySelectorAll: () => [image] }, { document });
-
+  attachCoverFallbackHandlers(cell);
   assert.equal(image.dataset.fallbackBound, "1");
-  assert.equal(typeof listeners.error, "function");
 
-  listeners.error();
-  assert.equal(image.src, "next-a");
+  const fail = () => image.dispatchEvent(new ctx.window.Event("error"));
+  fail();
+  assert.equal(image.getAttribute("src"), "next-a");
   assert.equal(image.dataset.fallbacks, "next-b");
 
-  listeners.error();
-  assert.equal(image.src, "next-b");
+  fail();
+  assert.equal(image.getAttribute("src"), "next-b");
   assert.equal(image.dataset.fallbacks, "");
 
-  listeners.error();
-  assert.equal(image.replacedWith.className, "cover-thumb");
-  assert.equal(image.replacedWith.attrs["aria-hidden"], "true");
+  fail();
+  const placeholder = cell.querySelector(".cover-thumb");
+  assert.equal(placeholder.tagName, "DIV");
+  assert.equal(placeholder.getAttribute("aria-hidden"), "true");
 });
 
 test("renderTrackTable wires cover fallback handlers after row render", async () => {
-  let coverAttachCalls = 0;
-  let waveformCalls = 0;
-  let transportCalls = 0;
-  const inserts = [];
+  const ctx = makeTestCtx();
+  const tbody = ctx.el.usbPlaylistTracks;
+  await renderTrackTable(ctx, tbody, [
+    { id: "a", title: "A", artworkDataUrl: "data:image/png;base64,AAA" },
+    { id: "b", title: "B" },
+  ], { origin: "usb" });
 
-  const tbody = {
-    innerHTML: "",
-    insertAdjacentHTML(_where, html) { inserts.push(html); }
-  };
-
-  await renderTrackTable(tbody, [{ id: "a" }, { id: "b" }], { origin: "usb" }, {
-    createTrackRow: (track, opts) => `<tr data-id="${track.id}" data-index="${opts.index}"></tr>`,
-    attachCoverFallbackHandlers: () => { coverAttachCalls += 1; },
-    renderWaveformsIn: () => { waveformCalls += 1; },
-    updateTransportButtonsInDom: () => { transportCalls += 1; },
-    escapeHtml: (v) => String(v ?? ""),
-    setStatus: () => {}
-  });
-
-  assert.equal(inserts.length, 2);
-  assert.equal(coverAttachCalls, 1);
-  assert.equal(waveformCalls, 1);
-  assert.equal(transportCalls, 1);
+  assert.equal(tbody.querySelectorAll(".track-grid-row").length, 2);
+  const img = tbody.querySelector("img.cover-thumb");
+  assert.equal(img.dataset.fallbackBound, "1");
 });
 
 test("renderTrackTable in append mode adds rows without clearing existing ones, offsetting indices", async () => {
-  const inserts = [];
-  let innerHTMLResetCount = 0;
-  const tbody = {
-    get innerHTML() { return ""; },
-    set innerHTML(_v) { innerHTMLResetCount += 1; },
-    insertAdjacentHTML(_where, html) { inserts.push(html); }
-  };
-  const deps = {
-    createTrackRow: (track, opts) => `<div data-id="${track.id}" data-index="${opts.index}"></div>`,
-    attachCoverFallbackHandlers: () => {},
-    renderWaveformsIn: () => {},
-    updateTransportButtonsInDom: () => {},
-    escapeHtml: (v) => String(v ?? ""),
-    setStatus: () => {}
-  };
+  const ctx = makeTestCtx();
+  const tbody = ctx.el.usbPlaylistTracks;
+  await renderTrackTable(ctx, tbody, [{ id: "a" }, { id: "b" }], { origin: "usb" });
+  assert.equal(tbody.querySelectorAll(".track-grid-row").length, 2);
 
-  await renderTrackTable(tbody, [{ id: "a" }, { id: "b" }], { origin: "usb" }, deps);
-  assert.equal(innerHTMLResetCount, 1, "the initial (non-append) render clears the table once");
-  assert.equal(inserts.length, 2);
+  await renderTrackTable(ctx, tbody, [{ id: "c" }, { id: "d" }], { origin: "usb", append: true, indexOffset: 2 });
 
-  await renderTrackTable(tbody, [{ id: "c" }, { id: "d" }], { origin: "usb", append: true, indexOffset: 2 }, deps);
-
-  assert.equal(innerHTMLResetCount, 1, "an append render must not clear the rows the previous page already built");
-  assert.equal(inserts.length, 4, "append should add to, not replace, the previous page's rows");
-  assert.ok(inserts[2].includes('data-index="2"'), "appended rows continue the index sequence from indexOffset");
-  assert.ok(inserts[3].includes('data-index="3"'));
+  const rows = [...tbody.querySelectorAll(".track-grid-row")];
+  assert.equal(rows.length, 4, "append should add to, not replace, the previous page's rows");
+  assert.deepEqual(rows.map((row) => row.dataset.trackIndex), ["0", "1", "2", "3"],
+    "appended rows continue the index sequence from indexOffset");
 });

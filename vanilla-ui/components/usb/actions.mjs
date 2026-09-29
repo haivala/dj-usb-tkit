@@ -1,5 +1,14 @@
-import { warningEntryText } from "../library/actions.mjs";
+import { warningEntryText, patchUsbRowsInContainer } from "../library/actions.mjs";
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
+import { createTrackListController } from "../shared/track_list_controller.mjs";
+import { cloneTemplate } from "../../ui_utils.mjs";
+import { STORAGE_KEY_USB_ROOT } from "../../settings_keys.mjs";
+import {
+  formatDurationMs,
+  renderTrackListDurationSummary,
+  getHistoryDateValue,
+  buildTracklistText,
+} from "../../track_utils.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
 // these is running, the currently-selected root must not change underneath
@@ -12,7 +21,8 @@ export function isUsbRootChangeBlocked(state) {
   return !!state.activeJobId && USB_ROOT_LOCKING_JOB_TYPES.has(state.activeJobType);
 }
 
-export function setUsbRootControlsLocked(state, el, locked, deps = {}) {
+export function setUsbRootControlsLocked(ctx, locked) {
+  const { el } = ctx;
   if (el.selectUsbFolderBtn) {
     el.selectUsbFolderBtn.disabled = !!locked;
     el.selectUsbFolderBtn.title = locked ? "Please wait for the current USB operation to finish" : "";
@@ -24,7 +34,7 @@ export function setUsbRootControlsLocked(state, el, locked, deps = {}) {
     // Don't just flip disabled=false here -- the export button's disabled
     // state is normally owned by playlist/usbRootValid logic (see below),
     // so hand back to that recompute instead of overriding it.
-    deps.updatePlaylistExportButtons?.();
+    ctx.updatePlaylistExportButtons();
   }
 }
 
@@ -52,9 +62,9 @@ export function playlistUsbExportStatusById(statusList) {
 // PDB/eDB only, no USB access) -- used after the export sync-mode setting
 // changes so the reorder lock reflects the new mode without a full USB rescan
 // and without the frontend re-deriving the rule.
-export async function refreshPlaylistExportStatus(state, deps = {}) {
-  const { command } = deps;
-  const data = await command("refresh_playlist_export_status", {
+export async function refreshPlaylistExportStatus(ctx) {
+  const { state } = ctx;
+  const data = await ctx.command("refresh_playlist_export_status", {
     usbRoot: state.usbRoot || null,
   });
   state.playlistUsbExportStatusById = playlistUsbExportStatusById(
@@ -85,41 +95,65 @@ export function computeExportButtonState({
     title: status?.exportButtonTitle || "Export current playlist to selected USB"
   };
 }
-// Backend-owned: `UsbParityPlaylistDetail.issueLabels` is built in Rust
-// (service::diagnostics::parity_issue_labels). The frontend renders them.
-export function formatParityIssues(pd) {
-  return Array.isArray(pd?.issueLabels) ? pd.issueLabels : [];
-}
 export function diagStatusIcon(status) {
-  if (status === "PASS") return "\u2713";
-  if (status === "WARN") return "\u26A0";
-  return "\u2717";
+  if (status === "PASS") return "✓";
+  if (status === "WARN") return "⚠";
+  return "✗";
 }
 
-function renderDiagCheckRow(container, check, deps = {}) {
-  const { escapeHtml, documentObj, switchView } = deps;
-  const doc = documentObj || document;
-  const row = doc.createElement("div");
-  row.className = `diag-check diag-check-${check.status.toLowerCase()}`;
-  row.innerHTML = `<span class="diag-indicator">${diagStatusIcon(check.status)}</span> <strong>${escapeHtml(check.label)}</strong>: ${escapeHtml(check.detail)}`;
-  if (check.link === "event-log" && typeof switchView === "function") {
-    const btn = doc.createElement("button");
-    btn.className = "diag-log-link";
-    btn.textContent = "→ event log";
-    btn.addEventListener("click", () => switchView("event-log").catch((err) => console.error(err)));
+function renderDiagCheckRow(ctx, container, check, { withLogLink = false } = {}) {
+  const doc = container.ownerDocument;
+  const row = cloneTemplate(doc, "tplDiagCheck");
+  row.classList.add(`diag-check-${check.status.toLowerCase()}`);
+  row.querySelector(".diag-indicator").textContent = diagStatusIcon(check.status);
+  row.querySelector("strong").textContent = check.label;
+  row.querySelector(".diag-check-detail").textContent = check.detail;
+  if (withLogLink && check.link === "event-log") {
+    const btn = cloneTemplate(doc, "tplDiagLogLink");
+    btn.addEventListener("click", () => ctx.switchView("event-log").catch((err) => console.error(err)));
     row.appendChild(btn);
   }
   container.appendChild(row);
 }
 
-export function renderDiagnosticsReport(el, data, deps = {}) {
-  const { escapeHtml, showDiagReportView: showReport, updateUsbHealthDot, switchView } = deps;
-  el.usbDiagnosticsCard.classList.remove("hidden");
-  showReport();
-  el.previewRepairsBtn.disabled = false;
-  updateUsbHealthDot(data.overallStatus);
+// A report section: status dot + title heading, filled in by the caller.
+function diagSection(doc, status, title) {
+  const section = cloneTemplate(doc, "tplDiagSection");
+  section.querySelector(".diag-dot").classList.add(`diag-${String(status).toLowerCase()}`);
+  section.querySelector(".diag-section-title").textContent = title;
+  return section;
+}
 
-  const healthCard = (deps.documentObj || document).getElementById("usbHealthCard");
+// Swap the playlist-details table to `headTemplate`'s columns and return its
+// emptied body.
+function resetDiagPlaylistTable(el, summaryText, headTemplate) {
+  el.diagPlaylistDetails.classList.remove("hidden");
+  const summary = el.diagPlaylistDetails.querySelector("summary");
+  if (summary) summary.textContent = summaryText;
+  el.diagPlaylistDetails.querySelector("thead tr")
+    ?.replaceWith(cloneTemplate(el.diagPlaylistDetails.ownerDocument, headTemplate));
+  el.diagPlaylistTableBody.replaceChildren();
+  return el.diagPlaylistTableBody;
+}
+
+// Fill a row's cells in order; the first cell holds the status dot.
+function fillDiagRow(tr, status, values) {
+  tr.querySelector(".diag-dot").classList.add(`diag-${String(status || "PASS").toLowerCase()}`);
+  values.forEach((value, i) => {
+    const td = tr.cells[i + 1];
+    (td.firstElementChild || td).textContent = value;
+  });
+  return tr;
+}
+
+export function renderDiagnosticsReport(ctx, data) {
+  const { el, document } = ctx;
+  el.usbDiagnosticsCard.classList.remove("hidden");
+  showDiagReportView(ctx);
+  el.previewRepairsBtn.disabled = false;
+  ctx.updateUsbHealthDot(data.overallStatus);
+
+  const healthCard = document.getElementById("usbHealthCard");
   if (healthCard) {
     healthCard.classList.remove("is-loading");
     if (data.overallStatus !== "PASS") {
@@ -141,43 +175,34 @@ export function renderDiagnosticsReport(el, data, deps = {}) {
     data.cdjCounterSection,
   ].filter(Boolean);
 
-  el.diagSections.innerHTML = "";
+  el.diagSections.replaceChildren();
   for (const sec of sections) {
-    const div = (deps.documentObj || document).createElement("div");
-    div.className = "diag-section";
-
-    const header = (deps.documentObj || document).createElement("h3");
-    header.innerHTML = `<span class="diag-dot diag-${sec.status.toLowerCase()}"></span> ${escapeHtml(sec.title)}`;
-    div.appendChild(header);
-
+    const div = diagSection(document, sec.status, sec.title);
     for (const check of (sec.checks || [])) {
-      renderDiagCheckRow(div, check, { escapeHtml, documentObj: deps.documentObj, switchView });
+      renderDiagCheckRow(ctx, div, check, { withLogLink: true });
     }
-
     el.diagSections.appendChild(div);
   }
 
   if (data.playlistDetails?.length) {
-    el.diagPlaylistDetails.classList.remove("hidden");
-    const summary = el.diagPlaylistDetails.querySelector("summary");
-    if (summary) summary.textContent = "Playlist Resolution Details";
-    const thead = el.diagPlaylistDetails.querySelector("thead tr");
-    if (thead) thead.innerHTML = "<th>Status</th><th>Playlist</th><th>Resolved</th><th>Total</th><th>Rate</th>";
-    el.diagPlaylistTableBody.innerHTML = "";
+    const tbody = resetDiagPlaylistTable(el, "Playlist Resolution Details", "tplDiagResolutionHead");
     for (const pd of data.playlistDetails) {
-      const tr = (deps.documentObj || document).createElement("tr");
-      tr.innerHTML = `<td><span class="diag-dot diag-${pd.status.toLowerCase()}"></span></td><td>${escapeHtml(pd.name)}</td><td>${pd.resolvedEntries}</td><td>${pd.totalEntries}</td><td>${(pd.resolutionRate * 100).toFixed(1)}%</td>`;
-      el.diagPlaylistTableBody.appendChild(tr);
+      tbody.appendChild(fillDiagRow(cloneTemplate(document, "tplDiagResolutionRow"), pd.status, [
+        pd.name,
+        pd.resolvedEntries,
+        pd.totalEntries,
+        `${(pd.resolutionRate * 100).toFixed(1)}%`,
+      ]));
     }
   } else {
     el.diagPlaylistDetails.classList.add("hidden");
   }
 }
 
-export function renderParityReport(el, data, deps = {}) {
-  const { escapeHtml, showDiagReportView: showReport, formatParityIssues } = deps;
+export function renderParityReport(ctx, data) {
+  const { el, document } = ctx;
   el.usbDiagnosticsCard.classList.remove("hidden");
-  showReport();
+  showDiagReportView(ctx);
   el.previewRepairsBtn.disabled = false;
   el.diagOverallStatus.textContent = data.overallStatus;
   el.diagOverallStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
@@ -188,69 +213,50 @@ export function renderParityReport(el, data, deps = {}) {
     status: data.overallStatus,
     checks: data.checks || []
   };
-  el.diagSections.innerHTML = "";
-  const div = (deps.documentObj || document).createElement("div");
-  div.className = "diag-section";
-  const header = (deps.documentObj || document).createElement("h3");
-  header.innerHTML = `<span class="diag-dot diag-${section.status.toLowerCase()}"></span> ${escapeHtml(section.title)}`;
-  div.appendChild(header);
+  el.diagSections.replaceChildren();
+  const div = diagSection(document, section.status, section.title);
   if (Array.isArray(data.summaryRows) && data.summaryRows.length) {
-    const summaryTitle = (deps.documentObj || document).createElement("h4");
-    summaryTitle.textContent = "Parity Summary";
-    div.appendChild(summaryTitle);
-    const table = (deps.documentObj || document).createElement("table");
-    table.className = "diag-table";
-    table.innerHTML = "<thead><tr><th>Status</th><th>Metric</th><th>Count</th></tr></thead>";
-    const tbody = (deps.documentObj || document).createElement("tbody");
+    const summary = cloneTemplate(document, "tplDiagParitySummary");
+    const tbody = summary.querySelector("tbody");
     for (const row of data.summaryRows) {
-      const tr = (deps.documentObj || document).createElement("tr");
-      tr.innerHTML = `<td><span class="diag-dot diag-${String(row.status || "PASS").toLowerCase()}"></span> ${escapeHtml(String(row.status || "PASS"))}</td><td>${escapeHtml(row.label || "")}</td><td>${Number(row.count || 0)}</td>`;
-      tbody.appendChild(tr);
+      const tr = cloneTemplate(document, "tplDiagParitySummaryRow");
+      tr.querySelector(".diag-summary-status").textContent = String(row.status || "PASS");
+      tbody.appendChild(fillDiagRow(tr, row.status, [row.label || "", Number(row.count || 0)]));
     }
-    table.appendChild(tbody);
-    div.appendChild(table);
+    div.append(...summary.children);
   }
   for (const check of section.checks) {
-    renderDiagCheckRow(div, check, { escapeHtml, documentObj: deps.documentObj });
+    renderDiagCheckRow(ctx, div, check);
   }
   el.diagSections.appendChild(div);
 
   if (data.playlistDetails?.length) {
-    el.diagPlaylistDetails.classList.remove("hidden");
-    const summary = el.diagPlaylistDetails.querySelector("summary");
-    if (summary) summary.textContent = "Strict Parity Playlist Details";
-    const thead = el.diagPlaylistDetails.querySelector("thead tr");
-    if (thead) thead.innerHTML = "<th>Status</th><th>Playlist</th><th class=\"num\">PDB</th><th class=\"num\">eDB</th><th class=\"num\">Matched</th><th>Issues</th>";
-    el.diagPlaylistTableBody.innerHTML = "";
+    const tbody = resetDiagPlaylistTable(el, "Strict Parity Playlist Details", "tplDiagParityHead");
     for (const pd of data.playlistDetails) {
-      const issues = formatParityIssues(pd);
-      const issueText = issues.length
-        ? `<span class="muted">${escapeHtml(issues.join(", "))}</span>`
-        : "";
-      const tr = (deps.documentObj || document).createElement("tr");
-      tr.innerHTML = [
-        `<td><span class="diag-dot diag-${String(pd.status || "PASS").toLowerCase()}"></span></td>`,
-        `<td>${escapeHtml(pd.name)}</td>`,
-        `<td class="num">${Number(pd.pdbTracks || 0)}</td>`,
-        `<td class="num">${Number(pd.edbTracks || 0)}</td>`,
-        `<td class="num">${pd.matchedTracks}</td>`,
-        `<td>${issueText}</td>`,
-      ].join("");
-      el.diagPlaylistTableBody.appendChild(tr);
+      // Backend-owned: `issueLabels` is built in Rust
+      // (service::diagnostics::parity_issue_labels). The frontend renders them.
+      const issues = Array.isArray(pd?.issueLabels) ? pd.issueLabels : [];
+      tbody.appendChild(fillDiagRow(cloneTemplate(document, "tplDiagParityRow"), pd.status, [
+        pd.name,
+        Number(pd.pdbTracks || 0),
+        Number(pd.edbTracks || 0),
+        pd.matchedTracks,
+        issues.join(", "),
+      ]));
     }
   } else {
     el.diagPlaylistDetails.classList.add("hidden");
   }
 }
 
-export function showDiagReportView(el) {
-  el.diagReportView.classList.remove("hidden");
-  el.diagRepairPanel.classList.add("hidden");
+export function showDiagReportView(ctx) {
+  ctx.el.diagReportView.classList.remove("hidden");
+  ctx.el.diagRepairPanel.classList.add("hidden");
 }
 
-export function showDiagRepairView(el) {
-  el.diagReportView.classList.add("hidden");
-  el.diagRepairPanel.classList.remove("hidden");
+function showDiagRepairView(ctx) {
+  ctx.el.diagReportView.classList.add("hidden");
+  ctx.el.diagRepairPanel.classList.remove("hidden");
 }
 
 // Blanks the diagnostics report content back to an empty/unknown state
@@ -258,14 +264,15 @@ export function showDiagRepairView(el) {
 // when the USB DBs changed underneath an on-screen report (repair, playlist
 // edit, export, backup restore, ...) but the same drive is still selected --
 // the stale report should disappear, not the whole panel.
-function resetDiagnosticsContent(el) {
+function resetDiagnosticsContent(ctx) {
+  const { el } = ctx;
   [el.usbHealthDot, el.usbHeaderHealthDot].filter(Boolean).forEach((dot) => {
     dot.classList.remove("health-pass", "health-warn", "health-fail");
     dot.dataset.tooltip = "USB health: unknown";
     dot.setAttribute("aria-label", "USB health: unknown");
   });
   if (el.diagSections) {
-    el.diagSections.innerHTML = "";
+    el.diagSections.replaceChildren();
   }
   if (el.diagOverallStatus) {
     el.diagOverallStatus.textContent = "";
@@ -278,14 +285,14 @@ function resetDiagnosticsContent(el) {
     el.diagPlaylistDetails.classList.add("hidden");
   }
   if (el.diagPlaylistTableBody) {
-    el.diagPlaylistTableBody.innerHTML = "";
+    el.diagPlaylistTableBody.replaceChildren();
   }
   if (el.diagRepairSummary) {
     el.diagRepairSummary.textContent = "";
     el.diagRepairSummary.className = "diag-repair-summary";
   }
   if (el.diagRepairFixes) {
-    el.diagRepairFixes.innerHTML = "";
+    el.diagRepairFixes.replaceChildren();
   }
   if (el.previewRepairsBtn) {
     el.previewRepairsBtn.disabled = true;
@@ -294,21 +301,22 @@ function resetDiagnosticsContent(el) {
     el.applyRepairsBtn.disabled = true;
   }
   if (el.diagReportView && el.diagRepairPanel) {
-    showDiagReportView(el);
+    showDiagReportView(ctx);
   }
 }
 
 // Clears a stale diagnostics report in place -- the DBs changed but the same
 // USB drive is still selected, so leave the panel's open/closed state alone.
-export function clearUsbDiagnostics(el) {
-  resetDiagnosticsContent(el);
+export function clearUsbDiagnostics(ctx) {
+  resetDiagnosticsContent(ctx);
 }
 
 // Full hide: the diagnostics report no longer applies to anything on screen
 // (USB root cleared or switched to a different drive), so collapse the panel
 // too, not just its content.
-export function hideUsbDiagnostics(el) {
-  resetDiagnosticsContent(el);
+export function hideUsbDiagnostics(ctx) {
+  const { el } = ctx;
+  resetDiagnosticsContent(ctx);
   if (el.usbDiagnosticsCard) {
     el.usbDiagnosticsCard.classList.add("hidden");
   }
@@ -319,15 +327,8 @@ export function hideUsbDiagnostics(el) {
   }
 }
 
-export function renderRepairPreview(el, data, deps = {}) {
-  const {
-    documentObj = document,
-    showDiagRepairView = () => showDiagRepairView(el),
-    getSelectedFixIds = () => new Set(),
-    setSelectedFixIds = () => {},
-    onToggleFixSelection = () => {}
-  } = deps;
-
+export function renderRepairPreview(ctx, data) {
+  const { state, el, document } = ctx;
   if (!el.diagRepairPanel) return;
   el.usbDiagnosticsCard.classList.remove("hidden");
 
@@ -336,11 +337,9 @@ export function renderRepairPreview(el, data, deps = {}) {
   const unsupportedItems = data.unsupportedItems || [];
   const fixCount = fixes.length;
   const supportedFixes = fixes.filter((f) => f.supported);
-  const supportedFixIds = supportedFixes
-    .map((f) => String(f?.id || ""))
-    .filter(Boolean);
-  setSelectedFixIds(new Set(supportedFixIds));
-  const selectedFixIds = getSelectedFixIds();
+  state.selectedRepairFixIds = new Set(
+    supportedFixes.map((f) => String(f?.id || "")).filter(Boolean)
+  );
   const writes = Number(data.estimatedFileWrites || 0);
   const deletes = Number(data.estimatedFileDeletes || 0);
 
@@ -352,7 +351,7 @@ export function renderRepairPreview(el, data, deps = {}) {
       const parts = [`${issueCount} issue(s)`, `${supportedFixes.length} fixable`];
       if (writes) parts.push(`${writes} writes`);
       if (deletes) parts.push(`${deletes} deletes`);
-      el.diagRepairSummary.textContent = parts.join(" \u00b7 ");
+      el.diagRepairSummary.textContent = parts.join(" · ");
       el.diagRepairSummary.className = "diag-repair-summary";
     }
   }
@@ -374,114 +373,76 @@ export function renderRepairPreview(el, data, deps = {}) {
       });
     }
 
-    el.diagRepairFixes.innerHTML = "";
+    el.diagRepairFixes.replaceChildren();
     for (const fix of fixesToRender) {
-      const li = documentObj.createElement("li");
+      const li = cloneTemplate(document, "tplRepairFix");
       li.className = fix.supported ? "diag-repair-fix-supported" : "diag-repair-fix-unsupported";
       if (fix.supported) {
         li.classList.add("diag-repair-fix-with-select");
       }
-
-      const content = documentObj.createElement("div");
-      content.className = "diag-repair-fix-content";
+      const checkbox = li.querySelector(".diag-repair-fix-check");
 
       if (fix.supported) {
         const fixId = String(fix.id || "");
         const alwaysApplied = fix.alwaysApplied === true;
-        const checkbox = documentObj.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "diag-repair-fix-check";
-        checkbox.checked = alwaysApplied || selectedFixIds.has(fixId);
+        checkbox.checked = alwaysApplied || state.selectedRepairFixIds.has(fixId);
         checkbox.dataset.fixId = fixId;
         if (alwaysApplied) {
           checkbox.disabled = true;
           checkbox.title = "Always applied — required for other repairs to complete safely";
         } else {
           checkbox.addEventListener("change", (event) => {
-            onToggleFixSelection(fixId, !!event?.target?.checked);
+            if (!fixId) return;
+            if (event?.target?.checked) state.selectedRepairFixIds.add(fixId);
+            else state.selectedRepairFixIds.delete(fixId);
+            el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
           });
         }
-        li.appendChild(checkbox);
-
-        const titleWrap = documentObj.createElement("div");
-        titleWrap.className = "diag-repair-fix-title";
-        const title = documentObj.createElement("strong");
-        title.textContent = fix.title;
-        titleWrap.appendChild(title);
-        content.appendChild(titleWrap);
       } else {
-        const titleWrap = documentObj.createElement("div");
-        titleWrap.className = "diag-repair-fix-title";
-        const title = documentObj.createElement("strong");
-        title.textContent = fix.title;
-        titleWrap.appendChild(title);
-        content.appendChild(titleWrap);
+        checkbox.remove();
       }
 
-      const desc = documentObj.createElement("span");
-      desc.className = "diag-repair-fix-desc";
-      desc.textContent = fix.description;
-      content.appendChild(desc);
-
-      const meta = documentObj.createElement("span");
-      meta.className = "diag-repair-fix-meta";
-      const support = fix.supported ? "\u2713 supported" : "\u2717 preview-only";
+      li.querySelector(".diag-repair-fix-title strong").textContent = fix.title;
+      li.querySelector(".diag-repair-fix-desc").textContent = fix.description;
+      const meta = li.querySelector(".diag-repair-fix-meta");
+      const support = fix.supported ? "✓ supported" : "✗ preview-only";
       const mode = fix.destructive ? "destructive" : "safe";
       const metaParts = [support, mode];
       if (fix.estimatedWrites) metaParts.push(`${fix.estimatedWrites} writes`);
       if (fix.estimatedDeletes) metaParts.push(`${fix.estimatedDeletes} deletes`);
       if (fix.alwaysApplied === true) metaParts.push("always applied");
-      meta.textContent = metaParts.join(" \u00b7 ");
-      content.appendChild(meta);
-
-      li.appendChild(content);
+      meta.textContent = metaParts.join(" · ");
 
       el.diagRepairFixes.appendChild(li);
     }
   }
 
-  showDiagRepairView();
-  const selectedCount = getSelectedFixIds().size;
-  el.applyRepairsBtn.disabled = selectedCount === 0;
+  showDiagRepairView(ctx);
+  el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
   if (supportedFixes.length === 0 && fixCount === 0) {
     el.previewRepairsBtn.disabled = true;
   }
 }
-export function loadUsbRootFromStorage(state, el, deps = {}) {
-  const {
-    localStorageObj = typeof localStorage !== "undefined" ? localStorage : null,
-    storageKeyUsbRoot = "usbRoot",
-    updateUsbRootText = () => {},
-    updateUsbConfigControlsVisibility = () => {},
-    updatePlaylistExportButtons = () => {}
-  } = deps;
-
+export function loadUsbRootFromStorage(ctx) {
+  const { state, el, localStorage } = ctx;
   try {
-    const raw = localStorageObj?.getItem?.(storageKeyUsbRoot);
+    const raw = localStorage?.getItem?.(STORAGE_KEY_USB_ROOT);
     state.usbRoot = raw ? String(raw).trim() || null : null;
   } catch {
     state.usbRoot = null;
   }
   state.usbRootValid = false;
   state.usbNeedsInit = false;
-  updateUsbRootText(state.usbRoot, false);
+  updateUsbRootText(ctx, state.usbRoot, false);
   if (el.usbInitRow) {
     el.usbInitRow.classList.add("hidden");
   }
-  updateUsbConfigControlsVisibility();
-  updatePlaylistExportButtons();
+  updateUsbConfigControlsVisibility(ctx);
+  ctx.updatePlaylistExportButtons();
 }
 
-export function resetUsbStateViews(state, el, deps = {}) {
-  const {
-    renderUsbPlaylists = () => {},
-    clearUsbPlaylistTracks = () => {},
-    renderHistoryList = () => {},
-    clearHistoryTracks = () => {},
-    renderUsbPlayerMenuEditor = () => {},
-    hideDiagnostics = true
-  } = deps;
-
+export function resetUsbStateViews(ctx, { hideDiagnostics = true } = {}) {
+  const { state, el } = ctx;
   state.usbPlaylists = [];
   state.playlistUsbExportStatusById = new Map();
   state.histories = [];
@@ -498,21 +459,17 @@ export function resetUsbStateViews(state, el, deps = {}) {
   // The USB may still be connected and selected (e.g. after a backup
   // restore or a repair apply) -- only a full disconnect/switch-drive
   // should collapse the diagnostics panel itself, not just blank its report.
-  if (hideDiagnostics) hideUsbDiagnostics(el);
+  if (hideDiagnostics) hideUsbDiagnostics(ctx);
 
-  renderUsbPlaylists();
-  clearUsbPlaylistTracks();
-  renderHistoryList();
-  clearHistoryTracks();
-  renderUsbPlayerMenuEditor();
+  renderUsbPlaylists(ctx);
+  ctx.usbPlaylistTracksCtl.clear();
+  renderHistoryList(ctx);
+  ctx.usbHistoryTracksCtl.clear();
+  renderUsbPlayerMenuEditor(ctx);
 }
 
-export async function syncAssetScopePaths(state, deps = {}) {
-  const {
-    invoke = async () => {},
-    warn = () => {}
-  } = deps;
-
+export async function syncAssetScopePaths(ctx) {
+  const { state } = ctx;
   const paths = [];
   for (const root of state.sourceRoots || []) {
     const value = String(root || "").trim();
@@ -523,15 +480,14 @@ export async function syncAssetScopePaths(state, deps = {}) {
   if (!paths.length) return;
 
   try {
-    await invoke("allow_asset_paths", { paths });
+    await ctx.invoke("allow_asset_paths", { paths });
   } catch (err) {
-    warn("allow_asset_paths failed:", err);
+    ctx.warn("allow_asset_paths failed:", err);
   }
 }
 
-export async function pickSourceFolders(deps = {}) {
-  const { invoke = async () => null } = deps;
-  const selected = await invoke("pick_source_folders");
+export async function pickSourceFolders(ctx) {
+  const selected = await ctx.invoke("pick_source_folders");
   if (!selected) return [];
 
   const rawItems = Array.isArray(selected) ? selected : [selected];
@@ -548,7 +504,8 @@ export async function pickSourceFolders(deps = {}) {
     })
     .filter(Boolean);
 }
-export function updateUsbConfigControlsVisibility(state, el) {
+export function updateUsbConfigControlsVisibility(ctx) {
+  const { state, el } = ctx;
   const hasValidRoot = !!state.usbRoot && !!state.usbRootValid;
   if (el.usbSelectedControls) {
     el.usbSelectedControls.classList.toggle("hidden", !hasValidRoot);
@@ -556,23 +513,24 @@ export function updateUsbConfigControlsVisibility(state, el) {
   if (!hasValidRoot && el.usbDiagnosticsCard) {
     el.usbDiagnosticsCard.classList.add("hidden");
   }
+  ctx.updateUsbEmptyState();
 }
 
-export async function detectExternalMasterDb(state, el, deps) {
-  const { command, warn, renderSourceChips } = deps;
+export async function detectExternalMasterDb(ctx) {
+  const { state, el } = ctx;
   try {
-    const data = await command("detect_external_master_db");
+    const data = await ctx.command("detect_external_master_db");
     const found = !!data?.found && !!data?.path;
     state.externalMasterDbPath = found ? data.path : null;
     if (!found) state.masterDbEnabled = false;
   } catch (err) {
     state.externalMasterDbPath = null;
     state.masterDbEnabled = false;
-    warn("External master DB detection failed:", err);
+    ctx.warn("External master DB detection failed:", err);
   }
   // Hide the legacy toggle element; the chip in renderSourceChips is the control
   el.externalMasterDbToggle?.classList.add("hidden");
-  renderSourceChips?.();
+  ctx.renderSourceChips();
 }
 
 // Prompts for (and saves) a name for `state.usbRoot` if it doesn't have one
@@ -582,13 +540,13 @@ export async function detectExternalMasterDb(state, el, deps) {
 // a replug or a different computer, where the OS-assigned mount path can't.
 // Best-effort: any failure to even check/show the prompt just lets the user
 // continue unnamed rather than blocking USB use entirely.
-async function promptDriveNameIfUnset(state, el, deps = {}) {
-  const { command, documentObj, updateUsbNameBadge = () => {} } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+async function promptDriveNameIfUnset(ctx) {
+  const { state, el, command, document: doc } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   // Reset first: a stale name from whatever drive was connected before must
   // never linger on screen while this one's actual name is still unknown.
   state.usbDeviceName = null;
-  updateUsbNameBadge();
+  ctx.updateUsbNameBadge();
   if (!state.usbRoot || typeof command !== "function") return;
 
   let existingName;
@@ -613,11 +571,10 @@ async function promptDriveNameIfUnset(state, el, deps = {}) {
   }
   if (existingName) {
     state.usbDeviceName = existingName;
-    updateUsbNameBadge();
+    ctx.updateUsbNameBadge();
     return;
   }
 
-  const doc = documentObj ?? (typeof document !== "undefined" ? document : null);
   const overlay = el.driveNameOverlay;
   if (!doc || !overlay || !el.driveNameInput || !el.driveNameOkBtn) {
     console.warn("[usb] drive-naming prompt DOM elements missing, skipping prompt", {
@@ -661,7 +618,7 @@ async function promptDriveNameIfUnset(state, el, deps = {}) {
       try {
         await command("set_usb_device_name", { usbRoot: state.usbRoot, name });
         state.usbDeviceName = name;
-        updateUsbNameBadge();
+        ctx.updateUsbNameBadge();
         cleanup();
         resolve();
       } catch (err) {
@@ -692,21 +649,9 @@ async function promptDriveNameIfUnset(state, el, deps = {}) {
   });
 }
 
-export async function validateAndSetUsbRoot(state, el, path, silent = false, deps) {
-  const {
-    command,
-    persistUsbRoot,
-    updateUsbRootText,
-    resetUsbStateViews,
-    updateUsbConfigControlsVisibility,
-    updateUsbSubNavDisabledState,
-    updatePlaylistExportButtons,
-    setStatus,
-    runUsbDiagnostics,
-    warn,
-    scheduler
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function validateAndSetUsbRoot(ctx, path, silent = false) {
+  const { state, el, command } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
 
   if (isUsbRootChangeBlocked(state)) {
     if (!silent) emitStatus("Please wait for the current USB operation to finish before switching drives");
@@ -716,22 +661,23 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
   const input = String(path || "").trim();
   const previousRoot = state.usbRoot;
   if (input && previousRoot && input !== previousRoot) {
-    hideUsbDiagnostics(el);
+    hideUsbDiagnostics(ctx);
   }
   if (!input) {
     state.usbRoot = null;
     state.usbRootValid = false;
     state.usbNeedsInit = false;
     state.usbDeviceName = null;
-    deps.updateUsbNameBadge?.();
-    persistUsbRoot(null);
-    updateUsbRootText(null, false);
+    ctx.updateUsbNameBadge();
+    ctx.persistUsbRoot(null);
+    updateUsbRootText(ctx, null, false);
     el.usbInitRow.classList.add("hidden");
-    resetUsbStateViews();
-    updateUsbConfigControlsVisibility();
-    updateUsbSubNavDisabledState();
-    updatePlaylistExportButtons();
+    resetUsbStateViews(ctx);
+    updateUsbConfigControlsVisibility(ctx);
+    ctx.updateUsbSubNavDisabledState();
+    ctx.updatePlaylistExportButtons();
     if (!silent) emitStatus("USB root cleared");
+    await syncAssetScopePaths(ctx);
     return false;
   }
 
@@ -744,8 +690,8 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
   state.usbRootValid = valid;
   state.usbNeedsInit = canInitialize;
   state.usbRoot = normalized || input;
-  persistUsbRoot(state.usbRoot);
-  updateUsbRootText(state.usbRoot, valid);
+  ctx.persistUsbRoot(state.usbRoot);
+  updateUsbRootText(ctx, state.usbRoot, valid);
   if (el.usbInitRow) {
     el.usbInitRow.classList.toggle("hidden", !canInitialize);
   }
@@ -763,36 +709,36 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
     el.initializeUsbBtn.disabled = !canInitialize;
   }
   if (previousRoot !== state.usbRoot) {
-    resetUsbStateViews();
+    resetUsbStateViews(ctx);
   }
-  updateUsbConfigControlsVisibility();
-  updateUsbSubNavDisabledState();
-  updatePlaylistExportButtons();
+  updateUsbConfigControlsVisibility(ctx);
+  ctx.updateUsbSubNavDisabledState();
+  ctx.updatePlaylistExportButtons();
   if (valid) {
-    await promptDriveNameIfUnset(state, el, deps);
+    await promptDriveNameIfUnset(ctx);
   } else {
     // Invalid/uninitialized root: clear any name badge left over from
     // whatever drive was previously connected -- it no longer applies.
     state.usbDeviceName = null;
-    deps.updateUsbNameBadge?.();
+    ctx.updateUsbNameBadge();
   }
   if (!silent) {
     if (valid) {
       const selectedWarningText = joinWarningTexts(result?.warnings);
       const reason = selectedWarningText ? ` (${selectedWarningText})` : "";
       emitStatus(`USB root selected: ${state.usbRoot}${reason}. Running diagnostics...`);
-      const _docObj = deps.documentObj ?? (typeof document !== "undefined" ? document : null);
-      const _healthCard = _docObj?.getElementById?.("usbHealthCard") ?? null;
-      if (_healthCard) {
-        _healthCard.removeAttribute("open");
-        _healthCard.classList.add("is-loading");
+      const healthCard = ctx.document?.getElementById?.("usbHealthCard") ?? null;
+      if (healthCard) {
+        healthCard.removeAttribute("open");
+        healthCard.classList.add("is-loading");
       }
-      scheduler(() => {
-        runUsbDiagnostics().catch((err) => {
-          warn("Auto-diagnostics failed:", err);
+      // Next frame, so the "Running diagnostics..." state paints first.
+      ctx.requestAnimationFrameFn(() => {
+        ctx.runUsbDiagnostics().catch((err) => {
+          ctx.warn("Auto-diagnostics failed:", err);
           emitStatus(`Auto-diagnostics failed: ${err?.message || err}`);
         });
-      }, 50);
+      });
     } else if (canInitialize) {
       emitStatus('USB selected but not initialized. Click "Initialize USB Structure" to continue.');
     } else {
@@ -800,19 +746,14 @@ export async function validateAndSetUsbRoot(state, el, path, silent = false, dep
       emitStatus(`USB root invalid: ${invalidWarningText}`);
     }
   }
+  if (state.usbRoot) await loadUsbDevices(ctx);
+  await syncAssetScopePaths(ctx);
   return valid;
 }
 
-export async function removeUsbPlaylist(state, playlist, deps) {
-  const {
-    setStatus,
-    openConfirmDialog,
-    command,
-    refreshUsb,
-    countWarningsForStatus,
-    clearUsbDiagnostics = () => {}
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function removeUsbPlaylist(ctx, playlist) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
 
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
@@ -823,23 +764,21 @@ export async function removeUsbPlaylist(state, playlist, deps) {
     return;
   }
 
-  const confirmed = await openConfirmDialog({
+  const confirmed = await ctx.openConfirmDialog({
     title: "Remove USB Playlist",
     message: `Remove USB playlist "${playlist.name}" from the stick?`,
     confirmLabel: "Remove"
   });
   if (!confirmed) return;
 
-  const data = await command("remove_usb_playlist", {
+  const data = await ctx.command("remove_usb_playlist", {
     usbRoot: state.usbRoot,
     playlistId: playlist.id,
     playlistName: playlist.name
   });
-  clearUsbDiagnostics();
-  await refreshUsb();
-  const warningCount = typeof countWarningsForStatus === "function"
-    ? countWarningsForStatus(data.warnings)
-    : ((data.warnings || []).length || 0);
+  clearUsbDiagnostics(ctx);
+  await refreshUsb(ctx);
+  const warningCount = ctx.countWarningsForStatus(data.warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   emitStatus(
     `Removed USB playlist: ${playlist.name} [db ${data.removedFromEdb || 0}, pdb ${data.removedFromPdb || 0}]${warningSuffix}`,
@@ -854,9 +793,9 @@ export function moveArrayItem(list, fromIndex, toIndex) {
   return copy;
 }
 
-export async function reorderUsbPlaylists(state, el, deps) {
-  const { command, refreshUsb, clearUsbDiagnostics = () => {} } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function reorderUsbPlaylists(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
 
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
@@ -864,36 +803,23 @@ export async function reorderUsbPlaylists(state, el, deps) {
   }
 
   try {
-    await command("reorder_usb_playlists", {
+    await ctx.command("reorder_usb_playlists", {
       usbRoot: state.usbRoot,
       orderedPlaylistIds: state.usbPlaylists.map((p) => p.id)
     });
-    clearUsbDiagnostics();
+    clearUsbDiagnostics(ctx);
     emitStatus("Playlist order saved");
   } catch (err) {
     emitStatus(`Failed to save playlist order: ${err.message || err}`);
   } finally {
-    await refreshUsb();
+    await refreshUsb(ctx);
   }
 }
-// USB workflow orchestration extracted from main.js.
+// USB workflow orchestration.
 
-export async function refreshUsb(state, el, deps) {
-  const {
-    setStatus,
-    command,
-    setProgress,
-    startProgressHeartbeat,
-    stopProgressHeartbeat,
-    normalizeUsbPlaylist,
-    renderUsbPlaylists,
-    clearUsbPlaylistTracks = () => {},
-    renderCurrentPlaylistTracksFromState,
-    updatePlaylistExportButtons,
-    countWarningsForStatus,
-    logWarnings
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function refreshUsb(ctx) {
+  const { state, el, setProgress, startProgressHeartbeat, stopProgressHeartbeat } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
@@ -903,7 +829,7 @@ export async function refreshUsb(state, el, deps) {
   startProgressHeartbeat();
   let data;
   try {
-    data = await command("fetch_usb_playlists", {
+    data = await ctx.command("fetch_usb_playlists", {
       usbRoot: state.usbRoot
     });
   } catch (err) {
@@ -913,140 +839,95 @@ export async function refreshUsb(state, el, deps) {
   }
   stopProgressHeartbeat();
 
-  const rawItems = data.items || [];
-  const total = rawItems.length;
-  setProgress(true, 40, `Loaded ${total} playlists, normalizing...`);
-  await new Promise((r) => setTimeout(r, 30));
-
-  state.usbPlaylists = [];
-  for (let i = 0; i < total; i += 1) {
-    state.usbPlaylists.push(normalizeUsbPlaylist(rawItems[i]));
-    if ((i + 1) % 3 === 0 || i === total - 1) {
-      const pct = 40 + Math.round(((i + 1) / total) * 35);
-      setProgress(true, pct, `Processing playlist ${i + 1}/${total}: ${rawItems[i].name || "..."}`);
-      await new Promise((r) => setTimeout(r, 0));
-    }
-  }
+  state.usbPlaylists = (data.items || []).map((item) => ctx.normalizeUsbPlaylist(item));
   state.playlistUsbExportStatusById = playlistUsbExportStatusById(data.playlistUsbExportStatus);
-
-  setProgress(true, 80, "Computing stats...");
-  await new Promise((r) => setTimeout(r, 20));
 
   const usbTrackTotal = Number(data.playlistTrackTotal) || 0;
   el.usbCountsText.textContent = `${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`;
-  setProgress(true, 90, "Rendering playlists...");
-  await new Promise((r) => setTimeout(r, 20));
-  renderUsbPlaylists();
-  clearUsbPlaylistTracks();
-  updatePlaylistExportButtons();
+  renderUsbPlaylists(ctx);
+  ctx.usbPlaylistTracksCtl.clear();
+  ctx.updatePlaylistExportButtons();
   // The freshly scanned status may flip an open local playlist's reorder lock.
-  await renderCurrentPlaylistTracksFromState?.();
+  await ctx.renderCurrentPlaylistTracksFromState();
 
-  const warningCount = countWarningsForStatus(data.warnings);
+  const warningCount = ctx.countWarningsForStatus(data.warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
-  logWarnings("usb-import", data.warnings, "fetch_usb_playlists");
+  ctx.logWarnings("usb-import", data.warnings, "fetch_usb_playlists");
   setProgress(true, 100, `Done — ${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`);
   emitStatus(`USB playlists loaded: ${state.usbPlaylists.length}${warningSuffix}`, { warningCount });
-  setTimeout(() => setProgress(false, 0, "Idle"), 1200);
+  ctx.scheduleProgressIdle(1200);
 }
 
-export async function runUsbDiagnostics(state, deps) {
-  const {
-    setStatus,
-    command,
-    updatePlaylistExportButtons,
-    renderCurrentPlaylistTracksFromState,
-    renderDiagnosticsReport,
-    logWarnings
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function runUsbDiagnostics(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
   }
-  const _diagDocObj = deps.documentObj ?? (typeof document !== "undefined" ? document : null);
-  const _diagHealthCard = _diagDocObj?.getElementById?.("usbHealthCard") ?? null;
-  if (_diagHealthCard) {
-    _diagHealthCard.removeAttribute("open");
-    _diagHealthCard.classList.add("is-loading");
+  const healthCard = ctx.document?.getElementById?.("usbHealthCard") ?? null;
+  if (healthCard) {
+    healthCard.removeAttribute("open");
+    healthCard.classList.add("is-loading");
   }
   emitStatus("Running USB diagnostics...");
-  const data = await command("run_usb_diagnostics", {
+  const data = await ctx.command("run_usb_diagnostics", {
     usbRoot: state.usbRoot
   });
   state.playlistUsbExportStatusById = playlistUsbExportStatusById(data?.playlistUsbExportStatus);
-  updatePlaylistExportButtons();
-  await renderCurrentPlaylistTracksFromState?.();
-  renderDiagnosticsReport(data);
-  logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
+  ctx.updatePlaylistExportButtons();
+  await ctx.renderCurrentPlaylistTracksFromState();
+  renderDiagnosticsReport(ctx, data);
+  ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
   emitStatus(`Diagnostics complete (${data.durationMs}ms)`);
 }
 
-export async function runUsbParityReport(state, deps) {
-  const {
-    setStatus,
-    command,
-    renderParityReport,
-    logWarnings
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function runUsbParityReport(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
   }
   emitStatus("Running USB parity report...");
-  const data = await command("run_usb_parity_report", {
+  const data = await ctx.command("run_usb_parity_report", {
     usbRoot: state.usbRoot
   });
-  renderParityReport(data);
-  logWarnings("usb-diagnostics", data.warnings, "run_usb_parity_report");
+  renderParityReport(ctx, data);
+  ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_parity_report");
   emitStatus(`Parity report complete (${data.durationMs}ms)`);
 }
 
-export async function previewUsbRepairs(state, deps) {
-  const {
-    setStatus,
-    command,
-    renderRepairPreview,
-    logWarnings
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function previewUsbRepairs(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
   }
   emitStatus("Previewing USB repair fixes...");
-  const data = await command("repair_usb_diagnostics", {
+  const data = await ctx.command("repair_usb_diagnostics", {
     usbRoot: state.usbRoot
   });
-  renderRepairPreview(data);
-  logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics preview");
+  renderRepairPreview(ctx, data);
+  ctx.logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics preview");
   emitStatus(`Repair preview ready (${data.durationMs}ms)`);
 }
 
-export async function applyUsbRepairs(state, deps) {
-  const {
-    setStatus,
-    command,
-    logWarnings,
-    resetUsbStateViews = () => {},
-    updatePlaylistExportButtons = () => {},
-    renderCurrentPlaylistTracksFromState = () => {},
-    renderDiagnosticsReport = () => {}
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function applyUsbRepairs(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
   }
   emitStatus("Applying supported USB repair fixes...");
-  let data;
   const selectedFixIds = Array.from(state.selectedRepairFixIds);
   if (selectedFixIds.length === 0) {
     emitStatus("Select at least one fix to apply.");
     return;
   }
-  data = await command("repair_usb_diagnostics", {
+  const data = await ctx.command("repair_usb_diagnostics", {
     usbRoot: state.usbRoot,
     apply: true,
     selectedFixIds
@@ -1057,33 +938,33 @@ export async function applyUsbRepairs(state, deps) {
   // which specific fix IDs touch playlists, treat any successful apply as
   // potentially invalidating whatever's loaded, same coarse-grained
   // "DB changed, clear it" reasoning diagnostics-clearing already uses.
-  if (applied > 0) resetUsbStateViews({ hideDiagnostics: false });
-  logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
+  if (applied > 0) resetUsbStateViews(ctx, { hideDiagnostics: false });
+  ctx.logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
   if (data.diagnostics) {
     state.playlistUsbExportStatusById = playlistUsbExportStatusById(
       data.diagnostics.playlistUsbExportStatus
     );
-    updatePlaylistExportButtons();
-    await renderCurrentPlaylistTracksFromState();
-    renderDiagnosticsReport(data.diagnostics);
-    logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
+    ctx.updatePlaylistExportButtons();
+    await ctx.renderCurrentPlaylistTracksFromState();
+    renderDiagnosticsReport(ctx, data.diagnostics);
+    ctx.logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
   }
   emitStatus(`Repair apply complete: ${applied} applied, ${failed} failed (${data.durationMs}ms)${data.diagnostics ? ". Diagnostics refreshed." : ""}`);
 }
 
-export async function refreshHistory(state, el, deps) {
-  const { setStatus, command, normalizeTrack, countWarningsForStatus, logWarnings, renderHistoryList, clearHistoryTracks = () => {} } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function refreshHistory(ctx) {
+  const { state, el } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot) {
     emitStatus("Select USB folder first");
     return;
   }
   emitStatus("Loading USB history...");
-  const data = await command("fetch_usb_histories", { usbRoot: state.usbRoot });
+  const data = await ctx.command("fetch_usb_histories", { usbRoot: state.usbRoot });
 
   state.histories = (data.items || []).map((history) => ({
     ...history,
-    tracks: (history.tracks || []).map((track) => normalizeTrack(track, "hist"))
+    tracks: (history.tracks || []).map((track) => ctx.normalizeTrack(track, "hist"))
   }));
   // Backend-owned: `fetch_usb_histories` always returns `counts` computed over
   // the full import -- the frontend renders them, never re-tallies.
@@ -1092,11 +973,11 @@ export async function refreshHistory(state, el, deps) {
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
   if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
-  renderHistoryList();
-  clearHistoryTracks();
-  const warningCount = countWarningsForStatus(data.warnings);
+  renderHistoryList(ctx);
+  ctx.usbHistoryTracksCtl.clear();
+  const warningCount = ctx.countWarningsForStatus(data.warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
-  logWarnings("usb-import", data.warnings, "fetch_usb_histories");
+  ctx.logWarnings("usb-import", data.warnings, "fetch_usb_histories");
   emitStatus(`USB histories loaded: ${state.histories.length}${warningSuffix}`, { warningCount });
 }
 
@@ -1108,9 +989,9 @@ export function sanitizeTracklistFileName(name) {
   return `${cleaned || "tracklist"}.txt`;
 }
 
-export async function exportHistoryTracklist(state, el, deps = {}) {
-  const { invoke = async () => false, tracklistExportDialog, buildTracklistText = () => "" } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function exportHistoryTracklist(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
 
   const history = state.histories[state.selectedHistoryIndex];
   if (!history || !state.historyTracks.length) {
@@ -1118,7 +999,7 @@ export async function exportHistoryTracklist(state, el, deps = {}) {
     return;
   }
 
-  const choice = await tracklistExportDialog.open({
+  const choice = await ctx.tracklistExportDialog.open({
     tracks: state.historyTracks,
     defaultTimesEnabled: true,
     defaultPlacement: "before"
@@ -1127,7 +1008,7 @@ export async function exportHistoryTracklist(state, el, deps = {}) {
 
   const startIndex = Math.min(Math.max(Number(choice.startIndex) || 0, 0), state.historyTracks.length - 1);
   const text = buildTracklistText(state.historyTracks.slice(startIndex), choice.timeMode);
-  const saved = await invoke("save_text_file", {
+  const saved = await ctx.invoke("save_text_file", {
     suggestedFileName: sanitizeTracklistFileName(history.name),
     contents: text
   });
@@ -1162,27 +1043,21 @@ function ensureValidPlayerMenuSelections(state) {
 function buildPlayerMenuItemButton(documentObj, item, selectedKind, side) {
   const kind = Number(item?.kind);
   const origin = item?.origin || "both";
-  const button = documentObj.createElement("button");
-  button.type = "button";
-  button.className = "player-menu-item";
+  const button = cloneTemplate(documentObj, "tplPlayerMenuItem");
   button.dataset.menuKind = String(kind);
   button.dataset.menuSide = side;
   button.dataset.menuOrigin = origin;
-  button.setAttribute("role", "option");
+  button.querySelector(".player-menu-item-label").textContent = toMenuOptionLabel(item);
 
-  const label = documentObj.createElement("span");
-  label.className = "player-menu-item-label";
-  label.textContent = toMenuOptionLabel(item);
-  button.appendChild(label);
-
+  const tag = button.querySelector(".player-menu-item-origin");
   if (side === "current" && origin !== "both") {
-    const tag = documentObj.createElement("span");
-    tag.className = `player-menu-item-origin is-${origin}`;
+    tag.classList.add(`is-${origin}`);
     tag.textContent = origin === "pdb_only" ? "PDB" : "eDB";
     tag.dataset.tooltip = origin === "pdb_only"
       ? "Only in PDB t16 (eDB missing this kind)"
       : "Only in eDB menuItem (not in PDB t16)";
-    button.appendChild(tag);
+  } else {
+    tag.remove();
   }
 
   const selected = Number(selectedKind) === kind;
@@ -1195,38 +1070,34 @@ function buildPlayerMenuItemButton(documentObj, item, selectedKind, side) {
   return button;
 }
 
-export function selectUsbPlayerMenuItem(state, el, side, kind, deps = {}) {
-  const normalized = normalizeMenuKind(kind);
-  if (side === "available") {
-    state.usbPlayerMenuAvailableSelectedKind = normalized;
-    state.usbPlayerMenuCurrentSelectedKind = null;
-  } else {
-    state.usbPlayerMenuCurrentSelectedKind = normalized;
-    state.usbPlayerMenuAvailableSelectedKind = null;
-  }
-  renderUsbPlayerMenuEditor(state, el, deps);
-}
-
-export function handleUsbPlayerMenuListClick(state, el, deps, side, event) {
+export function handleUsbPlayerMenuListClick(ctx, side, event) {
+  const { state } = ctx;
   const target = event?.target?.closest?.(".player-menu-item");
   if (!target) return;
   const kind = normalizeMenuKind(target.dataset.menuKind);
   if (kind === null) return;
-  selectUsbPlayerMenuItem(state, el, side, kind, deps);
+  if (side === "available") {
+    state.usbPlayerMenuAvailableSelectedKind = kind;
+    state.usbPlayerMenuCurrentSelectedKind = null;
+  } else {
+    state.usbPlayerMenuCurrentSelectedKind = kind;
+    state.usbPlayerMenuAvailableSelectedKind = null;
+  }
+  renderUsbPlayerMenuEditor(ctx);
 }
 
-export function renderUsbPlayerMenuEditor(state, el, deps = {}) {
-  const { documentObj = document } = deps;
+export function renderUsbPlayerMenuEditor(ctx) {
+  const { state, el, document } = ctx;
   const availableEl = el.usbPlayerMenuAvailable;
   const currentEl = el.usbPlayerMenuCurrent;
   if (!availableEl || !currentEl) return;
 
   ensureValidPlayerMenuSelections(state);
 
-  availableEl.innerHTML = "";
+  availableEl.replaceChildren();
   for (const item of state.usbPlayerMenuAvailable || []) {
     const row = buildPlayerMenuItemButton(
-      documentObj,
+      document,
       item,
       state.usbPlayerMenuAvailableSelectedKind,
       "available",
@@ -1234,10 +1105,10 @@ export function renderUsbPlayerMenuEditor(state, el, deps = {}) {
     availableEl.appendChild(row);
   }
 
-  currentEl.innerHTML = "";
+  currentEl.replaceChildren();
   for (const item of state.usbPlayerMenuCurrent || []) {
     const row = buildPlayerMenuItemButton(
-      documentObj,
+      document,
       item,
       state.usbPlayerMenuCurrentSelectedKind,
       "current",
@@ -1245,11 +1116,12 @@ export function renderUsbPlayerMenuEditor(state, el, deps = {}) {
     currentEl.appendChild(row);
   }
 
-  renderUsbPlayerMenuDivergence(state, el);
-  syncUsbPlayerMenuEditorControls(state, el);
+  renderUsbPlayerMenuDivergence(ctx);
+  syncUsbPlayerMenuEditorControls(ctx);
 }
 
-function renderUsbPlayerMenuDivergence(state, el) {
+function renderUsbPlayerMenuDivergence(ctx) {
+  const { state, el } = ctx;
   const node = el.usbPlayerMenuDivergence;
   if (!node) return;
   // Backend-owned: `summary` / `canSync` / `canRestore` come from
@@ -1279,22 +1151,28 @@ function renderUsbPlayerMenuDivergence(state, el) {
   }
 }
 
-export async function syncUsbPlayerMenusEdbToPdb(state, el, deps) {
-  const { command, clearUsbDiagnostics = () => {} } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+// Store a player-menu config response and redraw the editor.
+function applyPlayerMenuConfig(ctx, data, selection = null) {
+  const { state } = ctx;
+  state.usbPlayerMenuCurrent = Array.isArray(data?.currentItems) ? data.currentItems : [];
+  state.usbPlayerMenuAvailable = Array.isArray(data?.availableItems) ? data.availableItems : [];
+  state.usbPlayerMenuDivergence = normalizeDivergence(data?.divergence);
+  state.usbPlayerMenuCurrentSelectedKind = selection?.side === "current" ? normalizeMenuKind(selection.kind) : null;
+  state.usbPlayerMenuAvailableSelectedKind = selection?.side === "available" ? normalizeMenuKind(selection.kind) : null;
+  renderUsbPlayerMenuEditor(ctx);
+}
+
+export async function syncUsbPlayerMenusEdbToPdb(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
     return;
   }
   emitStatus("Fixing PDB sync...");
-  const data = await command("sync_usb_player_menu_edb_to_pdb", { usbRoot: state.usbRoot });
-  state.usbPlayerMenuCurrent = Array.isArray(data?.currentItems) ? data.currentItems : [];
-  state.usbPlayerMenuAvailable = Array.isArray(data?.availableItems) ? data.availableItems : [];
-  state.usbPlayerMenuDivergence = normalizeDivergence(data?.divergence);
-  state.usbPlayerMenuCurrentSelectedKind = null;
-  state.usbPlayerMenuAvailableSelectedKind = null;
-  renderUsbPlayerMenuEditor(state, el, deps);
-  if (data?.updated) clearUsbDiagnostics();
+  const data = await ctx.command("sync_usb_player_menu_edb_to_pdb", { usbRoot: state.usbRoot });
+  applyPlayerMenuConfig(ctx, data);
+  if (data?.updated) clearUsbDiagnostics(ctx);
   emitStatus(data?.updated ? "PDB categories restored" : "PDB already complete");
 }
 
@@ -1305,7 +1183,8 @@ function currentPlayerMenuItemByKind(state, kind) {
   return (state.usbPlayerMenuCurrent || []).find((item) => Number(item.kind) === kind) || null;
 }
 
-export function syncUsbPlayerMenuEditorControls(state, el) {
+export function syncUsbPlayerMenuEditorControls(ctx) {
+  const { state, el } = ctx;
   const availableEl = el.usbPlayerMenuAvailable;
   const currentEl = el.usbPlayerMenuCurrent;
   if (!availableEl || !currentEl) return;
@@ -1342,68 +1221,52 @@ function normalizeDivergence(raw) {
   };
 }
 
-export async function loadUsbPlayerMenuConfig(state, el, deps) {
-  const { command } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function loadUsbPlayerMenuConfig(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
-    renderUsbPlayerMenuEditor(state, el, deps);
+    renderUsbPlayerMenuEditor(ctx);
     return;
   }
   emitStatus("Loading player menu configuration...");
-  const data = await command("get_usb_player_menu_config", { usbRoot: state.usbRoot });
-  state.usbPlayerMenuCurrent = Array.isArray(data?.currentItems) ? data.currentItems : [];
-  state.usbPlayerMenuAvailable = Array.isArray(data?.availableItems) ? data.availableItems : [];
-  state.usbPlayerMenuDivergence = normalizeDivergence(data?.divergence);
-  state.usbPlayerMenuCurrentSelectedKind = null;
-  state.usbPlayerMenuAvailableSelectedKind = null;
-  renderUsbPlayerMenuEditor(state, el, deps);
+  const data = await ctx.command("get_usb_player_menu_config", { usbRoot: state.usbRoot });
+  applyPlayerMenuConfig(ctx, data);
   emitStatus("Player menu loaded");
 }
 
-export async function updateUsbPlayerMenuConfig(state, el, deps, currentKinds, preferredSelection = null) {
-  const { command, clearUsbDiagnostics = () => {} } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+async function updateUsbPlayerMenuConfig(ctx, currentKinds, preferredSelection = null) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
     return;
   }
-  const data = await command("update_usb_player_menu_config", {
+  const data = await ctx.command("update_usb_player_menu_config", {
     usbRoot: state.usbRoot,
     currentKinds,
   });
-  if (data?.updated) clearUsbDiagnostics();
-  state.usbPlayerMenuCurrent = Array.isArray(data?.currentItems) ? data.currentItems : [];
-  state.usbPlayerMenuAvailable = Array.isArray(data?.availableItems) ? data.availableItems : [];
-  state.usbPlayerMenuDivergence = normalizeDivergence(data?.divergence);
-  if (preferredSelection?.side === "current") {
-    state.usbPlayerMenuCurrentSelectedKind = normalizeMenuKind(preferredSelection.kind);
-    state.usbPlayerMenuAvailableSelectedKind = null;
-  } else if (preferredSelection?.side === "available") {
-    state.usbPlayerMenuAvailableSelectedKind = normalizeMenuKind(preferredSelection.kind);
-    state.usbPlayerMenuCurrentSelectedKind = null;
-  } else {
-    state.usbPlayerMenuCurrentSelectedKind = null;
-    state.usbPlayerMenuAvailableSelectedKind = null;
-  }
-  renderUsbPlayerMenuEditor(state, el, deps);
+  if (data?.updated) clearUsbDiagnostics(ctx);
+  applyPlayerMenuConfig(ctx, data, preferredSelection);
   emitStatus(data?.updated ? "Player menu updated" : "Player menu unchanged");
 }
 
-export async function addUsbPlayerMenuItems(state, el, deps) {
+export async function addUsbPlayerMenuItems(ctx) {
+  const { state } = ctx;
   const selected = normalizeMenuKind(state.usbPlayerMenuAvailableSelectedKind);
   if (selected === null) return;
   const currentKinds = (state.usbPlayerMenuCurrent || []).map((item) => Number(item.kind));
   if (!currentKinds.includes(selected)) {
     currentKinds.push(selected);
   }
-  await updateUsbPlayerMenuConfig(state, el, deps, currentKinds, {
+  await updateUsbPlayerMenuConfig(ctx, currentKinds, {
     side: "current",
     kind: selected,
   });
 }
 
-export async function removeUsbPlayerMenuItems(state, el, deps) {
+export async function removeUsbPlayerMenuItems(ctx) {
+  const { state } = ctx;
   const selected = normalizeMenuKind(state.usbPlayerMenuCurrentSelectedKind);
   if (selected === null) return;
   // Belt-and-suspenders: the Remove button is already disabled for these, and
@@ -1412,85 +1275,37 @@ export async function removeUsbPlayerMenuItems(state, el, deps) {
   const currentKinds = (state.usbPlayerMenuCurrent || [])
     .map((item) => Number(item.kind))
     .filter((kind) => kind !== selected);
-  await updateUsbPlayerMenuConfig(state, el, deps, currentKinds, {
+  await updateUsbPlayerMenuConfig(ctx, currentKinds, {
     side: "available",
     kind: selected,
   });
 }
 
-export async function moveUsbPlayerMenuItems(state, el, deps, direction) {
+export async function moveUsbPlayerMenuItems(ctx, direction) {
+  const { state } = ctx;
   const selected = normalizeMenuKind(state.usbPlayerMenuCurrentSelectedKind);
   if (selected === null) return;
   const currentKinds = (state.usbPlayerMenuCurrent || []).map((item) => Number(item.kind));
   const selectedIdx = currentKinds.indexOf(selected);
   if (selectedIdx < 0) return;
 
-  if (direction < 0) {
-    if (selectedIdx > 0) {
-      const tmp = currentKinds[selectedIdx - 1];
-      currentKinds[selectedIdx - 1] = currentKinds[selectedIdx];
-      currentKinds[selectedIdx] = tmp;
-    }
-  } else {
-    if (selectedIdx >= 0 && selectedIdx < currentKinds.length - 1) {
-      const tmp = currentKinds[selectedIdx + 1];
-      currentKinds[selectedIdx + 1] = currentKinds[selectedIdx];
-      currentKinds[selectedIdx] = tmp;
-    }
+  const swapIdx = direction < 0 ? selectedIdx - 1 : selectedIdx + 1;
+  if (swapIdx >= 0 && swapIdx < currentKinds.length) {
+    [currentKinds[swapIdx], currentKinds[selectedIdx]] = [currentKinds[selectedIdx], currentKinds[swapIdx]];
   }
-  await updateUsbPlayerMenuConfig(state, el, deps, currentKinds, {
+  await updateUsbPlayerMenuConfig(ctx, currentKinds, {
     side: "current",
     kind: selected,
   });
 }
 
-export async function exportPlaylistToUsb(state, el, playlistId, deps) {
-  const {
-    setStatus,
-    setProgress,
-    startProgressHeartbeat,
-    nextPaint,
-    command,
-    stopProgressHeartbeat,
-    countWarningsForStatus,
-    warningEntryLevel,
-    logWarnings,
-    emitMessage,
-    pushEventLog,
-    loadPlaylists,
-    updateModeText,
-    switchView,
-    renderUsbPlaylists,
-    clearUsbPlaylistTracks = () => {},
-    clearUsbDiagnostics = () => {},
-    commitActivePlaylistSort = async () => {}
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
-  const emitErrorEvent = (text, details = null, coalesceKey = "export.failure") => {
-    if (typeof emitMessage === "function") {
-      emitMessage({
-        level: "error",
-        source: "export",
-        code: "export.failure",
-        eventLog: { text, details, coalesceKey }
-      });
-      return;
-    }
-    if (typeof pushEventLog === "function") {
-      pushEventLog({
-        level: "error",
-        source: "export",
-        code: "export.failure",
-        message: text,
-        details,
-        coalesceKey
-      });
-    }
-  };
+export async function exportPlaylistToUsb(ctx, playlistId) {
+  const { state, el, setProgress, stopProgressHeartbeat } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
   try {
-    await commitActivePlaylistSort(playlistId);
+    await ctx.commitActivePlaylistSort(playlistId);
   } catch (err) {
     emitStatus(`Export blocked: couldn't save the current sort order (${err.message || err})`);
     return;
@@ -1514,11 +1329,11 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
   emitStatus(`Exporting ${playlist.name} to USB...`);
   el.donateBtn?.classList.add("exporting");
   setProgress(true, 8, "Starting USB export...");
-  startProgressHeartbeat();
-  await nextPaint();
+  ctx.startProgressHeartbeat();
+  await ctx.nextPaint();
   let data;
   try {
-    data = await command("export_to_usb", {
+    data = await ctx.command("export_to_usb", {
       usbRoot: state.usbRoot,
       playlistId: playlist.id,
       options: {
@@ -1541,7 +1356,12 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
     } else {
       const msg = String(error?.message || "USB export failed").trim() || "USB export failed";
       emitStatus(`Export failed: ${msg}. See Event Log for details.`);
-      emitErrorEvent(msg, "context: export_to_usb", "export.failure.export_to_usb");
+      ctx.emitMessage({
+        level: "error",
+        source: "export",
+        code: "export.failure",
+        eventLog: { text: msg, details: "context: export_to_usb", coalesceKey: "export.failure.export_to_usb" }
+      });
     }
     throw error;
   } finally {
@@ -1550,12 +1370,12 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
       stopProgressHeartbeat();
     }
   }
-  clearUsbDiagnostics();
-  const warningCount = countWarningsForStatus(data.warnings);
+  clearUsbDiagnostics(ctx);
+  const warningCount = ctx.countWarningsForStatus(data.warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   const warningList = Array.isArray(data.warnings) ? data.warnings : [];
   if (warningList.length) {
-    const infoCount = warningList.filter((entry) => warningEntryLevel(entry) === "info").length;
+    const infoCount = warningList.filter((entry) => ctx.warningEntryLevel(entry) === "info").length;
     if (warningCount > 0) {
       console.warn(
         `Export completed with ${warningCount} warning/error entr${warningCount === 1 ? "y" : "ies"}${infoCount ? ` (+${infoCount} info)` : ""}.`
@@ -1566,146 +1386,172 @@ export async function exportPlaylistToUsb(state, el, playlistId, deps) {
       );
     }
   }
-  logWarnings("export", data.warnings, "export_to_usb");
+  ctx.logWarnings("export", data.warnings, "export_to_usb");
   emitStatus(
     `Export complete: ${playlist.name} - ${data.exportedTracks || 0} track(s), ${data.skippedTracks || 0} skipped${warningSuffix}${state.exportPruneStale ? " [sync: mirror]" : " [sync: additive]"}`,
     { warningCount }
   );
-  await loadPlaylists();
+  await ctx.loadPlaylists();
   state.currentPlaylistId = playlistId;
-  updateModeText();
-  await switchView(playlistId);
+  ctx.updateModeText();
+  await ctx.switchView(playlistId);
 
   state.usbPlaylists = [];
-  renderUsbPlaylists();
-  clearUsbPlaylistTracks();
+  renderUsbPlaylists(ctx);
+  ctx.usbPlaylistTracksCtl.clear();
 }
 
-export function renderUsbPlaylists(state, el, deps = {}) {
-  const { escapeHtml = (v) => String(v || "") } = deps;
-  el.usbPlaylists.innerHTML = "";
-  const usbRight = el.usbPlaylists.closest(".split")?.querySelector(".right");
-  if (!state.usbPlaylists.length) {
-    el.usbPlaylists.innerHTML = '<li class="muted">No playlists imported yet. Click "Import Playlists" to load from USB.</li>';
-    usbRight?.classList.add("hidden");
+// A USB side list (playlists / history): the items, or `emptyText` with the
+// right-hand track pane hidden when there are none.
+function renderUsbSideList(list, items, emptyText) {
+  const doc = list.ownerDocument;
+  const right = list.closest(".split")?.querySelector(".right");
+  right?.classList.toggle("hidden", !items.length);
+  if (!items.length) {
+    const empty = cloneTemplate(doc, "tplMutedListItem");
+    empty.textContent = emptyText;
+    list.replaceChildren(empty);
     return;
   }
-  usbRight?.classList.remove("hidden");
-  state.usbPlaylists.forEach((playlist, index) => {
+  list.replaceChildren(...items);
+}
+
+export function renderUsbPlaylists(ctx) {
+  const { state, el, document } = ctx;
+  renderUsbSideList(el.usbPlaylists, state.usbPlaylists.map((playlist, index) => {
     const count = Number(playlist.trackCount ?? playlist.tracks?.length ?? 0);
-    el.usbPlaylists.insertAdjacentHTML(
-      "beforeend",
-      `<li data-usb-playlist-li="${index}"><button data-usb-playlist-index="${index}" data-usb-playlist="${escapeHtml(playlist.id)}"><span class="drag-handle" data-usb-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">&#10495;</span><span class="playlist-label">${escapeHtml(playlist.name)} (${count})</span><span class="playlist-remove" data-usb-remove-playlist="${escapeHtml(playlist.id)}" data-tooltip="Remove" aria-label="Remove">&times;</span></button></li>`
-    );
-  });
+    const li = cloneTemplate(document, "tplUsbPlaylistItem");
+    li.dataset.usbPlaylistLi = String(index);
+    const btn = li.firstElementChild;
+    btn.dataset.usbPlaylistIndex = String(index);
+    btn.dataset.usbPlaylist = playlist.id;
+    btn.querySelector(".playlist-label").textContent = `${playlist.name} (${count})`;
+    btn.querySelector(".playlist-remove").dataset.usbRemovePlaylist = playlist.id;
+    return li;
+  }), 'No playlists imported yet. Click "Import Playlists" to load from USB.');
 }
 
-export function usbPlaylistRowOptions() {
-  return {
-    withCheckbox: false,
-    actionLabel: "+",
-    actionType: "add-usb",
-    compactAddButton: true,
-    enableAnalyzeActions: true,
-    origin: "usb",
-    secondaryActionLabel: "Play",
-    secondaryActionType: "play-usb"
-  };
-}
-
-export function renderHistoryList(state, el, deps = {}) {
-  const {
-    escapeHtml = (v) => String(v || ""),
-    getHistoryDateValue = () => ""
-  } = deps;
-  el.historyList.innerHTML = "";
-  const histRight = el.historyList.closest(".split")?.querySelector(".right");
-  if (!state.histories.length) {
-    el.historyList.innerHTML = '<li class="muted">No history imported yet. Click "Import History" to load from USB.</li>';
-    histRight?.classList.add("hidden");
-    return;
-  }
-  histRight?.classList.remove("hidden");
-
+export function renderHistoryList(ctx) {
+  const { state, el, document } = ctx;
   // Render newest first — keep original index so click handler resolves state.histories[index]
-  state.histories.map((history, index) => ({ history, index })).reverse().forEach(({ history, index }) => {
+  const items = state.histories.map((history, index) => {
     const dateText = getHistoryDateValue(history);
-    el.historyList.insertAdjacentHTML(
-      "beforeend",
-      `<li><button data-history-index="${index}"><span class="playlist-label">${escapeHtml(history.name)}${dateText ? ` (${escapeHtml(dateText)})` : ""}</span></button></li>`
-    );
+    const li = cloneTemplate(document, "tplHistoryItem");
+    li.firstElementChild.dataset.historyIndex = String(index);
+    li.querySelector(".playlist-label").textContent = `${history.name}${dateText ? ` (${dateText})` : ""}`;
+    return li;
+  }).reverse();
+  renderUsbSideList(el.historyList, items, 'No history imported yet. Click "Import History" to load from USB.');
+}
+
+// The USB-playlist and USB-history track tables' data layer: paginated +
+// searched + sorted + per-page-hydrated by the backend, rendered via the shared
+// controller. Selection/search/sort/scroll all go through it.
+function createUsbTracksController(ctx, { bodyId, fetchCommand, prefix, secondaryActionType, actionType }) {
+  return createTrackListController({
+    bodyId,
+    getElements: () => ({
+      body: ctx.el[bodyId],
+      wrap: ctx.el[bodyId]?.closest?.(".table-wrap"),
+      durationTarget: bodyId === "historyTracks" ? ctx.el.historyTotalDuration : ctx.el.usbPlaylistTotalDuration,
+    }),
+    fetchPage: ({ scopeId, query, sortBy, sortDir, cursor, limit }) =>
+      ctx.command(fetchCommand, {
+        usbRoot: ctx.state.usbRoot || null,
+        id: scopeId,
+        query,
+        sortBy: sortBy || null,
+        sortDir: sortDir || null,
+        cursor: cursor || null,
+        limit,
+      }),
+    normalize: (track) => ctx.normalizeTrack(track, prefix),
+    rowOptions: () => ({
+      withCheckbox: false,
+      actionLabel: "+",
+      actionType,
+      compactAddButton: true,
+      enableAnalyzeActions: true,
+      origin: "usb",
+      secondaryActionLabel: "Play",
+      secondaryActionType,
+    }),
+    renderTrackTable: ctx.renderTrackTable,
+    renderDurationSummary: (target, summary) =>
+      renderTrackListDurationSummary(target, summary, formatDurationMs),
+    getTableSortState: () => ctx.tableSortState,
   });
 }
 
-export function usbHistoryRowOptions() {
-  return {
-    withCheckbox: false,
-    actionLabel: "+",
-    actionType: "add-history",
-    compactAddButton: true,
-    enableAnalyzeActions: true,
-    origin: "usb",
-    secondaryActionLabel: "Play",
-    secondaryActionType: "play-history"
-  };
+export function createUsbPlaylistTracksController(ctx) {
+  return createUsbTracksController(ctx, {
+    bodyId: "usbPlaylistTracks",
+    fetchCommand: "fetch_usb_playlist_tracks",
+    prefix: "usb",
+    actionType: "add-usb",
+    secondaryActionType: "play-usb",
+  });
 }
 
-export async function initializeUsb(state, el, deps = {}) {
-  const {
-    command = async () => {},
-    setStatus = () => {},
-    validateAndSetUsbRoot = async () => {},
-    logError = () => {}
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export function createUsbHistoryTracksController(ctx) {
+  return createUsbTracksController(ctx, {
+    bodyId: "historyTracks",
+    fetchCommand: "fetch_usb_history_tracks",
+    prefix: "hist",
+    actionType: "add-history",
+    secondaryActionType: "play-history",
+  });
+}
+
+export function patchUsbTrackRow(ctx, track) {
+  return patchUsbRowsInContainer(ctx, ctx.el.usbPlaylistTracks, track);
+}
+
+export function patchHistoryTrackRow(ctx, track) {
+  return patchUsbRowsInContainer(ctx, ctx.el.historyTracks, track);
+}
+
+export async function initializeUsb(ctx) {
+  const { state, el } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.usbRoot) return;
   try {
-    await command("initialize_usb", { usbRoot: state.usbRoot });
+    await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
     emitStatus("USB initialized");
     el.usbInitRow?.classList?.add("hidden");
-    await validateAndSetUsbRoot(state.usbRoot, false);
+    await validateAndSetUsbRoot(ctx, state.usbRoot, false);
   } catch (err) {
-    logError("Initialize USB failed:", err);
+    ctx.logError("Initialize USB failed:", err);
     emitStatus(`Initialize failed: ${err.message || err}`);
   }
 }
 
-export async function pickUsbFolder(deps = {}) {
-  const {
-    invoke = async () => null,
-    validateAndSetUsbRoot = async () => {},
-    state = {},
-    emitStatus
-  } = deps;
-  if (isUsbRootChangeBlocked(state)) {
-    resolveEmitStatus({ emitStatus })("Please wait for the current USB operation to finish before switching drives");
+export async function pickUsbFolder(ctx) {
+  if (isUsbRootChangeBlocked(ctx.state)) {
+    resolveEmitStatus(ctx)("Please wait for the current USB operation to finish before switching drives");
     return null;
   }
-  const selected = await invoke("pick_usb_folder");
+  const selected = await ctx.invoke("pick_usb_folder");
   if (!selected) return null;
-  await validateAndSetUsbRoot(String(selected), false);
+  await validateAndSetUsbRoot(ctx, String(selected), false);
   return selected;
 }
 
-export async function hydrateUsbTrackMetadata(state, track, deps = {}) {
-  const {
-    command = async () => ({}),
-    normalizeTrack = (t) => t
-  } = deps;
+export async function hydrateUsbTrackMetadata(ctx, track) {
   // Backend-owned: `needsHydration` (service::usb::hydrate_usb_track_in_place)
   // says whether an inspect could still fill anything in.
   if (!track || track.needsHydration !== true) return track;
   const trackId = String(track.id || "").trim();
   if (!/^\d+$/.test(trackId)) return track;
   try {
-    const inspected = await command("inspect_usb_track", {
-      usbRoot: state.usbRoot,
+    const inspected = await ctx.command("inspect_usb_track", {
+      usbRoot: ctx.state.usbRoot,
       trackId,
       filePath: track.filePath || "",
       title: track.title || "",
       artist: track.artist || ""
     });
-    applyHydratedTrackResult(track, inspected?.track, normalizeTrack);
+    applyHydratedTrackResult(ctx, track, inspected?.track);
   } catch (err) {
     console.warn(`inspect_usb_track failed for ${trackId}:`, err);
   }
@@ -1714,12 +1560,12 @@ export async function hydrateUsbTrackMetadata(state, track, deps = {}) {
   return track;
 }
 
-function applyHydratedTrackResult(track, inspectedTrack, normalizeTrack) {
+function applyHydratedTrackResult(ctx, track, inspectedTrack) {
   if (!inspectedTrack || typeof inspectedTrack !== "object") {
     track.artworkChecked = true;
     return;
   }
-  const normalized = normalizeTrack({ ...track, ...inspectedTrack }, "usb") || {};
+  const normalized = ctx.normalizeTrack({ ...track, ...inspectedTrack }, "usb") || {};
   if (!normalized.localTrackId && track.localTrackId) {
     normalized.localTrackId = track.localTrackId;
   }
@@ -1730,9 +1576,10 @@ function applyHydratedTrackResult(track, inspectedTrack, normalizeTrack) {
 // Replaces the old localStorage/app_settings "recent USB roots" list with a
 // live query against the usb_devices table -- so mount state and pruning
 // are always accurate, not a client-side cache that can drift from it.
-export async function loadUsbDevices(state, command) {
+export async function loadUsbDevices(ctx) {
+  const { state } = ctx;
   try {
-    const data = await command("list_usb_devices");
+    const data = await ctx.command("list_usb_devices");
     const items = Array.isArray(data?.items) ? data.items : [];
     state.usbDevices = items;
     state.usbRecentRoots = items.map((item) => String(item?.rootPath || "").trim()).filter(Boolean);
@@ -1741,23 +1588,25 @@ export async function loadUsbDevices(state, command) {
     state.usbDevices = [];
     state.usbRecentRoots = [];
   }
+  renderUsbRecentRoots(ctx);
   return state.usbRecentRoots;
 }
 
-export async function pruneUsbDevice(state, id, deps = {}) {
-  const { command, reload = () => {} } = deps;
+export async function pruneUsbDevice(ctx, id) {
   if (!id) return;
   try {
-    await command("prune_usb_device", { id });
+    await ctx.command("prune_usb_device", { id });
   } catch (err) {
     console.warn(`Failed to prune USB device ${id}:`, err);
   }
-  await reload();
+  await loadUsbDevices(ctx);
 }
 
-export function renderUsbRecentRoots(el, rows, document, state = {}) {
+export function renderUsbRecentRoots(ctx) {
+  const { state, el, document } = ctx;
   if (!el?.usbRecentRow || !el?.usbRecentList) return;
-  el.usbRecentList.innerHTML = "";
+  el.usbRecentList.replaceChildren();
+  const rows = state.usbRecentRoots;
   const normalizedRows = Array.isArray(rows)
     ? rows.filter((row) => String(row || "").trim().length > 0)
     : [];
@@ -1771,36 +1620,28 @@ export function renderUsbRecentRoots(el, rows, document, state = {}) {
     (Array.isArray(state.usbDevices) ? state.usbDevices : []).map((d) => [String(d?.rootPath || "").trim(), d])
   );
   normalizedRows.forEach((path) => {
-    const row = document.createElement("span");
-    row.className = "usb-cfg-recent-item";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "usb-cfg-recent-btn";
+    const row = cloneTemplate(document, "tplUsbRecentItem");
+    const btn = row.querySelector(".usb-cfg-recent-btn");
     btn.dataset.usbRecentPath = path;
     btn.dataset.tooltip = path;
-    btn.style.direction = "rtl";
-    btn.style.textAlign = "left";
     btn.textContent = path;
     btn.disabled = locked;
-    row.appendChild(btn);
 
+    const pruneBtn = row.querySelector(".usb-cfg-recent-prune-btn");
     const device = devicesByPath.get(path);
     if (device?.id) {
-      const pruneBtn = document.createElement("button");
-      pruneBtn.type = "button";
-      pruneBtn.className = "usb-cfg-recent-prune-btn";
       pruneBtn.dataset.usbPruneDeviceId = device.id;
-      pruneBtn.dataset.tooltip = "Forget this USB device";
       pruneBtn.setAttribute("aria-label", `Forget ${path}`);
-      pruneBtn.textContent = "×";
       pruneBtn.disabled = locked;
-      row.appendChild(pruneBtn);
+    } else {
+      pruneBtn.remove();
     }
     el.usbRecentList.appendChild(row);
   });
 }
 
-export function updateUsbRootText(el, path, valid = false) {
+export function updateUsbRootText(ctx, path, valid = false) {
+  const { el } = ctx;
   if (!el?.usbRootPathText) return;
   if (el.usbConnectionBar) {
     el.usbConnectionBar.classList.remove("hidden");

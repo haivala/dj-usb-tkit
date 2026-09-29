@@ -84,7 +84,7 @@ test("setupConsoleFileLogging serializes non-string args", async () => {
 
 test("setupRuntimeErrorLogging captures unhandled errors", () => {
   const logged = [];
-  setupRuntimeErrorLogging({ pushEventLog: (entry) => { logged.push(entry); } });
+  setupRuntimeErrorLogging({ window: globalThis.window, pushEventLog: (entry) => { logged.push(entry); } });
 
   window._fire("error", { message: "TypeError: x is not a function" });
 
@@ -95,7 +95,7 @@ test("setupRuntimeErrorLogging captures unhandled errors", () => {
 
 test("setupRuntimeErrorLogging captures unhandled rejections", () => {
   const logged = [];
-  setupRuntimeErrorLogging({ pushEventLog: (entry) => { logged.push(entry); } });
+  setupRuntimeErrorLogging({ window: globalThis.window, pushEventLog: (entry) => { logged.push(entry); } });
 
   window._fire("unhandledrejection", { reason: new Error("async failure") });
 

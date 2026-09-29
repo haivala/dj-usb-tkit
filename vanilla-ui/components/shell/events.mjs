@@ -1,4 +1,5 @@
 import { dismissUpdateBanner } from "../../update_check.mjs";
+import { STORAGE_KEY_SIDEBAR_COLLAPSED, FRONTEND_DB_KEY_SIDEBAR_COLLAPSED } from "../../settings_keys.mjs";
 
 export function bindShellEvents(ctx) {
   const {
@@ -6,21 +7,15 @@ export function bindShellEvents(ctx) {
     el,
     document,
     window,
-    sidebarExpandBtn,
     confirmDialog,
     tracklistExportDialog,
-    constants,
     persistSetting,
     setStatus,
     switchView,
     handleSortHeaderClick,
     stopPlaybackIfActive
   } = ctx;
-  const {
-    STORAGE_KEY_SIDEBAR_COLLAPSED,
-    FRONTEND_DB_KEY_SIDEBAR_COLLAPSED
-  } = constants;
-
+  const { sidebarExpandBtn } = el;
   sidebarExpandBtn?.addEventListener("click", () => {
     state.sidebarCollapsed = false;
     el.navSidebar.classList.remove("collapsed");
@@ -97,6 +92,6 @@ export function bindShellEvents(ctx) {
   document.addEventListener("click", handleSortHeaderClick);
 
   el.updateBannerDismissBtn?.addEventListener("click", () => {
-    dismissUpdateBanner(state, el);
+    dismissUpdateBanner(ctx);
   });
 }

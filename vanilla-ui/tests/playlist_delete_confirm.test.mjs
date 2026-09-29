@@ -10,7 +10,7 @@ test("deletePlaylist aborts when confirmation is declined", async () => {
     playlists: [{ id: "pl-1", name: "Main", lastExportedAt: null }]
   };
 
-  await deletePlaylist("pl-1", {
+  await deletePlaylist({
     state,
     openConfirmDialog: async ({ title }) => {
       assert.equal(title, "Delete App Playlist");
@@ -20,11 +20,10 @@ test("deletePlaylist aborts when confirmation is declined", async () => {
       commandCalled = true;
       return { deleted: true };
     },
-    loadPlaylists: async () => {},
     updateModeText: () => {},
-    switchTab: async () => {},
+    switchView: async () => {},
     setStatus: () => {}
-  });
+  }, "pl-1");
 
   assert.equal(commandCalled, false);
   assert.equal(state.deletingPlaylistId, null);

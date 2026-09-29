@@ -1,3 +1,5 @@
+import { getPlaybackUiStateHelpers, scrubRatioFromPointer } from "../playback/actions.mjs";
+
 // Resolves the emitStatus function from ctx, falling back to setStatus or a no-op.
 export function resolveEmitStatus(ctx) {
   return typeof ctx.emitStatus === "function"
@@ -48,11 +50,9 @@ export function handleTrackAction({ action, track, origin, target, event, state,
   const {
     addTracksToCurrentPlaylist,
     analyzeSingleTrack,
-    getPlaybackUiStateHelpers,
     isTrackCurrentlyPlaying,
     stopPlaybackFromUi,
     playTrackFromOrigin,
-    scrubRatioFromPointer,
   } = ctx;
   const emitStatus = resolveEmitStatus(ctx);
 
@@ -72,7 +72,7 @@ export function handleTrackAction({ action, track, origin, target, event, state,
   if (action === "edit-track-detail") {
     // Tag the row's origin so the modal knows whether to edit the local
     // master (Library / app playlist) or the on-USB bundle directly.
-    ctx.openTrackDetail?.({ ...track, origin })?.catch?.(catchErr(emitStatus));
+    ctx.openTrackDetail({ ...track, origin }).catch(catchErr(emitStatus));
     return true;
   }
 

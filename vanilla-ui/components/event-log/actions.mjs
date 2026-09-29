@@ -1,15 +1,20 @@
 // Event log UI rendering helpers.
 
-export function pushEventLog(state, eventLogStore, renderEventLog, entry = {}) {
+import { cloneTemplate } from "../../ui_utils.mjs";
+
+// Stores an already-normalized entry (see message_bus.mjs emitMessage).
+export function storeEventLogEntry(ctx, entry = {}) {
+  const { state, eventLogStore } = ctx;
   const pushed = eventLogStore.push(entry);
   if (!pushed) return;
   state.eventLogEntries = eventLogStore.list();
   if (state.activeTab === "event-log") {
-    renderEventLog();
+    renderEventLog(ctx);
   }
 }
 
-export function ensureEventLogSourceOptions(state, el, document) {
+function ensureEventLogSourceOptions(ctx) {
+  const { state, el } = ctx;
   if (!el.eventLogSourceFilter) return;
   const current = String(el.eventLogSourceFilter.value || "all");
   const known = new Set(["all"]);
@@ -19,10 +24,7 @@ export function ensureEventLogSourceOptions(state, el, document) {
   const sources = Array.from(new Set(state.eventLogEntries.map((x) => x.source))).sort();
   for (const src of sources) {
     if (known.has(src)) continue;
-    const opt = document.createElement("option");
-    opt.value = src;
-    opt.textContent = src;
-    el.eventLogSourceFilter.appendChild(opt);
+    el.eventLogSourceFilter.add(new el.eventLogSourceFilter.ownerDocument.defaultView.Option(src, src));
   }
   if ([...el.eventLogSourceFilter.options].some((opt) => opt.value === current)) {
     el.eventLogSourceFilter.value = current;
@@ -31,10 +33,10 @@ export function ensureEventLogSourceOptions(state, el, document) {
   }
 }
 
-export function renderEventLog(state, el, document, deps) {
-  const { ensureEventLogSourceOptions, escapeHtml } = deps;
+export function renderEventLog(ctx) {
+  const { state, el } = ctx;
   if (!el.eventLogList || !el.eventLogSummary) return;
-  ensureEventLogSourceOptions();
+  ensureEventLogSourceOptions(ctx);
   const levelFilter = String(el.eventLogLevelFilter?.value || "all");
   const sourceFilter = String(el.eventLogSourceFilter?.value || "all");
   const filtered = state.eventLogEntries.filter((item) => {
@@ -47,18 +49,18 @@ export function renderEventLog(state, el, document, deps) {
   el.eventLogSummary.textContent = totalOccurrences === rows.length
     ? `${rows.length} event(s)`
     : `${rows.length} event(s) (${totalOccurrences} occurrences)`;
+  const doc = el.eventLogList.ownerDocument;
   if (!rows.length) {
-    el.eventLogList.innerHTML = `<div class="event-log-row"><div class="event-log-message muted">No events</div></div>`;
+    const row = cloneTemplate(doc, "tplLogMessageRow");
+    row.firstElementChild.textContent = "No events";
+    el.eventLogList.replaceChildren(row);
     return;
   }
-  el.eventLogList.innerHTML = rows.map((item) => {
+  el.eventLogList.replaceChildren(...rows.map((item) => {
     const date = new Date(item.ts);
     const hh = String(date.getHours()).padStart(2, "0");
     const mm = String(date.getMinutes()).padStart(2, "0");
     const ss = String(date.getSeconds()).padStart(2, "0");
-    const level = escapeHtml(item.level);
-    const source = escapeHtml(item.source);
-    const message = escapeHtml(item.message);
     const rawCode = String(item.code || "unknown");
     const sourceCodePrefix = String(item.source || "")
       .toLowerCase()
@@ -67,14 +69,26 @@ export function renderEventLog(state, el, document, deps) {
     const collapsedCode = sourceCodePrefix && rawCode.startsWith(`${sourceCodePrefix}.`)
       ? rawCode.slice(sourceCodePrefix.length + 1)
       : rawCode;
-    const code = escapeHtml(collapsedCode || "unknown");
     const count = Math.max(1, Number(item.count) || 1);
     const details = String(item.details || "").trim();
-    const detailsAttr = details ? ` data-tooltip="${escapeHtml(details)}"` : "";
-    const countBadge = count > 1 ? `<span class="event-log-count" data-tooltip="Coalesced occurrences">x${count}</span>` : "";
-    return `<div class="event-log-row"><div class="event-log-time">${hh}:${mm}:${ss}</div><div class="event-log-level level-${level}">${level}</div><div class="event-log-source">${source}</div><div class="event-log-message"${detailsAttr}><span class="event-log-code">[${code}]</span> ${message} ${countBadge}</div></div>`;
-  }).join("");
+
+    const row = cloneTemplate(doc, "tplEventLogRow");
+    row.querySelector(".event-log-time").textContent = `${hh}:${mm}:${ss}`;
+    const level = row.querySelector(".event-log-level");
+    level.classList.add(`level-${item.level}`);
+    level.textContent = item.level;
+    row.querySelector(".event-log-source").textContent = item.source;
+    const message = row.querySelector(".event-log-message");
+    if (details) message.dataset.tooltip = details;
+    row.querySelector(".event-log-code").textContent = `[${collapsedCode || "unknown"}]`;
+    row.querySelector(".event-log-text").textContent = item.message;
+    const countBadge = row.querySelector(".event-log-count");
+    if (count > 1) countBadge.textContent = `x${count}`;
+    else countBadge.remove();
+    return row;
+  }));
 }
+
 // Console and runtime error logging setup.
 
 export async function setupConsoleFileLogging({ isTauriRuntime, invoke, pushEventLog }) {
@@ -137,7 +151,7 @@ export async function setupConsoleFileLogging({ isTauriRuntime, invoke, pushEven
   };
 }
 
-export function setupRuntimeErrorLogging({ pushEventLog }) {
+export function setupRuntimeErrorLogging({ pushEventLog, window }) {
   window.addEventListener("securitypolicyviolation", (event) => {
     const directive = String(event?.violatedDirective || "unknown");
     const blocked = String(event?.blockedURI || "").trim();
@@ -192,7 +206,7 @@ export function countWarningsForStatus(warnings) {
   }).length;
 }
 
-export function logWarnings(pushEventLog, source, warnings, context = "") {
+export function logWarnings(ctx, source, warnings, context = "") {
   const list = Array.isArray(warnings) ? warnings : [];
   if (!list.length) return;
   for (const warning of list) {
@@ -213,7 +227,7 @@ export function logWarnings(pushEventLog, source, warnings, context = "") {
       text.toLowerCase(),
       String(detailsJoined || "").toLowerCase()
     ];
-    pushEventLog({
+    ctx.pushEventLog({
       level,
       source: warningSource,
       code,

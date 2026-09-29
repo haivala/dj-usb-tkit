@@ -5,7 +5,6 @@ export function bindPlaylistEvents(ctx) {
   const {
     state,
     el,
-    setStatus,
     switchView,
     deletePlaylist,
     startPlaylistRename,
@@ -18,14 +17,13 @@ export function bindPlaylistEvents(ctx) {
     analyzeTrackIds,
     refreshCurrentPlaylistTracks,
     playlistTracksCtl,
-    clearPlaylistTrackSort = () => {},
-    commitActivePlaylistSort = async () => {},
-    isPlaylistSortActive = () => false
+    commitActivePlaylistSort,
+    isPlaylistSortActive
   } = ctx;
   const emitStatus = resolveEmitStatus(ctx);
 
   // Scroll-load more of the (now paginated) playlist track list.
-  playlistTracksCtl?.attachScroll?.();
+  playlistTracksCtl.attachScroll();
 
   el.navPlaylistList.addEventListener("mousedown", (event) => {
     const deleteBtn = event.target.closest("[data-delete-playlist]");

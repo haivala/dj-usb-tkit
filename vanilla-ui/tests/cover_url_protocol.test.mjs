@@ -36,11 +36,11 @@ test("convertFileSrcLocal converts local paths and preserves protocol URLs", () 
 
 test("buildCoverSrcCandidates orders cover sources and removes unusable entries", () => {
   const candidates = buildCoverSrcCandidates({
+    toPlayableUrl: (path) => `file://${path}`
+  }, {
     artworkDataUrl: "data:image/jpeg;base64,abc123",
     artworkPath: "/covers/art.jpg",
     artworkUrl: "asset://localhost/covers/art.jpg"
-  }, {
-    toPlayableUrl: (path) => `file://${path}`
   });
 
   assert.deepEqual(candidates, [
@@ -53,15 +53,15 @@ test("buildCoverSrcCandidates orders cover sources and removes unusable entries"
   assert.ok(candidates.every((url) => !url.startsWith("http://asset.localhost")));
   assert.ok(candidates.every((url) => !url.startsWith("https://asset.localhost")));
 
-  assert.deepEqual(buildCoverSrcCandidates({
+  assert.deepEqual(buildCoverSrcCandidates({}, {
     artworkPath: "tauri://localhost/covers/protocol.jpg",
     artworkUrl: "asset://localhost/covers/fallback.jpg"
   }), [
     "tauri://localhost/covers/protocol.jpg",
     "asset://localhost/covers/fallback.jpg"
   ]);
-  assert.deepEqual(buildCoverSrcCandidates({}), []);
-  assert.deepEqual(buildCoverSrcCandidates(null), []);
+  assert.deepEqual(buildCoverSrcCandidates({}, {}), []);
+  assert.deepEqual(buildCoverSrcCandidates({}, null), []);
 });
 
 test("appendUrlRevision appends revisions without rewriting data URLs", () => {

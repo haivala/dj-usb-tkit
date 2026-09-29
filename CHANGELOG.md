@@ -39,6 +39,22 @@
 
 ## Unreleased
 
+- **Fix:** starting a new job (creating a playlist, importing from the USB,
+  exporting, …) right after another one finished no longer makes its
+  progress bar disappear partway through. Before, the previous job's
+  "hide the bar" delay still fired and blanked the new job's progress.
+- **Fix:** clicking × on the new-playlist name field reliably cancels it,
+  instead of sometimes creating the playlist anyway.
+- **Improvement:** "Import Playlists" on the USB view finishes a little
+  faster. It no longer pauses between steps just to show progress messages.
+- **Improvement:** saving cue edits to a USB that another USB job is using
+  now continues the moment that job finishes, instead of checking for it
+  every 200 ms.
+- **Chore:** a smaller frontend: the UI code shares one app context instead
+  of passing dependencies around by hand, and all HTML now lives as
+  templates in `index.html` rather than being built in JavaScript
+  (`main.js` went from about 1,800 lines to 34; bundle 447 KB → 387 KB).
+
 ## 0.2.9
 
 - **Fix:** the app version (and the "Update available" link) now shows in the

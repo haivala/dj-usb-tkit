@@ -3,58 +3,24 @@ import assert from "node:assert/strict";
 import {
   clearUsbDiagnostics,
   hideUsbDiagnostics,
-  renderRepairPreview,
-  showDiagRepairView
+  renderRepairPreview
 } from "../components/usb/actions.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
-function makeElement(tag = "div") {
-  return {
-    tagName: tag.toUpperCase(),
-    className: "",
-    classList: makeClassList(),
-    textContent: "",
-    innerHTML: "",
-    dataset: {},
-    type: "",
-    checked: false,
-    disabled: false,
-    title: "",
-    children: [],
-    _listeners: {},
-    appendChild(node) { this.children.push(node); },
-    addEventListener(event, handler) { this._listeners[event] = handler; },
-    trigger(event, payload) { this._listeners[event]?.(payload); }
-  };
+function renderPreview(payload) {
+  const ctx = makeTestCtx();
+  ctx.el.applyRepairsBtn.disabled = false;
+  ctx.el.previewRepairsBtn.disabled = false;
+  renderRepairPreview(ctx, payload);
+  const fixes = [...ctx.el.diagRepairFixes.querySelectorAll("li")];
+  return { ctx, el: ctx.el, fixes };
 }
 
-function makeRepairEl() {
-  return {
-    usbDiagnosticsCard: { classList: makeClassList() },
-    diagRepairPanel: { classList: makeClassList() },
-    diagReportView: { classList: makeClassList() },
-    diagRepairSummary: { textContent: "", className: "" },
-    diagRepairFixes: { innerHTML: "", children: [], appendChild(node) { this.children.push(node); } },
-    applyRepairsBtn: { disabled: false },
-    previewRepairsBtn: { disabled: false }
-  };
-}
-
-function renderPreview(payload, deps = {}) {
-  const el = makeRepairEl();
-  const selection = deps.selection || new Set();
-  renderRepairPreview(el, payload, {
-    documentObj: { createElement: (tag) => makeElement(tag) },
-    showDiagRepairView: () => showDiagRepairView(el),
-    getSelectedFixIds: () => selection,
-    setSelectedFixIds: (ids) => {
-      selection.clear();
-      for (const id of ids) selection.add(id);
-    },
-    ...deps
-  });
-  return { el, selection };
-}
+const fixTitle = (li) => li.querySelector(".diag-repair-fix-title").textContent;
+const fixDesc = (li) => li.querySelector(".diag-repair-fix-desc").textContent;
+const fixMeta = (li) => li.querySelector(".diag-repair-fix-meta").textContent;
+const fixCheck = (li) => li.querySelector(".diag-repair-fix-check");
 
 test("renderRepairPreview handles no fixes and supported fix selection", () => {
   const empty = renderPreview({
@@ -68,9 +34,7 @@ test("renderRepairPreview handles no fixes and supported fix selection", () => {
   assert.equal(empty.previewRepairsBtn.disabled, true);
   assert.equal(empty.diagRepairSummary.textContent, "No issues found.");
 
-  const selected = new Set();
-  let withFixes = null;
-  withFixes = renderPreview({
+  const { ctx, el, fixes } = renderPreview({
     detectedIssues: ["a"],
     proposedFixes: [
       { id: "fix_a", title: "Fix A", description: "desc", supported: true, destructive: false },
@@ -79,27 +43,23 @@ test("renderRepairPreview handles no fixes and supported fix selection", () => {
     estimatedFileWrites: 2,
     estimatedFileDeletes: 0,
     unsupportedItems: []
-  }, {
-    selection: selected,
-    onToggleFixSelection: (id, checked) => {
-      if (checked) selected.add(id);
-      else selected.delete(id);
-      withFixes.el.applyRepairsBtn.disabled = selected.size === 0;
-    }
   });
+  const selected = ctx.state.selectedRepairFixIds;
   assert.deepEqual(Array.from(selected).sort(), ["fix_a", "fix_b"]);
-  assert.equal(withFixes.el.applyRepairsBtn.disabled, false);
+  assert.equal(el.applyRepairsBtn.disabled, false);
 
-  withFixes.el.diagRepairFixes.children[0].children[0].trigger("change", { target: { checked: false } });
-  withFixes.el.diagRepairFixes.children[1].children[0].trigger("change", { target: { checked: false } });
+  for (const li of fixes) {
+    fixCheck(li).checked = false;
+    fixCheck(li).dispatchEvent(new ctx.window.Event("change"));
+  }
   assert.equal(selected.size, 0);
-  assert.equal(withFixes.el.applyRepairsBtn.disabled, true);
+  assert.equal(el.applyRepairsBtn.disabled, true);
 });
 
 test("renderRepairPreview renders each backend fix description verbatim and appends unsupported items", () => {
   // The backend now bakes the full "why this is manual-only" text into the
   // fix's `description` and doesn't emit a duplicate unsupportedItem for it.
-  const { el } = renderPreview({
+  const { el, fixes } = renderPreview({
     detectedIssues: ["unindexed", "missing-audio"],
     proposedFixes: [
       {
@@ -118,18 +78,18 @@ test("renderRepairPreview renders each backend fix description verbatim and appe
   });
 
   assert.match(el.diagRepairSummary.textContent, /2 issue\(s\).*0 fixable/);
-  assert.equal(el.diagRepairFixes.children.length, 2);
-  assert.equal(el.diagRepairFixes.children[0].children[0].children[0].children[0].textContent, "Remove Missing Audio References");
+  assert.equal(fixes.length, 2);
+  assert.equal(fixTitle(fixes[0]), "Remove Missing Audio References");
   assert.match(
-    el.diagRepairFixes.children[0].children[0].children[1].textContent,
+    fixDesc(fixes[0]),
     /9 missing-audio reference\(s\) require manual review.*13 canonical-path unindexed audio file\(s\)/
   );
   // The standalone unsupported item renders as its own row, unmodified.
-  assert.equal(el.diagRepairFixes.children[1].children[0].children[0].children[0].textContent, "2 malformed USBANLZ entry/entries");
+  assert.equal(fixTitle(fixes[1]), "2 malformed USBANLZ entry/entries");
 });
 
 test("renderRepairPreview locks a backend always-applied fix's checkbox checked", () => {
-  const { el } = renderPreview({
+  const { fixes } = renderPreview({
     detectedIssues: ["a", "b"],
     proposedFixes: [
       { id: "repair_pdb_truncated_table_chain", title: "Truncated chain", description: "d", supported: true, destructive: false, alwaysApplied: true },
@@ -140,12 +100,10 @@ test("renderRepairPreview locks a backend always-applied fix's checkbox checked"
     unsupportedItems: []
   });
 
-  const lockedCheckbox = el.diagRepairFixes.children[0].children[0];
-  assert.equal(lockedCheckbox.checked, true);
-  assert.equal(lockedCheckbox.disabled, true);
-  // li -> content -> meta span (title, desc, meta)
-  assert.match(el.diagRepairFixes.children[0].children[1].children[2].textContent, /always applied/);
-  assert.equal(el.diagRepairFixes.children[1].children[0].disabled, false);
+  assert.equal(fixCheck(fixes[0]).checked, true);
+  assert.equal(fixCheck(fixes[0]).disabled, true);
+  assert.match(fixMeta(fixes[0]), /always applied/);
+  assert.equal(fixCheck(fixes[1]).disabled, false);
 });
 
 function makeHealthDot() {
@@ -157,6 +115,11 @@ function makeHealthDot() {
       if (name === "aria-label") this.ariaLabel = value;
     }
   };
+}
+
+// A stand-in container: `replaceChildren()` empties its markup.
+function container(innerHTML) {
+  return { innerHTML, replaceChildren() { this.innerHTML = ""; } };
 }
 
 function makeDiagnosticsEl() {
@@ -175,13 +138,13 @@ function makeDiagnosticsEl() {
       classList: makeClassList(),
       closest: (selector) => selector === "#usbHealthCard" ? healthCard : null
     },
-    diagSections: { innerHTML: "<div>stale</div>" },
+    diagSections: container("<div>stale</div>"),
     diagOverallStatus: { textContent: "WARN", className: "diag-badge diag-warn" },
     diagDuration: { textContent: "Completed in 1ms" },
     diagPlaylistDetails: { classList: makeClassList() },
-    diagPlaylistTableBody: { innerHTML: "<tr></tr>" },
+    diagPlaylistTableBody: container("<tr></tr>"),
     diagRepairSummary: { textContent: "stale summary", className: "diag-repair-summary is-bad" },
-    diagRepairFixes: { innerHTML: "<div>stale fix</div>" },
+    diagRepairFixes: container("<div>stale fix</div>"),
     previewRepairsBtn: { disabled: false },
     applyRepairsBtn: { disabled: false },
     diagReportView: { classList: makeClassList() },
@@ -214,7 +177,7 @@ test("clearUsbDiagnostics and hideUsbDiagnostics blank content with different vi
     [hideUsbDiagnostics, true, false, false]
   ]) {
     const el = makeDiagnosticsEl();
-    action(el);
+    action({ el });
     assertDiagnosticsContentCleared(el);
     assert.equal(el.usbDiagnosticsCard.classList.contains("hidden"), cardHidden);
     assert.equal(el._healthCard.open, cardOpen);

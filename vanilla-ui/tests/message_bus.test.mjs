@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createMessageBus, normalizeUiMessage, shouldPersistStatusToEventLog } from "../message_bus.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
+import { emitMessage, normalizeUiMessage, shouldPersistStatusToEventLog } from "../message_bus.mjs";
 
 test("normalizeUiMessage returns canonical preformatted payload", () => {
   const msg = normalizeUiMessage({
@@ -22,14 +23,10 @@ test("normalizeUiMessage returns canonical preformatted payload", () => {
 });
 
 test("message bus routes preformatted text without consumer-side rewriting", () => {
-  let statusText = "";
   const entries = [];
-  const bus = createMessageBus({
-    setStatusText: (text) => { statusText = text; },
-    pushEventLog: (entry) => entries.push(entry)
-  });
+  const ctx = makeTestCtx({ storeEventLogEntry: (entry) => entries.push(entry) });
 
-  bus.emitMessage({
+  emitMessage(ctx, {
     level: "info",
     source: "library",
     status: { text: "scan:stage - exact text" },
@@ -40,7 +37,7 @@ test("message bus routes preformatted text without consumer-side rewriting", () 
     }
   });
 
-  assert.equal(statusText, "scan:stage - exact text");
+  assert.equal(ctx.el.statusText.textContent, "scan:stage - exact text");
   assert.equal(entries.length, 1);
   assert.equal(entries[0].message, "scan:stage - exact text");
   assert.equal(entries[0].details, "ctx: test");

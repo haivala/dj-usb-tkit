@@ -17,25 +17,27 @@ test("registerBackendJobEvents unregisters old listeners and stores new ones", a
     unlistenPlaybackEvent: () => { oldPlaybackUnlistenCalls += 1; }
   };
 
-  await registerBackendJobEvents(state, {
+  const ctx = {
+    state,
     isTauriRuntime: () => true,
-    unregisterBackendJobEvents: () => unregisterBackendJobEvents(state, {}),
     getTauriEventListen: async () => async (eventName, handler) => {
       assert.equal(typeof handler, "function");
       if (eventName === "job:event") return () => { newJobUnlistenCalls += 1; };
       if (eventName === "playback:event") return () => { newPlaybackUnlistenCalls += 1; };
+      if (eventName === "backend:log") return () => {};
       throw new Error(`unexpected event ${eventName}`);
     },
     handleJobEvent: () => {},
-    handlePlaybackEvent: () => {}
-  });
+    handleBackendLogEvent: () => {}
+  };
+  await registerBackendJobEvents(ctx);
 
   assert.equal(oldJobUnlistenCalls, 1);
   assert.equal(oldPlaybackUnlistenCalls, 1);
   assert.equal(typeof state.unlistenJobEvent, "function");
   assert.equal(typeof state.unlistenPlaybackEvent, "function");
 
-  await unregisterBackendJobEvents(state, {});
+  await unregisterBackendJobEvents(ctx);
   assert.equal(newJobUnlistenCalls, 1);
   assert.equal(newPlaybackUnlistenCalls, 1);
   assert.equal(state.unlistenJobEvent, null);
@@ -46,16 +48,14 @@ test("beforeunload handler triggers backend unlisten cleanup", async () => {
   let beforeUnloadHandler = null;
   let unregisterCalls = 0;
 
-  bindBeforeUnloadCleanup(
-    {
+  bindBeforeUnloadCleanup({
+    state: { unlistenJobEvent: () => { unregisterCalls += 1; } },
+    window: {
       addEventListener: (name, handler) => {
         if (name === "beforeunload") beforeUnloadHandler = handler;
       }
-    },
-    async () => {
-      unregisterCalls += 1;
     }
-  );
+  });
 
   assert.equal(typeof beforeUnloadHandler, "function");
   beforeUnloadHandler();

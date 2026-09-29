@@ -9,29 +9,28 @@
 //     currentVersion, latestVersion, releaseUrl }
 
 import { STORAGE_KEY_UPDATE_DISMISSED } from "./settings_keys.mjs";
+import { openExternalUrl } from "./ui_utils.mjs";
 
 export const RELEASES_PAGE_URL = "https://github.com/haivala/dj-usb-tkit/releases";
 
-export function renderUpdateNotice(state, el, deps = {}) {
-  const { openUrl = () => {} } = deps;
+export function renderUpdateNotice(ctx) {
+  const { state, el } = ctx;
   if (!el.settingsUpdateNote) return;
 
   const info = state.updateCheck;
+  const link = el.settingsUpdateNote.querySelector(".update-note-link");
   if (!info || !info.updateAvailable) {
     el.settingsUpdateNote.classList.add("hidden");
-    el.settingsUpdateNote.textContent = "";
+    link.textContent = "";
     return;
   }
 
   el.settingsUpdateNote.classList.remove("hidden");
-  el.settingsUpdateNote.innerHTML =
-    `<a href="#" class="update-note-link">Update available: ${info.latestVersion}</a>`;
-  el.settingsUpdateNote
-    .querySelector(".update-note-link")
-    ?.addEventListener("click", (event) => {
-      event.preventDefault();
-      openUrl(info.releaseUrl || RELEASES_PAGE_URL);
-    });
+  link.textContent = `Update available: ${info.latestVersion}`;
+  link.onclick = (event) => {
+    event.preventDefault();
+    openExternalUrl(ctx.window, info.releaseUrl || RELEASES_PAGE_URL);
+  };
 }
 
 // The banner's wording per severity; any other severity gets no banner (just
@@ -41,11 +40,8 @@ const BANNER_TEXT = {
   feature: (version) => `New features available: ${version}`,
 };
 
-export function renderUpdateBanner(state, el, deps = {}) {
-  const {
-    localStorageObj = typeof localStorage !== "undefined" ? localStorage : null,
-    openUrl = () => {}
-  } = deps;
+export function renderUpdateBanner(ctx) {
+  const { state, el, localStorage } = ctx;
   if (!el.updateBanner) return;
 
   const info = state.updateCheck;
@@ -57,7 +53,7 @@ export function renderUpdateBanner(state, el, deps = {}) {
 
   let dismissedVersion = null;
   try {
-    dismissedVersion = localStorageObj?.getItem?.(STORAGE_KEY_UPDATE_DISMISSED) || null;
+    dismissedVersion = localStorage?.getItem?.(STORAGE_KEY_UPDATE_DISMISSED) || null;
   } catch {
     dismissedVersion = null;
   }
@@ -71,27 +67,23 @@ export function renderUpdateBanner(state, el, deps = {}) {
   el.updateBanner.classList.toggle("is-feature", info.severity === "feature");
   el.updateBanner.setAttribute("role", info.severity === "critical" ? "alert" : "status");
   if (el.updateBannerText) {
-    el.updateBannerText.innerHTML =
-      `${bannerText(info.latestVersion)} — ` +
-      `<a href="#" class="update-banner-link">view release</a>`;
-    el.updateBannerText
-      .querySelector(".update-banner-link")
-      ?.addEventListener("click", (event) => {
-        event.preventDefault();
-        openUrl(info.releaseUrl || RELEASES_PAGE_URL);
-      });
+    el.updateBannerText.querySelector(".update-banner-message").textContent = bannerText(info.latestVersion);
+    el.updateBannerText.querySelector(".update-banner-link").onclick = (event) => {
+      event.preventDefault();
+      openExternalUrl(ctx.window, info.releaseUrl || RELEASES_PAGE_URL);
+    };
   }
 }
 
-export function dismissUpdateBanner(state, el, deps = {}) {
-  const { localStorageObj = typeof localStorage !== "undefined" ? localStorage : null } = deps;
+export function dismissUpdateBanner(ctx) {
+  const { state, el, localStorage } = ctx;
   if (el.updateBanner) {
     el.updateBanner.classList.add("hidden");
   }
   try {
     const latestVersion = state.updateCheck?.latestVersion;
     if (latestVersion) {
-      localStorageObj?.setItem?.(STORAGE_KEY_UPDATE_DISMISSED, latestVersion);
+      localStorage?.setItem?.(STORAGE_KEY_UPDATE_DISMISSED, latestVersion);
     }
   } catch {
     // Best-effort persistence only.

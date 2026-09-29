@@ -1,53 +1,40 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
 import {
   refreshSourceRootAnalysisStatus,
   relocateSourceRoot,
   renderSourceChips,
   scanMasterDb
 } from "../components/library/actions.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
-function makeChipHarness(state, { includeSearch = false, deps = {} } = {}) {
-  const dom = new JSDOM(`<!doctype html><body>
-    <div id="chips"></div>${includeSearch ? '<input id="search" />' : ""}
-  </body>`);
-  const document = dom.window.document;
+function makeChipHarness(state) {
   const calls = { persisted: null, scanLabels: 0, indicators: 0 };
-  const el = {
-    sourceChipsContainer: document.querySelector("#chips"),
-    ...(includeSearch ? { librarySearch: document.querySelector("#search") } : {})
-  };
-  const mergedDeps = {
-    documentObj: document,
-    escapeHtml: (value) => String(value),
+  const ctx = makeTestCtx({
+    state,
     persistSourceRootEnabled: (map) => { calls.persisted = { ...map }; },
     updateScanLibraryButtonLabel: () => { calls.scanLabels += 1; },
     updateSourceFilterIndicator: () => { calls.indicators += 1; },
-    ...deps
-  };
+  });
   return {
     calls,
-    el,
-    render: () => renderSourceChips(state, el, mergedDeps),
-    chips: () => el.sourceChipsContainer.querySelectorAll(".source-chip")
+    ctx,
+    render: () => renderSourceChips(ctx),
+    chips: () => ctx.el.sourceChipsContainer.querySelectorAll(".source-chip")
   };
 }
 
 async function runScanMasterDb(command) {
   const statuses = [];
   const logged = [];
-  await scanMasterDb({ externalMasterDbPath: "/path/to/master.db" }, {
+  const ctx = makeTestCtx({
     emitStatus: (message) => statuses.push(message),
     command,
-    resetAndLoadLibraryTracks: async () => {},
-    LIBRARY_LOAD_LIMIT_POST_SCAN: 500,
     refreshCurrentPlaylistTracks: async () => {},
-    persistMasterDbEnabled: () => {},
-    persistSourcesEverConfigured: () => {},
-    renderSourceChips: () => {},
     logWarnings: (source, warnings) => { logged.push({ source, warnings }); }
   });
+  ctx.state.externalMasterDbPath = "/path/to/master.db";
+  await scanMasterDb(ctx);
   return { statuses, logged };
 }
 
@@ -125,7 +112,7 @@ test("renderSourceChips renders sourceRootAnalysisStatus verbatim and never reco
     libraryLoadedTotal: 999,
     libraryQuery: ""
   };
-  const harness = makeChipHarness(state, { includeSearch: true });
+  const harness = makeChipHarness(state);
   harness.render();
   assert.equal(harness.chips()[0].classList.contains("source-chip-analyzed"), true);
   assert.equal(harness.chips()[1].classList.contains("source-chip-analyzed"), false);
@@ -134,24 +121,18 @@ test("renderSourceChips renders sourceRootAnalysisStatus verbatim and never reco
 });
 
 test("relocateSourceRoot replaces source and preserves playlist track identity state", async () => {
-  const state = {
-    sourceRoots: ["/music/old"],
-    sourceRootEnabled: { "/music/old": true },
-    missingSourceRoots: new Set(["/music/old"]),
-    libraryQuery: ""
-  };
   const calls = [];
   const statuses = [];
   let persistedRoots = null;
   let persistedEnabled = null;
-  let rendered = 0;
-  let reloaded = 0;
   let refreshedPlaylists = 0;
 
-  await relocateSourceRoot(state, "/music/old", {
+  const ctx = makeTestCtx({
     pickSourceFolders: async () => ["/music/new"],
     command: async (name, payload) => {
       calls.push({ name, payload });
+      if (name === "check_source_roots") return { missing: [] };
+      if (name !== "relocate_source_root") return {};
       return {
         oldRoot: payload.oldRoot,
         newRoot: payload.newRoot,
@@ -164,24 +145,23 @@ test("relocateSourceRoot replaces source and preserves playlist track identity s
     },
     persistSourceRoots: (roots) => { persistedRoots = [...roots]; },
     persistSourceRootEnabled: (enabled) => { persistedEnabled = { ...enabled }; },
-    syncAssetScopePaths: async () => {},
-    renderSourceChips: () => { rendered += 1; },
-    resetAndLoadLibraryTracks: async () => { reloaded += 1; },
     refreshCurrentPlaylistTracks: async () => { refreshedPlaylists += 1; },
-    refreshMissingSourceRoots: async () => { state.missingSourceRoots = new Set(); },
-    LIBRARY_LOAD_LIMIT_DEFAULT: 25,
     emitStatus: (message) => statuses.push(message)
   });
+  const { state } = ctx;
+  state.sourceRoots = ["/music/old"];
+  state.sourceRootEnabled = { "/music/old": true };
+  state.missingSourceRoots = new Set(["/music/old"]);
 
-  assert.deepEqual(calls, [
-    { name: "relocate_source_root", payload: { oldRoot: "/music/old", newRoot: "/music/new" } }
-  ]);
+  await relocateSourceRoot(ctx, "/music/old");
+
+  assert.deepEqual(calls[0], { name: "relocate_source_root", payload: { oldRoot: "/music/old", newRoot: "/music/new" } });
+  assert.ok(calls.some((c) => c.name === "browse_source_files"), "the library reloads from the new root");
   assert.deepEqual(state.sourceRoots, ["/music/new"]);
   assert.deepEqual(persistedRoots, ["/music/new"]);
   assert.equal(persistedEnabled["/music/new"], true);
   assert.equal(Object.hasOwn(persistedEnabled, "/music/old"), false);
-  assert.ok(rendered >= 1);
-  assert.equal(reloaded, 1);
+  assert.equal(ctx.el.sourceChipsContainer.querySelector(".source-chip-path").textContent, "/music/new");
   assert.equal(refreshedPlaylists, 1);
   assert.ok(statuses.at(-1).includes("2 track path(s) updated"));
 });
@@ -226,9 +206,9 @@ test("refreshSourceRootAnalysisStatus queries non-missing roots and skips all-mi
     sourceRootAnalysisStatus: {}
   };
   const calls = [];
-  let rendered = 0;
 
-  await refreshSourceRootAnalysisStatus(state, {
+  const harness = makeChipHarness(state);
+  await refreshSourceRootAnalysisStatus(Object.assign(harness.ctx, {
     command: async (name, payload) => {
       calls.push({ name, payload });
       return {
@@ -237,9 +217,8 @@ test("refreshSourceRootAnalysisStatus queries non-missing roots and skips all-mi
           { sourceRoot: "/music/b", total: 2, analyzed: 2, fullyAnalyzed: true }
         ]
       };
-    },
-    renderSourceChips: () => { rendered += 1; }
-  });
+    }
+  }));
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].name, "browse_source_files");
@@ -248,7 +227,7 @@ test("refreshSourceRootAnalysisStatus queries non-missing roots and skips all-mi
   assert.equal(calls[0].payload.limit, 1);
   assert.equal(state.sourceRootAnalysisStatus["/music/a"], true);
   assert.equal(state.sourceRootAnalysisStatus["/music/b"], true);
-  assert.equal(rendered, 1);
+  assert.equal(harness.chips()[1].classList.contains("source-chip-analyzed"), true, "chips re-render with the new status");
 
   const missing = {
     sourceRoots: ["/music/a"],
@@ -258,11 +237,9 @@ test("refreshSourceRootAnalysisStatus queries non-missing roots and skips all-mi
     sourceRootAnalysisStatus: {}
   };
   let noOpCalls = 0;
-  rendered = 0;
-  await refreshSourceRootAnalysisStatus(missing, {
-    command: async () => { noOpCalls += 1; return {}; },
-    renderSourceChips: () => { rendered += 1; }
-  });
+  await refreshSourceRootAnalysisStatus(makeTestCtx({
+    state: missing,
+    command: async () => { noOpCalls += 1; return {}; }
+  }));
   assert.equal(noOpCalls, 0);
-  assert.equal(rendered, 0);
 });

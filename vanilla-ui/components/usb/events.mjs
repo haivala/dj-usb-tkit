@@ -1,11 +1,12 @@
 import { catchErr, handleTrackAction, trackMetaFingerprint, resolveEmitStatus, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
+import { setActiveListItem } from "../shell/actions.mjs";
+import { moveArrayItem } from "./actions.mjs";
 
 export function bindUsbEvents(ctx) {
   const {
     state,
     el,
-    setStatus,
     refreshUsb,
     pickUsbFolder,
     validateAndSetUsbRoot,
@@ -29,32 +30,19 @@ export function bindUsbEvents(ctx) {
     usbHistoryTracksCtl,
     removeUsbPlaylist,
     reorderUsbPlaylists,
-    moveArrayItem,
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
-    setActiveListItem,
-    addTracksToCurrentPlaylist,
     pruneUsbDevice,
+    patchUsbTrackRow,
+    patchHistoryTrackRow,
   } = ctx;
-  const patchUsbTrackRow = typeof ctx.patchUsbTrackRow === "function"
-    ? ctx.patchUsbTrackRow
-    : () => false;
-  const patchHistoryTrackRow = typeof ctx.patchHistoryTrackRow === "function"
-    ? ctx.patchHistoryTrackRow
-    : () => false;
   const emitStatus = resolveEmitStatus(ctx);
-  const syncPlayerMenuControls = typeof syncUsbPlayerMenuEditorControls === "function"
-    ? syncUsbPlayerMenuEditorControls
-    : () => {};
-  const onPlayerMenuListClick = typeof handleUsbPlayerMenuListClick === "function"
-    ? handleUsbPlayerMenuListClick
-    : () => {};
   // USB-playlist and USB-history track tables: fetch / paginate / search /
   // sort / scroll-load are owned by their shared track-list controllers (see
   // main.js), which fetch pre-hydrated pages from the backend. Scroll-load
   // wires itself here.
-  usbPlaylistTracksCtl?.attachScroll?.();
-  usbHistoryTracksCtl?.attachScroll?.();
+  usbPlaylistTracksCtl.attachScroll();
+  usbHistoryTracksCtl.attachScroll();
 
   el.refreshUsbBtn.addEventListener("click", () => {
     refreshUsb().catch(catchErr(emitStatus));
@@ -68,7 +56,7 @@ export function bindUsbEvents(ctx) {
     const pruneBtn = event.target.closest("[data-usb-prune-device-id]");
     if (pruneBtn) {
       const deviceId = String(pruneBtn.dataset.usbPruneDeviceId || "").trim();
-      if (deviceId) pruneUsbDevice?.(deviceId).catch(catchErr(emitStatus));
+      if (deviceId) pruneUsbDevice(deviceId).catch(catchErr(emitStatus));
       return;
     }
     const btn = event.target.closest("[data-usb-recent-path]");
@@ -154,12 +142,12 @@ export function bindUsbEvents(ctx) {
   });
 
   el.usbPlayerMenuAvailable?.addEventListener("click", (event) => {
-    onPlayerMenuListClick("available", event);
-    syncPlayerMenuControls();
+    handleUsbPlayerMenuListClick("available", event);
+    syncUsbPlayerMenuEditorControls();
   });
   el.usbPlayerMenuCurrent?.addEventListener("click", (event) => {
-    onPlayerMenuListClick("current", event);
-    syncPlayerMenuControls();
+    handleUsbPlayerMenuListClick("current", event);
+    syncUsbPlayerMenuEditorControls();
   });
 
   el.usbTrackSearch?.addEventListener("input", () => {

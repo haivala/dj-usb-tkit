@@ -1,5 +1,21 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
-import { formatDurationMs, formatBpm, renderKeyPill, renderTrackListDurationSummary } from "../../track_utils.mjs";
+import { createTrackListController } from "../shared/track_list_controller.mjs";
+import { renderEmptyState } from "../shell/actions.mjs";
+import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
+import { fillBpmCell, fillKeyCell, coverElement } from "../../track_table.mjs";
+import {
+  formatDurationMs,
+  renderTrackListDurationSummary,
+  normalizeDurationMs,
+  loadMoreIfNearBottom,
+} from "../../track_utils.mjs";
+import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
+
+export const LIBRARY_LOAD_LIMIT_DEFAULT = 200;
+const LIBRARY_LOAD_LIMIT_POST_SCAN = 1000;
+const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
+const LIBRARY_SCROLL_FETCH_THRESHOLD_PX = 120;
+const PREVIEW_HYDRATION_BATCH_SIZE = 48;
 
 export function warningEntryText(entry) {
   return String(entry?.message ?? entry ?? "").trim();
@@ -46,17 +62,12 @@ function normalizeFormatCompat(value) {
   return { severity, warning };
 }
 
-export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
-  const {
-    toPlayableUrl = () => null,
-    appendUrlRevision = (url) => url,
-    normalizeDurationMs = () => null,
-    randomId = () => Math.random().toString(36).slice(2, 9)
-  } = deps;
+const randomId = () => Math.random().toString(36).slice(2, 9);
 
+export function normalizeTrack(ctx, track, fallbackIdPrefix = "t") {
   const rawArtwork = track?.artworkDataUrl || track?.artworkUrl || track?.artworkPath || "";
   const artworkRevision = track?.updatedAt || "";
-  const convertedArtwork = appendUrlRevision(toPlayableUrl(rawArtwork) || "", artworkRevision);
+  const convertedArtwork = appendUrlRevision(ctx.toPlayableUrl(rawArtwork) || "", artworkRevision);
   const filePath = String(track?.filePath || "").trim();
   const waveformPreview = clampWaveformPreview(track?.waveformPreview);
   const title = track?.title || "Unknown Title";
@@ -113,14 +124,13 @@ export function normalizeTrack(track, fallbackIdPrefix = "t", deps = {}) {
   };
 }
 
-export function normalizeUsbPlaylist(playlist, deps = {}) {
-  const normalizeTrackFn = deps.normalizeTrack || ((track, prefix) => normalizeTrack(track, prefix, deps));
+export function normalizeUsbPlaylist(ctx, playlist) {
   const rawTracks = Array.isArray(playlist?.tracks)
     ? playlist.tracks
     : Array.isArray(playlist?.items)
       ? playlist.items
       : [];
-  const tracks = rawTracks.map((track) => normalizeTrackFn(track, "usb"));
+  const tracks = rawTracks.map((track) => normalizeTrack(ctx, track, "usb"));
   const declared = Number(playlist?.trackCount ?? 0);
   return {
     ...playlist,
@@ -176,11 +186,8 @@ export function applySourceRootAnalysisFromBrowseData(state, data) {
   }
 }
 
-export async function refreshSourceRootAnalysisStatus(state, deps = {}) {
-  const {
-    command,
-    renderSourceChips = () => {}
-  } = deps;
+export async function refreshSourceRootAnalysisStatus(ctx) {
+  const { state } = ctx;
   // Analysis status is a property of the folder itself, not of whether it's
   // currently toggled on in the library filter, so this intentionally
   // queries every configured root (enabled or not) rather than reusing the
@@ -190,7 +197,7 @@ export async function refreshSourceRootAnalysisStatus(state, deps = {}) {
   const roots = (state.sourceRoots || []).filter((root) => !sourceRootIsMissing(state, root));
   if (!roots.length) return;
   try {
-    const data = await command("browse_source_files", {
+    const data = await ctx.command("browse_source_files", {
       sourceRoots: roots,
       includeMasterDb: false,
       query: "",
@@ -198,7 +205,7 @@ export async function refreshSourceRootAnalysisStatus(state, deps = {}) {
       cursor: null
     });
     applySourceRootAnalysisFromBrowseData(state, data);
-    renderSourceChips();
+    renderSourceChips(ctx);
   } catch (err) {
     console.warn("Failed to refresh source folder analysis status:", err);
   }
@@ -226,25 +233,20 @@ export function sourceRootIsMissing(state, root) {
     .some((candidate) => normalizePath(candidate).replace(/\/+$/, "") === key);
 }
 
-export async function refreshMissingSourceRoots(state, deps = {}) {
-  const {
-    command = async () => ({ missing: [] }),
-    renderSourceChips = () => {},
-    emitStatus = () => {},
-    silent = true
-  } = deps;
+export async function refreshMissingSourceRoots(ctx, { silent = true } = {}) {
+  const { state } = ctx;
   const roots = Array.isArray(state.sourceRoots) ? state.sourceRoots : [];
   if (!roots.length) {
     setMissingSourceRoots(state, []);
-    renderSourceChips();
+    renderSourceChips(ctx);
     return [];
   }
   try {
-    const data = await command("check_source_roots", { sourceRoots: roots });
+    const data = await ctx.command("check_source_roots", { sourceRoots: roots });
     const missing = setMissingSourceRoots(state, Array.isArray(data?.missing) ? data.missing : []);
-    renderSourceChips();
+    renderSourceChips(ctx);
     if (!silent && missing.length) {
-      emitStatus(`Source folder missing: ${missing[0]}${missing.length > 1 ? ` (+${missing.length - 1} more)` : ""}. Relocate or remove it.`);
+      ctx.emitStatus(`Source folder missing: ${missing[0]}${missing.length > 1 ? ` (+${missing.length - 1} more)` : ""}. Relocate or remove it.`);
     }
     return missing;
   } catch (err) {
@@ -261,9 +263,9 @@ export function trackNeedsPreviewHydration(track) {
   return (missingWaveformPreview && missingColorData) && hasWaveformPath;
 }
 
-export function mergeHydratedTrackIntoState(state, rawTrack, deps) {
-  const { normalizeTrack } = deps;
-  const normalized = normalizeTrack(rawTrack, "lib");
+export function mergeHydratedTrackIntoState(ctx, rawTrack) {
+  const { state } = ctx;
+  const normalized = normalizeTrack(ctx, rawTrack, "lib");
   const trackId = String(normalized.id || "").trim();
   if (!trackId) return false;
   let changed = false;
@@ -289,17 +291,8 @@ export function mergeHydratedTrackIntoState(state, rawTrack, deps) {
   return changed;
 }
 
-export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
-  const {
-    patchTrackAnalysisFields,
-    debugFrontendLog,
-    log,
-    warn,
-    patchLibraryRowByTrackId,
-    patchPlaylistRowByTrackId = () => false,
-    hydrateTrackPreviewFromBackend
-  } = deps;
-
+export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
+  const { state } = ctx;
   const trackId = String(payload?.trackId || "").trim();
   if (!trackId) return;
 
@@ -307,11 +300,11 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
   let patchedTrack = null;
   for (const track of state.tracks) {
     if (String(track.id) !== trackId) continue;
-    libraryChanged = patchTrackAnalysisFields(track, payload) || libraryChanged;
+    libraryChanged = patchTrackAnalysisFields(ctx, track, payload) || libraryChanged;
     patchedTrack = track;
   }
   if (libraryChanged) {
-    debugFrontendLog("row-update", {
+    ctx.debugFrontendLog("row-update", {
       trackId,
       bpm: payload?.bpm ?? null,
       key: payload?.key ?? null
@@ -319,8 +312,8 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
     const label = patchedTrack
       ? [patchedTrack.artist, patchedTrack.title].filter(Boolean).join(" - ") || trackId
       : trackId;
-    log("[analysis-ui] patched state for", label, "bpm:", payload?.bpm, "key:", payload?.key);
-    patchLibraryRowByTrackId(trackId);
+    ctx.log("[analysis-ui] patched state for", label, "bpm:", payload?.bpm, "key:", payload?.key);
+    patchLibraryRowByTrackId(ctx, trackId);
   } else {
     const bpm = Number(payload?.bpm);
     const hasBpm = payload?.bpm !== undefined
@@ -335,7 +328,7 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
       const warnLabel = foundTrack
         ? [foundTrack.artist, foundTrack.title].filter(Boolean).join(" - ") || trackId
         : trackId;
-      warn("[analysis-ui] no state change for", warnLabel);
+      ctx.warn("[analysis-ui] no state change for", warnLabel);
     }
   }
 
@@ -343,84 +336,68 @@ export async function applyRealtimeAnalyzedTrackUpdate(state, payload, deps) {
     for (const track of playlist.tracks || []) {
       const localTrackId = String(track.localTrackId || track.id || "").trim();
       if (localTrackId !== trackId) continue;
-      patchTrackAnalysisFields(track, payload);
+      patchTrackAnalysisFields(ctx, track, payload);
     }
   }
   // The open app playlist shows the same library track: redraw its row too,
   // or it keeps the old BPM/key until the playlist is reloaded.
-  patchPlaylistRowByTrackId(trackId);
+  patchPlaylistRowByTrackId(ctx, trackId);
 
   const payloadHasPreview = Array.isArray(payload?.waveformPreview) && payload.waveformPreview.length > 0;
   const payloadHasWaveformPath = typeof payload?.waveformPeaksPath === "string"
     && payload.waveformPeaksPath.trim().length > 0;
   if (!payloadHasPreview && payloadHasWaveformPath) {
-    hydrateTrackPreviewFromBackend(trackId).catch(() => {});
+    hydrateTrackPreviewFromBackend(ctx, trackId).catch(() => {});
   }
 }
 
-export async function hydrateTrackPreviewFromBackend(state, trackId, deps) {
-  const {
-    command,
-    mergeHydratedTrackIntoState,
-    patchLibraryRowByTrackId
-  } = deps;
+export async function hydrateTrackPreviewFromBackend(ctx, trackId) {
+  const { state } = ctx;
   const id = String(trackId || "").trim();
   if (!id) return;
   if (state.trackPreviewHydrateInFlight.has(id)) return;
   state.trackPreviewHydrateInFlight.add(id);
   try {
-    const data = await command("get_tracks_by_ids_with_previews", { trackIds: [id] });
+    const data = await ctx.command("get_tracks_by_ids_with_previews", { trackIds: [id] });
     let changed = false;
     for (const item of data?.items || []) {
-      changed = mergeHydratedTrackIntoState(item) || changed;
+      changed = mergeHydratedTrackIntoState(ctx, item) || changed;
     }
     if (changed) {
-      patchLibraryRowByTrackId(id);
+      patchLibraryRowByTrackId(ctx, id);
     }
   } finally {
     state.trackPreviewHydrateInFlight.delete(id);
   }
 }
 
-export async function hydrateLoadedTracksPreviewsInBackground(state, deps) {
-  const {
-    getLoadedTracks = () => state.tracks || [],
-    command,
-    mergeHydratedTrackIntoState,
-    patchLibraryRowByTrackId,
-    nextPaint,
-    rerenderLibrary = () => {},
-    renderCurrentPlaylistTracksFromState,
-    renderSourceChips,
-    batchSize = 48
-  } = deps;
-
+export async function hydrateLoadedTracksPreviewsInBackground(ctx) {
+  const { state } = ctx;
   const hydrationSeq = ++state.loadedPreviewHydrationSeq;
-  const targetTracks = getLoadedTracks();
-  const pendingIds = targetTracks
+  const pendingIds = (state.tracks || [])
     .filter((track) => trackNeedsPreviewHydration(track))
     .map((track) => String(track.id || "").trim())
     .filter(Boolean);
   if (!pendingIds.length) return;
 
   let anyChanged = false;
-  for (let i = 0; i < pendingIds.length; i += batchSize) {
+  for (let i = 0; i < pendingIds.length; i += PREVIEW_HYDRATION_BATCH_SIZE) {
     if (hydrationSeq !== state.loadedPreviewHydrationSeq) return;
-    const batch = pendingIds.slice(i, i + batchSize);
+    const batch = pendingIds.slice(i, i + PREVIEW_HYDRATION_BATCH_SIZE);
     try {
-      const data = await command("get_tracks_by_ids_with_previews", { trackIds: batch });
+      const data = await ctx.command("get_tracks_by_ids_with_previews", { trackIds: batch });
       const changedIds = [];
       for (const item of data?.items || []) {
-        const changed = mergeHydratedTrackIntoState(item);
+        const changed = mergeHydratedTrackIntoState(ctx, item);
         if (!changed) continue;
         anyChanged = true;
         const id = String(item?.id || "").trim();
         if (id) changedIds.push(id);
       }
       for (const id of changedIds) {
-        patchLibraryRowByTrackId(id);
+        patchLibraryRowByTrackId(ctx, id);
       }
-      await nextPaint();
+      await ctx.nextPaint();
     } catch (_) {
       return;
     }
@@ -428,37 +405,26 @@ export async function hydrateLoadedTracksPreviewsInBackground(state, deps) {
 
   if (hydrationSeq !== state.loadedPreviewHydrationSeq) return;
   if (anyChanged) {
-    rerenderLibrary();
-    renderCurrentPlaylistTracksFromState();
-    renderSourceChips();
+    renderLibraryRows(ctx);
+    ctx.renderCurrentPlaylistTracksFromState();
+    renderSourceChips(ctx);
   }
 }
 
-export async function relocateSourceRoot(state, oldRoot, deps = {}) {
-  const {
-    pickSourceFolders = async () => [],
-    command = async () => ({}),
-    persistSourceRoots = () => {},
-    persistSourceRootEnabled = () => {},
-    syncAssetScopePaths = async () => {},
-    renderSourceChips = () => {},
-    resetAndLoadLibraryTracks = async () => {},
-    refreshCurrentPlaylistTracks = async () => {},
-    refreshMissingSourceRoots = async () => [],
-    LIBRARY_LOAD_LIMIT_DEFAULT = 200
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function relocateSourceRoot(ctx, oldRoot) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   const sourceRoot = String(oldRoot || "").trim();
   if (!sourceRoot) return;
 
   emitStatus(`Relocate source folder: ${sourceRoot}`);
-  const picked = await pickSourceFolders();
+  const picked = await ctx.pickSourceFolders();
   const newRoot = Array.isArray(picked)
     ? String(picked[0] || "").trim()
     : String(picked || "").trim();
   if (!newRoot) return;
 
-  const result = await command("relocate_source_root", {
+  const result = await ctx.command("relocate_source_root", {
     oldRoot: sourceRoot,
     newRoot
   });
@@ -487,13 +453,13 @@ export async function relocateSourceRoot(state, oldRoot, deps = {}) {
   if (unresolved === 0) {
     delete state.sourceRootEnabled[sourceRoot];
   }
-  persistSourceRoots(state.sourceRoots);
-  persistSourceRootEnabled(state.sourceRootEnabled);
-  renderSourceChips();
-  await syncAssetScopePaths();
-  await refreshMissingSourceRoots({ silent: true });
-  await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
-  await refreshCurrentPlaylistTracks();
+  ctx.persistSourceRoots(state.sourceRoots);
+  ctx.persistSourceRootEnabled(state.sourceRootEnabled);
+  renderSourceChips(ctx);
+  await ctx.syncAssetScopePaths();
+  await refreshMissingSourceRoots(ctx, { silent: true });
+  await resetAndLoadLibraryTracks(ctx, state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
+  await ctx.refreshCurrentPlaylistTracks();
 
   const updated = Number(result?.updated || 0);
   const partial = unresolved > 0
@@ -502,17 +468,9 @@ export async function relocateSourceRoot(state, oldRoot, deps = {}) {
   emitStatus(`Source relocated: ${updated} track path(s) updated${partial}`);
 }
 
-export function renderSourceChips(state, el, deps = {}) {
-  const {
-    documentObj = typeof document !== "undefined" ? document : null,
-    escapeHtml = (value) => String(value || ""),
-    persistSourceRootEnabled = () => {},
-    updateScanLibraryButtonLabel = () => {},
-    updateSourceFilterIndicator = () => {}
-  } = deps;
-
-  if (!documentObj) return;
-  el.sourceChipsContainer.innerHTML = "";
+export function renderSourceChips(ctx) {
+  const { state, el, document } = ctx;
+  el.sourceChipsContainer.replaceChildren();
   if (!state.sourceRootAnalysisStatus || typeof state.sourceRootAnalysisStatus !== "object") {
     state.sourceRootAnalysisStatus = {};
   }
@@ -528,9 +486,8 @@ export function renderSourceChips(state, el, deps = {}) {
   }
   // master.db chip - shown when detected, positioned before filesystem chips
   if (state.externalMasterDbPath) {
-    const chip = documentObj.createElement("span");
-    chip.className = "source-chip source-chip-master-db";
-    chip.innerHTML = `<input class="source-chip-toggle" type="checkbox" data-master-db="true" ${state.masterDbEnabled ? "checked" : ""} aria-label="Toggle desktop library" /><span class="source-chip-path">master.db</span>`;
+    const chip = cloneTemplate(document, "tplSourceChipMasterDb");
+    chip.querySelector(".source-chip-toggle").checked = !!state.masterDbEnabled;
     el.sourceChipsContainer.appendChild(chip);
   }
 
@@ -544,28 +501,33 @@ export function renderSourceChips(state, el, deps = {}) {
     // applySourceRootAnalysisFromBrowseData). Just render what it told us.
     const fullyAnalyzed = state.sourceRootAnalysisStatus[path] === true;
 
-    const chip = documentObj.createElement("span");
-    chip.className = `source-chip${fullyAnalyzed && !missing ? " source-chip-analyzed" : ""}${missing ? " source-chip-missing" : ""}`;
+    const chip = cloneTemplate(document, "tplSourceChip");
+    chip.classList.toggle("source-chip-analyzed", fullyAnalyzed && !missing);
+    chip.classList.toggle("source-chip-missing", missing);
     if (missing) {
       chip.dataset.sourceRelocateIndex = String(index);
       chip.dataset.tooltip = "Source folder missing. Click to relocate.";
     }
-    const checkedAttr = !missing && state.sourceRootEnabled[path] !== false ? "checked" : "";
-    const disabledAttr = missing ? "disabled" : "";
-    const ariaLabel = missing ? "Source folder missing" : "Filter source";
-    const pathTitle = missing
-      ? `Folder missing. Click to relocate: ${path}`
-      : path;
-    chip.innerHTML = `<input class="source-chip-toggle" type="checkbox" data-source-toggle-index="${index}" ${checkedAttr} ${disabledAttr} aria-label="${escapeHtml(ariaLabel)}" /><span class="source-chip-path" data-tooltip="${escapeHtml(pathTitle)}" aria-label="${escapeHtml(pathTitle)}">${escapeHtml(path)}</span><button class="source-chip-remove" data-source-index="${index}" aria-label="Remove">&times;</button>`;
+    const toggle = chip.querySelector(".source-chip-toggle");
+    toggle.dataset.sourceToggleIndex = String(index);
+    toggle.checked = !missing && state.sourceRootEnabled[path] !== false;
+    toggle.disabled = missing;
+    if (missing) toggle.setAttribute("aria-label", "Source folder missing");
+    const pathEl = chip.querySelector(".source-chip-path");
+    const pathTitle = missing ? `Folder missing. Click to relocate: ${path}` : path;
+    pathEl.textContent = path;
+    pathEl.dataset.tooltip = pathTitle;
+    pathEl.setAttribute("aria-label", pathTitle);
+    chip.querySelector(".source-chip-remove").dataset.sourceIndex = String(index);
     el.sourceChipsContainer.appendChild(chip);
   });
 
-  persistSourceRootEnabled(state.sourceRootEnabled);
+  ctx.persistSourceRootEnabled(state.sourceRootEnabled);
   if (el.importMasterDbBtn) {
     el.importMasterDbBtn.classList.toggle("hidden", !state.externalMasterDbPath);
   }
-  updateScanLibraryButtonLabel();
-  updateSourceFilterIndicator();
+  ctx.updateScanLibraryButtonLabel();
+  ctx.updateSourceFilterIndicator();
 }
 
 // The library's duration total/unknown-count are computed entirely by the
@@ -574,34 +536,30 @@ export function renderSourceChips(state, el, deps = {}) {
 // browse_source_files response (the library TrackListController), and live per
 // track via job.progress events during an analysis batch (job_manager.mjs). This is
 // a pure setter -- no track iteration, no countability logic, no filtering.
-export function applyLibraryDurationSummary(el, state, totalMs, unknownCount, deps = {}) {
+export function applyLibraryDurationSummary(ctx, totalMs, unknownCount) {
+  const { state, el } = ctx;
   state.libraryDurationTotalMs = Number(totalMs) || 0;
   state.libraryDurationUnknownCount = Math.max(0, Number(unknownCount) || 0);
   renderTrackListDurationSummary(
     el?.libraryTotalDuration,
     { totalDurationMs: state.libraryDurationTotalMs, unknownCount: state.libraryDurationUnknownCount },
-    deps.formatDurationMs
+    formatDurationMs
   );
 }
 
 // The library track table is fetched/paginated/searched/sorted by the shared
-// TrackListController (built in main.js over `browse_source_files`). This
-// renders only the chrome the controller does not own: the "add a folder"
-// empty state / onboarding mode, and re-applying the transient `is-analyzing`
-// row class after a (re)render. The table itself is drawn by the controller.
-export function renderLibraryChrome(state, el, deps = {}) {
-  const {
-    renderEmptyState = () => {},
-    syncLibraryOnboardingMode = () => {},
-    cssEscape = (value) => String(value || "")
-  } = deps;
-
+// TrackListController (createLibraryTracksController). This renders only the
+// chrome the controller does not own: the "add a folder" empty state /
+// onboarding mode, and re-applying the transient `is-analyzing` row class
+// after a (re)render. The table itself is drawn by the controller.
+export function renderLibraryChrome(ctx) {
+  const { state, el } = ctx;
   const noSources = !state.sourcesEverConfigured;
   if (el.libraryEmptyState) {
-    el.libraryEmptyState.innerHTML = "";
+    el.libraryEmptyState.replaceChildren();
     if (noSources) {
       const extraActions = state.externalMasterDbPath
-        ? [{ label: "RB master.db", onAction: () => deps.onEnableMasterDb?.() }]
+        ? [{ label: "RB master.db", onAction: () => scanMasterDb(ctx) }]
         : [];
       renderEmptyState(el.libraryEmptyState, {
         icon: "♫",
@@ -615,7 +573,7 @@ export function renderLibraryChrome(state, el, deps = {}) {
   if (el.libraryContent) {
     el.libraryContent.classList.toggle("hidden", noSources);
   }
-  syncLibraryOnboardingMode();
+  ctx.syncLibraryOnboardingMode();
 
   for (const id of state.analyzingTrackIds) {
     const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
@@ -624,34 +582,182 @@ export function renderLibraryChrome(state, el, deps = {}) {
   }
 }
 
-export async function scanLibrary(state, deps) {
-  const {
-    setStatus,
-    command,
-    persistSourceRoots,
-    resetAndLoadLibraryTracks,
-    LIBRARY_LOAD_LIMIT_POST_SCAN,
-    analyzeTrackIds,
-    refreshCurrentPlaylistTracks,
-    countWarningsForStatus,
-    renderSourceChips = () => {}
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+// The library track table's data layer: server-paginated + searched + sorted
+// via `browse_source_files`, rendered through the shared TrackListController.
+// `ctl.items` is backed by `state.tracks` (read by playback resolution,
+// analysis patching, and selection) so those stay consistent as pages load.
+// `ctl.prevById` is rebuilt before every page's normalize() so a lazily
+// hydrated waveform preview survives a reload / filter / sort change.
+export function createLibraryTracksController(ctx) {
+  const ctl = createTrackListController({
+    bodyId: "libraryTableBody",
+    pageSize: LIBRARY_LOAD_LIMIT_DEFAULT,
+    getElements: () => ({
+      body: ctx.el.libraryTableBody,
+      wrap: ctx.el.libraryTableWrap,
+      durationTarget: ctx.el.libraryTotalDuration,
+    }),
+    fetchPage: ({ query, sortBy, sortDir, cursor, limit }) => {
+      const enabledRoots = (ctx.state.sourceRoots || []).filter(
+        (root) => ctx.state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(ctx.state, root),
+      );
+      const includeMasterDb = ctx.state.masterDbEnabled === true;
+      ctx.state.libraryQuery = String(query || "").trim();
+      if (!enabledRoots.length && !includeMasterDb) {
+        return { total: 0, items: [], nextCursor: null, hasMore: false, totalDurationMs: 0, durationKnownCount: 0 };
+      }
+      return ctx.command("browse_source_files", {
+        sourceRoots: enabledRoots,
+        includeMasterDb,
+        query: ctx.state.libraryQuery,
+        sortBy: sortBy || null,
+        sortDir: sortDir || null,
+        cursor: cursor || null,
+        limit,
+      });
+    },
+    normalize: (track) => {
+      const normalized = normalizeTrack(ctx, track, "lib");
+      const prev = ctl.prevById.get(String(normalized.id));
+      return prev ? mergeTrackPreservingBestFields(prev, normalized) : normalized;
+    },
+    getItems: () => ctx.state.tracks,
+    setItems: (value) => { ctx.state.tracks = value; },
+    rowOptions: () => ({
+      withCheckbox: true,
+      selectedIds: ctx.state.selectedTrackIds,
+      actionLabel: "+",
+      actionType: "add-library",
+      compactAddButton: true,
+      enableAnalyzeActions: true,
+      origin: "local",
+      secondaryActionLabel: "Play",
+      secondaryActionType: "play-library",
+    }),
+    renderTrackTable: ctx.renderTrackTable,
+    renderDurationSummary: (_target, summary) =>
+      applyLibraryDurationSummary(
+        ctx,
+        summary.totalDurationMs,
+        Number(summary.trackCount || 0) - Number(summary.durationKnownCount || 0),
+      ),
+    getTableSortState: () => ctx.tableSortState,
+    onResponse: (data) => {
+      // On a re-query (search / sort) ctx.state.tracks still holds the previous list;
+      // snapshot it so surviving tracks keep their lazily hydrated previews. On a
+      // full reload (source-filter change) ctx.state.tracks is already cleared and
+      // resetAndLoadLibraryTracks took the snapshot before clearing.
+      if ((ctx.state.tracks || []).length) {
+        ctl.prevById = new Map(ctx.state.tracks.map((t) => [String(t.id), t]));
+      }
+      applySourceRootAnalysisFromBrowseData(ctx.state, data);
+      renderSourceChips(ctx);
+    },
+    onPage: (_page, { first }) => {
+      if (first) {
+        // On a fresh query/sort (not a scroll-append), narrow the selection to
+        // what the new result set shows -- filtering the library is the user's
+        // way of scoping "add selected" / "analyze selected". Backend "Select
+        // all" sets `selectedTrackIds` directly and only re-renders (no `first`
+        // page load), so its larger-than-one-page selection is preserved until
+        // the query actually changes.
+        const loadedIds = new Set((ctx.state.tracks || []).map((t) => t.id));
+        ctx.state.selectedTrackIds = new Set(
+          [...ctx.state.selectedTrackIds].filter((id) => loadedIds.has(id)),
+        );
+        ctx.updateSelectionCount();
+      }
+      renderLibraryChrome(ctx);
+      void hydrateLoadedTracksPreviewsInBackground(ctx);
+    },
+  });
+  ctl.prevById = new Map();
+  return ctl;
+}
+
+// Re-render the loaded library rows (no fetch) + chrome -- used after an
+// in-place mutation of `state.tracks` (analysis patch, bg preview hydration)
+// or a selection change.
+export async function renderLibraryRows(ctx) {
+  await ctx.libraryTracksCtl.rerender();
+  renderLibraryChrome(ctx);
+}
+
+// Debounced library search. Goes through the controller's setSearch (a
+// re-query of page 1 that does NOT pre-clear state.tracks), so lazily hydrated
+// waveform previews on tracks that survive the filter aren't flashed away.
+let librarySearchDebounceTimer = null;
+export function scheduleLibrarySearch(ctx) {
+  if (librarySearchDebounceTimer) clearTimeout(librarySearchDebounceTimer);
+  librarySearchDebounceTimer = setTimeout(() => {
+    librarySearchDebounceTimer = null;
+    Promise.resolve(ctx.libraryTracksCtl.setSearch(ctx.el.librarySearch?.value || ""))
+      .then(() => renderLibraryChrome(ctx))
+      .catch((err) => {
+        console.error(err);
+        ctx.emitStatus(err.message || String(err));
+      });
+  }, LIBRARY_SEARCH_DEBOUNCE_MS);
+}
+
+// Fetch the library from page 1 (source-filter / search / post-scan reload).
+// `state.libraryQuery` is the persisted search text; a bigger `limit` (post
+// scan) is a one-shot override, otherwise the controller's page size is used.
+export async function resetAndLoadLibraryTracks(ctx, query = "", limit = LIBRARY_LOAD_LIMIT_DEFAULT) {
+  const { state, libraryTracksCtl } = ctx;
+  state.libraryQuery = String(query || "").trim();
+  libraryTracksCtl.query = state.libraryQuery;
+  // Snapshot for waveform-preview preservation before ctl.load() clears state.tracks.
+  libraryTracksCtl.prevById = new Map((state.tracks || []).map((t) => [String(t.id), t]));
+  const opts = Number.isFinite(limit) && limit > LIBRARY_LOAD_LIMIT_DEFAULT ? { limit } : {};
+  await libraryTracksCtl.load(opts);
+}
+
+export function handleLibraryTableWrapScroll(ctx) {
+  const ctl = ctx.libraryTracksCtl;
+  loadMoreIfNearBottom(
+    ctx.el.libraryTableWrap,
+    LIBRARY_SCROLL_FETCH_THRESHOLD_PX,
+    () => ctl.loading,
+    () => ctl.hasMore,
+    () => ctl.loadMore().catch((err) => {
+      console.error(err);
+      ctx.emitStatus(err.message || String(err));
+    }),
+  );
+}
+
+// Key labels are rendered by the backend in the user's notation, so a notation
+// change re-fetches every loaded list (page 1) instead of relabelling rows here.
+export async function reloadTrackListsForKeyNotation(ctx) {
+  const reloads = [];
+  if (ctx.libraryTracksCtl.items.length) reloads.push(resetAndLoadLibraryTracks(ctx, ctx.state.libraryQuery));
+  if (ctx.getCurrentPlaylist()) reloads.push(ctx.refreshCurrentPlaylistTracks());
+  for (const ctl of [ctx.usbPlaylistTracksCtl, ctx.usbHistoryTracksCtl]) {
+    if (ctl.scopeId) reloads.push(ctl.reload());
+  }
+  await Promise.all(reloads);
+}
+
+export function enabledLibrarySourceRoots(ctx) {
+  const { state } = ctx;
+  return enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots);
+}
+
+export async function scanLibrary(ctx) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!state.sourceRoots.length) {
     emitStatus("Set at least one source root path before scanning");
     return;
   }
 
-  persistSourceRoots(state.sourceRoots);
+  ctx.persistSourceRoots(state.sourceRoots);
   const knownMissing = missingSourceRootsArray(state);
   if (knownMissing.length) {
     emitStatus(`Source folder missing: ${knownMissing[0]}${knownMissing.length > 1 ? ` (+${knownMissing.length - 1} more)` : ""}. Relocate or remove it.`);
   }
-  const activeScanRoots = enabledSourceRoots(
-    state.sourceRoots,
-    state.sourceRootEnabled,
-    state.missingSourceRoots
-  );
+  const activeScanRoots = enabledLibrarySourceRoots(ctx);
   if (!activeScanRoots.length) {
     emitStatus(knownMissing.length
       ? "No available source folders to scan. Relocate or remove missing source folders."
@@ -659,17 +765,17 @@ export async function scanLibrary(state, deps) {
     return;
   }
   emitStatus("Scanning library files...");
-  const result = await command("scan_library", {
+  const result = await ctx.command("scan_library", {
     sourceRoots: activeScanRoots,
     incremental: true
   });
   if (Array.isArray(result?.notFound) && result.notFound.length) {
     setMissingSourceRoots(state, [...missingSourceRootsArray(state), ...result.notFound]);
-    renderSourceChips();
+    renderSourceChips(ctx);
     emitStatus(`Source folder missing: ${result.notFound[0]}${result.notFound.length > 1 ? ` (+${result.notFound.length - 1} more)` : ""}. Relocate or remove it.`);
   }
 
-  await resetAndLoadLibraryTracks("", LIBRARY_LOAD_LIMIT_POST_SCAN);
+  await resetAndLoadLibraryTracks(ctx, "", LIBRARY_LOAD_LIMIT_POST_SCAN);
   // Backend-owned: `scan_library` reports these over the whole scanned library,
   // not the page the frontend just loaded.
   const scopedTrackCount = Math.max(0, Number(result?.scopedTrackCount || 0));
@@ -681,14 +787,14 @@ export async function scanLibrary(state, deps) {
   );
 
   const analysis = unanalyzedCount > 0
-    ? await analyzeTrackIds([], "Scan analysis", { scopeToLibraryFilter: true })
+    ? await analyzeTrackIds(ctx, [], "Scan analysis", { scopeToLibraryFilter: true })
     : { analyzed: 0, failed: 0, warnings: [] };
   const analyzed = Number(analysis?.analyzed || 0);
   const failed = Number(analysis?.failed || 0);
   const warnings = Array.isArray(analysis?.warnings) ? analysis.warnings : [];
-  await refreshCurrentPlaylistTracks();
+  await ctx.refreshCurrentPlaylistTracks();
 
-  const warningCount = countWarningsForStatus(warnings);
+  const warningCount = ctx.countWarningsForStatus(warnings);
   const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
   const autoLimitWarning = findAnalysisAutoLimitWarning(warnings);
   const autoLimitSuffix = autoLimitWarning ? ` | ${autoLimitWarning}` : "";
@@ -700,36 +806,26 @@ export async function scanLibrary(state, deps) {
   );
 }
 
-export async function analyzeSelectedTracks(state, deps) {
-  const { analyzeTrackIds, refreshCurrentPlaylistTracks } = deps;
-  const emitStatus = resolveEmitStatus(deps);
-  const trackIds = Array.from(state.selectedTrackIds || []).filter(Boolean);
+export async function analyzeSelectedTracks(ctx) {
+  const emitStatus = resolveEmitStatus(ctx);
+  const trackIds = Array.from(ctx.state.selectedTrackIds || []).filter(Boolean);
   if (!trackIds.length) {
     emitStatus("Select at least one track to analyze");
     return;
   }
-  await analyzeTrackIds(trackIds, "Analyze selected");
-  await refreshCurrentPlaylistTracks();
+  await analyzeTrackIds(ctx, trackIds, "Analyze selected");
+  await ctx.refreshCurrentPlaylistTracks();
 }
 
-export async function scanMasterDb(state, deps) {
-  const {
-    command,
-    resetAndLoadLibraryTracks,
-    LIBRARY_LOAD_LIMIT_POST_SCAN,
-    refreshCurrentPlaylistTracks,
-    persistMasterDbEnabled,
-    persistSourcesEverConfigured,
-    renderSourceChips,
-    logWarnings,
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function scanMasterDb(ctx) {
+  const { state, logWarnings } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   const path = state.externalMasterDbPath || undefined;
 
   emitStatus("Importing from desktop library...");
   let result;
   try {
-    result = await command("scan_master_db", { path });
+    result = await ctx.command("scan_master_db", { path });
   } catch (err) {
     emitStatus(`Desktop library import failed: ${err?.message || err}`);
     return;
@@ -739,17 +835,17 @@ export async function scanMasterDb(state, deps) {
   // includes it alongside the folder sources.
   state.masterDbEnabled = true;
   state.sourcesEverConfigured = true;
-  persistMasterDbEnabled?.(true);
-  persistSourcesEverConfigured?.(true);
-  renderSourceChips?.();
+  ctx.persistMasterDbEnabled(true);
+  ctx.persistSourcesEverConfigured(true);
+  renderSourceChips(ctx);
 
-  await resetAndLoadLibraryTracks("", LIBRARY_LOAD_LIMIT_POST_SCAN);
+  await resetAndLoadLibraryTracks(ctx, "", LIBRARY_LOAD_LIMIT_POST_SCAN);
 
-  await refreshCurrentPlaylistTracks();
+  await ctx.refreshCurrentPlaylistTracks();
 
   const notFound = Array.isArray(result.notFound) ? result.notFound : [];
   if (notFound.length > 0) {
-    logWarnings?.(
+    logWarnings(
       "master.db",
       notFound.map((p) => ({ level: "warn", message: p, code: "master_db.file_not_found" })),
       "desktop library import"
@@ -758,7 +854,7 @@ export async function scanMasterDb(state, deps) {
 
   const scanWarnings = Array.isArray(result.warnings) ? result.warnings : [];
   if (scanWarnings.length > 0) {
-    logWarnings?.(
+    logWarnings(
       "master.db",
       scanWarnings.map((entry) => (entry && typeof entry === "object"
         ? entry
@@ -771,23 +867,9 @@ export async function scanMasterDb(state, deps) {
   emitStatus(`Desktop library import done: ${result.indexed} new, ${result.updated} updated${suffix}`);
 }
 
-export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", options = {}, deps) {
-  const {
-    command,
-    setStatus,
-    setTrackAnalyzingState,
-    nextPaint,
-    mergeHydratedTrackIntoState,
-    patchLibraryRowByTrackId,
-    patchPlaylistRowByTrackId,
-    applySearchLocalFilter,
-    renderSourceChips,
-    refreshSourceRootAnalysisStatus = () => {},
-    refreshCurrentPlaylistTracks,
-    countWarningsForStatus,
-    logWarnings
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", options = {}) {
+  const { state } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (state.analysisEnginePersistPromise) {
     try {
       await state.analysisEnginePersistPromise;
@@ -817,7 +899,7 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
   // which would look identical regardless of how many workers are actually
   // running concurrently.
   try {
-    const batch = await command("analyze_new_tracks", {
+    const batch = await ctx.command("analyze_new_tracks", {
       trackIds: ids,
       playlistId: options.playlistId || null,
       scopeToLibraryFilter: !!options.scopeToLibraryFilter,
@@ -841,12 +923,12 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
     warnings.push(`batch analysis failed: ${err.message || err}`);
   } finally {
     for (const id of ids) {
-      setTrackAnalyzingState(String(id), false);
+      setTrackAnalyzingState(ctx, String(id), false);
     }
   }
   const changedIds = [];
   for (const item of hydratedItems) {
-    const changed = mergeHydratedTrackIntoState(item);
+    const changed = mergeHydratedTrackIntoState(ctx, item);
     if (changed) {
       const id = String(item?.id || "").trim();
       if (id) changedIds.push(id);
@@ -854,23 +936,23 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
   }
   if (changedIds.length) {
     if (ids.length === 1) {
-      await nextPaint();
-      await nextPaint();
+      await ctx.nextPaint();
+      await ctx.nextPaint();
     }
     for (const id of changedIds) {
-      patchLibraryRowByTrackId(id);
-      patchPlaylistRowByTrackId(id);
+      patchLibraryRowByTrackId(ctx, id);
+      patchPlaylistRowByTrackId(ctx, id);
     }
-    applySearchLocalFilter();
-    renderSourceChips();
+    renderLibraryRows(ctx);
+    renderSourceChips(ctx);
   }
 
-  Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
-  await refreshCurrentPlaylistTracks();
-  if (typeof logWarnings === "function" && warnings.length) {
-    logWarnings("analysis", warnings, modeLabel);
+  Promise.resolve(refreshSourceRootAnalysisStatus(ctx)).catch(() => {});
+  await ctx.refreshCurrentPlaylistTracks();
+  if (warnings.length) {
+    ctx.logWarnings("analysis", warnings, modeLabel);
   }
-  const warningCount = countWarningsForStatus(warnings);
+  const warningCount = ctx.countWarningsForStatus(warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   const autoLimitWarning = findAnalysisAutoLimitWarning(warnings);
   const autoLimitSuffix = autoLimitWarning ? ` | ${autoLimitWarning}` : "";
@@ -878,29 +960,21 @@ export async function analyzeTrackIds(state, trackIds, modeLabel = "Analyze", op
   return { analyzed, failed, warnings };
 }
 
-export async function analyzeSingleTrack(state, track, modeLabel = null, deps) {
-  const {
-    resolveLocalTrackIdAsync,
-    setStatus,
-    analyzeTrackIds
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
-  const localId = await resolveLocalTrackIdAsync(track);
+export async function analyzeSingleTrack(ctx, track, modeLabel = null) {
+  const emitStatus = resolveEmitStatus(ctx);
+  const localId = await ctx.resolveLocalTrackIdAsync(track);
   if (!localId) {
     emitStatus("Track is not in local library yet. Scan library first, then analyze.");
     return;
   }
-  const localTrack = state.tracks.find((t) => t.id === localId) || track;
+  const localTrack = ctx.state.tracks.find((t) => t.id === localId) || track;
   const label = modeLabel || (localTrack.analysisReady ? "Reanalyze" : "Analyze missing");
-  await analyzeTrackIds([localId], label);
+  await analyzeTrackIds(ctx, [localId], label);
 }
 
 
-export function patchLibraryRowByTrackId(state, el, trackId, deps) {
-  const {
-    cssEscape,
-    patchLibraryRowCells
-  } = deps;
+export function patchLibraryRowByTrackId(ctx, trackId) {
+  const { state, el } = ctx;
   const id = String(trackId || "").trim();
   if (!id) return false;
   const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
@@ -908,7 +982,7 @@ export function patchLibraryRowByTrackId(state, el, trackId, deps) {
   if (!row) return false;
   const track = state.tracks.find((t) => String(t.id) === id);
   if (!track) return false;
-  const patched = patchLibraryRowCells(row, track);
+  const patched = patchLibraryRowCells(ctx, row, track);
   const analyzing = state.analyzingTrackIds.has(id);
   row.classList.toggle("is-analyzing", analyzing);
   const analyzeBtn = row.querySelector("[data-action='analyze-track']");
@@ -916,44 +990,50 @@ export function patchLibraryRowByTrackId(state, el, trackId, deps) {
   return patched;
 }
 
-export function patchPlaylistRowByTrackId(state, el, trackId, deps) {
-  const {
-    cssEscape,
-    getCurrentPlaylist,
-    patchLibraryRowCells
-  } = deps;
+export function patchPlaylistRowByTrackId(ctx, trackId) {
+  const { state, el } = ctx;
   const id = String(trackId || "").trim();
   if (!id) return false;
   const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
   const row = el.playlistTracksBody?.querySelector(selector);
   if (!row) return false;
-  const playlist = getCurrentPlaylist();
+  const playlist = ctx.getCurrentPlaylist();
   const track = (playlist?.tracks || []).find((t) => {
     const localTrackId = String(t?.localTrackId || t?.id || "").trim();
     return localTrackId === id;
   });
   if (!track) return false;
-  const patched = patchLibraryRowCells(row, track);
+  const patched = patchLibraryRowCells(ctx, row, track);
   const analyzing = state.analyzingTrackIds.has(id);
   row.classList.toggle("is-analyzing", analyzing);
   return patched;
 }
 
-export function setTrackAnalyzingState(state, trackId, active, deps) {
-  const {
-    patchLibraryRowByTrackId,
-    patchPlaylistRowByTrackId
-  } = deps;
+// Patch every already-rendered USB row of `track` inside `container`.
+export function patchUsbRowsInContainer(ctx, container, track) {
+  const trackId = String(track?.id || "").trim();
+  if (!trackId) return false;
+  const selector = `.track-grid-row[data-track-origin="usb"][data-track-id="${cssEscape(trackId)}"]`;
+  const rows = container?.querySelectorAll?.(selector) || [];
+  let patched = false;
+  rows.forEach((row) => {
+    if (patchLibraryRowCells(ctx, row, track)) patched = true;
+  });
+  return patched;
+}
+
+export function setTrackAnalyzingState(ctx, trackId, active) {
+  const { state } = ctx;
   const id = String(trackId || "").trim();
   if (!id) return;
   if (active) state.analyzingTrackIds.add(id);
   else state.analyzingTrackIds.delete(id);
-  patchLibraryRowByTrackId(id);
-  patchPlaylistRowByTrackId(id);
+  patchLibraryRowByTrackId(ctx, id);
+  patchPlaylistRowByTrackId(ctx, id);
 }
 
-export function promoteTrackIdentity(state, el, oldId, newId, deps) {
-  const { cssEscape } = deps;
+export function promoteTrackIdentity(ctx, oldId, newId) {
+  const { state, el } = ctx;
   const fromId = String(oldId || "").trim();
   const toId = String(newId || "").trim();
   if (!fromId || !toId || fromId === toId) return;
@@ -1002,9 +1082,8 @@ export function parseProgressWaveformPreview(value) {
     .filter((v) => Number.isFinite(v));
 }
 
-export function patchTrackAnalysisFields(track, payload, deps) {
+export function patchTrackAnalysisFields(ctx, track, payload) {
   if (!track || !payload || typeof payload !== "object") return false;
-  const { toPlayableUrl } = deps;
   let changed = false;
   const setIfChanged = (key, next) => {
     if (next === undefined) return;
@@ -1032,7 +1111,7 @@ export function patchTrackAnalysisFields(track, payload, deps) {
   if (typeof payload.artworkPath === "string" && payload.artworkPath.trim()) {
     const artworkPath = payload.artworkPath.trim();
     setIfChanged("artworkPath", artworkPath);
-    setIfChanged("artworkUrl", appendUrlRevision(toPlayableUrl(artworkPath) || "", payload.updatedAt || Date.now()));
+    setIfChanged("artworkUrl", appendUrlRevision(ctx.toPlayableUrl(artworkPath) || "", payload.updatedAt || Date.now()));
     setIfChanged("artworkChecked", true);
   } else if (payload.artworkChecked === true) {
     setIfChanged("artworkChecked", true);
@@ -1062,9 +1141,8 @@ export function patchTrackAnalysisFields(track, payload, deps) {
   return changed;
 }
 
-export function patchLibraryRowCells(row, track, deps) {
+export function patchLibraryRowCells(ctx, row, track) {
   if (!row || !track) return false;
-  const { escapeHtml, buildCoverSrcCandidates, attachCoverFallbackHandlers, drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } = deps;
 
   const cells = row.querySelectorAll('[role="cell"]');
   if (cells.length < 3) return false;
@@ -1075,38 +1153,25 @@ export function patchLibraryRowCells(row, track, deps) {
   }
 
   const bpmTd = row.querySelector(".td-bpm");
-  if (bpmTd) {
-    const bpmTooltipText = track.bpmAnalyzer === "user"
-      ? "Manually set"
-      : track.bpmAnalyzer
-        ? `Analyzed with: ${track.bpmAnalyzer}`
-        : "";
-    const bpmTitle = bpmTooltipText ? ` data-tooltip="${escapeHtml(bpmTooltipText)}"` : "";
-    const bpmText = formatBpm(track.bpm);
-    bpmTd.innerHTML = bpmText
-      ? `<span class="bpm-pill"${bpmTitle}>${escapeHtml(bpmText)}</span>`
-      : "-";
-  }
+  if (bpmTd) fillBpmCell(bpmTd, track);
 
   const keyTd = row.querySelector(".td-key");
-  if (keyTd) {
-    keyTd.innerHTML = renderKeyPill(track, escapeHtml);
-  }
+  if (keyTd) fillKeyCell(keyTd, track);
 
   const coverTd = row.querySelector(".td-cover");
   if (coverTd) {
-    const coverCandidates = buildCoverSrcCandidates(track);
+    const coverCandidates = buildCoverSrcCandidates(ctx, track);
     if (coverCandidates.length) {
       const img = coverTd.querySelector("img.cover-thumb");
       if (img) {
         img.src = coverCandidates[0];
         img.dataset.fallbacks = coverCandidates.slice(1).join("|");
       } else {
-        coverTd.innerHTML = `<img class="cover-thumb" alt="cover" loading="lazy" src="${escapeHtml(coverCandidates[0])}" data-fallbacks="${escapeHtml(coverCandidates.slice(1).join("|"))}" />`;
+        coverTd.replaceChildren(coverElement(row.ownerDocument, coverCandidates));
         attachCoverFallbackHandlers(coverTd);
       }
     } else if (coverTd.querySelector("img.cover-thumb")) {
-      coverTd.innerHTML = `<div class="cover-thumb" aria-hidden="true"></div>`;
+      coverTd.replaceChildren(coverElement(row.ownerDocument, []));
     }
   }
 
@@ -1121,22 +1186,22 @@ export function patchLibraryRowCells(row, track, deps) {
         : [];
       const hasRenderableWaveform = colorData !== null || (peaks.length > 0 && peaks.some((v) => v > 0));
       if (hasRenderableWaveform) {
-        if (invalidateWaveformCache) invalidateWaveformCache(waveformDiv);
+        invalidateWaveformCache(waveformDiv);
         if (colorData) {
-          if (setWaveformColorData) setWaveformColorData(waveformDiv, colorData);
+          setWaveformColorData(waveformDiv, colorData);
           delete waveformDiv.dataset.peaks;
         } else {
           waveformDiv.dataset.peaks = peaks.join(",");
         }
         if (!waveformDiv.classList.contains("waveform-canvas")) {
           waveformDiv.classList.add("waveform-canvas");
-          waveformDiv.insertAdjacentHTML("afterbegin", `<canvas class="waveform-canvas-el" aria-hidden="true"></canvas>`);
+          waveformDiv.prepend(cloneTemplate(row.ownerDocument, "tplWaveformCanvas"));
         }
         drawWaveformCanvas(waveformDiv);
       } else {
         delete waveformDiv.dataset.peaks;
-        if (setWaveformColorData) setWaveformColorData(waveformDiv, null);
-        if (invalidateWaveformCache) invalidateWaveformCache(waveformDiv);
+        setWaveformColorData(waveformDiv, null);
+        invalidateWaveformCache(waveformDiv);
         waveformDiv.classList.remove("waveform-canvas");
         const canvas = waveformDiv.querySelector("canvas");
         if (canvas) canvas.remove();
@@ -1221,8 +1286,8 @@ export function appendUrlRevision(url, revision) {
   return `${normalized}${joiner}rev=${encodeURIComponent(rev)}`;
 }
 
-export function buildCoverSrcCandidates(track, deps = {}) {
-  const { toPlayableUrl } = deps;
+export function buildCoverSrcCandidates(ctx, track) {
+  const toPlayableUrl = ctx?.toPlayableUrl;
   const out = [];
   const seen = new Set();
   const addPathVariants = (value) => {
@@ -1261,8 +1326,7 @@ export function buildCoverSrcCandidates(track, deps = {}) {
 
 // --- cover_fallback.mjs ---
 
-export function attachCoverFallbackHandlers(root = document, deps = {}) {
-  const doc = deps.document || document;
+export function attachCoverFallbackHandlers(root) {
   root.querySelectorAll("img.cover-thumb").forEach((img) => {
     if (img.dataset.fallbackBound === "1") return;
     img.dataset.fallbackBound = "1";
@@ -1276,10 +1340,7 @@ export function attachCoverFallbackHandlers(root = document, deps = {}) {
         img.src = next;
         return;
       }
-      const placeholder = doc.createElement("div");
-      placeholder.className = "cover-thumb";
-      placeholder.setAttribute("aria-hidden", "true");
-      img.replaceWith(placeholder);
+      img.replaceWith(coverElement(img.ownerDocument, []));
     });
   });
 }

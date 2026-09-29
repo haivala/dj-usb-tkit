@@ -8,41 +8,18 @@ import { bindBackupsEvents } from "./components/backups/events.mjs";
 import { bindShellEvents } from "./components/shell/events.mjs";
 import { bindTrackDetailEvents } from "./components/track-detail/events.mjs";
 import { initTooltips } from "./tooltip.mjs";
+import { renderEmptyState } from "./components/shell/actions.mjs";
+import { scanLibraryButtonLabel } from "./components/library/actions.mjs";
 
-export { createTrackDetailController } from "./components/track-detail/actions.mjs";
-
-export function setStatusText(el, text, warningCount = 0) {
-  const target = el.statusText;
-  const doc = target.ownerDocument;
-  target.textContent = "";
-  const str = String(text ?? "");
-  const n = Math.max(0, Number(warningCount) || 0);
-  const pipeIdx = n > 0 ? str.indexOf("|") : -1;
-  if (pipeIdx === -1) {
-    target.append(doc.createTextNode(str));
-    return;
-  }
-  const trailing = str.slice(pipeIdx + 1);
-  const leadingSpace = trailing.match(/^\s*/)[0];
-  target.append(doc.createTextNode(str.slice(0, pipeIdx + 1) + leadingSpace));
-  const link = doc.createElement("a");
-  link.href = "#";
-  link.className = "status-warning-link";
-  link.textContent = trailing.slice(leadingSpace.length);
-  target.append(link);
-}
-
-export function setStatus(el, state, pushEventLog, text) {
-  setStatusText(el, text);
-}
-
-export function updateActivePlaylistIndicators(state, el) {
+export function updateActivePlaylistIndicators(ctx) {
+  const { state, el } = ctx;
   el.navPlaylistList.querySelectorAll(".nav-playlist-item").forEach((item) => {
     item.classList.toggle("playlist-active-mode", item.dataset.playlistId === state.currentPlaylistId);
   });
 }
 
-export function updateAddToPlaylistButtons(state, document) {
+export function updateAddToPlaylistButtons(ctx) {
+  const { state, document } = ctx;
   const hasPlaylist = !!state.currentPlaylistId;
   document.querySelectorAll('[data-action="add-library"], [data-action="add-usb"], [data-action="add-history"]').forEach((btn) => {
     btn.disabled = !hasPlaylist;
@@ -51,38 +28,33 @@ export function updateAddToPlaylistButtons(state, document) {
   if (addSelectedBtn) addSelectedBtn.disabled = !hasPlaylist;
 }
 
-export function updateModeText(state, el, deps) {
-  const { getCurrentPlaylist, updateAddToPlaylistButtons, updateActivePlaylistIndicators } = deps;
-  const current = getCurrentPlaylist();
-  if (!current) {
-    el.playlistBadge.className = "playlist-badge inactive";
-    el.badgeLabel.textContent = "No active playlist";
-    updateAddToPlaylistButtons();
-    updateActivePlaylistIndicators();
-    return;
-  }
-
-  el.playlistBadge.className = "playlist-badge active";
-  el.badgeLabel.textContent = current.name;
-  updateAddToPlaylistButtons();
-  updateActivePlaylistIndicators();
+export function updateModeText(ctx) {
+  const { el } = ctx;
+  const current = ctx.getCurrentPlaylist();
+  el.playlistBadge.className = current ? "playlist-badge active" : "playlist-badge inactive";
+  el.badgeLabel.textContent = current ? current.name : "No active playlist";
+  updateAddToPlaylistButtons(ctx);
+  updateActivePlaylistIndicators(ctx);
 }
 
-export function updateUsbNameBadge(state, el) {
+export function updateUsbNameBadge(ctx) {
+  const { state, el } = ctx;
   if (!el?.usbNameBadge || !el?.usbNameBadgeLabel) return;
   const name = String(state.usbDeviceName || "").trim();
   el.usbNameBadgeLabel.textContent = name || "Not connected";
 }
 
-export function updateSelectionCount(state, el) {
+export function updateSelectionCount(ctx) {
+  const { state, el } = ctx;
   const count = state.selectedTrackIds.size;
   el.selectionCount.textContent = count > 0 ? `${count} selected` : "";
   el.selectionActions.classList.toggle("hidden", count === 0);
   el.addSelectedBtn.disabled = !state.currentPlaylistId || count === 0;
+  updateScanLibraryButtonLabel(ctx);
 }
 
-export function updateUsbSubNavDisabledState(state, el, deps) {
-  const { switchView } = deps;
+export function updateUsbSubNavDisabledState(ctx) {
+  const { state, el } = ctx;
   const hasRoot = !!state.usbRoot && !!state.usbRootValid;
   el.navSidebar.querySelectorAll('.nav-sub-item[data-view^="usb-"]').forEach((btn) => {
     btn.classList.toggle("revealed", hasRoot);
@@ -92,17 +64,17 @@ export function updateUsbSubNavDisabledState(state, el, deps) {
   if (el.backupsRefreshBtn) el.backupsRefreshBtn.disabled = !hasRoot;
   if (el.openBackupsBtn) el.openBackupsBtn.disabled = !hasRoot;
   if (!hasRoot && (state.activeTab === "usb-playlists" || state.activeTab === "usb-history" || state.activeTab === "usb-player-menu")) {
-    switchView("usb").catch(() => {});
+    ctx.switchView("usb").catch(() => {});
   }
 }
 
-export function updateUsbEmptyState(state, document, deps) {
-  const { renderEmptyState } = deps;
+export function updateUsbEmptyState(ctx) {
+  const { state, document } = ctx;
   const container = document.getElementById("usbEmptyState");
   if (!container) return;
   const hasValidRoot = !!state.usbRoot && !!state.usbRootValid;
   const hasRecents = Array.isArray(state.usbRecentRoots) && state.usbRecentRoots.length > 0;
-  container.innerHTML = "";
+  container.replaceChildren();
   if (!hasValidRoot && !hasRecents) {
     renderEmptyState(container, {
       icon: "\u2B58",
@@ -113,7 +85,8 @@ export function updateUsbEmptyState(state, document, deps) {
   }
 }
 
-export function updateSourceFilterIndicator(state, el) {
+export function updateSourceFilterIndicator(ctx) {
+  const { state, el } = ctx;
   if (!el.sourceFilterIndicator) return;
   const anyUnchecked = state.sourceRoots.some((root) => state.sourceRootEnabled[root] === false);
   const masterDbFiltered = !!(state.externalMasterDbPath && !state.masterDbEnabled);
@@ -123,18 +96,19 @@ export function updateSourceFilterIndicator(state, el) {
   el.sourceFilterIndicator.classList.toggle("active", anyUnchecked || masterDbFiltered || missingRoots > 0);
 }
 
-export function updateScanLibraryButtonLabel(state, el, deps) {
-  const { scanLibraryButtonLabel } = deps;
+export function updateScanLibraryButtonLabel(ctx) {
+  const { state, el } = ctx;
   if (!el.scanLibraryBtn) return;
   el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.sourceRoots, state.selectedTrackIds.size);
 }
 
-export function closeSettingsDrawer(el) {
-  el.settingsDrawer.classList.add("hidden");
-  el.settingsBackdrop.classList.add("hidden");
+export function closeSettingsDrawer(ctx) {
+  ctx.el.settingsDrawer.classList.add("hidden");
+  ctx.el.settingsBackdrop.classList.add("hidden");
 }
 
-export function updateUsbHealthDot(el, status) {
+export function updateUsbHealthDot(ctx, status) {
+  const { el } = ctx;
   const dots = [el.usbHealthDot, el.usbHeaderHealthDot].filter(Boolean);
   if (!dots.length) return;
   const className =
@@ -155,7 +129,8 @@ export function updateUsbHealthDot(el, status) {
   });
 }
 
-export function syncLibraryOnboardingMode(state, document) {
+export function syncLibraryOnboardingMode(ctx) {
+  const { state, document } = ctx;
   document.body.classList.toggle(
     "library-onboarding",
     state.activeTab === "library" && !state.sourceRoots.length
@@ -209,14 +184,10 @@ export function createTracklistExportDialogController(el) {
   function populateStartTrackOptions(tracks) {
     const select = el.tracklistExportStartTrack;
     if (!select) return;
-    const doc = select.ownerDocument;
     select.textContent = "";
     (tracks || []).forEach((track, index) => {
-      const option = doc.createElement("option");
-      option.value = String(index);
       const label = `${index + 1}. ${track?.artist || ""} - ${track?.title || ""}`;
-      option.textContent = label.length > 64 ? `${label.slice(0, 63)}…` : label;
-      select.append(option);
+      select.add(new select.ownerDocument.defaultView.Option(label.length > 64 ? `${label.slice(0, 63)}…` : label, String(index)));
     });
     select.value = "0";
   }
@@ -253,7 +224,7 @@ export function createTracklistExportDialogController(el) {
 }
 
 export function bindEvents(ctx) {
-  const { state, el } = ctx;
+  const { el } = ctx;
 
   if (el.progressDismiss) {
     el.progressDismiss.addEventListener("click", ctx.dismissProgress);
@@ -274,12 +245,4 @@ export function bindEvents(ctx) {
   bindUsbEvents(ctx);
   bindPlaylistEvents(ctx);
   bindTrackDetailEvents(ctx);
-}
-
-export function createBindEventsContext(state, el, deps = {}) {
-  return {
-    state,
-    el,
-    ...deps
-  };
 }

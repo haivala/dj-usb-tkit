@@ -1,4 +1,12 @@
 import { resolveEmitStatus } from "../shared/track_actions.mjs";
+import { createTrackListController } from "../shared/track_list_controller.mjs";
+import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
+import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
+import { computeExportButtonState, isUsbRootChangeBlocked } from "../usb/actions.mjs";
+import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
+import { formatDurationMs, formatTimestampLocal, renderTrackListDurationSummary } from "../../track_utils.mjs";
+
+const PLAYLIST_LOAD_LIMIT_DEFAULT = 150;
 
 // Builds the wire payload for add_track_candidates_to_playlist from a UI track object,
 // keeping only the fields AddTrackCandidate (backend/src/models.rs) declares so UI-display
@@ -31,110 +39,28 @@ function toAddTrackCandidatePayload(track) {
   };
 }
 
-export function renderPlaylistTabsAndPanels(state, el, deps) {
-  const {
-    document,
-    escapeHtml,
-    formatPlaylistExportStatus,
-    renderPlaylistTabContent,
-    getPlaylistTabDomId
-  } = deps;
-
-  el.tabsContainer.querySelectorAll(".tab.playlist-tab").forEach((btn) => btn.remove());
-  el.tabsContainer.querySelectorAll(".tab-new-input-wrap").forEach((wrap) => wrap.remove());
-  el.playlistPanels.innerHTML = "";
-
-  state.playlists.forEach((playlist) => {
-    const canExportToUsb = !!state.usbRoot && !!state.usbRootValid;
-    const exportDisabledAttr = canExportToUsb ? "" : " disabled";
-    const exportTitle = canExportToUsb
-      ? "Export current playlist to selected USB"
-      : "Select a valid USB folder first";
-    const playlistTabId = getPlaylistTabDomId(playlist.id);
-    const playlistPanelId = `panel-${playlist.id}`;
-    const tab = document.createElement("button");
-    tab.className = "tab playlist-tab";
-    tab.id = playlistTabId;
-    tab.dataset.tab = playlist.id;
-    tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-selected", "false");
-    tab.setAttribute("aria-controls", playlistPanelId);
-    tab.innerHTML = renderPlaylistTabContent(playlist);
-    el.tabsContainer.insertBefore(tab, el.addPlaylistTab);
-
-    const panel = document.createElement("section");
-    panel.className = "panel";
-    panel.id = playlistPanelId;
-    panel.setAttribute("role", "tabpanel");
-    panel.setAttribute("aria-hidden", "true");
-    panel.setAttribute("aria-labelledby", playlistTabId);
-    panel.innerHTML = `
-      <section class="card">
-        <h2>${escapeHtml(playlist.name)}</h2>
-        <div class="row search-row">
-          <input data-playlist-search="${playlist.id}" value="${escapeHtml(state.playlistTrackSearch || "")}" placeholder="Search playlist tracks" />
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Cover</th>
-                <th>Waveform</th>
-                <th>No.</th>
-                <th>Title</th>
-                <th>Artist</th>
-                <th>Album</th>
-                <th>Added</th>
-                <th>Format</th>
-                <th>Length</th>
-                <th>BPM</th>
-                <th>Key</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody data-playlist-tracks="${playlist.id}"></tbody>
-          </table>
-        </div>
-        <p class="muted track-total-time" data-playlist-total-duration="${playlist.id}">Total time: 0:00</p>
-        <div class="row playlist-actions">
-          <p class="muted playlist-export-status">${escapeHtml(formatPlaylistExportStatus(playlist))}</p>
-          <button data-export-playlist="${playlist.id}" data-tooltip="${escapeHtml(exportTitle)}"${exportDisabledAttr}>Export to USB</button>
-        </div>
-      </section>
-    `;
-    el.playlistPanels.appendChild(panel);
-  });
-}
-
-export function renderPlaylistList(state, el, deps) {
-  const { document, renderPlaylistSidebarItemContent } = deps;
+export function renderPlaylistList(ctx) {
+  const { state, el, document } = ctx;
   el.navPlaylistList.querySelectorAll(".nav-playlist-item").forEach((item) => item.closest("li")?.remove());
   el.navPlaylistList.querySelectorAll(".nav-new-input-wrap").forEach((wrap) => wrap.remove());
 
   [...state.playlists].reverse().forEach((playlist) => {
-    const li = document.createElement("li");
-    const btn = document.createElement("button");
-    btn.className = "nav-playlist-item";
+    const li = cloneTemplate(document, "tplNavPlaylistItem");
+    const btn = li.firstElementChild;
     btn.dataset.playlistId = playlist.id;
-    btn.innerHTML = renderPlaylistSidebarItemContent(playlist);
+    fillPlaylistSidebarItem(btn, playlist);
     if (state.activeTab === playlist.id) btn.classList.add("active");
     if (state.currentPlaylistId === playlist.id) {
       btn.classList.add("playlist-active-mode");
       btn.dataset.tooltip = "Active playlist";
     }
-    li.appendChild(btn);
     el.navPlaylistList.appendChild(li);
   });
 }
 
-export function promptNewPlaylist(el, deps) {
-  const {
-    document,
-    requestAnimationFrame,
-    createPlaylist,
-    setStatus
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export function promptNewPlaylist(ctx) {
+  const { el, document, requestAnimationFrameFn } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   const existing = el.navPlaylistList.querySelector(".nav-new-input-wrap");
   if (existing) {
     existing.querySelector(".nav-new-input")?.focus();
@@ -143,21 +69,9 @@ export function promptNewPlaylist(el, deps) {
 
   el.addPlaylistBtn.classList.add("hidden");
 
-  const wrap = document.createElement("li");
-  wrap.className = "nav-new-input-wrap";
-
-  const input = document.createElement("input");
-  input.className = "nav-new-input";
-  input.type = "text";
-  input.placeholder = "Playlist name...";
-
-  const cancel = document.createElement("button");
-  cancel.className = "nav-new-cancel";
-  cancel.textContent = "\u00d7";
-  cancel.type = "button";
-
-  wrap.appendChild(input);
-  wrap.appendChild(cancel);
+  const wrap = cloneTemplate(document, "tplNavNewPlaylist");
+  const input = wrap.querySelector(".nav-new-input");
+  const cancel = wrap.querySelector(".nav-new-cancel");
   const addItem = el.navPlaylistList.querySelector(".nav-playlist-add-item");
   if (addItem?.nextSibling) {
     el.navPlaylistList.insertBefore(wrap, addItem.nextSibling);
@@ -165,7 +79,9 @@ export function promptNewPlaylist(el, deps) {
     el.navPlaylistList.appendChild(wrap);
   }
 
+  let closed = false;
   const cleanup = () => {
+    closed = true;
     wrap.remove();
     el.addPlaylistBtn.classList.remove("hidden");
   };
@@ -174,7 +90,7 @@ export function promptNewPlaylist(el, deps) {
     const name = input.value.trim();
     cleanup();
     if (name) {
-      createPlaylist(name).catch((err) => {
+      createPlaylist(ctx, name).catch((err) => {
         console.error(err);
         emitStatus(err.message || String(err));
       });
@@ -185,30 +101,24 @@ export function promptNewPlaylist(el, deps) {
     if (event.key === "Enter") { event.preventDefault(); submit(); }
     if (event.key === "Escape") { event.preventDefault(); cleanup(); }
   });
-  input.addEventListener("blur", () => {
-    setTimeout(() => {
-      if (document.activeElement !== cancel) submit();
-    }, 80);
+  // Leaving the field submits -- except towards ×, which cancels. Clicking ×
+  // must not take focus (WebKit doesn't focus buttons on click), so its
+  // mousedown is suppressed and the input never blurs.
+  input.addEventListener("blur", (event) => {
+    if (!closed && event.relatedTarget !== cancel) submit();
   });
+  cancel.addEventListener("mousedown", (event) => event.preventDefault());
   cancel.addEventListener("click", (event) => {
     event.preventDefault();
     cleanup();
   });
 
-  requestAnimationFrame(() => input.focus());
+  requestAnimationFrameFn(() => input.focus());
 }
 
-export function startPlaylistRename(playlistId, state, el, deps) {
-  const {
-    document,
-    requestAnimationFrame,
-    command,
-    setStatus,
-    renderPlaylistSidebarItemContent,
-    getCurrentPlaylist,
-    formatPlaylistExportStatus
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export function startPlaylistRename(ctx, playlistId) {
+  const { state, el, document, requestAnimationFrameFn, command } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
 
@@ -216,13 +126,10 @@ export function startPlaylistRename(playlistId, state, el, deps) {
   if (!item) return;
 
   const originalName = playlist.name;
-  const input = document.createElement("input");
-  input.className = "nav-rename-input";
-  input.type = "text";
+  const input = cloneTemplate(document, "tplNavRenameInput");
   input.value = originalName;
-
-  item.textContent = "";
-  item.appendChild(input);
+  const itemContent = [...item.childNodes];
+  item.replaceChildren(input);
 
   let finished = false;
   const finish = async (save) => {
@@ -241,12 +148,13 @@ export function startPlaylistRename(playlistId, state, el, deps) {
         emitStatus(`Rename failed: ${err.message || err}`);
       }
     }
-    item.innerHTML = renderPlaylistSidebarItemContent(playlist);
+    item.replaceChildren(...itemContent);
+    fillPlaylistSidebarItem(item, playlist);
     if (state.activeTab === playlistId) {
       el.playlistPanelTitle.textContent = playlist.name;
       el.playlistExportStatus.textContent = formatPlaylistExportStatus(playlist);
     }
-    const badge = getCurrentPlaylist();
+    const badge = getCurrentPlaylist(ctx);
     if (badge?.id === playlistId) {
       el.badgeLabel.textContent = playlist.name;
     }
@@ -258,14 +166,13 @@ export function startPlaylistRename(playlistId, state, el, deps) {
   });
   input.addEventListener("blur", () => finish(true));
 
-  requestAnimationFrame(() => {
+  requestAnimationFrameFn(() => {
     input.focus();
     input.select();
   });
 }
 
-export function formatPlaylistExportStatus(playlist, deps) {
-  const { formatTimestampLocal } = deps;
+export function formatPlaylistExportStatus(playlist) {
   const when = String(playlist?.lastExportedAt || "").trim();
   if (!when) return "Not exported yet.";
   const formattedWhen = formatTimestampLocal(when);
@@ -276,12 +183,11 @@ export function formatPlaylistExportStatus(playlist, deps) {
   return `Last exported ${formattedWhen}${rootText} (${countText}).`;
 }
 
-export async function loadPlaylists(state, deps) {
-  const { command, renderPlaylistTabsAndPanels, updatePlaylistExportButtons } = deps;
-  const data = await command("list_playlists");
-  state.playlists = (data.items || []).map((playlist) => ({ ...playlist, tracks: [] }));
-  renderPlaylistTabsAndPanels();
-  updatePlaylistExportButtons();
+export async function loadPlaylists(ctx) {
+  const data = await ctx.command("list_playlists");
+  ctx.state.playlists = (data.items || []).map((playlist) => ({ ...playlist, tracks: [] }));
+  renderPlaylistList(ctx);
+  updatePlaylistExportButtons(ctx);
 }
 
 // Column-sort on the app playlist tracklist is a free, reversible view-only
@@ -289,12 +195,12 @@ export async function loadPlaylists(state, deps) {
 // currently active sort only becomes the playlist's real (and thus exported)
 // order at two points: navigating away from the playlist, and exporting it.
 // Both call this with the playlist the sort belongs to.
-export async function commitActivePlaylistSort(state, playlistId, deps) {
-  const { command, getActiveSort, clearPlaylistTrackSort } = deps;
+export async function commitActivePlaylistSort(ctx, playlistId) {
+  const { state, command } = ctx;
   // Read the active sort *before* clearing -- clearPlaylistTrackSort deletes
   // the same state.
-  const sort = getActiveSort();
-  clearPlaylistTrackSort();
+  const sort = ctx.tableSortState.playlistTracksBody || null;
+  clearPlaylistTrackSort(ctx);
   const playlist = (state.playlists || []).find((p) => p.id === playlistId);
   if (!playlistId || !playlist || !sort?.key) return;
   if (state.playlistUsbExportStatusById?.get(playlistId)?.locksReorder) return;
@@ -308,13 +214,9 @@ export async function commitActivePlaylistSort(state, playlistId, deps) {
   });
 }
 
-export function updatePlaylistExportButtons(state, el, deps) {
-  const {
-    getCurrentPlaylist,
-    computeExportButtonState,
-    isUsbRootChangeBlocked
-  } = deps;
-  const current = getCurrentPlaylist();
+export function updatePlaylistExportButtons(ctx) {
+  const { state, el } = ctx;
+  const current = getCurrentPlaylist(ctx);
   const buttonState = computeExportButtonState({
     usbRoot: state.usbRoot,
     usbRootValid: state.usbRootValid,
@@ -322,7 +224,7 @@ export function updatePlaylistExportButtons(state, el, deps) {
     playlistUsbExportStatusById: state.playlistUsbExportStatusById
   });
 
-  el.exportPlaylistBtn.disabled = !!isUsbRootChangeBlocked?.(state);
+  el.exportPlaylistBtn.disabled = isUsbRootChangeBlocked(state);
   el.exportPlaylistBtn.textContent = buttonState.text;
   el.exportPlaylistBtn.dataset.tooltip = buttonState.title;
 
@@ -351,17 +253,9 @@ export function updatePlaylistExportButtons(state, el, deps) {
   }
 }
 
-export async function createPlaylist(name, deps) {
-  const {
-    setStatus,
-    withProgress,
-    command,
-    loadPlaylists,
-    state,
-    updateModeText,
-    switchTab
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function createPlaylist(ctx, name) {
+  const { state, withProgress, command, updateModeText, switchView } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
   if (!name) {
     emitStatus("Playlist name is required");
     return;
@@ -371,7 +265,7 @@ export async function createPlaylist(name, deps) {
     progress(35, "Saving playlist...");
     const playlist = await command("create_playlist", { name });
     progress(70, "Refreshing playlists...");
-    await loadPlaylists();
+    await loadPlaylists(ctx);
     const loadedPlaylists = Array.isArray(state.playlists) ? state.playlists : [];
     const createdPlaylistId = String(playlist?.playlistId || "").trim();
     const selectedPlaylist = loadedPlaylists.find((item) => String(item?.id || "") === createdPlaylistId)
@@ -384,7 +278,7 @@ export async function createPlaylist(name, deps) {
     state.currentPlaylistId = selectedPlaylistId;
     updateModeText();
     if (selectedPlaylistId) {
-      await switchTab(selectedPlaylistId);
+      await switchView(selectedPlaylistId);
     }
     return playlist;
   });
@@ -392,17 +286,9 @@ export async function createPlaylist(name, deps) {
   emitStatus(`Playlist created: ${created.name}`);
 }
 
-export async function deletePlaylist(playlistId, deps) {
-  const {
-    state,
-    openConfirmDialog,
-    command,
-    loadPlaylists,
-    updateModeText,
-    switchTab,
-    setStatus
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function deletePlaylist(ctx, playlistId) {
+  const { state, openConfirmDialog, command, updateModeText, switchView } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
 
   if (!playlistId || state.deletingPlaylistId === playlistId) return;
   const playlist = state.playlists.find((p) => p.id === playlistId);
@@ -425,31 +311,23 @@ export async function deletePlaylist(playlistId, deps) {
       emitStatus(`Delete failed: ${playlist.name}`);
       return;
     }
-    await loadPlaylists();
+    await loadPlaylists(ctx);
     if (state.currentPlaylistId === playlistId) {
       state.currentPlaylistId = state.playlists.at(-1)?.id || null;
     }
     updateModeText();
-    await switchTab(state.currentPlaylistId || "library");
+    await switchView(state.currentPlaylistId || "library");
     emitStatus(`Playlist deleted: ${playlist.name}`);
   } finally {
     state.deletingPlaylistId = null;
   }
 }
 
-export async function addTracksToCurrentPlaylist(tracks, deps) {
-  const {
-    requireCurrentPlaylist,
-    pushEventLog,
-    setStatus,
-    withProgress,
-    command,
-    refreshCurrentPlaylistTracks,
-    promoteTrackIdentity
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function addTracksToCurrentPlaylist(ctx, tracks) {
+  const { state, pushEventLog, withProgress, command, promoteTrackIdentity } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
 
-  const playlist = requireCurrentPlaylist();
+  const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;
   const candidates = Array.isArray(tracks) ? tracks : [];
   if (!candidates.length) {
@@ -459,21 +337,19 @@ export async function addTracksToCurrentPlaylist(tracks, deps) {
 
   const result = await withProgress("Adding tracks", async (progress) => {
     progress(25, "Resolving tracks...");
-    if (typeof pushEventLog === "function") {
-      pushEventLog({
-        level: "info",
-        source: "playlist-add",
-        code: "playlist_add.request",
-        message: `Adding ${candidates.length} track(s) to ${playlist.name}`,
-        details: `candidateIds=${candidates.map((item) => item.trackId || item.id || item.filePath || "unknown").join(",")}`
-      });
-    }
+    pushEventLog({
+      level: "info",
+      source: "playlist-add",
+      code: "playlist_add.request",
+      message: `Adding ${candidates.length} track(s) to ${playlist.name}`,
+      details: `candidateIds=${candidates.map((item) => item.trackId || item.id || item.filePath || "unknown").join(",")}`
+    });
     const add = await command("add_track_candidates_to_playlist", {
       playlistId: playlist.id,
       tracks: candidates.map(toAddTrackCandidatePayload),
       dedupe: "skip",
-      usbRoot: deps.usbRoot || null,
-      usbRootValid: !!deps.usbRootValid
+      usbRoot: state.usbRoot || null,
+      usbRootValid: !!state.usbRootValid
     });
     for (let i = 0; i < (add.resolutions || []).length; i += 1) {
       const resolution = add.resolutions[i] || {};
@@ -481,7 +357,7 @@ export async function addTracksToCurrentPlaylist(tracks, deps) {
       if (!resolvedId) continue;
       if (tracks?.[i]) tracks[i].localTrackId = resolvedId;
       const previousId = String(resolution.previousId || "").trim();
-      if (previousId && previousId !== resolvedId && typeof promoteTrackIdentity === "function") {
+      if (previousId && previousId !== resolvedId) {
         promoteTrackIdentity(previousId, resolvedId);
       }
     }
@@ -496,16 +372,14 @@ export async function addTracksToCurrentPlaylist(tracks, deps) {
     playlist.lastExportedUsbRoot = null;
     playlist.lastExportedTrackCount = null;
     progress(80, "Refreshing playlist...");
-    await refreshCurrentPlaylistTracks();
-    if (typeof pushEventLog === "function") {
-      pushEventLog({
-        level: "info",
-        source: "playlist-add",
-        code: "playlist_add.result",
-        message: `Added ${add.added} track(s) to ${playlist.name}`,
-        details: `requested=${add.requested || candidates.length} | resolved=${add.resolved || 0} | added=${add.added} | skipped=${add.skipped}`
-      });
-    }
+    await refreshCurrentPlaylistTracks(ctx);
+    pushEventLog({
+      level: "info",
+      source: "playlist-add",
+      code: "playlist_add.result",
+      message: `Added ${add.added} track(s) to ${playlist.name}`,
+      details: `requested=${add.requested || candidates.length} | resolved=${add.resolved || 0} | added=${add.added} | skipped=${add.skipped}`
+    });
     return add;
   });
   if (!Number(result.resolved || 0)) {
@@ -519,20 +393,11 @@ export async function addTracksToCurrentPlaylist(tracks, deps) {
 // selection against the current library filter (so a selection spanning pages
 // the user scrolled past is not lost), materializes any browse-only rows, and
 // appends -- the frontend just forwards the ids / `allMatching` flag.
-export async function addLibrarySelectionToCurrentPlaylist(deps) {
-  const {
-    requireCurrentPlaylist,
-    pushEventLog,
-    withProgress,
-    command,
-    refreshCurrentPlaylistTracks,
-    trackIds = [],
-    allMatching = false,
-    libraryFilter = {}
-  } = deps;
-  const emitStatus = resolveEmitStatus(deps);
+export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [], allMatching = false } = {}) {
+  const { state, pushEventLog, withProgress, command } = ctx;
+  const emitStatus = resolveEmitStatus(ctx);
 
-  const playlist = requireCurrentPlaylist();
+  const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;
   if (!allMatching && !trackIds.length) {
     emitStatus("Select at least one track to add");
@@ -543,9 +408,9 @@ export async function addLibrarySelectionToCurrentPlaylist(deps) {
     progress(30, "Adding tracks...");
     return command("add_library_selection_to_playlist", {
       playlistId: playlist.id,
-      sourceRoots: libraryFilter.sourceRoots || [],
-      includeMasterDb: !!libraryFilter.includeMasterDb,
-      query: libraryFilter.query || "",
+      sourceRoots: ctx.enabledLibrarySourceRoots(),
+      includeMasterDb: state.masterDbEnabled === true,
+      query: String(state.libraryQuery || "").trim(),
       trackIds: allMatching ? [] : trackIds,
       allMatching,
       dedupe: "skip"
@@ -556,16 +421,14 @@ export async function addLibrarySelectionToCurrentPlaylist(deps) {
   playlist.lastExportedAt = null;
   playlist.lastExportedUsbRoot = null;
   playlist.lastExportedTrackCount = null;
-  await refreshCurrentPlaylistTracks();
-  if (typeof pushEventLog === "function") {
-    pushEventLog({
-      level: "info",
-      source: "playlist-add",
-      code: "playlist_add.result",
-      message: `Added ${add?.added || 0} track(s) to ${playlist.name}`,
-      details: `added=${add?.added || 0} | skipped=${add?.skipped || 0} | allMatching=${allMatching}`
-    });
-  }
+  await refreshCurrentPlaylistTracks(ctx);
+  pushEventLog({
+    level: "info",
+    source: "playlist-add",
+    code: "playlist_add.result",
+    message: `Added ${add?.added || 0} track(s) to ${playlist.name}`,
+    details: `added=${add?.added || 0} | skipped=${add?.skipped || 0} | allMatching=${allMatching}`
+  });
   emitStatus(`Added ${add?.added || 0} tracks (skipped ${add?.skipped || 0}) to ${playlist.name}`);
 }
 
@@ -579,16 +442,21 @@ export function createSingleSubmit(handler) {
   };
 }
 
-export function renderPlaylistSidebarItemContent(playlist, deps) {
-  const { escapeHtml } = deps;
-  const statusIcon = playlist.lastExportedAt ? "\u2713" : "";
-  const statusClass = playlist.lastExportedAt ? " exported" : "";
-  const statusTitle = playlist.lastExportedAt ? "Exported to USB" : "";
-  return `
-    <span class="nav-playlist-name">${escapeHtml(playlist.name)}</span>
-    <span class="nav-playlist-status${statusClass}"${statusTitle ? ` data-tooltip="${statusTitle}" aria-label="${statusTitle}"` : ""}>${statusIcon}</span>
-    <span class="nav-playlist-delete" data-delete-playlist="${playlist.id}" data-tooltip="Delete playlist" aria-label="Delete playlist" role="button" tabindex="0">&times;</span>
-  `;
+// Name, "exported to USB" mark and delete button of a sidebar playlist item.
+export function fillPlaylistSidebarItem(item, playlist) {
+  item.querySelector(".nav-playlist-name").textContent = playlist.name;
+  const status = item.querySelector(".nav-playlist-status");
+  const exported = !!playlist.lastExportedAt;
+  status.classList.toggle("exported", exported);
+  status.textContent = exported ? "✓" : "";
+  if (exported) {
+    status.dataset.tooltip = "Exported to USB";
+    status.setAttribute("aria-label", "Exported to USB");
+  } else {
+    delete status.dataset.tooltip;
+    status.removeAttribute("aria-label");
+  }
+  item.querySelector(".nav-playlist-delete").dataset.deletePlaylist = playlist.id;
 }
 
 // The playlist's track count AND duration total are both computed entirely by
@@ -596,8 +464,8 @@ export function renderPlaylistSidebarItemContent(playlist, deps) {
 // loaded client-side) and pushed here via playlist.trackCount /
 // playlist.totalDurationMs -- see GetPlaylistTracksData::{total,total_duration_ms}.
 // This is a pure setter, no track iteration.
-export function updatePlaylistPanelTitle(el, playlist, deps) {
-  const { formatDurationMs } = deps;
+export function updatePlaylistPanelTitle(ctx, playlist) {
+  const { el } = ctx;
   if (!el?.playlistPanelTitle || !playlist) return;
   const loaded = Array.isArray(playlist.tracks) ? playlist.tracks.length : 0;
   // Prefer the backend's whole-playlist total; fall back to the loaded count
@@ -611,11 +479,180 @@ export function updatePlaylistPanelTitle(el, playlist, deps) {
   el.playlistPanelTitle.textContent = parts.join(" ");
 }
 
-export function populatePlaylistPanel(el, state, playlist, deps) {
-  const { updatePlaylistPanelTitle, formatPlaylistExportStatus, updatePlaylistExportButtons } = deps;
+export function populatePlaylistPanel(ctx, playlist) {
+  const { state, el } = ctx;
   if (!playlist) return;
-  updatePlaylistPanelTitle(playlist);
+  updatePlaylistPanelTitle(ctx, playlist);
   el.playlistExportStatus.textContent = formatPlaylistExportStatus(playlist);
-  updatePlaylistExportButtons();
+  updatePlaylistExportButtons(ctx);
   el.playlistSearchInput.value = state.playlistTrackSearch || "";
+}
+
+export function getCurrentPlaylist(ctx) {
+  const { state } = ctx;
+  return state.playlists.find((p) => p.id === state.currentPlaylistId) || null;
+}
+
+function requireCurrentPlaylist(ctx) {
+  const p = getCurrentPlaylist(ctx);
+  if (p) return p;
+  ctx.emitStatus("Create and activate a playlist first");
+  return null;
+}
+
+export function clearPlaylistTrackSort(ctx) {
+  clearTrackSort(
+    ctx.tableSortState,
+    "playlistTracksBody",
+    ctx.el.playlistTracksBody?.closest("[data-track-grid]")
+  );
+}
+
+export function isPlaylistSortActive(ctx) {
+  return !!ctx.tableSortState.playlistTracksBody;
+}
+
+// The app-playlist track table's data layer -- server-paginated + searched +
+// sorted via `get_playlist_tracks`, same as the other three views. `ctl.items`
+// is backed by `getCurrentPlaylist().tracks` (the loaded page(s)). A column
+// sort is still a *reversible view op* while browsing -- it re-queries page 1
+// sorted, and only becomes the playlist's persisted order when
+// `commitActivePlaylistSort` fires on navigate-away/export (which sends the
+// sort params to the backend, so it reorders the whole playlist, not just what
+// was loaded). Drag-reorder sends a single-move to the backend for the same
+// reason.
+export function createPlaylistTracksController(ctx) {
+  const ctl = createTrackListController({
+    bodyId: "playlistTracksBody",
+    pageSize: PLAYLIST_LOAD_LIMIT_DEFAULT,
+    getElements: () => ({
+      body: ctx.el.playlistTracksBody,
+      wrap: ctx.el.playlistTableWrap,
+      durationTarget: ctx.el.playlistTotalDuration,
+    }),
+    fetchPage: ({ scopeId, query, sortBy, sortDir, cursor, limit }) =>
+      ctx.command("get_playlist_tracks", {
+        playlistId: scopeId,
+        query,
+        sortBy: sortBy || null,
+        sortDir: sortDir || null,
+        cursor: cursor || null,
+        limit,
+      }),
+    normalize: (track) => ctx.normalizeTrack(track, "plt"),
+    getItems: () => getCurrentPlaylist(ctx)?.tracks || [],
+    setItems: (value) => {
+      const p = getCurrentPlaylist(ctx);
+      if (p) p.tracks = value;
+    },
+    rowOptions: () => {
+      const playlist = getCurrentPlaylist(ctx);
+      const lock = playlist
+        ? applyPlaylistReorderLockToGrid(
+          ctx.el,
+          playlist,
+          { searchActive: !!ctl.query },
+          ctx.state.playlistUsbExportStatusById,
+        )
+        : {};
+      return {
+        withCheckbox: false,
+        origin: "local",
+        secondaryActionLabel: "Play",
+        secondaryActionType: "play-library",
+        enableAnalyzeActions: true,
+        actionLabel: "×",
+        actionType: "remove-playlist-track",
+        compactAddButton: true,
+        reservesDragColumn: true,
+        enableDragReorder: lock.enableDragReorder,
+        dragDisabledTooltip: lock.dragDisabledTooltip,
+      };
+    },
+    renderTrackTable: ctx.renderTrackTable,
+    renderDurationSummary: (target, summary) =>
+      renderTrackListDurationSummary(target, summary, formatDurationMs),
+    getTableSortState: () => ctx.tableSortState,
+    onResponse: (data) => {
+      const p = getCurrentPlaylist(ctx);
+      if (p) {
+        p.totalDurationMs = Number(data.totalDurationMs) || 0;
+        p.durationKnownCount = Number(data.durationKnownCount) || 0;
+        p.unanalyzedCount = Number(data.unanalyzedCount) || 0;
+        // Whole-playlist count from the backend, not just the loaded page(s).
+        p.trackCount = Number(data.total) || 0;
+      }
+      // Reveal the table wrap *before* renderTrackTable paints the rows: a
+      // waveform canvas measured while an ancestor is `display:none` (the
+      // empty-state chrome still applied from a previously-selected empty
+      // playlist) sizes to 1x1 and is never repainted when the wrap is later
+      // shown, leaving every waveform blank. renderPlaylistPanelChrome() in
+      // onPage still owns the authoritative empty/non-empty state afterwards.
+      const hasTracks = Number(data.total) > 0 || (data.items || []).length > 0;
+      ctx.el.playlistTableWrap?.classList.toggle("hidden", !hasTracks);
+      ctx.el.playlistTotalDuration?.classList.toggle("hidden", !hasTracks);
+    },
+    onPage: () => renderPlaylistPanelChrome(ctx),
+  });
+  return ctl;
+}
+
+// Panel glue around the playlist track table that the controller does not own:
+// empty state, section visibility, search-input restore, is-analyzing pulse,
+// title, export buttons, sidebar. Run after every (re)render of the list.
+export function renderPlaylistPanelChrome(ctx) {
+  const { state, el, playlistTracksCtl } = ctx;
+  const playlist = getCurrentPlaylist(ctx);
+  if (!playlist) return;
+  const empty = playlistTracksCtl.total === 0 && !playlistTracksCtl.loading;
+  if (el.playlistEmptyState) {
+    el.playlistEmptyState.replaceChildren();
+    if (empty) {
+      renderEmptyState(el.playlistEmptyState, {
+        icon: "♫",
+        heading: "Browse Library or USB to add tracks",
+      });
+    }
+  }
+  el.playlistTableWrap?.classList.toggle("hidden", empty);
+  el.playlistTotalDuration?.classList.toggle("hidden", empty);
+  el.playlistSearchInput?.closest(".search-row")?.classList.toggle("hidden", empty);
+  el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", empty);
+  if (el.playlistSearchInput && el.playlistSearchInput.value !== (state.playlistTrackSearch || "")) {
+    el.playlistSearchInput.value = state.playlistTrackSearch || "";
+  }
+  for (const id of state.analyzingTrackIds) {
+    const row = el.playlistTracksBody?.querySelector(
+      `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`,
+    );
+    if (row) row.classList.add("is-analyzing");
+  }
+  updatePlaylistPanelTitle(ctx, playlist);
+  updatePlaylistExportButtons(ctx);
+  renderPlaylistList(ctx);
+}
+
+// Re-render the open playlist's track table from the already-loaded
+// `playlist.tracks` (no fetch) -- used when only the view changed: a
+// reorder-lock flip after a USB scan, a cross-view analysis patch.
+export async function renderCurrentPlaylistTracksFromState(ctx) {
+  if (!getCurrentPlaylist(ctx)) return;
+  await ctx.playlistTracksCtl.rerender();
+  renderPlaylistPanelChrome(ctx);
+}
+
+// Fetch the open playlist's tracks from the backend and render. `ctl.load`
+// replaces `getCurrentPlaylist().tracks` via setItems.
+export async function refreshCurrentPlaylistTracks(ctx) {
+  const { state, playlistTracksCtl } = ctx;
+  const playlist = getCurrentPlaylist(ctx);
+  if (!playlist) return;
+  playlistTracksCtl.query = String(state.playlistTrackSearch || "");
+  // Keep the controller's sort in lockstep with the header UI state -- a drag
+  // clears the sort (deletes tableSortState) but leaves ctl.sortBy stale.
+  const st = ctx.tableSortState.playlistTracksBody || null;
+  playlistTracksCtl.sortBy = st?.key || null;
+  playlistTracksCtl.sortDir = st?.dir || null;
+  await playlistTracksCtl.load({ scopeId: playlist.id });
+  renderPlaylistPanelChrome(ctx);
 }

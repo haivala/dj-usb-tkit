@@ -44,10 +44,10 @@ test("handleSortHeaderClick is a no-op when the grid is sort-locked", () => {
   const tableSortState = {};
   let renderCalls = 0;
 
-  handleSortHeaderClick(tableSortState, { target: albumHeader }, {
-    renderMap: { playlistTracksBody: () => { renderCalls += 1; } },
-    bodyToRendererMap: {}
-  });
+  handleSortHeaderClick({
+    tableSortState,
+    playlistTracksCtl: { bodyId: "playlistTracksBody", applyHeaderSort: () => { renderCalls += 1; } }
+  }, { target: albumHeader });
 
   assert.equal(tableSortState.playlistTracksBody, undefined);
   assert.equal(albumHeader.classList.contains("sort-asc"), false);
@@ -61,10 +61,10 @@ test("handleSortHeaderClick still sorts when the grid is not locked", () => {
   const tableSortState = {};
   let renderCalls = 0;
 
-  handleSortHeaderClick(tableSortState, { target: albumHeader }, {
-    renderMap: { playlistTracksBody: () => { renderCalls += 1; } },
-    bodyToRendererMap: {}
-  });
+  handleSortHeaderClick({
+    tableSortState,
+    playlistTracksCtl: { bodyId: "playlistTracksBody", applyHeaderSort: () => { renderCalls += 1; } }
+  }, { target: albumHeader });
 
   assert.deepEqual(tableSortState.playlistTracksBody, { key: "album", dir: "asc" });
   assert.equal(albumHeader.classList.contains("sort-asc"), true);

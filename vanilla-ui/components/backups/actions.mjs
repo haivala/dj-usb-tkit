@@ -1,5 +1,7 @@
 // USB DB backup snapshot list/restore/delete UI logic.
 
+import { cloneTemplate } from "../../ui_utils.mjs";
+
 function formatBackupTimestamp(raw) {
   // Stored as "%Y-%m-%d_%H-%M-%S" (usb_vendor_compat::backup_usb_databases).
   const match = /^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})$/.exec(String(raw || ""));
@@ -25,13 +27,19 @@ function labelForFiles(files) {
   return present.length ? present.map((stem) => STEM_LABELS[stem]).join(" and ") : "Backup";
 }
 
-export async function renderBackups(state, el, document, deps = {}) {
-  const { command, escapeHtml = (s) => String(s) } = deps;
+function showBackupsMessage(list, text) {
+  const row = cloneTemplate(list.ownerDocument, "tplLogMessageRow");
+  row.firstElementChild.textContent = text;
+  list.replaceChildren(row);
+}
+
+export async function renderBackups(ctx) {
+  const { state, el, command } = ctx;
   if (!el.backupsList || !el.backupsSummary) return;
 
   if (!state.usbRoot) {
     el.backupsSummary.textContent = "No USB connected";
-    el.backupsList.innerHTML = `<div class="event-log-row"><div class="event-log-message muted">Connect a USB to see its backups.</div></div>`;
+    showBackupsMessage(el.backupsList, "Connect a USB to see its backups.");
     return;
   }
 
@@ -41,47 +49,34 @@ export async function renderBackups(state, el, document, deps = {}) {
     items = Array.isArray(data?.items) ? data.items : [];
   } catch (err) {
     el.backupsSummary.textContent = "Failed to load backups";
-    el.backupsList.innerHTML = `<div class="event-log-row"><div class="event-log-message muted">${escapeHtml(err?.message || String(err))}</div></div>`;
+    showBackupsMessage(el.backupsList, err?.message || String(err));
     return;
   }
 
   state.usbBackups = items;
   el.backupsSummary.textContent = `${items.length} backup(s)`;
   if (!items.length) {
-    el.backupsList.innerHTML = `<div class="event-log-row"><div class="event-log-message muted">No backups yet.</div></div>`;
+    showBackupsMessage(el.backupsList, "No backups yet.");
     return;
   }
 
-  el.backupsList.innerHTML = items.map((item) => {
-    const reason = escapeHtml(item.reason || "—");
-    const rawTimestamp = escapeHtml(item.timestamp);
-    const timestamp = escapeHtml(formatBackupTimestamp(item.timestamp));
-    const size = escapeHtml(formatBackupSize(item.sizeBytes));
+  el.backupsList.replaceChildren(...items.map((item) => {
+    const row = cloneTemplate(el.backupsList.ownerDocument, "tplBackupRow");
     const location = item.location === "usb" ? "On USB" : "On this computer";
     const playlistCount = Number.isFinite(item.playlistCount)
       ? ` · ${item.playlistCount} playlist${item.playlistCount === 1 ? "" : "s"}`
       : "";
-    return `<div class="event-log-row" data-timestamp="${rawTimestamp}">
-      <div class="event-log-time">${timestamp}</div>
-      <div class="event-log-source">${reason}</div>
-      <div class="event-log-message">${size} · ${escapeHtml(location)}${escapeHtml(playlistCount)}</div>
-      <div class="backups-row-actions">
-        <button type="button" class="backups-restore-btn" data-timestamp="${rawTimestamp}">Restore</button>
-        <button type="button" class="backups-delete-btn" data-timestamp="${rawTimestamp}">Delete</button>
-      </div>
-    </div>`;
-  }).join("");
+    row.dataset.timestamp = item.timestamp;
+    row.querySelector(".event-log-time").textContent = formatBackupTimestamp(item.timestamp);
+    row.querySelector(".event-log-source").textContent = item.reason || "—";
+    row.querySelector(".event-log-message").textContent = `${formatBackupSize(item.sizeBytes)} · ${location}${playlistCount}`;
+    row.querySelectorAll("button").forEach((btn) => { btn.dataset.timestamp = item.timestamp; });
+    return row;
+  }));
 }
 
-export async function restoreUsbBackup(state, timestamp, deps = {}) {
-  const {
-    command,
-    openConfirmDialog = async () => true,
-    setStatus = () => {},
-    reload = async () => {},
-    clearUsbDiagnostics = () => {},
-    resetUsbStateViews = () => {}
-  } = deps;
+export async function restoreUsbBackup(ctx, timestamp) {
+  const { state, command, openConfirmDialog, setStatus } = ctx;
   if (!state.usbRoot) return;
 
   const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
@@ -102,16 +97,16 @@ export async function restoreUsbBackup(state, timestamp, deps = {}) {
     // them rather than show stale results; the user can reload if they
     // want fresh ones. The same drive is still selected, so only the
     // diagnostics report is cleared, not the whole panel.
-    clearUsbDiagnostics();
-    resetUsbStateViews({ hideDiagnostics: false });
+    ctx.clearUsbDiagnostics();
+    ctx.resetUsbStateViews({ hideDiagnostics: false });
   } catch (err) {
     setStatus(`Restore failed: ${err?.message || err}`);
   }
-  await reload();
+  await renderBackups(ctx);
 }
 
-export async function deleteUsbBackup(state, timestamp, deps = {}) {
-  const { command, openConfirmDialog = async () => true, setStatus = () => {}, reload = async () => {} } = deps;
+export async function deleteUsbBackup(ctx, timestamp) {
+  const { state, command, openConfirmDialog, setStatus } = ctx;
   if (!state.usbRoot) return;
 
   const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
@@ -129,5 +124,5 @@ export async function deleteUsbBackup(state, timestamp, deps = {}) {
   } catch (err) {
     setStatus(`Delete failed: ${err?.message || err}`);
   }
-  await reload();
+  await renderBackups(ctx);
 }

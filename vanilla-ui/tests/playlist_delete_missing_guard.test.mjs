@@ -6,15 +6,14 @@ test("deletePlaylist skips when playlist not found in state", async () => {
   let commandCalled = false;
   const state = { playlists: [], deletingPlaylistId: null };
 
-  await deletePlaylist("missing-id", {
+  await deletePlaylist({
     state,
     openConfirmDialog: async () => true,
     command: async () => { commandCalled = true; return { deleted: true }; },
-    loadPlaylists: async () => {},
     updateModeText: () => {},
-    switchTab: async () => {},
+    switchView: async () => {},
     setStatus: () => {}
-  });
+  }, "missing-id");
 
   assert.ok(!commandCalled, "should not call backend for nonexistent playlist");
 });

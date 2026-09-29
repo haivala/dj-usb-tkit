@@ -6,13 +6,13 @@ import { normalizeTrack, trackArtworkChecked } from "../components/library/actio
 // (service::usb::hydrate_usb_track_in_place, tested there). The frontend just
 // carries the `needsHydration` flag through normalizeTrack.
 
-const deps = { toPlayableUrl: (v) => v, appendUrlRevision: (u) => u, normalizeDurationMs: () => null };
+const ctx = { toPlayableUrl: (v) => v };
 
 test("normalizeTrack carries the backend needsHydration flag (USB rows)", () => {
-  assert.equal(normalizeTrack({ id: "1", needsHydration: true }, "usb", deps).needsHydration, true);
-  assert.equal(normalizeTrack({ id: "2", needsHydration: false }, "usb", deps).needsHydration, false);
+  assert.equal(normalizeTrack(ctx, { id: "1", needsHydration: true }, "usb").needsHydration, true);
+  assert.equal(normalizeTrack(ctx, { id: "2", needsHydration: false }, "usb").needsHydration, false);
   // absent / non-boolean -> false
-  assert.equal(normalizeTrack({ id: "3" }, "lib", deps).needsHydration, false);
+  assert.equal(normalizeTrack(ctx, { id: "3" }, "lib").needsHydration, false);
 });
 
 test("trackArtworkChecked reflects the frontend runtime flag", () => {

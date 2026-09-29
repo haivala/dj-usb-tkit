@@ -1,38 +1,32 @@
 import { catchErr, handleTrackAction, resolveEmitStatus, resolveRowActionTrack } from "../shared/track_actions.mjs";
+import { enabledSourceRoots, LIBRARY_LOAD_LIMIT_DEFAULT } from "./actions.mjs";
 
 export function bindLibraryEvents(ctx) {
   const {
     state,
     el,
     window,
-    constants,
-    setStatus,
     renderSourceChips,
     syncAssetScopePaths,
-    applySearchLocalFilter,
+    renderLibraryRows,
     updateSelectionCount,
-    updateSourceFilterIndicator = () => {},
-    openConfirmDialog = async () => false,
+    updateSourceFilterIndicator,
+    openConfirmDialog,
     command,
     resetAndLoadLibraryTracks,
     refreshCurrentPlaylistTracks,
     withProgress,
     persistSourceRoots,
     persistSourceRootEnabled,
-    persistMasterDbEnabled = () => {},
-    persistSourcesEverConfigured = () => {},
-    enabledSourceRoots,
+    persistMasterDbEnabled,
+    persistSourcesEverConfigured,
     pickSourceFolders,
     relocateSourceRoot,
     scanLibrary,
     scanMasterDb,
     analyzeSelectedTracks,
-    scheduleApplySearchLocalFilter,
-    addTracksToCurrentPlaylist,
     addLibrarySelectionToCurrentPlaylist,
-    getLibraryVisibleTracks,
-    hydrateLoadedTracksPreviewsInBackground = async () => {},
-    LIBRARY_LOAD_LIMIT_DEFAULT,
+    libraryTracksCtl,
   } = ctx;
   const emitStatus = resolveEmitStatus(ctx);
 
@@ -57,7 +51,7 @@ export function bindLibraryEvents(ctx) {
       renderSourceChips();
       syncAssetScopePaths().catch(() => {});
       if (!removedRoot) {
-        applySearchLocalFilter();
+        renderLibraryRows();
         updateSelectionCount();
         emitStatus(`Source folders: ${state.sourceRoots.length}`);
         return;
@@ -174,12 +168,12 @@ export function bindLibraryEvents(ctx) {
   });
 
   el.importMasterDbBtn?.addEventListener("click", () => {
-    scanMasterDb?.().catch(catchErr(emitStatus));
+    scanMasterDb().catch(catchErr(emitStatus));
   });
 
   el.libraryTableWrap?.addEventListener("scroll", ctx.handleLibraryTableWrapScroll, { passive: true });
   window.addEventListener("resize", ctx.handleLibraryTableWrapScroll);
-  el.librarySearch.addEventListener("input", scheduleApplySearchLocalFilter);
+  el.librarySearch.addEventListener("input", () => ctx.scheduleLibrarySearch());
 
   // Source bar accordion
   el.sourceFilterHeader?.addEventListener("click", () => {
@@ -205,7 +199,7 @@ export function bindLibraryEvents(ctx) {
     const checkbox = event.target;
     if (!checkbox.checked) {
       state.selectedTrackIds.clear();
-      ctx.renderLibraryRows();
+      renderLibraryRows();
       updateSelectionCount();
       return;
     }
@@ -215,14 +209,14 @@ export function bindLibraryEvents(ctx) {
       const data = await withProgress("Selecting all matching tracks", async (progress) => {
         progress(40, "Enumerating tracks...");
         return command("list_matching_track_ids", {
-          sourceRoots: enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots),
+          sourceRoots: ctx.enabledLibrarySourceRoots(),
           includeMasterDb: state.masterDbEnabled === true,
           query: String(state.libraryQuery || "").trim(),
         });
       });
       if (!checkbox.checked) return;
       state.selectedTrackIds = new Set((data?.trackIds || []).filter(Boolean));
-      ctx.renderLibraryRows();
+      renderLibraryRows();
       updateSelectionCount();
     })().catch(catchErr(emitStatus));
   });
@@ -240,7 +234,7 @@ export function bindLibraryEvents(ctx) {
     const target = event.target.closest("[data-action]");
     const action = target?.dataset?.action;
     const rowKey = target?.closest(".track-grid-row")?.dataset?.playbackRow || null;
-    const track = resolveRowActionTrack(getLibraryVisibleTracks(), target);
+    const track = resolveRowActionTrack(libraryTracksCtl.view, target);
     if (!track) return;
 
     handleTrackAction({ action, track, origin: "local", target, event, state, rowKey, ctx });

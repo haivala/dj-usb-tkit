@@ -8,6 +8,7 @@ import {
   MAX_CUES,
 } from "../components/track-detail/actions.mjs";
 import { base64ToBytes } from "../components/track-detail/waveform_detail.mjs";
+import { APP_TEMPLATES } from "./test_helpers.mjs";
 
 function pwv5Base64(entryCount) {
   const bytes = new Uint8Array(entryCount * 2);
@@ -37,6 +38,7 @@ function makeEl() {
         <button id="trackDetailSaveBtn"></button>
         <div id="trackDetailColorPopover" hidden></div>
       </div>
+      ${APP_TEMPLATES}
     </body>`,
     { pretendToBeVisual: true }
   );
@@ -191,8 +193,14 @@ test("openTrackDetail resolves id, fetches detail, then saves the edited payload
   const trackDetailDialog = { open: async () => savedPayload };
   const emitted = [];
   await openTrackDetail(
-    { id: "row-1", title: "T" },
-    { command, resolveLocalTrackIdAsync: async () => "local-1", trackDetailDialog, emitStatus: (m) => emitted.push(m) }
+    {
+      command,
+      resolveLocalTrackIdAsync: async () => "local-1",
+      trackDetailDialog,
+      emitStatus: (m) => emitted.push(m),
+      applyRealtimeAnalyzedTrackUpdate: () => {}
+    },
+    { id: "row-1", title: "T" }
   );
 
   assert.deepEqual(calls[0], ["get_track_detail", { trackId: "local-1" }]);
@@ -212,13 +220,13 @@ test("openTrackDetail bails when the track has no analysis waveform", async () =
   const emitted = [];
   let opened = false;
   await openTrackDetail(
-    { id: "row-x" },
     {
       command: async () => ({ track: { id: "local-x" }, cues: [], detailWaveform: null }),
       resolveLocalTrackIdAsync: async () => "local-x",
       trackDetailDialog: { open: async () => { opened = true; return null; } },
       emitStatus: (m) => emitted.push(m),
-    }
+    },
+    { id: "row-x" }
   );
   assert.equal(opened, false);
   assert.match(emitted.join(" "), /Analyze this track first/);

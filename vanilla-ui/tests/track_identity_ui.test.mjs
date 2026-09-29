@@ -5,19 +5,21 @@ import {
   setTrackAnalyzingState,
   promoteTrackIdentity
 } from "../components/library/actions.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
-test("setTrackAnalyzingState updates set and patches library/playlist rows", () => {
-  const state = {
-    analyzingTrackIds: new Set(["x"]),
-    tracks: [{ id: "x", durationMs: 1000, bpm: 120, waveformPreview: [1] }]
-  };
-  const calls = [];
-  setTrackAnalyzingState(state, "x", false, {
-    patchLibraryRowByTrackId: (id) => calls.push(`lib:${id}`),
-    patchPlaylistRowByTrackId: (id) => calls.push(`pl:${id}`)
-  });
-  assert.equal(state.analyzingTrackIds.has("x"), false);
-  assert.deepEqual(calls, ["lib:x", "pl:x"]);
+test("setTrackAnalyzingState updates the set and the rendered library row", async () => {
+  const ctx = makeTestCtx();
+  ctx.state.tracks = [{ id: "x", title: "X", durationMs: 1000, bpm: 120, waveformPreview: [1] }];
+  await ctx.libraryTracksCtl.rerender();
+  const row = ctx.el.libraryTableBody.querySelector('.track-grid-row[data-track-id="x"]');
+
+  setTrackAnalyzingState(ctx, "x", true);
+  assert.equal(ctx.state.analyzingTrackIds.has("x"), true);
+  assert.equal(row.classList.contains("is-analyzing"), true);
+
+  setTrackAnalyzingState(ctx, "x", false);
+  assert.equal(ctx.state.analyzingTrackIds.has("x"), false);
+  assert.equal(row.classList.contains("is-analyzing"), false);
 });
 
 test("promoteTrackIdentity updates state ids and row dataset ids", () => {
@@ -28,7 +30,7 @@ test("promoteTrackIdentity updates state ids and row dataset ids", () => {
     playlists: [{ tracks: [{ id: "old", localTrackId: "old" }] }]
   };
   const el = { libraryTableBody: dom.window.document.querySelector("#lib") };
-  promoteTrackIdentity(state, el, "old", "new", { cssEscape: (v) => v });
+  promoteTrackIdentity({ state, el }, "old", "new");
 
   assert.equal(state.tracks[0].id, "new");
   assert.equal(state.tracks[0].localTrackId, "new");

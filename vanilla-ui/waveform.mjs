@@ -96,7 +96,7 @@ function measureWaveformCanvas(element) {
   if (!canvas) return null;
 
   const rect = element.getBoundingClientRect();
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const dpr = Math.max(1, element.ownerDocument?.defaultView?.devicePixelRatio || 1);
   return {
     element,
     canvas,
