@@ -3869,9 +3869,10 @@ html.is-ui-dragging * {
   grid-template-columns: 26px 72px 24px 1fr 28px;
   align-items: center;
   gap: 8px;
+  padding: 4px 6px;
   border-radius: 8px;
 }
-.cue-row.is-selected { background: var(--action-btn-hover-bg); box-shadow: 0 0 0 4px var(--action-btn-hover-bg); }
+.cue-row.is-selected { background: var(--action-btn-hover-bg); }
 .cue-row-play {
   width: 22px;
   height: 22px;
@@ -3907,7 +3908,6 @@ html.is-ui-dragging * {
 .cue-row-delete:hover { color: var(--danger, #e12424); }
 .cue-row.is-playback-start {
   grid-template-columns: 26px 72px 24px 1fr auto;
-  padding-bottom: 4px;
   border-bottom: 1px dashed var(--line);
 }
 .cue-row-memory {
