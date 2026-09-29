@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+## 0.2.8
+
+**Severity:** feature
+
 - **New feature:** a "Key notation" setting (Settings → Classic `Am` /
   Camelot `8A`). It changes how keys are shown in the app: the track lists,
   USB playlists and history, and the cue editor's key picker. It's display
