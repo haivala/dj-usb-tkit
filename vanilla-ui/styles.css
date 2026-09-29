@@ -2896,10 +2896,14 @@ td button[data-action]:disabled,
   margin-bottom: 12px;
 }
 
-.settings-footer {
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+.settings-meta {
+  margin-left: auto;
+  margin-right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  min-width: 0;
 }
 
 .settings-version {
@@ -2912,7 +2916,7 @@ td button[data-action]:disabled,
 
 .settings-update-note {
   display: block;
-  margin-top: 4px;
+  margin-top: 2px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   letter-spacing: 0.04em;

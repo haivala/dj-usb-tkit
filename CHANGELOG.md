@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+- **Fix:** the app version (and the "Update available" link) now shows in the
+  Settings header next to the close button. Before, it sat at the bottom of
+  the settings list and was hidden below the fold on shorter windows.
+
 ## 0.2.8
 
 **Severity:** feature
