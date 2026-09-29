@@ -689,7 +689,7 @@ test("keyboard: Space plays/pauses (never presses the focused Save), C adds a cu
 
 test("shortcuts stay out of text fields: typing c/1/Space in a cue name only types", async ({ page }) => {
   await openCueEditor(page, { seedCues: [30000] });
-  const name = page.locator("#trackDetailCueList .cue-row-name").first();
+  const name = page.locator("#trackDetailCueList .cue-row .cue-row-name").first();
   await name.click();
   await name.press("End");
   await page.keyboard.type(" c1 ");
@@ -713,14 +713,14 @@ test("undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name ty
   await expect(rows).toHaveCount(2);
   await page.locator("#trackDetailBpmDouble").click();
   await expect(bpm).toHaveValue("256");
-  const name = page.locator("#trackDetailCueList .cue-row-name").first();
+  const name = page.locator("#trackDetailCueList .cue-row .cue-row-name").first();
   const originalName = await name.inputValue();
   await name.fill("");
   await name.pressSequentially("Intro");
   await page.locator("#trackDetailTitle").click();
 
   await page.keyboard.press("Control+z"); // the whole name at once
-  await expect(page.locator("#trackDetailCueList .cue-row-name").first()).toHaveValue(originalName);
+  await expect(page.locator("#trackDetailCueList .cue-row .cue-row-name").first()).toHaveValue(originalName);
   await page.keyboard.press("Control+z");
   await expect(bpm).toHaveValue("128");
   await undo.click();
@@ -1002,7 +1002,7 @@ test("a cue row's play button and its waveform marker both play from that cue's 
   const playCalls = () =>
     page.evaluate(() => window.__calls.filter((c) => c.command === "play_resolved_track"));
 
-  await page.locator("#trackDetailCueList .cue-row-play").click();
+  await page.locator("#trackDetailCueList .cue-row .cue-row-play").click();
   await expect.poll(async () => (await playCalls()).length).toBe(1);
   expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
 
@@ -1038,7 +1038,7 @@ test("dragging a cue marker moves it without playing; Quantize (Q, on by default
     if (shift) await page.keyboard.up("Shift");
   };
   const listedMs = async () => {
-    const text = await page.locator("#trackDetailCueList .cue-row-pos").first().textContent();
+    const text = await page.locator("#trackDetailCueList .cue-row .cue-row-pos").first().textContent();
     const [m, rest] = text.split(":");
     return Number(m) * 60000 + Number(rest) * 1000;
   };
