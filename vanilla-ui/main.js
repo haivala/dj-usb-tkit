@@ -692,6 +692,12 @@ const pauseResumeDeps = () => ({
   });
 const pausePlaybackFromUi = async () => playback.pausePlaybackFromUi(state, pauseResumeDeps());
 const resumePlaybackFromUi = async () => playback.resumePlaybackFromUi(state, pauseResumeDeps());
+const moveActiveWaveform = (waveformEl) => playback.moveActiveWaveform(state, waveformEl, {
+    command,
+    setWaveformPlayhead,
+    requestAnimationFrameFn: window.requestAnimationFrame.bind(window),
+    cancelAnimationFrameFn: window.cancelAnimationFrame.bind(window),
+  });
 const playTrackFromOrigin = async (track, origin, options = {}) => playback.playTrackFromOriginController(state, track, origin, options, {
     playTrackFromOriginCore: playback.playTrackFromOrigin,
     command,
@@ -1747,6 +1753,7 @@ function bindEvents() {
     stopPlaybackFromUi,
     pausePlaybackFromUi,
     resumePlaybackFromUi,
+    moveActiveWaveform,
     playTrackFromOrigin,
     scrubRatioFromPointer: playback.scrubRatioFromPointer,
     removeUsbPlaylist,

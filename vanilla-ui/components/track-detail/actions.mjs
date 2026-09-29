@@ -113,6 +113,7 @@ export function createTrackDetailController(el, prefs = {}) {
     selectedTempId: null, // the cue ←/→ moves: last added, clicked, dragged or jumped to
   };
   let playPauseShowsPlaying = null;
+  const openListeners = [];
   // The save payload as opened; anything else is an unsaved edit.
   let openedPayloadJson = "";
   // Undo/redo: snapshots of the editable state (see `mutate`).
@@ -790,6 +791,11 @@ export function createTrackDetailController(el, prefs = {}) {
       api.setView(0, working.durationMs || DEFAULT_SPAN_MS);
     },
 
+    /// Called after every open, once the modal is shown.
+    onOpened(listener) {
+      openListeners.push(listener);
+    },
+
     notePlaybackStarted() {
       if (!playheadRafHandle) playheadRafHandle = raf(playheadTick);
     },
@@ -1157,6 +1163,7 @@ export function createTrackDetailController(el, prefs = {}) {
 
       el.trackDetailSaveBtn?.focus();
       openedPayloadJson = JSON.stringify(api.toSavePayload());
+      for (const listener of openListeners) listener();
 
       return new Promise((resolve) => {
         resolveFn = resolve;

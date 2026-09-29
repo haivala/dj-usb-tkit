@@ -9,13 +9,46 @@ export function bindTrackDetailEvents(ctx) {
   if (!overlay || !trackDetailDialog) return;
 
   let playbackStartedHere = false;
+  // Playback of this track was already running when the editor opened: the
+  // editor shows it (and may seek/pause it) but hands it back on close.
+  let adopted = null; // { from: the waveform it was shown on }
 
   const stopIfOwned = () => {
+    if (adopted) {
+      const { from } = adopted;
+      adopted = null;
+      ctx.moveActiveWaveform?.(from?.isConnected ? from : null).catch(() => {});
+      return;
+    }
     if (playbackStartedHere && ctx.stopPlaybackFromUi) {
       playbackStartedHere = false;
       ctx.stopPlaybackFromUi().catch(() => {});
     }
   };
+
+  // On open: keep playing (and show it) if it's this track; stop any other
+  // track so Play, "+ Cue" and the playhead all mean this one.
+  trackDetailDialog.onOpened?.(() => {
+    playbackStartedHere = false;
+    adopted = null;
+    if (!ctx.state?.playbackActive) return;
+    if (ctx.isTrackCurrentlyPlaying?.(trackDetailDialog.getWorking().track)) {
+      ctx
+        .moveActiveWaveform?.(el.trackDetailWaveform)
+        .then((from) => {
+          if (from === undefined) return;
+          adopted = { from };
+          if (overlay.hidden) {
+            stopIfOwned(); // closed before the status came back: hand it straight back
+            return;
+          }
+          trackDetailDialog.notePlaybackStarted();
+        })
+        .catch(() => {});
+    } else {
+      ctx.stopPlaybackFromUi?.().catch(() => {});
+    }
+  });
   const close = () => {
     stopIfOwned();
     trackDetailDialog.close(null);
@@ -93,7 +126,7 @@ export function bindTrackDetailEvents(ctx) {
   const playFromRatio = (startRatio) => {
     const track = trackDetailDialog.getWorking().track;
     if (!track || !ctx.playTrackFromOrigin) return;
-    playbackStartedHere = true;
+    if (!adopted) playbackStartedHere = true;
     ctx
       .playTrackFromOrigin(track, "local", { startRatio, waveformEl: wf })
       .then(() => trackDetailDialog.notePlaybackStarted())

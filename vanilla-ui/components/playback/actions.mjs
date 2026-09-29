@@ -210,6 +210,41 @@ export function resumePlaybackFromUi(state, deps) {
   return runPauseChange(state, "resume_playback_native", () => !!state.playbackPaused, deps);
 }
 
+/// Hand the running playback's playhead over to another waveform (the cue
+/// editor adopting a track already playing from a list row, and back on
+/// close). Position and paused flag come from the backend's status; this only
+/// re-targets the projection. Resolves to the waveform it replaced, or
+/// `undefined` when nothing was moved (no playback, or a play/stop won).
+export function moveActiveWaveform(state, waveformEl, deps) {
+  const { command, setWaveformPlayhead, requestAnimationFrameFn, cancelAnimationFrameFn } = deps;
+  if (!state.playbackActive) return Promise.resolve(undefined);
+  const generation = state.playbackGeneration;
+  return withBackendQueue(state, async () => {
+    const status = await command("get_playback_status_native");
+    if (!isGenerationCurrent(state, generation) || !state.playbackActive) return undefined;
+    if (!status || !(status.playing || status.paused)) return undefined;
+    const previous = state.activeWaveform;
+    stopPlayheadInterpolation(state, { cancelAnimationFrameFn });
+    if (previous && previous !== waveformEl) setWaveformPlayhead(previous, 0, false);
+    state.activeWaveform = waveformEl || null;
+    const duration = Number(status.durationMs || 0);
+    const position = Number(status.positionMs || 0);
+    if (waveformEl && status.paused) {
+      setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : 0, false, true);
+    } else if (waveformEl && duration > 0) {
+      startPlayheadInterpolation(state, {
+        waveformEl,
+        initialPositionMs: position,
+        durationMs: duration,
+        setWaveformPlayhead,
+        requestAnimationFrameFn,
+        cancelAnimationFrameFn
+      });
+    }
+    return previous || null;
+  });
+}
+
 export async function stopPlaybackFromUi(state, deps) {
   const {
     command,

@@ -24,6 +24,9 @@ function installTrackDetailMock(page, opts = {}) {
         waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
       },
     ];
+    if (opts.secondTrack) {
+      tracks.push({ ...tracks[0], id: "t2", title: "Other Track", filePath: "/music/two.mp3" });
+    }
     // What the backend's key_notation renders for the keys these tests use.
     const CAMELOT = { "Am": "8A", "F#m": "11A", "C": "8B" };
     const keyLabel = (k) => (opts.camelot && CAMELOT[k]) || k;
@@ -1178,6 +1181,60 @@ test("play/pause resumes in the backend from where it was paused", async ({ page
   // The playhead carries on from the paused spot.
   await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(pausedMs);
   expect(await modalPlayheadMs(page)).toBeLessThan(pausedMs + 2000);
+});
+
+test("opening the editor on the track already playing from its row shows it playing, and hands it back on close", async ({ page }) => {
+  await installTrackDetailMock(page);
+  await page.goto("/");
+  const calls = (command) =>
+    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+  const row = page.locator("#libraryTableBody .track-grid-row").first();
+
+  await row.locator('[data-action="play-library"]').click();
+  await expect(row.locator(".waveform")).toHaveClass(/is-playing/);
+  await page.waitForTimeout(400);
+
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  const btn = page.locator("#trackDetailPlayPause");
+  // Still the same playback -- shown here, not restarted or stopped.
+  await expect(btn).toHaveAttribute("aria-label", "Pause");
+  await expect(page.locator("#trackDetailWaveform")).toHaveClass(/is-playing/);
+  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(300);
+  expect(await calls("play_resolved_track")).toHaveLength(1);
+  expect(await calls("stop_playback_native")).toHaveLength(0);
+
+  // Pause works on the adopted playback.
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Play");
+  expect(await calls("pause_playback_native")).toHaveLength(1);
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Pause");
+
+  // Closing leaves it playing, back on the row.
+  await page.locator("#trackDetailCloseBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(row.locator(".waveform")).toHaveClass(/is-playing/);
+  expect(await calls("stop_playback_native")).toHaveLength(0);
+});
+
+test("opening the editor while another track plays stops that track", async ({ page }) => {
+  await installTrackDetailMock(page, { secondTrack: true });
+  await page.goto("/");
+  const calls = (command) =>
+    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+  const rows = page.locator("#libraryTableBody .track-grid-row");
+  await expect(rows).toHaveCount(2);
+  const other = rows.filter({ hasText: "Other Track" });
+
+  await other.locator('[data-action="play-library"]').click();
+  await expect(other.locator(".waveform")).toHaveClass(/is-playing/);
+
+  await rows.filter({ hasText: "Cue Track" }).locator('[data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect.poll(async () => (await calls("stop_playback_native")).length).toBe(1);
+  await expect(page.locator("#trackDetailPlayPause")).toHaveAttribute("aria-label", "Play");
+  await expect(other.locator(".waveform")).not.toHaveClass(/is-playing/);
 });
 
 test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows cue markers", async ({ page }) => {
