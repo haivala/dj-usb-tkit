@@ -63,7 +63,6 @@ export function makeTestCtx(overrides = {}) {
   ctx.requestAnimationFrameFn = (cb) => setTimeout(cb, 0);
   ctx.cancelAnimationFrameFn = (handle) => clearTimeout(handle);
   ctx.nextPaint = async () => {};
-  ctx.log = () => {};
   ctx.warn = () => {};
   return Object.assign(ctx, overrides);
 }

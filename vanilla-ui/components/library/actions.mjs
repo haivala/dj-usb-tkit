@@ -297,11 +297,9 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
   if (!trackId) return;
 
   let libraryChanged = false;
-  let patchedTrack = null;
   for (const track of state.tracks) {
     if (String(track.id) !== trackId) continue;
     libraryChanged = patchTrackAnalysisFields(ctx, track, payload) || libraryChanged;
-    patchedTrack = track;
   }
   if (libraryChanged) {
     ctx.debugFrontendLog("row-update", {
@@ -309,10 +307,6 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
       bpm: payload?.bpm ?? null,
       key: payload?.key ?? null
     });
-    const label = patchedTrack
-      ? [patchedTrack.artist, patchedTrack.title].filter(Boolean).join(" - ") || trackId
-      : trackId;
-    ctx.log("[analysis-ui] patched state for", label, "bpm:", payload?.bpm, "key:", payload?.key);
     patchLibraryRowByTrackId(ctx, trackId);
   } else {
     const bpm = Number(payload?.bpm);

@@ -50,10 +50,15 @@
 - **Improvement:** saving cue edits to a USB that another USB job is using
   now continues the moment that job finishes, instead of checking for it
   every 200 ms.
+- **Improvement:** less overhead during analysis and other long jobs. The UI
+  no longer logs a line for every job event (each one also became an Event
+  Log entry and a write to the log file), and an open Event Log adds new
+  entries in place instead of redrawing up to 1,000 rows for each one.
 - **Chore:** a smaller frontend: the UI code shares one app context instead
-  of passing dependencies around by hand, and all HTML now lives as
-  templates in `index.html` rather than being built in JavaScript
-  (`main.js` went from about 1,800 lines to 34; bundle 447 KB → 387 KB).
+  of passing dependencies around by hand, all HTML now lives as templates in
+  `index.html` rather than being built in JavaScript (`main.js` went from
+  about 1,800 lines to 34), and the production bundle is minified
+  (447 KB → 211 KB).
 
 ## 0.2.9
 

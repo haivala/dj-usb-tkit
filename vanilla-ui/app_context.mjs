@@ -93,7 +93,6 @@ export function createAppContext(env) {
     requestAnimationFrameFn: (cb) => window.requestAnimationFrame(cb),
     cancelAnimationFrameFn: (handle) => window.cancelAnimationFrame(handle),
     // Late-bound: setupConsoleFileLogging replaces the console methods at startup.
-    log: (...a) => console.log(...a),
     logInfo: (...a) => console.info(...a),
     warn: (...a) => console.warn(...a),
     logError: (...a) => console.error(...a),

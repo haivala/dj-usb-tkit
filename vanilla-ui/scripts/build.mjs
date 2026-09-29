@@ -28,6 +28,9 @@ await build({
   // External sourcemap is opt-in only -- dist/ is the real Tauri production
   // frontend bundle, so it must never ship with source attached by default.
   sourcemap: process.env.COVERAGE ? true : false,
+  // Minified like any production web build; coverage builds stay readable so
+  // the e2e coverage report maps back onto the sources.
+  minify: !process.env.COVERAGE,
   logLevel: "info"
 });
 

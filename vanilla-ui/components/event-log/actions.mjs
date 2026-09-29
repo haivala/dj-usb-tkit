@@ -2,14 +2,16 @@
 
 import { cloneTemplate } from "../../ui_utils.mjs";
 
-// Stores an already-normalized entry (see message_bus.mjs emitMessage).
+// Stores an already-normalized entry (see message_bus.mjs emitMessage). With
+// the Event Log open, only that entry's row changes -- a busy job can log
+// many entries a second, too many for a full re-render each.
 export function storeEventLogEntry(ctx, entry = {}) {
   const { state, eventLogStore } = ctx;
   const pushed = eventLogStore.push(entry);
   if (!pushed) return;
   state.eventLogEntries = eventLogStore.list();
   if (state.activeTab === "event-log") {
-    renderEventLog(ctx);
+    showEventLogEntry(ctx, pushed);
   }
 }
 
@@ -33,60 +35,90 @@ function ensureEventLogSourceOptions(ctx) {
   }
 }
 
-export function renderEventLog(ctx) {
+// The entries the level/source filters let through, oldest first.
+function filteredEventLogEntries(ctx) {
   const { state, el } = ctx;
-  if (!el.eventLogList || !el.eventLogSummary) return;
-  ensureEventLogSourceOptions(ctx);
   const levelFilter = String(el.eventLogLevelFilter?.value || "all");
   const sourceFilter = String(el.eventLogSourceFilter?.value || "all");
-  const filtered = state.eventLogEntries.filter((item) => {
+  return state.eventLogEntries.filter((item) => {
     const levelMatch = levelFilter === "all" || item.level === levelFilter;
     const sourceMatch = sourceFilter === "all" || item.source === sourceFilter;
     return levelMatch && sourceMatch;
   });
-  const rows = filtered.slice().reverse();
-  const totalOccurrences = rows.reduce((sum, item) => sum + Math.max(1, Number(item.count) || 1), 0);
-  el.eventLogSummary.textContent = totalOccurrences === rows.length
-    ? `${rows.length} event(s)`
-    : `${rows.length} event(s) (${totalOccurrences} occurrences)`;
+}
+
+function renderEventLogSummary(ctx, entries) {
+  const totalOccurrences = entries.reduce((sum, item) => sum + Math.max(1, Number(item.count) || 1), 0);
+  ctx.el.eventLogSummary.textContent = totalOccurrences === entries.length
+    ? `${entries.length} event(s)`
+    : `${entries.length} event(s) (${totalOccurrences} occurrences)`;
+}
+
+function eventLogRow(doc, item) {
+  const date = new Date(item.ts);
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  const rawCode = String(item.code || "unknown");
+  const sourceCodePrefix = String(item.source || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "");
+  const collapsedCode = sourceCodePrefix && rawCode.startsWith(`${sourceCodePrefix}.`)
+    ? rawCode.slice(sourceCodePrefix.length + 1)
+    : rawCode;
+  const count = Math.max(1, Number(item.count) || 1);
+  const details = String(item.details || "").trim();
+
+  const row = cloneTemplate(doc, "tplEventLogRow");
+  row.dataset.entryId = String(item.id);
+  row.querySelector(".event-log-time").textContent = `${hh}:${mm}:${ss}`;
+  const level = row.querySelector(".event-log-level");
+  level.classList.add(`level-${item.level}`);
+  level.textContent = item.level;
+  row.querySelector(".event-log-source").textContent = item.source;
+  const message = row.querySelector(".event-log-message");
+  if (details) message.dataset.tooltip = details;
+  row.querySelector(".event-log-code").textContent = `[${collapsedCode || "unknown"}]`;
+  row.querySelector(".event-log-text").textContent = item.message;
+  const countBadge = row.querySelector(".event-log-count");
+  if (count > 1) countBadge.textContent = `x${count}`;
+  else countBadge.remove();
+  return row;
+}
+
+export function renderEventLog(ctx) {
+  const { el } = ctx;
+  if (!el.eventLogList || !el.eventLogSummary) return;
+  ensureEventLogSourceOptions(ctx);
+  const entries = filteredEventLogEntries(ctx);
+  renderEventLogSummary(ctx, entries);
   const doc = el.eventLogList.ownerDocument;
-  if (!rows.length) {
+  if (!entries.length) {
     const row = cloneTemplate(doc, "tplLogMessageRow");
     row.firstElementChild.textContent = "No events";
     el.eventLogList.replaceChildren(row);
     return;
   }
-  el.eventLogList.replaceChildren(...rows.map((item) => {
-    const date = new Date(item.ts);
-    const hh = String(date.getHours()).padStart(2, "0");
-    const mm = String(date.getMinutes()).padStart(2, "0");
-    const ss = String(date.getSeconds()).padStart(2, "0");
-    const rawCode = String(item.code || "unknown");
-    const sourceCodePrefix = String(item.source || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ".")
-      .replace(/^\.+|\.+$/g, "");
-    const collapsedCode = sourceCodePrefix && rawCode.startsWith(`${sourceCodePrefix}.`)
-      ? rawCode.slice(sourceCodePrefix.length + 1)
-      : rawCode;
-    const count = Math.max(1, Number(item.count) || 1);
-    const details = String(item.details || "").trim();
+  // Newest first.
+  el.eventLogList.replaceChildren(...entries.reverse().map((item) => eventLogRow(doc, item)));
+}
 
-    const row = cloneTemplate(doc, "tplEventLogRow");
-    row.querySelector(".event-log-time").textContent = `${hh}:${mm}:${ss}`;
-    const level = row.querySelector(".event-log-level");
-    level.classList.add(`level-${item.level}`);
-    level.textContent = item.level;
-    row.querySelector(".event-log-source").textContent = item.source;
-    const message = row.querySelector(".event-log-message");
-    if (details) message.dataset.tooltip = details;
-    row.querySelector(".event-log-code").textContent = `[${collapsedCode || "unknown"}]`;
-    row.querySelector(".event-log-text").textContent = item.message;
-    const countBadge = row.querySelector(".event-log-count");
-    if (count > 1) countBadge.textContent = `x${count}`;
-    else countBadge.remove();
-    return row;
-  }));
+// Put the just-stored `item` (new, or a repeat moved up with its new count)
+// at the top of the open list, without touching the other rows.
+function showEventLogEntry(ctx, item) {
+  const { el } = ctx;
+  const list = el.eventLogList;
+  if (!list || !el.eventLogSummary) return;
+  ensureEventLogSourceOptions(ctx);
+  const entries = filteredEventLogEntries(ctx);
+  renderEventLogSummary(ctx, entries);
+  list.querySelector(`.event-log-row[data-entry-id="${item.id}"]`)?.remove();
+  if (!entries.includes(item)) return;
+  list.querySelector(".event-log-row:not([data-entry-id])")?.remove(); // "No events"
+  list.prepend(eventLogRow(list.ownerDocument, item));
+  // The store drops its oldest entries past its cap; they're the bottom rows.
+  while (list.children.length > entries.length) list.lastElementChild.remove();
 }
 
 // Console and runtime error logging setup.

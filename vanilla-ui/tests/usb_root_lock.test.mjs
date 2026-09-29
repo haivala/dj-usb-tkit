@@ -145,24 +145,18 @@ test("updatePlaylistExportButtons respects USB-root lock state", () => {
   }
 });
 
-test("handleJobEvent locks USB controls only for USB-locking job lifecycles", async () => {
-  // handleJobEvent unconditionally console.logs a "[job-event]" trace line
-  // for every event it handles -- expected here since we're calling it
-  // directly and repeatedly, so silence it to keep the test run's terminal
-  // output clean.
-  await withSilencedConsole(() => {
-    for (const [jobType, endEvent, expected] of [
-      ["diagnostics", "job.completed", [true, false]],
-      ["analysis", "job.completed", []],
-      ["usb_write", "job.failed", [true, false]]
-    ]) {
-      const lockCalls = [];
-      const ctx = jobCtx(lockCalls);
-      handleJobEvent(ctx, { event: "job.started", jobId: "job-1", jobType });
-      handleJobEvent(ctx, { event: endEvent, jobId: "job-1", jobType });
-      assert.deepEqual(lockCalls, expected, jobType);
-    }
-  });
+test("handleJobEvent locks USB controls only for USB-locking job lifecycles", () => {
+  for (const [jobType, endEvent, expected] of [
+    ["diagnostics", "job.completed", [true, false]],
+    ["analysis", "job.completed", []],
+    ["usb_write", "job.failed", [true, false]]
+  ]) {
+    const lockCalls = [];
+    const ctx = jobCtx(lockCalls);
+    handleJobEvent(ctx, { event: "job.started", jobId: "job-1", jobType });
+    handleJobEvent(ctx, { event: endEvent, jobId: "job-1", jobType });
+    assert.deepEqual(lockCalls, expected, jobType);
+  }
 });
 
 test("loadUsbDevices maps backend devices and recovers to an empty list on failure", async () => {

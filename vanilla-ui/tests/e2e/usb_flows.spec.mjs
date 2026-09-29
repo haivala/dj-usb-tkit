@@ -600,6 +600,43 @@ test("Event Log flood remains capped", async ({ page }) => {
   await expect(page.locator("#eventLogSummary")).toContainText("1000 event(s)");
 });
 
+test("an open Event Log updates live: new entries on top, repeats coalesce, rows are kept", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.goto("/");
+  await page.locator("#settingsBtn").click();
+  await page.locator("#openEventLogBtn").click();
+
+  const rows = page.locator("#eventLogList .event-log-row");
+  await page.evaluate(() => console.log("live-first"));
+  await expect(rows.first()).toContainText("live-first");
+  // Tag a row node: an incremental update must leave it in place.
+  await rows.first().evaluate((row) => { row.__kept = true; });
+
+  await page.evaluate(() => console.log("live-second"));
+  await expect(rows.first()).toContainText("live-second");
+  expect(await rows.nth(1).evaluate((row) => row.__kept === true && row.textContent.includes("live-first"))).toBe(true);
+
+  // A repeat moves the existing entry back to the top with its count.
+  await page.evaluate(() => console.log("live-first"));
+  await expect(rows.first()).toContainText("live-first");
+  await expect(rows.first().locator(".event-log-count")).toHaveText("x2");
+  await expect(page.locator("#eventLogList .event-log-row", { hasText: "live-first" })).toHaveCount(1);
+
+  // Entries hidden by the source filter don't show up.
+  await page.locator("#eventLogSourceFilter").selectOption("startup");
+  await page.evaluate(() => console.log("live-filtered-out"));
+  await expect(page.locator("#eventLogList")).not.toContainText("live-filtered-out");
+  await page.locator("#eventLogSourceFilter").selectOption("all");
+
+  // A flood while open stays capped at the store's 1000 entries.
+  await page.evaluate(() => {
+    for (let i = 0; i < 1200; i += 1) console.log(`live-flood-${i}`);
+  });
+  await expect(page.locator("#eventLogSummary")).toContainText("1000 event(s)");
+  await expect(rows).toHaveCount(1000);
+  await expect(rows.first()).toContainText("live-flood-1199");
+});
+
 test("Diagnostics and parity render without warning panel", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");

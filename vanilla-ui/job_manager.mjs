@@ -184,13 +184,6 @@ export function handleJobEvent(ctx, payload) {
     setTrackAnalyzingState,
     setUsbRootControlsLocked,
   } = ctx;
-  const trackInfo = payload?.trackTitle || payload?.trackId;
-  console.log(
-    "[job-event]",
-    payload?.event,
-    payload?.stage,
-    ...(trackInfo ? ["track:", trackInfo] : [payload?.message || ""])
-  );
   if (!payload || typeof payload !== "object") return;
 
   const eventName = String(payload.event || "");
