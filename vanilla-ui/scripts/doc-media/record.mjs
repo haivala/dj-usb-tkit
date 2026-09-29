@@ -1,17 +1,20 @@
-// Records the cue-editor GIFs in docs/assets/ from the real frontend build.
+// Records the docs media in docs/assets/ -- the cue-editor GIFs and the
+// README / cue-editor screenshots -- from the real frontend build.
 //
-//   npm run docs:gifs            (from vanilla-ui/; needs cargo and ffmpeg)
+//   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
+//   npm run docs:media -- cue-editor cue-editor-drag-cues   (only those)
 //
-// 1. Synthesises a 129 BPM demo track with ffmpeg and puts it in a temporary
-//    source folder with the backend's fixture tracks.
-// 2. Scans and analyzes that folder with the real backend
-//    (`dump_doc_gif_fixture` bin) and dumps what the frontend would receive.
-// 3. Serves dist/ with Tauri's invoke stubbed from that dump
-//    (page_init.js), drives the cue editor in headless Chromium, captures
-//    lossless frames over CDP, and encodes each scene as a GIF.
+// 1. Synthesises a made-up 10-track library (two albums, two source folders)
+//    with ffmpeg.
+// 2. Scans and analyzes it with the real backend (`dump_doc_gif_fixture`
+//    bin) and dumps what the frontend would receive.
+// 3. Serves dist/ with Tauri's invoke stubbed from that dump (page_init.js,
+//    which also stands in for the playlists and a connected USB), drives the
+//    app in headless Chromium, and writes each GIF scene (lossless frames
+//    over CDP, encoded with ffmpeg) and each screenshot.
 import { chromium } from "@playwright/test";
 import { spawn, execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,49 +22,89 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const uiDir = resolve(here, "../..");
 const repoDir = resolve(uiDir, "..");
-const fixturesDir = join(repoDir, "backend/tests/fixtures");
 const outDir = join(repoDir, "docs/assets");
 const BASE_URL = "http://127.0.0.1:4173/";
-const VIEWPORT = { width: 1280, height: 800 };
+const VIEWPORT = { width: 1280, height: 837 };
 const GIF_WIDTH = 960;
 const EDITOR_TITLE = "Demo Groove";
+// What the source folders look like in the app (long, so the chips truncate).
+const SHOWN_ROOT = "/home/dj/Music/Projects/Chiphead.Music";
+const FOLDERS = ["Syyskuu", "Heinäkuu"];
 
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", ...opts });
 
 // --- 1. Demo library ---
 
-// 150 s at 129 BPM: kick + off-beat hats, bass from bar 17, a kickless
-// breakdown in bars 25–32, and a snare on 2 and 4 from bar 33, so the
-// waveform and the overview strip have some shape.
-function synthesizeDemoTrack(path) {
-  const beat = "(60/129)";
+const ALBUMS = [
+  {
+    folder: "Syyskuu",
+    album: "Night Shift EP",
+    artist: "Kaamos Unit",
+    cover:
+      "gradients=s=400x400:c0=0x2e1065:c1=0xdb2777:c2=0xf59e0b:n=3:x0=0:y0=0:x1=400:y1=400:seed=7," +
+      "drawgrid=w=40:h=40:t=1:c=white@0.12",
+    tracks: [
+      // The editor track of the GIFs: 150 s, kickless breakdown in bars 25–32.
+      { title: EDITOR_TITLE, bpm: 129, rootHz: 55, seconds: 150, breakdown: 3, minor: true },
+      { title: "Low Orbit", bpm: 124, rootHz: 49, seconds: 170, breakdown: 2, minor: false },
+      { title: "Frost Line", bpm: 126, rootHz: 43.65, seconds: 160, breakdown: 4, minor: true },
+      { title: "Northbound", bpm: 122, rootHz: 41.2, seconds: 185, breakdown: 3, minor: false },
+      { title: "Afterglow", bpm: 128, rootHz: 61.74, seconds: 175, breakdown: 5, minor: true },
+    ],
+  },
+  {
+    folder: "Heinäkuu",
+    album: "Lakeside Tapes",
+    artist: "Midsummer Static",
+    cover:
+      "mandelbrot=s=400x400:start_x=-0.7453:start_y=0.1127:start_scale=0.012:outer=normalized_iteration_count," +
+      "hue=h=190:s=1.1,gblur=sigma=0.8",
+    tracks: [
+      { title: "Sauna Talk", bpm: 132, rootHz: 36.71, seconds: 165, breakdown: 2, minor: true },
+      { title: "Pier Lights", bpm: 136, rootHz: 58.27, seconds: 155, breakdown: 4, minor: false },
+      { title: "White Nights", bpm: 140, rootHz: 46.25, seconds: 180, breakdown: 3, minor: true },
+      { title: "Driftwood", bpm: 134, rootHz: 65.41, seconds: 150, breakdown: 5, minor: false },
+      { title: "Last Ferry", bpm: 138, rootHz: 51.91, seconds: 190, breakdown: 2, minor: true },
+    ],
+  },
+];
+
+// Kick + off-beat hats, bass from the third 8-bar section, a kickless
+// breakdown in section `breakdown`, and a snare on 2 and 4 from the fifth, so
+// the waveform and the overview strip have some shape. A sustained triad on
+// the bass root gives the key analysis something to find.
+function synthesizeTrack(path, { title, artist, album, cover, bpm, rootHz, minor, seconds, breakdown }) {
+  const beat = `(60/${bpm})`;
   const t = "(t-0.05)";
   const inBeat = `mod(${t},${beat})`;
   const offBeat = `mod(${t}-${beat}/2,${beat})`;
   const section = `floor(${t}/(${beat}*32))`;
   const kick = `if(gte(${t},0),sin(2*PI*(45*${inBeat}+(110/28)*(1-exp(-28*${inBeat}))))*exp(-7*${inBeat}),0)`;
   const hat = `(random(0)*2-1)*exp(-70*${offBeat})*0.22`;
-  const bass = `0.25*sin(2*PI*55*t)*(1-exp(-20*${offBeat}))*exp(-6*${offBeat})`;
+  const bass = `0.25*sin(2*PI*${rootHz}*t)*(1-exp(-20*${offBeat}))*exp(-6*${offBeat})`;
   const snare = `(random(1)*2-1)*exp(-25*mod(${t}-${beat},2*${beat}))*0.3`;
-  const mix = `0.8*(if(eq(${section},3),0,${kick})+${hat}+if(gte(${section},2),${bass},0)+if(gte(${section},4),${snare},0))`;
+  const third = minor ? 1.18921 : 1.25992;
+  const pad = [1, third, 1.49831].map((r) => `sin(2*PI*${(rootHz * 4 * r).toFixed(3)}*t)`).join("+");
+  const mix = `0.8*(if(eq(${section},${breakdown}),0,${kick})+${hat}+if(gte(${section},2),${bass},0)+if(gte(${section},4),${snare},0)+0.07*(${pad}))`;
   run("ffmpeg", [
     "-v", "error", "-y",
-    "-f", "lavfi", "-i", `aevalsrc=exprs='${mix}|${mix}':s=44100:d=150`,
-    "-i", join(fixturesDir, "artwork/folder_cover.jpg"),
+    "-f", "lavfi", "-i", `aevalsrc=exprs='${mix}|${mix}':s=44100:d=${seconds}`,
+    "-f", "lavfi", "-t", "0.04", "-i", cover,
     "-map", "0:a", "-map", "1:v", "-c:v", "mjpeg", "-disposition:v", "attached_pic",
-    "-metadata", `title=${EDITOR_TITLE}`, "-metadata", "artist=DJ USB Tkit", "-metadata", "album=Docs",
+    "-metadata", `title=${title}`, "-metadata", `artist=${artist}`, "-metadata", `album=${album}`,
     "-b:a", "192k", path,
   ]);
 }
 
 function buildFixture(work) {
-  const src = join(work, "music");
-  mkdirSync(src, { recursive: true });
-  synthesizeDemoTrack(join(src, "demo_groove.mp3"));
-  // track_no_art.mp3 is silent, which analysis rejects; the rest analyze.
-  cpSync(join(fixturesDir, "audio/embedded"), join(src, "embedded"), { recursive: true });
-  cpSync(join(fixturesDir, "audio/folder"), join(src, "folder"), { recursive: true });
-  cpSync(join(fixturesDir, "audio/parent"), join(src, "parent"), { recursive: true });
+  const src = join(work, "Chiphead.Music");
+  for (const { folder, tracks, ...albumTags } of ALBUMS) {
+    mkdirSync(join(src, folder), { recursive: true });
+    tracks.forEach((track, i) => {
+      const file = `${String(i + 1).padStart(2, "0")} ${track.title}.mp3`;
+      synthesizeTrack(join(src, folder, file), { ...albumTags, ...track });
+    });
+  }
 
   const json = join(work, "fixture.json");
   run("cargo", [
@@ -70,7 +113,7 @@ function buildFixture(work) {
   ], { cwd: repoDir });
 
   const fixture = JSON.parse(readFileSync(json, "utf8"));
-  // The page can't read local files: inline artwork, and show short paths.
+  // The page can't read local files: inline artwork, and show made-up paths.
   const mime = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png" };
   for (const track of fixture.tracks) {
     if (track.artworkPath) {
@@ -78,17 +121,30 @@ function buildFixture(work) {
       track.artworkDataUrl = `data:${type};base64,${readFileSync(track.artworkPath).toString("base64")}`;
     }
     track.artworkPath = null;
-    track.filePath = `/music/${relative(src, track.filePath)}`;
+    track.filePath = `${SHOWN_ROOT}/${relative(src, track.filePath)}`;
     track.waveformPeaksPath = track.waveformPeaksPath && `/analysis/${basename(track.waveformPeaksPath)}`;
   }
-  fixture.tracks.sort((a, b) => (a.title === EDITOR_TITLE ? -1 : b.title === EDITOR_TITLE ? 1 : 0));
+  // Album order, then track number (the file name), as a tidy library shows.
+  fixture.tracks.sort((a, b) => {
+    const folder = (t) => FOLDERS.indexOf(t.filePath.split("/").at(-2));
+    return folder(a) - folder(b) || a.filePath.localeCompare(b.filePath);
+  });
   fixture.detail.track = fixture.tracks.find((t) => t.id === fixture.detail.track.id);
+  fixture.sourceRoots = FOLDERS.map((f) => `${SHOWN_ROOT}/${f}`);
+  const byTitle = (...titles) => fixture.tracks.filter((t) => titles.includes(t.title));
+  // Sidebar order top to bottom; `current` is the active playlist.
+  fixture.playlists = [
+    { id: "pl-event1", name: "Event 1", tracks: byTitle("Afterglow", "White Nights", "Last Ferry", "Pier Lights") },
+    { id: "pl-bass", name: "Bass", current: true, tracks: byTitle("Low Orbit", "Northbound", "Sauna Talk", "Driftwood", EDITOR_TITLE) },
+    { id: "pl-house", name: "House", tracks: byTitle("Frost Line", "Afterglow", "Pier Lights") },
+    { id: "pl-1", name: "Playlist 1", tracks: [] },
+  ];
   return fixture;
 }
 
 // --- 2. Browser session + capture ---
 
-async function openSession(browser, fixture, opts) {
+async function openApp(browser, fixture, opts) {
   const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, colorScheme: "dark" });
   await ctx.addInitScript({
     content: `window.__DOC_GIF_FIXTURE__=${JSON.stringify(fixture)};window.__DOC_GIF_OPTS__=${JSON.stringify(opts)};`,
@@ -96,12 +152,38 @@ async function openSession(browser, fixture, opts) {
   await ctx.addInitScript({ path: join(here, "page_init.js") });
   const page = await ctx.newPage();
   await page.goto(BASE_URL);
+  await page.locator("#libraryTableBody .track-grid-row").nth(fixture.tracks.length - 1).waitFor();
+  return { ctx, page };
+}
+
+async function openEditor(page) {
   const row = page.locator("#libraryTableBody .track-grid-row", { hasText: EDITOR_TITLE });
   await row.locator('.waveform-cell [data-action="edit-track-detail"]').click();
   await page.locator("#trackDetailOverlay").waitFor({ state: "visible" });
   await page.waitForTimeout(400);
-  const wf = await page.locator("#trackDetailWaveform").boundingBox();
+  return page.locator("#trackDetailWaveform").boundingBox();
+}
+
+async function openSession(browser, fixture, opts) {
+  const { ctx, page } = await openApp(browser, fixture, opts);
+  const wf = await openEditor(page);
   return { ctx, page, wf };
+}
+
+// The app connects a USB only from the picker or a recent-USB button, and has
+// no stored "current playlist": click both, as a user would, then go back to
+// the Library.
+async function connectUsbAndPickPlaylist(page, fixture) {
+  await page.locator("[data-usb-recent-path]").first().dispatchEvent("click");
+  await page.locator("#usbNameBadgeLabel", { hasText: "Chiphead" }).waitFor();
+  await page.locator("#statusText", { hasText: "Diagnostics complete" }).waitFor();
+  const current = fixture.playlists.find((p) => p.current);
+  await page.locator(`.nav-playlist-item[data-playlist-id="${current.id}"]`).click();
+  await page.locator("#playlistTracksBody .track-grid-row").first().waitFor();
+  await page.locator('.nav-item[data-view="library"]').click();
+  await page.locator("#libraryTableBody .track-grid-row").first().waitFor();
+  await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+  await page.waitForTimeout(600);
 }
 
 // Scroll-zooms the editor to 0:00–0:15, then drags the view back to 0:00
@@ -306,9 +388,50 @@ function scenes(fixture) {
   ];
 }
 
+// --- 4. Screenshots ---
+
+function shots(fixture) {
+  const bpm = fixture.detail.track.bpm;
+  const firstBeat = fixture.detail.firstBeatMs ?? 0;
+  const onBeat = (n) => Math.round(firstBeat + n * (60000 / bpm));
+
+  return [
+    {
+      // README hero: the Library with a USB connected and a playlist active.
+      name: "DJ-USB-Tkit",
+      opts: {},
+      async run() {},
+    },
+    {
+      // docs/CUE_EDITOR.md: a start marker off the first beat, one hot cue,
+      // paused mid-intro, the hot cue selected.
+      name: "cue-editor",
+      opts: {
+        cues: [
+          { positionMs: onBeat(3), playbackStart: true },
+          { positionMs: onBeat(16), colorId: 5, name: "Drop" },
+        ],
+      },
+      async run(page) {
+        const wf = await openEditor(page);
+        await zoomToIntro(page, wf, { ticks: 10 });
+        await panToStart(page, wf);
+        const playPause = page.locator("#trackDetailPlayPause");
+        await playPause.click();
+        await page.waitForTimeout(1500);
+        await playPause.click();
+        await page.locator("#statusText", { hasText: "Paused" }).waitFor();
+        await page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos").click();
+        await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
+    },
+  ];
+}
+
 // --- main ---
 
-const work = mkdtempSync(join(tmpdir(), "doc-gifs-"));
+const work = mkdtempSync(join(tmpdir(), "doc-media-"));
 let server = null;
 let browser = null;
 try {
@@ -321,8 +444,9 @@ try {
   }
   browser = await chromium.launch();
   const only = process.argv.slice(2);
+  const wanted = (name) => !only.length || only.includes(name);
   for (const scene of scenes(fixture)) {
-    if (only.length && !only.includes(scene.name)) continue;
+    if (!wanted(scene.name)) continue;
     const { ctx, page, wf } = await openSession(browser, fixture, scene.opts);
     const framesDir = join(work, `frames-${scene.name}`);
     let captured = null;
@@ -331,6 +455,16 @@ try {
     });
     await ctx.close();
     encodeGif(captured, framesDir, join(outDir, `${scene.name}.gif`));
+  }
+  for (const shot of shots(fixture)) {
+    if (!wanted(shot.name)) continue;
+    const { ctx, page } = await openApp(browser, fixture, shot.opts);
+    await connectUsbAndPickPlaylist(page, fixture);
+    await shot.run(page);
+    const out = join(outDir, `${shot.name}.png`);
+    await page.screenshot({ path: out });
+    await ctx.close();
+    console.log(`wrote ${relative(repoDir, out)}`);
   }
 } finally {
   await browser?.close();

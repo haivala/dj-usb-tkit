@@ -127,19 +127,21 @@ rendering, command wiring, playlist workflows, source-root filtering, USB flows,
 diagnostics/repair UI behavior, playback state, event-log behavior, and
 message-routing contracts.
 
-## Docs GIFs
+## Docs media
 
-The cue-editor GIFs in `docs/assets/` (used by `docs/CUE_EDITOR.md` and the
-top-level README) are recorded from the real frontend build. Re-record them
-after a cue-editor UI change:
+The GIFs and screenshots in `docs/assets/` (used by `docs/CUE_EDITOR.md` and
+the top-level README) are recorded from the real frontend build: the three
+`cue-editor-*.gif`, `DJ-USB-Tkit.png` and `cue-editor.png`. Re-record them
+after a UI change:
 
 ```bash
-npm run docs:gifs --prefix vanilla-ui
+npm run docs:media --prefix vanilla-ui
 ```
 
-It needs `cargo` and `ffmpeg`. The script synthesises a 129 BPM demo track,
-scans and analyzes it together with the backend's fixture tracks through the
-real backend (`dump_doc_gif_fixture` bin), and drives the cue editor in
-headless Chromium with Tauri's invoke answered from that data. To record only
-some scenes, name them: `npm run docs:gifs -- cue-editor-drag-cues`. See
-`scripts/doc-gifs/record.mjs`.
+It needs `cargo` and `ffmpeg`. The script synthesises a made-up library (10
+tracks on 2 albums in two source folders), scans and analyzes it through the
+real backend (`dump_doc_gif_fixture` bin), and drives the app in headless
+Chromium with Tauri's invoke answered from that data, plus made-up playlists
+and a connected USB named "Chiphead". To record only some, name them:
+`npm run docs:media --prefix vanilla-ui -- cue-editor cue-editor-drag-cues`.
+See `scripts/doc-media/record.mjs`.

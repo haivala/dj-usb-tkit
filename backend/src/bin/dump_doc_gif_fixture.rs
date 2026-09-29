@@ -1,5 +1,5 @@
-//! Builds the data behind the docs' cue-editor GIFs (see
-//! `vanilla-ui/scripts/doc-gifs/record.mjs`): scans and analyzes a source
+//! Builds the data behind the docs' GIFs and screenshots (see
+//! `vanilla-ui/scripts/doc-media/record.mjs`): scans and analyzes a source
 //! folder into a fresh data dir, then writes what the frontend would receive
 //! (`get_tracks_by_ids_with_previews` for every track, `get_track_detail` for
 //! the one opened in the editor) as JSON.

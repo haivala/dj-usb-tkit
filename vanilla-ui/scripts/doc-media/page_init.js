@@ -1,12 +1,16 @@
 // Page init script for record.mjs: stands in for the Tauri backend with the
-// payloads the real backend produced (window.__DOC_GIF_FIXTURE__), and draws a
-// cursor and a Shift keycap, which a headless screencast doesn't show.
+// payloads the real backend produced (window.__DOC_GIF_FIXTURE__) plus
+// made-up playlists and a connected USB, and draws a cursor and a Shift
+// keycap, which a headless screencast doesn't show.
 (() => {
-  const { tracks, detail } = window.__DOC_GIF_FIXTURE__;
+  const { tracks, detail, sourceRoots, playlists } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
+  const USB_ROOT = "/run/media/dj/Chiphead";
   const ls = window.localStorage;
   ls.setItem("djusbtkit.helpSeen", "1");
-  ls.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+  ls.setItem("djusbtkit.theme", "dark");
+  ls.setItem("djusbtkit.accentHue", "270");
+  ls.setItem("djusbtkit.sourceRoots", JSON.stringify(sourceRoots));
   ls.setItem("djusbtkit.cueStartOnFirstBeat", "0");
   ls.setItem("djusbtkit.cueQuantize", "1");
 
@@ -22,6 +26,21 @@
     durationMs,
   });
   const ok = (data) => ({ ok: true, data });
+  const sumMs = (items) => items.reduce((ms, t) => ms + (Number(t.durationMs) || 0), 0);
+  const exportedAt = "2026-09-26T18:00:00Z";
+  // The sidebar lists playlists newest first, i.e. reversed.
+  const playlistRows = [...playlists].reverse().map(({ id, name, tracks: items }) => ({
+    id,
+    name,
+    source: "app",
+    lastExportedAt: items.length ? exportedAt : null,
+    lastExportedUsbRoot: items.length ? USB_ROOT : null,
+    lastExportedTrackCount: items.length || null,
+    trackCount: items.length,
+    totalDurationMs: sumMs(items),
+    createdAt: exportedAt,
+    updatedAt: exportedAt,
+  }));
 
   window.__TAURI__ = {
     core: {
@@ -40,7 +59,36 @@
           case "detect_external_master_db":
             return ok({ found: false, path: null });
           case "list_playlists":
-            return ok({ items: [] });
+            return ok({ items: playlistRows });
+          case "get_playlist_tracks": {
+            const items = playlists.find((p) => p.id === r.playlistId)?.tracks || [];
+            return ok({
+              playlistId: r.playlistId,
+              items,
+              total: items.length,
+              hasMore: false,
+              totalDurationMs: sumMs(items),
+              durationKnownCount: items.length,
+            });
+          }
+          case "check_source_roots":
+            return ok({ missing: [] });
+          case "list_usb_devices":
+            return ok({ items: [{ id: "usb-chiphead", rootPath: USB_ROOT }] });
+          case "validate_usb_root":
+            return ok({
+              valid: true,
+              normalizedRoot: USB_ROOT,
+              hasVendorRoot: true,
+              hasContents: true,
+              hasPdb: true,
+              hasWriteAccess: true,
+              warnings: [],
+            });
+          case "get_usb_device_name":
+            return ok({ name: "Chiphead" });
+          case "run_usb_diagnostics":
+            return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
           case "fetch_usb_playlists":
           case "fetch_usb_histories":
             return ok({ items: [], warnings: [] });
@@ -48,7 +96,15 @@
           case "search_tracks":
             return ok({ total: tracks.length, items: tracks });
           case "browse_source_files":
-            return ok({ total: tracks.length, items: tracks, nextCursor: null, hasMore: false });
+            return ok({
+              total: tracks.length,
+              items: tracks,
+              nextCursor: null,
+              hasMore: false,
+              sourceRootAnalysis: sourceRoots.map((sourceRoot) => ({ sourceRoot, fullyAnalyzed: true })),
+              totalDurationMs: sumMs(tracks),
+              durationKnownCount: tracks.length,
+            });
           case "get_tracks_by_ids_with_previews":
             return ok({ items: tracks.filter((t) => (r.trackIds || []).includes(t.id)) });
           case "resolve_track_identity":

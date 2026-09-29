@@ -16,7 +16,7 @@
     "test:ci": "npm run build && npm run test:unit && npm run test:e2e:nobuild",
     "test": "npm run test:unit && npm run test:e2e",
     "test:e2e:coverage": "rm -rf .coverage-e2e && COVERAGE=1 node scripts/build.mjs && COVERAGE=1 playwright test && node scripts/report-e2e-coverage.mjs",
-    "docs:gifs": "node scripts/doc-gifs/record.mjs"
+    "docs:media": "node scripts/doc-media/record.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

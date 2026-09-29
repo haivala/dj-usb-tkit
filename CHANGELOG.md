@@ -60,6 +60,10 @@
   opens, it stops, so Play and "+ Cue" always apply to the track being edited.
 - **Fix:** the highlight on the selected cue in the cue editor's list no
   longer gets cut off at the edges.
+- **Chore:** the README and cue-editor screenshots are now generated like the
+  cue-editor GIFs, from a made-up demo library. One command
+  (`npm run docs:media --prefix vanilla-ui`) regenerates all of them;
+  `docs:gifs` is gone.
 
 ## 0.2.7
 
