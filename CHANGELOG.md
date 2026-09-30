@@ -39,6 +39,17 @@
 
 ## Unreleased
 
+- **Fix:** video files (`.mp4` files with a video track) are no longer
+  imported into the library. Audio-only `.mp4`
+  (AAC) files still are. Videos already in the library drop out on the next
+  scan.
+- **Fix:** analysis now reads the audio track of `.mp4` files that also
+  contain video, instead of failing on the video track.
+- **Fix:** a file whose audio can't be decoded now counts as failed (with
+  the reason in the Event Log). Before, it was counted as analyzed, with a
+  meaningless waveform drawn from the file's raw bytes and no BPM, key or
+  length. A track that decodes but ends up without a BPM or length is now
+  reported as "incomplete" in the status line instead of "analyzed".
 - **Fix:** starting a new job (creating a playlist, importing from the USB,
   exporting, …) right after another one finished no longer makes its
   progress bar disappear partway through. Before, the previous job's

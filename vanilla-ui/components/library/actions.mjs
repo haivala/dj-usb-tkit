@@ -690,9 +690,10 @@ export async function scanLibrary(ctx) {
 
   const analysis = unanalyzedCount > 0
     ? await analyzeTrackIds(ctx, [], "Scan analysis", { scopeToLibraryFilter: true })
-    : { analyzed: 0, failed: 0, warnings: [] };
+    : { analyzed: 0, incomplete: 0, failed: 0, warnings: [] };
   const analyzed = Number(analysis?.analyzed || 0);
   const failed = Number(analysis?.failed || 0);
+  const incompleteSuffix = analysis?.incomplete ? `, incomplete ${analysis.incomplete}` : "";
   const warnings = Array.isArray(analysis?.warnings) ? analysis.warnings : [];
   await ctx.refreshCurrentPlaylistTracks();
 
@@ -703,7 +704,7 @@ export async function scanLibrary(ctx) {
   const missingCount = missingSourceRootsArray(state).length;
   const missingSuffix = missingCount ? ` | ${missingCount} source folder(s) missing` : "";
   emitStatus(
-    `Scan done: ${scopedTrackCount} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}${missingSuffix}`,
+    `Scan done: ${scopedTrackCount} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${autoLimitSuffix}${missingSuffix}`,
     { warningCount }
   );
 }
@@ -788,6 +789,8 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   const countLabel = ids.length ? `${ids.length}` : "matching";
 
   let analyzed = 0;
+  // Decoded fine, but analysis left something out (no BPM detected, ...).
+  let incomplete = 0;
   let failed = 0;
   const warnings = [];
   let hydratedItems = [];
@@ -815,11 +818,12 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
       query: String(state.libraryQuery || "").trim()
     });
     analyzed = Math.max(0, Number(batch?.analyzed || 0));
+    incomplete = Math.max(0, Number(batch?.incomplete || 0));
     failed = Math.max(0, Number(batch?.failed || 0));
     const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
     warnings.push(...batchWarnings);
     hydratedItems = Array.isArray(batch?.items) ? batch.items : [];
-    emitStatus(`${modeLabel}: ${analyzed + failed} track(s) processed...`);
+    emitStatus(`${modeLabel}: ${analyzed + incomplete + failed} track(s) processed...`);
   } catch (err) {
     failed = ids.length;
     warnings.push(`batch analysis failed: ${err.message || err}`);
@@ -858,8 +862,9 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
   const autoLimitWarning = findAnalysisAutoLimitWarning(warnings);
   const autoLimitSuffix = autoLimitWarning ? ` | ${autoLimitWarning}` : "";
-  emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${warningSuffix}${autoLimitSuffix}`, { warningCount });
-  return { analyzed, failed, warnings };
+  const incompleteSuffix = incomplete ? `, incomplete ${incomplete}` : "";
+  emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${autoLimitSuffix}`, { warningCount });
+  return { analyzed, incomplete, failed, warnings };
 }
 
 export async function analyzeSingleTrack(ctx, track, modeLabel = null) {

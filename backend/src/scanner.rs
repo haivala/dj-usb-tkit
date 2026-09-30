@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -81,7 +83,7 @@ pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTra
             }
 
             let path = entry.path();
-            if !is_audio_path(path) {
+            if !is_audio_path(path) || is_video_file(path) {
                 continue;
             }
 
@@ -196,6 +198,84 @@ fn is_audio_path(path: &Path) -> bool {
         .unwrap_or_default();
 
     is_supported_audio_extension(&ext)
+}
+
+/// A `.mp4` that carries a video track (a downloaded clip, not an AAC audio
+/// file) -- the library leaves those out.
+fn is_video_file(path: &Path) -> bool {
+    let is_mp4 = path
+        .extension()
+        .and_then(|x| x.to_str())
+        .is_some_and(|x| x.eq_ignore_ascii_case("mp4"));
+    is_mp4 && File::open(path).is_ok_and(|mut file| mp4_has_video_track(&mut file))
+}
+
+/// Walks the MP4 box tree (moov > trak > mdia > hdlr) looking for a track
+/// whose handler type is `vide`. Only box headers and the few handler bytes
+/// are read, so a large file costs a handful of small reads.
+fn mp4_has_video_track<R: Read + Seek>(reader: &mut R) -> bool {
+    let Ok(file_end) = reader.seek(SeekFrom::End(0)) else {
+        return false;
+    };
+    let Some(moov) = find_mp4_box(reader, 0, file_end, b"moov") else {
+        return false;
+    };
+    let mut pos = moov.0;
+    while let Some((trak_start, trak_end)) = find_mp4_box(reader, pos, moov.1, b"trak") {
+        pos = trak_end;
+        let handler = find_mp4_box(reader, trak_start, trak_end, b"mdia")
+            .and_then(|(start, end)| find_mp4_box(reader, start, end, b"hdlr"))
+            .and_then(|(start, _)| {
+                // hdlr payload: version/flags (4), pre_defined (4), handler_type (4).
+                let mut handler = [0u8; 4];
+                reader.seek(SeekFrom::Start(start + 8)).ok()?;
+                reader.read_exact(&mut handler).ok()?;
+                Some(handler)
+            });
+        if handler == Some(*b"vide") {
+            return true;
+        }
+    }
+    false
+}
+
+/// The payload range (start, end) of the first `kind` box among the sibling
+/// boxes in `start..end`.
+fn find_mp4_box<R: Read + Seek>(
+    reader: &mut R,
+    mut pos: u64,
+    end: u64,
+    kind: &[u8; 4],
+) -> Option<(u64, u64)> {
+    const MAX_SIBLINGS: usize = 4096;
+    for _ in 0..MAX_SIBLINGS {
+        if pos.checked_add(8)? > end {
+            return None;
+        }
+        reader.seek(SeekFrom::Start(pos)).ok()?;
+        let mut header = [0u8; 8];
+        reader.read_exact(&mut header).ok()?;
+        let size32 = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+        let (payload_start, box_end) = match size32 {
+            // Box runs to the end of its parent.
+            0 => (pos + 8, end),
+            // 64-bit size follows the type.
+            1 => {
+                let mut large = [0u8; 8];
+                reader.read_exact(&mut large).ok()?;
+                (pos + 16, pos.checked_add(u64::from_be_bytes(large))?)
+            }
+            size => (pos + 8, pos.checked_add(u64::from(size))?),
+        };
+        if box_end <= pos || box_end > end || payload_start > box_end {
+            return None;
+        }
+        if &header[4..8] == kind {
+            return Some((payload_start, box_end));
+        }
+        pos = box_end;
+    }
+    None
 }
 
 fn read_embedded_metadata(path: &Path) -> EmbeddedMetadata {
@@ -358,6 +438,77 @@ fn infer_track_number_from_name(name: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    fn mp4_box(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut out = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn mp4_trak(handler: &[u8; 4]) -> Vec<u8> {
+        let mut hdlr = vec![0u8; 8];
+        hdlr.extend_from_slice(handler);
+        hdlr.extend_from_slice(&[0u8; 12]);
+        mp4_box(b"trak", &mp4_box(b"mdia", &mp4_box(b"hdlr", &hdlr)))
+    }
+
+    fn mp4_file(handlers: &[&[u8; 4]]) -> Vec<u8> {
+        let traks = handlers
+            .iter()
+            .flat_map(|h| mp4_trak(h))
+            .collect::<Vec<_>>();
+        let mut out = mp4_box(b"ftyp", b"isom\0\0\0\0");
+        out.extend(mp4_box(b"mdat", &[0u8; 64]));
+        out.extend(mp4_box(b"moov", &traks));
+        out
+    }
+
+    #[test]
+    fn mp4_with_a_video_track_is_detected() {
+        assert!(super::mp4_has_video_track(&mut Cursor::new(mp4_file(&[
+            b"vide", b"soun"
+        ]))));
+        assert!(super::mp4_has_video_track(&mut Cursor::new(mp4_file(&[
+            b"soun", b"vide"
+        ]))));
+    }
+
+    #[test]
+    fn audio_only_or_malformed_mp4_is_not_video() {
+        assert!(!super::mp4_has_video_track(&mut Cursor::new(mp4_file(&[
+            b"soun"
+        ]))));
+        assert!(!super::mp4_has_video_track(&mut Cursor::new(
+            b"not an mp4 at all".to_vec()
+        )));
+        // A box claiming to run past the end of the file.
+        let mut truncated = mp4_file(&[b"vide"]);
+        truncated.truncate(truncated.len() - 10);
+        assert!(!super::mp4_has_video_track(&mut Cursor::new(truncated)));
+    }
+
+    #[test]
+    fn scan_leaves_out_mp4_videos_but_keeps_audio_mp4() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("clip.mp4"), mp4_file(&[b"vide", b"soun"])).unwrap();
+        std::fs::write(dir.path().join("song.mp4"), mp4_file(&[b"soun"])).unwrap();
+        let tracks =
+            super::scan_audio_files(&[dir.path().to_string_lossy().to_string()]).expect("scan");
+        let names = tracks
+            .iter()
+            .map(|t| {
+                std::path::Path::new(&t.path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["song.mp4".to_string()]);
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;

@@ -1457,7 +1457,12 @@ pub struct AnalyzeNewTracksRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzeNewTracksData {
     pub job_id: String,
+    /// Tracks that came out analysis-ready (waveform + BPM + duration).
     pub analyzed: usize,
+    /// Tracks whose audio decoded but analysis left something out (no BPM
+    /// detected, no duration) -- they still show as needing analysis.
+    #[serde(default)]
+    pub incomplete: usize,
     pub failed: usize,
     pub warnings: Vec<WarningEntry>,
     #[serde(default)]

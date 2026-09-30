@@ -1332,6 +1332,32 @@ test("a failed analyze_new_tracks count is reported in the status line", async (
   await expect(page.locator("#statusText")).toContainText("done: analyzed 0, failed 1");
 });
 
+test("a track analysis couldn't finish (no BPM found) is reported as incomplete, not analyzed", async ({ page }) => {
+  await installAnalyzeResponseMock(page, {
+    analyzeResponse: {
+      jobId: "job-1",
+      analyzed: 0,
+      incomplete: 1,
+      failed: 0,
+      warnings: [{
+        level: "warn",
+        source: "analysis",
+        code: "analysis.track-incomplete",
+        message: "/music/Track One.mp3: no BPM detected"
+      }]
+    }
+  });
+  await page.goto("/");
+
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
+  await page.locator('[data-action="analyze-track"]').click();
+
+  await expect(page.locator("#statusText")).toContainText("done: analyzed 0, failed 0, incomplete 1");
+  await page.locator("#settingsBtn").click();
+  await page.locator("#openEventLogBtn").click();
+  await expect(page.locator("#eventLogList")).toContainText("/music/Track One.mp3: no BPM detected");
+});
+
 test("a structured warning entry's message renders in the status line instead of [object Object]", async ({ page }) => {
   await installAnalyzeResponseMock(page, {
     analyzeResponse: {

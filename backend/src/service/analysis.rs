@@ -16,9 +16,10 @@ use rodio::Decoder;
 use rodio::Source;
 use rusqlite::params;
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::Track as SymphoniaTrack;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -641,6 +642,7 @@ impl BackendService {
             return Ok(AnalyzeNewTracksData {
                 job_id,
                 analyzed: 0,
+                incomplete: 0,
                 failed: 0,
                 warnings: vec![logging::log(
                     Level::Info,
@@ -663,6 +665,7 @@ impl BackendService {
         std::fs::create_dir_all(&artwork_dir)?;
 
         let mut analyzed = 0usize;
+        let mut incomplete = 0usize;
         let mut failed = 0usize;
         let mut warnings = Vec::<WarningEntry>::new();
         if let Some(total) = auto_eligible_total
@@ -941,6 +944,7 @@ impl BackendService {
                             PersistDoneCounters {
                                 completed_count: &mut completed_count,
                                 analyzed: &mut analyzed,
+                                incomplete: &mut incomplete,
                                 failed: &mut failed,
                                 warnings: &mut warnings,
                                 library_context: library_context.as_mut(),
@@ -1041,6 +1045,7 @@ impl BackendService {
                     PersistDoneCounters {
                         completed_count: &mut completed_count,
                         analyzed: &mut analyzed,
+                        incomplete: &mut incomplete,
                         failed: &mut failed,
                         warnings: &mut warnings,
                         library_context: library_context.as_mut(),
@@ -1062,6 +1067,7 @@ impl BackendService {
         Ok(AnalyzeNewTracksData {
             job_id,
             analyzed,
+            incomplete,
             failed,
             warnings,
             items,
@@ -1095,9 +1101,29 @@ struct LibraryDurationContext {
 struct PersistDoneCounters<'a> {
     completed_count: &'a mut usize,
     analyzed: &'a mut usize,
+    incomplete: &'a mut usize,
     failed: &'a mut usize,
     warnings: &'a mut Vec<WarningEntry>,
     library_context: Option<&'a mut LibraryDurationContext>,
+}
+
+/// What an otherwise successful analysis left out, for the Event Log.
+fn incomplete_analysis_reason(local: &LocalAnalysisResult) -> String {
+    let mut missing = Vec::new();
+    if !local.bpm.is_some_and(|bpm| bpm > 0.0) {
+        missing.push("no BPM detected");
+    }
+    if !local.duration_ms.is_some_and(|ms| ms > 0) {
+        missing.push("no duration");
+    }
+    if local
+        .waveform_peaks_path
+        .as_deref()
+        .is_none_or(|p| p.trim().is_empty())
+    {
+        missing.push("no waveform");
+    }
+    missing.join(", ")
 }
 
 fn persist_done_result(
@@ -1111,6 +1137,7 @@ fn persist_done_result(
     let PersistDoneCounters {
         completed_count,
         analyzed,
+        incomplete,
         failed,
         warnings,
         mut library_context,
@@ -1129,14 +1156,29 @@ fn persist_done_result(
                 local.bpm_analyzer,
                 local.first_beat_ms.map(|v| v as i64),
             ])?;
-            *analyzed += 1;
+            let ready = has_core_analysis_fields(
+                local.waveform_peaks_path.as_deref(),
+                local.bpm,
+                local.duration_ms,
+            );
+            if ready {
+                *analyzed += 1;
+            } else {
+                *incomplete += 1;
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "analysis",
+                    "analysis.track-incomplete",
+                    format!(
+                        "{}: {}",
+                        track.file_path,
+                        incomplete_analysis_reason(&local)
+                    ),
+                ));
+            }
             if let Some(ctx) = library_context.as_deref_mut()
                 && ctx.visible_track_ids.contains(&track.id)
-                && has_core_analysis_fields(
-                    local.waveform_peaks_path.as_deref(),
-                    local.bpm,
-                    local.duration_ms,
-                )
+                && ready
             {
                 ctx.total_ms += local.duration_ms.unwrap_or(0);
                 ctx.known_count += 1;
@@ -1225,23 +1267,6 @@ fn resolve_persisted_artwork(path: &Path, artwork_dir: &Path, track_id: &str) ->
                 .as_deref()
                 .and_then(|found| persist_library_artwork_thumbnail(found, artwork_dir, track_id))
         })
-}
-
-fn waveform_data_from_decoded_or_file(
-    decoded: Option<(&[f32], u32)>,
-    path: &Path,
-    bins: usize,
-) -> BackendResult<WaveformData> {
-    match decoded {
-        Some((samples, sample_rate)) => Ok(build_waveform_data_from_samples_with_rate(
-            samples,
-            bins,
-            sample_rate,
-        )),
-        None => Ok(WaveformData::from_peaks(
-            build_waveform_preview_from_file_bytes(path, bins, 256 * 1024)?,
-        )),
-    }
 }
 
 pub(crate) fn collect_tracks_for_analysis(
@@ -1504,7 +1529,9 @@ fn analyze_local_track_with_updates(
         )));
     }
 
-    let decoded = decode_audio_mono_samples(&path, ANALYSIS_DECODE_MAX_SAMPLES).ok();
+    // A file with no decodable audio track fails here -- it must not be
+    // "analyzed" into a waveform drawn from its raw bytes.
+    let (samples, sample_rate) = decode_audio_mono_samples(&path, ANALYSIS_DECODE_MAX_SAMPLES)?;
 
     // Emission order (artwork, waveform, duration, bpm/key) mirrors the track
     // row's left-to-right column order in the UI. A couple of pieces still
@@ -1519,32 +1546,18 @@ fn analyze_local_track_with_updates(
         });
     }
 
-    let bpm_key_result = match decoded.as_ref() {
-        Some((samples, sample_rate)) => {
-            detect_bpm_key(engine, samples, *sample_rate, bpm_min, bpm_max)?
-        }
-        None => BpmKeyResult {
-            bpm: None,
-            key: None,
-            first_beat_ms: None,
-        },
-    };
+    let bpm_key_result = detect_bpm_key(engine, &samples, sample_rate, bpm_min, bpm_max)?;
     let bpm = bpm_key_result.bpm;
     let key = bpm_key_result.key;
     let first_beat_ms = bpm_key_result.first_beat_ms;
-    let duration_ms = detect_track_duration_ms(&path).or_else(|| {
-        decoded.as_ref().and_then(|(samples, sample_rate)| {
-            duration_ms_from_decoded(samples.len(), *sample_rate)
-        })
-    });
+    let duration_ms = detect_track_duration_ms(&path)
+        .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate));
 
-    let waveform = waveform_data_from_decoded_or_file(
-        decoded
-            .as_ref()
-            .map(|(samples, sample_rate)| (samples.as_slice(), *sample_rate)),
-        &path,
+    let waveform = build_waveform_data_from_samples_with_rate(
+        &samples,
         waveform_detail_bins_for_duration(duration_ms),
-    )?;
+        sample_rate,
+    );
     let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
     let waveform_peaks_path = if waveform.peaks.is_empty() {
         None
@@ -1632,7 +1645,7 @@ fn detect_track_duration_ms(path: &Path) -> Option<u64> {
         )
         .ok()?;
     let format = probed.format;
-    let track = format.default_track()?;
+    let track = first_audio_track(format.tracks())?;
     let sr = u64::from(track.codec_params.sample_rate?);
     let frames = track.codec_params.n_frames?;
     if sr == 0 || frames == 0 {
@@ -1949,6 +1962,14 @@ pub(crate) fn normalize_text(value: &str) -> String {
         .collect::<String>()
 }
 
+/// The first track Symphonia can decode -- the audio in a video file, where
+/// the container's default track is often the (undecodable) video.
+fn first_audio_track(tracks: &[SymphoniaTrack]) -> Option<&SymphoniaTrack> {
+    tracks
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+}
+
 pub(crate) fn decode_audio_mono_samples(
     path: &Path,
     max_samples: usize,
@@ -2019,9 +2040,7 @@ fn decode_audio_mono_samples_symphonia(
         .map_err(|err| err.to_string())?;
 
     let mut format = probed.format;
-    let track = format
-        .default_track()
-        .ok_or_else(|| "no default audio track".to_string())?;
+    let track = first_audio_track(format.tracks()).ok_or_else(|| "no audio track".to_string())?;
     let track_id = track.id;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
