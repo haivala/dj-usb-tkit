@@ -51,6 +51,18 @@
   analyzed like any other track. Files the library doesn't take (tracker
   modules, videos) are skipped. The chip turns Mixxx tracks on and off in
   the library view, separately from the rekordbox library.
+- **New feature:** import a playlist from rekordbox or Mixxx. The sidebar's
+  Playlists section gets an "Import" button when either library is found.
+  It lists the playlists and history sessions that have tracks (plus Mixxx
+  crates; rekordbox playlists inside folders show as "Folder / Name"). The
+  one you pick becomes a new playlist in the same order (Mixxx crates by
+  artist and title). Its tracks are imported into the library the same way
+  as with "Import RB" / "Import Mixxx", including Mixxx hot cues. A track
+  listed twice is added once. If none of its tracks are found on this
+  computer, nothing is created and the status line says so. Smart playlists
+  aren't listed, because rekordbox doesn't store their tracks.
+- **Improvement:** "Import RB" now skips files the library doesn't take
+  (such as videos), like the folder scan does.
 - **Fix:** video files (`.mp4` files with a video track) are no longer
   imported into the library. Audio-only `.mp4`
   (AAC) files still are. Videos already in the library drop out on the next

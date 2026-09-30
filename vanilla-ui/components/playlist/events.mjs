@@ -9,6 +9,8 @@ export function bindPlaylistEvents(ctx) {
     deletePlaylist,
     startPlaylistRename,
     promptNewPlaylist,
+    importExternalPlaylist,
+    playlistImportDialog,
     command,
     getCurrentPlaylist,
     loadPlaylists,
@@ -57,6 +59,19 @@ export function bindPlaylistEvents(ctx) {
 
   el.addPlaylistBtn.addEventListener("click", () => {
     promptNewPlaylist();
+  });
+
+  el.importPlaylistBtn?.addEventListener("click", () => {
+    importExternalPlaylist().catch(catchErr(emitStatus));
+  });
+  el.playlistImportOkBtn?.addEventListener("click", () => {
+    playlistImportDialog?.close(true);
+  });
+  el.playlistImportCancelBtn?.addEventListener("click", () => {
+    playlistImportDialog?.close(false);
+  });
+  el.playlistImportOverlay?.addEventListener("click", (event) => {
+    if (event.target === el.playlistImportOverlay) playlistImportDialog?.close(false);
   });
 
   let playlistSearchTimer = null;

@@ -8,6 +8,7 @@ import { bindBackupsEvents } from "./components/backups/events.mjs";
 import { bindShellEvents } from "./components/shell/events.mjs";
 import { bindTrackDetailEvents } from "./components/track-detail/events.mjs";
 import { initTooltips } from "./tooltip.mjs";
+import { cloneTemplate } from "./ui_utils.mjs";
 import { renderEmptyState } from "./components/shell/actions.mjs";
 import { scanLibraryButtonLabel } from "./components/library/actions.mjs";
 
@@ -166,6 +167,60 @@ export function createConfirmDialogController(el) {
       el.confirmOkBtn.focus();
       return new Promise((resolve) => {
         confirmResolve = resolve;
+      });
+    }
+  };
+}
+
+// Picker for importing one external playlist. `open({ groups })` takes
+// `[{ label, items }]` (one <optgroup> each) and resolves with the chosen
+// item, or null when cancelled.
+export function createPlaylistImportDialogController(el, document) {
+  let resolveFn = null;
+  let isOpen = false;
+  let items = [];
+
+  function populate(groups) {
+    const select = el.playlistImportSelect;
+    select.textContent = "";
+    items = [];
+    const Option = select.ownerDocument.defaultView.Option;
+    for (const { label, items: groupItems } of groups) {
+      if (!groupItems?.length) continue;
+      const group = cloneTemplate(document, "tplSelectOptgroup");
+      group.label = label;
+      for (const item of groupItems) {
+        group.appendChild(new Option(`${item.name} (${item.trackCount})`, String(items.length)));
+        items.push(item);
+      }
+      select.appendChild(group);
+    }
+    select.selectedIndex = 0;
+  }
+
+  return {
+    isOpen() {
+      return isOpen;
+    },
+    close(confirmed) {
+      if (!isOpen) return;
+      isOpen = false;
+      el.playlistImportOverlay.hidden = true;
+      const chosen = confirmed ? items[Number(el.playlistImportSelect.value)] || null : null;
+      const resolver = resolveFn;
+      resolveFn = null;
+      if (resolver) resolver(chosen);
+    },
+    open({ groups = [] } = {}) {
+      if (isOpen) {
+        this.close(false);
+      }
+      isOpen = true;
+      populate(groups);
+      el.playlistImportOverlay.hidden = false;
+      el.playlistImportSelect.focus();
+      return new Promise((resolve) => {
+        resolveFn = resolve;
       });
     }
   };

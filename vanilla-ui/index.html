@@ -98,6 +98,12 @@
               <span class="nav-label">New</span>
             </button>
           </li>
+          <li class="hidden" id="importPlaylistItem">
+            <button class="nav-item nav-add-playlist" id="importPlaylistBtn" data-tooltip="Import a playlist from rekordbox or Mixxx" aria-label="Import playlist">
+              <span class="nav-icon">&#8615;</span>
+              <span class="nav-label">Import</span>
+            </button>
+          </li>
           <!-- dynamic playlist items inserted here by JS -->
         </ul>
       </nav>
@@ -589,6 +595,23 @@
     </div>
   </div>
 
+  <div class="confirm-overlay" id="playlistImportOverlay" hidden>
+    <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="playlistImportTitle">
+      <h3 id="playlistImportTitle">Import Playlist</h3>
+      <div class="tracklist-export-body">
+        <div class="tracklist-export-field">
+          <label for="playlistImportSelect">Playlist</label>
+          <select id="playlistImportSelect"></select>
+        </div>
+        <p class="muted">Imported as a new playlist. Tracks not yet in the library are imported with it.</p>
+      </div>
+      <div class="row confirm-actions">
+        <button id="playlistImportCancelBtn">Cancel</button>
+        <button id="playlistImportOkBtn" data-primary>Import</button>
+      </div>
+    </div>
+  </div>
+
   <div class="confirm-overlay" id="trackDetailOverlay" data-playback-scope hidden>
     <div class="track-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="trackDetailTitle">
       <div class="track-detail-header">
@@ -733,8 +756,9 @@
   <!-- Status line, library sources, sidebar playlists -->
   <template id="tplStatusWarningLink"><a href="#" class="status-warning-link"></a></template>
   <template id="tplSourceChipMasterDb">
-    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-master-db="true" aria-label="Toggle desktop library" /><span class="source-chip-path">master.db</span></span>
+    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-master-db="true" aria-label="Toggle rekordbox library" /><span class="source-chip-path">rekordbox</span></span>
   </template>
+  <template id="tplSelectOptgroup"><optgroup></optgroup></template>
   <template id="tplSourceChipMixxxDb">
     <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" aria-label="Toggle Mixxx library" /><span class="source-chip-path">Mixxx</span></span>
   </template>

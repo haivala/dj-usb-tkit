@@ -11,6 +11,7 @@ mod export_log;
 pub(crate) mod format_compat;
 pub(crate) mod key_notation;
 mod mixxx_import;
+mod rekordbox_import;
 mod repair;
 pub mod update_check;
 mod usb;
@@ -61,10 +62,9 @@ use crate::models::{
     RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
     ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ResolvePlaybackSourceData,
     ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
-    SearchTracksRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetPlaybackMetronomeRequest, SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData,
-    Track, WarningEntry,
+    ScanLibraryData, ScanLibraryRequest, SearchTracksData, SearchTracksRequest,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
+    SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track, WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -414,6 +414,35 @@ impl ExternalLibraries {
     pub(crate) fn includes(self, track: &Track) -> bool {
         (self.master_db && track.master_db_source) || (self.mixxx_db && track.mixxx_db_source)
     }
+}
+
+/// Create a local playlist holding `track_ids` in order; returns its id.
+pub(crate) fn insert_local_playlist(
+    conn: &rusqlite::Connection,
+    name: &str,
+    track_ids: &[String],
+) -> BackendResult<String> {
+    let id = Uuid::now_v7().to_string();
+    let now = now();
+    conn.execute(
+        "INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at) VALUES (?1, ?2, 'local', NULL, NULL, NULL, ?3, ?3)",
+        params![id, name, now],
+    )?;
+    for (index, track_id) in track_ids.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![Uuid::now_v7().to_string(), id, track_id, index as i64 + 1, now],
+        )?;
+    }
+    Ok(id)
+}
+
+/// An external playlist import that found none of its tracks: failing beats
+/// creating an empty playlist.
+pub(crate) fn no_importable_tracks_error(name: &str, listed: usize) -> BackendError {
+    BackendError::Validation(format!(
+        "none of the {listed} track(s) in {name:?} could be imported: files not found on this computer or not supported"
+    ))
 }
 
 fn non_empty_db_value(value: &str) -> Option<&str> {
@@ -1232,395 +1261,6 @@ impl BackendService {
             scoped_track_count,
             album_count,
             unanalyzed_count,
-            warnings,
-        })
-    }
-
-    pub fn scan_master_db(&self, req: ScanMasterDbRequest) -> BackendResult<ScanLibraryData> {
-        use self::usb_utils::external_master_db_candidates;
-        use self::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
-
-        // Resolve path: explicit request > auto-detect
-        let master_path = if let Some(p) = req.path.as_deref().filter(|s| !s.trim().is_empty()) {
-            std::path::PathBuf::from(p.trim())
-        } else {
-            external_master_db_candidates()
-                .into_iter()
-                .find(|c| c.is_file())
-                .ok_or_else(|| BackendError::Validation("master.db not found".to_string()))?
-        };
-
-        if !master_path.is_file() {
-            return Err(BackendError::Validation(format!(
-                "master.db not found: {}",
-                master_path.display()
-            )));
-        }
-
-        // Open read-only with SQLCipher key
-        let conn = rusqlite::Connection::open_with_flags(
-            &master_path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .map_err(|e| BackendError::Validation(format!("could not open master.db: {e}")))?;
-        conn.execute_batch(&format!("PRAGMA key='{}';", DEFAULT_MASTER_DB_KEY))
-            .map_err(|e| BackendError::Validation(format!("master.db key failed: {e}")))?;
-
-        // Verify we can read the schema
-        let ok: bool = conn
-            .query_row(
-                "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='djmdContent'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0;
-        if !ok {
-            return Err(BackendError::Validation(
-                "master.db opened but djmdContent table not found (wrong key or version)"
-                    .to_string(),
-            ));
-        }
-
-        // Query all non-deleted tracks with available metadata.
-        // FolderPath is the full file path (despite the name).
-        // BPM is stored as centiBPM integer (12600 = 126.00 BPM).
-        // Key is a FK into djmdKey; ScaleName holds the human-readable name.
-        // AnalysisDataPath and ImagePath are desktop library virtual paths on Windows
-        // (/PIONEER/...) and resolve under the share directory.
-        let mut stmt = conn
-            .prepare(
-                r#"
-            SELECT
-              c.FolderPath,
-              c.Title,
-              COALESCE(ar.Name, c.SrcArtistName, '') AS Artist,
-              COALESCE(al.Name, '')                   AS Album,
-              c.BPM,
-              k.ScaleName,
-              c.Length,
-              c.AnalysisDataPath,
-              c.ImagePath
-            FROM djmdContent c
-            LEFT JOIN djmdArtist  ar ON ar.ID = c.ArtistID
-            LEFT JOIN djmdAlbum   al ON al.ID = c.AlbumID
-            LEFT JOIN djmdKey     k  ON k.ID  = c.KeyID
-            WHERE IFNULL(c.rb_local_deleted, 0) = 0
-              AND c.FolderPath IS NOT NULL
-            "#,
-            )
-            .map_err(|e| BackendError::Validation(format!("master.db query failed: {e}")))?;
-
-        struct RbTrack {
-            file_path: String,
-            title: String,
-            artist: String,
-            album: String,
-            bpm: Option<f64>,
-            tonality: Option<String>,
-            duration_ms: Option<i64>,
-            anlz_path: Option<String>,
-            image_path: Option<String>,
-        }
-
-        let tracks: Vec<RbTrack> = stmt
-            .query_map([], |row| {
-                Ok(RbTrack {
-                    file_path: row.get::<_, String>(0)?,
-                    title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    album: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    bpm: row.get::<_, Option<i64>>(4)?.map(|b| b as f64 / 100.0),
-                    tonality: row.get::<_, Option<String>>(5)?,
-                    duration_ms: row.get::<_, Option<i64>>(6)?.map(|s| s * 1000),
-                    anlz_path: row.get::<_, Option<String>>(7)?,
-                    image_path: row.get::<_, Option<String>>(8)?,
-                })
-            })
-            .map_err(|e| BackendError::Validation(format!("master.db row error: {e}")))?
-            .filter_map(|r| r.ok())
-            .filter(|t| !t.file_path.trim().is_empty())
-            .collect();
-
-        let now = now();
-        let mut db_conn = self.db.connect()?;
-        let tx = db_conn.transaction()?;
-
-        // Load existing tracks by file_path for upsert logic
-        let mut existing: std::collections::HashMap<String, String> = {
-            let mut stmt = tx.prepare("SELECT file_path, id FROM tracks")?;
-            stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect()
-        };
-
-        let analysis_dir = self.db.data_dir().join("analysis");
-        let artwork_dir = analysis_dir.join("artwork");
-        let _ = std::fs::create_dir_all(&artwork_dir);
-
-        let mut indexed = 0usize;
-        let mut updated = 0usize;
-        let mut removed = 0usize;
-        let mut not_found: Vec<String> = Vec::new();
-        let mut anlz_null = 0usize;
-        let mut anlz_miss = 0usize;
-        let mut anlz_ok = 0usize;
-        let mut artwork_null = 0usize;
-        let mut artwork_miss = 0usize;
-        let mut artwork_ok = 0usize;
-        let mut sample_anlz: Option<String> = None;
-        let mut sample_img: Option<String> = None;
-        let mut warnings = Vec::<WarningEntry>::new();
-
-        for t in &tracks {
-            if !std::path::Path::new(&t.file_path).exists() {
-                // Remove from local DB if previously imported; skip upsert
-                if existing.remove(&t.file_path).is_some() {
-                    tx.execute(
-                        "DELETE FROM tracks WHERE file_path = ?1",
-                        params![t.file_path],
-                    )?;
-                    removed += 1;
-                }
-                not_found.push(t.file_path.clone());
-                continue;
-            }
-
-            let fingerprint = build_track_match_fingerprint(
-                &t.title,
-                &t.artist,
-                Some(t.album.as_str()).filter(|s| !s.is_empty()),
-            );
-
-            // Resolve (or generate) the track ID before any file writes
-            let is_update = existing.contains_key(&t.file_path);
-            let track_id = if is_update {
-                existing[&t.file_path].clone()
-            } else {
-                Uuid::now_v7().to_string()
-            };
-
-            // Waveform: store the original ANLZ path in place - no copy, no conversion.
-            // PWV4 bytes are extracted later when the track is loaded for display.
-            let waveform_path = match t.anlz_path.as_deref().and_then(non_empty_db_value) {
-                None => {
-                    anlz_null += 1;
-                    None
-                }
-                Some(anlz_rel) => {
-                    if sample_anlz.is_none() {
-                        sample_anlz = Some(anlz_rel.to_string());
-                    }
-                    let resolved = master_db_analysis_file_candidates(&master_path, anlz_rel)
-                        .into_iter()
-                        .find(|p| p.is_file());
-                    if let Some(anlz_abs) = resolved {
-                        anlz_ok += 1;
-                        anlz_abs.to_str().map(str::to_owned)
-                    } else {
-                        anlz_miss += 1;
-                        warnings.push(logging::log(
-                            Level::Warn,
-                            "scan-master-db",
-                            "scan.master-db.anlz-not-found",
-                            format!("ANLZ not found (AnalysisDataPath={anlz_rel:?})"),
-                        ));
-                        None
-                    }
-                }
-            };
-
-            // Artwork from djmdContent.ImagePath.
-            let artwork_path = match t.image_path.as_deref().and_then(non_empty_db_value) {
-                None => {
-                    artwork_null += 1;
-                    None
-                }
-                Some(img_rel) => {
-                    if sample_img.is_none() {
-                        sample_img = Some(img_rel.to_string());
-                    }
-                    match resolve_master_db_resource_path(&master_path, img_rel, |p| p.is_file()) {
-                        None => {
-                            artwork_miss += 1;
-                            warnings.push(logging::log(
-                                Level::Warn,
-                                "scan-master-db",
-                                "scan.master-db.artwork-not-found",
-                                format!("artwork not found (ImagePath={img_rel:?})"),
-                            ));
-                            None
-                        }
-                        Some(src) => {
-                            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
-                            let dest = artwork_dir.join(format!("{track_id}.{ext}"));
-                            match std::fs::copy(&src, &dest) {
-                                Ok(_) => {
-                                    artwork_ok += 1;
-                                    Some(dest.to_string_lossy().to_string())
-                                }
-                                Err(e) => {
-                                    artwork_miss += 1;
-                                    warnings.push(logging::log(
-                                        Level::Error,
-                                        "scan-master-db",
-                                        "scan.master-db.artwork-copy-failed",
-                                        format!("artwork copy failed {src:?} -> {dest:?}: {e}"),
-                                    ));
-                                    None
-                                }
-                            }
-                        }
-                    }
-                }
-            };
-
-            if is_update {
-                tx.execute(
-                    r#"UPDATE tracks SET
-                        title = ?1, artist = ?2, album = ?3,
-                        bpm = COALESCE(bpm, ?4),
-                        tonality = COALESCE(tonality, ?5),
-                        duration_ms = COALESCE(duration_ms, ?6),
-                        waveform_peaks_path = COALESCE(?7, waveform_peaks_path),
-                        artwork_path = COALESCE(?8, artwork_path),
-                        format_ext = COALESCE(format_ext, ?12),
-                        match_fingerprint = ?9,
-                        master_db_source = 1,
-                        updated_at = ?10
-                       WHERE id = ?11"#,
-                    params![
-                        t.title,
-                        t.artist,
-                        if t.album.is_empty() {
-                            None
-                        } else {
-                            Some(&t.album)
-                        },
-                        t.bpm,
-                        t.tonality,
-                        t.duration_ms,
-                        waveform_path,
-                        artwork_path,
-                        fingerprint,
-                        now,
-                        track_id,
-                        crate::utils::format_ext_from_path(&t.file_path)
-                    ],
-                )?;
-                updated += 1;
-            } else {
-                tx.execute(
-                    r#"INSERT INTO tracks (
-                        id, title, artist, album, bpm, tonality, file_path, format_ext,
-                        duration_ms, waveform_peaks_path, artwork_path, match_fingerprint,
-                        master_db_source, created_at, updated_at
-                       ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13)"#,
-                    params![
-                        track_id,
-                        t.title,
-                        t.artist,
-                        if t.album.is_empty() {
-                            None
-                        } else {
-                            Some(&t.album)
-                        },
-                        t.bpm,
-                        t.tonality,
-                        t.file_path,
-                        crate::utils::format_ext_from_path(&t.file_path),
-                        t.duration_ms,
-                        waveform_path,
-                        artwork_path,
-                        fingerprint,
-                        now
-                    ],
-                )?;
-                existing.insert(t.file_path.clone(), track_id);
-                indexed += 1;
-            }
-        }
-
-        tx.commit()?;
-
-        if let Some(p) = sample_anlz {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-master-db",
-                "scan.master-db.anlz-sample",
-                format!("AnalysisDataPath sample: {p}"),
-            ));
-        }
-        if let Some(p) = sample_img {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-master-db",
-                "scan.master-db.image-sample",
-                format!("ImagePath sample: {p}"),
-            ));
-        }
-        if anlz_null > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-master-db",
-                "scan.master-db.anlz-null",
-                format!("{anlz_null} track(s) have no AnalysisDataPath"),
-            ));
-        }
-        if anlz_miss > 0 {
-            warnings.push(logging::log(
-                Level::Warn,
-                "scan-master-db",
-                "scan.master-db.anlz-miss-summary",
-                format!("{anlz_miss} ANLZ path(s) not found on disk"),
-            ));
-        }
-        if anlz_ok > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-master-db",
-                "scan.master-db.anlz-ok",
-                format!("{anlz_ok} ANLZ path(s) resolved OK"),
-            ));
-        }
-        if artwork_null > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-master-db",
-                "scan.master-db.artwork-null",
-                format!("{artwork_null} track(s) have no ImagePath"),
-            ));
-        }
-        if artwork_miss > 0 {
-            warnings.push(logging::log(
-                Level::Warn,
-                "scan-master-db",
-                "scan.master-db.artwork-miss-summary",
-                format!("{artwork_miss} artwork source file(s) not found or copy failed"),
-            ));
-        }
-        if artwork_ok > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-master-db",
-                "scan.master-db.artwork-ok",
-                format!("{artwork_ok} artwork file(s) copied OK"),
-            ));
-        }
-
-        Ok(ScanLibraryData {
-            job_id: Uuid::now_v7().to_string(),
-            indexed,
-            updated,
-            removed,
-            not_found,
-            // Master-DB scan isn't scoped to source folders; the post-scan
-            // library facts are only surfaced for `scan_library`.
-            scoped_track_count: 0,
-            album_count: 0,
-            unanalyzed_count: 0,
             warnings,
         })
     }
@@ -2481,13 +2121,8 @@ impl BackendService {
             ));
         }
 
-        let id = Uuid::now_v7().to_string();
-        let now = now();
         let conn = self.db.connect()?;
-        conn.execute(
-            "INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at) VALUES (?1, ?2, 'local', NULL, NULL, NULL, ?3, ?3)",
-            params![id, name, now],
-        )?;
+        let id = insert_local_playlist(&conn, name, &[])?;
 
         Ok(CreatePlaylistData {
             playlist_id: id,
@@ -4026,6 +3661,7 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::ScanMasterDbRequest;
 
     // --- build_track_match_fingerprint ---
 

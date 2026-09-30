@@ -15,11 +15,12 @@ use crate::models::{
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
     GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
-    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
-    InspectUsbTracksRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    ListPlaylistsData, ListTracksData, ListTracksRequest, ListUsbBackupsData,
-    ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, ImportExternalPlaylistData,
+    ImportExternalPlaylistRequest, InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData,
+    InspectUsbTrackRequest, InspectUsbTracksData, InspectUsbTracksRequest,
+    ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
+    ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
+    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
     MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
     PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackMetronomeData,
     PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
@@ -81,8 +82,36 @@ impl BackendCommands {
         wrap(self.service.scan_master_db(req))
     }
 
+    pub fn list_rekordbox_playlists(
+        &self,
+        req: ListExternalPlaylistsRequest,
+    ) -> ApiResponse<ListExternalPlaylistsData> {
+        wrap(self.service.list_rekordbox_playlists(req))
+    }
+
+    pub fn import_rekordbox_playlist(
+        &self,
+        req: ImportExternalPlaylistRequest,
+    ) -> ApiResponse<ImportExternalPlaylistData> {
+        wrap(self.service.import_rekordbox_playlist(req))
+    }
+
     pub fn scan_mixxx_db(&self, req: ScanMixxxDbRequest) -> ApiResponse<ScanLibraryData> {
         wrap(self.service.scan_mixxx_db(req))
+    }
+
+    pub fn list_mixxx_playlists(
+        &self,
+        req: ListExternalPlaylistsRequest,
+    ) -> ApiResponse<ListExternalPlaylistsData> {
+        wrap(self.service.list_mixxx_playlists(req))
+    }
+
+    pub fn import_mixxx_playlist(
+        &self,
+        req: ImportExternalPlaylistRequest,
+    ) -> ApiResponse<ImportExternalPlaylistData> {
+        wrap(self.service.import_mixxx_playlist(req))
     }
 
     pub fn search_tracks(&self, req: SearchTracksRequest) -> ApiResponse<SearchTracksData> {

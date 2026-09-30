@@ -390,6 +390,7 @@ export function renderSourceChips(ctx) {
   if (state.externalMasterDbPath) {
     const chip = cloneTemplate(document, "tplSourceChipMasterDb");
     chip.querySelector(".source-chip-toggle").checked = !!state.masterDbEnabled;
+    chip.querySelector(".source-chip-path").dataset.tooltip = state.externalMasterDbPath;
     el.sourceChipsContainer.appendChild(chip);
   }
   if (state.externalMixxxDbPath) {
@@ -436,6 +437,9 @@ export function renderSourceChips(ctx) {
   }
   if (el.importMixxxDbBtn) {
     el.importMixxxDbBtn.classList.toggle("hidden", !state.externalMixxxDbPath);
+  }
+  if (el.importPlaylistItem) {
+    el.importPlaylistItem.classList.toggle("hidden", !state.externalMasterDbPath && !state.externalMixxxDbPath);
   }
   ctx.updateScanLibraryButtonLabel();
   ctx.updateSourceFilterIndicator();

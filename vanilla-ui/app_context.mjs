@@ -89,7 +89,7 @@ export function createAppContext(env) {
     commitActivePlaylistSort updatePlaylistExportButtons createPlaylist deletePlaylist
     addTracksToCurrentPlaylist addLibrarySelectionToCurrentPlaylist populatePlaylistPanel
     getCurrentPlaylist isPlaylistSortActive renderCurrentPlaylistTracksFromState
-    refreshCurrentPlaylistTracks`);
+    refreshCurrentPlaylistTracks importExternalPlaylist`);
   bindActions(library, `normalizeTrack normalizeUsbPlaylist refreshSourceRootAnalysisStatus
     refreshMissingSourceRoots applyRealtimeAnalyzedTrackUpdate hydrateLoadedTracksPreviewsInBackground
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
@@ -114,6 +114,7 @@ export function createAppContext(env) {
   ctx.confirmDialog = uiCtrl.createConfirmDialogController(ctx.el);
   ctx.openConfirmDialog = (opts) => ctx.confirmDialog.open(opts);
   ctx.tracklistExportDialog = uiCtrl.createTracklistExportDialogController(ctx.el);
+  ctx.playlistImportDialog = uiCtrl.createPlaylistImportDialogController(ctx.el, ctx.document);
   ctx.trackDetailDialog = trackDetail.createAppTrackDetailController(ctx);
   ctx.libraryTracksCtl = library.createLibraryTracksController(ctx);
   ctx.playlistTracksCtl = playlist.createPlaylistTracksController(ctx);

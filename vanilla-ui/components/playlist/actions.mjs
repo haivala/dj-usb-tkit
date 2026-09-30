@@ -285,6 +285,110 @@ export async function createPlaylist(ctx, name) {
   emitStatus(`Playlist created: ${created.name}`);
 }
 
+// External libraries a playlist can be imported from. Each is offered when
+// its database was detected; importing turns that library's source chip on.
+const PLAYLIST_IMPORT_SOURCES = [
+  {
+    label: "rekordbox",
+    pathKey: "externalMasterDbPath",
+    listCommand: "list_rekordbox_playlists",
+    importCommand: "import_rekordbox_playlist",
+    enable: (ctx) => {
+      ctx.state.masterDbEnabled = true;
+      ctx.persistMasterDbEnabled(true);
+    }
+  },
+  {
+    label: "Mixxx",
+    pathKey: "externalMixxxDbPath",
+    listCommand: "list_mixxx_playlists",
+    importCommand: "import_mixxx_playlist",
+    enable: (ctx) => {
+      ctx.state.mixxxDbEnabled = true;
+      ctx.persistMixxxDbEnabled(true);
+    }
+  }
+];
+
+const PLAYLIST_IMPORT_KINDS = [
+  ["playlist", "playlists"],
+  ["crate", "crates"],
+  ["history", "history"]
+];
+
+// Pick one playlist / crate / history session from a detected rekordbox or
+// Mixxx library and import it as a new local playlist (the backend imports
+// its tracks too), then open it.
+export async function importExternalPlaylist(ctx) {
+  const { state, withProgress, command, updateModeText, switchView, logWarnings } = ctx;
+  const { emitStatus } = ctx;
+
+  const sources = PLAYLIST_IMPORT_SOURCES.filter((source) => state[source.pathKey]);
+  const listed = await Promise.all(sources.map(async (source) => {
+    const path = state[source.pathKey];
+    try {
+      const data = await command(source.listCommand, { path });
+      return (Array.isArray(data?.items) ? data.items : []).map((item) => ({ ...item, source, path }));
+    } catch (err) {
+      emitStatus(`Could not read ${source.label} playlists: ${err?.message || err}`);
+      return null;
+    }
+  }));
+  const groups = sources.flatMap((source, index) => PLAYLIST_IMPORT_KINDS.map(([kind, kindLabel]) => ({
+    label: `${source.label} ${kindLabel}`,
+    items: (listed[index] || []).filter((item) => item.kind === kind)
+  })));
+  if (!groups.some((group) => group.items.length)) {
+    // Keep a listing error on the status line rather than hiding it.
+    if (!listed.includes(null)) emitStatus("No playlists with tracks found");
+    return;
+  }
+
+  const chosen = await ctx.playlistImportDialog.open({ groups });
+  if (!chosen) return;
+  const { source, path } = chosen;
+
+  let result;
+  try {
+    result = await withProgress(`Importing ${source.label} playlist`, async (progress) => {
+      progress(30, `Importing ${chosen.name}...`);
+      const imported = await command(source.importCommand, { path, kind: chosen.kind, id: chosen.id });
+      progress(70, "Refreshing playlists...");
+      // The imported tracks belong to that library: show them in the library too.
+      source.enable(ctx);
+      state.sourcesEverConfigured = true;
+      ctx.persistSourcesEverConfigured(true);
+      ctx.renderSourceChips();
+      await ctx.resetAndLoadLibraryTracks(state.libraryQuery || "");
+      await loadPlaylists(ctx);
+      state.currentPlaylistId = imported.playlistId;
+      updateModeText();
+      await switchView(imported.playlistId);
+      return imported;
+    });
+  } catch (err) {
+    emitStatus(`${source.label} playlist import failed: ${err?.message || err}`);
+    return;
+  }
+
+  const logLabel = `${source.label} playlist import`;
+  const notFound = Array.isArray(result.notFound) ? result.notFound : [];
+  if (notFound.length > 0) {
+    logWarnings(
+      source.label,
+      notFound.map((p) => ({ level: "warn", message: p, code: "playlist_import.file_not_found" })),
+      logLabel
+    );
+  }
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  if (warnings.length > 0) {
+    logWarnings(source.label, warnings, logLabel);
+  }
+  const skipped = Math.max(0, Number(chosen.trackCount || 0) - Number(result.added || 0));
+  const suffix = skipped > 0 ? ` | ${skipped} track(s) skipped (see event log)` : "";
+  emitStatus(`Imported playlist ${result.name}: ${result.added} track(s)${suffix}`);
+}
+
 export async function deletePlaylist(ctx, playlistId) {
   const { state, openConfirmDialog, command, updateModeText, switchView } = ctx;
   const { emitStatus } = ctx;

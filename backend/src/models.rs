@@ -1970,6 +1970,61 @@ pub struct ScanMixxxDbRequest {
     pub path: Option<String>,
 }
 
+/// Which kind of list a playlist import reads from an external library: a
+/// playlist (incl. Mixxx's Auto DJ), a Mixxx crate, or a history session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExternalPlaylistKind {
+    Playlist,
+    Crate,
+    History,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalPlaylistSummary {
+    /// The source library's own id (Mixxx: numeric, rekordbox: text).
+    pub id: String,
+    pub name: String,
+    pub kind: ExternalPlaylistKind,
+    pub track_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListExternalPlaylistsRequest {
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListExternalPlaylistsData {
+    pub items: Vec<ExternalPlaylistSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExternalPlaylistRequest {
+    #[serde(default)]
+    pub path: Option<String>,
+    pub kind: ExternalPlaylistKind,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExternalPlaylistData {
+    pub playlist_id: String,
+    pub name: String,
+    /// Tracks placed in the new playlist.
+    pub added: usize,
+    /// Tracks new to the local library.
+    pub indexed: usize,
+    pub not_found: Vec<String>,
+    pub warnings: Vec<WarningEntry>,
+}
+
 // ── track cues + beat-grid editing ────────────────────────
 
 /// A cue point on a track. This app targets CDJ playback directly, so a cue is

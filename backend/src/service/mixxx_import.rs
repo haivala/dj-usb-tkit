@@ -7,21 +7,27 @@
 //! analysis like any folder track; hot cues are imported straight into
 //! `track_cues` (they only need a position, not analysis).
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use uuid::Uuid;
 
 use super::cues::{
     KEY_OPTIONS, MAX_HOT_CUES, insert_track_cues, nearest_palette_color_id, track_has_cues,
 };
 use super::key_notation::camelot_position;
-use super::{BackendService, build_track_match_fingerprint, non_empty_db_value, now};
+use super::{
+    BackendService, build_track_match_fingerprint, insert_local_playlist,
+    no_importable_tracks_error, non_empty_db_value, now,
+};
 use crate::edb::{load_table_columns, table_exists};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    DetectExternalMixxxDbData, ScanLibraryData, ScanMixxxDbRequest, TrackCue, WarningEntry,
+    DetectExternalMixxxDbData, ExternalPlaylistKind, ExternalPlaylistSummary,
+    ImportExternalPlaylistData, ImportExternalPlaylistRequest, ListExternalPlaylistsData,
+    ListExternalPlaylistsRequest, ScanLibraryData, ScanMixxxDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
 
@@ -282,43 +288,151 @@ fn load_mixxx_cues(conn: &Connection, mixxx_track_id: i64) -> BackendResult<Vec<
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-impl BackendService {
-    pub fn detect_external_mixxx_db(&self) -> BackendResult<DetectExternalMixxxDbData> {
-        Ok(detect_external_mixxx_db())
+/// Resolve the Mixxx library to use (explicit path, else auto-detect) and open
+/// it read-only -- Mixxx may be running; its WAL is still read consistently.
+fn open_mixxx_db(path: Option<&str>) -> BackendResult<Connection> {
+    let mixxx_path = if let Some(p) = path.filter(|s| !s.trim().is_empty()) {
+        PathBuf::from(p.trim())
+    } else {
+        external_mixxx_db_candidates()
+            .into_iter()
+            .find(|c| c.is_file())
+            .ok_or_else(|| BackendError::Validation("Mixxx library not found".to_string()))?
+    };
+    if !mixxx_path.is_file() {
+        return Err(BackendError::Validation(format!(
+            "Mixxx library not found: {}",
+            mixxx_path.display()
+        )));
     }
+    let mixxx = Connection::open_with_flags(&mixxx_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| BackendError::Validation(format!("could not open Mixxx library: {e}")))?;
+    if !table_exists(&mixxx, "library") || !table_exists(&mixxx, "track_locations") {
+        return Err(BackendError::Validation(
+            "Mixxx library opened but library/track_locations tables not found".to_string(),
+        ));
+    }
+    Ok(mixxx)
+}
 
-    pub fn scan_mixxx_db(&self, req: ScanMixxxDbRequest) -> BackendResult<ScanLibraryData> {
-        let mixxx_path = if let Some(p) = req.path.as_deref().filter(|s| !s.trim().is_empty()) {
-            PathBuf::from(p.trim())
-        } else {
-            external_mixxx_db_candidates()
-                .into_iter()
-                .find(|c| c.is_file())
-                .ok_or_else(|| BackendError::Validation("Mixxx library not found".to_string()))?
-        };
-        if !mixxx_path.is_file() {
-            return Err(BackendError::Validation(format!(
-                "Mixxx library not found: {}",
-                mixxx_path.display()
-            )));
-        }
+// Mixxx `Playlists.hidden` values: a regular playlist, the Auto DJ queue, and a
+// history set log.
+const MIXXX_PLAYLIST_REGULAR: i64 = 0;
+const MIXXX_PLAYLIST_AUTO_DJ: i64 = 1;
+const MIXXX_PLAYLIST_SET_LOG: i64 = 2;
 
-        // Read-only: Mixxx may be running (its WAL is still read consistently).
-        let mixxx = Connection::open_with_flags(&mixxx_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| BackendError::Validation(format!("could not open Mixxx library: {e}")))?;
-        if !table_exists(&mixxx, "library") || !table_exists(&mixxx, "track_locations") {
-            return Err(BackendError::Validation(
-                "Mixxx library opened but library/track_locations tables not found".to_string(),
-            ));
-        }
-        let has_cues_table = table_exists(&mixxx, "cues");
-        let tracks = load_mixxx_tracks(&mixxx)?;
+/// The Mixxx playlists, crates and history set logs that have tracks, in the
+/// order Mixxx's sidebar shows them.
+fn list_mixxx_playlists_from(mixxx: &Connection) -> BackendResult<Vec<ExternalPlaylistSummary>> {
+    let mut items = Vec::new();
+    if table_exists(mixxx, "Playlists") && table_exists(mixxx, "PlaylistTracks") {
+        let mut stmt = mixxx.prepare(
+            "SELECT p.id, p.name, p.hidden, COUNT(pt.id)
+             FROM Playlists p JOIN PlaylistTracks pt ON pt.playlist_id = p.id
+             WHERE p.hidden IN (?1, ?2, ?3)
+             GROUP BY p.id
+             ORDER BY p.hidden = ?3, CASE WHEN p.hidden = ?3 THEN -p.id ELSE p.position END",
+        )?;
+        let rows = stmt.query_map(
+            params![
+                MIXXX_PLAYLIST_REGULAR,
+                MIXXX_PLAYLIST_AUTO_DJ,
+                MIXXX_PLAYLIST_SET_LOG
+            ],
+            |row| {
+                let hidden: i64 = row.get(2)?;
+                Ok(ExternalPlaylistSummary {
+                    id: row.get::<_, i64>(0)?.to_string(),
+                    name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    kind: if hidden == MIXXX_PLAYLIST_SET_LOG {
+                        ExternalPlaylistKind::History
+                    } else {
+                        ExternalPlaylistKind::Playlist
+                    },
+                    track_count: row.get::<_, i64>(3)?.max(0) as usize,
+                })
+            },
+        )?;
+        items.extend(rows.filter_map(|r| r.ok()));
+    }
+    if table_exists(mixxx, "crates") && table_exists(mixxx, "crate_tracks") {
+        let mut stmt = mixxx.prepare(
+            "SELECT c.id, c.name, COUNT(ct.track_id)
+             FROM crates c JOIN crate_tracks ct ON ct.crate_id = c.id
+             GROUP BY c.id
+             ORDER BY c.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ExternalPlaylistSummary {
+                id: row.get::<_, i64>(0)?.to_string(),
+                name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                kind: ExternalPlaylistKind::Crate,
+                track_count: row.get::<_, i64>(2)?.max(0) as usize,
+            })
+        })?;
+        items.extend(rows.filter_map(|r| r.ok()));
+    }
+    Ok(items)
+}
 
-        let now = now();
-        let mut db_conn = self.db.connect()?;
-        let tx = db_conn.transaction()?;
+/// The Mixxx track ids of one playlist/set log (in play order) or crate (by
+/// artist + title -- crates are unordered), plus its name.
+fn load_mixxx_playlist_entries(
+    mixxx: &Connection,
+    kind: ExternalPlaylistKind,
+    id: i64,
+) -> BackendResult<(String, Vec<i64>)> {
+    let (name_sql, entries_sql) = match kind {
+        ExternalPlaylistKind::Playlist | ExternalPlaylistKind::History => (
+            "SELECT name FROM Playlists WHERE id = ?1",
+            "SELECT track_id FROM PlaylistTracks WHERE playlist_id = ?1 ORDER BY position, id",
+        ),
+        ExternalPlaylistKind::Crate => (
+            "SELECT name FROM crates WHERE id = ?1",
+            "SELECT ct.track_id FROM crate_tracks ct LEFT JOIN library l ON l.id = ct.track_id
+             WHERE ct.crate_id = ?1
+             ORDER BY l.artist COLLATE NOCASE, l.title COLLATE NOCASE, ct.track_id",
+        ),
+    };
+    let name: Option<String> = mixxx
+        .query_row(name_sql, params![id], |row| row.get(0))
+        .optional()
+        .map_err(|e| BackendError::Validation(format!("Mixxx playlist query failed: {e}")))?
+        .ok_or_else(|| BackendError::NotFound(format!("Mixxx playlist not found: {id}")))?;
+    let mut stmt = mixxx
+        .prepare(entries_sql)
+        .map_err(|e| BackendError::Validation(format!("Mixxx playlist query failed: {e}")))?;
+    let ids = stmt
+        .query_map(params![id], |row| row.get::<_, i64>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok((name.unwrap_or_default(), ids))
+}
 
-        let mut existing: std::collections::HashMap<String, String> = {
+/// Upserts Mixxx tracks into the local `tracks` table (plus their cover file
+/// and hot cues) and tallies what happened. Shared by the whole-library import
+/// and the single-playlist import so both treat a track identically.
+struct MixxxTrackImporter<'a> {
+    mixxx: &'a Connection,
+    has_cues_table: bool,
+    existing: HashMap<String, String>,
+    artwork_dir: PathBuf,
+    now: String,
+    indexed: usize,
+    updated: usize,
+    removed: usize,
+    not_found: Vec<String>,
+    artwork_ok: usize,
+    artwork_miss: usize,
+    cue_tracks: usize,
+    cue_tracks_kept_local: usize,
+    unsupported: usize,
+    warnings: Vec<WarningEntry>,
+}
+
+impl<'a> MixxxTrackImporter<'a> {
+    fn new(mixxx: &'a Connection, tx: &Connection, data_dir: &Path) -> BackendResult<Self> {
+        let existing = {
             let mut stmt = tx.prepare("SELECT file_path, id FROM tracks")?;
             stmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -326,217 +440,354 @@ impl BackendService {
             .filter_map(|r| r.ok())
             .collect()
         };
-
-        let artwork_dir = self.db.data_dir().join("analysis").join("artwork");
+        let artwork_dir = data_dir.join("analysis").join("artwork");
         let _ = std::fs::create_dir_all(&artwork_dir);
+        Ok(Self {
+            mixxx,
+            has_cues_table: table_exists(mixxx, "cues"),
+            existing,
+            artwork_dir,
+            now: now(),
+            indexed: 0,
+            updated: 0,
+            removed: 0,
+            not_found: Vec::new(),
+            artwork_ok: 0,
+            artwork_miss: 0,
+            cue_tracks: 0,
+            cue_tracks_kept_local: 0,
+            unsupported: 0,
+            warnings: Vec::new(),
+        })
+    }
 
-        let mut indexed = 0usize;
-        let mut updated = 0usize;
-        let mut removed = 0usize;
-        let mut not_found: Vec<String> = Vec::new();
-        let mut artwork_ok = 0usize;
-        let mut artwork_miss = 0usize;
-        let mut cue_tracks = 0usize;
-        let mut cue_tracks_kept_local = 0usize;
-        let mut unsupported = 0usize;
-        let mut warnings = Vec::<WarningEntry>::new();
-
-        for t in &tracks {
-            if !Path::new(&t.file_path).exists() {
-                if existing.remove(&t.file_path).is_some() {
-                    tx.execute(
-                        "DELETE FROM tracks WHERE file_path = ?1",
-                        params![t.file_path],
-                    )?;
-                    removed += 1;
-                }
-                not_found.push(t.file_path.clone());
-                continue;
-            }
-
-            // Same rule as the folder scan: Mixxx also plays tracker modules
-            // (.it/.xm/...) and videos, which the library leaves out.
-            if !is_library_audio_file(Path::new(&t.file_path)) {
-                unsupported += 1;
-                continue;
-            }
-
-            let fingerprint = build_track_match_fingerprint(
-                &t.title,
-                &t.artist,
-                Some(t.album.as_str()).filter(|s| !s.is_empty()),
-            );
-            let existing_id = existing.get(&t.file_path).cloned();
-            let track_id = existing_id
-                .clone()
-                .unwrap_or_else(|| Uuid::now_v7().to_string());
-
-            let artwork_path = match t.cover_location.as_deref() {
-                None => None,
-                Some(location) => match resolve_mixxx_cover_file(&t.file_path, location) {
-                    None => {
-                        artwork_miss += 1;
-                        warnings.push(logging::log(
-                            Level::Warn,
-                            "scan-mixxx-db",
-                            "scan.mixxx-db.artwork-not-found",
-                            format!("cover file not found ({location:?} for {:?})", t.file_path),
-                        ));
-                        None
-                    }
-                    Some(src) => {
-                        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
-                        let dest = artwork_dir.join(format!("{track_id}.{ext}"));
-                        match std::fs::copy(&src, &dest) {
-                            Ok(_) => {
-                                artwork_ok += 1;
-                                Some(dest.to_string_lossy().to_string())
-                            }
-                            Err(e) => {
-                                artwork_miss += 1;
-                                warnings.push(logging::log(
-                                    Level::Error,
-                                    "scan-mixxx-db",
-                                    "scan.mixxx-db.artwork-copy-failed",
-                                    format!("cover copy failed {src:?} -> {dest:?}: {e}"),
-                                ));
-                                None
-                            }
-                        }
-                    }
-                },
-            };
-            let album = Some(&t.album).filter(|a| !a.is_empty());
-            let format_ext = crate::utils::format_ext_from_path(&t.file_path);
-
-            if existing_id.is_some() {
+    /// Insert or update one track; `None` when it was skipped (file missing
+    /// or not a supported audio file).
+    fn upsert(&mut self, tx: &Connection, t: &MixxxTrack) -> BackendResult<Option<String>> {
+        if !Path::new(&t.file_path).exists() {
+            // Remove from local DB if previously imported; skip upsert
+            if self.existing.remove(&t.file_path).is_some() {
                 tx.execute(
-                    r#"UPDATE tracks SET
-                        title = ?1, artist = ?2, album = ?3,
-                        bpm = COALESCE(bpm, ?4),
-                        tonality = COALESCE(tonality, ?5),
-                        duration_ms = COALESCE(duration_ms, ?6),
-                        sample_rate_hz = COALESCE(sample_rate_hz, ?7),
-                        artwork_path = COALESCE(?8, artwork_path),
-                        format_ext = COALESCE(format_ext, ?9),
-                        match_fingerprint = ?10,
-                        mixxx_db_source = 1,
-                        updated_at = ?11
-                       WHERE id = ?12"#,
-                    params![
-                        t.title,
-                        t.artist,
-                        album,
-                        t.bpm,
-                        t.key,
-                        t.duration_ms,
-                        t.sample_rate,
-                        artwork_path,
-                        format_ext,
-                        fingerprint,
-                        now,
-                        track_id,
-                    ],
+                    "DELETE FROM tracks WHERE file_path = ?1",
+                    params![t.file_path],
                 )?;
-                updated += 1;
-            } else {
-                tx.execute(
-                    r#"INSERT INTO tracks (
-                        id, title, artist, album, bpm, tonality, file_path, format_ext,
-                        duration_ms, sample_rate_hz, artwork_path, match_fingerprint,
-                        mixxx_db_source, created_at, updated_at
-                       ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13)"#,
-                    params![
-                        track_id,
-                        t.title,
-                        t.artist,
-                        album,
-                        t.bpm,
-                        t.key,
-                        t.file_path,
-                        format_ext,
-                        t.duration_ms,
-                        t.sample_rate,
-                        artwork_path,
-                        fingerprint,
-                        now,
-                    ],
-                )?;
-                existing.insert(t.file_path.clone(), track_id.clone());
-                indexed += 1;
+                self.removed += 1;
             }
-
-            // Hot cues: only onto a track without local cues (local edits win).
-            let Some(sample_rate) = t.sample_rate.filter(|_| has_cues_table) else {
-                continue;
-            };
-            let cues = mixxx_cues_to_track_cues(&load_mixxx_cues(&mixxx, t.mixxx_id)?, sample_rate);
-            if cues.is_empty() {
-                continue;
-            }
-            if track_has_cues(&tx, &track_id)? {
-                cue_tracks_kept_local += 1;
-            } else {
-                insert_track_cues(&tx, &track_id, &cues)?;
-                cue_tracks += 1;
-            }
+            self.not_found.push(t.file_path.clone());
+            return Ok(None);
         }
 
-        tx.commit()?;
+        // Same rule as the folder scan: Mixxx also plays tracker modules
+        // (.it/.xm/...) and videos, which the library leaves out.
+        if !is_library_audio_file(Path::new(&t.file_path)) {
+            self.unsupported += 1;
+            return Ok(None);
+        }
 
-        if unsupported > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-mixxx-db",
-                "scan.mixxx-db.unsupported-skipped",
-                format!("{unsupported} track(s) skipped: not a supported audio file"),
-            ));
+        let fingerprint = build_track_match_fingerprint(
+            &t.title,
+            &t.artist,
+            Some(t.album.as_str()).filter(|s| !s.is_empty()),
+        );
+        let existing_id = self.existing.get(&t.file_path).cloned();
+        let track_id = existing_id
+            .clone()
+            .unwrap_or_else(|| Uuid::now_v7().to_string());
+        let artwork_path = self.copy_cover(t, &track_id);
+        let album = Some(&t.album).filter(|a| !a.is_empty());
+        let format_ext = crate::utils::format_ext_from_path(&t.file_path);
+
+        if existing_id.is_some() {
+            tx.execute(
+                r#"UPDATE tracks SET
+                    title = ?1, artist = ?2, album = ?3,
+                    bpm = COALESCE(bpm, ?4),
+                    tonality = COALESCE(tonality, ?5),
+                    duration_ms = COALESCE(duration_ms, ?6),
+                    sample_rate_hz = COALESCE(sample_rate_hz, ?7),
+                    artwork_path = COALESCE(?8, artwork_path),
+                    format_ext = COALESCE(format_ext, ?9),
+                    match_fingerprint = ?10,
+                    mixxx_db_source = 1,
+                    updated_at = ?11
+                   WHERE id = ?12"#,
+                params![
+                    t.title,
+                    t.artist,
+                    album,
+                    t.bpm,
+                    t.key,
+                    t.duration_ms,
+                    t.sample_rate,
+                    artwork_path,
+                    format_ext,
+                    fingerprint,
+                    self.now,
+                    track_id,
+                ],
+            )?;
+            self.updated += 1;
+        } else {
+            tx.execute(
+                r#"INSERT INTO tracks (
+                    id, title, artist, album, bpm, tonality, file_path, format_ext,
+                    duration_ms, sample_rate_hz, artwork_path, match_fingerprint,
+                    mixxx_db_source, created_at, updated_at
+                   ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13)"#,
+                params![
+                    track_id,
+                    t.title,
+                    t.artist,
+                    album,
+                    t.bpm,
+                    t.key,
+                    t.file_path,
+                    format_ext,
+                    t.duration_ms,
+                    t.sample_rate,
+                    artwork_path,
+                    fingerprint,
+                    self.now,
+                ],
+            )?;
+            self.existing.insert(t.file_path.clone(), track_id.clone());
+            self.indexed += 1;
         }
-        if cue_tracks > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-mixxx-db",
-                "scan.mixxx-db.cues-imported",
-                format!("hot cues imported for {cue_tracks} track(s)"),
-            ));
-        }
-        if cue_tracks_kept_local > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-mixxx-db",
-                "scan.mixxx-db.cues-kept-local",
-                format!(
-                    "{cue_tracks_kept_local} track(s) already had cues; their Mixxx cues were not imported"
-                ),
-            ));
-        }
-        if artwork_ok > 0 {
-            warnings.push(logging::log(
-                Level::Info,
-                "scan-mixxx-db",
-                "scan.mixxx-db.artwork-ok",
-                format!("{artwork_ok} cover file(s) copied OK"),
-            ));
-        }
-        if artwork_miss > 0 {
-            warnings.push(logging::log(
+
+        self.import_cues(tx, t, &track_id)?;
+        Ok(Some(track_id))
+    }
+
+    fn copy_cover(&mut self, t: &MixxxTrack, track_id: &str) -> Option<String> {
+        let location = t.cover_location.as_deref()?;
+        let Some(src) = resolve_mixxx_cover_file(&t.file_path, location) else {
+            self.artwork_miss += 1;
+            self.warnings.push(logging::log(
                 Level::Warn,
                 "scan-mixxx-db",
-                "scan.mixxx-db.artwork-miss-summary",
-                format!("{artwork_miss} cover file(s) not found or copy failed"),
+                "scan.mixxx-db.artwork-not-found",
+                format!("cover file not found ({location:?} for {:?})", t.file_path),
             ));
+            return None;
+        };
+        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
+        let dest = self.artwork_dir.join(format!("{track_id}.{ext}"));
+        match std::fs::copy(&src, &dest) {
+            Ok(_) => {
+                self.artwork_ok += 1;
+                Some(dest.to_string_lossy().to_string())
+            }
+            Err(e) => {
+                self.artwork_miss += 1;
+                self.warnings.push(logging::log(
+                    Level::Error,
+                    "scan-mixxx-db",
+                    "scan.mixxx-db.artwork-copy-failed",
+                    format!("cover copy failed {src:?} -> {dest:?}: {e}"),
+                ));
+                None
+            }
         }
+    }
 
+    /// Hot cues: only onto a track without local cues (local edits win).
+    fn import_cues(
+        &mut self,
+        tx: &Connection,
+        t: &MixxxTrack,
+        track_id: &str,
+    ) -> BackendResult<()> {
+        let Some(sample_rate) = t.sample_rate.filter(|_| self.has_cues_table) else {
+            return Ok(());
+        };
+        let cues = mixxx_cues_to_track_cues(&load_mixxx_cues(self.mixxx, t.mixxx_id)?, sample_rate);
+        if cues.is_empty() {
+            return Ok(());
+        }
+        if track_has_cues(tx, track_id)? {
+            self.cue_tracks_kept_local += 1;
+        } else {
+            insert_track_cues(tx, track_id, &cues)?;
+            self.cue_tracks += 1;
+        }
+        Ok(())
+    }
+
+    /// The summary log entries, appended after the per-track warnings.
+    fn finish_warnings(&mut self) -> Vec<WarningEntry> {
+        let mut summary = |level, code: &str, message: String| {
+            self.warnings
+                .push(logging::log(level, "scan-mixxx-db", code, message));
+        };
+        if self.unsupported > 0 {
+            summary(
+                Level::Info,
+                "scan.mixxx-db.unsupported-skipped",
+                format!(
+                    "{} track(s) skipped: not a supported audio file",
+                    self.unsupported
+                ),
+            );
+        }
+        if self.cue_tracks > 0 {
+            summary(
+                Level::Info,
+                "scan.mixxx-db.cues-imported",
+                format!("hot cues imported for {} track(s)", self.cue_tracks),
+            );
+        }
+        if self.cue_tracks_kept_local > 0 {
+            summary(
+                Level::Info,
+                "scan.mixxx-db.cues-kept-local",
+                format!(
+                    "{} track(s) already had cues; their Mixxx cues were not imported",
+                    self.cue_tracks_kept_local
+                ),
+            );
+        }
+        if self.artwork_ok > 0 {
+            summary(
+                Level::Info,
+                "scan.mixxx-db.artwork-ok",
+                format!("{} cover file(s) copied OK", self.artwork_ok),
+            );
+        }
+        if self.artwork_miss > 0 {
+            summary(
+                Level::Warn,
+                "scan.mixxx-db.artwork-miss-summary",
+                format!(
+                    "{} cover file(s) not found or copy failed",
+                    self.artwork_miss
+                ),
+            );
+        }
+        std::mem::take(&mut self.warnings)
+    }
+}
+
+impl BackendService {
+    pub fn detect_external_mixxx_db(&self) -> BackendResult<DetectExternalMixxxDbData> {
+        Ok(detect_external_mixxx_db())
+    }
+
+    pub fn scan_mixxx_db(&self, req: ScanMixxxDbRequest) -> BackendResult<ScanLibraryData> {
+        let mixxx = open_mixxx_db(req.path.as_deref())?;
+        let tracks = load_mixxx_tracks(&mixxx)?;
+
+        let mut db_conn = self.db.connect()?;
+        let tx = db_conn.transaction()?;
+        let mut importer = MixxxTrackImporter::new(&mixxx, &tx, &self.db.data_dir())?;
+        for t in &tracks {
+            importer.upsert(&tx, t)?;
+        }
+        tx.commit()?;
+
+        let warnings = importer.finish_warnings();
         Ok(ScanLibraryData {
             job_id: Uuid::now_v7().to_string(),
-            indexed,
-            updated,
-            removed,
-            not_found,
+            indexed: importer.indexed,
+            updated: importer.updated,
+            removed: importer.removed,
+            not_found: importer.not_found,
             // Like the master.db import: not scoped to source folders.
             scoped_track_count: 0,
             album_count: 0,
             unanalyzed_count: 0,
+            warnings,
+        })
+    }
+
+    pub fn list_mixxx_playlists(
+        &self,
+        req: ListExternalPlaylistsRequest,
+    ) -> BackendResult<ListExternalPlaylistsData> {
+        let mixxx = open_mixxx_db(req.path.as_deref())?;
+        Ok(ListExternalPlaylistsData {
+            items: list_mixxx_playlists_from(&mixxx)?,
+        })
+    }
+
+    /// Import one Mixxx playlist, crate or set log as a new local playlist.
+    /// Its tracks are imported the same way the whole-library import does it
+    /// (metadata, cover, hot cues); tracks the library leaves out (missing or
+    /// unsupported files) are skipped, and a track listed twice is added once.
+    pub fn import_mixxx_playlist(
+        &self,
+        req: ImportExternalPlaylistRequest,
+    ) -> BackendResult<ImportExternalPlaylistData> {
+        let id: i64 = req.id.trim().parse().map_err(|_| {
+            BackendError::Validation(format!("invalid Mixxx playlist id: {:?}", req.id))
+        })?;
+        let mixxx = open_mixxx_db(req.path.as_deref())?;
+        let (mixxx_name, entry_ids) = load_mixxx_playlist_entries(&mixxx, req.kind, id)?;
+        let name = non_empty_db_value(&mixxx_name)
+            .map(str::to_string)
+            .unwrap_or_else(|| "Mixxx playlist".to_string());
+
+        let wanted: HashSet<i64> = entry_ids.iter().copied().collect();
+        let tracks_by_id: HashMap<i64, MixxxTrack> = load_mixxx_tracks(&mixxx)?
+            .into_iter()
+            .filter(|t| wanted.contains(&t.mixxx_id))
+            .map(|t| (t.mixxx_id, t))
+            .collect();
+
+        let mut db_conn = self.db.connect()?;
+        let tx = db_conn.transaction()?;
+        let mut importer = MixxxTrackImporter::new(&mixxx, &tx, &self.db.data_dir())?;
+
+        let mut local_ids: Vec<String> = Vec::new();
+        let mut seen_mixxx: HashSet<i64> = HashSet::new();
+        let mut duplicates = 0usize;
+        let mut deleted_in_mixxx = 0usize;
+        for mixxx_id in &entry_ids {
+            if !seen_mixxx.insert(*mixxx_id) {
+                duplicates += 1;
+                continue;
+            }
+            let Some(t) = tracks_by_id.get(mixxx_id) else {
+                // Removed from the Mixxx library (or its file flagged deleted).
+                deleted_in_mixxx += 1;
+                continue;
+            };
+            if let Some(track_id) = importer.upsert(&tx, t)? {
+                local_ids.push(track_id);
+            }
+        }
+
+        if local_ids.is_empty() {
+            // Dropping `tx` rolls back the (partial) track upserts too.
+            return Err(no_importable_tracks_error(&name, entry_ids.len()));
+        }
+        let playlist_id = insert_local_playlist(&tx, &name, &local_ids)?;
+        tx.commit()?;
+
+        let mut warnings = importer.finish_warnings();
+        if duplicates > 0 {
+            warnings.push(logging::log(
+                Level::Info,
+                "scan-mixxx-db",
+                "scan.mixxx-db.playlist-duplicates-skipped",
+                format!("{duplicates} repeated track(s) in {name:?} added once"),
+            ));
+        }
+        if deleted_in_mixxx > 0 {
+            warnings.push(logging::log(
+                Level::Warn,
+                "scan-mixxx-db",
+                "scan.mixxx-db.playlist-tracks-deleted",
+                format!(
+                    "{deleted_in_mixxx} track(s) in {name:?} are no longer in the Mixxx library"
+                ),
+            ));
+        }
+        Ok(ImportExternalPlaylistData {
+            playlist_id,
+            name,
+            added: local_ids.len(),
+            indexed: importer.indexed,
+            not_found: importer.not_found,
             warnings,
         })
     }
@@ -943,6 +1194,265 @@ mod tests {
         assert_eq!(browse(false, true), 2);
         assert_eq!(browse(true, false), 0);
         assert_eq!(browse(false, false), 0);
+    }
+
+    /// Adds Mixxx's playlist + crate tables to a fixture library.
+    fn add_mixxx_playlists(
+        path: &Path,
+        playlists: &[(i64, &str, i64, i64, &[i64])],
+        crates: &[(i64, &str, &[i64])],
+    ) {
+        let conn = Connection::open(path).expect("open mixxx fixture");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE Playlists (
+              id INTEGER PRIMARY KEY, name TEXT, position INTEGER, hidden INTEGER,
+              date_created TEXT, date_modified TEXT, locked INTEGER
+            );
+            CREATE TABLE PlaylistTracks (
+              id INTEGER PRIMARY KEY, playlist_id INTEGER, track_id INTEGER, position INTEGER
+            );
+            CREATE TABLE crates (id INTEGER PRIMARY KEY, name TEXT, count INTEGER, show INTEGER);
+            CREATE TABLE crate_tracks (crate_id INTEGER, track_id INTEGER);
+            "#,
+        )
+        .expect("create playlist schema");
+        for (id, name, position, hidden, tracks) in playlists {
+            conn.execute(
+                "INSERT INTO Playlists (id, name, position, hidden, locked) VALUES (?1, ?2, ?3, ?4, 0)",
+                params![id, name, position, hidden],
+            )
+            .expect("insert playlist");
+            // Stored out of order: the import must sort by `position`.
+            for (index, track_id) in tracks.iter().enumerate().rev() {
+                conn.execute(
+                    "INSERT INTO PlaylistTracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
+                    params![id, track_id, index as i64 + 1],
+                )
+                .expect("insert playlist track");
+            }
+        }
+        for (id, name, tracks) in crates {
+            conn.execute(
+                "INSERT INTO crates (id, name, show) VALUES (?1, ?2, 1)",
+                params![id, name],
+            )
+            .expect("insert crate");
+            for track_id in *tracks {
+                conn.execute(
+                    "INSERT INTO crate_tracks (crate_id, track_id) VALUES (?1, ?2)",
+                    params![id, track_id],
+                )
+                .expect("insert crate track");
+            }
+        }
+    }
+
+    fn playlist_titles(service: &BackendService, playlist_id: &str) -> Vec<String> {
+        let conn = service.db.connect().expect("service db");
+        conn.prepare(
+            "SELECT t.title FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
+             WHERE pt.playlist_id = ?1 ORDER BY pt.position",
+        )
+        .unwrap()
+        .query_map(params![playlist_id], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn list_and_import_mixxx_playlists_crates_and_set_logs() {
+        let mixxx_root = tempfile::tempdir().expect("mixxx root");
+        let media_root = tempfile::tempdir().expect("media root");
+        let (_service_dir, service) = test_service();
+
+        let paths: Vec<PathBuf> = ["a.mp3", "b.mp3", "c.flac", "tune.it"]
+            .iter()
+            .map(|name| media_root.path().join(name))
+            .collect();
+        for p in &paths {
+            std::fs::write(p, b"audio").expect("write media");
+        }
+        let missing = media_root.path().join("missing.mp3");
+        let mixxx_path = create_mixxx_db_fixture(
+            mixxx_root.path(),
+            &[
+                (
+                    paths[0].to_str().unwrap(),
+                    "Alpha",
+                    None,
+                    44_100,
+                    0,
+                    None,
+                    0,
+                ),
+                (
+                    paths[1].to_str().unwrap(),
+                    "Bravo",
+                    None,
+                    44_100,
+                    0,
+                    None,
+                    0,
+                ),
+                (
+                    paths[2].to_str().unwrap(),
+                    "Charlie",
+                    None,
+                    44_100,
+                    0,
+                    None,
+                    0,
+                ),
+                (
+                    paths[3].to_str().unwrap(),
+                    "Module",
+                    None,
+                    44_100,
+                    0,
+                    None,
+                    0,
+                ),
+                (
+                    missing.to_str().unwrap(),
+                    "Missing",
+                    None,
+                    44_100,
+                    0,
+                    None,
+                    0,
+                ),
+                (
+                    paths[0].to_str().unwrap(),
+                    "Deleted",
+                    None,
+                    44_100,
+                    0,
+                    None,
+                    1,
+                ),
+            ],
+            &[(2, MIXXX_CUE_HOT, 88_200.0, 0, None, 0)],
+        );
+        add_mixxx_playlists(
+            &mixxx_path,
+            &[
+                (1, "Auto DJ", 1, MIXXX_PLAYLIST_AUTO_DJ, &[]),
+                (2, "placeholder", 2, -1, &[1]),
+                // Ids 1-5 = library rows above; 6 = deleted in Mixxx; 99 = gone.
+                (
+                    3,
+                    "Warmup",
+                    3,
+                    MIXXX_PLAYLIST_REGULAR,
+                    &[3, 1, 2, 1, 4, 5, 6, 99],
+                ),
+                (4, "2026-09-29", 4, MIXXX_PLAYLIST_SET_LOG, &[2]),
+                (5, "2026-09-30", 5, MIXXX_PLAYLIST_SET_LOG, &[1, 2]),
+                (6, "Empty", 6, MIXXX_PLAYLIST_REGULAR, &[]),
+            ],
+            &[(1, "Peak", &[3, 1]), (2, "Gone", &[5])],
+        );
+        let path = Some(mixxx_path.to_string_lossy().to_string());
+
+        let listed = service
+            .list_mixxx_playlists(ListExternalPlaylistsRequest { path: path.clone() })
+            .expect("list playlists")
+            .items;
+        let summary: Vec<_> = listed
+            .iter()
+            .map(|p| (p.name.as_str(), p.kind, p.track_count))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("Warmup", ExternalPlaylistKind::Playlist, 8),
+                ("2026-09-30", ExternalPlaylistKind::History, 2),
+                ("2026-09-29", ExternalPlaylistKind::History, 1),
+                ("Gone", ExternalPlaylistKind::Crate, 1),
+                ("Peak", ExternalPlaylistKind::Crate, 2),
+            ]
+        );
+
+        let imported = service
+            .import_mixxx_playlist(ImportExternalPlaylistRequest {
+                path: path.clone(),
+                kind: ExternalPlaylistKind::Playlist,
+                id: "3".to_string(),
+            })
+            .expect("import playlist");
+        assert_eq!(imported.name, "Warmup");
+        assert_eq!(imported.added, 3);
+        assert_eq!(imported.indexed, 3);
+        assert_eq!(
+            imported.not_found,
+            vec![missing.to_string_lossy().to_string()]
+        );
+        let codes: Vec<_> = imported.warnings.iter().map(|w| w.code.as_str()).collect();
+        for code in [
+            "scan.mixxx-db.unsupported-skipped",
+            "scan.mixxx-db.cues-imported",
+            "scan.mixxx-db.playlist-duplicates-skipped",
+            "scan.mixxx-db.playlist-tracks-deleted",
+        ] {
+            assert!(codes.contains(&code), "expected {code}, got {codes:?}");
+        }
+        assert_eq!(
+            playlist_titles(&service, &imported.playlist_id),
+            vec!["Charlie", "Alpha", "Bravo"]
+        );
+        let conn = service.db.connect().expect("service db");
+        let (mixxx_flag, cues): (i64, i64) = conn
+            .query_row(
+                "SELECT t.mixxx_db_source, (SELECT COUNT(1) FROM track_cues c WHERE c.track_id = t.id)
+                 FROM tracks t WHERE t.title = 'Bravo'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("bravo row");
+        assert_eq!((mixxx_flag, cues), (1, 1));
+        drop(conn);
+
+        // Re-importing reuses the library rows; a crate imports artist/title order.
+        let crate_import = service
+            .import_mixxx_playlist(ImportExternalPlaylistRequest {
+                path: path.clone(),
+                kind: ExternalPlaylistKind::Crate,
+                id: "1".to_string(),
+            })
+            .expect("import crate");
+        assert_eq!(crate_import.indexed, 0);
+        assert_eq!(
+            playlist_titles(&service, &crate_import.playlist_id),
+            vec!["Alpha", "Charlie"]
+        );
+
+        // Only a missing file: an error, and no empty playlist left behind.
+        let err = service
+            .import_mixxx_playlist(ImportExternalPlaylistRequest {
+                path: path.clone(),
+                kind: ExternalPlaylistKind::Crate,
+                id: "2".to_string(),
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("none of the 1 track(s)"), "{err}");
+        let playlists: i64 = service
+            .db
+            .connect()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM playlists", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(playlists, 2);
+
+        let err = service
+            .import_mixxx_playlist(ImportExternalPlaylistRequest {
+                path,
+                kind: ExternalPlaylistKind::Playlist,
+                id: "42".to_string(),
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("not found"), "{err}");
     }
 
     #[test]

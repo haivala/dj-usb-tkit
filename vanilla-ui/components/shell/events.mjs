@@ -9,6 +9,7 @@ export function bindShellEvents(ctx) {
     window,
     confirmDialog,
     tracklistExportDialog,
+    playlistImportDialog,
     persistSetting,
     emitStatus,
     switchView,
@@ -46,6 +47,14 @@ export function bindShellEvents(ctx) {
     if (event.key === "Enter" && document.activeElement === el.confirmOkBtn) {
       event.preventDefault();
       confirmDialog.close(true);
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!playlistImportDialog?.isOpen()) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      playlistImportDialog.close(false);
     }
   });
 

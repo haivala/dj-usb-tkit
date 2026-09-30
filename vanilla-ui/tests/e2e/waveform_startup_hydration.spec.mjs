@@ -165,8 +165,47 @@ function installSourceChipAnalysisMock(page) {
             window.__mixxxScanPayload = payload?.request || null;
             return { ok: true, data: { indexed: 2, updated: 0, removed: 0, notFound: [], warnings: [] } };
           }
+          if (command === "list_mixxx_playlists") {
+            return {
+              ok: true,
+              data: {
+                items: [
+                  { id: "4", name: "Test playlist", kind: "playlist", trackCount: 3 },
+                  { id: "7", name: "Peak", kind: "crate", trackCount: 2 },
+                  { id: "3", name: "2026-09-30", kind: "history", trackCount: 4 }
+                ]
+              }
+            };
+          }
+          if (command === "list_rekordbox_playlists") {
+            return {
+              ok: true,
+              data: {
+                items: [
+                  { id: "2912649392", name: "Pikkujoulut", kind: "playlist", trackCount: 40 },
+                  { id: "280079994", name: "HISTORY 2023-06-16", kind: "history", trackCount: 7 }
+                ]
+              }
+            };
+          }
+          window.__importedPlaylists = window.__importedPlaylists || [];
+          if (command === "import_mixxx_playlist" || command === "import_rekordbox_playlist") {
+            const playlistId = command === "import_mixxx_playlist" ? "pl-mixxx" : "pl-rekordbox";
+            window.__playlistImports = [...(window.__playlistImports || []), { command, request: payload?.request || null }];
+            window.__importedPlaylists.push({
+              id: playlistId, name: playlistId, trackCount: 2,
+              createdAt: "2026-03-01T00:00:00Z", updatedAt: "2026-03-01T00:00:00Z"
+            });
+            return {
+              ok: true,
+              data: { playlistId, name: playlistId, added: 2, indexed: 2, notFound: [], warnings: [] }
+            };
+          }
           if (command === "list_playlists") {
-            return { ok: true, data: { items: [] } };
+            return { ok: true, data: { items: window.__importedPlaylists } };
+          }
+          if (command === "get_playlist_tracks") {
+            return { ok: true, data: { total: 0, items: [], hasMore: false, nextCursor: null } };
           }
           if (command === "pick_source_folders") {
             window.__picked = true;
@@ -238,7 +277,7 @@ test("source chips show analyzed green on startup and adding a source indexes it
   // what's already indexed.
   const masterDbToggle = page.locator('.source-chip-toggle[data-master-db="true"]');
   await expect(masterDbToggle).toBeVisible();
-  await expect(masterDbToggle).toHaveAttribute("aria-label", "Toggle desktop library");
+  await expect(masterDbToggle).toHaveAttribute("aria-label", "Toggle rekordbox library");
   await expect(page.locator("#importMasterDbBtn")).toBeVisible();
   await masterDbToggle.check();
   await expect(masterDbToggle).toBeChecked();
@@ -263,6 +302,47 @@ test("source chips show analyzed green on startup and adding a source indexes it
     path: "/home/dj/.mixxx/mixxxdb.sqlite"
   });
   await expect(mixxxToggle).toBeChecked();
+});
+
+test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new playlist", async ({ page }) => {
+  await installSourceChipAnalysisMock(page);
+  await page.goto("/");
+
+  const importBtn = page.locator("#importPlaylistBtn");
+  await expect(importBtn).toBeVisible();
+  await importBtn.click();
+
+  const overlay = page.locator("#playlistImportOverlay");
+  await expect(overlay).toBeVisible();
+  await expect(page.locator("#playlistImportSelect optgroup")).toHaveCount(5);
+  expect(await page.locator("#playlistImportSelect optgroup").evaluateAll((groups) => groups.map((g) => g.label)))
+    .toEqual(["rekordbox playlists", "rekordbox history", "Mixxx playlists", "Mixxx crates", "Mixxx history"]);
+  await expect(page.locator('#playlistImportSelect optgroup[label="Mixxx crates"] option')).toHaveText("Peak (2)");
+
+  // Escape cancels without importing.
+  await page.keyboard.press("Escape");
+  await expect(overlay).toBeHidden();
+  expect(await page.evaluate(() => window.__playlistImports || null)).toBeNull();
+
+  await importBtn.click();
+  await page.locator("#playlistImportSelect").selectOption({ label: "2026-09-30 (4)" });
+  await page.locator("#playlistImportOkBtn").click();
+  await expect(overlay).toBeHidden();
+  await expect.poll(async () => page.evaluate(() => window.__playlistImports)).toEqual([
+    { command: "import_mixxx_playlist", request: { path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3" } }
+  ]);
+  await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-mixxx"]')).toHaveClass(/active/);
+  await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
+
+  await importBtn.click();
+  await page.locator("#playlistImportSelect").selectOption({ label: "Pikkujoulut (40)" });
+  await page.locator("#playlistImportOkBtn").click();
+  await expect.poll(async () => page.evaluate(() => window.__playlistImports.at(-1))).toEqual({
+    command: "import_rekordbox_playlist",
+    request: { path: "/music/master.db", kind: "playlist", id: "2912649392" }
+  });
+  await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
+  await expect(page.locator('.source-chip-toggle[data-master-db="true"]')).toBeChecked();
 });
 
 // Regression coverage for: searching the library used to make a fully
