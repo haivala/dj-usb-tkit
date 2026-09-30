@@ -693,6 +693,7 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
     ctx.updateUsbSubNavDisabledState();
     ctx.updatePlaylistExportButtons();
     if (!silent) emitStatus("USB root cleared");
+    el.usbRecentRow?.classList.remove("collapsed");
     await syncAssetScopePaths(ctx);
     return false;
   }
@@ -763,6 +764,9 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
   }
   if (state.usbRoot) await loadUsbDevices(ctx);
   await syncAssetScopePaths(ctx);
+  // The recent list is for picking a drive: close it once one is selected
+  // (its header reopens it).
+  if (valid) el.usbRecentRow?.classList.add("collapsed");
   return valid;
 }
 

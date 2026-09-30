@@ -143,6 +143,13 @@ test("clicking a recent USB pill for an unnamed drive opens the naming prompt, s
 
   await expect(page.locator("#usbNameBadge")).toBeVisible();
   await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");
+
+  // Selecting a drive closes the recent list; its header reopens it.
+  await expect(page.locator("#usbRecentRow")).toHaveClass(/collapsed/);
+  await expect(page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]')).toBeHidden();
+  await page.locator("#usbRecentHeader").click();
+  await expect(page.locator("#usbRecentRow")).not.toHaveClass(/collapsed/);
+  await expect(page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]')).toBeVisible();
 });
 
 test("clicking a recent USB pill for an already-named drive does not reopen the naming prompt, and shows the name in the status-line badge", async ({ page }) => {
@@ -175,11 +182,15 @@ test("recent USB naming prompt can be dismissed without saving", async ({ page }
   await page.keyboard.press("Escape");
   await expect(page.locator("#driveNameOverlay")).toBeHidden();
 
+  // Selecting the drive closed the recent list: reopen it to pick it again.
+  const reopenRecent = () => page.locator("#usbRecentHeader").click();
+  await reopenRecent();
   await pill.click();
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
   await page.locator("#driveNameOverlay").dispatchEvent("click");
   await expect(page.locator("#driveNameOverlay")).toBeHidden();
 
+  await reopenRecent();
   await pill.click();
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
   await page.locator("#driveNameSkipBtn").click();

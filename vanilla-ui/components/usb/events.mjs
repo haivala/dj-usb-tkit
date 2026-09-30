@@ -52,6 +52,11 @@ export function bindUsbEvents(ctx) {
     pickUsbFolder().catch(catchErr(emitStatus));
   });
 
+  // Recent USBs accordion, like the library's Sources.
+  el.usbRecentHeader?.addEventListener("click", () => {
+    el.usbRecentRow?.classList.toggle("collapsed");
+  });
+
   el.usbRecentList?.addEventListener("click", (event) => {
     const pruneBtn = event.target.closest("[data-usb-prune-device-id]");
     if (pruneBtn) {
