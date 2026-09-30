@@ -4179,7 +4179,7 @@ pub(crate) fn compute_additive_diff(
     // a never-played device) and hard-failed any first export past ~95
     // tracks, since a tt=19 page holds at most 96 fixed-40-byte rows and
     // this function has never needed to grow tt=19 across multiple pages.
-    // Confirmed against Mixo (an independent, real, working DJ export tool)
+    // Confirmed against an independent, real, working DJ export tool
     // that a single static row is the correct baseline: its own PDB writer
     // seeds table 19 with exactly one fixed row on every export, never
     // scaled to library size. See docs/PDB.md's Row Footer section.
@@ -7847,8 +7847,8 @@ mod additive_tests {
         // fabricated one placeholder tt=19 row per track with no cap, and a
         // tt=19 page can only ever hold ~96 40-byte rows. There is no real
         // play history to represent on a never-played device, and no
-        // reference export (real rekordbox or Mixo, an independent working
-        // DJ export tool) has ever shown tt=19 needing more than one row for
+        // reference export (real rekordbox or an independent working DJ
+        // export tool) has ever shown tt=19 needing more than one row for
         // a fresh export, so this must synthesize exactly one row regardless
         // of library size, not scale with track count at all.
         let mut empty = PdbData::empty();

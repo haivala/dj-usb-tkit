@@ -106,6 +106,95 @@ drag-to-pan** shows the full ~150 entries/sec detail; it opens zoomed to the
 first ~2 minutes. The magnifier button is disabled for tracks with no analysis
 (no `.EXT` ⇒ no PWV5). See `vanilla-ui/components/track-detail/waveform_detail.mjs`.
 
+## Seek-index chunks (`PVBR`, `PVB2`)
+
+rekordbox writes two chunks that help a player find the byte position of a given time in
+files whose bitrate varies. This app writes `PVBR` as all zeros and never writes `PVB2`.
+Tracks play correctly this way, including FLACs on a CDJ-2000NXS2.
+
+Our working guess (not verified) is that newer players use the audio file's own seek
+data: the `SEEKTABLE` in a FLAC, or the `Xing` table of contents in a VBR MP3. Not every
+file has one, though; in the libraries checked, about one FLAC in seven had no
+`SEEKTABLE`. The test that would settle it: on the player, try cue jumps, needle search
+and loops in files with no seek data anywhere (a FLAC without a `SEEKTABLE`, a VBR MP3
+without a `Xing` header), exported by this app.
+- If those land correctly, the player needs no index at all.
+- If they are off or slow while files with their own seek data are fine, the guess holds.
+
+Either way, only older players would be left as candidates for needing rekordbox's chunks.
+
+We only write data that is identical to what rekordbox writes, so both stay empty until a
+hardware test shows that some player needs them. A seek table can be computed from the
+audio file, so the formats and rules below were worked out from rekordbox exports so the
+decision can be revisited.
+
+### `PVBR` (`.DAT`, MP3 seek index)
+
+Layout: `len_header` 16, `len_tag` 1620. The body is 400 big-endian `u32` entries followed
+by a `u32` total sample count.
+
+What rekordbox writes:
+
+| File | Entries | Total |
+|---|---|---|
+| CBR MP3 | all 0 | counted frames × 1152 |
+| VBR MP3 | byte offsets (below) | counted frames × 1152 |
+| FLAC / WAV / AIFF / ALAC | all 0 | 0 |
+| some AAC `.m4a` | all 0 | the stream's sample count, for some files only |
+
+- **VBR entries:** `entry[i]` is the byte offset of counted frame
+  `max(floor((i + 1) · N / 400) − 8, 0)`. `N` is the number of counted frames, and the
+  offset is measured from the first counted frame, not from the start of the file.
+- **Counted frames** are the MPEG frames between any ID3v2 tag and an ID3v1 tag. Whether
+  the first frame (a `Xing`/`Info` header) counts depends on the encoder string in that
+  header:
+  - `LAME…` or `iTunes…` → counted
+  - `Lavc…` (ffmpeg) or mixed-case `Lame…` → **not** counted; offsets start at the second
+    frame
+  - no header → every frame counts
+- **CBR vs VBR** is decided by whether the audio frames' bitrates vary.
+
+Checked byte for byte against three rekordbox exports: a fresh export of a purpose-built
+test set (encoders, bitrate modes, header types, tags, short clips, other formats) and two
+real libraries built up over years. Every MP3 these rules cover matched, except one CBR
+file that got a filled index for no reason we could find in the file.
+
+rekordbox's behaviour is not predictable in these cases, so this app would keep `PVBR`
+at zeros for them:
+
+- **APE or Lyrics3 tags:** rekordbox appears to count those bytes as about one more frame
+  in CBR files.
+- **VBRI headers:** rekordbox skipped the header frame in some files and counted it in
+  others.
+- **Anything that doesn't parse cleanly:** lost sync, a truncated last frame, a
+  `Xing` frame count that disagrees with the file, or an unknown encoder string.
+- **MPEG-2 / 2.5:** one example used frames × 576.
+
+### `PVB2` (`.EXT`, FLAC seek index)
+
+Layout: `len_header` 32, `len_tag` 8032. The header after the common 12 bytes is:
+- 4 zero bytes
+- `u64` total samples, equal to `STREAMINFO`
+- `u32` entry count
+- `u32` 20 (entry size)
+
+Each 20-byte entry is `u64` first sample of the frame, `u64` byte offset of the frame, and
+`u32` samples in the frame (the block size, for example 1152, 4096 or 4608). The byte
+offset is measured from the first audio frame, not the start of the file. rekordbox
+writes it for every FLAC, with or without a `SEEKTABLE`. It isn't copied from the file's
+own `SEEKTABLE`.
+
+- **Tracks of 400 frames or fewer** get one entry per frame except the last.
+- **Longer tracks** get 400 entries. Each entry is the last frame starting at or before
+  position `i / 400` of a length slightly shorter than the real total: 0.3–8 ms shorter
+  at 44.1 kHz.
+  - That shortfall depends on the audio. The same audio in six different FLAC encodings
+    gave the same shortfall, and different tracks gave different ones. A 48 kHz file
+    matched the plain `i · total / 400` rule exactly.
+  - This suggests rekordbox measures the length after its own resampling, which can't be
+    reproduced exactly. The plain rule matches about 98% of entries; the others are one
+    frame earlier in rekordbox.
+
 ## Decode Bounds
 
 Waveform generation decodes up to `24_000_000` mono samples during analysis. Duration for ANLZ

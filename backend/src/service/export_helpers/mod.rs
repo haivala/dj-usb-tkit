@@ -4583,7 +4583,7 @@ mod tests {
         // t19 always ends up with exactly one placeholder row on a first
         // export, regardless of track count (no real play history exists
         // yet on a freshly initialized USB, and no reference export -- real
-        // rekordbox or Mixo, an independent working DJ export tool -- has
+        // rekordbox or an independent working DJ export tool -- has
         // ever shown tt=19 needing more than one row here). The
         // `initialize_usb` template already seeds exactly one row, SEALED
         // (flags=0x24), matching a genuine rekordbox-initialized template

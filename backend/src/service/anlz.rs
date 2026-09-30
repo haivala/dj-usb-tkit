@@ -594,16 +594,21 @@ pub(crate) fn ppth_path_from_anlz(data: &[u8]) -> Option<String> {
 }
 
 // ===========================================================================
-// PVBR — VBR seek index (placeholder)
+// PVBR — MP3 seek index, deliberately left empty
 // ===========================================================================
 //
 // len_header = 0x10 (16)
-// Offset 12-15: unknown (4 bytes, observed 0x00000000)
-// Offset 16+:   index data (observed: 1604 bytes of zeros)
+// Offset 12-15: unknown (4 bytes, 0)
+// Offset 16+:   400 u32 byte offsets + u32 total samples (1604 bytes)
+//
+// All zeros is what rekordbox itself writes for non-MP3 files and, apart from the
+// total, for CBR MP3s. The real layout and the rules rekordbox follows are in
+// docs/WAVEFORMS.md ("Seek-index chunks"); they are not written until a player is
+// shown to need them, and never approximated.
 
 fn append_pvbr_chunk(file: &mut Vec<u8>) {
     let header = vec![0u8; 4]; // unknown1 = 0
-    let payload = vec![0u8; 1604]; // placeholder zeros
+    let payload = vec![0u8; 1604]; // empty index and total
     append_anlz_chunk(file, b"PVBR", &header, &payload);
 }
 
@@ -1324,7 +1329,7 @@ pub fn build_anlz_dat_file(
     // 1. PPTH
     append_ppth_chunk(&mut file, track_path);
 
-    // 2. PVBR — VBR seek index placeholder
+    // 2. PVBR — MP3 seek index, left empty (see append_pvbr_chunk)
     append_pvbr_chunk(&mut file);
 
     // 3. PQTZ — beat grid

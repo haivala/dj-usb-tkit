@@ -400,7 +400,7 @@ through it.
 On the first export against a track-less template, the writer seeds exactly
 **one** placeholder `tt=19` row — not one per track. There is no real play
 history to represent on a never-played device, and no reference export (real
-rekordbox or Mixo, an independent working DJ export tool) has ever shown `tt=19`
+rekordbox or an independent working DJ export tool) has ever shown `tt=19`
 needing more than one row for a fresh export. If the existing template already
 has exactly one row (e.g. a genuine rekordbox-initialized template, which ships
 one already), the page is left completely untouched rather than rewritten —
