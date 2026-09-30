@@ -48,7 +48,8 @@ use crate::models::{
     AddTracksToPlaylistRequest, BrowseSourceFilesData, BrowseSourceFilesRequest,
     CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
     DedupeMode, DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest, GetTracksByIdsData,
+    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest,
+    GetSourceRootAnalysisData, GetSourceRootAnalysisRequest, GetTracksByIdsData,
     GetTracksByIdsRequest, InitializeUsbData, InitializeUsbRequest, ListMatchingTrackIdsData,
     ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
     MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
@@ -1887,27 +1888,7 @@ impl BackendService {
         // worst case, a query matching zero tracks in a folder collapses
         // `total` to 0, and `fully_analyzed` requires `total > 0`). Computed
         // from the full, unfiltered set -- before the query filter below.
-        let source_root_analysis = source_roots
-            .iter()
-            .map(|root| {
-                let mut total = 0usize;
-                let mut analyzed = 0usize;
-                for track in &all_items {
-                    if browse_path_matches_root(&track.file_path, root) {
-                        total += 1;
-                        if track_has_core_analysis_for_source_status(track) {
-                            analyzed += 1;
-                        }
-                    }
-                }
-                SourceRootAnalysisStatus {
-                    source_root: root.clone(),
-                    total,
-                    analyzed,
-                    fully_analyzed: total > 0 && analyzed == total,
-                }
-            })
-            .collect::<Vec<_>>();
+        let source_root_analysis = source_root_analysis(&source_roots, &all_items);
 
         let mut items = all_items;
         if !query.is_empty() {
@@ -1958,6 +1939,25 @@ impl BackendService {
             source_root_analysis,
             total_duration_ms,
             duration_known_count,
+        })
+    }
+
+    /// Each source folder's analyzed status on its own (every track in it,
+    /// enabled in the library filter or not) -- the source chips' green state.
+    /// Same scan and count as `browse_source_files`, without the search,
+    /// sort and paging a browse does.
+    pub fn get_source_root_analysis(
+        &self,
+        req: GetSourceRootAnalysisRequest,
+    ) -> BackendResult<GetSourceRootAnalysisData> {
+        let source_roots = sanitize_source_roots(req.source_roots);
+        if source_roots.is_empty() {
+            return Ok(GetSourceRootAnalysisData { items: Vec::new() });
+        }
+        let conn = self.db.connect()?;
+        let tracks = self.compute_all_library_tracks(&conn, &source_roots, false)?;
+        Ok(GetSourceRootAnalysisData {
+            items: source_root_analysis(&source_roots, &tracks),
         })
     }
 
@@ -3315,6 +3315,36 @@ pub(crate) fn apply_frontend_track_fields(
             key_notation::key_display_fields(track.key.as_deref(), notation);
     }
     Ok(())
+}
+
+/// Per source root: how many of `tracks` live under it and how many of those
+/// have their core analysis. Callers pass the full, unfiltered track set so a
+/// folder's status never depends on a search query.
+fn source_root_analysis(
+    source_roots: &[String],
+    tracks: &[Track],
+) -> Vec<SourceRootAnalysisStatus> {
+    source_roots
+        .iter()
+        .map(|root| {
+            let mut total = 0usize;
+            let mut analyzed = 0usize;
+            for track in tracks {
+                if browse_path_matches_root(&track.file_path, root) {
+                    total += 1;
+                    if track_has_core_analysis_for_source_status(track) {
+                        analyzed += 1;
+                    }
+                }
+            }
+            SourceRootAnalysisStatus {
+                source_root: root.clone(),
+                total,
+                analyzed,
+                fully_analyzed: total > 0 && analyzed == total,
+            }
+        })
+        .collect()
 }
 
 const FINGERPRINT_MATCH_DURATION_TOLERANCE_MS: i64 = 2000;
@@ -5952,6 +5982,73 @@ mod tests {
             assert_eq!(status.analyzed, 1, "source root {}", status.source_root);
             assert!(status.fully_analyzed, "source root {}", status.source_root);
         }
+    }
+
+    #[test]
+    fn get_source_root_analysis_counts_each_root_on_its_own() {
+        let (_dir, service) = test_service();
+        let root_a = tempfile::tempdir().expect("root a");
+        let root_b = tempfile::tempdir().expect("root b");
+        let path_a = root_a.path().join("alpha.mp3");
+        let path_b1 = root_b.path().join("bravo.mp3");
+        let path_b2 = root_b.path().join("charlie.mp3");
+        for path in [&path_a, &path_b1, &path_b2] {
+            std::fs::write(path, b"data").expect("write track");
+        }
+
+        let conn = service.db.connect().expect("connect");
+        // root_a: one analyzed track. root_b: one analyzed, one not (no bpm/waveform).
+        for (id, title, path, analyzed) in [
+            ("t1", "Alpha", &path_a, true),
+            ("t2", "Bravo", &path_b1, true),
+            ("t3", "Charlie", &path_b2, false),
+        ] {
+            let path = path.to_string_lossy().to_string();
+            let fingerprint = build_track_match_fingerprint(title, "Artist", None);
+            if analyzed {
+                conn.execute(
+                    "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+                     VALUES (?1, ?2, 'Artist', ?3, 200000, 120.0, '/data/w.dat', ?4, 0, datetime('now'), datetime('now'))",
+                    params![id, title, path, fingerprint],
+                )
+                .expect("insert analyzed track");
+            } else {
+                conn.execute(
+                    "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, master_db_source, created_at, updated_at)
+                     VALUES (?1, ?2, 'Artist', ?3, ?4, 0, datetime('now'), datetime('now'))",
+                    params![id, title, path, fingerprint],
+                )
+                .expect("insert unanalyzed track");
+            }
+        }
+        drop(conn);
+
+        let root_a_str = root_a.path().to_string_lossy().to_string();
+        let root_b_str = root_b.path().to_string_lossy().to_string();
+        let result = service
+            .get_source_root_analysis(GetSourceRootAnalysisRequest {
+                source_roots: vec![root_a_str.clone(), root_b_str.clone()],
+            })
+            .expect("source root analysis");
+
+        let status = |root: &str| {
+            result
+                .items
+                .iter()
+                .find(|item| item.source_root == root)
+                .unwrap_or_else(|| panic!("no status for {root}"))
+        };
+        assert_eq!(result.items.len(), 2);
+        assert_eq!(
+            (status(&root_a_str).total, status(&root_a_str).analyzed),
+            (1, 1)
+        );
+        assert!(status(&root_a_str).fully_analyzed);
+        assert_eq!(
+            (status(&root_b_str).total, status(&root_b_str).analyzed),
+            (2, 1)
+        );
+        assert!(!status(&root_b_str).fully_analyzed);
     }
 
     #[test]

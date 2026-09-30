@@ -61,6 +61,14 @@
   (447 KB → 211 KB). The UI also no longer re-checks and re-coerces the
   track, USB playlist and player-menu data the backend already sends fully
   typed.
+- **Improvement:** refreshing the library folders' "fully analyzed" (green)
+  status, which happens after every analysis batch and job, now uses its
+  own backend command. Before, it ran a full library browse (including
+  sorting every track) just to read that status.
+- **Chore:** further frontend cleanup: one status-message function instead
+  of two names for it, the playback-button helpers loaded as a normal module
+  instead of a global script, DOM references collected from `index.html`
+  automatically instead of a hand-kept list, and removal of unused app state.
 - **Chore:** retired 20 frontend unit tests that only repeated what the
   end-to-end tests already check through the real UI.
 

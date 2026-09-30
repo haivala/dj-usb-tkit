@@ -431,7 +431,6 @@ export function loadUsbRootFromStorage(ctx) {
     state.usbRoot = null;
   }
   state.usbRootValid = false;
-  state.usbNeedsInit = false;
   updateUsbRootText(ctx, state.usbRoot, false);
   if (el.usbInitRow) {
     el.usbInitRow.classList.add("hidden");
@@ -665,8 +664,7 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
   if (!input) {
     state.usbRoot = null;
     state.usbRootValid = false;
-    state.usbNeedsInit = false;
-    state.usbDeviceName = null;
+      state.usbDeviceName = null;
     ctx.updateUsbNameBadge();
     ctx.persistUsbRoot(null);
     updateUsbRootText(ctx, null, false);
@@ -687,7 +685,6 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
   const canInitialize = !!normalized && !valid && !!result?.hasWriteAccess && hasStructureWarning;
   state.usbWritable = !!result?.hasWriteAccess;
   state.usbRootValid = valid;
-  state.usbNeedsInit = canInitialize;
   state.usbRoot = normalized || input;
   ctx.persistUsbRoot(state.usbRoot);
   updateUsbRootText(ctx, state.usbRoot, valid);

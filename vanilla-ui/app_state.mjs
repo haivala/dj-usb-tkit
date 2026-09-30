@@ -16,7 +16,6 @@ export function createInitialState() {
     usbRecentRoots: [],
     usbRootValid: false,
     usbDeviceName: null,
-    usbNeedsInit: false,
     usbWritable: true,
     exportPruneStale: true,
     exportBackup: true,
@@ -103,7 +102,6 @@ export function createInitialState() {
     analyzingTrackIds: new Set(),
     deletingPlaylistId: null,
     selectedRepairFixIds: new Set(),
-    eventLogEntries: [],
     startupPhase: true
   };
 }

@@ -19,11 +19,12 @@ use crate::models::{
     DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest,
     FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsData,
-    GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
-    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
-    InspectUsbTracksData, InspectUsbTracksRequest, JobEventPayload, ListMatchingTrackIdsData,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
+    GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
+    InspectUsbTracksRequest, JobEventPayload, ListMatchingTrackIdsData,
     ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
     ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
     MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
@@ -666,6 +667,14 @@ pub fn browse_source_files(
     request: BrowseSourceFilesRequest,
 ) -> ApiResponse<BrowseSourceFilesData> {
     state.browse_source_files(request)
+}
+
+#[tauri::command]
+pub fn get_source_root_analysis(
+    state: State<'_, BackendCommands>,
+    request: GetSourceRootAnalysisRequest,
+) -> ApiResponse<GetSourceRootAnalysisData> {
+    state.get_source_root_analysis(request)
 }
 
 #[tauri::command]

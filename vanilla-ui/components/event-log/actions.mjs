@@ -9,38 +9,30 @@ export function storeEventLogEntry(ctx, entry = {}) {
   const { state, eventLogStore } = ctx;
   const pushed = eventLogStore.push(entry);
   if (!pushed) return;
-  state.eventLogEntries = eventLogStore.list();
   if (state.activeTab === "event-log") {
     showEventLogEntry(ctx, pushed);
   }
 }
 
-function ensureEventLogSourceOptions(ctx) {
-  const { state, el } = ctx;
-  if (!el.eventLogSourceFilter) return;
-  const current = String(el.eventLogSourceFilter.value || "all");
-  const known = new Set(["all"]);
-  for (const opt of el.eventLogSourceFilter.options) {
-    known.add(String(opt.value || ""));
-  }
-  const sources = Array.from(new Set(state.eventLogEntries.map((x) => x.source))).sort();
-  for (const src of sources) {
+// Offer each of `sources` in the source filter (once), keeping the selection.
+function ensureEventLogSourceOptions(ctx, sources) {
+  const select = ctx.el.eventLogSourceFilter;
+  if (!select) return;
+  const current = String(select.value || "all");
+  const known = new Set([...select.options].map((opt) => String(opt.value || "")));
+  for (const src of [...new Set(sources)].sort()) {
     if (known.has(src)) continue;
-    el.eventLogSourceFilter.add(new el.eventLogSourceFilter.ownerDocument.defaultView.Option(src, src));
+    select.add(new select.ownerDocument.defaultView.Option(src, src));
   }
-  if ([...el.eventLogSourceFilter.options].some((opt) => opt.value === current)) {
-    el.eventLogSourceFilter.value = current;
-  } else {
-    el.eventLogSourceFilter.value = "all";
-  }
+  select.value = [...select.options].some((opt) => opt.value === current) ? current : "all";
 }
 
 // The entries the level/source filters let through, oldest first.
 function filteredEventLogEntries(ctx) {
-  const { state, el } = ctx;
+  const { el } = ctx;
   const levelFilter = String(el.eventLogLevelFilter?.value || "all");
   const sourceFilter = String(el.eventLogSourceFilter?.value || "all");
-  return state.eventLogEntries.filter((item) => {
+  return ctx.eventLogStore.list().filter((item) => {
     const levelMatch = levelFilter === "all" || item.level === levelFilter;
     const sourceMatch = sourceFilter === "all" || item.source === sourceFilter;
     return levelMatch && sourceMatch;
@@ -90,7 +82,7 @@ function eventLogRow(doc, item) {
 export function renderEventLog(ctx) {
   const { el } = ctx;
   if (!el.eventLogList || !el.eventLogSummary) return;
-  ensureEventLogSourceOptions(ctx);
+  ensureEventLogSourceOptions(ctx, ctx.eventLogStore.list().map((item) => item.source));
   const entries = filteredEventLogEntries(ctx);
   renderEventLogSummary(ctx, entries);
   const doc = el.eventLogList.ownerDocument;
@@ -110,7 +102,7 @@ function showEventLogEntry(ctx, item) {
   const { el } = ctx;
   const list = el.eventLogList;
   if (!list || !el.eventLogSummary) return;
-  ensureEventLogSourceOptions(ctx);
+  ensureEventLogSourceOptions(ctx, [item.source]);
   const entries = filteredEventLogEntries(ctx);
   renderEventLogSummary(ctx, entries);
   list.querySelector(`.event-log-row[data-entry-id="${item.id}"]`)?.remove();
@@ -141,19 +133,6 @@ export async function setupConsoleFileLogging({ isTauriRuntime, invoke, pushEven
   }
 
   const forward = (level, args) => {
-    pushEventLog({
-      level,
-      source: "console",
-      message: args.map((v) => {
-        if (typeof v === "string") return v;
-        try {
-          return JSON.stringify(v);
-        } catch {
-          return String(v);
-        }
-      }).join(" ")
-    });
-    if (!canForwardToFile) return;
     const message = args.map((v) => {
       if (typeof v === "string") return v;
       try {
@@ -162,7 +141,8 @@ export async function setupConsoleFileLogging({ isTauriRuntime, invoke, pushEven
         return String(v);
       }
     }).join(" ");
-    invoke("append_frontend_log", { level, message }).catch(() => {});
+    pushEventLog({ level, source: "console", message });
+    if (canForwardToFile) invoke("append_frontend_log", { level, message }).catch(() => {});
   };
 
   console.log = (...args) => {

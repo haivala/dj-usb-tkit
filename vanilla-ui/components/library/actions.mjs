@@ -89,9 +89,9 @@ export function mergeTrackPreservingBestFields(existing, normalized) {
   return merged;
 }
 
-export function applySourceRootAnalysisFromBrowseData(state, data) {
-  const rows = Array.isArray(data?.sourceRootAnalysis) ? data.sourceRootAnalysis : [];
-  if (!rows.length) return;
+// Store the backend's per-folder analyzed status (SourceRootAnalysisStatus rows).
+export function applySourceRootAnalysis(state, rows) {
+  if (!rows?.length) return;
   if (!state.sourceRootAnalysisStatus || typeof state.sourceRootAnalysisStatus !== "object") {
     state.sourceRootAnalysisStatus = {};
   }
@@ -105,22 +105,14 @@ export function applySourceRootAnalysisFromBrowseData(state, data) {
 export async function refreshSourceRootAnalysisStatus(ctx) {
   const { state } = ctx;
   // Analysis status is a property of the folder itself, not of whether it's
-  // currently toggled on in the library filter, so this intentionally
-  // queries every configured root (enabled or not) rather than reusing the
-  // enabled-only filter the visible library's browse_source_files query uses.
-  // Missing roots are skipped since there's nothing on
-  // disk to scan.
+  // currently toggled on in the library filter, so this asks about every
+  // configured root (enabled or not). Missing roots are skipped since there's
+  // nothing on disk to scan.
   const roots = (state.sourceRoots || []).filter((root) => !sourceRootIsMissing(state, root));
   if (!roots.length) return;
   try {
-    const data = await ctx.command("browse_source_files", {
-      sourceRoots: roots,
-      includeMasterDb: false,
-      query: "",
-      limit: 1,
-      cursor: null
-    });
-    applySourceRootAnalysisFromBrowseData(state, data);
+    const data = await ctx.command("get_source_root_analysis", { sourceRoots: roots });
+    applySourceRootAnalysis(state, data?.items);
     renderSourceChips(ctx);
   } catch (err) {
     console.warn("Failed to refresh source folder analysis status:", err);
@@ -408,7 +400,7 @@ export function renderSourceChips(ctx) {
     const missing = sourceRootIsMissing(state, path);
     // Per-root "fully analyzed" is computed by the backend over the complete,
     // unfiltered track set and delivered as `sourceRootAnalysis` (see
-    // applySourceRootAnalysisFromBrowseData). Just render what it told us.
+    // applySourceRootAnalysis). Just render what it told us.
     const fullyAnalyzed = state.sourceRootAnalysisStatus[path] === true;
 
     const chip = cloneTemplate(document, "tplSourceChip");
@@ -560,7 +552,7 @@ export function createLibraryTracksController(ctx) {
       if ((ctx.state.tracks || []).length) {
         ctl.prevById = new Map(ctx.state.tracks.map((t) => [String(t.id), t]));
       }
-      applySourceRootAnalysisFromBrowseData(ctx.state, data);
+      applySourceRootAnalysis(ctx.state, data.sourceRootAnalysis);
       renderSourceChips(ctx);
     },
     onPage: (_page, { first }) => {
@@ -596,11 +588,11 @@ export async function renderLibraryRows(ctx) {
 // Debounced library search. Goes through the controller's setSearch (a
 // re-query of page 1 that does NOT pre-clear state.tracks), so lazily hydrated
 // waveform previews on tracks that survive the filter aren't flashed away.
-let librarySearchDebounceTimer = null;
 export function scheduleLibrarySearch(ctx) {
-  if (librarySearchDebounceTimer) clearTimeout(librarySearchDebounceTimer);
-  librarySearchDebounceTimer = setTimeout(() => {
-    librarySearchDebounceTimer = null;
+  const { state } = ctx;
+  clearTimeout(state.librarySearchDebounceTimer);
+  state.librarySearchDebounceTimer = setTimeout(() => {
+    state.librarySearchDebounceTimer = null;
     Promise.resolve(ctx.libraryTracksCtl.setSearch(ctx.el.librarySearch?.value || ""))
       .then(() => renderLibraryChrome(ctx))
       .catch((err) => {

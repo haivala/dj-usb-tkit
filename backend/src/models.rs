@@ -350,6 +350,18 @@ pub struct SourceRootAnalysisStatus {
     pub fully_analyzed: bool,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetSourceRootAnalysisRequest {
+    pub source_roots: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetSourceRootAnalysisData {
+    pub items: Vec<SourceRootAnalysisStatus>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterializeSourceTrackRequest {

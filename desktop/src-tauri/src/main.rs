@@ -804,6 +804,7 @@ fn main() {
             backend::tauri_commands::list_tracks,
             backend::tauri_commands::browse_source_files,
             backend::tauri_commands::check_source_roots,
+            backend::tauri_commands::get_source_root_analysis,
             backend::tauri_commands::materialize_source_track,
             backend::tauri_commands::resolve_track_identity,
             backend::tauri_commands::get_track_detail,

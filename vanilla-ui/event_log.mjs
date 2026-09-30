@@ -125,8 +125,9 @@ export function createEventLogStore({ maxEntries = 1000 } = {}) {
       byKey.clear();
     },
 
+    // The live entries, oldest first -- read-only; not a copy.
     list() {
-      return entries.slice();
+      return entries;
     }
   };
 }

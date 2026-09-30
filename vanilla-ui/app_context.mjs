@@ -15,58 +15,11 @@ import * as messages from "./message_bus.mjs";
 import { createInitialState, createTableSortState, createEventLogState } from "./app_state.mjs";
 import { renderWaveformsIn } from "./waveform.mjs";
 
-const ELEMENT_IDS = [
-  "statusText", "playlistBadge", "badgeLabel", "usbNameBadge", "usbNameBadgeLabel", "usbHeaderHealthDot", "navSidebar",
-  "sidebarCollapseBtn", "sidebarExpandBtn", "donateBtn", "navPlaylistList", "addPlaylistBtn",
-  "playlistPanelTitle", "playlistSearchInput", "playlistTracksBody", "playlistTableWrap",
-  "playlistEmptyState", "playlistTotalDuration", "playlistExportStatus", "analyzePlaylistMissingBtn",
-  "exportPlaylistBtn", "settingsBtn", "settingsDrawer", "settingsBackdrop",
-  "settingsCloseBtn", "settingsVersionText", "settingsUpdateNote", "updateBanner",
-  "updateBannerText", "updateBannerDismissBtn", "openEventLogBtn", "accentHueSlider",
-  "accentSwatch", "accentResetBtn", "sourceFilterIndicator", "selectionActions",
-  "usbConnectionBar", "usbSelectedControls", "usbInitRow", "usbInitHint",
-  "usbHealthDot", "initializeUsbBtn", "sourceChipsContainer", "sourceBar",
-  "sourceFilterHeader", "addSourceBtn", "importMasterDbBtn", "librarySearch",
-  "libraryTableBody", "libraryTableWrap", "libraryEmptyState", "libraryContent",
-  "selectAllTracks", "selectionCount", "usbPlaylists", "usbTrackSearch",
-  "usbPlaylistTracks", "usbPlaylistTotalDuration", "historyList", "historyTrackSearch",
-  "historyTracks", "historyTotalDuration", "usbPlayerMenuAvailable", "usbPlayerMenuCurrent",
-  "usbPlayerMenuAddBtn", "usbPlayerMenuRemoveBtn", "usbPlayerMenuUpBtn", "usbPlayerMenuDownBtn",
-  "usbPlayerMenuDivergence", "usbPlayerMenuDivergenceMessage", "usbPlayerMenuSyncBtn", "usbPlayerMenuRestoreBtn",
-  "libraryTotalDuration", "scanLibraryBtn", "addSelectedBtn", "refreshUsbBtn",
-  "refreshHistoryBtn", "exportHistoryTracklistBtn", "runUsbParityBtn", "exportSyncModeGroup",
-  "exportSyncModeMirror", "exportSyncModeAdditive", "exportBackupCheckbox", "backupRetentionCountInput",
-  "openBackupsBtn", "backupsList", "backupsSummary", "backupsRefreshBtn",
-  "driveNameOverlay", "driveNameInput", "driveNameError", "driveNameOkBtn", "driveNameSkipBtn", "analysisBpmRangeSelect",
-  "analysisEngineSelect", "keyNotationSelect", "analysisEngineStatus", "essentiaInstallRow", "essentiaNodeStatus",
-  "essentiaDownloadBtn", "essentiaCancelBtn", "essentiaRemoveBtn", "selectUsbFolderBtn",
-  "usbRecentRow", "usbRecentList", "usbRootPathText", "externalMasterDbToggle",
-  "externalMasterDbCheckbox", "externalMasterDbPath", "usbCountsText", "historyCountsText",
-  "progressFooter", "progressText", "progressFill", "progressDismiss",
-  "progressPauseBtn", "progressCancelAnalysisBtn", "usbDiagnosticsCard", "diagOverallStatus",
-  "diagDuration", "diagSections", "diagReportView", "diagRepairPanel",
-  "diagRepairSummary", "diagRepairFixes", "diagBackToReportBtn", "diagPlaylistDetails",
-  "diagPlaylistTableBody", "reDiagnoseBtn", "previewRepairsBtn", "applyRepairsBtn",
-  "confirmOverlay", "confirmTitle", "confirmMessage", "confirmOkBtn",
-  "confirmCancelBtn", "tracklistExportOverlay", "tracklistExportTitle", "tracklistExportStartTrack",
-  "tracklistExportTimesToggle", "tracklistExportPlacementRow", "tracklistExportPlacement", "tracklistExportOkBtn",
-  "tracklistExportCancelBtn", "helpBtn", "helpOverlay", "helpCloseBtn",
-  "eventLogLevelFilter", "eventLogSourceFilter", "eventLogClearBtn", "eventLogSummary",
-  "eventLogList",
-  "trackDetailOverlay", "trackDetailTitle", "trackDetailCloseBtn", "trackDetailWaveform",
-  "trackDetailBeatgrid", "trackDetailPreStart", "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs",
-  "trackDetailFirstBeatMinus", "trackDetailFirstBeatPlus", "trackDetailStartFirstCue", "trackDetailStartFirstBeat", "trackDetailStartNote", "trackDetailAddCue",
-  "trackDetailBpm", "trackDetailBpmMinus", "trackDetailBpmPlus", "trackDetailBpmHalf", "trackDetailBpmDouble",
-  "trackDetailQuantize", "trackDetailMetronome", "trackDetailUndo", "trackDetailRedo",
-  "trackDetailKey", "trackDetailKeyMinus", "trackDetailKeyPlus",
-  "trackDetailPlayPause", "trackDetailHint", "trackDetailHintBtn",
-  "trackDetailOverview", "trackDetailOverviewCues", "trackDetailOverviewWindow", "trackDetailZoomOut", "trackDetailZoomIn", "trackDetailZoomFit", "trackDetailGridLevel", "trackDetailMetronomeMix", "trackDetailZoomRange", "trackDetailTotalTime",
-  "trackDetailCueList", "trackDetailStartCue", "trackDetailCancelBtn", "trackDetailSaveBtn", "trackDetailColorPopover",
-];
-
+// Every element with an `id` in index.html, by id (`el.statusText`, …). Ids
+// inside <template>s aren't part of the document, so they're never collected.
 function collectElements(document) {
   return {
-    ...Object.fromEntries(ELEMENT_IDS.map((id) => [id, document.getElementById(id)])),
+    ...Object.fromEntries([...document.querySelectorAll("[id]")].map((node) => [node.id, node])),
     panels: {
       library: document.getElementById("panel-library"),
       usb: document.getElementById("panel-usb"),

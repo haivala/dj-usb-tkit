@@ -12,13 +12,14 @@ use crate::models::{
     DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest,
     FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsData,
-    GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
-    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
-    InspectUsbTracksData, InspectUsbTracksRequest, ListMatchingTrackIdsData,
-    ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
+    GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
+    InspectUsbTracksRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
+    ListPlaylistsData, ListTracksData, ListTracksRequest, ListUsbBackupsData,
+    ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
     MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
     PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackMetronomeData,
     PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
@@ -100,6 +101,13 @@ impl BackendCommands {
         req: CheckSourceRootsRequest,
     ) -> ApiResponse<CheckSourceRootsData> {
         wrap(self.service.check_source_roots(req))
+    }
+
+    pub fn get_source_root_analysis(
+        &self,
+        req: GetSourceRootAnalysisRequest,
+    ) -> ApiResponse<GetSourceRootAnalysisData> {
+        wrap(self.service.get_source_root_analysis(req))
     }
 
     pub fn materialize_source_track(

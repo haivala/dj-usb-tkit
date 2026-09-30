@@ -184,6 +184,16 @@ function installSourceChipAnalysisMock(page) {
               }
             };
           }
+          if (command === "get_source_root_analysis") {
+            return {
+              ok: true,
+              data: {
+                items: (payload?.request?.sourceRoots || []).map((sourceRoot) => ({
+                  sourceRoot, total: 1, analyzed: 1, fullyAnalyzed: true
+                }))
+              }
+            };
+          }
           if (command === "get_tracks_by_ids_with_previews") {
             return { ok: true, data: { items: tracks } };
           }
@@ -286,6 +296,17 @@ function installSourceChipSearchMock(page) {
           }
           if (command === "list_tracks" || command === "search_tracks") {
             return { ok: true, data: { total: 0, items: [] } };
+          }
+          if (command === "get_source_root_analysis") {
+            return {
+              ok: true,
+              data: {
+                items: [
+                  { sourceRoot: "/music-a", total: 1, analyzed: 1, fullyAnalyzed: true },
+                  { sourceRoot: "/music-b", total: 1, analyzed: 1, fullyAnalyzed: true }
+                ]
+              }
+            };
           }
           if (command === "browse_source_files") {
             const query = String(payload?.request?.query || "").trim().toLowerCase();

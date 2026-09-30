@@ -198,7 +198,7 @@ test("scanMasterDb reports success, failure, and structured warnings", async () 
   assert.notEqual(typeof warning.logged[0].warnings[0].message, "object");
 });
 
-test("refreshSourceRootAnalysisStatus queries non-missing roots and skips all-missing sets", async () => {
+test("refreshSourceRootAnalysisStatus asks about every non-missing root and skips all-missing sets", async () => {
   const state = {
     sourceRoots: ["/music/a", "/music/b"],
     sourceRootEnabled: { "/music/a": true, "/music/b": false },
@@ -212,7 +212,7 @@ test("refreshSourceRootAnalysisStatus queries non-missing roots and skips all-mi
     command: async (name, payload) => {
       calls.push({ name, payload });
       return {
-        sourceRootAnalysis: [
+        items: [
           { sourceRoot: "/music/a", total: 3, analyzed: 3, fullyAnalyzed: true },
           { sourceRoot: "/music/b", total: 2, analyzed: 2, fullyAnalyzed: true }
         ]
@@ -220,11 +220,9 @@ test("refreshSourceRootAnalysisStatus queries non-missing roots and skips all-mi
     }
   }));
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].name, "browse_source_files");
-  assert.deepEqual(calls[0].payload.sourceRoots, ["/music/a", "/music/b"]);
-  assert.equal(calls[0].payload.includeMasterDb, false);
-  assert.equal(calls[0].payload.limit, 1);
+  assert.deepEqual(calls, [
+    { name: "get_source_root_analysis", payload: { sourceRoots: ["/music/a", "/music/b"] } }
+  ]);
   assert.equal(state.sourceRootAnalysisStatus["/music/a"], true);
   assert.equal(state.sourceRootAnalysisStatus["/music/b"], true);
   assert.equal(harness.chips()[1].classList.contains("source-chip-analyzed"), true, "chips re-render with the new status");
