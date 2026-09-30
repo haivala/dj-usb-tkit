@@ -36,8 +36,8 @@ use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_wit
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
 use super::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash};
 use super::{
-    BackendService, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS, has_core_analysis_fields,
-    now, track_has_core_analysis_for_source_status,
+    BackendService, ExternalLibraries, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS,
+    has_core_analysis_fields, now, track_has_core_analysis_for_source_status,
 };
 
 const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
@@ -591,7 +591,7 @@ impl BackendService {
                 let visible = self.compute_visible_library_tracks(
                     &conn,
                     &req.source_roots,
-                    req.include_master_db,
+                    ExternalLibraries::from_flags(req.include_master_db, req.include_mixxx_db),
                     &req.query,
                 )?;
                 Some(
@@ -694,11 +694,12 @@ impl BackendService {
         // locally from a possibly-partial (paginated) view. No filter
         // context (no source roots and master.db off) opts this out at no
         // extra cost -- the two progress fields just stay `None`.
-        let mut library_context = if !req.source_roots.is_empty() || req.include_master_db {
+        let libraries = ExternalLibraries::from_flags(req.include_master_db, req.include_mixxx_db);
+        let mut library_context = if !req.source_roots.is_empty() || libraries.any() {
             let visible = self.compute_visible_library_tracks(
                 &conn,
                 &req.source_roots,
-                req.include_master_db,
+                libraries,
                 &req.query,
             )?;
             let batch_ids: std::collections::HashSet<&str> =

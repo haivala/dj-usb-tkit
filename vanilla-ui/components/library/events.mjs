@@ -19,16 +19,29 @@ export function bindLibraryEvents(ctx) {
     persistSourceRoots,
     persistSourceRootEnabled,
     persistMasterDbEnabled,
+    persistMixxxDbEnabled,
     persistSourcesEverConfigured,
     pickSourceFolders,
     relocateSourceRoot,
     scanLibrary,
     scanMasterDb,
+    scanMixxxDb,
     analyzeSelectedTracks,
     addLibrarySelectionToCurrentPlaylist,
     libraryTracksCtl,
   } = ctx;
   const { emitStatus } = ctx;
+
+  // "enabled/total" over the folder chips plus each detected library chip.
+  const emitSourceFilterCounts = () => {
+    const libraries = [
+      [state.externalMasterDbPath, state.masterDbEnabled],
+      [state.externalMixxxDbPath, state.mixxxDbEnabled],
+    ].filter(([path]) => !!path);
+    const enabled = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots).length
+      + libraries.filter(([, on]) => on === true).length;
+    emitStatus(`Source filters: ${enabled}/${state.sourceRoots.length + libraries.length} enabled`);
+  };
 
   el.sourceChipsContainer.addEventListener("click", (event) => {
     const removeBtn = event.target.closest(".source-chip-remove");
@@ -86,17 +99,21 @@ export function bindLibraryEvents(ctx) {
     const checkbox = event.target.closest(".source-chip-toggle");
     if (!checkbox) return;
 
-    // master.db chip toggle - pure filter, never triggers import
-    if (checkbox.dataset.masterDb === "true") {
+    // master.db / Mixxx chip toggles - pure filters, never trigger an import
+    const isMasterDb = checkbox.dataset.masterDb === "true";
+    if (isMasterDb || checkbox.dataset.mixxxDb === "true") {
       const enabling = checkbox.checked;
-      state.masterDbEnabled = enabling;
-      persistMasterDbEnabled(enabling);
+      if (isMasterDb) {
+        state.masterDbEnabled = enabling;
+        persistMasterDbEnabled(enabling);
+      } else {
+        state.mixxxDbEnabled = enabling;
+        persistMixxxDbEnabled(enabling);
+      }
       resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT)
         .catch(catchErr(emitStatus));
       updateSourceFilterIndicator();
-      const total = state.sourceRoots.length + 1;
-      const enabled = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots).length + (enabling ? 1 : 0);
-      emitStatus(`Source filters: ${enabled}/${total} enabled`);
+      emitSourceFilterCounts();
       return;
     }
 
@@ -108,10 +125,7 @@ export function bindLibraryEvents(ctx) {
     resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT)
       .catch(catchErr(emitStatus));
     updateSourceFilterIndicator();
-    const masterDbTotal = state.externalMasterDbPath ? 1 : 0;
-    const masterDbEnabled = state.externalMasterDbPath && state.masterDbEnabled ? 1 : 0;
-    const enabledCount = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots).length + masterDbEnabled;
-    emitStatus(`Source filters: ${enabledCount}/${state.sourceRoots.length + masterDbTotal} enabled`);
+    emitSourceFilterCounts();
   });
 
   el.addSourceBtn.addEventListener("click", () => {
@@ -171,6 +185,10 @@ export function bindLibraryEvents(ctx) {
     scanMasterDb().catch(catchErr(emitStatus));
   });
 
+  el.importMixxxDbBtn?.addEventListener("click", () => {
+    scanMixxxDb().catch(catchErr(emitStatus));
+  });
+
   el.libraryTableWrap?.addEventListener("scroll", ctx.handleLibraryTableWrapScroll, { passive: true });
   window.addEventListener("resize", ctx.handleLibraryTableWrapScroll);
   el.librarySearch.addEventListener("input", () => ctx.scheduleLibrarySearch());
@@ -211,6 +229,7 @@ export function bindLibraryEvents(ctx) {
         return command("list_matching_track_ids", {
           sourceRoots: ctx.enabledLibrarySourceRoots(),
           includeMasterDb: state.masterDbEnabled === true,
+          includeMixxxDb: state.mixxxDbEnabled === true,
           query: String(state.libraryQuery || "").trim(),
         });
       });

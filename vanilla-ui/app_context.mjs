@@ -76,7 +76,8 @@ export function createAppContext(env) {
     syncLibraryOnboardingMode bindEvents`);
   bindActions(settings, `persistSetting hydrateLocalStorageFromFrontendSettingsDb persistSourceRoots
     persistUsbRoot loadSourceRootsFromStorage loadSourceRootEnabledFromStorage persistSourceRootEnabled
-    persistMasterDbEnabled loadMasterDbEnabledFromStorage persistSourcesEverConfigured
+    persistMasterDbEnabled loadMasterDbEnabledFromStorage persistMixxxDbEnabled
+    loadMixxxDbEnabledFromStorage persistSourcesEverConfigured
     loadSourcesEverConfiguredFromStorage`);
   bindActions(bootstrap, "switchView debugFrontendLog handleBackendLogEvent");
   bindActions(shell, "handleSortHeaderClick");
@@ -94,11 +95,12 @@ export function createAppContext(env) {
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
     scheduleLibrarySearch resetAndLoadLibraryTracks handleLibraryTableWrapScroll
     reloadTrackListsForKeyNotation enabledLibrarySourceRoots scanLibrary analyzeSelectedTracks
-    scanMasterDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState promoteTrackIdentity
+    scanMasterDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState promoteTrackIdentity
     patchTrackAnalysisFields`);
   bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage resetUsbStateViews
-    syncAssetScopePaths pickSourceFolders detectExternalMasterDb validateAndSetUsbRoot
+    syncAssetScopePaths pickSourceFolders detectExternalMasterDb detectExternalMixxxDb
+    validateAndSetUsbRoot
     removeUsbPlaylist reorderUsbPlaylists refreshUsb runUsbDiagnostics runUsbParityReport
     previewUsbRepairs applyUsbRepairs refreshHistory exportHistoryTracklist
     handleUsbPlayerMenuListClick renderUsbPlayerMenuEditor syncUsbPlayerMenusEdbToPdb

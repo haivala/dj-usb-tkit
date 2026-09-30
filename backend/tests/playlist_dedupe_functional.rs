@@ -119,6 +119,7 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
         .list_matching_track_ids(ListMatchingTrackIdsRequest {
             source_roots: roots.clone(),
             include_master_db: false,
+            include_mixxx_db: false,
             query: String::new(),
         })
         .data
@@ -141,6 +142,7 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
             playlist_id: playlist_id.clone(),
             source_roots: roots.clone(),
             include_master_db: false,
+            include_mixxx_db: false,
             query: String::new(),
             track_ids: Vec::new(),
             all_matching: true,
@@ -156,6 +158,7 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
             playlist_id: playlist_id.clone(),
             source_roots: roots,
             include_master_db: false,
+            include_mixxx_db: false,
             query: String::new(),
             track_ids: matching.track_ids.clone(),
             all_matching: false,

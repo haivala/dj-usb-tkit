@@ -9,8 +9,8 @@ use crate::models::{
     AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
     BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
     CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
-    DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest,
-    FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
+    DeleteUsbBackupRequest, DetectExternalMasterDbData, DetectExternalMixxxDbData, ExportToUsbData,
+    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
     GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
@@ -33,7 +33,7 @@ use crate::models::{
     RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
     RunUsbParityReportData, RunUsbParityReportRequest, SaveTrackAnalysisEditsData,
     SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
-    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
+    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, ScanMixxxDbRequest, SearchTracksData,
     SearchTracksRequest, SetAnalysisPausedData, SetFrontendSettingData, SetFrontendSettingRequest,
     SetPlaybackMetronomeRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
     TrackDetail, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
@@ -79,6 +79,10 @@ impl BackendCommands {
 
     pub fn scan_master_db(&self, req: ScanMasterDbRequest) -> ApiResponse<ScanLibraryData> {
         wrap(self.service.scan_master_db(req))
+    }
+
+    pub fn scan_mixxx_db(&self, req: ScanMixxxDbRequest) -> ApiResponse<ScanLibraryData> {
+        wrap(self.service.scan_mixxx_db(req))
     }
 
     pub fn search_tracks(&self, req: SearchTracksRequest) -> ApiResponse<SearchTracksData> {
@@ -618,6 +622,10 @@ impl BackendCommands {
 
     pub fn detect_external_master_db(&self) -> ApiResponse<DetectExternalMasterDbData> {
         wrap(self.service.detect_external_master_db())
+    }
+
+    pub fn detect_external_mixxx_db(&self) -> ApiResponse<DetectExternalMixxxDbData> {
+        wrap(self.service.detect_external_mixxx_db())
     }
 
     pub fn initialize_usb(&self, req: InitializeUsbRequest) -> ApiResponse<InitializeUsbData> {

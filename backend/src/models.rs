@@ -129,6 +129,10 @@ pub struct Track {
     pub created_at: String,
     pub updated_at: String,
     pub master_db_source: bool,
+    /// Imported from a Mixxx library (`mixxxdb.sqlite`). Independent of
+    /// `master_db_source`: a file in both libraries carries both flags.
+    #[serde(default)]
+    pub mixxx_db_source: bool,
     /// Authoritative: true when `file_path` falls under any known USB device
     /// root (current or previously pruned). Computed fresh on every read
     /// against the `usb_devices` registry -- not stored. See
@@ -290,6 +294,8 @@ pub struct BrowseSourceFilesRequest {
     pub source_roots: Vec<String>,
     #[serde(default)]
     pub include_master_db: bool,
+    #[serde(default)]
+    pub include_mixxx_db: bool,
     pub query: String,
     pub limit: usize,
     #[serde(default)]
@@ -603,6 +609,8 @@ pub struct ListMatchingTrackIdsRequest {
     #[serde(default)]
     pub include_master_db: bool,
     #[serde(default)]
+    pub include_mixxx_db: bool,
+    #[serde(default)]
     pub query: String,
 }
 
@@ -625,6 +633,8 @@ pub struct AddLibrarySelectionToPlaylistRequest {
     pub source_roots: Vec<String>,
     #[serde(default)]
     pub include_master_db: bool,
+    #[serde(default)]
+    pub include_mixxx_db: bool,
     #[serde(default)]
     pub query: String,
     #[serde(default)]
@@ -1450,6 +1460,8 @@ pub struct AnalyzeNewTracksRequest {
     #[serde(default)]
     pub include_master_db: bool,
     #[serde(default)]
+    pub include_mixxx_db: bool,
+    #[serde(default)]
     pub query: String,
 }
 
@@ -1938,6 +1950,22 @@ pub struct DetectExternalMasterDbData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanMasterDbRequest {
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+// ── Mixxx library import ───────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectExternalMixxxDbData {
+    pub found: bool,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanMixxxDbRequest {
     #[serde(default)]
     pub path: Option<String>,
 }

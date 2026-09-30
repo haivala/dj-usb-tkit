@@ -531,6 +531,21 @@ export async function detectExternalMasterDb(ctx) {
   ctx.renderSourceChips();
 }
 
+export async function detectExternalMixxxDb(ctx) {
+  const { state } = ctx;
+  try {
+    const data = await ctx.command("detect_external_mixxx_db");
+    const found = !!data?.found && !!data?.path;
+    state.externalMixxxDbPath = found ? data.path : null;
+    if (!found) state.mixxxDbEnabled = false;
+  } catch (err) {
+    state.externalMixxxDbPath = null;
+    state.mixxxDbEnabled = false;
+    ctx.warn("Mixxx library detection failed:", err);
+  }
+  ctx.renderSourceChips();
+}
+
 // Prompts for (and saves) a name for `state.usbRoot` if it doesn't have one
 // yet. A name is this app's only notion of stable drive identity (see
 // `usb_identity` on the backend) -- it's what lets backups and local

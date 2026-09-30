@@ -70,6 +70,8 @@ export function createInitialState() {
     sidebarCollapsed: false,
     externalMasterDbPath: null,
     masterDbEnabled: false,
+    externalMixxxDbPath: null,
+    mixxxDbEnabled: false,
     sourcesEverConfigured: false,
     activeJobId: null,
     activeJobType: null,

@@ -90,10 +90,11 @@ export function updateSourceFilterIndicator(ctx) {
   if (!el.sourceFilterIndicator) return;
   const anyUnchecked = state.sourceRoots.some((root) => state.sourceRootEnabled[root] === false);
   const masterDbFiltered = !!(state.externalMasterDbPath && !state.masterDbEnabled);
+  const mixxxDbFiltered = !!(state.externalMixxxDbPath && !state.mixxxDbEnabled);
   const missingRoots = state.missingSourceRoots instanceof Set
     ? state.missingSourceRoots.size
     : (Array.isArray(state.missingSourceRoots) ? state.missingSourceRoots.length : 0);
-  el.sourceFilterIndicator.classList.toggle("active", anyUnchecked || masterDbFiltered || missingRoots > 0);
+  el.sourceFilterIndicator.classList.toggle("active", anyUnchecked || masterDbFiltered || mixxxDbFiltered || missingRoots > 0);
 }
 
 export function updateScanLibraryButtonLabel(ctx) {

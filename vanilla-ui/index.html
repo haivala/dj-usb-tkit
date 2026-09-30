@@ -133,6 +133,7 @@
               <div class="source-actions">
                 <button id="addSourceBtn">+ Add Folder</button>
                 <button id="importMasterDbBtn" class="hidden">Import RB</button>
+                <button id="importMixxxDbBtn" class="hidden">Import Mixxx</button>
                 <button id="scanLibraryBtn" data-primary>Scan Library</button>
               </div>
             </div>
@@ -733,6 +734,9 @@
   <template id="tplStatusWarningLink"><a href="#" class="status-warning-link"></a></template>
   <template id="tplSourceChipMasterDb">
     <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-master-db="true" aria-label="Toggle desktop library" /><span class="source-chip-path">master.db</span></span>
+  </template>
+  <template id="tplSourceChipMixxxDb">
+    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" aria-label="Toggle Mixxx library" /><span class="source-chip-path">Mixxx</span></span>
   </template>
   <template id="tplSourceChip">
     <span class="source-chip"><input class="source-chip-toggle" type="checkbox" aria-label="Filter source" /><span class="source-chip-path"></span><button class="source-chip-remove" aria-label="Remove">&times;</button></span>

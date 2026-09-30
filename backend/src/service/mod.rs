@@ -10,6 +10,7 @@ pub mod export_helpers;
 mod export_log;
 pub(crate) mod format_compat;
 pub(crate) mod key_notation;
+mod mixxx_import;
 mod repair;
 pub mod update_check;
 mod usb;
@@ -87,6 +88,13 @@ pub(crate) const SETTING_UI_ANALYSIS_ENGINE: &str = "ui_analysis_engine_v1";
 pub(crate) const SETTING_UI_SIDEBAR_COLLAPSED: &str = "ui_sidebar_collapsed_v1";
 pub(crate) const SETTING_UI_HELP_SEEN: &str = "ui_help_seen_v1";
 pub(crate) const SETTING_UI_KEY_NOTATION: &str = "ui_key_notation_v1";
+pub(crate) const SETTING_UI_MASTER_DB_ENABLED: &str = "ui_master_db_enabled_v1";
+pub(crate) const SETTING_UI_MIXXX_DB_ENABLED: &str = "ui_mixxx_db_enabled_v1";
+pub(crate) const SETTING_UI_SOURCES_EVER_CONFIGURED: &str = "ui_sources_ever_configured_v1";
+pub(crate) const SETTING_UI_CUE_START_ON_FIRST_BEAT: &str = "ui_cue_start_on_first_beat_v1";
+pub(crate) const SETTING_UI_CUE_BEATGRID_LEVEL: &str = "ui_cue_beatgrid_level_v1";
+pub(crate) const SETTING_UI_CUE_QUANTIZE: &str = "ui_cue_quantize_v1";
+pub(crate) const SETTING_UI_CUE_METRONOME_MIX: &str = "ui_cue_metronome_mix_v1";
 const WAVEFORM_PREVIEW_BINS: usize = 2400;
 
 const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
@@ -94,7 +102,8 @@ const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
 pub(crate) const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm, tonality, file_path, \
     file_size_bytes, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, duration_ms, \
     artwork_path, waveform_peaks_path, bpm_analyzer, created_at, updated_at, \
-    COALESCE(master_db_source, 0) AS master_db_source, wav_extensible_kind, tonality_source";
+    COALESCE(master_db_source, 0) AS master_db_source, wav_extensible_kind, tonality_source, \
+    COALESCE(mixxx_db_source, 0) AS mixxx_db_source";
 
 type ExistingTrackSnapshot = (
     String,
@@ -379,6 +388,32 @@ fn track_has_core_analysis_for_source_status(track: &Track) -> bool {
         track.bpm,
         track.duration_ms,
     )
+}
+
+/// Which imported desktop libraries the library view includes alongside its
+/// source folders (the rekordbox `master.db` and Mixxx chips).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ExternalLibraries {
+    pub master_db: bool,
+    pub mixxx_db: bool,
+}
+
+impl ExternalLibraries {
+    pub(crate) fn from_flags(master_db: bool, mixxx_db: bool) -> Self {
+        Self {
+            master_db,
+            mixxx_db,
+        }
+    }
+
+    pub(crate) fn any(self) -> bool {
+        self.master_db || self.mixxx_db
+    }
+
+    /// True when `track` was imported from one of the enabled libraries.
+    pub(crate) fn includes(self, track: &Track) -> bool {
+        (self.master_db && track.master_db_source) || (self.mixxx_db && track.mixxx_db_source)
+    }
 }
 
 fn non_empty_db_value(value: &str) -> Option<&str> {
@@ -1706,7 +1741,7 @@ impl BackendService {
         &self,
         conn: &rusqlite::Connection,
         source_roots: &[String],
-        include_master_db: bool,
+        libraries: ExternalLibraries,
     ) -> BackendResult<Vec<Track>> {
         let mut source_roots = source_roots
             .iter()
@@ -1715,7 +1750,7 @@ impl BackendService {
             .collect::<Vec<_>>();
         source_roots.sort();
         source_roots.dedup();
-        if source_roots.is_empty() && !include_master_db {
+        if source_roots.is_empty() && !libraries.any() {
             return Ok(Vec::new());
         }
 
@@ -1781,6 +1816,7 @@ impl BackendService {
                         created_at: now.clone(),
                         updated_at: now,
                         master_db_source: false,
+                        mixxx_db_source: false,
                         is_usb_path: false,
                         // Freshly scanned, not yet indexed -- no analysis.
                         analysis_ready: false,
@@ -1790,10 +1826,10 @@ impl BackendService {
             })
             .collect::<Vec<_>>();
 
-        if include_master_db {
+        if libraries.any() {
             for track in indexed_tracks
                 .into_iter()
-                .filter(|track| track.master_db_source)
+                .filter(|track| libraries.includes(track))
             {
                 let path_key = browse_path_key(&track.file_path);
                 if seen_paths.insert(path_key) {
@@ -1822,10 +1858,10 @@ impl BackendService {
         &self,
         conn: &rusqlite::Connection,
         source_roots: &[String],
-        include_master_db: bool,
+        libraries: ExternalLibraries,
         query: &str,
     ) -> BackendResult<Vec<Track>> {
-        let mut items = self.compute_all_library_tracks(conn, source_roots, include_master_db)?;
+        let mut items = self.compute_all_library_tracks(conn, source_roots, libraries)?;
         let query = query.trim().to_lowercase();
         if !query.is_empty() {
             items.retain(|track| track_matches_query(track, &query));
@@ -1845,8 +1881,11 @@ impl BackendService {
             .collect::<Vec<_>>();
         source_roots.sort();
         source_roots.dedup();
-        let include_master_db = req.include_master_db;
-        if source_roots.is_empty() && !include_master_db {
+        let libraries = ExternalLibraries {
+            master_db: req.include_master_db,
+            mixxx_db: req.include_mixxx_db,
+        };
+        if source_roots.is_empty() && !libraries.any() {
             return Ok(BrowseSourceFilesData {
                 total: 0,
                 items: Vec::new(),
@@ -1868,10 +1907,15 @@ impl BackendService {
             "browse_source_files",
             &query,
             &roots_signature,
-            if include_master_db {
+            if libraries.master_db {
                 "master_db"
             } else {
                 "no_master_db"
+            },
+            if libraries.mixxx_db {
+                "mixxx_db"
+            } else {
+                "no_mixxx_db"
             },
             sort_by,
             sort_dir,
@@ -1879,7 +1923,7 @@ impl BackendService {
         let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
 
         let conn = self.db.connect()?;
-        let all_items = self.compute_all_library_tracks(&conn, &source_roots, include_master_db)?;
+        let all_items = self.compute_all_library_tracks(&conn, &source_roots, libraries)?;
 
         // source_root_analysis describes each folder's own analyzed state
         // and must not depend on the current search query -- otherwise a
@@ -1955,7 +1999,8 @@ impl BackendService {
             return Ok(GetSourceRootAnalysisData { items: Vec::new() });
         }
         let conn = self.db.connect()?;
-        let tracks = self.compute_all_library_tracks(&conn, &source_roots, false)?;
+        let tracks =
+            self.compute_all_library_tracks(&conn, &source_roots, ExternalLibraries::default())?;
         Ok(GetSourceRootAnalysisData {
             items: source_root_analysis(&source_roots, &tracks),
         })
@@ -2532,7 +2577,8 @@ impl BackendService {
             SELECT t.id, t.title, t.artist, t.album, t.track_number, t.bpm, t.tonality, t.file_path,
                    t.file_size_bytes, t.format_ext, t.sample_rate_hz, t.bit_depth, t.bitrate_kbps, t.duration_ms,
                    t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at,
-                   COALESCE(t.master_db_source, 0) AS master_db_source, t.wav_extensible_kind
+                   COALESCE(t.master_db_source, 0) AS master_db_source, t.wav_extensible_kind,
+                   COALESCE(t.mixxx_db_source, 0) AS mixxx_db_source
             FROM playlist_tracks pt
             JOIN tracks t ON t.id = pt.track_id
             WHERE pt.playlist_id = ?1
@@ -2738,7 +2784,7 @@ impl BackendService {
         let visible = self.compute_visible_library_tracks(
             &conn,
             &req.source_roots,
-            req.include_master_db,
+            ExternalLibraries::from_flags(req.include_master_db, req.include_mixxx_db),
             &req.query,
         )?;
         let track_ids: Vec<String> = visible.into_iter().map(|track| track.id).collect();
@@ -2756,7 +2802,7 @@ impl BackendService {
         let visible = self.compute_visible_library_tracks(
             &conn,
             &req.source_roots,
-            req.include_master_db,
+            ExternalLibraries::from_flags(req.include_master_db, req.include_mixxx_db),
             &req.query,
         )?;
 
@@ -3071,7 +3117,8 @@ impl BackendService {
                     SELECT t.id, t.title, t.artist, t.album, t.track_number, t.bpm, t.tonality, t.file_path,
                            t.file_size_bytes, t.format_ext, t.sample_rate_hz, t.bit_depth, t.bitrate_kbps, t.duration_ms,
                            t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at,
-                           COALESCE(t.master_db_source, 0) AS master_db_source, t.wav_extensible_kind
+                           COALESCE(t.master_db_source, 0) AS master_db_source, t.wav_extensible_kind,
+                   COALESCE(t.mixxx_db_source, 0) AS mixxx_db_source
                     FROM playlist_tracks pt
                     JOIN tracks t ON t.id = pt.track_id
                     WHERE pt.playlist_id = ?1
@@ -3235,6 +3282,13 @@ fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_SIDEBAR_COLLAPSED,
         SETTING_UI_HELP_SEEN,
         SETTING_UI_KEY_NOTATION,
+        SETTING_UI_MASTER_DB_ENABLED,
+        SETTING_UI_MIXXX_DB_ENABLED,
+        SETTING_UI_SOURCES_EVER_CONFIGURED,
+        SETTING_UI_CUE_START_ON_FIRST_BEAT,
+        SETTING_UI_CUE_BEATGRID_LEVEL,
+        SETTING_UI_CUE_QUANTIZE,
+        SETTING_UI_CUE_METRONOME_MIX,
     ]
 }
 
@@ -3618,6 +3672,7 @@ pub(crate) fn row_to_track(
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
         master_db_source: is_master_db,
+        mixxx_db_source: row.get::<_, i64>("mixxx_db_source").unwrap_or(0) != 0,
         // Filled in by callers that expose Track to the frontend (see
         // apply_frontend_track_fields); internal-only callers leave this false.
         is_usb_path: false,
@@ -4685,6 +4740,32 @@ mod tests {
         assert!(keys.contains(&SETTING_UI_HELP_SEEN));
     }
 
+    /// Every `FRONTEND_DB_KEY_*` the frontend persists must be accepted by
+    /// `set_frontend_setting`, or saving it fails with "unsupported frontend
+    /// setting key" and the value only survives in the webview's localStorage.
+    #[test]
+    fn frontend_ui_setting_keys_cover_every_frontend_db_key() {
+        let source = include_str!("../../../vanilla-ui/settings_keys.mjs");
+        let frontend_keys: Vec<&str> = source
+            .lines()
+            .filter(|line| {
+                line.trim_start()
+                    .starts_with("export const FRONTEND_DB_KEY_")
+            })
+            .filter_map(|line| line.split('"').nth(1))
+            .collect();
+        assert!(frontend_keys.len() > 10, "parsed {frontend_keys:?}");
+        let allowed = frontend_ui_setting_keys();
+        let missing: Vec<_> = frontend_keys
+            .iter()
+            .filter(|key| !allowed.contains(key))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "backend rejects frontend setting keys: {missing:?}"
+        );
+    }
+
     #[test]
     fn source_root_keys_equal_normalizes_case_and_trailing_slash() {
         assert!(source_root_keys_equal("/Music/", "/music"));
@@ -4749,6 +4830,7 @@ mod tests {
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             master_db_source: false,
+            mixxx_db_source: false,
             is_usb_path: false,
             analysis_ready: false,
             format_compat: Default::default(),
@@ -5693,6 +5775,7 @@ mod tests {
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
                 include_master_db: false,
+                include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
                 cursor: None,
@@ -5723,6 +5806,7 @@ mod tests {
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
                 include_master_db: true,
+                include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
                 cursor: None,
@@ -5768,6 +5852,7 @@ mod tests {
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
                 include_master_db: true,
+                include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
                 cursor: None,
@@ -5795,6 +5880,7 @@ mod tests {
 
         let req = |cursor: Option<String>| BrowseSourceFilesRequest {
             include_master_db: true,
+            include_mixxx_db: false,
             limit: 2,
             cursor,
             sort_by: Some("title".to_string()),
@@ -5848,6 +5934,7 @@ mod tests {
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
                 include_master_db: true,
+                include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
                 cursor: None,
@@ -5883,6 +5970,7 @@ mod tests {
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
                 include_master_db: true,
+                include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
                 cursor: None,
@@ -5959,6 +6047,7 @@ mod tests {
                     root_b.path().to_string_lossy().to_string(),
                 ],
                 include_master_db: false,
+                include_mixxx_db: false,
                 // Matches only the track in root_a -- root_b's track matches
                 // nothing, which used to collapse its `total` to 0 and flip
                 // `fully_analyzed` to false even though root_b is 100%

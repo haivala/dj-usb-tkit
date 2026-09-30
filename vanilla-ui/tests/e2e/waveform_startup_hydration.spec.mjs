@@ -158,6 +158,13 @@ function installSourceChipAnalysisMock(page) {
           if (command === "detect_external_master_db") {
             return { ok: true, data: { found: true, path: "/music/master.db" } };
           }
+          if (command === "detect_external_mixxx_db") {
+            return { ok: true, data: { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite" } };
+          }
+          if (command === "scan_mixxx_db") {
+            window.__mixxxScanPayload = payload?.request || null;
+            return { ok: true, data: { indexed: 2, updated: 0, removed: 0, notFound: [], warnings: [] } };
+          }
           if (command === "list_playlists") {
             return { ok: true, data: { items: [] } };
           }
@@ -171,6 +178,7 @@ function installSourceChipAnalysisMock(page) {
             return { ok: true, data: { indexed: 1, updated: 0, removed: 0 } };
           }
           if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+            if (command === "browse_source_files") window.__lastBrowsePayload = payload?.request || null;
             return {
               ok: true,
               data: {
@@ -235,6 +243,26 @@ test("source chips show analyzed green on startup and adding a source indexes it
   await masterDbToggle.check();
   await expect(masterDbToggle).toBeChecked();
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
+
+  // The Mixxx chip is its own filter, sent as a separate browse flag.
+  const mixxxToggle = page.locator('.source-chip-toggle[data-mixxx-db="true"]');
+  await expect(mixxxToggle).toBeVisible();
+  await expect(mixxxToggle).toHaveAttribute("aria-label", "Toggle Mixxx library");
+  await expect(mixxxToggle).not.toBeChecked();
+  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(false);
+  await mixxxToggle.check();
+  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(true);
+  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMasterDb)).toBe(true);
+  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
+
+  // Import Mixxx runs the Mixxx import against the detected library.
+  await mixxxToggle.uncheck();
+  await expect(page.locator("#importMixxxDbBtn")).toBeVisible();
+  await page.locator("#importMixxxDbBtn").click();
+  await expect.poll(async () => page.evaluate(() => window.__mixxxScanPayload)).toEqual({
+    path: "/home/dj/.mixxx/mixxxdb.sqlite"
+  });
+  await expect(mixxxToggle).toBeChecked();
 });
 
 // Regression coverage for: searching the library used to make a fully

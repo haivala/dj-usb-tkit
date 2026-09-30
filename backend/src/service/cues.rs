@@ -58,12 +58,7 @@ pub fn import_anlz_cues_for_track(
     track_id: &str,
     dat_path: &Path,
 ) -> BackendResult<()> {
-    let existing: i64 = tx.query_row(
-        "SELECT COUNT(1) FROM track_cues WHERE track_id = ?1",
-        params![track_id],
-        |row| row.get(0),
-    )?;
-    if existing > 0 {
+    if track_has_cues(tx, track_id)? {
         return Ok(());
     }
 
@@ -75,25 +70,7 @@ pub fn import_anlz_cues_for_track(
         return Ok(());
     }
 
-    let now = now();
-    for (index, cue) in collapse_anlz_cues(&bytes).into_iter().enumerate() {
-        tx.execute(
-            "INSERT INTO track_cues
-               (id, track_id, position_ms, color_id, name, sort_order, is_playback_start,
-                created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-            params![
-                cue.id,
-                track_id,
-                i64::from(cue.position_ms),
-                cue.color_id.map(i64::from),
-                cue.name,
-                index as i64,
-                cue.playback_start,
-                now,
-            ],
-        )?;
-    }
+    insert_track_cues(tx, track_id, &collapse_anlz_cues(&bytes))?;
 
     // Seed the beat-grid anchor when the local row doesn't have one.
     let local_first_beat: Option<i64> = tx
@@ -110,6 +87,45 @@ pub fn import_anlz_cues_for_track(
         tx.execute(
             "UPDATE tracks SET first_beat_ms = ?1 WHERE id = ?2 AND first_beat_ms IS NULL",
             params![i64::from(first_beat), track_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// True when the local track already carries cues -- imports never overwrite
+/// them (local edits always win).
+pub fn track_has_cues(conn: &Connection, track_id: &str) -> BackendResult<bool> {
+    let existing: i64 = conn.query_row(
+        "SELECT COUNT(1) FROM track_cues WHERE track_id = ?1",
+        params![track_id],
+        |row| row.get(0),
+    )?;
+    Ok(existing > 0)
+}
+
+/// Append `cues` to the track's `track_cues` rows, `sort_order` = list order.
+pub fn insert_track_cues(
+    conn: &Connection,
+    track_id: &str,
+    cues: &[TrackCue],
+) -> BackendResult<()> {
+    let now = now();
+    for (index, cue) in cues.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO track_cues
+               (id, track_id, position_ms, color_id, name, sort_order, is_playback_start,
+                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            params![
+                cue.id,
+                track_id,
+                i64::from(cue.position_ms),
+                cue.color_id.map(i64::from),
+                cue.name,
+                index as i64,
+                cue.playback_start,
+                now,
+            ],
         )?;
     }
     Ok(())
@@ -340,6 +356,22 @@ pub fn palette_entry(color_id: u8) -> Option<HotcuePaletteEntry> {
 
 pub fn is_valid_color_id(color_id: u8) -> bool {
     palette_entry(color_id).is_some()
+}
+
+/// The palette id whose colour is closest (squared RGB distance) to a
+/// `0xRRGGBB` value, for importing cue colours from other DJ software.
+pub fn nearest_palette_color_id(rgb: u32) -> u8 {
+    let (r, g, b) = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+    HOTCUE_PALETTE
+        .iter()
+        .min_by_key(|e| {
+            let dr = i64::from(e.rgb.0) - i64::from(r);
+            let dg = i64::from(e.rgb.1) - i64::from(g);
+            let db = i64::from(e.rgb.2) - i64::from(b);
+            dr * dr + dg * dg + db * db
+        })
+        .map(|e| e.id)
+        .unwrap_or(DEFAULT_HOTCUE_COLOR_ID)
 }
 
 /// A cue list as the cue editor gets it: every hot cue carries a colour (the

@@ -16,8 +16,8 @@ use crate::models::{
     AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
     BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
     CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
-    DeleteUsbBackupRequest, DetectExternalMasterDbData, ExportToUsbData, ExportToUsbRequest,
-    FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
+    DeleteUsbBackupRequest, DetectExternalMasterDbData, DetectExternalMixxxDbData, ExportToUsbData,
+    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
     GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
@@ -40,7 +40,7 @@ use crate::models::{
     RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
     RunUsbParityReportData, RunUsbParityReportRequest, SaveTrackAnalysisEditsData,
     SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
-    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksData,
+    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, ScanMixxxDbRequest, SearchTracksData,
     SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest, SetFrontendSettingData,
     SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameData,
     SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, UpdateUsbPlayerMenuConfigData,
@@ -633,6 +633,69 @@ pub async fn scan_master_db(
                 )
             })
             .unwrap_or_else(|| "Desktop library import completed".to_string());
+        emit_job_event(&app, "job.completed", identity, 1, 1, 100, summary);
+    } else {
+        emit_job_failed(
+            &app,
+            identity,
+            response.error.as_ref().map(|e| e.message.clone()),
+        );
+    }
+
+    Ok(response)
+}
+
+#[tauri::command]
+pub async fn scan_mixxx_db(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+    request: ScanMixxxDbRequest,
+) -> Result<ApiResponse<ScanLibraryData>, String> {
+    let job_id = Uuid::now_v7().to_string();
+    let identity = JobIdentity {
+        job_id: &job_id,
+        job_type: "scan",
+        stage: "scan_mixxx_db",
+    };
+    emit_job_event(
+        &app,
+        "job.started",
+        identity,
+        0,
+        1,
+        0,
+        "Importing from Mixxx library",
+    );
+    emit_job_event(
+        &app,
+        "job.progress",
+        identity,
+        0,
+        1,
+        30,
+        "Reading Mixxx library database",
+    );
+
+    let commands = state.inner().clone();
+    let response =
+        match tauri::async_runtime::spawn_blocking(move || commands.scan_mixxx_db(request)).await {
+            Ok(resp) => resp,
+            Err(err) => ApiResponse::failure(
+                crate::error::BackendError::Internal(format!("scan_mixxx_db task failed: {err}"))
+                    .into(),
+            ),
+        };
+    if response.ok {
+        let summary = response
+            .data
+            .as_ref()
+            .map(|d| {
+                format!(
+                    "Mixxx library import completed: indexed {}, updated {}",
+                    d.indexed, d.updated
+                )
+            })
+            .unwrap_or_else(|| "Mixxx library import completed".to_string());
         emit_job_event(&app, "job.completed", identity, 1, 1, 100, summary);
     } else {
         emit_job_failed(
@@ -1560,6 +1623,13 @@ pub fn detect_external_master_db(
     state: State<'_, BackendCommands>,
 ) -> ApiResponse<DetectExternalMasterDbData> {
     state.detect_external_master_db()
+}
+
+#[tauri::command]
+pub fn detect_external_mixxx_db(
+    state: State<'_, BackendCommands>,
+) -> ApiResponse<DetectExternalMixxxDbData> {
+    state.detect_external_mixxx_db()
 }
 
 #[tauri::command]

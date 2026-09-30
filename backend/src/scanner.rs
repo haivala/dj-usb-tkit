@@ -83,7 +83,7 @@ pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTra
             }
 
             let path = entry.path();
-            if !is_audio_path(path) || is_video_file(path) {
+            if !is_library_audio_file(path) {
                 continue;
             }
 
@@ -198,6 +198,12 @@ fn is_audio_path(path: &Path) -> bool {
         .unwrap_or_default();
 
     is_supported_audio_extension(&ext)
+}
+
+/// A file the library takes: a supported audio extension and not an MP4 video.
+/// Shared by the folder scan and the external-library imports.
+pub(crate) fn is_library_audio_file(path: &Path) -> bool {
+    is_audio_path(path) && !is_video_file(path)
 }
 
 /// A `.mp4` that carries a video track (a downloaded clip, not an AAC audio

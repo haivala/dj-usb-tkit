@@ -392,6 +392,12 @@ export function renderSourceChips(ctx) {
     chip.querySelector(".source-chip-toggle").checked = !!state.masterDbEnabled;
     el.sourceChipsContainer.appendChild(chip);
   }
+  if (state.externalMixxxDbPath) {
+    const chip = cloneTemplate(document, "tplSourceChipMixxxDb");
+    chip.querySelector(".source-chip-toggle").checked = !!state.mixxxDbEnabled;
+    chip.querySelector(".source-chip-path").dataset.tooltip = state.externalMixxxDbPath;
+    el.sourceChipsContainer.appendChild(chip);
+  }
 
   state.sourceRoots.forEach((path, index) => {
     if (state.sourceRootEnabled[path] === undefined) {
@@ -428,6 +434,9 @@ export function renderSourceChips(ctx) {
   if (el.importMasterDbBtn) {
     el.importMasterDbBtn.classList.toggle("hidden", !state.externalMasterDbPath);
   }
+  if (el.importMixxxDbBtn) {
+    el.importMixxxDbBtn.classList.toggle("hidden", !state.externalMixxxDbPath);
+  }
   ctx.updateScanLibraryButtonLabel();
   ctx.updateSourceFilterIndicator();
 }
@@ -460,9 +469,10 @@ export function renderLibraryChrome(ctx) {
   if (el.libraryEmptyState) {
     el.libraryEmptyState.replaceChildren();
     if (noSources) {
-      const extraActions = state.externalMasterDbPath
-        ? [{ label: "RB master.db", onAction: () => scanMasterDb(ctx) }]
-        : [];
+      const extraActions = [
+        ...(state.externalMasterDbPath ? [{ label: "RB master.db", onAction: () => scanMasterDb(ctx) }] : []),
+        ...(state.externalMixxxDbPath ? [{ label: "Mixxx library", onAction: () => scanMixxxDb(ctx) }] : []),
+      ];
       renderEmptyState(el.libraryEmptyState, {
         icon: "♫",
         heading: "Add a music folder to get started",
@@ -504,13 +514,15 @@ export function createLibraryTracksController(ctx) {
         (root) => ctx.state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(ctx.state, root),
       );
       const includeMasterDb = ctx.state.masterDbEnabled === true;
+      const includeMixxxDb = ctx.state.mixxxDbEnabled === true;
       ctx.state.libraryQuery = String(query || "").trim();
-      if (!enabledRoots.length && !includeMasterDb) {
+      if (!enabledRoots.length && !includeMasterDb && !includeMixxxDb) {
         return { total: 0, items: [], nextCursor: null, hasMore: false, totalDurationMs: 0, durationKnownCount: 0 };
       }
       return ctx.command("browse_source_files", {
         sourceRoots: enabledRoots,
         includeMasterDb,
+        includeMixxxDb,
         query: ctx.state.libraryQuery,
         sortBy: sortBy || null,
         sortDir: sortDir || null,
@@ -721,24 +733,53 @@ export async function analyzeSelectedTracks(ctx) {
 }
 
 export async function scanMasterDb(ctx) {
+  await importExternalLibrary(ctx, {
+    command: "scan_master_db",
+    path: ctx.state.externalMasterDbPath,
+    label: "Desktop library",
+    logSource: "master.db",
+    codePrefix: "master_db",
+    enable: () => {
+      ctx.state.masterDbEnabled = true;
+      ctx.persistMasterDbEnabled(true);
+    },
+  });
+}
+
+export async function scanMixxxDb(ctx) {
+  await importExternalLibrary(ctx, {
+    command: "scan_mixxx_db",
+    path: ctx.state.externalMixxxDbPath,
+    label: "Mixxx library",
+    logSource: "mixxx",
+    codePrefix: "mixxx_db",
+    enable: () => {
+      ctx.state.mixxxDbEnabled = true;
+      ctx.persistMixxxDbEnabled(true);
+    },
+  });
+}
+
+// Shared by the rekordbox master.db and Mixxx imports: run the backend
+// import, turn the library's source chip on, and report the outcome.
+async function importExternalLibrary(ctx, { command, path, label, logSource, codePrefix, enable }) {
   const { state, logWarnings } = ctx;
   const { emitStatus } = ctx;
-  const path = state.externalMasterDbPath || undefined;
+  const logLabel = `${label.toLowerCase()} import`;
 
-  emitStatus("Importing from desktop library...");
+  emitStatus(`Importing from ${label.toLowerCase()}...`);
   let result;
   try {
-    result = await ctx.command("scan_master_db", { path });
+    result = await ctx.command(command, { path: path || undefined });
   } catch (err) {
-    emitStatus(`Desktop library import failed: ${err?.message || err}`);
+    emitStatus(`${label} import failed: ${err?.message || err}`);
     return;
   }
 
-  // Mark master.db as enabled and configured so the library's browse query
+  // Mark the library as enabled and configured so the library's browse query
   // includes it alongside the folder sources.
-  state.masterDbEnabled = true;
+  enable();
   state.sourcesEverConfigured = true;
-  ctx.persistMasterDbEnabled(true);
   ctx.persistSourcesEverConfigured(true);
   renderSourceChips(ctx);
 
@@ -749,25 +790,25 @@ export async function scanMasterDb(ctx) {
   const notFound = Array.isArray(result.notFound) ? result.notFound : [];
   if (notFound.length > 0) {
     logWarnings(
-      "master.db",
-      notFound.map((p) => ({ level: "warn", message: p, code: "master_db.file_not_found" })),
-      "desktop library import"
+      logSource,
+      notFound.map((p) => ({ level: "warn", message: p, code: `${codePrefix}.file_not_found` })),
+      logLabel
     );
   }
 
   const scanWarnings = Array.isArray(result.warnings) ? result.warnings : [];
   if (scanWarnings.length > 0) {
     logWarnings(
-      "master.db",
+      logSource,
       scanWarnings.map((entry) => (entry && typeof entry === "object"
         ? entry
-        : { level: "info", message: entry, code: "master_db.scan_diag" })),
-      "desktop library import"
+        : { level: "info", message: entry, code: `${codePrefix}.scan_diag` })),
+      logLabel
     );
   }
 
   const suffix = notFound.length > 0 ? ` | ${notFound.length} file(s) not found (see event log)` : "";
-  emitStatus(`Desktop library import done: ${result.indexed} new, ${result.updated} updated${suffix}`);
+  emitStatus(`${label} import done: ${result.indexed} new, ${result.updated} updated${suffix}`);
 }
 
 export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", options = {}) {
@@ -815,6 +856,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
         (root) => state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(state, root)
       ),
       includeMasterDb: state.masterDbEnabled === true,
+      includeMixxxDb: state.mixxxDbEnabled === true,
       query: String(state.libraryQuery || "").trim()
     });
     analyzed = Math.max(0, Number(batch?.analyzed || 0));

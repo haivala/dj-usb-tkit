@@ -232,6 +232,7 @@ export async function initApp(ctx) {
   ctx.loadSourceRootsFromStorage();
   ctx.loadSourceRootEnabledFromStorage();
   ctx.loadMasterDbEnabledFromStorage();
+  ctx.loadMixxxDbEnabledFromStorage();
   ctx.loadSourcesEverConfiguredFromStorage();
   await ctx.loadUsbDevices();
 
@@ -251,6 +252,7 @@ export async function initApp(ctx) {
   ctx.renderSourceChips();
   ctx.refreshSourceRootAnalysisStatus().catch(() => {});
   await ctx.detectExternalMasterDb();
+  await ctx.detectExternalMixxxDb();
   ctx.bindEvents();
   await ctx.switchView("library");
   pushEventLog({ level: "info", source: "startup", message: "Initial view ready" });

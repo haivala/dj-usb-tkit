@@ -2031,6 +2031,7 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
         .browse_source_files(BrowseSourceFilesRequest {
             source_roots: vec![source.to_string_lossy().to_string()],
             include_master_db: false,
+            include_mixxx_db: false,
             query: String::new(),
             limit: 50,
             cursor: None,
