@@ -78,12 +78,6 @@ export function getHistoryDateValue(history) {
   return history?.createdAt || "";
 }
 
-export function getHistoryDateDisplay(history) {
-  const value = getHistoryDateValue(history);
-  if (!value) return "";
-  return `not earlier than ${value}`;
-}
-
 export function formatTimestampLocal(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;

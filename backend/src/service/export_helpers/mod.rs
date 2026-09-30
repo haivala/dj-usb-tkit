@@ -3393,9 +3393,9 @@ mod tests {
         // 400 bins satisfies the minimum detail-gate for any duration ≤ 15s (required ≤ 2400,
         // so the PWV7 triplet-run check is skipped). Use 1s to keep the fixture minimal.
         let waveform = WaveformData::from_peaks(vec![128; 400]);
-        let dat_content = build_anlz_dat_file(&waveform, "", None, Some(1_000));
-        let ext_content = build_anlz_ext_file(&waveform, "", None, Some(1_000));
-        let twoex_content = build_anlz_2ex_file(&waveform, "", Some(1_000));
+        let dat_content = build_anlz_dat_file(&waveform, "", None, 1_000, None, &[]);
+        let ext_content = build_anlz_ext_file(&waveform, "", None, 1_000, None, &[]);
+        let twoex_content = build_anlz_2ex_file(&waveform, "", 1_000);
         assert!(
             ppth_path_from_anlz(&dat_content).is_none(),
             "local analysis cache should start without PPTH"
@@ -3503,17 +3503,17 @@ mod tests {
         fs::create_dir_all(dat_path.parent().unwrap()).unwrap();
         fs::write(
             &dat_path,
-            build_anlz_dat_file(&waveform, exported_path, Some(120.0), Some(200_000)),
+            build_anlz_dat_file(&waveform, exported_path, Some(120.0), 200_000, None, &[]),
         )
         .unwrap();
         fs::write(
             &ext_path,
-            build_anlz_ext_file(&waveform, exported_path, Some(120.0), Some(200_000)),
+            build_anlz_ext_file(&waveform, exported_path, Some(120.0), 200_000, None, &[]),
         )
         .unwrap();
         fs::write(
             &twoex_path,
-            build_anlz_2ex_file(&waveform, exported_path, Some(200_000)),
+            build_anlz_2ex_file(&waveform, exported_path, 200_000),
         )
         .unwrap();
 

@@ -3027,7 +3027,14 @@ mod diag_tests {
         use super::super::anlz::{WaveformData, build_anlz_dat_file};
 
         let peaks: Vec<u8> = (0..100).map(|i| (i * 100 / 99).min(100) as u8).collect();
-        let dat_bytes = build_anlz_dat_file(&WaveformData::from_peaks(peaks), "", None, None);
+        let dat_bytes = build_anlz_dat_file(
+            &WaveformData::from_peaks(peaks),
+            "",
+            None,
+            30_000,
+            None,
+            &[],
+        );
 
         // extract_waveform_preview_from_anlz_bytes should find PWAV and decode it
         let preview = extract_waveform_preview_from_anlz_bytes(&dat_bytes, 50);

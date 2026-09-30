@@ -22,6 +22,21 @@ const PDB_ZERO_TRANRF_FIX_ID: &str = "repair_pdb_zero_tranrf_on_track_pages";
 const PDB_WRONG_TRACK_U5_FIX_ID: &str = "repair_pdb_wrong_track_u5_num_rl";
 const PDB_WRONG_HISTORY_SHAPE_FIX_ID: &str = "repair_pdb_wrong_history_page_shape";
 const PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID: &str = "repair_pdb_wrong_playlist_tree_shape";
+/// A flat waveform with the same level on every band.
+fn flat_waveform(len: usize, level: u8) -> backend::service::anlz::WaveformData {
+    let band = vec![level.min(127); len];
+    backend::service::anlz::WaveformData {
+        peaks: vec![level; len],
+        bands: vec![3; len],
+        low_energy: band.clone(),
+        mid_energy: band.clone(),
+        high_energy: band.clone(),
+        low_energy_full: band.clone(),
+        mid_energy_full: band.clone(),
+        high_energy_full: band,
+        peak_level: 1.0,
+    }
+}
 
 fn vendor_db_dir(usb_root: &Path) -> std::path::PathBuf {
     usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
@@ -3711,7 +3726,7 @@ fn bpm_key_check_status(backend: &BackendCommands, usb: &Path) -> backend::model
 #[test]
 fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
     use backend::service::anlz::{
-        WaveformData, build_anlz_dat_file, build_anlz_ext_file, read_beatgrid_tempo_from_anlz,
+        build_anlz_dat_file, build_anlz_ext_file, read_beatgrid_tempo_from_anlz,
     };
 
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
@@ -3735,16 +3750,16 @@ fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
     // Replace the fixture's placeholder bundle with a real one whose beat
     // grid is at a wrong tempo, and skew the eDB BPM and key.
     let dat_path = find_exported_anlz_dat(&usb);
-    let waveform = WaveformData::from_peaks(vec![128; 400]);
+    let waveform = flat_waveform(400, 128);
     let track_path = track.track_file_path.as_str();
     fs::write(
         &dat_path,
-        build_anlz_dat_file(&waveform, track_path, Some(wrong_bpm), Some(200_000)),
+        build_anlz_dat_file(&waveform, track_path, Some(wrong_bpm), 200_000, None, &[]),
     )
     .expect("write DAT");
     fs::write(
         dat_path.with_extension("EXT"),
-        build_anlz_ext_file(&waveform, track_path, Some(wrong_bpm), Some(200_000)),
+        build_anlz_ext_file(&waveform, track_path, Some(wrong_bpm), 200_000, None, &[]),
     )
     .expect("write EXT");
     // The automatic diagnosis is database-only: a beat grid alone never

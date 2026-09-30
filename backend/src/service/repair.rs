@@ -23,7 +23,7 @@ use crate::models::{
 use crate::pdb_reader::parse_pdb;
 
 use super::BackendService;
-use super::analysis::build_waveform_preview_from_audio;
+use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
 use super::anlz::{
     AnlzAnalysisEdits, AnlzBundlePaths, WaveformData, apply_analysis_edits_to_anlz,
     atomic_write_bytes, write_generated_anlz_bundle,
@@ -2889,9 +2889,25 @@ fn apply_bpm_key_mismatch_repair(
         let Some(dat) = m.anlz_dat_path.as_deref() else {
             continue;
         };
+        // The grid's beat count comes from the track length: the PDB's, else
+        // the audio file's own. Never a made-up one.
+        let Some(duration_ms) = m.duration_ms.or_else(|| {
+            detect_track_duration_ms(&usb_root.join(m.track_path.trim_start_matches('/')))
+        }) else {
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-repair",
+                "usb.repair.bpm-key.duration-unknown",
+                format!(
+                    "beat grid not rebuilt: track length unknown for {}",
+                    m.track_path
+                ),
+            ));
+            continue;
+        };
         let edits = AnlzAnalysisEdits {
             bpm: Some(f64::from(m.pdb_tempo_x100) / 100.0),
-            duration_ms: m.duration_ms,
+            duration_ms: Some(duration_ms),
             first_beat_ms: None,
             cues: None,
         };
@@ -5852,9 +5868,9 @@ impl BackendService {
             analysis_dir: std::path::PathBuf,
             track_path: String,
             // Known-good tempo/duration from the already-parsed PDB row, so a
-            // regenerated bundle bakes in the track's real beat grid instead
-            // of falling back to the ANLZ writer's 120 BPM / 180s defaults
-            // (see docs/DIAGNOSTICS_REPAIRS.md).
+            // regenerated bundle bakes in the track's real beat grid (with no
+            // known tempo it gets no beat grid at all; with no known length the
+            // source file's own length is used; see docs/DIAGNOSTICS_REPAIRS.md).
             bpm: Option<f64>,
             duration_ms: Option<u64>,
         }
@@ -5890,7 +5906,10 @@ impl BackendService {
                         analysis_dir: analysis_dir.clone(),
                         track_path: t.track_file_path.clone(),
                         bpm: (t.tempo_x100 > 0).then(|| t.tempo_x100 as f64 / 100.0),
-                        duration_ms: t.duration_seconds.map(|s| s as u64 * 1000),
+                        duration_ms: t
+                            .duration_seconds
+                            .filter(|s| *s > 0)
+                            .map(|s| s as u64 * 1000),
                     };
                     map_by_file.insert(canonicalize_playlist_name(&a), target.clone());
                     map_by_dir.insert(
@@ -5999,6 +6018,21 @@ impl BackendService {
                 ));
                 continue;
             }
+            let Some(duration_ms) = target
+                .duration_ms
+                .or_else(|| detect_track_duration_ms(std::path::Path::new(&source_audio)))
+            else {
+                failed += 1;
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-repair",
+                    "usb.repair.empty-analysis.duration-unknown",
+                    format!(
+                        "repair failed (empty analysis): track length unknown for {source_audio}"
+                    ),
+                ));
+                continue;
+            };
             let base_dir = target.analysis_dir;
             let bundle_paths = AnlzBundlePaths {
                 dat_path: base_dir.join("ANLZ0000.DAT"),
@@ -6010,7 +6044,7 @@ impl BackendService {
                 &bundle_paths,
                 &target.track_path,
                 target.bpm,
-                target.duration_ms,
+                duration_ms,
             ) {
                 failed += 1;
                 warnings.push(logging::log(
@@ -7685,7 +7719,7 @@ mod tests {
         assert_eq!(
             read_beatgrid_tempo_from_anlz(&dat_bytes),
             Some(14_000),
-            "regenerated bundle must bake the track's real PDB tempo, not the 120 BPM default"
+            "regenerated bundle must bake the track's real PDB tempo"
         );
     }
     #[test]

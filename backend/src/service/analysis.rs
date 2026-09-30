@@ -54,7 +54,6 @@ const ANALYSIS_MEMORY_USABLE_FRACTION: f64 = 0.75;
 const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 1536 * 1024 * 1024;
 // Stratum budget plus a Node.js/WASM child process per worker.
 const ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES: u64 = 400 * 1024 * 1024;
-const ANLZ_DETAIL_DEFAULT_DURATION_MS: u64 = 180_000;
 const ANLZ_DETAIL_BINS_PER_SECOND: f64 = 150.0;
 const LIBRARY_ARTWORK_SIZE_PX: u32 = 80;
 const DEFAULT_ANALYSIS_BPM_MIN: u32 = 70;
@@ -1221,14 +1220,13 @@ fn waveform_preview_if_persisted(
         .map(|_| downsample_waveform_peaks(&waveform.peaks, WAVEFORM_PREVIEW_BINS))
 }
 
-pub(crate) fn waveform_detail_entries_for_duration(duration_ms: Option<u64>) -> usize {
-    let duration_ms = duration_ms.unwrap_or(ANLZ_DETAIL_DEFAULT_DURATION_MS);
+pub(crate) fn waveform_detail_entries_for_duration(duration_ms: u64) -> usize {
     (((duration_ms as f64 / 1000.0) * ANLZ_DETAIL_BINS_PER_SECOND).ceil() as usize)
         .saturating_add(4)
         .max(400)
 }
 
-pub(crate) fn waveform_detail_bins_for_duration(duration_ms: Option<u64>) -> usize {
+pub(crate) fn waveform_detail_bins_for_duration(duration_ms: u64) -> usize {
     waveform_detail_entries_for_duration(duration_ms).max(WAVEFORM_PREVIEW_BINS)
 }
 
@@ -1553,29 +1551,35 @@ fn analyze_local_track_with_updates(
     let duration_ms = detect_track_duration_ms(&path)
         .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate));
 
-    let waveform = build_waveform_data_from_samples_with_rate(
-        &samples,
-        waveform_detail_bins_for_duration(duration_ms),
-        sample_rate,
-    );
-    let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
-    let waveform_peaks_path = if waveform.peaks.is_empty() {
-        None
-    } else {
-        // Cues (if the track was previously edited) are baked into the cache
-        // by `save_track_analysis_edits`; a fresh analysis writes an empty cue
-        // list and the next save/export re-applies them.
-        write_generated_anlz_bundle_with_first_beat(
-            &waveform,
-            &bundle_paths,
-            "",
-            bpm,
-            duration_ms,
-            first_beat_ms,
-            &[],
-        )?;
-        Some(bundle_paths.dat_path.to_string_lossy().to_string())
+    // The waveform's detail entries are a time axis: with no known length
+    // there is no waveform, rather than one stretched to a made-up length.
+    let waveform = match duration_ms {
+        Some(duration_ms) => build_waveform_data_from_samples_with_rate(
+            &samples,
+            waveform_detail_bins_for_duration(duration_ms),
+            sample_rate,
+        ),
+        None => WaveformData::empty(),
     };
+    let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
+    let waveform_peaks_path =
+        if let Some(duration_ms) = duration_ms.filter(|_| !waveform.peaks.is_empty()) {
+            // Cues (if the track was previously edited) are baked into the cache
+            // by `save_track_analysis_edits`; a fresh analysis writes an empty cue
+            // list and the next save/export re-applies them.
+            write_generated_anlz_bundle_with_first_beat(
+                &waveform,
+                &bundle_paths,
+                "",
+                bpm,
+                duration_ms,
+                first_beat_ms,
+                &[],
+            )?;
+            Some(bundle_paths.dat_path.to_string_lossy().to_string())
+        } else {
+            None
+        };
     let waveform_preview = waveform_preview_if_persisted(&waveform, &waveform_peaks_path);
     if waveform_peaks_path.is_some() || waveform_preview.is_some() {
         on_update(TrackPartialUpdate {
@@ -1628,7 +1632,7 @@ fn duration_ms_from_decoded(sample_count: usize, sample_rate: u32) -> Option<u64
     Some((sample_count as u64).saturating_mul(1000) / u64::from(sample_rate))
 }
 
-fn detect_track_duration_ms(path: &Path) -> Option<u64> {
+pub(crate) fn detect_track_duration_ms(path: &Path) -> Option<u64> {
     // Deterministic single-source duration resolution: Symphonia metadata only.
     let file = File::open(path).ok()?;
     let mut hint = Hint::new();
@@ -2940,18 +2944,18 @@ mod tests {
 
     #[test]
     fn waveform_detail_entries_follow_cdj_detail_rate() {
-        assert_eq!(waveform_detail_entries_for_duration(Some(30_000)), 4_504);
+        assert_eq!(waveform_detail_entries_for_duration(30_000), 4_504);
         assert_eq!(
-            waveform_detail_bins_for_duration(Some(8_000)),
+            waveform_detail_bins_for_duration(8_000),
             WAVEFORM_PREVIEW_BINS,
             "short tracks still keep enough local bins for UI preview"
         );
-        assert_eq!(waveform_detail_bins_for_duration(Some(180_000)), 27_004);
+        assert_eq!(waveform_detail_bins_for_duration(180_000), 27_004);
     }
 
     #[test]
     fn persisted_waveform_preview_is_downsampled_from_detail_cache() {
-        let detail_bins = waveform_detail_bins_for_duration(Some(180_000));
+        let detail_bins = waveform_detail_bins_for_duration(180_000);
         let waveform =
             WaveformData::from_peaks((0..detail_bins).map(|i| ((i * 37) % 101) as u8).collect());
 

@@ -1932,7 +1932,10 @@ pub(crate) fn detect_bpm_key_mismatches(
             out.push(BpmKeyMismatch {
                 track_path: track.track_file_path.clone(),
                 pdb_tempo_x100,
-                duration_ms: track.duration_seconds.map(|s| u64::from(s) * 1000),
+                duration_ms: track
+                    .duration_seconds
+                    .filter(|s| *s > 0)
+                    .map(|s| u64::from(s) * 1000),
                 anlz_dat_path,
                 edb_bpmx100,
                 pdb_key_for_edb,

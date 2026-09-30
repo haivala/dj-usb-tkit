@@ -53,6 +53,19 @@
 - **Fix:** the USB repair for empty analysis files no longer writes a
   waveform made from the file's raw bytes when the source audio can't be
   decoded. It now reports that track as failed and leaves the file as it was.
+- **Fix:** tracks with no known BPM no longer get a made-up 120 BPM beat grid
+  in their analysis files; they get none. Moving the first beat of such a
+  track no longer rebuilds its grid at 120 BPM.
+- **Fix:** analysis files no longer contain a made-up phrase map. Every
+  track with a BPM got the same Intro / Verse / Chorus / Outro split into
+  equal quarters, which players showed as if it were real phrase analysis.
+  Phrases aren't analyzed, so none are written now. Phrase data rekordbox
+  wrote is still kept.
+- **Fix:** a track whose length is unknown no longer gets a waveform and beat
+  grid sized for a made-up 3-minute length. Analysis writes no waveform for
+  it. The USB repairs for empty analysis files and for beat-grid tempo take
+  the length from the audio file when the USB database has none, and
+  otherwise report the track instead of guessing.
 - **Fix:** starting a new job (creating a playlist, importing from the USB,
   exporting, …) right after another one finished no longer makes its
   progress bar disappear partway through. Before, the previous job's

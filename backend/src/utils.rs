@@ -91,12 +91,6 @@ pub fn table_ptr_fields(bytes: &[u8], table_type: u32) -> Option<(u32, u32, u32)
     Some((ec, first, last))
 }
 
-/// Convenience variant that returns only `(first_page, last_page)`.
-pub fn table_ptr_first_last(bytes: &[u8], table_type: u32) -> Option<(u32, u32)> {
-    let (_, first, last) = table_ptr_fields(bytes, table_type)?;
-    Some((first, last))
-}
-
 /// Write the PDB header table-pointer triple for the given `table_type`.
 pub fn set_table_ptr_fields(
     bytes: &mut [u8],
@@ -329,13 +323,6 @@ mod tests {
         let last: u32 = 3;
         assert!(set_table_ptr_fields(&mut buf, 0, ec, first, last));
         assert_eq!(table_ptr_fields(&buf, 0), Some((5, 1, 3)));
-    }
-
-    #[test]
-    fn table_ptr_first_last_drops_ec() {
-        let mut buf = vec![0u8; 0x1c + 16];
-        assert!(set_table_ptr_fields(&mut buf, 0, 99, 2, 7));
-        assert_eq!(table_ptr_first_last(&buf, 0), Some((2, 7)));
     }
 
     #[test]

@@ -1550,7 +1550,9 @@ mod tests {
             &super::super::anlz::WaveformData::from_peaks(vec![128; 400]),
             "/Contents/x.mp3",
             Some(120.0),
-            Some(120_000),
+            120_000,
+            None,
+            &[],
         );
         let anlz = anlz_cues_from_track_cues(&[
             cue("c1", 3000, Some(2)),

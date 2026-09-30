@@ -61,8 +61,9 @@ impl WaveformData {
         }
     }
 
-    /// Create WaveformData from amplitude-only peaks (assigns default mid band=3).
-    /// 3-band data is synthesized from the single amplitude using a mid-dominant split.
+    /// Test fixture: WaveformData from amplitude-only peaks (mid band=3), with
+    /// 3-band data derived from the single amplitude using a mid-dominant split.
+    #[cfg(test)]
     pub fn from_peaks(peaks: Vec<u8>) -> Self {
         let len = peaks.len();
         // Synthesize plausible 3-band data: most energy in mid, some in high, less in low
@@ -159,7 +160,7 @@ pub fn write_generated_anlz_bundle(
     paths: &AnlzBundlePaths,
     track_path: &str,
     bpm: Option<f64>,
-    duration_ms: Option<u64>,
+    duration_ms: u64,
 ) -> BackendResult<()> {
     write_generated_anlz_bundle_with_first_beat(
         waveform,
@@ -177,11 +178,11 @@ pub fn write_generated_anlz_bundle_with_first_beat(
     paths: &AnlzBundlePaths,
     track_path: &str,
     bpm: Option<f64>,
-    duration_ms: Option<u64>,
+    duration_ms: u64,
     first_beat_ms_override: Option<u32>,
     cues: &[AnlzCue],
 ) -> BackendResult<()> {
-    let dat = build_anlz_dat_file_with_first_beat(
+    let dat = build_anlz_dat_file(
         waveform,
         track_path,
         bpm,
@@ -189,7 +190,7 @@ pub fn write_generated_anlz_bundle_with_first_beat(
         first_beat_ms_override,
         cues,
     );
-    let ext = build_anlz_ext_file_with_first_beat(
+    let ext = build_anlz_ext_file(
         waveform,
         track_path,
         bpm,
@@ -223,25 +224,12 @@ pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> BackendResult<()>
     Ok(())
 }
 
-/// Fallback tempo baked into a beat-grid chunk when no real bpm is known at
-/// write time (e.g. a degenerate analysis pass, or a repair that hasn't
-/// learned the track's actual tempo). Named so callers elsewhere in the
-/// crate (diagnostics: `repair.rs`'s beat-grid-tempo-mismatch scan) can
-/// recognize "this chunk was never given a real tempo" instead of
-/// re-deriving the magic number independently.
-pub(crate) const ANLZ_DEFAULT_BEATGRID_BPM: f64 = 120.0;
-
-fn append_pqt2_chunk(
-    file: &mut Vec<u8>,
-    bpm: Option<f64>,
-    duration_ms: Option<u64>,
-    first_beat_ms: u32,
-) {
-    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
-    if bpm_val <= 0.0 {
+fn append_pqt2_chunk(file: &mut Vec<u8>, bpm: Option<f64>, duration_ms: u64, first_beat_ms: u32) {
+    // No known tempo, no beat grid: never bake in a made-up one.
+    let Some(bpm_val) = bpm.filter(|b| *b > 0.0) else {
         return;
-    }
-    let dur_ms = duration_ms.unwrap_or(180_000) as f64;
+    };
+    let dur_ms = duration_ms as f64;
     let beat_interval_ms = 60_000.0 / bpm_val;
     let num_beats = compute_num_beats(dur_ms, beat_interval_ms, first_beat_ms);
     if num_beats == 0 {
@@ -282,93 +270,15 @@ fn append_pqt2_chunk(
 }
 
 fn normalize_first_beat_ms(first_beat_ms: u32, bpm: Option<f64>) -> u32 {
-    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
-    if bpm_val <= 0.0 {
-        return 0;
-    }
+    let Some(bpm_val) = bpm.filter(|b| *b > 0.0) else {
+        return first_beat_ms;
+    };
     let interval_ms = 60_000.0 / bpm_val;
     if !interval_ms.is_finite() || interval_ms <= 1.0 {
         return 0;
     }
     let wrapped = (first_beat_ms as f64) % interval_ms;
     wrapped.round().max(0.0) as u32
-}
-
-fn pssi_xor_mask(len_entries: u16, idx: usize) -> u8 {
-    const BASE: [u8; 19] = [
-        0xCB, 0xE1, 0xEE, 0xFA, 0xE5, 0xEE, 0xAD, 0xEE, 0xE9, 0xD2, 0xE9, 0xEB, 0xE1, 0xE9, 0xF3,
-        0xE8, 0xE9, 0xF4, 0xE1,
-    ];
-    BASE[idx % BASE.len()].wrapping_add(len_entries as u8)
-}
-
-fn append_pssi_chunk(
-    file: &mut Vec<u8>,
-    bpm: Option<f64>,
-    duration_ms: Option<u64>,
-    first_beat_ms: u32,
-) {
-    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
-    if bpm_val <= 0.0 {
-        return;
-    }
-    let dur_ms = duration_ms.unwrap_or(180_000) as f64;
-    let beat_interval_ms = 60_000.0 / bpm_val;
-    let num_beats = compute_num_beats(dur_ms, beat_interval_ms, first_beat_ms) as u16;
-    if num_beats < 8 {
-        return;
-    }
-
-    // Build a minimal, valid phrase map with deterministic regions:
-    // Intro(1), Verse(2), Chorus(9), Outro(10) in mood=2 ("mid").
-    let mut starts = [
-        1u16,
-        (num_beats / 4).max(2),
-        (num_beats / 2).max(3),
-        ((num_beats * 3) / 4).max(4),
-    ];
-    for i in 1..starts.len() {
-        starts[i] = starts[i].max(starts[i - 1].saturating_add(1));
-    }
-    let kinds = [1u16, 2u16, 9u16, 10u16];
-    let len_entries = starts.len() as u16;
-
-    let mut header = Vec::<u8>::with_capacity(20);
-    header.extend_from_slice(&24u32.to_be_bytes()); // len_entry_bytes
-    header.extend_from_slice(&len_entries.to_be_bytes()); // len_e
-    header.extend_from_slice(&2u16.to_be_bytes()); // mood=mid
-    header.extend_from_slice(&[0u8; 6]); // unknown bytes 14-19
-    header.extend_from_slice(&num_beats.to_be_bytes()); // end_beat
-    header.extend_from_slice(&0u16.to_be_bytes()); // unknown2
-    header.push(0); // bank=default
-    header.push(0); // unknown3
-
-    let mut payload = Vec::<u8>::with_capacity(starts.len() * 24);
-    for (idx, (&beat, &kind)) in starts.iter().zip(kinds.iter()).enumerate() {
-        let mut entry = [0u8; 24];
-        let entry_index = (idx as u16) + 1;
-        entry[0..2].copy_from_slice(&entry_index.to_be_bytes());
-        entry[2..4].copy_from_slice(&beat.to_be_bytes());
-        entry[4..6].copy_from_slice(&kind.to_be_bytes());
-        // b flag at byte 11 = 0 => single auxiliary beat at beat2.
-        entry[11] = 0;
-        let beat2 = beat.saturating_add(4).min(num_beats);
-        entry[12..14].copy_from_slice(&beat2.to_be_bytes());
-        // fill flag disabled
-        entry[21] = 0;
-        payload.extend_from_slice(&entry);
-    }
-
-    // Reference exports obfuscate bytes after len_e (absolute byte 18 onward in tag).
-    let header_len = header.len();
-    for (i, byte) in header.iter_mut().enumerate().skip(6) {
-        *byte ^= pssi_xor_mask(len_entries, i - 6);
-    }
-    for (i, byte) in payload.iter_mut().enumerate() {
-        *byte ^= pssi_xor_mask(len_entries, header_len - 6 + i);
-    }
-
-    append_anlz_chunk(file, b"PSSI", &header, &payload);
 }
 
 // ===========================================================================
@@ -435,25 +345,6 @@ pub(crate) fn append_ppth_chunk(file: &mut Vec<u8>, path: &str) {
     file.extend_from_slice(&ppth_chunk);
     let file_len = file.len() as u32;
     file[8..12].copy_from_slice(&file_len.to_be_bytes());
-}
-
-/// Inject a PPTH chunk into an existing ANLZ file that lacks one.
-/// Inserts after the 28-byte PMAI header, before existing chunks.
-pub fn inject_ppth_into_anlz(data: &[u8], track_path: &str) -> Vec<u8> {
-    if data.len() < 28 {
-        return data.to_vec();
-    }
-    let Some(ppth_buf) = build_ppth_chunk(track_path) else {
-        return data.to_vec();
-    };
-
-    let mut result = Vec::with_capacity(data.len() + ppth_buf.len());
-    result.extend_from_slice(&data[..28]);
-    result.extend_from_slice(&ppth_buf);
-    result.extend_from_slice(&data[28..]);
-    let file_len = result.len() as u32;
-    result[8..12].copy_from_slice(&file_len.to_be_bytes());
-    result
 }
 
 fn build_ppth_chunk(path: &str) -> Option<Vec<u8>> {
@@ -548,8 +439,10 @@ pub struct AnlzAnalysisEdits<'a> {
     /// `first_beat_ms` (the existing anchor already in the file is reused —
     /// see `apply_analysis_edits_to_anlz`).
     pub bpm: Option<f64>,
+    /// The grid is only rebuilt when this is known: its length is the beat count.
     pub duration_ms: Option<u64>,
-    /// `Some` ⇒ rebuild `PQTZ`/`PQT2` with this beat-grid anchor.
+    /// `Some` ⇒ rebuild `PQTZ`/`PQT2` with this beat-grid anchor (only when
+    /// `bpm` and `duration_ms` are known too).
     pub first_beat_ms: Option<u32>,
     /// `Some` ⇒ rebuild `PCOB`/`PCO2` from this cue list (full replace).
     pub cues: Option<&'a [AnlzCue]>,
@@ -559,11 +452,12 @@ pub struct AnlzAnalysisEdits<'a> {
 /// existing `PMAI` file in place, preserving every other chunk and its order.
 ///
 /// Mirrors [`ensure_ppth_chunk`]'s chunk walk. `PSSI` phrase data is copied
-/// verbatim — its layout is not fully understood and must not be regenerated on
-/// an incremental edit (a full re-analysis is the only thing that rewrites it).
+/// verbatim — this app never writes one (it doesn't analyze phrases), so any
+/// `PSSI` present came from rekordbox.
 ///
-/// The beat grid is rebuilt whenever `edits.first_beat_ms` is explicit, *or*
-/// `edits.bpm` is given with no explicit anchor — in that second case the
+/// The beat grid is rebuilt only when `edits.bpm` and `edits.duration_ms` are
+/// known: with an explicit
+/// `edits.first_beat_ms`, or with no explicit anchor — in that second case the
 /// anchor already embedded in `data` is reused, so a bpm-only correction (a
 /// track re-analyzed to the right tempo but with no confident first-beat, or
 /// no cue/first-beat edit at all) still lands on disk instead of silently
@@ -572,9 +466,16 @@ pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) 
     if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
         return data.to_vec();
     }
-    let beatgrid_anchor_ms = edits
-        .first_beat_ms
-        .or_else(|| edits.bpm.and_then(|_| read_first_beat_from_anlz(data)));
+    // The grid is only rebuilt with a known tempo and length; without them
+    // the existing grid chunks are kept as they are.
+    let beatgrid_duration_ms = edits
+        .duration_ms
+        .filter(|_| edits.bpm.is_some_and(|b| b > 0.0));
+    let beatgrid_anchor_ms = beatgrid_duration_ms.and_then(|_| {
+        edits
+            .first_beat_ms
+            .or_else(|| read_first_beat_from_anlz(data))
+    });
     if beatgrid_anchor_ms.is_none() && edits.cues.is_none() {
         return data.to_vec();
     }
@@ -611,16 +512,17 @@ pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) 
         let original = &data[pos..pos + total_len];
         let mut replacement: Option<Vec<u8>> = None;
 
-        if let Some(first_beat_ms) = rebuilt_first_beat {
+        if let (Some(first_beat_ms), Some(duration_ms)) = (rebuilt_first_beat, beatgrid_duration_ms)
+        {
             if fourcc == b"PQTZ" {
                 let mut chunk = Vec::new();
-                append_pqtz_chunk(&mut chunk, edits.bpm, edits.duration_ms, first_beat_ms);
+                append_pqtz_chunk(&mut chunk, edits.bpm, duration_ms, first_beat_ms);
                 if !chunk.is_empty() {
                     replacement = Some(chunk);
                 }
             } else if fourcc == b"PQT2" {
                 let mut chunk = Vec::new();
-                append_pqt2_chunk(&mut chunk, edits.bpm, edits.duration_ms, first_beat_ms);
+                append_pqt2_chunk(&mut chunk, edits.bpm, duration_ms, first_beat_ms);
                 if !chunk.is_empty() {
                     replacement = Some(chunk);
                 }
@@ -721,17 +623,12 @@ fn append_pvbr_chunk(file: &mut Vec<u8>) {
 //   2-3: tempo       (u16, BPM × 100)
 //   4-7: time        (u32, milliseconds)
 
-fn append_pqtz_chunk(
-    file: &mut Vec<u8>,
-    bpm: Option<f64>,
-    duration_ms: Option<u64>,
-    first_beat_ms: u32,
-) {
-    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
-    if bpm_val <= 0.0 {
+fn append_pqtz_chunk(file: &mut Vec<u8>, bpm: Option<f64>, duration_ms: u64, first_beat_ms: u32) {
+    // No known tempo, no beat grid: never bake in a made-up one.
+    let Some(bpm_val) = bpm.filter(|b| *b > 0.0) else {
         return;
-    }
-    let dur_ms = duration_ms.unwrap_or(180_000) as f64;
+    };
+    let dur_ms = duration_ms as f64;
     let beat_interval_ms = 60_000.0 / bpm_val;
     let num_beats = compute_num_beats(dur_ms, beat_interval_ms, first_beat_ms);
     if num_beats == 0 {
@@ -759,14 +656,12 @@ fn append_pqtz_chunk(
     append_anlz_chunk(file, b"PQTZ", &header, &payload);
 }
 
-fn estimate_first_beat_ms(
-    waveform: &WaveformData,
-    bpm: Option<f64>,
-    duration_ms: Option<u64>,
-) -> u32 {
-    let bpm_val = bpm.unwrap_or(ANLZ_DEFAULT_BEATGRID_BPM);
-    let dur_ms = duration_ms.unwrap_or(180_000) as f64;
-    if bpm_val <= 0.0 || waveform.peaks.is_empty() || dur_ms <= 0.0 {
+fn estimate_first_beat_ms(waveform: &WaveformData, bpm: Option<f64>, duration_ms: u64) -> u32 {
+    let Some(bpm_val) = bpm.filter(|b| *b > 0.0) else {
+        return 0;
+    };
+    let dur_ms = duration_ms as f64;
+    if waveform.peaks.is_empty() || dur_ms <= 0.0 {
         return 0;
     }
     let interval = 60_000.0 / bpm_val;
@@ -1366,8 +1261,8 @@ fn resample_energy(energy: &[u8], count: usize) -> Vec<u8> {
 /// rounding artifact. Using a gapless-trimmed duration instead reproduces
 /// deltas of 10-140+ entries per track rather than a flat +4; see
 /// `docs/WAVEFORMS.md` "Why + 4" for the full derivation.
-fn detail_entry_count(duration_ms: Option<u64>) -> u32 {
-    let duration_secs = duration_ms.unwrap_or(180_000) as f64 / 1000.0;
+fn detail_entry_count(duration_ms: u64) -> u32 {
+    let duration_secs = duration_ms as f64 / 1000.0;
     ((duration_secs * 150.0).ceil() as u32)
         .saturating_add(4)
         .max(400)
@@ -1417,16 +1312,7 @@ pub fn build_anlz_dat_file(
     waveform: &WaveformData,
     track_path: &str,
     bpm: Option<f64>,
-    duration_ms: Option<u64>,
-) -> Vec<u8> {
-    build_anlz_dat_file_with_first_beat(waveform, track_path, bpm, duration_ms, None, &[])
-}
-
-fn build_anlz_dat_file_with_first_beat(
-    waveform: &WaveformData,
-    track_path: &str,
-    bpm: Option<f64>,
-    duration_ms: Option<u64>,
+    duration_ms: u64,
     first_beat_ms_override: Option<u32>,
     cues: &[AnlzCue],
 ) -> Vec<u8> {
@@ -1502,7 +1388,7 @@ fn build_anlz_dat_file_with_first_beat(
 }
 
 // ===========================================================================
-// .EXT — PPTH + PWV3 + PCOB(hot) + PCOB(mem) + PCO2(hot) + PCO2(mem) + PQT2 + PWV5 + PWV4 + PSSI
+// .EXT — PPTH + PWV3 + PCOB(hot) + PCOB(mem) + PCO2(hot) + PCO2(mem) + PQT2 + PWV5 + PWV4
 // ===========================================================================
 //
 // PWV3: detail waveform, 1 byte per entry
@@ -1531,16 +1417,7 @@ pub fn build_anlz_ext_file(
     waveform: &WaveformData,
     track_path: &str,
     bpm: Option<f64>,
-    duration_ms: Option<u64>,
-) -> Vec<u8> {
-    build_anlz_ext_file_with_first_beat(waveform, track_path, bpm, duration_ms, None, &[])
-}
-
-fn build_anlz_ext_file_with_first_beat(
-    waveform: &WaveformData,
-    track_path: &str,
-    bpm: Option<f64>,
-    duration_ms: Option<u64>,
+    duration_ms: u64,
     first_beat_ms_override: Option<u32>,
     cues: &[AnlzCue],
 ) -> Vec<u8> {
@@ -1662,9 +1539,6 @@ fn build_anlz_ext_file_with_first_beat(
         append_anlz_chunk(&mut file, b"PWV4", &header, &payload);
     }
 
-    // 10. PSSI — song structure / phrase analysis (reference exports place this in .EXT)
-    append_pssi_chunk(&mut file, bpm, duration_ms, first_beat_ms);
-
     file
 }
 
@@ -1687,11 +1561,7 @@ fn build_anlz_ext_file_with_first_beat(
 //   Each entry: [mid_height, high_height, low_height]
 //   Display: stacked vertically — lows (dark blue) + mids (amber) + highs (white)
 
-pub fn build_anlz_2ex_file(
-    waveform: &WaveformData,
-    track_path: &str,
-    duration_ms: Option<u64>,
-) -> Vec<u8> {
+pub fn build_anlz_2ex_file(waveform: &WaveformData, track_path: &str, duration_ms: u64) -> Vec<u8> {
     let mut file = build_anlz_file_header();
 
     let detail_count = detail_entry_count(duration_ms);
@@ -1902,7 +1772,9 @@ mod tests {
             &WaveformData::from_peaks(vec![128; 100]),
             "/Contents/Test/track.mp3",
             Some(120.0),
-            Some(30_000),
+            30_000,
+            None,
+            &[],
         );
         let tags = collect_chunk_tags(&dat);
         assert_eq!(
@@ -1918,7 +1790,9 @@ mod tests {
             &WaveformData::from_peaks(vec![128; 100]),
             "",
             Some(120.0),
-            Some(30_000),
+            30_000,
+            None,
+            &[],
         );
         let tags = collect_chunk_tags(&dat);
         assert_eq!(tags[0], "PVBR");
@@ -1930,7 +1804,9 @@ mod tests {
             &WaveformData::from_peaks(vec![128; 100]),
             "",
             Some(120.0),
-            Some(30_000),
+            30_000,
+            None,
+            &[],
         );
         let pqtz = find_chunk_payload(&dat, "PQTZ").expect("PQTZ chunk");
         assert_eq!(pqtz.len(), 61 * 8, "120 BPM × 30s = 61 beats × 8 bytes");
@@ -1938,11 +1814,11 @@ mod tests {
 
     #[test]
     fn dat_pqtz_beat_entries_have_correct_format() {
-        let dat = build_anlz_dat_file_with_first_beat(
+        let dat = build_anlz_dat_file(
             &WaveformData::from_peaks(vec![128; 100]),
             "",
             Some(120.0),
-            Some(10_000),
+            10_000,
             Some(0),
             &[],
         );
@@ -1967,7 +1843,14 @@ mod tests {
 
     #[test]
     fn dat_pwav_encoding() {
-        let dat = build_anlz_dat_file(&WaveformData::from_peaks(vec![100; 100]), "", None, None);
+        let dat = build_anlz_dat_file(
+            &WaveformData::from_peaks(vec![100; 100]),
+            "",
+            None,
+            30_000,
+            None,
+            &[],
+        );
         let pwav = find_chunk_payload(&dat, "PWAV").expect("PWAV");
         assert_eq!(pwav.len(), 400);
         for &b in pwav {
@@ -1980,7 +1863,14 @@ mod tests {
 
     #[test]
     fn dat_pwv2_encoding() {
-        let dat = build_anlz_dat_file(&WaveformData::from_peaks(vec![100; 100]), "", None, None);
+        let dat = build_anlz_dat_file(
+            &WaveformData::from_peaks(vec![100; 100]),
+            "",
+            None,
+            30_000,
+            None,
+            &[],
+        );
         let pwv2 = find_chunk_payload(&dat, "PWV2").expect("PWV2");
         assert_eq!(pwv2.len(), 100);
         for &b in pwv2 {
@@ -2021,7 +1911,14 @@ mod tests {
 
     #[test]
     fn dat_pcob_chunks_present() {
-        let dat = build_anlz_dat_file(&WaveformData::from_peaks(vec![128; 100]), "", None, None);
+        let dat = build_anlz_dat_file(
+            &WaveformData::from_peaks(vec![128; 100]),
+            "",
+            None,
+            30_000,
+            None,
+            &[],
+        );
         let tags = collect_chunk_tags(&dat);
         let pcob_count = tags.iter().filter(|t| *t == "PCOB").count();
         assert_eq!(pcob_count, 2, "DAT should have 2 empty PCOB chunks");
@@ -2034,16 +1931,18 @@ mod tests {
         let ext = build_anlz_ext_file(
             &WaveformData::from_peaks(vec![128; 100]),
             "/Contents/Test/track.mp3",
+            Some(128.0),
+            30_000,
             None,
-            Some(30_000),
+            &[],
         );
         let tags = collect_chunk_tags(&ext);
         assert_eq!(
             tags,
             vec![
-                "PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PQT2", "PWV5", "PWV4", "PSSI",
+                "PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PQT2", "PWV5", "PWV4",
             ],
-            "EXT chunk order must match reference"
+            "EXT chunk order must match reference (no PSSI: phrases are not analyzed)"
         );
     }
 
@@ -2053,7 +1952,9 @@ mod tests {
             &WaveformData::from_peaks(vec![80; 100]),
             "",
             None,
-            Some(10_000),
+            10_000,
+            None,
+            &[],
         );
         let pwv3 = find_chunk_payload(&ext, "PWV3").expect("PWV3");
         let mut saw_non7 = false;
@@ -2076,7 +1977,9 @@ mod tests {
             &WaveformData::from_peaks(vec![128; 100]),
             "",
             None,
-            Some(30_000),
+            30_000,
+            None,
+            &[],
         );
         let pwv3 = find_chunk_payload(&ext, "PWV3").expect("PWV3");
         assert_eq!(
@@ -2092,7 +1995,9 @@ mod tests {
             &WaveformData::from_peaks(vec![128; 100]),
             "",
             None,
-            Some(30_000),
+            30_000,
+            None,
+            &[],
         );
         let pwv3 = find_chunk_payload(&ext, "PWV3").expect("PWV3");
         let pwv5 = find_chunk_payload(&ext, "PWV5").expect("PWV5");
@@ -2101,7 +2006,14 @@ mod tests {
 
     #[test]
     fn ext_pwv4_has_1200_entries() {
-        let ext = build_anlz_ext_file(&WaveformData::from_peaks(vec![128; 100]), "", None, None);
+        let ext = build_anlz_ext_file(
+            &WaveformData::from_peaks(vec![128; 100]),
+            "",
+            None,
+            30_000,
+            None,
+            &[],
+        );
         let pwv4 = find_chunk_payload(&ext, "PWV4").expect("PWV4");
         assert_eq!(pwv4.len(), 7200, "1200 × 6 bytes");
     }
@@ -2120,7 +2032,7 @@ mod tests {
             high_energy_full: vec![13; 200],
             peak_level: 1.0,
         };
-        let ext = build_anlz_ext_file(&waveform, "", None, Some(30_000));
+        let ext = build_anlz_ext_file(&waveform, "", None, 30_000, None, &[]);
         let pwv4 = find_chunk_payload(&ext, "PWV4").expect("PWV4");
         assert_eq!(pwv4.len(), 7200, "1200 × 6 bytes");
 
@@ -2160,7 +2072,7 @@ mod tests {
         let twoex = build_anlz_2ex_file(
             &WaveformData::from_peaks(vec![128; 100]),
             "/Contents/Test/track.mp3",
-            Some(30_000),
+            30_000,
         );
         let tags = collect_chunk_tags(&twoex);
         assert_eq!(
@@ -2172,15 +2084,14 @@ mod tests {
 
     #[test]
     fn twoex_pwv7_is_3_bytes_per_entry() {
-        let twoex =
-            build_anlz_2ex_file(&WaveformData::from_peaks(vec![128; 100]), "", Some(30_000));
+        let twoex = build_anlz_2ex_file(&WaveformData::from_peaks(vec![128; 100]), "", 30_000);
         let pwv7 = find_chunk_payload(&twoex, "PWV7").expect("PWV7");
         assert_eq!(pwv7.len(), 4504 * 3);
     }
 
     #[test]
     fn twoex_pwv6_has_1200_entries() {
-        let twoex = build_anlz_2ex_file(&WaveformData::from_peaks(vec![128; 100]), "", None);
+        let twoex = build_anlz_2ex_file(&WaveformData::from_peaks(vec![128; 100]), "", 30_000);
         let pwv6 = find_chunk_payload(&twoex, "PWV6").expect("PWV6");
         assert_eq!(pwv6.len(), 1200 * 3, "1200 × 3 bytes");
     }
@@ -2199,7 +2110,7 @@ mod tests {
             high_energy_full: vec![10; 100],
             peak_level: 1.0,
         };
-        let twoex = build_anlz_2ex_file(&waveform, "", Some(10_000));
+        let twoex = build_anlz_2ex_file(&waveform, "", 10_000);
         let pwv7 = find_chunk_payload(&twoex, "PWV7").expect("PWV7");
         for chunk in pwv7.chunks(3) {
             let (mid, high, low) = (chunk[0], chunk[1], chunk[2]);
@@ -2252,21 +2163,21 @@ mod tests {
     #[test]
     fn estimate_first_beat_handles_low_band_driven_beats() {
         let wf = pulsed_waveform_for_band(6000, 140.0, 180_000, 52, 0);
-        let got = estimate_first_beat_ms(&wf, Some(140.0), Some(180_000));
+        let got = estimate_first_beat_ms(&wf, Some(140.0), 180_000);
         assert!(got.abs_diff(52) <= 20, "expected ~52ms, got {got}ms");
     }
 
     #[test]
     fn estimate_first_beat_handles_mid_band_driven_beats() {
         let wf = pulsed_waveform_for_band(6000, 128.0, 210_000, 120, 1);
-        let got = estimate_first_beat_ms(&wf, Some(128.0), Some(210_000));
+        let got = estimate_first_beat_ms(&wf, Some(128.0), 210_000);
         assert!(got.abs_diff(120) <= 25, "expected ~120ms, got {got}ms");
     }
 
     #[test]
     fn estimate_first_beat_handles_high_band_driven_beats() {
         let wf = pulsed_waveform_for_band(6000, 90.0, 200_000, 165, 2);
-        let got = estimate_first_beat_ms(&wf, Some(90.0), Some(200_000));
+        let got = estimate_first_beat_ms(&wf, Some(90.0), 200_000);
         assert!(got.abs_diff(165) <= 25, "expected ~165ms, got {got}ms");
     }
 
@@ -2279,7 +2190,9 @@ mod tests {
                 &WaveformData::from_peaks(vec![128; 512]),
                 "",
                 Some(120.0),
-                Some(60_000),
+                60_000,
+                None,
+                &[],
             ),
             "DAT",
         );
@@ -2292,7 +2205,9 @@ mod tests {
                 &WaveformData::from_peaks(vec![128; 512]),
                 "",
                 None,
-                Some(60_000),
+                60_000,
+                None,
+                &[],
             ),
             "EXT",
         );
@@ -2301,7 +2216,7 @@ mod tests {
     #[test]
     fn twoex_structure_consistent() {
         verify_anlz_structure(
-            &build_anlz_2ex_file(&WaveformData::from_peaks(vec![128; 512]), "", Some(60_000)),
+            &build_anlz_2ex_file(&WaveformData::from_peaks(vec![128; 512]), "", 60_000),
             "2EX",
         );
     }
@@ -2309,15 +2224,15 @@ mod tests {
     #[test]
     fn all_files_consistent_with_empty_peaks() {
         verify_anlz_structure(
-            &build_anlz_dat_file(&WaveformData::empty(), "", None, None),
+            &build_anlz_dat_file(&WaveformData::empty(), "", None, 30_000, None, &[]),
             "DAT-empty",
         );
         verify_anlz_structure(
-            &build_anlz_ext_file(&WaveformData::empty(), "", None, None),
+            &build_anlz_ext_file(&WaveformData::empty(), "", None, 30_000, None, &[]),
             "EXT-empty",
         );
         verify_anlz_structure(
-            &build_anlz_2ex_file(&WaveformData::empty(), "", None),
+            &build_anlz_2ex_file(&WaveformData::empty(), "", 30_000),
             "2EX-empty",
         );
     }
@@ -2330,7 +2245,9 @@ mod tests {
             &WaveformData::from_peaks(vec![128; 10]),
             "/Contents/Test/track.mp3",
             None,
+            30_000,
             None,
+            &[],
         );
         let ppth = find_chunk_payload(&dat, "PPTH").expect("PPTH chunk");
         let u16s: Vec<u16> = ppth
@@ -2344,7 +2261,14 @@ mod tests {
     #[test]
     fn ppth_encodes_unicode_usb_path_as_utf16be() {
         let path = "/Contents/Fixture Ö Artist/Fixture Ä Album/03 - Entä jos Fixture.flac";
-        let dat = build_anlz_dat_file(&WaveformData::from_peaks(vec![128; 10]), path, None, None);
+        let dat = build_anlz_dat_file(
+            &WaveformData::from_peaks(vec![128; 10]),
+            path,
+            None,
+            30_000,
+            None,
+            &[],
+        );
         assert_eq!(ppth_path_from_anlz(&dat).as_deref(), Some(path));
     }
 
@@ -2355,7 +2279,9 @@ mod tests {
             &WaveformData::from_peaks(vec![128; 10]),
             "",
             Some(120.0),
-            Some(30_000),
+            30_000,
+            None,
+            &[],
         );
         assert_eq!(
             collect_chunk_tags(&dat).first().map(String::as_str),
@@ -2385,7 +2311,7 @@ mod tests {
             &paths,
             "",
             None,
-            None,
+            30_000,
         )
         .unwrap();
 
@@ -2395,12 +2321,6 @@ mod tests {
         assert_eq!(&std::fs::read(&paths.dat_path).unwrap()[0..4], b"PMAI");
         assert_eq!(&std::fs::read(&paths.ext_path).unwrap()[0..4], b"PMAI");
         assert_eq!(&std::fs::read(&paths.twoex_path).unwrap()[0..4], b"PMAI");
-    }
-
-    #[test]
-    fn from_peaks_assigns_default_mid_band() {
-        let waveform = WaveformData::from_peaks(vec![50, 75, 100]);
-        assert_eq!(waveform.bands, vec![3, 3, 3]);
     }
 
     // --- Cue points ---
@@ -2532,11 +2452,11 @@ mod tests {
 
     #[test]
     fn cues_round_trip_through_ext_file() {
-        let ext = build_anlz_ext_file_with_first_beat(
+        let ext = build_anlz_ext_file(
             &WaveformData::from_peaks(vec![128; 400]),
             "",
             Some(128.0),
-            Some(180_000),
+            180_000,
             Some(0),
             &sample_cues(),
         );
@@ -2565,7 +2485,9 @@ mod tests {
             &WaveformData::from_peaks(vec![128; 400]),
             "/Contents/x.mp3",
             Some(120.0),
-            Some(120_000),
+            120_000,
+            None,
+            &[],
         );
         let before_tags = collect_chunk_tags(&plain);
 
@@ -2581,7 +2503,7 @@ mod tests {
 
         // Chunk order and every non-cue / non-beatgrid chunk are unchanged.
         assert_eq!(collect_chunk_tags(&edited), before_tags);
-        for tag in ["PPTH", "PWV3", "PWV5", "PWV4", "PSSI"] {
+        for tag in ["PPTH", "PWV3", "PWV5", "PWV4"] {
             assert_eq!(
                 find_chunk_payload(&plain, tag),
                 find_chunk_payload(&edited, tag),
@@ -2600,15 +2522,86 @@ mod tests {
     }
 
     #[test]
+    fn no_bpm_writes_no_beat_grid() {
+        let waveform = WaveformData::from_peaks(vec![128; 400]);
+        let dat = build_anlz_dat_file(&waveform, "/Contents/x.mp3", None, 120_000, None, &[]);
+        let ext = build_anlz_ext_file(&waveform, "/Contents/x.mp3", None, 120_000, None, &[]);
+        verify_anlz_structure(&dat, "no-bpm DAT");
+        verify_anlz_structure(&ext, "no-bpm EXT");
+        assert!(find_chunk_payload(&dat, "PQTZ").is_none());
+        assert!(find_chunk_payload(&ext, "PQT2").is_none());
+        assert_eq!(read_beatgrid_tempo_from_anlz(&dat), None);
+        // The waveforms are still there.
+        assert!(find_chunk_payload(&dat, "PWAV").is_some());
+        assert!(find_chunk_payload(&ext, "PWV5").is_some());
+    }
+
+    #[test]
+    fn apply_analysis_edits_without_bpm_keeps_the_grid_and_applies_cues() {
+        let plain = build_anlz_ext_file(
+            &WaveformData::from_peaks(vec![128; 400]),
+            "/Contents/x.mp3",
+            Some(128.0),
+            120_000,
+            None,
+            &[],
+        );
+        let edited = apply_analysis_edits_to_anlz(
+            &plain,
+            &AnlzAnalysisEdits {
+                bpm: None,
+                duration_ms: Some(120_000),
+                first_beat_ms: Some(250),
+                cues: Some(&sample_cues()),
+            },
+        );
+        assert_eq!(
+            find_chunk_payload(&plain, "PQT2"),
+            find_chunk_payload(&edited, "PQT2"),
+            "no known tempo: the grid must not be rebuilt"
+        );
+        assert_eq!(read_beatgrid_tempo_from_anlz(&edited), Some(12_800));
+        assert_eq!(read_cues_from_anlz(&edited).len(), 4);
+        verify_anlz_structure(&edited, "edited EXT");
+    }
+
+    #[test]
+    fn apply_analysis_edits_without_duration_keeps_the_grid() {
+        let plain = build_anlz_ext_file(
+            &WaveformData::from_peaks(vec![128; 400]),
+            "/Contents/x.mp3",
+            Some(128.0),
+            120_000,
+            None,
+            &[],
+        );
+        let edited = apply_analysis_edits_to_anlz(
+            &plain,
+            &AnlzAnalysisEdits {
+                bpm: Some(140.0),
+                duration_ms: None,
+                first_beat_ms: Some(250),
+                cues: Some(&sample_cues()),
+            },
+        );
+        assert_eq!(
+            find_chunk_payload(&plain, "PQT2"),
+            find_chunk_payload(&edited, "PQT2"),
+            "no known length: the grid must not be rebuilt"
+        );
+        assert_eq!(read_cues_from_anlz(&edited).len(), 4);
+        verify_anlz_structure(&edited, "edited EXT");
+    }
+
+    #[test]
     fn apply_analysis_edits_rebuilds_beatgrid_from_bpm_alone() {
-        // Simulates a bundle whose beat grid was baked with a stale/default
-        // tempo (e.g. the `fix_empty_analysis_files` bug this test guards
-        // against): built at 120 BPM with an explicit anchor at 0ms.
-        let plain = build_anlz_ext_file_with_first_beat(
+        // Simulates a bundle whose beat grid was baked with a stale tempo:
+        // built at 120 BPM with an explicit anchor at 0ms.
+        let plain = build_anlz_ext_file(
             &WaveformData::from_peaks(vec![128; 400]),
             "/Contents/x.mp3",
             Some(120.0),
-            Some(120_000),
+            120_000,
             Some(0),
             &[],
         );
@@ -2631,7 +2624,7 @@ mod tests {
         // The anchor already embedded in the bundle (0ms) is preserved,
         // wrapped to the new tempo's beat interval -- not discarded.
         assert_eq!(read_first_beat_from_anlz(&edited), Some(0));
-        for tag in ["PPTH", "PWV3", "PWV5", "PWV4", "PSSI"] {
+        for tag in ["PPTH", "PWV3", "PWV5", "PWV4"] {
             assert_eq!(
                 find_chunk_payload(&plain, tag),
                 find_chunk_payload(&edited, tag),

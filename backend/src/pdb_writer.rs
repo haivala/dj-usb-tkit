@@ -3621,40 +3621,6 @@ fn append_rows_to_t07_tombstone_pages_in_place(
     Ok((pages_reused, cursor))
 }
 
-/// Compute remaining heap capacity on a populated data page if we were to
-/// add `extra_rows` more rows to it.
-///
-/// Returns `Some(bytes_free)` when the page is recognizable as a populated
-/// data page (non-zero stored index, non-sentinel `pf`, non-empty heap),
-/// `None` otherwise.
-///
-/// Currently only used as a self-documenting reference for the inline
-/// capacity check in `append_rows_to_chain_in_place`. Kept here so the
-/// capacity model lives next to the constants that define it.
-#[allow(dead_code)]
-fn remaining_heap_capacity(
-    page: &[u8],
-    present_used_bytes: usize,
-    present_row_count: usize,
-    extra_rows: usize,
-) -> Option<usize> {
-    let stored_idx = read_u32_le_at(page, 0x04)?;
-    if stored_idx == 0 {
-        return None;
-    }
-    let pf = *page.get(0x1b)?;
-    if pf == 0x64 {
-        return None;
-    }
-    let new_footer = footer_size_for_rows(present_row_count + extra_rows);
-    let occupied = PAGE_HEADER_SIZE + present_used_bytes + new_footer;
-    if PAGE_SIZE >= occupied {
-        Some(PAGE_SIZE - occupied)
-    } else {
-        Some(0)
-    }
-}
-
 /// Append `new_rows` to an existing table's chain in place, mutating
 /// `bytes` directly.
 ///

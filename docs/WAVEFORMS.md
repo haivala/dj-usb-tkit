@@ -73,7 +73,8 @@ placeholders byte-for-byte, so unedited exports are unchanged.
 `save_track_analysis_edits` and USB export both apply
 `apply_analysis_edits_to_anlz`, an in-place transform that rebuilds only
 `PQTZ`/`PQT2` (from `first_beat_ms`) and the cue chunks, copying every other
-chunk — including `PSSI` phrase data — verbatim. `read_cues_from_anlz` /
+chunk — including any `PSSI` phrase data rekordbox wrote — verbatim. This
+app never writes `PSSI` itself: it doesn't analyze phrases. `read_cues_from_anlz` /
 `read_first_beat_from_anlz` decode them back on USB re-import.
 
 The beat grid also rebuilds from `bpm` **alone**, with no explicit
@@ -85,9 +86,13 @@ rather than requiring a fresh one. This closes a real failure mode: a track
 re-analyzed to the correct BPM but with no confident first-beat detection
 (`stratum-dsp` can return a tempo with an empty `beat_grid.beats`) used to
 leave its *existing* beat grid untouched on every future export — including
-one baked at the ANLZ writer's `120.0` BPM fallback by a degenerate earlier
-analysis or by `fix_empty_analysis_files` (which now also carries the
-track's real PDB `tempo_x100`/duration forward instead of defaulting). PDB
+one baked at a stale tempo by an earlier analysis. The ANLZ writer never
+invents a tempo or a length: with no known BPM it writes no beat grid
+(`PQTZ`/`PQT2`), and it takes the track length as a required input (the
+detail waveform's entry count and the grid's beat count both come from it),
+so a track with no known length gets no bundle. `fix_empty_analysis_files`
+carries the track's real PDB `tempo_x100`/duration forward, measuring the
+source file when the PDB has no length. PDB
 and eDB tempo metadata could be completely correct while CDJ hardware still
 read the stale beat-grid tempo for its live/master display — a normal
 re-export now corrects it.

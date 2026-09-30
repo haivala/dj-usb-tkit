@@ -16,6 +16,21 @@ const BPM: f64 = 120.0;
 const DURATION_SECS: f64 = 30.0;
 const DURATION_MS: u64 = 30_000;
 const TRACK_PATH: &str = "/Contents/Test Artist/Test Album/kick_pattern.wav";
+/// A flat waveform with the same level on every band.
+fn flat_waveform(len: usize, level: u8) -> WaveformData {
+    let band = vec![level.min(127); len];
+    WaveformData {
+        peaks: vec![level; len],
+        bands: vec![3; len],
+        low_energy: band.clone(),
+        mid_energy: band.clone(),
+        high_energy: band.clone(),
+        low_energy_full: band.clone(),
+        mid_energy_full: band.clone(),
+        high_energy_full: band,
+        peak_level: 1.0,
+    }
+}
 
 /// Generate a mono 16-bit WAV file with a periodic kick drum pattern.
 ///
@@ -189,9 +204,9 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     );
 
     // Build all 3 ANLZ files
-    let dat = build_anlz_dat_file(&waveform, TRACK_PATH, Some(BPM), Some(DURATION_MS));
-    let ext = build_anlz_ext_file(&waveform, TRACK_PATH, Some(BPM), Some(DURATION_MS));
-    let twoex = build_anlz_2ex_file(&waveform, TRACK_PATH, Some(DURATION_MS));
+    let dat = build_anlz_dat_file(&waveform, TRACK_PATH, Some(BPM), DURATION_MS, None, &[]);
+    let ext = build_anlz_ext_file(&waveform, TRACK_PATH, Some(BPM), DURATION_MS, None, &[]);
+    let twoex = build_anlz_2ex_file(&waveform, TRACK_PATH, DURATION_MS);
 
     // === Validate .DAT ===
     verify_pmai_header(&dat, "DAT");
@@ -248,7 +263,7 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     assert_eq!(
         ext_tags,
         vec![
-            "PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PQT2", "PWV5", "PWV4", "PSSI",
+            "PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PQT2", "PWV5", "PWV4",
         ],
         "EXT chunk order"
     );
@@ -345,8 +360,8 @@ fn anlz_bundle_write_roundtrip() {
         twoex_path: dir.path().join("ANLZ0000.2EX"),
     };
 
-    let waveform = WaveformData::from_peaks(vec![80; 500]);
-    write_generated_anlz_bundle(&waveform, &paths, TRACK_PATH, Some(120.0), Some(30_000)).unwrap();
+    let waveform = flat_waveform(500, 80);
+    write_generated_anlz_bundle(&waveform, &paths, TRACK_PATH, Some(120.0), 30_000).unwrap();
 
     // All files exist and are valid ANLZ
     for (path, label) in [
