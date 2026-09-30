@@ -370,6 +370,36 @@ export async function relocateSourceRoot(ctx, oldRoot) {
   emitStatus(`Source relocated: ${updated} track path(s) updated${partial}`);
 }
 
+// The detected DJ libraries' chips, in their own "Libraries" row. A library's
+// checkbox (show / hide its tracks) only works once it has been imported --
+// `imported` comes from the backend's detect call; the chip's ↻ imports it.
+function renderLibraryChips(ctx) {
+  const { state, el, document } = ctx;
+  if (!el.libraryChipsContainer) return;
+  const libraries = [
+    {
+      path: state.externalMasterDbPath, imported: state.masterDbImported, enabled: state.masterDbEnabled,
+      template: "tplSourceChipMasterDb", label: "rekordbox"
+    },
+    {
+      path: state.externalMixxxDbPath, imported: state.mixxxDbImported, enabled: state.mixxxDbEnabled,
+      template: "tplSourceChipMixxxDb", label: "Mixxx"
+    }
+  ].filter((library) => library.path);
+  el.libraryChipsContainer.replaceChildren();
+  for (const library of libraries) {
+    const chip = cloneTemplate(document, library.template);
+    const toggle = chip.querySelector(".source-chip-toggle");
+    toggle.disabled = !library.imported;
+    toggle.checked = !!library.imported && !!library.enabled;
+    chip.querySelector(".source-chip-path").dataset.tooltip = library.imported
+      ? library.path
+      : `Not imported yet: click ↻ to import from ${library.label}`;
+    el.libraryChipsContainer.appendChild(chip);
+  }
+  el.libraryChipsRow?.classList.toggle("hidden", !libraries.length);
+}
+
 export function renderSourceChips(ctx) {
   const { state, el, document } = ctx;
   el.sourceChipsContainer.replaceChildren();
@@ -386,19 +416,7 @@ export function renderSourceChips(ctx) {
   if (retainedMissingRoots.length !== missingSourceRootsArray(state).length) {
     setMissingSourceRoots(state, retainedMissingRoots);
   }
-  // master.db chip - shown when detected, positioned before filesystem chips
-  if (state.externalMasterDbPath) {
-    const chip = cloneTemplate(document, "tplSourceChipMasterDb");
-    chip.querySelector(".source-chip-toggle").checked = !!state.masterDbEnabled;
-    chip.querySelector(".source-chip-path").dataset.tooltip = state.externalMasterDbPath;
-    el.sourceChipsContainer.appendChild(chip);
-  }
-  if (state.externalMixxxDbPath) {
-    const chip = cloneTemplate(document, "tplSourceChipMixxxDb");
-    chip.querySelector(".source-chip-toggle").checked = !!state.mixxxDbEnabled;
-    chip.querySelector(".source-chip-path").dataset.tooltip = state.externalMixxxDbPath;
-    el.sourceChipsContainer.appendChild(chip);
-  }
+  renderLibraryChips(ctx);
 
   state.sourceRoots.forEach((path, index) => {
     if (state.sourceRootEnabled[path] === undefined) {
@@ -432,12 +450,6 @@ export function renderSourceChips(ctx) {
   });
 
   ctx.persistSourceRootEnabled(state.sourceRootEnabled);
-  if (el.importMasterDbBtn) {
-    el.importMasterDbBtn.classList.toggle("hidden", !state.externalMasterDbPath);
-  }
-  if (el.importMixxxDbBtn) {
-    el.importMixxxDbBtn.classList.toggle("hidden", !state.externalMixxxDbPath);
-  }
   if (el.importPlaylistItem) {
     el.importPlaylistItem.classList.toggle("hidden", !state.externalMasterDbPath && !state.externalMixxxDbPath);
   }
@@ -747,6 +759,7 @@ export async function scanMasterDb(ctx) {
       ctx.state.masterDbEnabled = true;
       ctx.persistMasterDbEnabled(true);
     },
+    detect: () => ctx.detectExternalMasterDb(),
   });
 }
 
@@ -761,12 +774,13 @@ export async function scanMixxxDb(ctx) {
       ctx.state.mixxxDbEnabled = true;
       ctx.persistMixxxDbEnabled(true);
     },
+    detect: () => ctx.detectExternalMixxxDb(),
   });
 }
 
 // Shared by the rekordbox master.db and Mixxx imports: run the backend
 // import, turn the library's source chip on, and report the outcome.
-async function importExternalLibrary(ctx, { command, path, label, logSource, codePrefix, enable }) {
+async function importExternalLibrary(ctx, { command, path, label, logSource, codePrefix, enable, detect }) {
   const { state, logWarnings } = ctx;
   const { emitStatus } = ctx;
   const logLabel = `${label.toLowerCase()} import`;
@@ -781,11 +795,12 @@ async function importExternalLibrary(ctx, { command, path, label, logSource, cod
   }
 
   // Mark the library as enabled and configured so the library's browse query
-  // includes it alongside the folder sources.
+  // includes it alongside the folder sources, and re-detect it: the backend
+  // now reports it as imported, which unlocks its chip.
   enable();
   state.sourcesEverConfigured = true;
   ctx.persistSourcesEverConfigured(true);
-  renderSourceChips(ctx);
+  await detect();
 
   await resetAndLoadLibraryTracks(ctx, "", LIBRARY_LOAD_LIMIT_POST_SCAN);
 

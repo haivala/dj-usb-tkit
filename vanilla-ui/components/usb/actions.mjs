@@ -520,9 +520,11 @@ export async function detectExternalMasterDb(ctx) {
     const data = await ctx.command("detect_external_master_db");
     const found = !!data?.found && !!data?.path;
     state.externalMasterDbPath = found ? data.path : null;
+    state.masterDbImported = found && data.imported === true;
     if (!found) state.masterDbEnabled = false;
   } catch (err) {
     state.externalMasterDbPath = null;
+    state.masterDbImported = false;
     state.masterDbEnabled = false;
     ctx.warn("External master DB detection failed:", err);
   }
@@ -537,9 +539,11 @@ export async function detectExternalMixxxDb(ctx) {
     const data = await ctx.command("detect_external_mixxx_db");
     const found = !!data?.found && !!data?.path;
     state.externalMixxxDbPath = found ? data.path : null;
+    state.mixxxDbImported = found && data.imported === true;
     if (!found) state.mixxxDbEnabled = false;
   } catch (err) {
     state.externalMixxxDbPath = null;
+    state.mixxxDbImported = false;
     state.mixxxDbEnabled = false;
     ctx.warn("Mixxx library detection failed:", err);
   }

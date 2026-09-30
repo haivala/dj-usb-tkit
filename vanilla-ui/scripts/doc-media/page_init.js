@@ -73,9 +73,13 @@
           case "set_frontend_setting":
             return ok(null);
           case "detect_external_master_db":
-            return ok(external ? { found: true, path: "C:/Users/dj/AppData/Roaming/Pioneer/rekordbox/master.db" } : { found: false, path: null });
+            return ok(external
+              ? { found: true, path: "C:/Users/dj/AppData/Roaming/Pioneer/rekordbox/master.db", imported: true }
+              : { found: false, path: null, imported: false });
           case "detect_external_mixxx_db":
-            return ok(external ? { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite" } : { found: false, path: null });
+            return ok(external
+              ? { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite", imported: true }
+              : { found: false, path: null, imported: false });
           case "list_rekordbox_playlists":
             return listExternal("rekordbox");
           case "list_mixxx_playlists":

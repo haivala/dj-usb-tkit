@@ -19,7 +19,7 @@ use super::cues::{
 use super::key_notation::camelot_position;
 use super::{
     BackendService, annotate_imported_playlists, build_track_match_fingerprint,
-    external_playlist_key, no_importable_tracks_error, non_empty_db_value, now,
+    external_playlist_key, has_tracks_flagged, no_importable_tracks_error, non_empty_db_value, now,
     save_imported_playlist,
 };
 use crate::edb::{load_table_columns, table_exists};
@@ -52,10 +52,12 @@ pub fn detect_external_mixxx_db() -> DetectExternalMixxxDbData {
         Some(path) => DetectExternalMixxxDbData {
             found: true,
             path: Some(path.to_string_lossy().to_string()),
+            imported: false,
         },
         None => DetectExternalMixxxDbData {
             found: false,
             path: None,
+            imported: false,
         },
     }
 }
@@ -719,7 +721,11 @@ impl<'a> MixxxTrackImporter<'a> {
 
 impl BackendService {
     pub fn detect_external_mixxx_db(&self) -> BackendResult<DetectExternalMixxxDbData> {
-        Ok(detect_external_mixxx_db())
+        let conn = self.db.connect()?;
+        Ok(DetectExternalMixxxDbData {
+            imported: has_tracks_flagged(&conn, "mixxx_db_source")?,
+            ..detect_external_mixxx_db()
+        })
     }
 
     pub fn scan_mixxx_db(&self, req: ScanMixxxDbRequest) -> BackendResult<ScanLibraryData> {
@@ -1172,11 +1178,14 @@ mod tests {
         .expect("seed missing track");
         drop(conn);
 
+        let imported = || service.detect_external_mixxx_db().expect("detect").imported;
+        assert!(!imported(), "nothing imported yet");
         let result = service
             .scan_mixxx_db(ScanMixxxDbRequest {
                 path: Some(mixxx_path.to_string_lossy().to_string()),
             })
             .expect("scan mixxx db");
+        assert!(imported());
         assert_eq!(result.indexed, 1);
         assert_eq!(result.updated, 1);
         assert_eq!(result.removed, 0);

@@ -42,8 +42,8 @@
 **Severity:** feature
 
 - **New feature:** import a Mixxx library. When the app finds Mixxx's
-  library (`mixxxdb.sqlite`), an "Import Mixxx" button and a "Mixxx" source
-  chip appear in the Media Library. Importing brings in each track's title,
+  library (`mixxxdb.sqlite`), a "Mixxx" chip with an import button (↻)
+  appears in the Media Library's new "Libraries" row. Importing brings in each track's title,
   artist, album, genre, BPM, key, length and cover image file, plus its hot cues
   (position, colour and label) and main cue as the playback-start cue.
   Cues are only added to tracks that don't already have cues in the app.
@@ -53,7 +53,7 @@
   again updates a BPM or key that still came from Mixxx. Files the library doesn't take (tracker
   modules, videos) are skipped. The chip turns Mixxx tracks on and off in
   the library view, separately from the rekordbox library.
-- **New feature:** "Import RB" imports rekordbox cues, hot cues first. Hot
+- **New feature:** the rekordbox import imports rekordbox cues, hot cues first. Hot
   cues (pads A–H, with name and colour) become cue points; a memory cue
   before the first hot cue becomes the playback-start cue; other memory cues
   fill the cue points still free. A track with only memory cues (set up for
@@ -66,7 +66,7 @@
   crates; rekordbox playlists inside folders show as "Folder / Name"). The
   one you pick becomes a new playlist in the same order (Mixxx crates by
   artist and title). Its tracks are imported into the library the same way
-  as with "Import RB" / "Import Mixxx", including hot cues. A track
+  as with the library chips' import, including hot cues. A track
   listed twice is added once. If none of its tracks are found on this
   computer, nothing is created and the status line says so. Smart playlists
   aren't listed, because rekordbox doesn't store their tracks. Importing the
@@ -107,19 +107,25 @@
   "hide the bar" delay still fired and blanked the new job's progress.
 - **Fix:** clicking × on the new-playlist name field reliably cancels it,
   instead of sometimes creating the playlist anyway.
-- **Fix:** "Import RB" no longer deletes a track from the app when its file
+- **Fix:** the rekordbox import no longer deletes a track from the app when its file
   isn't found, for example because its drive is unplugged. Deleting it also
   removed it from every playlist and lost its cues and edits. The track is
   now kept and listed in the Event Log as not found.
-- **Improvement:** "Import RB" now skips files the library doesn't take
+- **Improvement:** the rekordbox import now skips files the library doesn't take
   (such as videos), like the folder scan does.
-- **Improvement:** a BPM or key imported by "Import RB" is no longer replaced
+- **Improvement:** a BPM or key imported from rekordbox is no longer replaced
   when the app analyzes the track for the first time; "Reanalyze" still
-  replaces it with the app's own detection. Running "Import RB" again updates
+  replaces it with the app's own detection. Importing again updates
   a BPM or key that still came from rekordbox, so a tempo corrected there
   comes across; one you edited or reanalyzed in the app is kept. A track
   rekordbox never analyzed now has an unknown BPM instead of 0.
-- **Improvement:** "Import RB" imports each track's genre from rekordbox.
+- **Improvement:** the rekordbox import brings in each track's genre from rekordbox.
+- **Improvement:** the Media Library's "+ Add Folder" and "Scan Libraries"
+  buttons sit next to its title, so they stay visible when the Sources section
+  collapses; the USB Browser, USB Playlists and USB History pages do the same
+  with their buttons. All page titles now share one size and style. The rekordbox chip moves out of the folder chips into its own
+  "Libraries" row, where its ↻ button replaces "Import RB"; its checkbox stays
+  disabled until the library has been imported.
 - **Improvement:** "Import Playlists" on the USB view finishes a little
   faster. It no longer pauses between steps just to show progress messages.
 - **Improvement:** saving cue edits to a USB that another USB job is using

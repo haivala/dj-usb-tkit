@@ -296,7 +296,8 @@ const PLAYLIST_IMPORT_SOURCES = [
     enable: (ctx) => {
       ctx.state.masterDbEnabled = true;
       ctx.persistMasterDbEnabled(true);
-    }
+    },
+    detect: (ctx) => ctx.detectExternalMasterDb()
   },
   {
     label: "Mixxx",
@@ -306,7 +307,8 @@ const PLAYLIST_IMPORT_SOURCES = [
     enable: (ctx) => {
       ctx.state.mixxxDbEnabled = true;
       ctx.persistMixxxDbEnabled(true);
-    }
+    },
+    detect: (ctx) => ctx.detectExternalMixxxDb()
   }
 ];
 
@@ -372,7 +374,8 @@ export async function importExternalPlaylist(ctx) {
       source.enable(ctx);
       state.sourcesEverConfigured = true;
       ctx.persistSourcesEverConfigured(true);
-      ctx.renderSourceChips();
+      // Re-detect: the library now counts as imported, unlocking its chip.
+      await source.detect(ctx);
       await ctx.resetAndLoadLibraryTracks(state.libraryQuery || "");
       await loadPlaylists(ctx);
       state.currentPlaylistId = imported.playlistId;

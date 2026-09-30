@@ -8,9 +8,11 @@ own libraries on the same computer:
 - **rekordbox**: the desktop library `master.db`
 - **Mixxx**: the library `mixxxdb.sqlite`
 
-Both are found automatically at startup. When one is found, the Media Library
-gets a source chip for it (**rekordbox** / **Mixxx**) and an import button
-(**Import RB** / **Import Mixxx**). If no music folder has been added yet, the
+Both are found automatically at startup. When one is found, the Media
+Library's **Sources** section gets a **Libraries** row (under **Folders**)
+with a chip for it: **rekordbox** / **Mixxx**, with an import button (↻, "Import
+from rekordbox" / "Import from Mixxx"). The chip's checkbox stays disabled until
+that library has been imported. If no music folder has been added yet, the
 empty library screen offers the same imports.
 
 Both databases are only ever read. Nothing is written back to rekordbox or
@@ -18,8 +20,8 @@ Mixxx, and either application can stay open while importing.
 
 ### Importing a library
 
-**Import RB** / **Import Mixxx** brings every track of that library into the
-app's library and turns its source chip on:
+The chip's ↻ brings every track of that library into the app's library and
+turns the chip on:
 
 | | rekordbox | Mixxx |
 | --- | --- | --- |
@@ -86,8 +88,10 @@ Some tracks are skipped, with the reason in the Event Log:
 
 ### Source chips
 
-A library's chip only filters the library view: it shows or hides that
-library's tracks and never re-imports. The two chips are independent. A track
+A library's checkbox only filters the library view: it shows or hides that
+library's tracks and never re-imports (the ↻ does that). It can only be
+turned on once the library has been imported, which the backend reports with
+the library's detection (`imported`). The two chips are independent. A track
 that is in both libraries shows when either chip is on.
 
 ### Importing a playlist
@@ -110,8 +114,8 @@ where the selected one comes from, for example `Mixxx crate · 3 tracks`.
 
 The chosen list becomes a new playlist with the same name and track order
 (Mixxx crates have no order, so their tracks are sorted by artist and title).
-Its tracks are imported into the library the same way as with Import RB /
-Import Mixxx, the library's source chip is turned on, and the new playlist
+Its tracks are imported into the library the same way as with the chip's ↻,
+the library's chip is turned on, and the new playlist
 opens. A track listed twice is added once. The playlist's header says where
 it came from, e.g. `Friday Set (5 tracks, Total time: 14:05) · Imported from
 rekordbox`.

@@ -31,6 +31,7 @@ async function runScanMasterDb(command) {
     emitStatus: (message) => statuses.push(message),
     command,
     refreshCurrentPlaylistTracks: async () => {},
+    detectExternalMasterDb: async () => {},
     logWarnings: (source, warnings) => { logged.push({ source, warnings }); }
   });
   ctx.state.externalMasterDbPath = "/path/to/master.db";

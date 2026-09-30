@@ -156,12 +156,17 @@ function installSourceChipAnalysisMock(page) {
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
           if (command === "detect_external_master_db") {
-            return { ok: true, data: { found: true, path: "/music/master.db" } };
+            return { ok: true, data: { found: true, path: "/music/master.db", imported: true } };
           }
           if (command === "detect_external_mixxx_db") {
-            return { ok: true, data: { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite" } };
+            // Not imported until "Import from Mixxx" (the chip's ↻) runs.
+            return {
+              ok: true,
+              data: { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite", imported: !!window.__mixxxImported }
+            };
           }
           if (command === "scan_mixxx_db") {
+            window.__mixxxImported = true;
             window.__mixxxScanPayload = payload?.request || null;
             return { ok: true, data: { indexed: 2, updated: 0, removed: 0, notFound: [], warnings: [] } };
           }
@@ -194,6 +199,8 @@ function installSourceChipAnalysisMock(page) {
           window.__importedPlaylists = window.__importedPlaylists || [];
           if (command === "import_mixxx_playlist" || command === "import_rekordbox_playlist") {
             const playlistId = command === "import_mixxx_playlist" ? "pl-mixxx" : "pl-rekordbox";
+            // Its tracks are Mixxx-library tracks now, as the real backend reports.
+            if (command === "import_mixxx_playlist") window.__mixxxImported = true;
             window.__playlistImports = [...(window.__playlistImports || []), { command, request: payload?.request || null }];
             window.__importedPlaylists.push({
               id: playlistId, name: playlistId, trackCount: 2,
@@ -275,37 +282,41 @@ test("source chips show analyzed green on startup and adding a source indexes it
   });
   await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
 
-  // The master.db chip's checkbox is a pure browse-filter toggle -- it must
-  // never trigger a rescan (scanning master.db isn't a thing; it's already
-  // a fully-populated external database), only a re-filtered reload of
+  // The library chips sit in their own "Libraries" row, not among the folders.
+  await expect(page.locator("#libraryChipsRow")).toBeVisible();
+  await expect(page.locator("#sourceChipsContainer .source-chip-toggle[data-master-db]")).toHaveCount(0);
+
+  // The rekordbox chip's checkbox (imported library) is a pure browse-filter
+  // toggle -- it must never trigger a rescan, only a re-filtered reload of
   // what's already indexed.
-  const masterDbToggle = page.locator('.source-chip-toggle[data-master-db="true"]');
+  const masterDbToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-master-db="true"]');
   await expect(masterDbToggle).toBeVisible();
   await expect(masterDbToggle).toHaveAttribute("aria-label", "Toggle rekordbox library");
-  await expect(page.locator("#importMasterDbBtn")).toBeVisible();
+  await expect(masterDbToggle).toBeEnabled();
   await masterDbToggle.check();
   await expect(masterDbToggle).toBeChecked();
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
 
-  // The Mixxx chip is its own filter, sent as a separate browse flag.
-  const mixxxToggle = page.locator('.source-chip-toggle[data-mixxx-db="true"]');
-  await expect(mixxxToggle).toBeVisible();
+  // Mixxx isn't imported yet: its checkbox is disabled until the chip's ↻ runs
+  // the import, which then turns it on (a separate browse flag).
+  const mixxxToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-mixxx-db="true"]');
   await expect(mixxxToggle).toHaveAttribute("aria-label", "Toggle Mixxx library");
+  await expect(mixxxToggle).toBeDisabled();
   await expect(mixxxToggle).not.toBeChecked();
   await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(false);
-  await mixxxToggle.check();
-  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(true);
-  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMasterDb)).toBe(true);
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
-
-  // Import Mixxx runs the Mixxx import against the detected library.
-  await mixxxToggle.uncheck();
-  await expect(page.locator("#importMixxxDbBtn")).toBeVisible();
-  await page.locator("#importMixxxDbBtn").click();
+  await page.locator('#libraryChipsContainer .source-chip-import[data-import-library="mixxx"]').click();
   await expect.poll(async () => page.evaluate(() => window.__mixxxScanPayload)).toEqual({
     path: "/home/dj/.mixxx/mixxxdb.sqlite"
   });
+  await expect(mixxxToggle).toBeEnabled();
   await expect(mixxxToggle).toBeChecked();
+  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(true);
+  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMasterDb)).toBe(true);
+
+  // Unticking only filters: no import, and the browse drops Mixxx.
+  await mixxxToggle.uncheck();
+  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(false);
+  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
 });
 
 test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new playlist", async ({ page }) => {

@@ -835,13 +835,13 @@ main {
 
 /* ── panel headings (was .card h2) ─────────────────── */
 
-.panel > h2 {
+/* One title style for every page (Media Library, USB pages, Event Log, ...). */
+.panel > h2,
+.panel-header > h2 {
   font-family: 'Outfit', sans-serif;
-  font-weight: 600;
-  font-size: 15px;
+  font-weight: 700;
+  font-size: 21px;
   margin-bottom: 12px;
-  padding-left: 12px;
-  border-left: 3px solid var(--accent);
   color: var(--ink);
   flex-shrink: 0;
 }
@@ -945,10 +945,51 @@ main {
   align-items: center;
 }
 
-.source-actions {
+/* A page's title with its actions on the right (wrapping under the title on
+   narrow windows), so the actions stay visible when the content below
+   collapses or grows. */
+.panel-header {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.panel-header > h2 {
+  margin: 0;
+}
+
+/* Divider between the title and its actions. */
+.panel-header-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  border-left: 1px solid var(--line);
+  padding-left: 16px;
+}
+
+/* A labelled row of source chips: folders, then imported DJ libraries. */
+.source-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.source-row-label {
+  flex: 0 0 72px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 36px;
+}
+
+.source-row > .source-chips {
+  flex: 1;
+  min-width: 0;
 }
 
 .source-chip {
@@ -1020,6 +1061,31 @@ main {
   background: none;
   border: none;
   box-shadow: none;
+}
+
+/* Import (or re-import) a DJ library, inside its chip. */
+.source-chip-import {
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  height: auto;
+  min-width: auto;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.source-chip-import:hover {
+  color: var(--accent);
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+
+.source-chip-toggle:disabled {
+  cursor: not-allowed;
 }
 
 .source-chips:empty::before {
@@ -1101,16 +1167,6 @@ main {
 
 .usb-connection-bar {
   margin-bottom: 14px;
-}
-
-.usb-connection-bar h2 {
-  font-family: 'Outfit', sans-serif;
-  font-weight: 600;
-  font-size: 15px;
-  margin-bottom: 10px;
-  padding-left: 12px;
-  border-left: 3px solid var(--accent);
-  color: var(--ink);
 }
 
 .usb-health-dot {
@@ -2415,13 +2471,6 @@ td button[data-action]:disabled,
   text-transform: uppercase;
   letter-spacing: 1.2px;
   color: var(--muted);
-}
-
-.usb-cfg-connect-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
 }
 
 .usb-path-badge {

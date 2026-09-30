@@ -448,6 +448,17 @@ pub(crate) fn external_playlist_key(library: &str, kind: ExternalPlaylistKind, i
     format!("{library}:{kind}:{}", id.trim())
 }
 
+/// Whether any track carries the import flag `column` (`master_db_source` /
+/// `mixxx_db_source`), i.e. that library has been imported.
+pub(crate) fn has_tracks_flagged(conn: &rusqlite::Connection, column: &str) -> BackendResult<bool> {
+    debug_assert!(matches!(column, "master_db_source" | "mixxx_db_source"));
+    Ok(conn.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM tracks WHERE {column} = 1)"),
+        [],
+        |row| row.get(0),
+    )?)
+}
+
 /// The library name shown for a playlist's `import_source` (see
 /// [`external_playlist_key`]).
 fn imported_from_label(import_source: &str) -> Option<&'static str> {
@@ -968,7 +979,11 @@ impl BackendService {
     }
 
     pub fn detect_external_master_db(&self) -> BackendResult<DetectExternalMasterDbData> {
-        Ok(detect_external_master_db_util())
+        let conn = self.db.connect()?;
+        Ok(DetectExternalMasterDbData {
+            imported: has_tracks_flagged(&conn, "master_db_source")?,
+            ..detect_external_master_db_util()
+        })
     }
 
     pub fn initialize_usb(&self, req: InitializeUsbRequest) -> BackendResult<InitializeUsbData> {
@@ -4043,11 +4058,19 @@ mod tests {
         .expect("seed removed track");
         drop(conn);
 
+        let imported = || {
+            service
+                .detect_external_master_db()
+                .expect("detect")
+                .imported
+        };
+        assert!(!imported(), "nothing imported yet");
         let result = service
             .scan_master_db(ScanMasterDbRequest {
                 path: Some(master_path.to_string_lossy().to_string()),
             })
             .expect("scan master db");
+        assert!(imported());
 
         assert_eq!(result.indexed, 2);
         assert_eq!(result.updated, 1);

@@ -32,12 +32,12 @@ export function bindLibraryEvents(ctx) {
   } = ctx;
   const { emitStatus } = ctx;
 
-  // "enabled/total" over the folder chips plus each detected library chip.
+  // "enabled/total" over the folder chips plus each imported library chip.
   const emitSourceFilterCounts = () => {
     const libraries = [
-      [state.externalMasterDbPath, state.masterDbEnabled],
-      [state.externalMixxxDbPath, state.mixxxDbEnabled],
-    ].filter(([path]) => !!path);
+      [state.externalMasterDbPath && state.masterDbImported, state.masterDbEnabled],
+      [state.externalMixxxDbPath && state.mixxxDbImported, state.mixxxDbEnabled],
+    ].filter(([available]) => !!available);
     const enabled = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots).length
       + libraries.filter(([, on]) => on === true).length;
     emitStatus(`Source filters: ${enabled}/${state.sourceRoots.length + libraries.length} enabled`);
@@ -98,24 +98,6 @@ export function bindLibraryEvents(ctx) {
   el.sourceChipsContainer.addEventListener("change", (event) => {
     const checkbox = event.target.closest(".source-chip-toggle");
     if (!checkbox) return;
-
-    // master.db / Mixxx chip toggles - pure filters, never trigger an import
-    const isMasterDb = checkbox.dataset.masterDb === "true";
-    if (isMasterDb || checkbox.dataset.mixxxDb === "true") {
-      const enabling = checkbox.checked;
-      if (isMasterDb) {
-        state.masterDbEnabled = enabling;
-        persistMasterDbEnabled(enabling);
-      } else {
-        state.mixxxDbEnabled = enabling;
-        persistMixxxDbEnabled(enabling);
-      }
-      resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT)
-        .catch(catchErr(emitStatus));
-      updateSourceFilterIndicator();
-      emitSourceFilterCounts();
-      return;
-    }
 
     const index = Number(checkbox.dataset.sourceToggleIndex);
     if (!Number.isInteger(index) || index < 0 || index >= state.sourceRoots.length) return;
@@ -181,12 +163,30 @@ export function bindLibraryEvents(ctx) {
     action().catch(catchErr(emitStatus));
   });
 
-  el.importMasterDbBtn?.addEventListener("click", () => {
-    scanMasterDb().catch(catchErr(emitStatus));
+  // Library chips: the checkbox is a pure filter (never an import); ↻ imports.
+  el.libraryChipsContainer?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest(".source-chip-toggle");
+    if (!checkbox) return;
+    const enabling = checkbox.checked;
+    if (checkbox.dataset.masterDb === "true") {
+      state.masterDbEnabled = enabling;
+      persistMasterDbEnabled(enabling);
+    } else if (checkbox.dataset.mixxxDb === "true") {
+      state.mixxxDbEnabled = enabling;
+      persistMixxxDbEnabled(enabling);
+    } else {
+      return;
+    }
+    resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT)
+      .catch(catchErr(emitStatus));
+    updateSourceFilterIndicator();
+    emitSourceFilterCounts();
   });
-
-  el.importMixxxDbBtn?.addEventListener("click", () => {
-    scanMixxxDb().catch(catchErr(emitStatus));
+  el.libraryChipsContainer?.addEventListener("click", (event) => {
+    const importBtn = event.target.closest(".source-chip-import");
+    if (!importBtn) return;
+    const scan = importBtn.dataset.importLibrary === "rekordbox" ? scanMasterDb : scanMixxxDb;
+    scan().catch(catchErr(emitStatus));
   });
 
   el.libraryTableWrap?.addEventListener("scroll", ctx.handleLibraryTableWrapScroll, { passive: true });

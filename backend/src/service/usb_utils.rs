@@ -1396,6 +1396,7 @@ pub fn detect_external_master_db() -> crate::models::DetectExternalMasterDbData 
             return crate::models::DetectExternalMasterDbData {
                 found: true,
                 path: Some(candidate.to_string_lossy().to_string()),
+                imported: false,
             };
         }
     }
@@ -1403,6 +1404,7 @@ pub fn detect_external_master_db() -> crate::models::DetectExternalMasterDbData 
     crate::models::DetectExternalMasterDbData {
         found: false,
         path: None,
+        imported: false,
     }
 }
 

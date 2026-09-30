@@ -153,6 +153,7 @@ test("source, settings, health, name badge, and onboarding helpers update compac
       sourceRoots: ["/a"],
       sourceRootEnabled: { "/a": true },
       externalMasterDbPath: "/path/to/master.db",
+      masterDbImported: true,
       masterDbEnabled: false
     },
     el
@@ -164,6 +165,28 @@ test("source, settings, health, name badge, and onboarding helpers update compac
   syncLibraryOnboardingMode({ state: { activeTab: "library", sourceRoots: [] }, document });
 
   assert.equal(el.sourceFilterIndicator.classList.contains("active"), true);
+  // A library never imported isn't filtering anything out.
+  updateSourceFilterIndicator({
+    state: {
+      sourceRoots: ["/a"],
+      sourceRootEnabled: { "/a": true },
+      externalMasterDbPath: "/path/to/master.db",
+      masterDbImported: false,
+      masterDbEnabled: false
+    },
+    el
+  });
+  assert.equal(el.sourceFilterIndicator.classList.contains("active"), false);
+  updateSourceFilterIndicator({
+    state: {
+      sourceRoots: ["/a"],
+      sourceRootEnabled: { "/a": true },
+      externalMasterDbPath: "/path/to/master.db",
+      masterDbImported: true,
+      masterDbEnabled: false
+    },
+    el
+  });
   assert.equal(el.scanLibraryBtn.textContent, "Scan Libraries");
   assert.equal(el.settingsDrawer.classList.contains("hidden"), true);
   assert.equal(el.settingsBackdrop.classList.contains("hidden"), true);

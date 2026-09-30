@@ -1949,6 +1949,10 @@ pub struct RepairUsbDiagnosticsData {
 pub struct DetectExternalMasterDbData {
     pub found: bool,
     pub path: Option<String>,
+    /// Tracks from this library are in the local library (it was imported);
+    /// until then its source chip can't be turned on.
+    #[serde(default)]
+    pub imported: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1965,6 +1969,10 @@ pub struct ScanMasterDbRequest {
 pub struct DetectExternalMixxxDbData {
     pub found: bool,
     pub path: Option<String>,
+    /// Tracks from this library are in the local library (it was imported);
+    /// until then its source chip can't be turned on.
+    #[serde(default)]
+    pub imported: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

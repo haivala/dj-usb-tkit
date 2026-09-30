@@ -123,25 +123,32 @@
       <section class="panel active" id="panel-library" role="tabpanel">
         <div id="libraryEmptyState"></div>
         <div id="libraryContent">
-          <h2>Media Library</h2>
+          <div class="panel-header">
+            <h2>Media Library</h2>
+            <div class="panel-header-actions">
+              <button id="addSourceBtn">+ Add Folder</button>
+              <button id="scanLibraryBtn" data-primary>Scan Library</button>
+            </div>
+          </div>
           <div class="source-bar" id="sourceBar">
             <div class="source-filter-header" id="sourceFilterHeader">
-              <span class="source-filter-label">Source Folders</span>
+              <span class="source-filter-label">Sources</span>
               <span class="source-filter-indicator" id="sourceFilterIndicator">Filtered</span>
             </div>
             <div class="source-body" id="sourceBody">
-              <div class="source-chips" id="sourceChipsContainer"></div>
+              <div class="source-row">
+                <span class="source-row-label">Folders</span>
+                <div class="source-chips" id="sourceChipsContainer"></div>
+              </div>
+              <div class="source-row hidden" id="libraryChipsRow">
+                <span class="source-row-label">Libraries</span>
+                <div class="source-chips" id="libraryChipsContainer"></div>
+              </div>
               <label class="external-master-db-toggle hidden" id="externalMasterDbToggle">
                 <input type="checkbox" id="externalMasterDbCheckbox" />
                 <span class="external-master-db-toggle-label">External Library</span>
                 <span class="external-master-db-toggle-path muted" id="externalMasterDbPath"></span>
               </label>
-              <div class="source-actions">
-                <button id="addSourceBtn">+ Add Folder</button>
-                <button id="importMasterDbBtn" class="hidden">Import RB</button>
-                <button id="importMixxxDbBtn" class="hidden">Import Mixxx</button>
-                <button id="scanLibraryBtn" data-primary>Scan Library</button>
-              </div>
             </div>
           </div>
           <div class="library-toolbar">
@@ -179,11 +186,13 @@
       <section class="panel" id="panel-usb" role="tabpanel" aria-hidden="true">
         <!-- USB Connection Bar — hidden until USB is selected -->
         <div class="usb-connection-bar hidden" id="usbConnectionBar">
-          <h2>USB Browser</h2>
-          <div class="usb-cfg-connect-row">
-            <button id="selectUsbFolderBtn" data-primary>Select USB Folder</button>
-            <span class="usb-path-badge" id="usbRootPathText">No USB selected</span>
-            <span class="usb-health-dot" id="usbHealthDot" data-tooltip="USB health unknown" aria-label="USB health unknown"></span>
+          <div class="panel-header">
+            <h2>USB Browser</h2>
+            <div class="panel-header-actions">
+              <button id="selectUsbFolderBtn" data-primary>Select USB Folder</button>
+              <span class="usb-path-badge" id="usbRootPathText">No USB selected</span>
+              <span class="usb-health-dot" id="usbHealthDot" data-tooltip="USB health unknown" aria-label="USB health unknown"></span>
+            </div>
           </div>
           <div class="usb-cfg-recent-row" id="usbRecentRow">
             <span class="muted">Recent:</span>
@@ -256,9 +265,11 @@
 
       <!-- USB Playlists panel -->
       <section class="panel" id="panel-usb-playlists" role="tabpanel" aria-hidden="true">
-        <h2>USB Playlists</h2>
-        <div class="row mb-sm">
-          <button id="refreshUsbBtn" data-primary disabled>Import Playlists</button>
+        <div class="panel-header">
+          <h2>USB Playlists</h2>
+          <div class="panel-header-actions">
+            <button id="refreshUsbBtn" data-primary disabled>Import Playlists</button>
+          </div>
         </div>
         <p class="muted" id="usbCountsText">0 playlists, 0 tracks</p>
         <div class="split">
@@ -292,10 +303,12 @@
 
       <!-- USB History panel -->
       <section class="panel" id="panel-usb-history" role="tabpanel" aria-hidden="true">
-        <h2>USB History</h2>
-        <div class="row mb-sm">
-          <button id="refreshHistoryBtn" data-primary disabled>Import History</button>
-          <button id="exportHistoryTracklistBtn" disabled>Export Tracklist</button>
+        <div class="panel-header">
+          <h2>USB History</h2>
+          <div class="panel-header-actions">
+            <button id="refreshHistoryBtn" data-primary disabled>Import History</button>
+            <button id="exportHistoryTracklistBtn" disabled>Export Tracklist</button>
+          </div>
         </div>
         <p class="muted" id="historyCountsText">0 sessions, 0 tracks</p>
         <div class="split">
@@ -761,11 +774,11 @@
   <!-- Status line, library sources, sidebar playlists -->
   <template id="tplStatusWarningLink"><a href="#" class="status-warning-link"></a></template>
   <template id="tplSourceChipMasterDb">
-    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-master-db="true" aria-label="Toggle rekordbox library" /><span class="source-chip-path">rekordbox</span></span>
+    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-master-db="true" aria-label="Toggle rekordbox library" /><span class="source-chip-path">rekordbox</span><button class="source-chip-import" type="button" data-import-library="rekordbox" data-tooltip="Import from rekordbox" aria-label="Import from rekordbox">&#8635;</button></span>
   </template>
   <template id="tplSelectOptgroup"><optgroup></optgroup></template>
   <template id="tplSourceChipMixxxDb">
-    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" aria-label="Toggle Mixxx library" /><span class="source-chip-path">Mixxx</span></span>
+    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" aria-label="Toggle Mixxx library" /><span class="source-chip-path">Mixxx</span><button class="source-chip-import" type="button" data-import-library="mixxx" data-tooltip="Import from Mixxx" aria-label="Import from Mixxx">&#8635;</button></span>
   </template>
   <template id="tplSourceChip">
     <span class="source-chip"><input class="source-chip-toggle" type="checkbox" aria-label="Filter source" /><span class="source-chip-path"></span><button class="source-chip-remove" aria-label="Remove">&times;</button></span>
