@@ -50,6 +50,9 @@
   meaningless waveform drawn from the file's raw bytes and no BPM, key or
   length. A track that decodes but ends up without a BPM or length is now
   reported as "incomplete" in the status line instead of "analyzed".
+- **Fix:** the USB repair for empty analysis files no longer writes a
+  waveform made from the file's raw bytes when the source audio can't be
+  decoded. It now reports that track as failed and leaves the file as it was.
 - **Fix:** starting a new job (creating a playlist, importing from the USB,
   exporting, …) right after another one finished no longer makes its
   progress bar disappear partway through. Before, the previous job's

@@ -1,7 +1,7 @@
 //! Track analysis: BPM detection, key detection, waveform generation, cover art.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -2150,18 +2150,12 @@ pub(crate) fn build_waveform_preview_from_audio(
     if bins == 0 {
         return Ok(WaveformData::empty());
     }
-    let (samples, sample_rate) = match decode_audio_mono_samples(path, max_samples) {
-        Ok(decoded) => decoded,
-        Err(_) => {
-            return Ok(WaveformData::from_peaks(
-                build_waveform_preview_from_file_bytes(path, bins, 256 * 1024)?,
-            ));
-        }
-    };
+    let (samples, sample_rate) = decode_audio_mono_samples(path, max_samples)?;
     if samples.is_empty() {
-        return Ok(WaveformData::from_peaks(
-            build_waveform_preview_from_file_bytes(path, bins, 256 * 1024)?,
-        ));
+        return Err(BackendError::Internal(format!(
+            "no audio samples decoded from {}",
+            path.display()
+        )));
     }
     Ok(build_waveform_data_from_samples_with_rate(
         &samples,
@@ -2497,52 +2491,15 @@ fn biquad_apply(samples: &[f32], b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) ->
     out
 }
 
-pub(crate) fn build_waveform_preview_from_file_bytes(
-    path: &Path,
-    bins: usize,
-    max_bytes: usize,
-) -> BackendResult<Vec<u8>> {
-    if bins == 0 {
-        return Ok(Vec::new());
-    }
-    let mut file = File::open(path)?;
-    let mut bytes = vec![0u8; max_bytes.max(1)];
-    let read = file.read(&mut bytes)?;
-    bytes.truncate(read);
-    if bytes.is_empty() {
-        return Ok(vec![0; bins]);
-    }
-
-    let n = bytes.len();
-    let mut out = Vec::<u8>::with_capacity(bins);
-    for i in 0..bins {
-        let start = i * n / bins;
-        let end = ((i + 1) * n / bins).max(start + 1).min(n);
-        let slice = &bytes[start..end];
-        let mut sum = 0f32;
-        for b in slice {
-            sum += (*b as f32 - 128.0).abs() / 128.0;
-        }
-        let mean = if slice.is_empty() {
-            0.0
-        } else {
-            sum / slice.len() as f32
-        };
-        out.push((mean * 100.0).round().clamp(0.0, 100.0) as u8);
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         AnalysisEngine, EssentiaResult, build_waveform_data_from_samples,
-        build_waveform_preview_from_audio, build_waveform_preview_from_file_bytes,
-        build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
-        count_tracks_missing_core_fields, decode_audio_mono_samples, discover_cover_art_in_dir,
-        discover_cover_art_in_parent, discover_cover_art_path, duration_ms_from_decoded,
-        essentia_result_has_detected_values, has_memory_headroom_for_engine,
-        local_analysis_bundle_paths, normalize_essentia_result,
+        build_waveform_preview_from_audio, build_waveform_preview_from_samples,
+        collect_tracks_for_analysis, combine_worker_caps, count_tracks_missing_core_fields,
+        decode_audio_mono_samples, discover_cover_art_in_dir, discover_cover_art_in_parent,
+        discover_cover_art_path, duration_ms_from_decoded, essentia_result_has_detected_values,
+        has_memory_headroom_for_engine, local_analysis_bundle_paths, normalize_essentia_result,
         persist_library_artwork_thumbnail_from_image, resolve_analysis_bpm_range,
         resolve_analysis_engine, resolve_analysis_parallelism_budget_with_cap,
         resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
@@ -3247,46 +3204,6 @@ mod tests {
         assert_eq!(found.file_name().unwrap(), "cover.jpg");
     }
 
-    // --- build_waveform_preview_from_file_bytes ---
-
-    #[test]
-    fn build_waveform_preview_from_file_bytes_returns_empty_for_zero_bins() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("f.bin");
-        std::fs::write(&path, vec![10u8; 100]).unwrap();
-        let result = build_waveform_preview_from_file_bytes(&path, 0, 1000).expect("preview");
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn build_waveform_preview_from_file_bytes_returns_zeros_for_empty_file() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("empty.bin");
-        std::fs::write(&path, Vec::<u8>::new()).unwrap();
-        let result = build_waveform_preview_from_file_bytes(&path, 8, 1000).expect("preview");
-        assert_eq!(result, vec![0u8; 8]);
-    }
-
-    #[test]
-    fn build_waveform_preview_from_file_bytes_produces_requested_bin_count() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("data.bin");
-        let bytes: Vec<u8> = (0..255u8).collect();
-        std::fs::write(&path, &bytes).unwrap();
-        let result = build_waveform_preview_from_file_bytes(&path, 16, 4096).expect("preview");
-        assert_eq!(result.len(), 16);
-        assert!(result.iter().all(|&v| v <= 100));
-    }
-
-    #[test]
-    fn build_waveform_preview_from_file_bytes_respects_max_bytes_cap() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("data.bin");
-        std::fs::write(&path, vec![255u8; 10_000]).unwrap();
-        let capped = build_waveform_preview_from_file_bytes(&path, 4, 8).expect("preview");
-        assert_eq!(capped.len(), 4);
-    }
-
     // --- build_waveform_preview_from_audio ---
 
     #[test]
@@ -3299,12 +3216,11 @@ mod tests {
     }
 
     #[test]
-    fn build_waveform_preview_from_audio_falls_back_to_raw_bytes_when_decode_fails() {
+    fn build_waveform_preview_from_audio_errors_when_decode_fails() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("not_audio.mp3");
         std::fs::write(&path, vec![7u8; 500]).unwrap();
-        let result = build_waveform_preview_from_audio(&path, 8, 1000).expect("waveform");
-        assert_eq!(result.peaks.len(), 8);
+        assert!(build_waveform_preview_from_audio(&path, 8, 1000).is_err());
     }
 
     // --- decode_audio_mono_samples ---

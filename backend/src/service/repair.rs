@@ -7622,12 +7622,9 @@ mod tests {
         let service_data_dir = tempdir().expect("service data dir");
         let service = BackendService::new(service_data_dir.path()).expect("backend service");
 
-        // Source audio: garbage bytes are enough -- decode fails and
-        // build_waveform_preview_from_audio falls back to a raw-bytes
-        // waveform, same as any other file the audio decoder can't parse.
-        let audio_path = usb_root.join("Contents/track.mp3");
+        let audio_path = usb_root.join("Contents/track.wav");
         std::fs::create_dir_all(audio_path.parent().unwrap()).unwrap();
-        std::fs::write(&audio_path, vec![7u8; 2000]).unwrap();
+        write_sine_wav(&audio_path, 1_000);
 
         let anlz_dir = usb_root.join("PIONEER/USBANLZ/P001/00000001");
         std::fs::create_dir_all(&anlz_dir).unwrap();
@@ -7663,7 +7660,7 @@ mod tests {
                 autoload_hotcues: None,
                 title: "Track".to_string(),
                 anlz_path: "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT".to_string(),
-                track_file_path: "/Contents/track.mp3".to_string(),
+                track_file_path: "/Contents/track.wav".to_string(),
             }],
             ..ParsedPdb::default()
         };
@@ -7690,5 +7687,107 @@ mod tests {
             Some(14_000),
             "regenerated bundle must bake the track's real PDB tempo, not the 120 BPM default"
         );
+    }
+    #[test]
+    fn apply_fix_empty_analysis_files_fails_when_source_audio_cannot_be_decoded() {
+        let (_td, usb_root) = test_usb_root();
+        let service_data_dir = tempdir().expect("service data dir");
+        let service = BackendService::new(service_data_dir.path()).expect("backend service");
+
+        let audio_path = usb_root.join("Contents/track.mp3");
+        std::fs::create_dir_all(audio_path.parent().unwrap()).unwrap();
+        std::fs::write(&audio_path, vec![7u8; 2000]).unwrap(); // not audio
+
+        let anlz_dir = usb_root.join("PIONEER/USBANLZ/P001/00000001");
+        std::fs::create_dir_all(&anlz_dir).unwrap();
+        let dat_path = anlz_dir.join("ANLZ0000.DAT");
+        std::fs::write(&dat_path, b"").unwrap();
+
+        let parsed = ParsedPdb {
+            tracks: vec![PdbTrackRow {
+                content_link: None,
+                sample_rate_hz: None,
+                file_size_bytes: None,
+                master_content_id: None,
+                master_db_id: None,
+                id: 1,
+                artist_id: 0,
+                album_id: 0,
+                artwork_id: 0,
+                key_id: 0,
+                genre_id: 0,
+                bitrate_kbps: None,
+                track_number: 0,
+                tempo_x100: 14_000,
+                release_year: None,
+                bit_depth: None,
+                duration_seconds: Some(222),
+                file_type: None,
+                isrc: None,
+                date_added: None,
+                release_date: None,
+                dj_comment: None,
+                file_name: None,
+                publish_track_info: None,
+                autoload_hotcues: None,
+                title: "Track".to_string(),
+                anlz_path: "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT".to_string(),
+                track_file_path: "/Contents/track.mp3".to_string(),
+            }],
+            ..ParsedPdb::default()
+        };
+
+        let empty_path =
+            resolve_usb_side_path(&usb_root, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT")
+                .expect("resolve anlz path");
+
+        let mut warnings = Vec::new();
+        let (fixed, skipped, failed, _writes) = service
+            .apply_fix_empty_analysis_files(
+                &usb_root,
+                &[empty_path],
+                None,
+                Some(&parsed),
+                &mut warnings,
+            )
+            .expect("apply fix_empty_analysis_files");
+        assert_eq!((fixed, skipped, failed), (0, 0, 1));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.code == "usb.repair.empty-analysis.analyze-failed"),
+            "undecodable source must be reported as failed: {warnings:?}"
+        );
+        assert!(
+            std::fs::read(&dat_path).expect("dat").is_empty(),
+            "no made-up waveform may be written"
+        );
+    }
+
+    /// A mono 16-bit 44.1 kHz WAV of a 440 Hz sine, `duration_ms` long.
+    fn write_sine_wav(path: &Path, duration_ms: u32) {
+        let sample_rate: u32 = 44_100;
+        let samples = (sample_rate as u64 * duration_ms as u64 / 1000) as usize;
+        let data_len = (samples * 2) as u32;
+        let mut out = Vec::<u8>::with_capacity(44 + samples * 2);
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data_len).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        out.extend_from_slice(&1u16.to_le_bytes()); // mono
+        out.extend_from_slice(&sample_rate.to_le_bytes());
+        out.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&data_len.to_le_bytes());
+        for i in 0..samples {
+            let t = i as f32 / sample_rate as f32;
+            let v =
+                ((2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.25 * i16::MAX as f32) as i16;
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        std::fs::write(path, out).expect("write wav");
     }
 }
