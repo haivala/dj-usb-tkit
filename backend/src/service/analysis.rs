@@ -34,7 +34,9 @@ use crate::models::{
 
 use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
-use super::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash};
+use super::export_helpers::{
+    KeptAnalysis, LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash,
+};
 use super::{
     BackendService, ExternalLibraries, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS,
     has_core_analysis_fields, now, track_has_core_analysis_for_source_status,
@@ -1268,6 +1270,59 @@ fn resolve_persisted_artwork(path: &Path, artwork_dir: &Path, track_id: &str) ->
         })
 }
 
+/// Where a stored BPM / key came from, when it didn't come from this app's
+/// analysis: the user's own edit, or an import.
+const KEPT_VALUE_SOURCES: &[&str] = &["user", "mixxx", "rekordbox"];
+
+/// The BPM / key an analysis run keeps instead of replacing. The first
+/// analysis of a track (it has no waveform yet) keeps a value the user set or
+/// an import brought in -- a DJ's corrected BPM or key from rekordbox / Mixxx
+/// -- and only fills in what's missing. Analyzing a track that already has
+/// its waveform is a reanalysis: it replaces them with the app's detection,
+/// which is how a user resets them.
+pub(crate) fn kept_analysis_values(
+    has_waveform: bool,
+    bpm: Option<f64>,
+    bpm_source: Option<&str>,
+    key: Option<&str>,
+    key_source: Option<&str>,
+) -> KeptAnalysis {
+    if has_waveform {
+        return KeptAnalysis::default();
+    }
+    let kept_source =
+        |source: Option<&str>| source.is_some_and(|s| KEPT_VALUE_SOURCES.contains(&s));
+    KeptAnalysis {
+        bpm: bpm.filter(|b| *b > 0.0).filter(|_| kept_source(bpm_source)),
+        key: key
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .filter(|_| kept_source(key_source))
+            .map(str::to_string),
+    }
+}
+
+const ANALYSIS_TRACK_COLS: &str =
+    "id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path";
+
+fn row_to_track_for_analysis(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalTrackForAnalysis> {
+    let has_waveform = row
+        .get::<_, Option<String>>(7)?
+        .is_some_and(|p| !p.trim().is_empty());
+    Ok(LocalTrackForAnalysis {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        file_path: row.get(2)?,
+        kept: kept_analysis_values(
+            has_waveform,
+            row.get(3)?,
+            row.get::<_, Option<String>>(4)?.as_deref(),
+            row.get::<_, Option<String>>(5)?.as_deref(),
+            row.get::<_, Option<String>>(6)?.as_deref(),
+        ),
+    })
+}
+
 pub(crate) fn collect_tracks_for_analysis(
     conn: &rusqlite::Connection,
     requested_track_ids: &[String],
@@ -1275,7 +1330,7 @@ pub(crate) fn collect_tracks_for_analysis(
     if requested_track_ids.is_empty() {
         let sql = format!(
             r#"
-            SELECT id, title, file_path
+            SELECT {ANALYSIS_TRACK_COLS}
             FROM tracks
             WHERE {MISSING_CORE_ANALYSIS_SQL}
             ORDER BY updated_at ASC
@@ -1283,13 +1338,7 @@ pub(crate) fn collect_tracks_for_analysis(
             "#,
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map([], |row| {
-            Ok(LocalTrackForAnalysis {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                file_path: row.get(2)?,
-            })
-        })?;
+        let rows = stmt.query_map([], row_to_track_for_analysis)?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row?);
@@ -1313,15 +1362,12 @@ pub(crate) fn collect_tracks_for_analysis(
     }
 
     let placeholders = vec!["?"; ordered_ids.len()].join(", ");
-    let sql = format!("SELECT id, title, file_path FROM tracks WHERE id IN ({placeholders})");
+    let sql = format!("SELECT {ANALYSIS_TRACK_COLS} FROM tracks WHERE id IN ({placeholders})");
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(ordered_ids.iter()), |row| {
-        Ok(LocalTrackForAnalysis {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            file_path: row.get(2)?,
-        })
-    })?;
+    let rows = stmt.query_map(
+        rusqlite::params_from_iter(ordered_ids.iter()),
+        row_to_track_for_analysis,
+    )?;
 
     let mut by_id = std::collections::HashMap::<String, LocalTrackForAnalysis>::new();
     for row in rows {
@@ -1360,6 +1406,7 @@ where
     analyze_local_track_with_updates(
         &track.file_path,
         &track.id,
+        &track.kept,
         waveform_dir,
         artwork_dir,
         bpm_params,
@@ -1510,6 +1557,7 @@ struct BpmDetectionParams {
 fn analyze_local_track_with_updates(
     file_path: &str,
     track_id: &str,
+    kept: &KeptAnalysis,
     waveform_dir: &Path,
     artwork_dir: &Path,
     bpm_params: BpmDetectionParams,
@@ -1546,8 +1594,14 @@ fn analyze_local_track_with_updates(
     }
 
     let bpm_key_result = detect_bpm_key(engine, &samples, sample_rate, bpm_min, bpm_max)?;
-    let bpm = bpm_key_result.bpm;
-    let key = bpm_key_result.key;
+    // A kept BPM / key wins over the detection, in the DB and in the beat grid
+    // written below. `bpm_analyzer` stays unset for a kept BPM so the column
+    // keeps saying where it came from.
+    let bpm = kept.bpm.or(bpm_key_result.bpm);
+    let bpm_analyzer = bpm
+        .filter(|_| kept.bpm.is_none())
+        .map(|_| engine.as_str().to_string());
+    let key = kept.key.clone().or(bpm_key_result.key);
     let first_beat_ms = bpm_key_result.first_beat_ms;
     let duration_ms = detect_track_duration_ms(&path)
         .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate));
@@ -1600,11 +1654,7 @@ fn analyze_local_track_with_updates(
     if bpm.is_some() || key.is_some() {
         on_update(TrackPartialUpdate {
             bpm,
-            bpm_analyzer: if bpm.is_some() {
-                Some(engine.as_str().to_string())
-            } else {
-                None
-            },
+            bpm_analyzer: bpm_analyzer.clone(),
             key: key.clone(),
             ..TrackPartialUpdate::default()
         });
@@ -1612,11 +1662,7 @@ fn analyze_local_track_with_updates(
 
     Ok(LocalAnalysisResult {
         bpm,
-        bpm_analyzer: if bpm.is_some() {
-            Some(engine.as_str().to_string())
-        } else {
-            None
-        },
+        bpm_analyzer,
         key,
         first_beat_ms,
         duration_ms,
@@ -2504,17 +2550,18 @@ mod tests {
         collect_tracks_for_analysis, combine_worker_caps, count_tracks_missing_core_fields,
         decode_audio_mono_samples, discover_cover_art_in_dir, discover_cover_art_in_parent,
         discover_cover_art_path, duration_ms_from_decoded, essentia_result_has_detected_values,
-        has_memory_headroom_for_engine, local_analysis_bundle_paths, normalize_essentia_result,
-        persist_library_artwork_thumbnail_from_image, resolve_analysis_bpm_range,
-        resolve_analysis_engine, resolve_analysis_parallelism_budget_with_cap,
-        resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
-        resolve_worker_cap_for_engine, strip_appimage_lib_path, waveform_detail_bins_for_duration,
-        waveform_detail_entries_for_duration, waveform_preview_if_persisted,
+        has_memory_headroom_for_engine, kept_analysis_values, local_analysis_bundle_paths,
+        normalize_essentia_result, persist_library_artwork_thumbnail_from_image,
+        resolve_analysis_bpm_range, resolve_analysis_engine,
+        resolve_analysis_parallelism_budget_with_cap, resolve_analysis_worker_count_with_cap,
+        resolve_memory_worker_cap, resolve_worker_cap_for_engine, strip_appimage_lib_path,
+        waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
+        waveform_preview_if_persisted,
     };
     use crate::error::BackendError;
     use crate::service::WAVEFORM_PREVIEW_BINS;
     use crate::service::anlz::WaveformData;
-    use crate::service::export_helpers::stable_u32_hash;
+    use crate::service::export_helpers::{KeptAnalysis, stable_u32_hash};
     use rusqlite::Connection;
     use std::path::Path;
     use std::process::Command;
@@ -2534,7 +2581,9 @@ mod tests {
               title TEXT NOT NULL,
               file_path TEXT NOT NULL,
               bpm REAL,
+              bpm_analyzer TEXT,
               tonality TEXT,
+              tonality_source TEXT,
               duration_ms INTEGER,
               artwork_path TEXT,
               waveform_peaks_path TEXT,
@@ -2543,6 +2592,78 @@ mod tests {
             "#,
         )
         .expect("create tracks table");
+    }
+
+    #[test]
+    fn first_analysis_keeps_user_and_imported_bpm_and_key() {
+        for source in ["user", "mixxx", "rekordbox"] {
+            assert_eq!(
+                kept_analysis_values(false, Some(128.0), Some(source), Some("Am"), Some(source)),
+                KeptAnalysis {
+                    bpm: Some(128.0),
+                    key: Some("Am".to_string())
+                },
+                "{source}"
+            );
+        }
+        // Each value is judged on its own source.
+        assert_eq!(
+            kept_analysis_values(
+                false,
+                Some(128.0),
+                Some("stratum"),
+                Some("Am"),
+                Some("mixxx")
+            ),
+            KeptAnalysis {
+                bpm: None,
+                key: Some("Am".to_string())
+            }
+        );
+        // Values from an earlier analysis, unknown ones and empty ones are
+        // replaced.
+        assert_eq!(
+            kept_analysis_values(false, Some(128.0), None, Some("  "), Some("user")),
+            KeptAnalysis::default()
+        );
+        assert_eq!(
+            kept_analysis_values(false, Some(0.0), Some("mixxx"), None, None),
+            KeptAnalysis::default()
+        );
+    }
+
+    #[test]
+    fn reanalysis_replaces_user_and_imported_bpm_and_key() {
+        // The track already has its waveform: analyzing it again is the reset.
+        assert_eq!(
+            kept_analysis_values(true, Some(128.0), Some("user"), Some("Am"), Some("mixxx")),
+            KeptAnalysis::default()
+        );
+    }
+
+    #[test]
+    fn collect_tracks_for_analysis_reads_the_kept_values() {
+        let conn = Connection::open_in_memory().expect("open db");
+        setup_tracks_table(&conn);
+        conn.execute_batch(
+            r#"
+            INSERT INTO tracks (id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path, updated_at)
+            VALUES
+              ('fresh', 'Fresh', '/m/a.mp3', 140.0, 'mixxx', 'Dm', 'mixxx', NULL, '1'),
+              ('analyzed', 'Analyzed', '/m/b.mp3', 140.0, 'user', 'Dm', 'user', '/a/ANLZ0000.DAT', '2');
+            "#,
+        )
+        .expect("insert tracks");
+        let tracks = collect_tracks_for_analysis(&conn, &["fresh".into(), "analyzed".into()])
+            .expect("collect");
+        assert_eq!(
+            tracks[0].kept,
+            KeptAnalysis {
+                bpm: Some(140.0),
+                key: Some("Dm".to_string())
+            }
+        );
+        assert_eq!(tracks[1].kept, KeptAnalysis::default());
     }
 
     fn insert_track(conn: &Connection, id: &str, title: &str) {

@@ -33,9 +33,25 @@ Mixxx stores its waveforms and beat grids in its own formats, so Mixxx tracks
 need the app's analysis before export, like any folder track. rekordbox tracks
 point at rekordbox's analysis files instead.
 
+The first analysis of an imported track keeps the imported BPM and key, so a
+tempo or key the DJ corrected in rekordbox or Mixxx isn't lost, and writes
+that BPM into the beat grid. **Reanalyze** on the analyzed track replaces
+them with the app's own detection. A BPM you set yourself in the cue editor
+behaves the same way. The BPM tooltip shows where the value came from
+("From Mixxx", "From rekordbox", "Manually set").
+
 Running an import again updates the tracks already imported. Your own changes
-win: BPM, key and length are only filled in when the track has none yet, and
-cues are only added to a track that has no cues in the app.
+win:
+
+- BPM and key are taken from rekordbox / Mixxx when the track has none, or
+  when its value still came from that library, so a tempo you corrected
+  there comes across. A value you edited in the app, or that the app's
+  analysis replaced (Reanalyze), is kept.
+- Length is only filled in when the track has none.
+- Cues are only added to a track that has no cues in the app.
+
+The playlist import can override this per playlist (see **Force update**
+below).
 
 The app's cue list is up to 8 cue points plus one playback-start cue, and
 cue points take pads A–H in position order. So an imported hot cue can land on
@@ -91,12 +107,28 @@ The chosen list becomes a new playlist with the same name and track order
 (Mixxx crates have no order, so their tracks are sorted by artist and title).
 Its tracks are imported into the library the same way as with Import RB /
 Import Mixxx, the library's source chip is turned on, and the new playlist
-opens. A track listed twice is added once.
+opens. A track listed twice is added once. The playlist's header says where
+it came from, e.g. `Friday Set (5 tracks, Total time: 14:05) · Imported from
+rekordbox`.
 
 If none of the list's tracks can be imported, for example a rekordbox library
 from another computer whose file paths don't exist here, no playlist is
-created and the status line says why. Importing the same list twice creates
-two playlists.
+created and the status line says why.
+
+**Importing a list again** updates the playlist its first import made instead
+of creating another one: its tracks and their order are replaced with the
+current ones from rekordbox / Mixxx, its name is kept (even if you renamed it),
+and its USB export status is cleared. The line under the list says so, for
+example `Mixxx playlist · 5 tracks · updates your playlist "Friday Set"`.
+Changes you made to that playlist in the app are replaced. A playlist you
+delete is created again on the next import.
+
+**Force update track data from rekordbox / Mixxx** (a checkbox, off by
+default) makes the playlist's tracks take BPM, key and cues from the library
+even where you edited them or reanalyzed them in the app. Cues are only
+replaced when the library has cues for the track. The analysis files on the
+USB follow on the next export, which rebuilds each track's beat grid and cues
+from the app's values.
 
 ### When both libraries have the same file
 
@@ -137,8 +169,17 @@ import runs in one transaction; when it finds no importable track it returns
 an error before creating the playlist, which also rolls back the track
 upserts.
 
+`playlists.import_source` records where an imported playlist came from, as
+`<library>:<kind>:<id>` (for example `mixxx:crate:4`; Mixxx playlist and crate
+ids overlap). The list commands return the matching local playlist as
+`existingPlaylist`, and an import saves into it (`save_imported_playlist`).
+
 `tracks.master_db_source` and `tracks.mixxx_db_source` record where a track
-came from. The library filter requests (`browse_source_files`,
+came from. An import that fills in a track's BPM or key sets
+`bpm_analyzer` / `tonality_source` to `rekordbox` or `mixxx` (a cue-editor edit
+sets `user`). `analysis::kept_analysis_values` keeps a value with one of those
+sources when the track has no waveform yet (its first analysis); a track that
+already has one is reanalyzed and gets the detected values. The library filter requests (`browse_source_files`,
 `list_matching_track_ids`, `add_library_selection_to_playlist`,
 `analyze_new_tracks`) carry `includeMasterDb` / `includeMixxxDb`; a track is
 included when `(includeMasterDb && masterDbSource) || (includeMixxxDb &&

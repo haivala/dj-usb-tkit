@@ -186,6 +186,10 @@ pub struct Playlist {
     pub last_exported_track_count: Option<usize>,
     pub created_at: String,
     pub updated_at: String,
+    /// The library an imported playlist came from, as shown ("Mixxx",
+    /// "rekordbox"); derived from `playlists.import_source`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1988,6 +1992,17 @@ pub struct ExternalPlaylistSummary {
     pub name: String,
     pub kind: ExternalPlaylistKind,
     pub track_count: usize,
+    /// The local playlist an earlier import of this list made; importing it
+    /// again updates that playlist.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_playlist: Option<ImportedPlaylistRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedPlaylistRef {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2010,6 +2025,10 @@ pub struct ImportExternalPlaylistRequest {
     pub path: Option<String>,
     pub kind: ExternalPlaylistKind,
     pub id: String,
+    /// Replace the tracks' BPM, key and cues with the library's, even where
+    /// they were edited or reanalyzed in the app.
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2017,6 +2036,8 @@ pub struct ImportExternalPlaylistRequest {
 pub struct ImportExternalPlaylistData {
     pub playlist_id: String,
     pub name: String,
+    /// An earlier import's playlist was updated instead of a new one created.
+    pub updated_existing: bool,
     /// Tracks placed in the new playlist.
     pub added: usize,
     /// Tracks new to the local library.

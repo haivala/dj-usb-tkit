@@ -20,6 +20,8 @@ Represents a local library track. Core fields include identity, display metadata
 
 `Playlist` is the user-managed container. `PlaylistTrack` stores ordered membership and position within the playlist.
 
+A playlist imported from rekordbox or Mixxx stores its source in `playlists.import_source` (`<library>:<kind>:<id>`), so importing that list again updates it instead of creating a copy (see `docs/EXTERNAL_LIBRARIES.md`). `list_playlists` derives `importedFrom` ("Mixxx" / "rekordbox") from it for the playlist header.
+
 ### TrackCue and the beat-grid first beat
 
 The `track_cues` table holds user-editable cue points, one row per cue,

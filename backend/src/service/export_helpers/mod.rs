@@ -301,6 +301,17 @@ pub struct LocalTrackForAnalysis {
     pub id: String,
     pub title: String,
     pub file_path: String,
+    /// Values the analysis keeps instead of replacing them with its own
+    /// detection (see `analysis::kept_analysis_values`).
+    pub kept: KeptAnalysis,
+}
+
+/// A BPM / key that an analysis run keeps: set by the user or imported from
+/// rekordbox / Mixxx, on a track being analyzed for the first time.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct KeptAnalysis {
+    pub bpm: Option<f64>,
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -341,7 +341,13 @@ export async function importExternalPlaylist(ctx) {
       .filter((item) => item.kind === kind)
       .map((item) => ({
         ...item,
-        description: `${source.label} ${oneLabel} · ${item.trackCount} ${item.trackCount === 1 ? "track" : "tracks"}`
+        sourceLabel: source.label,
+        description: [
+          `${source.label} ${oneLabel}`,
+          `${item.trackCount} ${item.trackCount === 1 ? "track" : "tracks"}`,
+          // Importing a list again updates the playlist its earlier import made.
+          ...(item.existingPlaylist ? [`updates your playlist "${item.existingPlaylist.name}"`] : [])
+        ].join(" · ")
       }))
   })));
   if (!groups.some((group) => group.items.length)) {
@@ -358,7 +364,9 @@ export async function importExternalPlaylist(ctx) {
   try {
     result = await withProgress(`Importing ${source.label} playlist`, async (progress) => {
       progress(30, `Importing ${chosen.name}...`);
-      const imported = await command(source.importCommand, { path, kind: chosen.kind, id: chosen.id });
+      const imported = await command(source.importCommand, {
+        path, kind: chosen.kind, id: chosen.id, force: chosen.force === true
+      });
       progress(70, "Refreshing playlists...");
       // The imported tracks belong to that library: show them in the library too.
       source.enable(ctx);
@@ -392,7 +400,8 @@ export async function importExternalPlaylist(ctx) {
   }
   const skipped = Math.max(0, Number(chosen.trackCount || 0) - Number(result.added || 0));
   const suffix = skipped > 0 ? ` | ${skipped} track(s) skipped (see event log)` : "";
-  emitStatus(`Imported playlist ${result.name}: ${result.added} track(s)${suffix}`);
+  const verb = result.updatedExisting ? "Updated" : "Imported";
+  emitStatus(`${verb} playlist ${result.name}: ${result.added} track(s)${suffix}`);
 }
 
 export async function deletePlaylist(ctx, playlistId) {
@@ -586,6 +595,8 @@ export function updatePlaylistPanelTitle(ctx, playlist) {
   if (count > 0) {
     parts.push(`(${count} track${count !== 1 ? "s" : ""}, Total time: ${formatDurationMs(totalMs)})`);
   }
+  // Backend-derived from where the playlist was imported (see list_playlists).
+  if (playlist.importedFrom) parts.push(`· Imported from ${playlist.importedFrom}`);
   el.playlistPanelTitle.textContent = parts.join(" ");
 }
 

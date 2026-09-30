@@ -170,13 +170,17 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
   library, returns the `scan_library` result shape (`indexed`, `updated`,
   `removed`, `notFound`, `warnings`)
 - `list_rekordbox_playlists` / `list_mixxx_playlists` — `{ path? }`; returns
-  `items: [{ id, name, kind, trackCount }]` where `id` is the source library's
-  own id as a string and `kind` is `playlist` | `crate` | `history` (only
-  lists with tracks)
-- `import_rekordbox_playlist` / `import_mixxx_playlist` — `{ path?, kind, id }`;
-  creates a local playlist and imports its tracks, returns `{ playlistId, name,
-  added, indexed, notFound, warnings }`. Fails with a validation error, creating
-  nothing, when none of the list's tracks can be imported
+  `items: [{ id, name, kind, trackCount, existingPlaylist? }]` where `id` is
+  the source library's own id as a string, `kind` is `playlist` | `crate` |
+  `history` (only lists with tracks), and `existingPlaylist` (`{ id, name }`)
+  is the local playlist an earlier import of that list made
+- `import_rekordbox_playlist` / `import_mixxx_playlist` — `{ path?, kind, id,
+  force? }`; imports the list's tracks into the playlist an earlier import of
+  it made (`updatedExisting: true`) or a new one, returns `{ playlistId, name,
+  updatedExisting, added, indexed, notFound, warnings }`. `force` makes the
+  tracks take BPM, key and cues from the library over the app's own values.
+  Fails with a validation error, changing nothing, when none of the list's
+  tracks can be imported
 
 `export_to_usb` options:
 

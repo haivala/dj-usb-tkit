@@ -174,8 +174,10 @@ export function createConfirmDialogController(el) {
 
 // Picker for importing one external playlist. `open({ groups })` takes
 // `[{ label, items }]` (one <optgroup> each) and resolves with the chosen
-// item, or null when cancelled. The line under the select shows the chosen
-// item's `description` -- the group isn't visible once the list is closed.
+// item plus `force` (the "force update" checkbox), or null when cancelled.
+// The line under the select shows the chosen item's `description` -- the
+// group isn't visible once the list is closed -- and the checkbox names its
+// `sourceLabel`.
 export function createPlaylistImportDialogController(el, document) {
   let resolveFn = null;
   let isOpen = false;
@@ -201,7 +203,11 @@ export function createPlaylistImportDialogController(el, document) {
   }
 
   function syncDescription() {
-    el.playlistImportSource.textContent = items[Number(el.playlistImportSelect.value)]?.description || "";
+    const item = items[Number(el.playlistImportSelect.value)];
+    el.playlistImportSource.textContent = item?.description || "";
+    el.playlistImportForceLabel.textContent = item?.sourceLabel
+      ? `Force update track data from ${item.sourceLabel}`
+      : "Force update track data";
   }
 
   return {
@@ -213,7 +219,8 @@ export function createPlaylistImportDialogController(el, document) {
       if (!isOpen) return;
       isOpen = false;
       el.playlistImportOverlay.hidden = true;
-      const chosen = confirmed ? items[Number(el.playlistImportSelect.value)] || null : null;
+      const item = confirmed ? items[Number(el.playlistImportSelect.value)] : null;
+      const chosen = item ? { ...item, force: !!el.playlistImportForce.checked } : null;
       const resolver = resolveFn;
       resolveFn = null;
       if (resolver) resolver(chosen);
@@ -223,6 +230,7 @@ export function createPlaylistImportDialogController(el, document) {
         this.close(false);
       }
       isOpen = true;
+      el.playlistImportForce.checked = false;
       populate(groups);
       el.playlistImportOverlay.hidden = false;
       el.playlistImportSelect.focus();

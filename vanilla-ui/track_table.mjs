@@ -6,6 +6,13 @@ import { renderWaveformsIn, setWaveformColorData } from "./waveform.mjs";
 
 // The BPM cell: the formatted value in a pill (tooltip = which analyzer set
 // it), or "-" before analysis.
+// Where a BPM came from when it wasn't this app's analysis.
+const BPM_SOURCE_TOOLTIPS = {
+  user: "Manually set",
+  mixxx: "From Mixxx",
+  rekordbox: "From rekordbox"
+};
+
 export function fillBpmCell(cell, track) {
   const bpmText = formatBpm(track.bpm);
   if (!bpmText) {
@@ -14,11 +21,8 @@ export function fillBpmCell(cell, track) {
   }
   const pill = cloneTemplate(cell.ownerDocument, "tplBpmPill");
   pill.textContent = bpmText;
-  const tooltip = track.bpmAnalyzer === "user"
-    ? "Manually set"
-    : track.bpmAnalyzer
-      ? `Analyzed with: ${track.bpmAnalyzer}`
-      : "";
+  const tooltip = BPM_SOURCE_TOOLTIPS[track.bpmAnalyzer]
+    || (track.bpmAnalyzer ? `Analyzed with: ${track.bpmAnalyzer}` : "");
   if (tooltip) pill.dataset.tooltip = tooltip;
   cell.replaceChildren(pill);
 }

@@ -537,6 +537,87 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_le_bytes([a, b, c, d]))
 }
 
+/// An imported (or user-set) BPM / key survives the track's first analysis --
+/// in the DB and in the analysis file's beat grid -- and a reanalysis resets
+/// it to the app's detection.
+#[test]
+fn first_analysis_keeps_imported_bpm_and_key_and_reanalysis_resets_them() {
+    let root = tempdir().expect("temp root");
+    let source = root.path().join("source");
+    let data_dir = root.path().join("data");
+    fs::create_dir_all(&source).expect("create source");
+    write_test_pulsed_key_wav(&source.join("Artist - Kept.wav"), 120.0, 20_000);
+
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![source.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    let track_id = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search tracks")
+        .items[0]
+        .id
+        .clone();
+
+    // As a Mixxx import leaves it: a DJ-corrected BPM and key, no waveform yet.
+    let db = || rusqlite::Connection::open(data_dir.join("backend.db")).expect("open db");
+    db().execute(
+        "UPDATE tracks SET bpm = 140.0, bpm_analyzer = 'mixxx', tonality = 'Dm',
+                tonality_source = 'mixxx', waveform_peaks_path = NULL
+         WHERE id = ?1",
+        [&track_id],
+    )
+    .expect("mark imported values");
+    let row = || -> (f64, Option<String>, String, String) {
+        db().query_row(
+            "SELECT bpm, bpm_analyzer, tonality, waveform_peaks_path FROM tracks WHERE id = ?1",
+            [&track_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .expect("track row")
+    };
+    let analyze = || {
+        let result = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+            track_ids: vec![track_id.clone()],
+            ..Default::default()
+        });
+        assert!(result.ok, "analyze failed: {result:?}");
+        assert_eq!(result.data.expect("analyze data").analyzed, 1);
+    };
+
+    analyze();
+    let (bpm, analyzer, key, dat) = row();
+    assert_eq!(bpm, 140.0);
+    assert_eq!(analyzer.as_deref(), Some("mixxx"));
+    assert_eq!(key, "Dm");
+    assert_eq!(
+        read_beatgrid_tempo_from_anlz(&fs::read(&dat).expect("read ANLZ")),
+        Some(14_000),
+        "the beat grid follows the kept BPM"
+    );
+
+    // The track now has its waveform: analyzing it again resets BPM and key
+    // to the app's detection (not exact on this synthetic file, so only
+    // "replaced, and the grid agrees").
+    analyze();
+    let (bpm, analyzer, _key, dat) = row();
+    assert_ne!(bpm, 140.0, "reanalysis replaces the kept BPM");
+    assert_ne!(analyzer.as_deref(), Some("mixxx"));
+    assert!(analyzer.is_some());
+    assert_eq!(
+        read_beatgrid_tempo_from_anlz(&fs::read(&dat).expect("read ANLZ")),
+        Some((bpm * 100.0).round() as u16),
+        "the beat grid follows the detected BPM"
+    );
+}
+
 fn write_test_pulsed_key_wav(path: &Path, bpm: f32, duration_ms: u32) {
     let sample_rate: u32 = 44_100;
     let channels: u16 = 1;

@@ -604,6 +604,11 @@
           <select id="playlistImportSelect" aria-label="Playlist to import"></select>
           <span class="playlist-import-source" id="playlistImportSource"></span>
         </div>
+        <label class="usb-cfg-toggle-row" for="playlistImportForce">
+          <input type="checkbox" id="playlistImportForce" />
+          <span id="playlistImportForceLabel">Force update track data</span>
+          <span class="muted usb-cfg-toggle-hint">Replaces the BPM, key and cues of the playlist's tracks, including your own edits.</span>
+        </label>
       </div>
       <div class="row confirm-actions">
         <button id="playlistImportCancelBtn">Cancel</button>

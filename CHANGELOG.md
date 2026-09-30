@@ -48,7 +48,9 @@
   (position, colour and label) and main cue as the playback-start cue.
   Cues are only added to tracks that don't already have cues in the app.
   Mixxx waveforms and beat grids aren't imported, so imported tracks are
-  analyzed like any other track. Files the library doesn't take (tracker
+  analyzed like any other track; that analysis keeps the imported BPM and
+  key, and "Reanalyze" replaces them with the app's own detection. Importing
+  again updates a BPM or key that still came from Mixxx. Files the library doesn't take (tracker
   modules, videos) are skipped. The chip turns Mixxx tracks on and off in
   the library view, separately from the rekordbox library.
 - **New feature:** "Import RB" imports rekordbox cues, hot cues first. Hot
@@ -67,7 +69,11 @@
   as with "Import RB" / "Import Mixxx", including hot cues. A track
   listed twice is added once. If none of its tracks are found on this
   computer, nothing is created and the status line says so. Smart playlists
-  aren't listed, because rekordbox doesn't store their tracks.
+  aren't listed, because rekordbox doesn't store their tracks. Importing the
+  same list again updates the playlist it made the first time (tracks and
+  order, the name you gave it kept) instead of creating a copy. "Force update
+  track data" replaces the tracks' BPM, key and cues with the library's,
+  including your own edits.
 - **Fix:** video files (`.mp4` files with a video track) are no longer
   imported into the library. Audio-only `.mp4`
   (AAC) files still are. Videos already in the library drop out on the next
@@ -103,6 +109,12 @@
   instead of sometimes creating the playlist anyway.
 - **Improvement:** "Import RB" now skips files the library doesn't take
   (such as videos), like the folder scan does.
+- **Improvement:** a BPM or key imported by "Import RB" is no longer replaced
+  when the app analyzes the track for the first time; "Reanalyze" still
+  replaces it with the app's own detection. Running "Import RB" again updates
+  a BPM or key that still came from rekordbox, so a tempo corrected there
+  comes across; one you edited or reanalyzed in the app is kept. A track
+  rekordbox never analyzed now has an unknown BPM instead of 0.
 - **Improvement:** "Import Playlists" on the USB view finishes a little
   faster. It no longer pauses between steps just to show progress messages.
 - **Improvement:** saving cue edits to a USB that another USB job is using

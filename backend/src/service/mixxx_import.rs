@@ -18,8 +18,9 @@ use super::cues::{
 };
 use super::key_notation::camelot_position;
 use super::{
-    BackendService, build_track_match_fingerprint, insert_local_playlist,
-    no_importable_tracks_error, non_empty_db_value, now,
+    BackendService, annotate_imported_playlists, build_track_match_fingerprint,
+    external_playlist_key, no_importable_tracks_error, non_empty_db_value, now,
+    save_imported_playlist,
 };
 use crate::edb::{load_table_columns, table_exists};
 use crate::error::{BackendError, BackendResult};
@@ -32,6 +33,8 @@ use crate::models::{
 use crate::scanner::is_library_audio_file;
 
 pub(crate) const MIXXX_DB_ENV_KEY: &str = "DJUSBTKIT_MIXXX_DB_PATH";
+/// `playlists.import_source` prefix of playlists imported from Mixxx.
+const MIXXX_LIBRARY: &str = "mixxx";
 const MIXXX_DB_FILE: &str = "mixxxdb.sqlite";
 
 // Mixxx `cues.type` values (mixxx::CueType).
@@ -354,6 +357,7 @@ fn list_mixxx_playlists_from(mixxx: &Connection) -> BackendResult<Vec<ExternalPl
             |row| {
                 let hidden: i64 = row.get(2)?;
                 Ok(ExternalPlaylistSummary {
+                    existing_playlist: None,
                     id: row.get::<_, i64>(0)?.to_string(),
                     name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                     kind: if hidden == MIXXX_PLAYLIST_SET_LOG {
@@ -376,6 +380,7 @@ fn list_mixxx_playlists_from(mixxx: &Connection) -> BackendResult<Vec<ExternalPl
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(ExternalPlaylistSummary {
+                existing_playlist: None,
                 id: row.get::<_, i64>(0)?.to_string(),
                 name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 kind: ExternalPlaylistKind::Crate,
@@ -426,6 +431,9 @@ fn load_mixxx_playlist_entries(
 /// and the single-playlist import so both treat a track identically.
 struct MixxxTrackImporter<'a> {
     mixxx: &'a Connection,
+    /// Take BPM, key and cues from Mixxx even over the app's own values
+    /// (the playlist import's "force update").
+    force: bool,
     has_cues_table: bool,
     existing: HashMap<String, String>,
     artwork_dir: PathBuf,
@@ -456,6 +464,7 @@ impl<'a> MixxxTrackImporter<'a> {
         let _ = std::fs::create_dir_all(&artwork_dir);
         Ok(Self {
             mixxx,
+            force: false,
             has_cues_table: table_exists(mixxx, "cues"),
             existing,
             artwork_dir,
@@ -511,10 +520,26 @@ impl<'a> MixxxTrackImporter<'a> {
 
         if existing_id.is_some() {
             tx.execute(
+                // Mixxx's BPM / key replace the track's when it has none, when
+                // they still came from Mixxx (so a tempo corrected in Mixxx comes
+                // across), or when forced -- never a value the user edited or the
+                // app's analysis set otherwise. A value taken is marked as Mixxx's,
+                // so the first analysis keeps it (see `kept_analysis_values`).
+                // SET expressions see the row's old values.
                 r#"UPDATE tracks SET
                     title = ?1, artist = ?2, album = ?3,
-                    bpm = COALESCE(bpm, ?4),
-                    tonality = COALESCE(tonality, ?5),
+                    bpm_analyzer = CASE WHEN ?4 IS NOT NULL
+                                         AND (?13 OR bpm IS NULL OR bpm_analyzer = 'mixxx')
+                                        THEN 'mixxx' ELSE bpm_analyzer END,
+                    bpm = CASE WHEN ?4 IS NOT NULL
+                                AND (?13 OR bpm IS NULL OR bpm_analyzer = 'mixxx')
+                               THEN ?4 ELSE bpm END,
+                    tonality_source = CASE WHEN ?5 IS NOT NULL
+                                            AND (?13 OR tonality IS NULL OR tonality_source = 'mixxx')
+                                           THEN 'mixxx' ELSE tonality_source END,
+                    tonality = CASE WHEN ?5 IS NOT NULL
+                                     AND (?13 OR tonality IS NULL OR tonality_source = 'mixxx')
+                                    THEN ?5 ELSE tonality END,
                     duration_ms = COALESCE(duration_ms, ?6),
                     sample_rate_hz = COALESCE(sample_rate_hz, ?7),
                     artwork_path = COALESCE(?8, artwork_path),
@@ -536,6 +561,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     fingerprint,
                     self.now,
                     track_id,
+                    self.force,
                 ],
             )?;
             self.updated += 1;
@@ -544,8 +570,11 @@ impl<'a> MixxxTrackImporter<'a> {
                 r#"INSERT INTO tracks (
                     id, title, artist, album, bpm, tonality, file_path, format_ext,
                     duration_ms, sample_rate_hz, artwork_path, match_fingerprint,
-                    mixxx_db_source, created_at, updated_at
-                   ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13)"#,
+                    mixxx_db_source, created_at, updated_at,
+                    bpm_analyzer, tonality_source
+                   ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
+                     CASE WHEN ?5 IS NOT NULL THEN 'mixxx' END,
+                     CASE WHEN ?6 IS NOT NULL THEN 'mixxx' END)"#,
                 params![
                     track_id,
                     t.title,
@@ -616,12 +645,17 @@ impl<'a> MixxxTrackImporter<'a> {
         if cues.is_empty() {
             return Ok(());
         }
-        if track_has_cues(tx, track_id)? {
+        if self.force {
+            tx.execute(
+                "DELETE FROM track_cues WHERE track_id = ?1",
+                params![track_id],
+            )?;
+        } else if track_has_cues(tx, track_id)? {
             self.cue_tracks_kept_local += 1;
-        } else {
-            insert_track_cues(tx, track_id, &cues)?;
-            self.cue_tracks += 1;
+            return Ok(());
         }
+        insert_track_cues(tx, track_id, &cues)?;
+        self.cue_tracks += 1;
         Ok(())
     }
 
@@ -716,9 +750,10 @@ impl BackendService {
         req: ListExternalPlaylistsRequest,
     ) -> BackendResult<ListExternalPlaylistsData> {
         let mixxx = open_mixxx_db(req.path.as_deref())?;
-        Ok(ListExternalPlaylistsData {
-            items: list_mixxx_playlists_from(&mixxx)?,
-        })
+        let mut items = list_mixxx_playlists_from(&mixxx)?;
+        let conn = self.db.connect()?;
+        annotate_imported_playlists(&conn, MIXXX_LIBRARY, &mut items)?;
+        Ok(ListExternalPlaylistsData { items })
     }
 
     /// Import one Mixxx playlist, crate or set log as a new local playlist.
@@ -748,6 +783,7 @@ impl BackendService {
         let mut db_conn = self.db.connect()?;
         let tx = db_conn.transaction()?;
         let mut importer = MixxxTrackImporter::new(&mixxx, &tx, &self.db.data_dir())?;
+        importer.force = req.force;
 
         let mut local_ids: Vec<String> = Vec::new();
         let mut seen_mixxx: HashSet<i64> = HashSet::new();
@@ -772,7 +808,8 @@ impl BackendService {
             // Dropping `tx` rolls back the (partial) track upserts too.
             return Err(no_importable_tracks_error(&name, entry_ids.len()));
         }
-        let playlist_id = insert_local_playlist(&tx, &name, &local_ids)?;
+        let key = external_playlist_key(MIXXX_LIBRARY, req.kind, &req.id);
+        let (playlist, updated_existing) = save_imported_playlist(&tx, &key, &name, &local_ids)?;
         tx.commit()?;
 
         let mut warnings = importer.finish_warnings();
@@ -795,8 +832,9 @@ impl BackendService {
             ));
         }
         Ok(ImportExternalPlaylistData {
-            playlist_id,
-            name,
+            playlist_id: playlist.id,
+            name: playlist.name,
+            updated_existing,
             added: local_ids.len(),
             indexed: importer.indexed,
             not_found: importer.not_found,
@@ -808,7 +846,7 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::BrowseSourceFilesRequest;
+    use crate::models::{BrowseSourceFilesRequest, ImportedPlaylistRef};
 
     fn test_service() -> (tempfile::TempDir, BackendService) {
         let dir = tempfile::tempdir().expect("service data dir");
@@ -1160,6 +1198,18 @@ mod tests {
         assert_eq!(duration_ms, Some(185_500));
         assert_eq!(sample_rate, Some(48_000));
         assert_eq!(flags, (1, 0));
+        // Imported BPM / key are marked as Mixxx's, so analysis keeps them.
+        let sources: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT bpm_analyzer, tonality_source FROM tracks WHERE id = ?1",
+                params![new_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("new track sources");
+        assert_eq!(
+            sources,
+            (Some("mixxx".to_string()), Some("mixxx".to_string()))
+        );
         let artwork = artwork.expect("cover copied");
         assert!(Path::new(&artwork).is_file());
         assert!(artwork.ends_with(&format!("{new_id}.jpg")));
@@ -1195,6 +1245,16 @@ mod tests {
         assert_eq!(bpm, Some(128.0));
         assert_eq!(key.as_deref(), Some("C"));
         assert_eq!(mixxx_flag, 1);
+        // Only the value this import filled in (the key) is marked Mixxx's;
+        // the BPM the track already had keeps its (empty) source.
+        let sources: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT bpm_analyzer, tonality_source FROM tracks WHERE id = 'existing-track'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("existing track sources");
+        assert_eq!(sources, (None, Some("mixxx".to_string())));
         let existing_cues: Vec<String> = conn
             .prepare("SELECT id FROM track_cues WHERE track_id = 'existing-track'")
             .unwrap()
@@ -1418,6 +1478,7 @@ mod tests {
                 path: path.clone(),
                 kind: ExternalPlaylistKind::Playlist,
                 id: "3".to_string(),
+                force: false,
             })
             .expect("import playlist");
         assert_eq!(imported.name, "Warmup");
@@ -1450,6 +1511,24 @@ mod tests {
             )
             .expect("bravo row");
         assert_eq!((mixxx_flag, cues), (1, 1));
+        // Playlist import marks the BPM / key like the library import does,
+        // so the first analysis keeps them.
+        let sources: (Option<f64>, Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT bpm, bpm_analyzer, tonality, tonality_source FROM tracks WHERE title = 'Bravo'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .expect("bravo sources");
+        assert_eq!(
+            sources,
+            (
+                Some(124.0),
+                Some("mixxx".to_string()),
+                Some("Am".to_string()),
+                Some("mixxx".to_string())
+            )
+        );
         drop(conn);
 
         // Re-importing reuses the library rows; a crate imports artist/title order.
@@ -1458,6 +1537,7 @@ mod tests {
                 path: path.clone(),
                 kind: ExternalPlaylistKind::Crate,
                 id: "1".to_string(),
+                force: false,
             })
             .expect("import crate");
         assert_eq!(crate_import.indexed, 0);
@@ -1472,6 +1552,7 @@ mod tests {
                 path: path.clone(),
                 kind: ExternalPlaylistKind::Crate,
                 id: "2".to_string(),
+                force: false,
             })
             .unwrap_err();
         assert!(err.to_string().contains("none of the 1 track(s)"), "{err}");
@@ -1488,9 +1569,164 @@ mod tests {
                 path,
                 kind: ExternalPlaylistKind::Playlist,
                 id: "42".to_string(),
+                force: false,
             })
             .unwrap_err();
         assert!(err.to_string().contains("not found"), "{err}");
+    }
+
+    #[test]
+    fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() {
+        let mixxx_root = tempfile::tempdir().expect("mixxx root");
+        let media_root = tempfile::tempdir().expect("media root");
+        let (_service_dir, service) = test_service();
+        let paths: Vec<PathBuf> = ["a.mp3", "b.mp3"]
+            .iter()
+            .map(|n| media_root.path().join(n))
+            .collect();
+        for p in &paths {
+            std::fs::write(p, b"audio").expect("write media");
+        }
+        let mixxx_path = create_mixxx_db_fixture(
+            mixxx_root.path(),
+            &[
+                (
+                    paths[0].to_str().unwrap(),
+                    "Alpha",
+                    Some(22),
+                    44_100,
+                    0,
+                    None,
+                    0,
+                ),
+                (
+                    paths[1].to_str().unwrap(),
+                    "Bravo",
+                    Some(22),
+                    44_100,
+                    0,
+                    None,
+                    0,
+                ),
+            ],
+            &[],
+        );
+        // Playlist 3 and crate 3: same id, different lists.
+        add_mixxx_playlists(
+            &mixxx_path,
+            &[(3, "Warmup", 1, MIXXX_PLAYLIST_REGULAR, &[1, 2])],
+            &[(3, "Warmup crate", &[2])],
+        );
+        let path = Some(mixxx_path.to_string_lossy().to_string());
+        let import = |kind, force| {
+            service
+                .import_mixxx_playlist(ImportExternalPlaylistRequest {
+                    path: path.clone(),
+                    kind,
+                    id: "3".to_string(),
+                    force,
+                })
+                .expect("import")
+        };
+        let conn = || service.db.connect().expect("service db");
+        let track = |title: &str| -> (f64, Option<String>, i64) {
+            conn()
+                .query_row(
+                    "SELECT t.bpm, t.bpm_analyzer,
+                            (SELECT COUNT(1) FROM track_cues c WHERE c.track_id = t.id)
+                     FROM tracks t WHERE t.title = ?1",
+                    params![title],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .expect("track row")
+        };
+
+        let first = import(ExternalPlaylistKind::Playlist, false);
+        assert!(!first.updated_existing);
+        let local = service.list_playlists().expect("list playlists").items;
+        assert_eq!(local[0].imported_from.as_deref(), Some("Mixxx"));
+        let listed = service
+            .list_mixxx_playlists(ListExternalPlaylistsRequest { path: path.clone() })
+            .expect("list")
+            .items;
+        let warmup = listed
+            .iter()
+            .find(|p| p.kind == ExternalPlaylistKind::Playlist)
+            .unwrap();
+        assert_eq!(
+            warmup.existing_playlist,
+            Some(ImportedPlaylistRef {
+                id: first.playlist_id.clone(),
+                name: "Warmup".to_string()
+            })
+        );
+        let crate_item = listed
+            .iter()
+            .find(|p| p.kind == ExternalPlaylistKind::Crate)
+            .unwrap();
+        assert_eq!(
+            crate_item.existing_playlist, None,
+            "crate 3 is a different list"
+        );
+
+        // In the app: the playlist renamed, Alpha's BPM set by hand and given
+        // a cue. In Mixxx: new BPMs, the order swapped, and cues on both.
+        conn()
+            .execute_batch(&format!(
+                "UPDATE playlists SET name = 'My Warmup' WHERE id = '{}';
+                 UPDATE tracks SET bpm = 130.0, bpm_analyzer = 'user' WHERE title = 'Alpha';
+                 INSERT INTO track_cues (id, track_id, position_ms, sort_order, created_at, updated_at)
+                   SELECT 'local', id, 7777, 0, 'x', 'x' FROM tracks WHERE title = 'Alpha';",
+                first.playlist_id
+            ))
+            .expect("local edits");
+        let mixxx = Connection::open(&mixxx_path).expect("open mixxx fixture");
+        mixxx
+            .execute_batch(
+                "UPDATE library SET bpm = 126.0 WHERE id = 1;
+                 UPDATE library SET bpm = 128.0 WHERE id = 2;
+                 UPDATE PlaylistTracks SET position = 3 - position WHERE playlist_id = 3;
+                 INSERT INTO cues (track_id, type, position, length, hotcue, color)
+                   VALUES (1, 1, 88200, 0, 0, 0), (2, 1, 176400, 0, 0, 0);",
+            )
+            .expect("mixxx edits");
+        drop(mixxx);
+
+        // Plain re-import: the same playlist, its name kept, the new order;
+        // Mixxx-owned values refresh, the user's edits stay.
+        let again = import(ExternalPlaylistKind::Playlist, false);
+        assert!(again.updated_existing);
+        assert_eq!(again.playlist_id, first.playlist_id);
+        assert_eq!(again.name, "My Warmup");
+        assert_eq!(
+            playlist_titles(&service, &again.playlist_id),
+            vec!["Bravo", "Alpha"]
+        );
+        assert_eq!(track("Alpha"), (130.0, Some("user".to_string()), 1));
+        assert_eq!(track("Bravo"), (128.0, Some("mixxx".to_string()), 1));
+
+        // The crate with the same id becomes its own playlist.
+        let crate_import = import(ExternalPlaylistKind::Crate, false);
+        assert!(!crate_import.updated_existing);
+        assert_ne!(crate_import.playlist_id, first.playlist_id);
+
+        // Forced: Mixxx wins, BPM and cues included.
+        let forced = import(ExternalPlaylistKind::Playlist, true);
+        assert!(forced.updated_existing);
+        assert_eq!(track("Alpha"), (126.0, Some("mixxx".to_string()), 1));
+        let alpha_cue: i64 = conn()
+            .query_row(
+                "SELECT c.position_ms FROM track_cues c JOIN tracks t ON t.id = c.track_id
+                 WHERE t.title = 'Alpha'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("alpha cue");
+        assert_eq!(alpha_cue, 1_000, "Mixxx's cue replaced the local one");
+        let playlists: i64 = conn()
+            .query_row("SELECT COUNT(*) FROM playlists", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(playlists, 2);
     }
 
     #[test]

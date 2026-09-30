@@ -18,9 +18,9 @@ use super::cues::{
 use super::usb_utils::external_master_db_candidates;
 use super::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
 use super::{
-    BackendService, build_track_match_fingerprint, insert_local_playlist,
-    master_db_analysis_file_candidates, no_importable_tracks_error, non_empty_db_value, now,
-    resolve_master_db_resource_path,
+    BackendService, annotate_imported_playlists, build_track_match_fingerprint,
+    external_playlist_key, master_db_analysis_file_candidates, no_importable_tracks_error,
+    non_empty_db_value, now, resolve_master_db_resource_path, save_imported_playlist,
 };
 use crate::edb::table_exists;
 use crate::error::{BackendError, BackendResult};
@@ -36,6 +36,8 @@ use crate::scanner::is_library_audio_file;
 // opposed to a folder, 1, or a smart playlist, 4, whose tracks rekordbox
 // computes and never stores).
 const RB_ATTRIBUTE_LIST: i64 = 0;
+/// `playlists.import_source` prefix of playlists imported from rekordbox.
+const REKORDBOX_LIBRARY: &str = "rekordbox";
 // `ParentID` of a top-level playlist / history folder.
 const RB_ROOT_PARENT: &str = "root";
 
@@ -124,7 +126,11 @@ fn load_master_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
                 title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 album: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                bpm: row.get::<_, Option<i64>>(4)?.map(|b| b as f64 / 100.0),
+                // 0 = not analyzed in rekordbox: unknown, not 0 BPM.
+                bpm: row
+                    .get::<_, Option<i64>>(4)?
+                    .filter(|b| *b > 0)
+                    .map(|b| b as f64 / 100.0),
                 tonality: row.get::<_, Option<String>>(5)?,
                 duration_ms: row.get::<_, Option<i64>>(6)?.map(|s| s * 1000),
                 anlz_path: row.get::<_, Option<String>>(7)?,
@@ -309,6 +315,7 @@ fn list_rekordbox_playlists_from(conn: &Connection) -> BackendResult<Vec<Externa
                     .join(" / ")
             };
             ExternalPlaylistSummary {
+                existing_playlist: None,
                 id: node.id.clone(),
                 name,
                 kind,
@@ -468,6 +475,9 @@ fn load_rb_cues(conn: &Connection, content_id: &str) -> BackendResult<Vec<RbCue>
 /// both treat a track identically.
 struct MasterDbTrackImporter<'a> {
     master: &'a Connection,
+    /// Take BPM, key and cues from rekordbox even over the app's own values
+    /// (the playlist import's "force update").
+    force: bool,
     has_cue_table: bool,
     master_path: PathBuf,
     existing: HashMap<String, String>,
@@ -512,6 +522,7 @@ impl<'a> MasterDbTrackImporter<'a> {
         let _ = std::fs::create_dir_all(&artwork_dir);
         Ok(Self {
             master,
+            force: false,
             has_cue_table: table_exists(master, "djmdCue"),
             master_path,
             existing,
@@ -577,10 +588,23 @@ impl<'a> MasterDbTrackImporter<'a> {
 
         if existing_id.is_some() {
             tx.execute(
+                // A BPM / key this import fills in is marked as rekordbox's,
+                // so the first analysis keeps it (see `kept_analysis_values`).
+                // SET expressions see the row's old values.
                 r#"UPDATE tracks SET
                     title = ?1, artist = ?2, album = ?3,
-                    bpm = COALESCE(bpm, ?4),
-                    tonality = COALESCE(tonality, ?5),
+                    bpm_analyzer = CASE WHEN ?4 IS NOT NULL
+                                         AND (?13 OR bpm IS NULL OR bpm_analyzer = 'rekordbox')
+                                        THEN 'rekordbox' ELSE bpm_analyzer END,
+                    bpm = CASE WHEN ?4 IS NOT NULL
+                                AND (?13 OR bpm IS NULL OR bpm_analyzer = 'rekordbox')
+                               THEN ?4 ELSE bpm END,
+                    tonality_source = CASE WHEN ?5 IS NOT NULL
+                                            AND (?13 OR tonality IS NULL OR tonality_source = 'rekordbox')
+                                           THEN 'rekordbox' ELSE tonality_source END,
+                    tonality = CASE WHEN ?5 IS NOT NULL
+                                     AND (?13 OR tonality IS NULL OR tonality_source = 'rekordbox')
+                                    THEN ?5 ELSE tonality END,
                     duration_ms = COALESCE(duration_ms, ?6),
                     waveform_peaks_path = COALESCE(?7, waveform_peaks_path),
                     artwork_path = COALESCE(?8, artwork_path),
@@ -601,7 +625,8 @@ impl<'a> MasterDbTrackImporter<'a> {
                     fingerprint,
                     self.now,
                     track_id,
-                    crate::utils::format_ext_from_path(&t.file_path)
+                    crate::utils::format_ext_from_path(&t.file_path),
+                    self.force
                 ],
             )?;
             self.updated += 1;
@@ -610,8 +635,11 @@ impl<'a> MasterDbTrackImporter<'a> {
                 r#"INSERT INTO tracks (
                     id, title, artist, album, bpm, tonality, file_path, format_ext,
                     duration_ms, waveform_peaks_path, artwork_path, match_fingerprint,
-                    master_db_source, created_at, updated_at
-                   ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13)"#,
+                    master_db_source, created_at, updated_at,
+                    bpm_analyzer, tonality_source
+                   ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
+                     CASE WHEN ?5 IS NOT NULL THEN 'rekordbox' END,
+                     CASE WHEN ?6 IS NOT NULL THEN 'rekordbox' END)"#,
                 params![
                     track_id,
                     t.title,
@@ -646,13 +674,18 @@ impl<'a> MasterDbTrackImporter<'a> {
         if cues.is_empty() {
             return Ok(());
         }
-        if track_has_cues(tx, track_id)? {
+        if self.force {
+            tx.execute(
+                "DELETE FROM track_cues WHERE track_id = ?1",
+                params![track_id],
+            )?;
+        } else if track_has_cues(tx, track_id)? {
             self.cue_tracks_kept_local += 1;
-        } else {
-            insert_track_cues(tx, track_id, &cues)?;
-            self.cue_tracks += 1;
-            self.memory_cues_skipped += skipped_memory;
+            return Ok(());
         }
+        insert_track_cues(tx, track_id, &cues)?;
+        self.cue_tracks += 1;
+        self.memory_cues_skipped += skipped_memory;
         Ok(())
     }
 
@@ -866,9 +899,10 @@ impl BackendService {
         req: ListExternalPlaylistsRequest,
     ) -> BackendResult<ListExternalPlaylistsData> {
         let (_, conn) = open_master_db(req.path.as_deref())?;
-        Ok(ListExternalPlaylistsData {
-            items: list_rekordbox_playlists_from(&conn)?,
-        })
+        let mut items = list_rekordbox_playlists_from(&conn)?;
+        let local = self.db.connect()?;
+        annotate_imported_playlists(&local, REKORDBOX_LIBRARY, &mut items)?;
+        Ok(ListExternalPlaylistsData { items })
     }
 
     /// Import one rekordbox playlist or history session as a new local
@@ -896,6 +930,7 @@ impl BackendService {
         let tx = db_conn.transaction()?;
         let mut importer =
             MasterDbTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
+        importer.force = req.force;
 
         let mut local_ids: Vec<String> = Vec::new();
         let mut seen: HashSet<&str> = HashSet::new();
@@ -919,7 +954,8 @@ impl BackendService {
             // Dropping `tx` rolls back the (partial) track upserts too.
             return Err(no_importable_tracks_error(&name, entry_ids.len()));
         }
-        let playlist_id = insert_local_playlist(&tx, &name, &local_ids)?;
+        let key = external_playlist_key(REKORDBOX_LIBRARY, req.kind, &req.id);
+        let (playlist, updated_existing) = save_imported_playlist(&tx, &key, &name, &local_ids)?;
         tx.commit()?;
 
         let mut warnings = importer.finish_warnings();
@@ -942,8 +978,9 @@ impl BackendService {
             ));
         }
         Ok(ImportExternalPlaylistData {
-            playlist_id,
-            name,
+            playlist_id: playlist.id,
+            name: playlist.name,
+            updated_existing,
             added: local_ids.len(),
             indexed: importer.indexed,
             not_found: importer.not_found,
@@ -1178,6 +1215,87 @@ mod tests {
     }
 
     #[test]
+    fn reimporting_a_rekordbox_playlist_updates_it_and_force_takes_rekordbox_values() {
+        let rb_root = tempfile::tempdir().expect("rb root");
+        let media_root = tempfile::tempdir().expect("media root");
+        let (_service_dir, service) = test_service();
+        let media: Vec<PathBuf> = ["a.mp3", "b.flac", "c.wav"]
+            .iter()
+            .map(|n| media_root.path().join(n))
+            .collect();
+        for p in &media {
+            std::fs::write(p, b"audio").expect("write media");
+        }
+        let path = Some(
+            create_master_db_with_playlists(rb_root.path(), &media)
+                .to_string_lossy()
+                .to_string(),
+        );
+        let import = |force| {
+            service
+                .import_rekordbox_playlist(ImportExternalPlaylistRequest {
+                    path: path.clone(),
+                    kind: ExternalPlaylistKind::Playlist,
+                    id: "11".to_string(),
+                    force,
+                })
+                .expect("import")
+        };
+        let charlie = || -> (f64, Option<String>, Vec<i64>) {
+            let conn = service.db.connect().expect("service db");
+            let (bpm, source) = conn
+                .query_row(
+                    "SELECT bpm, bpm_analyzer FROM tracks WHERE title = 'Charlie'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("charlie");
+            let cues = conn
+                .prepare(
+                    "SELECT c.position_ms FROM track_cues c JOIN tracks t ON t.id = c.track_id
+                     WHERE t.title = 'Charlie' ORDER BY c.sort_order",
+                )
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            (bpm, source, cues)
+        };
+
+        let first = import(false);
+        let local = service.list_playlists().expect("list playlists").items;
+        assert_eq!(local[0].imported_from.as_deref(), Some("rekordbox"));
+        service
+            .db
+            .connect()
+            .unwrap()
+            .execute_batch(
+                "UPDATE tracks SET bpm = 99.0, bpm_analyzer = 'user' WHERE title = 'Charlie';
+                 DELETE FROM track_cues;
+                 INSERT INTO track_cues (id, track_id, position_ms, sort_order, created_at, updated_at)
+                   SELECT 'local', id, 7777, 0, 'x', 'x' FROM tracks WHERE title = 'Charlie';",
+            )
+            .expect("local edits");
+
+        let again = import(false);
+        assert!(again.updated_existing);
+        assert_eq!(again.playlist_id, first.playlist_id);
+        assert_eq!(charlie(), (99.0, Some("user".to_string()), vec![7777]));
+
+        let forced = import(true);
+        assert_eq!(forced.playlist_id, first.playlist_id);
+        assert_eq!(
+            charlie(),
+            (
+                128.0,
+                Some("rekordbox".to_string()),
+                vec![53, 54_911, 60_000]
+            )
+        );
+    }
+
+    #[test]
     fn list_and_import_rekordbox_playlists_and_history() {
         let rb_root = tempfile::tempdir().expect("rb root");
         let media_root = tempfile::tempdir().expect("media root");
@@ -1221,6 +1339,7 @@ mod tests {
                 path: path.clone(),
                 kind: ExternalPlaylistKind::Playlist,
                 id: "11".to_string(),
+                force: false,
             })
             .expect("import playlist");
         assert_eq!(imported.name, "Friday");
@@ -1251,6 +1370,17 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
+        let charlie: (Option<f64>, Option<String>) = service
+            .db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT bpm, bpm_analyzer FROM tracks WHERE title = 'Charlie'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(charlie, (Some(128.0), Some("rekordbox".to_string())));
         assert_eq!(
             charlie_cues,
             vec![
@@ -1270,6 +1400,7 @@ mod tests {
                 path: path.clone(),
                 kind: ExternalPlaylistKind::History,
                 id: "h2".to_string(),
+                force: false,
             })
             .expect("import history");
         assert_eq!(history.indexed, 0, "tracks reused from the first import");
@@ -1284,6 +1415,7 @@ mod tests {
                 path: path.clone(),
                 kind: ExternalPlaylistKind::Playlist,
                 id: "15".to_string(),
+                force: false,
             })
             .unwrap_err();
         assert!(err.to_string().contains("none of the 1 track(s)"), "{err}");
@@ -1307,6 +1439,7 @@ mod tests {
                         path: path.clone(),
                         kind,
                         id: id.to_string(),
+                        force: false,
                     })
                     .is_err(),
                 "{kind:?} {id} should not import"

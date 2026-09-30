@@ -50,14 +50,14 @@ use crate::models::{
     AddTracksToPlaylistRequest, BrowseSourceFilesData, BrowseSourceFilesRequest,
     CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
     DedupeMode, DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest,
-    GetSourceRootAnalysisData, GetSourceRootAnalysisRequest, GetTracksByIdsData,
-    GetTracksByIdsRequest, InitializeUsbData, InitializeUsbRequest, ListMatchingTrackIdsData,
-    ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackMetronomeData,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, Playlist,
-    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
+    ExternalPlaylistKind, ExternalPlaylistSummary, GetFrontendSettingsData, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetSourceRootAnalysisData, GetSourceRootAnalysisRequest,
+    GetTracksByIdsData, GetTracksByIdsRequest, ImportedPlaylistRef, InitializeUsbData,
+    InitializeUsbRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData,
+    ListTracksData, ListTracksRequest, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
+    PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest,
+    PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
+    Playlist, RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
     RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
     ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ResolvePlaybackSourceData,
@@ -435,6 +435,101 @@ pub(crate) fn insert_local_playlist(
         )?;
     }
     Ok(id)
+}
+
+/// The `playlists.import_source` of a list imported from an external library,
+/// e.g. `mixxx:crate:4` (Mixxx playlist and crate ids overlap).
+pub(crate) fn external_playlist_key(library: &str, kind: ExternalPlaylistKind, id: &str) -> String {
+    let kind = match kind {
+        ExternalPlaylistKind::Playlist => "playlist",
+        ExternalPlaylistKind::Crate => "crate",
+        ExternalPlaylistKind::History => "history",
+    };
+    format!("{library}:{kind}:{}", id.trim())
+}
+
+/// The library name shown for a playlist's `import_source` (see
+/// [`external_playlist_key`]).
+fn imported_from_label(import_source: &str) -> Option<&'static str> {
+    match import_source.split(':').next()? {
+        "mixxx" => Some("Mixxx"),
+        "rekordbox" => Some("rekordbox"),
+        _ => None,
+    }
+}
+
+/// The local playlist an earlier import of `key` made, if it still exists.
+pub(crate) fn find_imported_playlist(
+    conn: &rusqlite::Connection,
+    key: &str,
+) -> BackendResult<Option<ImportedPlaylistRef>> {
+    Ok(conn
+        .query_row(
+            "SELECT id, name FROM playlists WHERE import_source = ?1 ORDER BY created_at LIMIT 1",
+            params![key],
+            |row| {
+                Ok(ImportedPlaylistRef {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// Mark each listed external playlist that was imported before.
+pub(crate) fn annotate_imported_playlists(
+    conn: &rusqlite::Connection,
+    library: &str,
+    items: &mut [ExternalPlaylistSummary],
+) -> BackendResult<()> {
+    for item in items {
+        item.existing_playlist =
+            find_imported_playlist(conn, &external_playlist_key(library, item.kind, &item.id))?;
+    }
+    Ok(())
+}
+
+/// Save an imported list's tracks: into the playlist an earlier import of
+/// `key` made (its tracks and order replaced, its name kept, its USB export
+/// status cleared), or into a new playlist named `name`. Returns the
+/// playlist, and whether it was an existing one.
+pub(crate) fn save_imported_playlist(
+    conn: &rusqlite::Connection,
+    key: &str,
+    name: &str,
+    track_ids: &[String],
+) -> BackendResult<(ImportedPlaylistRef, bool)> {
+    if let Some(existing) = find_imported_playlist(conn, key)? {
+        conn.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
+            params![existing.id],
+        )?;
+        let now = now();
+        for (index, track_id) in track_ids.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![Uuid::now_v7().to_string(), existing.id, track_id, index as i64 + 1, now],
+            )?;
+        }
+        conn.execute(
+            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL WHERE id = ?2",
+            params![now, existing.id],
+        )?;
+        return Ok((existing, true));
+    }
+    let id = insert_local_playlist(conn, name, track_ids)?;
+    conn.execute(
+        "UPDATE playlists SET import_source = ?1 WHERE id = ?2",
+        params![key, id],
+    )?;
+    Ok((
+        ImportedPlaylistRef {
+            id,
+            name: name.to_string(),
+        },
+        false,
+    ))
 }
 
 /// An external playlist import that found none of its tracks: failing beats
@@ -2172,7 +2267,7 @@ impl BackendService {
         let conn = self.db.connect()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at
+            SELECT id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at, import_source
             FROM playlists
             ORDER BY created_at ASC
             "#,
@@ -2188,6 +2283,11 @@ impl BackendService {
                 last_exported_track_count: row.get(5)?,
                 created_at: row.get(6)?,
                 updated_at: row.get(7)?,
+                imported_from: row
+                    .get::<_, Option<String>>(8)?
+                    .as_deref()
+                    .and_then(imported_from_label)
+                    .map(str::to_string),
             })
         })?;
 

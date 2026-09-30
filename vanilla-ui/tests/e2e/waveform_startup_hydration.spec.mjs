@@ -170,7 +170,10 @@ function installSourceChipAnalysisMock(page) {
               ok: true,
               data: {
                 items: [
-                  { id: "4", name: "Test playlist", kind: "playlist", trackCount: 3 },
+                  {
+                    id: "4", name: "Test playlist", kind: "playlist", trackCount: 3,
+                    existingPlaylist: { id: "pl-old", name: "My Test playlist" }
+                  },
                   { id: "7", name: "Peak", kind: "crate", trackCount: 2 },
                   { id: "3", name: "2026-09-30", kind: "history", trackCount: 4 }
                 ]
@@ -194,6 +197,7 @@ function installSourceChipAnalysisMock(page) {
             window.__playlistImports = [...(window.__playlistImports || []), { command, request: payload?.request || null }];
             window.__importedPlaylists.push({
               id: playlistId, name: playlistId, trackCount: 2,
+              importedFrom: command === "import_mixxx_playlist" ? "Mixxx" : "rekordbox",
               createdAt: "2026-03-01T00:00:00Z", updatedAt: "2026-03-01T00:00:00Z"
             });
             return {
@@ -320,6 +324,13 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
   await expect(page.locator('#playlistImportSelect optgroup[label="Mixxx crates"] option')).toHaveText("Peak (2)");
   // The closed select shows only the name: the line under it names the source.
   await expect(page.locator("#playlistImportSource")).toHaveText("rekordbox playlist · 40 tracks");
+  await expect(page.locator("#playlistImportForceLabel")).toHaveText("Force update track data from rekordbox");
+  await expect(page.locator("#playlistImportForce")).not.toBeChecked();
+  // A list imported before says which playlist importing it again updates.
+  await page.locator("#playlistImportSelect").selectOption({ label: "Test playlist (3)" });
+  await expect(page.locator("#playlistImportSource"))
+    .toHaveText('Mixxx playlist · 3 tracks · updates your playlist "My Test playlist"');
+  await expect(page.locator("#playlistImportForceLabel")).toHaveText("Force update track data from Mixxx");
   await page.locator("#playlistImportSelect").selectOption({ label: "Peak (2)" });
   await expect(page.locator("#playlistImportSource")).toHaveText("Mixxx crate · 2 tracks");
 
@@ -334,17 +345,20 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
   await page.locator("#playlistImportOkBtn").click();
   await expect(overlay).toBeHidden();
   await expect.poll(async () => page.evaluate(() => window.__playlistImports)).toEqual([
-    { command: "import_mixxx_playlist", request: { path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3" } }
+    { command: "import_mixxx_playlist", request: { path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3", force: false } }
   ]);
   await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-mixxx"]')).toHaveClass(/active/);
+  await expect(page.locator("#playlistPanelTitle")).toHaveText(/ · Imported from Mixxx$/);
   await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
 
   await importBtn.click();
+  await expect(page.locator("#playlistImportForce")).not.toBeChecked();
   await page.locator("#playlistImportSelect").selectOption({ label: "Pikkujoulut (40)" });
+  await page.locator("#playlistImportForce").check();
   await page.locator("#playlistImportOkBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__playlistImports.at(-1))).toEqual({
     command: "import_rekordbox_playlist",
-    request: { path: "/music/master.db", kind: "playlist", id: "2912649392" }
+    request: { path: "/music/master.db", kind: "playlist", id: "2912649392", force: true }
   });
   await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
   await expect(page.locator('.source-chip-toggle[data-master-db="true"]')).toBeChecked();
