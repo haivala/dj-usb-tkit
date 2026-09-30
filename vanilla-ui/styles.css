@@ -659,6 +659,8 @@ body.library-onboarding {
   position: relative;
 }
 
+/* The current-playlist dot sits right after the name, so the exported ✓ and
+   delete × stay in the same columns on every row. */
 .nav-playlist-item.playlist-active-mode::after {
   content: '';
   width: 6px;
@@ -666,10 +668,11 @@ body.library-onboarding {
   border-radius: 50%;
   background: var(--accent-hot);
   flex-shrink: 0;
+  order: 1;
 }
 
 .nav-playlist-name {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -681,6 +684,9 @@ body.library-onboarding {
   flex-shrink: 0;
   width: 14px;
   text-align: center;
+  order: 2;
+  /* Pushes ✓ and × to the row's right edge. */
+  margin-left: auto;
 }
 
 .nav-playlist-status.exported {
@@ -688,6 +694,7 @@ body.library-onboarding {
 }
 
 .nav-playlist-delete {
+  order: 2;
   display: inline-flex;
   width: 18px;
   height: 18px;
