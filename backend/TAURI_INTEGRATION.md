@@ -53,6 +53,8 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
 
 - Library:
   - `scan_library`
+  - `scan_master_db`, `list_rekordbox_playlists`, `import_rekordbox_playlist`
+  - `scan_mixxx_db`, `list_mixxx_playlists`, `import_mixxx_playlist`
   - `search_tracks`
   - `list_tracks`
   - `browse_source_files`
@@ -84,6 +86,7 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `run_usb_parity_report`
   - `repair_usb_diagnostics`
   - `detect_external_master_db`
+  - `detect_external_mixxx_db`
   - `initialize_usb`
   - `export_to_usb`
 - Analysis:

@@ -65,6 +65,7 @@ drive selection from being rendered against a newer selected drive.
 
 - `scan_library`
 - `scan_master_db`
+- `scan_mixxx_db`
 - `search_tracks`
 - `list_tracks`
 - `browse_source_files`
@@ -159,6 +160,23 @@ drive selection from being rendered against a newer selected drive.
 - `initialize_usb`
 - `export_to_usb`
 - `detect_external_master_db`
+
+### External libraries
+
+See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
+
+- `detect_external_master_db` / `detect_external_mixxx_db` — `{ found, path }`
+- `scan_master_db` / `scan_mixxx_db` — `{ path? }`; imports every track of the
+  library, returns the `scan_library` result shape (`indexed`, `updated`,
+  `removed`, `notFound`, `warnings`)
+- `list_rekordbox_playlists` / `list_mixxx_playlists` — `{ path? }`; returns
+  `items: [{ id, name, kind, trackCount }]` where `id` is the source library's
+  own id as a string and `kind` is `playlist` | `crate` | `history` (only
+  lists with tracks)
+- `import_rekordbox_playlist` / `import_mixxx_playlist` — `{ path?, kind, id }`;
+  creates a local playlist and imports its tracks, returns `{ playlistId, name,
+  added, indexed, notFound, warnings }`. Fails with a validation error, creating
+  nothing, when none of the list's tracks can be imported
 
 `export_to_usb` options:
 

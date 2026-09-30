@@ -13,6 +13,10 @@ no safe local match exists.
 
 Transport state is pushed through backend events, so the UI reflects start/progress/stop updates without tight polling loops.
 
+A playlist can also be imported from a rekordbox or Mixxx library with the
+**Import** button under **New** in the sidebar. It becomes an ordinary local
+playlist; see `docs/EXTERNAL_LIBRARIES.md`.
+
 ## Deep technical details
 
 Playlist state is modeled as local entities with ordered mapping rows. In practice, this means playlist metadata (`name`, identity, timestamps) is stored separately from ordered membership (`playlistId`, `trackId`, position). Track ordering is therefore explicit and stable, which avoids accidental reshuffling during add/remove operations. Adding or removing playlist tracks also clears the playlist's cached USB export status so the UI stops showing stale "exported" state immediately.

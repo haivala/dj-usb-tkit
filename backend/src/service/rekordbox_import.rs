@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags, params};
 use uuid::Uuid;
 
+use super::cues::{
+    DEFAULT_HOTCUE_COLOR_ID, MAX_HOT_CUES, insert_track_cues, is_valid_color_id, track_has_cues,
+};
+
 use super::usb_utils::external_master_db_candidates;
 use super::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
 use super::{
@@ -24,7 +28,7 @@ use crate::logging::{self, Level};
 use crate::models::{
     ExternalPlaylistKind, ExternalPlaylistSummary, ImportExternalPlaylistData,
     ImportExternalPlaylistRequest, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
-    ScanLibraryData, ScanMasterDbRequest, WarningEntry,
+    ScanLibraryData, ScanMasterDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
 
@@ -341,10 +345,104 @@ fn load_rb_list_entries(
     Ok((node.name.clone(), ids))
 }
 
+/// One row of `djmdCue`.
+#[derive(Debug, Clone)]
+pub(crate) struct RbCue {
+    pub kind: i64,
+    pub in_msec: i64,
+    pub color_table_index: Option<i64>,
+    pub comment: Option<String>,
+}
+
+// `djmdCue.Kind`: 0 is a memory cue; hot-cue pads A-H are 1, 2, 3, 5, 6, 7,
+// 8, 9 (rekordbox skips 4).
+const RB_CUE_KIND_MEMORY: i64 = 0;
+
+fn rb_is_hot_cue(kind: i64) -> bool {
+    matches!(kind, 1..=3 | 5..=9)
+}
+
+/// Convert a track's rekordbox cues into this app's cue list: hot cues (and
+/// hot loops, at their start) become cue points in position order, capped at
+/// [`MAX_HOT_CUES`]; the earliest memory cue becomes the playback-start cue
+/// when it lies before the first hot cue (the same rule `split_playback_start`
+/// applies on export). Returns the list and how many memory cues it left out
+/// -- the app has no separate memory cues.
+pub(crate) fn rekordbox_cues_to_track_cues(cues: &[RbCue]) -> (Vec<TrackCue>, usize) {
+    let mut hot: Vec<TrackCue> = cues
+        .iter()
+        .filter(|c| rb_is_hot_cue(c.kind) && c.in_msec >= 0)
+        .map(|c| TrackCue {
+            id: Uuid::now_v7().to_string(),
+            position_ms: u32::try_from(c.in_msec).unwrap_or(u32::MAX),
+            // The app writes its palette id as the USB `cue.colorTableIndex`;
+            // read it back the same way. Unset (or outside the palette) gets
+            // the default colour.
+            color_id: Some(
+                c.color_table_index
+                    .and_then(|i| u8::try_from(i).ok())
+                    .filter(|i| is_valid_color_id(*i))
+                    .unwrap_or(DEFAULT_HOTCUE_COLOR_ID),
+            ),
+            name: c
+                .comment
+                .as_deref()
+                .and_then(non_empty_db_value)
+                .map(str::to_string),
+            playback_start: false,
+        })
+        .collect();
+    hot.sort_by_key(|c| c.position_ms);
+    hot.dedup_by_key(|c| c.position_ms);
+    hot.truncate(MAX_HOT_CUES as usize);
+
+    let mut memory: Vec<u32> = cues
+        .iter()
+        .filter(|c| c.kind == RB_CUE_KIND_MEMORY && c.in_msec >= 0)
+        .map(|c| u32::try_from(c.in_msec).unwrap_or(u32::MAX))
+        .collect();
+    memory.sort_unstable();
+    let start = hot
+        .first()
+        .and_then(|first| memory.first().copied().filter(|ms| *ms < first.position_ms));
+    let skipped_memory = memory.len() - usize::from(start.is_some());
+
+    let mut out = Vec::with_capacity(hot.len() + 1);
+    if let Some(position_ms) = start {
+        out.push(TrackCue {
+            id: Uuid::now_v7().to_string(),
+            position_ms,
+            color_id: None,
+            name: None,
+            playback_start: true,
+        });
+    }
+    out.extend(hot);
+    (out, skipped_memory)
+}
+
+fn load_rb_cues(conn: &Connection, content_id: &str) -> BackendResult<Vec<RbCue>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT IFNULL(Kind, 0), IFNULL(InMsec, -1), ColorTableIndex, Comment FROM djmdCue
+         WHERE CAST(ContentID AS TEXT) = ?1 AND IFNULL(rb_local_deleted, 0) = 0",
+    )?;
+    let rows = stmt.query_map(params![content_id], |row| {
+        Ok(RbCue {
+            kind: row.get(0)?,
+            in_msec: row.get(1)?,
+            color_table_index: row.get(2)?,
+            comment: row.get(3)?,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 /// Upserts `master.db` tracks into the local `tracks` table and tallies what
 /// happened. Shared by the whole-library import and the playlist import so
 /// both treat a track identically.
-struct MasterDbTrackImporter {
+struct MasterDbTrackImporter<'a> {
+    master: &'a Connection,
+    has_cue_table: bool,
     master_path: PathBuf,
     existing: HashMap<String, String>,
     artwork_dir: PathBuf,
@@ -362,11 +460,19 @@ struct MasterDbTrackImporter {
     artwork_ok: usize,
     sample_anlz: Option<String>,
     sample_img: Option<String>,
+    cue_tracks: usize,
+    cue_tracks_kept_local: usize,
+    memory_cues_skipped: usize,
     warnings: Vec<WarningEntry>,
 }
 
-impl MasterDbTrackImporter {
-    fn new(master_path: PathBuf, tx: &Connection, data_dir: &Path) -> BackendResult<Self> {
+impl<'a> MasterDbTrackImporter<'a> {
+    fn new(
+        master: &'a Connection,
+        master_path: PathBuf,
+        tx: &Connection,
+        data_dir: &Path,
+    ) -> BackendResult<Self> {
         // Load existing tracks by file_path for upsert logic
         let existing = {
             let mut stmt = tx.prepare("SELECT file_path, id FROM tracks")?;
@@ -379,6 +485,8 @@ impl MasterDbTrackImporter {
         let artwork_dir = data_dir.join("analysis").join("artwork");
         let _ = std::fs::create_dir_all(&artwork_dir);
         Ok(Self {
+            master,
+            has_cue_table: table_exists(master, "djmdCue"),
             master_path,
             existing,
             artwork_dir,
@@ -396,6 +504,9 @@ impl MasterDbTrackImporter {
             artwork_ok: 0,
             sample_anlz: None,
             sample_img: None,
+            cue_tracks: 0,
+            cue_tracks_kept_local: 0,
+            memory_cues_skipped: 0,
             warnings: Vec::new(),
         })
     }
@@ -494,7 +605,29 @@ impl MasterDbTrackImporter {
             self.existing.insert(t.file_path.clone(), track_id.clone());
             self.indexed += 1;
         }
+        self.import_cues(tx, t, &track_id)?;
         Ok(Some(track_id))
+    }
+
+    /// Cues from `djmdCue`: only onto a track without local cues (local edits
+    /// win).
+    fn import_cues(&mut self, tx: &Connection, t: &RbTrack, track_id: &str) -> BackendResult<()> {
+        if !self.has_cue_table || t.content_id.is_empty() {
+            return Ok(());
+        }
+        let (cues, skipped_memory) =
+            rekordbox_cues_to_track_cues(&load_rb_cues(self.master, &t.content_id)?);
+        if cues.is_empty() {
+            return Ok(());
+        }
+        if track_has_cues(tx, track_id)? {
+            self.cue_tracks_kept_local += 1;
+        } else {
+            insert_track_cues(tx, track_id, &cues)?;
+            self.cue_tracks += 1;
+            self.memory_cues_skipped += skipped_memory;
+        }
+        Ok(())
     }
 
     /// Waveform: store the original ANLZ path in place - no copy, no conversion.
@@ -586,6 +719,33 @@ impl MasterDbTrackImporter {
                 format!("ImagePath sample: {p}"),
             );
         }
+        if self.cue_tracks > 0 {
+            summary(
+                Level::Info,
+                "scan.master-db.cues-imported",
+                format!("cues imported for {} track(s)", self.cue_tracks),
+            );
+        }
+        if self.cue_tracks_kept_local > 0 {
+            summary(
+                Level::Info,
+                "scan.master-db.cues-kept-local",
+                format!(
+                    "{} track(s) already had cues; their rekordbox cues were not imported",
+                    self.cue_tracks_kept_local
+                ),
+            );
+        }
+        if self.memory_cues_skipped > 0 {
+            summary(
+                Level::Info,
+                "scan.master-db.memory-cues-skipped",
+                format!(
+                    "{} rekordbox memory cue(s) not imported (only hot cues and a memory cue before the first hot cue are)",
+                    self.memory_cues_skipped
+                ),
+            );
+        }
         if self.unsupported > 0 {
             summary(
                 Level::Info,
@@ -652,7 +812,8 @@ impl BackendService {
 
         let mut db_conn = self.db.connect()?;
         let tx = db_conn.transaction()?;
-        let mut importer = MasterDbTrackImporter::new(master_path, &tx, &self.db.data_dir())?;
+        let mut importer =
+            MasterDbTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
         for t in &tracks {
             importer.upsert(&tx, t)?;
         }
@@ -707,7 +868,8 @@ impl BackendService {
 
         let mut db_conn = self.db.connect()?;
         let tx = db_conn.transaction()?;
-        let mut importer = MasterDbTrackImporter::new(master_path, &tx, &self.db.data_dir())?;
+        let mut importer =
+            MasterDbTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
 
         let mut local_ids: Vec<String> = Vec::new();
         let mut seen: HashSet<&str> = HashSet::new();
@@ -807,6 +969,16 @@ mod tests {
               ID VARCHAR(255) PRIMARY KEY, HistoryID VARCHAR(255), ContentID VARCHAR(255),
               TrackNo INTEGER, rb_local_deleted INTEGER DEFAULT 0
             );
+            CREATE TABLE djmdCue (
+              ID VARCHAR(255) PRIMARY KEY, ContentID VARCHAR(255), InMsec INTEGER,
+              OutMsec INTEGER, Kind INTEGER, Color INTEGER, ColorTableIndex INTEGER,
+              Comment TEXT, rb_local_deleted INTEGER DEFAULT 0
+            );
+            INSERT INTO djmdCue VALUES
+              ('q1', '103', 53, -1, 0, -1, NULL, NULL, 0),
+              ('q2', '103', 54911, -1, 1, -1, 3, 'Drop', 0),
+              ('q3', '103', 60000, -1, 5, -1, NULL, NULL, 0),
+              ('q4', '103', 70000, -1, 2, -1, 99, NULL, 1);
             INSERT INTO djmdPlaylist VALUES
               ('10', 1, 'Sets', 1, 'root', NULL, 0),
               ('11', 1, 'Friday', 0, '10', NULL, 0),
@@ -869,6 +1041,61 @@ mod tests {
         .unwrap()
     }
 
+    fn rb_cue(kind: i64, in_msec: i64) -> RbCue {
+        RbCue {
+            kind,
+            in_msec,
+            color_table_index: None,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn rekordbox_hot_cue_kinds_skip_four() {
+        let hot: Vec<i64> = (0..=10).filter(|k| rb_is_hot_cue(*k)).collect();
+        assert_eq!(hot, vec![1, 2, 3, 5, 6, 7, 8, 9]);
+    }
+
+    #[test]
+    fn rekordbox_cues_map_hot_cues_and_leading_memory_cue() {
+        // The real "Bash Plate" layout: one memory cue, then pads A-H.
+        let mut cues = vec![rb_cue(0, 53)];
+        for (i, kind) in [1, 2, 3, 5, 6, 7, 8, 9].into_iter().enumerate() {
+            cues.push(rb_cue(kind, 54_911 + i as i64 * 1000));
+        }
+        let (out, skipped) = rekordbox_cues_to_track_cues(&cues);
+        assert_eq!(skipped, 0);
+        assert_eq!(out.len(), 9);
+        assert!(out[0].playback_start);
+        assert_eq!(out[0].position_ms, 53);
+        assert!(out[1..].iter().all(|c| !c.playback_start));
+        assert_eq!(out[1].position_ms, 54_911);
+        assert_eq!(out[8].position_ms, 61_911);
+    }
+
+    #[test]
+    fn rekordbox_other_memory_cues_are_counted_not_imported() {
+        let cues = vec![
+            rb_cue(0, 5_000),
+            rb_cue(1, 10_000),
+            rb_cue(0, 20_000),
+            rb_cue(0, 30_000),
+        ];
+        let (out, skipped) = rekordbox_cues_to_track_cues(&cues);
+        assert_eq!(
+            out.iter()
+                .map(|c| (c.position_ms, c.playback_start))
+                .collect::<Vec<_>>(),
+            vec![(5_000, true), (10_000, false)]
+        );
+        assert_eq!(skipped, 2);
+
+        // Memory cues only (no hot cue): nothing to import, all counted.
+        let (out, skipped) = rekordbox_cues_to_track_cues(&[rb_cue(0, 1_000)]);
+        assert!(out.is_empty());
+        assert_eq!(skipped, 1);
+    }
+
     #[test]
     fn list_and_import_rekordbox_playlists_and_history() {
         let rb_root = tempfile::tempdir().expect("rb root");
@@ -928,6 +1155,33 @@ mod tests {
         assert_eq!(
             playlist_titles(&service, &imported.playlist_id),
             vec!["Charlie", "Alpha", "Bravo"]
+        );
+        let charlie_cues: Vec<(i64, Option<i64>, Option<String>, bool)> = service
+            .db
+            .connect()
+            .unwrap()
+            .prepare(
+                "SELECT c.position_ms, c.color_id, c.name, c.is_playback_start
+                 FROM track_cues c JOIN tracks t ON t.id = c.track_id
+                 WHERE t.title = 'Charlie' ORDER BY c.sort_order",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            charlie_cues,
+            vec![
+                (53, None, None, true),
+                (54_911, Some(3), Some("Drop".to_string()), false),
+                (
+                    60_000,
+                    Some(i64::from(DEFAULT_HOTCUE_COLOR_ID)),
+                    None,
+                    false
+                ),
+            ]
         );
 
         let history = service

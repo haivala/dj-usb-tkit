@@ -6,7 +6,8 @@ This is the documentation set for DJ USB Tkit.
 
 - `PDB` = `export.pdb`
 - `eDB` = `exportLibrary.db`
-- `master DB` = `master.db`
+- `master DB` = `master.db` (rekordbox's desktop library)
+- `Mixxx DB` = `mixxxdb.sqlite` (Mixxx's library)
 - `local DB` = app local SQLite database
 
 ## Overview
@@ -16,6 +17,7 @@ This is the documentation set for DJ USB Tkit.
 ## Functional Docs
 
 - `docs/LIBRARY_ANALYSIS.md` - library scanning, analysis, and waveform behavior
+- `docs/EXTERNAL_LIBRARIES.md` - importing tracks and playlists from rekordbox and Mixxx
 - `docs/PLAYLISTS_PLAYBACK.md` - playlist workflows and native playback behavior
 - `docs/CUE_EDITOR.md` - cue points, beat grid, playback start, keyboard shortcuts, metronome
 - `docs/USB_IMPORT.md` - USB read/merge behavior and hydration model

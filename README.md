@@ -48,6 +48,9 @@ chmod +x DJ_USB_Tkit_*_amd64.AppImage
 ## Current Capabilities
 
 - Library scanning, playlist management, and native local playback.
+- Import tracks and playlists from a rekordbox or Mixxx library on the same
+  computer, including their hot cues (see
+  [docs/EXTERNAL_LIBRARIES.md](docs/EXTERNAL_LIBRARIES.md)).
 - USB import/export with `mirror` and `additive` playlist sync modes.
 - Local BPM, key, waveform, and artwork analysis for missing track metadata.
 - A cue editor for setting a track's hot cues, beat grid, key, and where the

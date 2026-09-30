@@ -57,12 +57,19 @@
   crates; rekordbox playlists inside folders show as "Folder / Name"). The
   one you pick becomes a new playlist in the same order (Mixxx crates by
   artist and title). Its tracks are imported into the library the same way
-  as with "Import RB" / "Import Mixxx", including Mixxx hot cues. A track
+  as with "Import RB" / "Import Mixxx", including hot cues. A track
   listed twice is added once. If none of its tracks are found on this
   computer, nothing is created and the status line says so. Smart playlists
   aren't listed, because rekordbox doesn't store their tracks.
 - **Improvement:** "Import RB" now skips files the library doesn't take
   (such as videos), like the folder scan does.
+- **New feature:** "Import RB" imports rekordbox hot cues (pads A–H, with
+  name and colour). A memory cue before the first hot cue becomes the
+  playback-start cue; other memory cues aren't imported yet. Cues are only
+  added to tracks that don't already have cues in the app.
+- **Chore:** new `docs/EXTERNAL_LIBRARIES.md` on importing tracks and
+  playlists from rekordbox and Mixxx; the command and data-model docs list
+  the new commands, source flags and the frontend settings allowlist.
 - **Fix:** video files (`.mp4` files with a video track) are no longer
   imported into the library. Audio-only `.mp4`
   (AAC) files still are. Videos already in the library drop out on the next
