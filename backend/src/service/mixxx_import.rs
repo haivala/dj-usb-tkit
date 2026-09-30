@@ -229,6 +229,7 @@ struct MixxxTrack {
     duration_ms: Option<i64>,
     sample_rate: Option<u32>,
     cover_location: Option<String>,
+    genre: Option<String>,
 }
 
 fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
@@ -237,7 +238,8 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
     let sql = format!(
         r#"
         SELECT l.id, tl.location, l.title, l.artist, l.album, l.bpm,
-               {key_id}, l.key, l.duration, l.samplerate, {cover_type}, {cover_location}
+               {key_id}, l.key, l.duration, l.samplerate, {cover_type}, {cover_location},
+               {genre}
         FROM library l
         JOIN track_locations tl ON tl.id = l.location
         WHERE IFNULL({mixxx_deleted}, 0) = 0
@@ -247,6 +249,7 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
         key_id = column_or_null(&library_cols, "l", "key_id"),
         cover_type = column_or_null(&library_cols, "l", "coverart_type"),
         cover_location = column_or_null(&library_cols, "l", "coverart_location"),
+        genre = column_or_null(&library_cols, "l", "genre"),
         mixxx_deleted = column_or_null(&library_cols, "l", "mixxx_deleted"),
         fs_deleted = column_or_null(&location_cols, "tl", "fs_deleted"),
     );
@@ -278,6 +281,11 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
                 cover_location: cover_location
                     .filter(|_| cover_type == Some(MIXXX_COVER_TYPE_FILE))
                     .filter(|l| !l.trim().is_empty()),
+                genre: row
+                    .get::<_, Option<String>>(12)?
+                    .as_deref()
+                    .and_then(non_empty_db_value)
+                    .map(str::to_string),
             })
         })
         .map_err(|e| BackendError::Validation(format!("Mixxx library row error: {e}")))?
@@ -440,7 +448,6 @@ struct MixxxTrackImporter<'a> {
     now: String,
     indexed: usize,
     updated: usize,
-    removed: usize,
     not_found: Vec<String>,
     artwork_ok: usize,
     artwork_miss: usize,
@@ -471,7 +478,6 @@ impl<'a> MixxxTrackImporter<'a> {
             now: now(),
             indexed: 0,
             updated: 0,
-            removed: 0,
             not_found: Vec::new(),
             artwork_ok: 0,
             artwork_miss: 0,
@@ -485,15 +491,10 @@ impl<'a> MixxxTrackImporter<'a> {
     /// Insert or update one track; `None` when it was skipped (file missing
     /// or not a supported audio file).
     fn upsert(&mut self, tx: &Connection, t: &MixxxTrack) -> BackendResult<Option<String>> {
+        // A missing file is skipped and reported, never deleted: the drive it's
+        // on may just be unplugged, and deleting the track would take its
+        // cues, edits and places in every playlist with it.
         if !Path::new(&t.file_path).exists() {
-            // Remove from local DB if previously imported; skip upsert
-            if self.existing.remove(&t.file_path).is_some() {
-                tx.execute(
-                    "DELETE FROM tracks WHERE file_path = ?1",
-                    params![t.file_path],
-                )?;
-                self.removed += 1;
-            }
             self.not_found.push(t.file_path.clone());
             return Ok(None);
         }
@@ -528,6 +529,7 @@ impl<'a> MixxxTrackImporter<'a> {
                 // SET expressions see the row's old values.
                 r#"UPDATE tracks SET
                     title = ?1, artist = ?2, album = ?3,
+                    genre = COALESCE(?14, genre),
                     bpm_analyzer = CASE WHEN ?4 IS NOT NULL
                                          AND (?13 OR bpm IS NULL OR bpm_analyzer = 'mixxx')
                                         THEN 'mixxx' ELSE bpm_analyzer END,
@@ -562,6 +564,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     self.now,
                     track_id,
                     self.force,
+                    t.genre,
                 ],
             )?;
             self.updated += 1;
@@ -571,10 +574,10 @@ impl<'a> MixxxTrackImporter<'a> {
                     id, title, artist, album, bpm, tonality, file_path, format_ext,
                     duration_ms, sample_rate_hz, artwork_path, match_fingerprint,
                     mixxx_db_source, created_at, updated_at,
-                    bpm_analyzer, tonality_source
+                    bpm_analyzer, tonality_source, genre
                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
                      CASE WHEN ?5 IS NOT NULL THEN 'mixxx' END,
-                     CASE WHEN ?6 IS NOT NULL THEN 'mixxx' END)"#,
+                     CASE WHEN ?6 IS NOT NULL THEN 'mixxx' END, ?14)"#,
                 params![
                     track_id,
                     t.title,
@@ -589,6 +592,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     artwork_path,
                     fingerprint,
                     self.now,
+                    t.genre,
                 ],
             )?;
             self.existing.insert(t.file_path.clone(), track_id.clone());
@@ -735,7 +739,8 @@ impl BackendService {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,
             updated: importer.updated,
-            removed: importer.removed,
+            // Imports never remove tracks (see `MixxxTrackImporter::upsert`).
+            removed: 0,
             not_found: importer.not_found,
             // Like the master.db import: not scoped to source folders.
             scoped_track_count: 0,
@@ -894,7 +899,7 @@ mod tests {
             CREATE TABLE library (
               id INTEGER PRIMARY KEY, artist TEXT, title TEXT, album TEXT, location INTEGER,
               duration REAL, bpm REAL, key TEXT, key_id INTEGER, samplerate INTEGER,
-              mixxx_deleted INTEGER, coverart_type INTEGER, coverart_location TEXT
+              mixxx_deleted INTEGER, coverart_type INTEGER, coverart_location TEXT, genre TEXT
             );
             CREATE TABLE cues (
               id INTEGER PRIMARY KEY, track_id INTEGER, type INTEGER, position REAL,
@@ -914,8 +919,8 @@ mod tests {
             .expect("insert location");
             conn.execute(
                 "INSERT INTO library (id, artist, title, album, location, duration, bpm, key,
-                   key_id, samplerate, mixxx_deleted, coverart_type, coverart_location)
-                 VALUES (?1, 'Artist', ?2, 'Album', ?1, 185.5, 124.0, 'Am', ?3, ?4, ?5, ?6, ?7)",
+                   key_id, samplerate, mixxx_deleted, coverart_type, coverart_location, genre)
+                 VALUES (?1, 'Artist', ?2, 'Album', ?1, 185.5, 124.0, 'Am', ?3, ?4, ?5, ?6, ?7, 'Techno')",
                 params![
                     id,
                     title,
@@ -1151,6 +1156,20 @@ mod tests {
             [],
         )
         .expect("seed local cue");
+        // Imported earlier; its file is gone now (drive unplugged). It has a cue
+        // and a playlist place, which the import must not take away.
+        conn.execute_batch(&format!(
+            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, created_at, updated_at)
+               VALUES ('missing-track', 'Missing', 'Artist', '{}', 'fp', 'old', 'old');
+             INSERT INTO track_cues (id, track_id, position_ms, sort_order, created_at, updated_at)
+               VALUES ('missing-cue', 'missing-track', 1000, 0, 'old', 'old');
+             INSERT INTO playlists (id, name, source, created_at, updated_at)
+               VALUES ('pl-1', 'Set', 'local', 'old', 'old');
+             INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at)
+               VALUES ('pt-1', 'pl-1', 'missing-track', 1, 'old');",
+            missing_path.to_str().unwrap()
+        ))
+        .expect("seed missing track");
         drop(conn);
 
         let result = service
@@ -1263,6 +1282,28 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(existing_cues, vec!["local-cue".to_string()]);
+
+        // The missing file's track is kept, with its cue and playlist place.
+        let kept: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM tracks WHERE id = 'missing-track'),
+                        (SELECT COUNT(*) FROM track_cues WHERE track_id = 'missing-track'),
+                        (SELECT COUNT(*) FROM playlist_tracks WHERE track_id = 'missing-track')",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("missing track");
+        assert_eq!(kept, (1, 1, 1));
+
+        // Genre comes from Mixxx, for new and existing tracks.
+        let genres: Vec<Option<String>> = conn
+            .prepare("SELECT genre FROM tracks WHERE id IN (?1, 'existing-track') ORDER BY id")
+            .unwrap()
+            .query_map(params![new_id], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(genres, vec![Some("Techno".to_string()); 2]);
 
         // Tracks deleted in Mixxx are skipped entirely.
         let deleted: i64 = conn

@@ -3982,7 +3982,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_master_db_imports_updates_removes_and_reports_resource_warnings() {
+    fn scan_master_db_imports_updates_keeps_missing_and_reports_resource_warnings() {
         let master_root = tempfile::tempdir().expect("master root");
         let media_root = tempfile::tempdir().expect("media root");
         let (_service_dir, service) = test_service();
@@ -4051,7 +4051,9 @@ mod tests {
 
         assert_eq!(result.indexed, 2);
         assert_eq!(result.updated, 1);
-        assert_eq!(result.removed, 1);
+        // A missing file is reported, never deleted (its drive may just be
+        // unplugged).
+        assert_eq!(result.removed, 0);
         assert_eq!(
             result.not_found,
             vec![removed_path.to_string_lossy().to_string()]
@@ -4111,14 +4113,14 @@ mod tests {
                 .is_some_and(|path| path.ends_with(".JPG"))
         );
 
-        let removed_count: i64 = conn
+        let missing_kept: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM tracks WHERE id = 'removed-track'",
                 [],
                 |row| row.get(0),
             )
-            .expect("removed row count");
-        assert_eq!(removed_count, 0);
+            .expect("missing row count");
+        assert_eq!(missing_kept, 1);
 
         let imported_count: i64 = conn
             .query_row(

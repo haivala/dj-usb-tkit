@@ -24,6 +24,7 @@ app's library and turns its source chip on:
 | | rekordbox | Mixxx |
 | --- | --- | --- |
 | Title, artist, album | yes | yes |
+| Genre | yes | yes |
 | BPM, key, length | yes | yes (plus sample rate) |
 | Cover image | yes (rekordbox's artwork file) | only a cover image *file* next to the track; embedded covers come from the app's own analysis |
 | Waveform | rekordbox's own analysis files are used in place | no; the app's analysis makes one |
@@ -48,6 +49,8 @@ win:
   there comes across. A value you edited in the app, or that the app's
   analysis replaced (Reanalyze), is kept.
 - Length is only filled in when the track has none.
+- Title, artist and album follow the library; genre does too when the library
+  has one for the track.
 - Cues are only added to a track that has no cues in the app.
 
 The playlist import can override this per playlist (see **Force update**
@@ -74,7 +77,9 @@ brings them in once the app supports more cues.
 
 Some tracks are skipped, with the reason in the Event Log:
 
-- the file no longer exists (a track imported earlier is removed from the library)
+- the file isn't found, for example because its drive is unplugged. A track
+  imported earlier is kept, with its cues, edits and playlist places; the
+  import just doesn't update it
 - the file isn't one the library takes, such as a video or a tracker module
   (`.it`, `.xm`, …), the same rule the folder scan uses
 - the track was deleted in rekordbox / Mixxx
@@ -189,7 +194,8 @@ mixxxDbSource)`.
 
 - Tracks: `djmdContent` (text `ID`; `FolderPath` is the full file path;
   `BPM` is centi-BPM; `Length` in seconds), joined to `djmdArtist`,
-  `djmdAlbum` and `djmdKey.ScaleName`. `AnalysisDataPath` / `ImagePath` are
+  `djmdAlbum`, `djmdKey.ScaleName` and (when the schema has it)
+  `djmdGenre.Name` via `GenreID`. `AnalysisDataPath` / `ImagePath` are
   `/PIONEER/...` paths under rekordbox's `share` folder.
 - Playlists: `djmdPlaylist` (`Attribute` 0 = playlist, 1 = folder,
   4 = smart playlist; top level has `ParentID = 'root'`; ordered by `Seq`)
@@ -213,7 +219,8 @@ mixxxDbSource)`.
 
 - Tracks: `library` joined to `track_locations` on `library.location`;
   rows with `library.mixxx_deleted` or `track_locations.fs_deleted` set are
-  ignored. `duration` is in seconds, `bpm` a float.
+  ignored. `duration` is in seconds, `bpm` a float; `genre` is read when the
+  column exists.
 - Key: `library.key_id` is Mixxx's ChromaticKey (1–12 = C..B major, 13–24 =
   Cm..Bm minor), mapped to the app's classic key names. When it's unset, the
   `key` text is used if it's a key the app recognises; Mixxx writes that text

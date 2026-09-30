@@ -86,6 +86,7 @@ struct RbTrack {
     duration_ms: Option<i64>,
     anlz_path: Option<String>,
     image_path: Option<String>,
+    genre: Option<String>,
 }
 
 fn load_master_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
@@ -95,8 +96,18 @@ fn load_master_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
     // Key is a FK into djmdKey; ScaleName holds the human-readable name.
     // AnalysisDataPath and ImagePath are desktop library virtual paths on Windows
     // (/PIONEER/...) and resolve under the share directory.
+    // Genre is a FK into djmdGenre; read it only where the schema has both.
+    let has_genre = table_exists(conn, "djmdGenre")
+        && crate::edb::load_table_columns(conn, "djmdContent")?
+            .iter()
+            .any(|c| c == "GenreID");
+    let (genre_col, genre_join) = if has_genre {
+        ("g.Name", "LEFT JOIN djmdGenre g ON g.ID = c.GenreID")
+    } else {
+        ("NULL", "")
+    };
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             r#"
         SELECT
           c.FolderPath,
@@ -108,15 +119,17 @@ fn load_master_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
           c.Length,
           c.AnalysisDataPath,
           c.ImagePath,
-          CAST(c.ID AS TEXT)
+          CAST(c.ID AS TEXT),
+          {genre_col}
         FROM djmdContent c
         LEFT JOIN djmdArtist  ar ON ar.ID = c.ArtistID
         LEFT JOIN djmdAlbum   al ON al.ID = c.AlbumID
         LEFT JOIN djmdKey     k  ON k.ID  = c.KeyID
+        {genre_join}
         WHERE IFNULL(c.rb_local_deleted, 0) = 0
           AND c.FolderPath IS NOT NULL
         "#,
-        )
+        ))
         .map_err(|e| BackendError::Validation(format!("master.db query failed: {e}")))?;
 
     let tracks = stmt
@@ -136,6 +149,11 @@ fn load_master_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
                 anlz_path: row.get::<_, Option<String>>(7)?,
                 image_path: row.get::<_, Option<String>>(8)?,
                 content_id: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                genre: row
+                    .get::<_, Option<String>>(10)?
+                    .as_deref()
+                    .and_then(non_empty_db_value)
+                    .map(str::to_string),
             })
         })
         .map_err(|e| BackendError::Validation(format!("master.db row error: {e}")))?
@@ -485,7 +503,6 @@ struct MasterDbTrackImporter<'a> {
     now: String,
     indexed: usize,
     updated: usize,
-    removed: usize,
     not_found: Vec<String>,
     unsupported: usize,
     anlz_null: usize,
@@ -530,7 +547,6 @@ impl<'a> MasterDbTrackImporter<'a> {
             now: now(),
             indexed: 0,
             updated: 0,
-            removed: 0,
             not_found: Vec::new(),
             unsupported: 0,
             anlz_null: 0,
@@ -551,15 +567,10 @@ impl<'a> MasterDbTrackImporter<'a> {
     /// Insert or update one track; `None` when it was skipped (file missing
     /// or not a supported audio file).
     fn upsert(&mut self, tx: &Connection, t: &RbTrack) -> BackendResult<Option<String>> {
+        // A missing file is skipped and reported, never deleted: the drive it's
+        // on may just be unplugged, and deleting the track would take its
+        // cues, edits and places in every playlist with it.
         if !Path::new(&t.file_path).exists() {
-            // Remove from local DB if previously imported; skip upsert
-            if self.existing.remove(&t.file_path).is_some() {
-                tx.execute(
-                    "DELETE FROM tracks WHERE file_path = ?1",
-                    params![t.file_path],
-                )?;
-                self.removed += 1;
-            }
             self.not_found.push(t.file_path.clone());
             return Ok(None);
         }
@@ -593,6 +604,7 @@ impl<'a> MasterDbTrackImporter<'a> {
                 // SET expressions see the row's old values.
                 r#"UPDATE tracks SET
                     title = ?1, artist = ?2, album = ?3,
+                    genre = COALESCE(?14, genre),
                     bpm_analyzer = CASE WHEN ?4 IS NOT NULL
                                          AND (?13 OR bpm IS NULL OR bpm_analyzer = 'rekordbox')
                                         THEN 'rekordbox' ELSE bpm_analyzer END,
@@ -626,7 +638,8 @@ impl<'a> MasterDbTrackImporter<'a> {
                     self.now,
                     track_id,
                     crate::utils::format_ext_from_path(&t.file_path),
-                    self.force
+                    self.force,
+                    t.genre
                 ],
             )?;
             self.updated += 1;
@@ -636,10 +649,10 @@ impl<'a> MasterDbTrackImporter<'a> {
                     id, title, artist, album, bpm, tonality, file_path, format_ext,
                     duration_ms, waveform_peaks_path, artwork_path, match_fingerprint,
                     master_db_source, created_at, updated_at,
-                    bpm_analyzer, tonality_source
+                    bpm_analyzer, tonality_source, genre
                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
                      CASE WHEN ?5 IS NOT NULL THEN 'rekordbox' END,
-                     CASE WHEN ?6 IS NOT NULL THEN 'rekordbox' END)"#,
+                     CASE WHEN ?6 IS NOT NULL THEN 'rekordbox' END, ?14)"#,
                 params![
                     track_id,
                     t.title,
@@ -653,7 +666,8 @@ impl<'a> MasterDbTrackImporter<'a> {
                     waveform_path,
                     artwork_path,
                     fingerprint,
-                    self.now
+                    self.now,
+                    t.genre
                 ],
             )?;
             self.existing.insert(t.file_path.clone(), track_id.clone());
@@ -883,7 +897,8 @@ impl BackendService {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,
             updated: importer.updated,
-            removed: importer.removed,
+            // Imports never remove tracks (see `MasterDbTrackImporter::upsert`).
+            removed: 0,
             not_found: importer.not_found,
             // Master-DB scan isn't scoped to source folders; the post-scan
             // library facts are only surfaced for `scan_library`.
@@ -1014,8 +1029,10 @@ mod tests {
             CREATE TABLE djmdContent (
               ID VARCHAR(255) PRIMARY KEY, FolderPath TEXT, Title TEXT, SrcArtistName TEXT,
               ArtistID TEXT, AlbumID TEXT, BPM INTEGER, KeyID TEXT, Length INTEGER,
-              AnalysisDataPath TEXT, ImagePath TEXT, rb_local_deleted INTEGER DEFAULT 0
+              AnalysisDataPath TEXT, ImagePath TEXT, GenreID TEXT, rb_local_deleted INTEGER DEFAULT 0
             );
+            CREATE TABLE djmdGenre (ID VARCHAR(255) PRIMARY KEY, Name TEXT);
+            INSERT INTO djmdGenre VALUES ('g1', 'Drum & Bass');
             CREATE TABLE djmdPlaylist (
               ID VARCHAR(255) PRIMARY KEY, Seq INTEGER, Name TEXT, Attribute INTEGER,
               ParentID VARCHAR(255), SmartList TEXT, rb_local_deleted INTEGER DEFAULT 0
@@ -1082,8 +1099,8 @@ mod tests {
         ];
         for (id, file_path, title, deleted) in rows {
             conn.execute(
-                "INSERT INTO djmdContent (ID, FolderPath, Title, SrcArtistName, BPM, Length, rb_local_deleted)
-                 VALUES (?1, ?2, ?3, 'Artist', 12800, 200, ?4)",
+                "INSERT INTO djmdContent (ID, FolderPath, Title, SrcArtistName, BPM, Length, GenreID, rb_local_deleted)
+                 VALUES (?1, ?2, ?3, 'Artist', 12800, 200, 'g1', ?4)",
                 params![id, file_path, title, deleted],
             )
             .expect("insert content");
@@ -1381,6 +1398,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(charlie, (Some(128.0), Some("rekordbox".to_string())));
+        let genre: Option<String> = service
+            .db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT genre FROM tracks WHERE title = 'Charlie'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(genre.as_deref(), Some("Drum & Bass"));
         assert_eq!(
             charlie_cues,
             vec![
