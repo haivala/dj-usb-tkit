@@ -39,6 +39,18 @@
 
 ## Unreleased
 
+**Severity:** feature
+
+- **New feature:** import a Mixxx library. When the app finds Mixxx's
+  library (`mixxxdb.sqlite`), an "Import Mixxx" button and a "Mixxx" source
+  chip appear in the Media Library. Importing brings in each track's title,
+  artist, album, BPM, key, length and cover image file, plus its hot cues
+  (position, colour and label) and main cue as the playback-start cue.
+  Cues are only added to tracks that don't already have cues in the app.
+  Mixxx waveforms and beat grids aren't imported, so imported tracks are
+  analyzed like any other track. Files the library doesn't take (tracker
+  modules, videos) are skipped. The chip turns Mixxx tracks on and off in
+  the library view, separately from the rekordbox library.
 - **Fix:** video files (`.mp4` files with a video track) are no longer
   imported into the library. Audio-only `.mp4`
   (AAC) files still are. Videos already in the library drop out on the next
