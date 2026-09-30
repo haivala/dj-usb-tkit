@@ -310,10 +310,11 @@ const PLAYLIST_IMPORT_SOURCES = [
   }
 ];
 
+// [kind, group label, one list of that kind]
 const PLAYLIST_IMPORT_KINDS = [
-  ["playlist", "playlists"],
-  ["crate", "crates"],
-  ["history", "history"]
+  ["playlist", "playlists", "playlist"],
+  ["crate", "crates", "crate"],
+  ["history", "history", "history session"]
 ];
 
 // Pick one playlist / crate / history session from a detected rekordbox or
@@ -334,9 +335,14 @@ export async function importExternalPlaylist(ctx) {
       return null;
     }
   }));
-  const groups = sources.flatMap((source, index) => PLAYLIST_IMPORT_KINDS.map(([kind, kindLabel]) => ({
+  const groups = sources.flatMap((source, index) => PLAYLIST_IMPORT_KINDS.map(([kind, kindLabel, oneLabel]) => ({
     label: `${source.label} ${kindLabel}`,
-    items: (listed[index] || []).filter((item) => item.kind === kind)
+    items: (listed[index] || [])
+      .filter((item) => item.kind === kind)
+      .map((item) => ({
+        ...item,
+        description: `${source.label} ${oneLabel} · ${item.trackCount} ${item.trackCount === 1 ? "track" : "tracks"}`
+      }))
   })));
   if (!groups.some((group) => group.items.length)) {
     // Keep a listing error on the status line rather than hiding it.

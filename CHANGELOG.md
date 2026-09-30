@@ -51,6 +51,13 @@
   analyzed like any other track. Files the library doesn't take (tracker
   modules, videos) are skipped. The chip turns Mixxx tracks on and off in
   the library view, separately from the rekordbox library.
+- **New feature:** "Import RB" imports rekordbox cues, hot cues first. Hot
+  cues (pads A–H, with name and colour) become cue points; a memory cue
+  before the first hot cue becomes the playback-start cue; other memory cues
+  fill the cue points still free. A track with only memory cues (set up for
+  older players) gets its first memory cue as the playback start and the
+  next 8 as cue points. Cues are only added to tracks that don't already
+  have cues in the app.
 - **New feature:** import a playlist from rekordbox or Mixxx. The sidebar's
   Playlists section gets an "Import" button when either library is found.
   It lists the playlists and history sessions that have tracks (plus Mixxx
@@ -61,15 +68,6 @@
   listed twice is added once. If none of its tracks are found on this
   computer, nothing is created and the status line says so. Smart playlists
   aren't listed, because rekordbox doesn't store their tracks.
-- **Improvement:** "Import RB" now skips files the library doesn't take
-  (such as videos), like the folder scan does.
-- **New feature:** "Import RB" imports rekordbox hot cues (pads A–H, with
-  name and colour). A memory cue before the first hot cue becomes the
-  playback-start cue; other memory cues aren't imported yet. Cues are only
-  added to tracks that don't already have cues in the app.
-- **Chore:** new `docs/EXTERNAL_LIBRARIES.md` on importing tracks and
-  playlists from rekordbox and Mixxx; the command and data-model docs list
-  the new commands, source flags and the frontend settings allowlist.
 - **Fix:** video files (`.mp4` files with a video track) are no longer
   imported into the library. Audio-only `.mp4`
   (AAC) files still are. Videos already in the library drop out on the next
@@ -103,6 +101,8 @@
   "hide the bar" delay still fired and blanked the new job's progress.
 - **Fix:** clicking × on the new-playlist name field reliably cancels it,
   instead of sometimes creating the playlist anyway.
+- **Improvement:** "Import RB" now skips files the library doesn't take
+  (such as videos), like the folder scan does.
 - **Improvement:** "Import Playlists" on the USB view finishes a little
   faster. It no longer pauses between steps just to show progress messages.
 - **Improvement:** saving cue edits to a USB that another USB job is using
@@ -112,6 +112,13 @@
   no longer logs a line for every job event (each one also became an Event
   Log entry and a write to the log file), and an open Event Log adds new
   entries in place instead of redrawing up to 1,000 rows for each one.
+- **Improvement:** refreshing the library folders' "fully analyzed" (green)
+  status, which happens after every analysis batch and job, now uses its
+  own backend command. Before, it ran a full library browse (including
+  sorting every track) just to read that status.
+- **Chore:** new `docs/EXTERNAL_LIBRARIES.md` on importing tracks and
+  playlists from rekordbox and Mixxx; the command and data-model docs list
+  the new commands, source flags and the frontend settings allowlist.
 - **Chore:** a smaller frontend: the UI code shares one app context instead
   of passing dependencies around by hand, all HTML now lives as templates in
   `index.html` rather than being built in JavaScript (`main.js` went from
@@ -119,10 +126,6 @@
   (447 KB → 211 KB). The UI also no longer re-checks and re-coerces the
   track, USB playlist and player-menu data the backend already sends fully
   typed.
-- **Improvement:** refreshing the library folders' "fully analyzed" (green)
-  status, which happens after every analysis batch and job, now uses its
-  own backend command. Before, it ran a full library browse (including
-  sorting every track) just to read that status.
 - **Chore:** further frontend cleanup: one status-message function instead
   of two names for it, the playback-button helpers loaded as a normal module
   instead of a global script, DOM references collected from `index.html`

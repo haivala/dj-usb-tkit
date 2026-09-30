@@ -174,7 +174,8 @@ export function createConfirmDialogController(el) {
 
 // Picker for importing one external playlist. `open({ groups })` takes
 // `[{ label, items }]` (one <optgroup> each) and resolves with the chosen
-// item, or null when cancelled.
+// item, or null when cancelled. The line under the select shows the chosen
+// item's `description` -- the group isn't visible once the list is closed.
 export function createPlaylistImportDialogController(el, document) {
   let resolveFn = null;
   let isOpen = false;
@@ -196,9 +197,15 @@ export function createPlaylistImportDialogController(el, document) {
       select.appendChild(group);
     }
     select.selectedIndex = 0;
+    syncDescription();
+  }
+
+  function syncDescription() {
+    el.playlistImportSource.textContent = items[Number(el.playlistImportSelect.value)]?.description || "";
   }
 
   return {
+    syncDescription,
     isOpen() {
       return isOpen;
     },

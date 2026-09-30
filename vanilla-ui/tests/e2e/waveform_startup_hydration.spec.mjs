@@ -318,6 +318,10 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
   expect(await page.locator("#playlistImportSelect optgroup").evaluateAll((groups) => groups.map((g) => g.label)))
     .toEqual(["rekordbox playlists", "rekordbox history", "Mixxx playlists", "Mixxx crates", "Mixxx history"]);
   await expect(page.locator('#playlistImportSelect optgroup[label="Mixxx crates"] option')).toHaveText("Peak (2)");
+  // The closed select shows only the name: the line under it names the source.
+  await expect(page.locator("#playlistImportSource")).toHaveText("rekordbox playlist · 40 tracks");
+  await page.locator("#playlistImportSelect").selectOption({ label: "Peak (2)" });
+  await expect(page.locator("#playlistImportSource")).toHaveText("Mixxx crate · 2 tracks");
 
   // Escape cancels without importing.
   await page.keyboard.press("Escape");
@@ -326,6 +330,7 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
 
   await importBtn.click();
   await page.locator("#playlistImportSelect").selectOption({ label: "2026-09-30 (4)" });
+  await expect(page.locator("#playlistImportSource")).toHaveText("Mixxx history session · 4 tracks");
   await page.locator("#playlistImportOkBtn").click();
   await expect(overlay).toBeHidden();
   await expect.poll(async () => page.evaluate(() => window.__playlistImports)).toEqual([

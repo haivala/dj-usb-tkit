@@ -362,63 +362,89 @@ fn rb_is_hot_cue(kind: i64) -> bool {
     matches!(kind, 1..=3 | 5..=9)
 }
 
-/// Convert a track's rekordbox cues into this app's cue list: hot cues (and
-/// hot loops, at their start) become cue points in position order, capped at
-/// [`MAX_HOT_CUES`]; the earliest memory cue becomes the playback-start cue
-/// when it lies before the first hot cue (the same rule `split_playback_start`
-/// applies on export). Returns the list and how many memory cues it left out
-/// -- the app has no separate memory cues.
+/// Convert a track's rekordbox cues into this app's cue list (up to
+/// [`MAX_HOT_CUES`] cue points plus one playback-start cue), hot cues first:
+///
+/// - Every hot cue (and hot loop, at its start) becomes a cue point.
+/// - The earliest memory cue becomes the playback-start cue -- where a CDJ's
+///   auto-cue loads the track -- when it lies before the first hot cue. On a
+///   track with no hot cues it needs another memory cue after it: a start cue
+///   with no cue point is dropped on save and export, so a lone memory cue
+///   becomes a cue point instead.
+/// - The other memory cues fill the free cue-point slots in position order; one
+///   at a hot cue's position merges into that cue (it keeps its memory point
+///   on export).
+///
+/// Returns the list and how many memory cues found no free slot (the app has
+/// no separate memory cues yet; importing again once it does picks them up).
 pub(crate) fn rekordbox_cues_to_track_cues(cues: &[RbCue]) -> (Vec<TrackCue>, usize) {
-    let mut hot: Vec<TrackCue> = cues
-        .iter()
-        .filter(|c| rb_is_hot_cue(c.kind) && c.in_msec >= 0)
-        .map(|c| TrackCue {
-            id: Uuid::now_v7().to_string(),
-            position_ms: u32::try_from(c.in_msec).unwrap_or(u32::MAX),
-            // The app writes its palette id as the USB `cue.colorTableIndex`;
-            // read it back the same way. Unset (or outside the palette) gets
-            // the default colour.
-            color_id: Some(
-                c.color_table_index
-                    .and_then(|i| u8::try_from(i).ok())
-                    .filter(|i| is_valid_color_id(*i))
-                    .unwrap_or(DEFAULT_HOTCUE_COLOR_ID),
-            ),
-            name: c
-                .comment
-                .as_deref()
-                .and_then(non_empty_db_value)
-                .map(str::to_string),
-            playback_start: false,
-        })
-        .collect();
-    hot.sort_by_key(|c| c.position_ms);
-    hot.dedup_by_key(|c| c.position_ms);
-    hot.truncate(MAX_HOT_CUES as usize);
+    let to_cue = |c: &RbCue| TrackCue {
+        id: Uuid::now_v7().to_string(),
+        position_ms: u32::try_from(c.in_msec).unwrap_or(u32::MAX),
+        // The app writes its palette id as the USB `cue.colorTableIndex`;
+        // read it back the same way. Unset (or outside the palette) gets the
+        // default colour.
+        color_id: Some(
+            c.color_table_index
+                .and_then(|i| u8::try_from(i).ok())
+                .filter(|i| is_valid_color_id(*i))
+                .unwrap_or(DEFAULT_HOTCUE_COLOR_ID),
+        ),
+        name: c
+            .comment
+            .as_deref()
+            .and_then(non_empty_db_value)
+            .map(str::to_string),
+        playback_start: false,
+    };
+    let sorted = |memory: bool| {
+        let mut out: Vec<TrackCue> = cues
+            .iter()
+            .filter(|c| c.in_msec >= 0)
+            .filter(|c| {
+                if memory {
+                    c.kind == RB_CUE_KIND_MEMORY
+                } else {
+                    rb_is_hot_cue(c.kind)
+                }
+            })
+            .map(to_cue)
+            .collect();
+        out.sort_by_key(|c| c.position_ms);
+        out.dedup_by_key(|c| c.position_ms);
+        out
+    };
 
-    let mut memory: Vec<u32> = cues
-        .iter()
-        .filter(|c| c.kind == RB_CUE_KIND_MEMORY && c.in_msec >= 0)
-        .map(|c| u32::try_from(c.in_msec).unwrap_or(u32::MAX))
-        .collect();
-    memory.sort_unstable();
-    let start = hot
-        .first()
-        .and_then(|first| memory.first().copied().filter(|ms| *ms < first.position_ms));
-    let skipped_memory = memory.len() - usize::from(start.is_some());
+    let mut points = sorted(false);
+    points.truncate(MAX_HOT_CUES as usize);
+    let mut memory = sorted(true);
 
-    let mut out = Vec::with_capacity(hot.len() + 1);
-    if let Some(position_ms) = start {
+    let first_hot = points.first().map(|c| c.position_ms);
+    let has_start = match (memory.first(), first_hot) {
+        (Some(first), Some(hot)) => first.position_ms < hot,
+        (Some(_), None) => memory.len() > 1,
+        (None, _) => false,
+    };
+    let start = has_start.then(|| memory.remove(0));
+
+    let hot_positions: HashSet<u32> = points.iter().map(|c| c.position_ms).collect();
+    memory.retain(|c| !hot_positions.contains(&c.position_ms));
+    let free = (MAX_HOT_CUES as usize).saturating_sub(points.len());
+    let skipped = memory.len().saturating_sub(free);
+    points.extend(memory.into_iter().take(free));
+    points.sort_by_key(|c| c.position_ms);
+
+    let mut out = Vec::with_capacity(points.len() + 1);
+    if let Some(start) = start {
         out.push(TrackCue {
-            id: Uuid::now_v7().to_string(),
-            position_ms,
             color_id: None,
             name: None,
             playback_start: true,
+            ..start
         });
     }
-    out.extend(hot);
-    (out, skipped_memory)
+    out.extend(points);
+    (out, skipped)
 }
 
 fn load_rb_cues(conn: &Connection, content_id: &str) -> BackendResult<Vec<RbCue>> {
@@ -741,7 +767,7 @@ impl<'a> MasterDbTrackImporter<'a> {
                 Level::Info,
                 "scan.master-db.memory-cues-skipped",
                 format!(
-                    "{} rekordbox memory cue(s) not imported (only hot cues and a memory cue before the first hot cue are)",
+                    "{} rekordbox memory cue(s) not imported: no free cue slot after the hot cues",
                     self.memory_cues_skipped
                 ),
             );
@@ -1073,8 +1099,14 @@ mod tests {
         assert_eq!(out[8].position_ms, 61_911);
     }
 
+    fn summary(cues: &[TrackCue]) -> Vec<(u32, bool)> {
+        cues.iter()
+            .map(|c| (c.position_ms, c.playback_start))
+            .collect()
+    }
+
     #[test]
-    fn rekordbox_other_memory_cues_are_counted_not_imported() {
+    fn rekordbox_memory_cues_fill_free_slots_after_hot_cues() {
         let cues = vec![
             rb_cue(0, 5_000),
             rb_cue(1, 10_000),
@@ -1083,17 +1115,66 @@ mod tests {
         ];
         let (out, skipped) = rekordbox_cues_to_track_cues(&cues);
         assert_eq!(
-            out.iter()
-                .map(|c| (c.position_ms, c.playback_start))
-                .collect::<Vec<_>>(),
-            vec![(5_000, true), (10_000, false)]
+            summary(&out),
+            vec![
+                (5_000, true),
+                (10_000, false),
+                (20_000, false),
+                (30_000, false)
+            ]
         );
-        assert_eq!(skipped, 2);
+        assert_eq!(skipped, 0);
+    }
 
-        // Memory cues only (no hot cue): nothing to import, all counted.
+    #[test]
+    fn rekordbox_hot_cues_take_priority_over_memory_cues() {
+        // 7 hot cues leave one free slot for the 3 later memory cues.
+        let mut cues: Vec<RbCue> = [1, 2, 3, 5, 6, 7, 8]
+            .into_iter()
+            .enumerate()
+            .map(|(i, kind)| rb_cue(kind, 10_000 + i as i64 * 1_000))
+            .collect();
+        cues.extend([
+            rb_cue(0, 1_000),
+            rb_cue(0, 40_000),
+            rb_cue(0, 50_000),
+            rb_cue(0, 60_000),
+        ]);
+        let (out, skipped) = rekordbox_cues_to_track_cues(&cues);
+        assert_eq!(out.len(), 9);
+        assert_eq!(summary(&out)[0], (1_000, true));
+        assert_eq!(out.last().unwrap().position_ms, 40_000);
+        assert_eq!(skipped, 2);
+    }
+
+    #[test]
+    fn rekordbox_memory_only_track_gets_start_plus_eight_cues() {
+        let cues: Vec<RbCue> = (0..12).map(|i| rb_cue(0, 1_000 + i * 1_000)).collect();
+        let (out, skipped) = rekordbox_cues_to_track_cues(&cues);
+        assert_eq!(out.len(), 9);
+        assert_eq!(summary(&out)[0], (1_000, true));
+        assert!(out[1..].iter().all(|c| !c.playback_start));
+        assert_eq!(out.last().unwrap().position_ms, 9_000);
+        assert_eq!(skipped, 3);
+        // A memory cue that becomes a cue point gets the default colour.
+        assert_eq!(out[1].color_id, Some(DEFAULT_HOTCUE_COLOR_ID));
+    }
+
+    #[test]
+    fn rekordbox_lone_memory_cue_becomes_a_cue_point() {
         let (out, skipped) = rekordbox_cues_to_track_cues(&[rb_cue(0, 1_000)]);
-        assert!(out.is_empty());
-        assert_eq!(skipped, 1);
+        assert_eq!(summary(&out), vec![(1_000, false)]);
+        assert_eq!(skipped, 0);
+    }
+
+    #[test]
+    fn rekordbox_memory_cue_after_first_hot_cue_is_no_start() {
+        // No memory cue before the hot cue: nothing becomes the start, and a
+        // memory cue on a hot cue's position merges into it.
+        let cues = vec![rb_cue(0, 20_000), rb_cue(1, 10_000), rb_cue(0, 10_000)];
+        let (out, skipped) = rekordbox_cues_to_track_cues(&cues);
+        assert_eq!(summary(&out), vec![(10_000, false), (20_000, false)]);
+        assert_eq!(skipped, 0);
     }
 
     #[test]

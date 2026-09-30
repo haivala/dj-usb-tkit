@@ -27,7 +27,7 @@ app's library and turns its source chip on:
 | BPM, key, length | yes | yes (plus sample rate) |
 | Cover image | yes (rekordbox's artwork file) | only a cover image *file* next to the track; embedded covers come from the app's own analysis |
 | Waveform | rekordbox's own analysis files are used in place | no; the app's analysis makes one |
-| Hot cues | yes: hot cues (and hot loops) on pads A–H, with colour and name; a memory cue before the first hot cue becomes the playback-start cue | yes: hot cues and saved loops on pads 1–8, with colour and label; the main cue becomes the playback-start cue |
+| Hot cues | yes: hot cues (and hot loops) on pads A–H, with colour and name, then memory cues (see below) | yes: hot cues and saved loops on pads 1–8, with colour and label; the main cue becomes the playback-start cue |
 
 Mixxx stores its waveforms and beat grids in its own formats, so Mixxx tracks
 need the app's analysis before export, like any folder track. rekordbox tracks
@@ -40,8 +40,21 @@ cues are only added to a track that has no cues in the app.
 The app's cue list is up to 8 cue points plus one playback-start cue, and
 cue points take pads A–H in position order. So an imported hot cue can land on
 a different pad letter than in rekordbox or Mixxx if the pads weren't in
-position order there. rekordbox memory cues other than the one before the
-first hot cue aren't imported; the Event Log counts them.
+position order there.
+
+rekordbox cues are imported hot cues first:
+
+- every hot cue becomes a cue point
+- the earliest memory cue becomes the playback-start cue (where a CDJ's
+  auto-cue loads the track) when it comes before the first hot cue
+- the other memory cues fill the cue points still free, in position order;
+  each one is exported as both a memory point and a hot cue
+- a memory cue that is a track's only cue becomes a cue point
+
+So a track with only memory cues, as set up for older players, gets its first
+memory cue as the playback start and the next 8 as cue points. Memory cues
+that don't fit aren't imported; the Event Log counts them. Importing again
+brings them in once the app supports more cues.
 
 Some tracks are skipped, with the reason in the Event Log:
 
@@ -69,7 +82,10 @@ when either library is found. It opens a picker listing, per library:
 - **Mixxx history** (set logs), newest first.
 
 Only lists with tracks are shown. rekordbox smart playlists aren't listed,
-because rekordbox doesn't store their tracks.
+because rekordbox doesn't store their tracks. The line under the list says
+where the selected one comes from, for example `Mixxx crate · 3 tracks`.
+
+![Import under New, picking a playlist, and the imported playlist opening](assets/import-playlist.gif)
 
 The chosen list becomes a new playlist with the same name and track order
 (Mixxx crates have no order, so their tracks are sorted by artist and title).
@@ -141,7 +157,9 @@ mixxxDbSource)`.
   `ColorTableIndex`). `Kind` 0 is a memory cue and hot-cue pads A–H are
   `Kind` 1, 2, 3, 5, 6, 7, 8, 9 (rekordbox skips 4). Hot cues become cue
   points; the earliest memory cue becomes the playback-start cue when it lies
-  before the first hot cue. `ColorTableIndex` is read with the same codes the
+  before the first hot cue (with no hot cues, when another memory cue
+  follows); the other memory cues fill the free cue points by position, and
+  one at a hot cue's position merges into it. `ColorTableIndex` is read with the same codes the
   app writes to the USB eDB's `cue.colorTableIndex` (its palette ids 1–8);
   unset or other values get the default colour. Colours set in rekordbox are
   not yet validated against real data.
@@ -163,8 +181,9 @@ mixxxDbSource)`.
   track's folder (or absolute). Embedded covers (`coverart_type = 1`) are
   left to analysis.
 - Cues: `cues.type` 1 (hot cue) and 4 (saved loop) with `hotcue >= 0`
-  become cue points, ordered by position, deduplicated by position and
-  capped at 8. Type 2 (main cue) becomes the playback-start cue when it lies
+  become cue points, at most 8. With more pads set, the lowest-numbered
+  pads (`hotcue` 0-7 = pads 1-8) win; the kept cues are ordered by position,
+  one per position. Type 2 (main cue) becomes the playback-start cue when it lies
   before the first hot cue. Intro, outro and other markers are ignored.
   `position` is in interleaved stereo samples:
   `ms = position / (2 × samplerate) × 1000`. `color` (`0xRRGGBB`) maps to the

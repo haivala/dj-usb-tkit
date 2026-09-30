@@ -3225,6 +3225,13 @@ td button[data-action]:disabled,
   min-width: 0;
 }
 
+/* Which library / kind the selected playlist comes from (the closed select
+   only shows its name). */
+.playlist-import-source {
+  color: var(--ink);
+  font-size: 15px;
+}
+
 .tracklist-export-field select {
   width: 100%;
   max-width: 100%;

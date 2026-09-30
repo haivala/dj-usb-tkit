@@ -129,37 +129,49 @@ pub(crate) struct MixxxCue {
 }
 
 /// Convert a track's Mixxx cues into this app's cue list: every cue on a
-/// hot-cue pad (plain hot cues and saved loops) becomes a cue point in
-/// position order, capped at [`MAX_HOT_CUES`]; the main cue becomes the
-/// playback-start cue when it lies before the first hot cue (the same rule
-/// `split_playback_start` applies on export).
+/// hot-cue pad (plain hot cues and saved loops) becomes a cue point, in
+/// position order, capped at [`MAX_HOT_CUES`]. Mixxx allows more pads than
+/// that: the lowest-numbered pads win (pads 1-8 are the ones an 8-pad
+/// controller plays). The main cue becomes the playback-start cue when it
+/// lies before the first hot cue (the same rule `split_playback_start`
+/// applies on export).
 pub(crate) fn mixxx_cues_to_track_cues(cues: &[MixxxCue], sample_rate: u32) -> Vec<TrackCue> {
-    let mut hot: Vec<TrackCue> = cues
+    let mut on_pads: Vec<(i64, TrackCue)> = cues
         .iter()
         .filter(|c| (c.cue_type == MIXXX_CUE_HOT || c.cue_type == MIXXX_CUE_LOOP) && c.hotcue >= 0)
         .filter_map(|c| {
             let position_ms = mixxx_samples_to_ms(c.position, sample_rate)?;
-            Some(TrackCue {
-                id: Uuid::now_v7().to_string(),
-                position_ms,
-                color_id: Some(
-                    c.color
-                        .and_then(|rgb| u32::try_from(rgb).ok())
-                        .map(nearest_palette_color_id)
-                        .unwrap_or(super::cues::DEFAULT_HOTCUE_COLOR_ID),
-                ),
-                name: c
-                    .label
-                    .as_deref()
-                    .and_then(non_empty_db_value)
-                    .map(str::to_string),
-                playback_start: false,
-            })
+            Some((
+                c.hotcue,
+                TrackCue {
+                    id: Uuid::now_v7().to_string(),
+                    position_ms,
+                    color_id: Some(
+                        c.color
+                            .and_then(|rgb| u32::try_from(rgb).ok())
+                            .map(nearest_palette_color_id)
+                            .unwrap_or(super::cues::DEFAULT_HOTCUE_COLOR_ID),
+                    ),
+                    name: c
+                        .label
+                        .as_deref()
+                        .and_then(non_empty_db_value)
+                        .map(str::to_string),
+                    playback_start: false,
+                },
+            ))
         })
         .collect();
+    // Lowest pads first; of two pads on the same position, the lower one.
+    on_pads.sort_by_key(|(pad, c)| (*pad, c.position_ms));
+    let mut positions = HashSet::new();
+    let mut hot: Vec<TrackCue> = on_pads
+        .into_iter()
+        .map(|(_, c)| c)
+        .filter(|c| positions.insert(c.position_ms))
+        .take(MAX_HOT_CUES as usize)
+        .collect();
     hot.sort_by_key(|c| c.position_ms);
-    hot.dedup_by_key(|c| c.position_ms);
-    hot.truncate(MAX_HOT_CUES as usize);
 
     let start = hot.first().and_then(|first| {
         cues.iter()
@@ -963,6 +975,32 @@ mod tests {
         let out = mixxx_cues_to_track_cues(&main_after, 44_100);
         assert_eq!(out.len(), 1);
         assert!(!out[0].playback_start);
+    }
+
+    #[test]
+    fn mixxx_lowest_pads_win_over_earlier_extra_pads() {
+        // Pads 1-8 spread through the track; pads 9-12 set near the start.
+        let mut cues: Vec<MixxxCue> = (0..8)
+            .map(|pad| {
+                cue(
+                    MIXXX_CUE_HOT,
+                    88_200.0 * f64::from(60 + pad * 10),
+                    i64::from(pad),
+                    None,
+                )
+            })
+            .collect();
+        cues.extend((8..12).map(|pad| {
+            cue(
+                MIXXX_CUE_HOT,
+                88_200.0 * f64::from(pad),
+                i64::from(pad),
+                None,
+            )
+        }));
+        let out = mixxx_cues_to_track_cues(&cues, 44_100);
+        let seconds: Vec<u32> = out.iter().map(|c| c.position_ms / 1000).collect();
+        assert_eq!(seconds, vec![60, 70, 80, 90, 100, 110, 120, 130]);
     }
 
     #[test]

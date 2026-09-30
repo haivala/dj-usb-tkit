@@ -1,7 +1,9 @@
 // Page init script for record.mjs: stands in for the Tauri backend with the
 // payloads the real backend produced (window.__DOC_GIF_FIXTURE__) plus
 // made-up playlists and a connected USB, and draws a cursor and a Shift
-// keycap, which a headless screencast doesn't show.
+// keycap, which a headless screencast doesn't show. With
+// `opts.externalLibraries`, a rekordbox and a Mixxx library are "detected"
+// and their made-up playlists can be imported.
 (() => {
   const { tracks, detail, sourceRoots, sourceRootEnabled, playlists } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
@@ -29,14 +31,27 @@
   const ok = (data) => ({ ok: true, data });
   const sumMs = (items) => items.reduce((ms, t) => ms + (Number(t.durationMs) || 0), 0);
   const exportedAt = "2026-09-26T18:00:00Z";
+  const external = opts.externalLibraries || null;
+  const byTitles = (titles) => titles.map((title) => tracks.find((t) => t.title === title)).filter(Boolean);
+  // Imported playlists join the sidebar like any local playlist.
+  const importPlaylist = (source, r) => {
+    const item = external[source].find((p) => p.id === r.id && p.kind === r.kind);
+    const id = `pl-import-${source}-${item.id}`;
+    const items = byTitles(item.titles);
+    playlists.push({ id, name: item.name, tracks: items, imported: true });
+    return ok({ playlistId: id, name: item.name, added: items.length, indexed: 0, notFound: [], warnings: [] });
+  };
+  const listExternal = (source) =>
+    ok({ items: external[source].map(({ id, name, kind, titles }) => ({ id, name, kind, trackCount: titles.length })) });
+
   // The sidebar lists playlists newest first, i.e. reversed.
-  const playlistRows = [...playlists].reverse().map(({ id, name, tracks: items }) => ({
+  const playlistRows = () => [...playlists].reverse().map(({ id, name, tracks: items, imported }) => ({
     id,
     name,
     source: "app",
-    lastExportedAt: items.length ? exportedAt : null,
-    lastExportedUsbRoot: items.length ? USB_ROOT : null,
-    lastExportedTrackCount: items.length || null,
+    lastExportedAt: items.length && !imported ? exportedAt : null,
+    lastExportedUsbRoot: items.length && !imported ? USB_ROOT : null,
+    lastExportedTrackCount: (!imported && items.length) || null,
     trackCount: items.length,
     totalDurationMs: sumMs(items),
     createdAt: exportedAt,
@@ -58,9 +73,19 @@
           case "set_frontend_setting":
             return ok(null);
           case "detect_external_master_db":
-            return ok({ found: false, path: null });
+            return ok(external ? { found: true, path: "C:/Users/dj/AppData/Roaming/Pioneer/rekordbox/master.db" } : { found: false, path: null });
+          case "detect_external_mixxx_db":
+            return ok(external ? { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite" } : { found: false, path: null });
+          case "list_rekordbox_playlists":
+            return listExternal("rekordbox");
+          case "list_mixxx_playlists":
+            return listExternal("mixxx");
+          case "import_rekordbox_playlist":
+            return importPlaylist("rekordbox", r);
+          case "import_mixxx_playlist":
+            return importPlaylist("mixxx", r);
           case "list_playlists":
-            return ok({ items: playlistRows });
+            return ok({ items: playlistRows() });
           case "get_playlist_tracks": {
             const items = playlists.find((p) => p.id === r.playlistId)?.tracks || [];
             return ok({

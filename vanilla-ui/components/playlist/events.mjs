@@ -64,6 +64,9 @@ export function bindPlaylistEvents(ctx) {
   el.importPlaylistBtn?.addEventListener("click", () => {
     importExternalPlaylist().catch(catchErr(emitStatus));
   });
+  for (const type of ["change", "input"]) {
+    el.playlistImportSelect?.addEventListener(type, () => playlistImportDialog?.syncDescription());
+  }
   el.playlistImportOkBtn?.addEventListener("click", () => {
     playlistImportDialog?.close(true);
   });

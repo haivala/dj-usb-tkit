@@ -599,11 +599,11 @@
     <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="playlistImportTitle">
       <h3 id="playlistImportTitle">Import Playlist</h3>
       <div class="tracklist-export-body">
-        <div class="tracklist-export-field">
-          <label for="playlistImportSelect">Playlist</label>
-          <select id="playlistImportSelect"></select>
-        </div>
         <p class="muted">Imported as a new playlist. Tracks not yet in the library are imported with it.</p>
+        <div class="tracklist-export-field">
+          <select id="playlistImportSelect" aria-label="Playlist to import"></select>
+          <span class="playlist-import-source" id="playlistImportSource"></span>
+        </div>
       </div>
       <div class="row confirm-actions">
         <button id="playlistImportCancelBtn">Cancel</button>

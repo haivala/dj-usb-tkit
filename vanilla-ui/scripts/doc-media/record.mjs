@@ -1,5 +1,6 @@
-// Records the docs media in docs/assets/ -- the cue-editor GIFs and the
-// README / cue-editor screenshots -- from the real frontend build.
+// Records the docs media in docs/assets/ -- the cue-editor and
+// playlist-import GIFs and the README / cue-editor screenshots -- from the
+// real frontend build.
 //
 //   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
 //   npm run docs:media -- cue-editor cue-editor-drag-cues   (only those)
@@ -253,14 +254,17 @@ async function dragMarker(page, marker, dx, { shift = false, steps = 60, stepDel
   }
 }
 
-// Captures PNG frames over CDP while `scene` runs; returns the frame list and
-// the union of the editor dialog's boxes before and after (it grows with the
-// cue list), for cropping.
-async function capture(page, framesDir, scene) {
+const FULL_WINDOW = { x: 0, y: 0, width: VIEWPORT.width, height: VIEWPORT.height };
+
+// Captures PNG frames over CDP while `scene` runs; returns the frame list and,
+// for cropping, the union of the editor dialog's boxes before and after (it
+// grows with the cue list) -- or the whole window with `fullWindow`.
+async function capture(page, framesDir, scene, { fullWindow = false } = {}) {
   rmSync(framesDir, { recursive: true, force: true });
   mkdirSync(framesDir, { recursive: true });
   const dialog = page.locator("#trackDetailOverlay > *").first();
-  const boxes = [await dialog.boundingBox()];
+  const cropBox = async () => (fullWindow ? FULL_WINDOW : dialog.boundingBox());
+  const boxes = [await cropBox()];
   const cdp = await page.context().newCDPSession(page);
   const frames = [];
   cdp.on("Page.screencastFrame", async ({ data, metadata, sessionId }) => {
@@ -274,7 +278,7 @@ async function capture(page, framesDir, scene) {
   await scene();
   await page.waitForTimeout(300);
   await cdp.send("Page.stopScreencast");
-  boxes.push(await dialog.boundingBox());
+  boxes.push(await cropBox());
   const x = Math.min(...boxes.map((b) => b.x));
   const y = Math.min(...boxes.map((b) => b.y));
   const crop = {
@@ -389,7 +393,59 @@ function scenes(fixture) {
         });
       },
     },
+    {
+      // docs/EXTERNAL_LIBRARIES.md: Import under New, pick a rekordbox
+      // playlist from the grouped list, and it opens as a new playlist.
+      name: "import-playlist",
+      editor: false,
+      opts: {
+        externalLibraries: {
+          rekordbox: [
+            { id: "3924571", name: "Friday Set", kind: "playlist", titles: ["Low Orbit", "Sauna Talk", "Pier Lights", "White Nights", "Afterglow"] },
+            { id: "1180562", name: "Sets / Warmup", kind: "playlist", titles: ["Northbound", "Driftwood", "Frost Line"] },
+            { id: "8841207", name: "HISTORY 2026-09-19", kind: "history", titles: ["Frost Line", "Last Ferry"] },
+          ],
+          mixxx: [
+            { id: "4", name: "Late Night", kind: "playlist", titles: ["Afterglow", "Last Ferry"] },
+            { id: "2", name: "Peak Time", kind: "crate", titles: ["White Nights", "Last Ferry", "Pier Lights"] },
+            { id: "7", name: "2026-09-26", kind: "history", titles: ["Sauna Talk", "Driftwood"] },
+          ],
+        },
+      },
+      async run(page, _wf, record) {
+        await page.mouse.move(820, 420);
+        await page.waitForTimeout(300);
+        await record(async () => {
+          await page.waitForTimeout(600);
+          await clickOn(page, page.locator("#importPlaylistBtn"), 900);
+          // The native drop-down list isn't in a screencast: step through the
+          // choices on the closed select instead, as the keyboard does.
+          const select = page.locator("#playlistImportSelect");
+          await moveTo(page, ...(await center(select)));
+          await select.focus();
+          await page.waitForTimeout(700);
+          for (let i = 0; i < 4; i += 1) {
+            await page.keyboard.press("ArrowDown");
+            await page.waitForTimeout(650);
+          }
+          for (let i = 0; i < 4; i += 1) {
+            await page.keyboard.press("ArrowUp");
+            await page.waitForTimeout(450);
+          }
+          await page.waitForTimeout(500);
+          await clickOn(page, page.locator("#playlistImportOkBtn"), 300);
+          await page.locator("#playlistTracksBody .track-grid-row").first().waitFor();
+          await moveTo(page, 820, 520, 20);
+          await page.waitForTimeout(2200);
+        }, { fullWindow: true });
+      },
+    },
   ];
+}
+
+async function center(locator) {
+  const b = await locator.boundingBox();
+  return [b.x + b.width / 2, b.y + b.height / 2];
 }
 
 // --- 4. Screenshots ---
@@ -451,11 +507,13 @@ try {
   const wanted = (name) => !only.length || only.includes(name);
   for (const scene of scenes(fixture)) {
     if (!wanted(scene.name)) continue;
-    const { ctx, page, wf } = await openSession(browser, fixture, scene.opts);
+    const { ctx, page, wf } = scene.editor === false
+      ? await openApp(browser, fixture, scene.opts)
+      : await openSession(browser, fixture, scene.opts);
     const framesDir = join(work, `frames-${scene.name}`);
     let captured = null;
-    await scene.run(page, wf, async (body) => {
-      captured = await capture(page, framesDir, body);
+    await scene.run(page, wf, async (body, captureOpts) => {
+      captured = await capture(page, framesDir, body, captureOpts);
     });
     await ctx.close();
     encodeGif(captured, framesDir, join(outDir, `${scene.name}.gif`));
