@@ -825,8 +825,19 @@ main {
 
 .panel.active { display: flex; }
 
-/* USB panel has no table-wrap scroll container — allow the panel itself to scroll */
-#panel-usb { overflow-y: auto; }
+/* USB panel has no table-wrap scroll container — allow the panel itself to
+   scroll, with a gutter so the content doesn't touch the scrollbar and room
+   after the last item. The end space is a flex spacer: padding-bottom in a
+   scrolling flex column isn't reliably kept by every engine. */
+#panel-usb {
+  overflow-y: auto;
+  padding-right: 12px;
+}
+
+#panel-usb::after {
+  content: '';
+  flex: 0 0 24px;
+}
 
 @keyframes panel-in {
   from { opacity: 0; transform: translateY(4px); }
