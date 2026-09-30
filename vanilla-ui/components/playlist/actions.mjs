@@ -151,7 +151,7 @@ export function startPlaylistRename(ctx, playlistId) {
     fillPlaylistSidebarItem(item, playlist);
     if (state.activeTab === playlistId) {
       el.playlistPanelTitle.textContent = playlist.name;
-      el.playlistExportStatus.textContent = formatPlaylistExportStatus(playlist);
+      renderPlaylistExportStatus(el, playlist);
     }
     const badge = getCurrentPlaylist(ctx);
     if (badge?.id === playlistId) {
@@ -176,10 +176,25 @@ export function formatPlaylistExportStatus(playlist) {
   if (!when) return "Not exported yet.";
   const formattedWhen = formatTimestampLocal(when);
   const root = String(playlist?.lastExportedUsbRoot || "").trim();
+  // The drive's name (backend-resolved) reads better than its mount path.
+  const drive = String(playlist?.lastExportedUsbName || "").trim() || root;
   const count = Number(playlist?.lastExportedTrackCount);
   const countText = Number.isFinite(count) && count >= 0 ? `${count} track(s)` : "unknown track count";
-  const rootText = root ? ` to ${root}` : "";
-  return `Last exported ${formattedWhen}${rootText} (${countText}).`;
+  const driveText = drive ? ` to ${drive}` : "";
+  return `Last exported ${formattedWhen}${driveText} (${countText}).`;
+}
+
+// The export status line, with the drive's mount path as its tooltip when
+// the line names the drive instead.
+function renderPlaylistExportStatus(el, playlist) {
+  const status = el.playlistExportStatus;
+  status.textContent = formatPlaylistExportStatus(playlist);
+  const root = String(playlist?.lastExportedUsbRoot || "").trim();
+  if (playlist?.lastExportedAt && playlist?.lastExportedUsbName && root) {
+    status.dataset.tooltip = root;
+  } else {
+    delete status.dataset.tooltip;
+  }
 }
 
 export async function loadPlaylists(ctx) {
@@ -581,10 +596,9 @@ export function fillPlaylistSidebarItem(item, playlist) {
   item.querySelector(".nav-playlist-delete").dataset.deletePlaylist = playlist.id;
 }
 
-// The playlist's track count AND duration total are both computed entirely by
-// the backend over the whole playlist (not just whatever page(s) happen to be
-// loaded client-side) and pushed here via playlist.trackCount /
-// playlist.totalDurationMs -- see GetPlaylistTracksData::{total,total_duration_ms}.
+// The playlist's track count is computed by the backend over the whole
+// playlist (not just whatever page(s) happen to be loaded client-side) and
+// pushed here via playlist.trackCount -- see GetPlaylistTracksData::total.
 // This is a pure setter, no track iteration.
 export function updatePlaylistPanelTitle(ctx, playlist) {
   const { el } = ctx;
@@ -593,10 +607,10 @@ export function updatePlaylistPanelTitle(ctx, playlist) {
   // Prefer the backend's whole-playlist total; fall back to the loaded count
   // only before the first page response has set it.
   const count = Number(playlist.trackCount) > 0 ? Number(playlist.trackCount) : loaded;
-  const totalMs = Number(playlist.totalDurationMs) || 0;
   const parts = [playlist.name];
+  // The total time is under the table (playlistTotalDuration), not repeated here.
   if (count > 0) {
-    parts.push(`(${count} track${count !== 1 ? "s" : ""}, Total time: ${formatDurationMs(totalMs)})`);
+    parts.push(`(${count} track${count !== 1 ? "s" : ""})`);
   }
   // Backend-derived from where the playlist was imported (see list_playlists).
   if (playlist.importedFrom) parts.push(`· Imported from ${playlist.importedFrom}`);
@@ -607,7 +621,7 @@ export function populatePlaylistPanel(ctx, playlist) {
   const { state, el } = ctx;
   if (!playlist) return;
   updatePlaylistPanelTitle(ctx, playlist);
-  el.playlistExportStatus.textContent = formatPlaylistExportStatus(playlist);
+  renderPlaylistExportStatus(el, playlist);
   updatePlaylistExportButtons(ctx);
   el.playlistSearchInput.value = state.playlistTrackSearch || "";
 }

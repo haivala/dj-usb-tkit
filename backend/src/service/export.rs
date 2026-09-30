@@ -701,6 +701,14 @@ pub(crate) fn usb_root_last_segment(usb_root: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// How the export button names the connected drive: its name (the on-drive
+/// marker the app writes when a drive is named), else the root's trailing
+/// directory name.
+pub(crate) fn usb_drive_label(usb_root: &str) -> Option<String> {
+    super::usb_identity::read_drive_name(std::path::Path::new(usb_root.trim()))
+        .or_else(|| usb_root_last_segment(usb_root))
+}
+
 /// The export button's label for one playlist when a valid USB is selected.
 /// `locks_reorder` true means the next export is an additive append onto a
 /// same-named USB playlist rather than a fresh write.
@@ -726,15 +734,15 @@ fn export_button_title(locks_reorder: bool, playlist_name: &str) -> String {
 /// to exist on the connected USB (already normalized via
 /// `normalize_playlist_name_for_compare`), computed once server-side so the
 /// frontend never re-derives this from raw state. `usb_root` is the connected
-/// drive's path (if any), used only for the export button label's trailing
-/// directory name.
+/// drive's path (if any), used only to name the drive in the export button
+/// label (see `usb_drive_label`).
 pub(crate) fn compute_playlist_usb_export_status(
     local_playlists: &[Playlist],
     usb_playlist_names: &HashSet<String>,
     prune_stale: bool,
     usb_root: Option<&str>,
 ) -> Vec<PlaylistUsbExportStatus> {
-    let usb_dir = usb_root.and_then(usb_root_last_segment);
+    let usb_dir = usb_root.and_then(usb_drive_label);
     local_playlists
         .iter()
         .map(|playlist| {
@@ -1904,7 +1912,7 @@ mod tests {
         format_bytes, has_required_analysis, has_required_analysis_fields,
         normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
         record_existing_usb_path_by_fingerprint, resolve_collision_free_media_target,
-        usb_playlist_names_for_export_compare, usb_root_last_segment,
+        usb_drive_label, usb_playlist_names_for_export_compare, usb_root_last_segment,
         validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
     };
     use crate::error::BackendError;
@@ -3180,7 +3188,30 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             imported_from: None,
+            last_exported_usb_name: None,
         }
+    }
+
+    #[test]
+    fn export_button_names_a_named_drive_and_falls_back_to_its_folder() {
+        let named = tempfile::tempdir().expect("named drive");
+        crate::service::usb_identity::write_drive_name(named.path(), "CLUB_STICK")
+            .expect("name drive");
+        let root = named.path().to_string_lossy().to_string();
+        assert_eq!(usb_drive_label(&root).as_deref(), Some("CLUB_STICK"));
+        let status = compute_playlist_usb_export_status(
+            &[make_playlist("p1", "Set")],
+            &std::collections::HashSet::new(),
+            true,
+            Some(&root),
+        );
+        assert_eq!(status[0].export_button_text, "Export to USB: CLUB_STICK");
+
+        // No name on the drive: its folder name, as before.
+        assert_eq!(
+            usb_drive_label("/media/user/USB_STICK_2").as_deref(),
+            Some("USB_STICK_2")
+        );
     }
 
     #[test]

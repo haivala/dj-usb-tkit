@@ -1527,6 +1527,25 @@ button[data-export-playlist]:hover {
   flex-shrink: 0;
 }
 
+/* Under a playlist's table: export status on the left, total time on the right. */
+.playlist-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  flex-shrink: 0;
+}
+
+.playlist-footer .playlist-export-status {
+  margin: 8px 2px 0;
+  padding-bottom: 10px;
+}
+
+.playlist-footer .track-total-time {
+  margin-left: auto;
+}
+
 /* ── diagnostics table (only remaining <table>) ────── */
 
 table {
@@ -1955,6 +1974,13 @@ input[type="checkbox"] {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Nothing shown on the right yet (e.g. before an import): the list -- and its
+   "No ... imported yet" message -- gets the full width instead of wrapping at
+   260px. Engines without :has keep the narrow column. */
+.split:has(> .right.hidden) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* ── Player menu editor ──────────────────────────────── */

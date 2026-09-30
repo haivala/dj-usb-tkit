@@ -190,8 +190,8 @@ function installSourceChipAnalysisMock(page) {
               ok: true,
               data: {
                 items: [
-                  { id: "2912649392", name: "Pikkujoulut", kind: "playlist", trackCount: 40 },
-                  { id: "280079994", name: "HISTORY 2023-06-16", kind: "history", trackCount: 7 }
+                  { id: "1234567890", name: "Winter Party", kind: "playlist", trackCount: 40 },
+                  { id: "1122334455", name: "HISTORY 2025-01-01", kind: "history", trackCount: 7 }
                 ]
               }
             };
@@ -364,12 +364,12 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
 
   await importBtn.click();
   await expect(page.locator("#playlistImportForce")).not.toBeChecked();
-  await page.locator("#playlistImportSelect").selectOption({ label: "Pikkujoulut (40)" });
+  await page.locator("#playlistImportSelect").selectOption({ label: "Winter Party (40)" });
   await page.locator("#playlistImportForce").check();
   await page.locator("#playlistImportOkBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__playlistImports.at(-1))).toEqual({
     command: "import_rekordbox_playlist",
-    request: { path: "/music/master.db", kind: "playlist", id: "2912649392", force: true }
+    request: { path: "/music/master.db", kind: "playlist", id: "1234567890", force: true }
   });
   await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
   await expect(page.locator('.source-chip-toggle[data-master-db="true"]')).toBeChecked();

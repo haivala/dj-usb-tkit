@@ -1138,7 +1138,7 @@ mod tests {
 
     #[test]
     fn rekordbox_cues_map_hot_cues_and_leading_memory_cue() {
-        // The real "Bash Plate" layout: one memory cue, then pads A-H.
+        // A layout seen in a real rekordbox library: one memory cue, then pads A-H.
         let mut cues = vec![rb_cue(0, 53)];
         for (i, kind) in [1, 2, 3, 5, 6, 7, 8, 9].into_iter().enumerate() {
             cues.push(rb_cue(kind, 54_911 + i as i64 * 1000));

@@ -352,7 +352,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   await page.goto("/");
 
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks, Total time: 3:00)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks)");
   // Footer total comes straight from the backend (get_playlist_tracks), not a
   // client-side sum -- 1 of the 2 tracks has no known length.
   await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00 (1 without length)");
@@ -490,7 +490,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
 
   await page.goto("/");
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist (1 track, Total time: 3:00)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist (1 track)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeHidden();
   await expect(page.locator("#exportPlaylistBtn")).toBeVisible();
   await expect(page.locator("#exportPlaylistBtn")).toHaveText("Select USB first");

@@ -448,6 +448,24 @@ pub(crate) fn external_playlist_key(library: &str, kind: ExternalPlaylistKind, i
     format!("{library}:{kind}:{}", id.trim())
 }
 
+/// The name of the drive at `usb_root`: the on-drive marker when it's plugged
+/// in, else the name cached for it in `usb_devices`.
+pub(crate) fn usb_drive_name(conn: &rusqlite::Connection, usb_root: &str) -> Option<String> {
+    if let Some(name) = usb_identity::read_drive_name(Path::new(usb_root.trim())) {
+        return Some(name);
+    }
+    conn.query_row(
+        "SELECT label FROM usb_devices WHERE root_path_key = ?1",
+        params![normalize_source_root_for_matching(usb_root)],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .flatten()
+    .filter(|name| !name.trim().is_empty())
+}
+
 /// Whether any track carries the import flag `column` (`master_db_source` /
 /// `mixxx_db_source`), i.e. that library has been imported.
 pub(crate) fn has_tracks_flagged(conn: &rusqlite::Connection, column: &str) -> BackendResult<bool> {
@@ -2303,10 +2321,18 @@ impl BackendService {
                     .as_deref()
                     .and_then(imported_from_label)
                     .map(str::to_string),
+                // Filled in below (needs a lookup per exported playlist).
+                last_exported_usb_name: None,
             })
         })?;
 
-        let items = rows.collect::<Result<Vec<_>, _>>()?;
+        let mut items = rows.collect::<Result<Vec<_>, _>>()?;
+        for playlist in &mut items {
+            playlist.last_exported_usb_name = playlist
+                .last_exported_usb_root
+                .as_deref()
+                .and_then(|root| usb_drive_name(&conn, root));
+        }
         Ok(ListPlaylistsData { items })
     }
 
@@ -4616,6 +4642,32 @@ mod tests {
             params![id, title, artist, file_path, duration_ms, file_size_bytes, fp, master_db_source as i64],
         )
         .expect("insert track");
+    }
+
+    #[test]
+    fn list_playlists_names_the_drive_last_exported_to() {
+        let (_dir, service) = test_service();
+        let conn = service.db.connect().expect("service db");
+        // An unplugged drive whose name is cached, and an unnamed one.
+        conn.execute_batch(&format!(
+            "INSERT INTO usb_devices (id, root_path, root_path_key, label, first_seen_at, last_seen_at, created_at, updated_at)
+               VALUES ('d1', '/run/media/dj/STICK', '{}', 'CLUB_STICK', 'x', 'x', 'x', 'x');
+             INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, created_at, updated_at)
+               VALUES ('p1', 'Named', 'local', 'x', '/run/media/dj/STICK', '1', '1'),
+                      ('p2', 'Unnamed', 'local', 'x', '/run/media/dj/OTHER', '2', '2'),
+                      ('p3', 'Never', 'local', NULL, NULL, '3', '3');",
+            normalize_source_root_for_matching("/run/media/dj/STICK")
+        ))
+        .expect("seed");
+        drop(conn);
+        let names: Vec<Option<String>> = service
+            .list_playlists()
+            .expect("list")
+            .items
+            .into_iter()
+            .map(|p| p.last_exported_usb_name)
+            .collect();
+        assert_eq!(names, vec![Some("CLUB_STICK".to_string()), None, None]);
     }
 
     #[test]

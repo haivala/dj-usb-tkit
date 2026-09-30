@@ -190,6 +190,9 @@ pub struct Playlist {
     /// "rekordbox"); derived from `playlists.import_source`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported_from: Option<String>,
+    /// The name of the drive at `last_exported_usb_root`, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_exported_usb_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

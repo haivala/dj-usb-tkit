@@ -126,6 +126,10 @@
   with their buttons. All page titles now share one size and style. The rekordbox chip moves out of the folder chips into its own
   "Libraries" row, where its ↻ button replaces "Import RB"; its checkbox stays
   disabled until the library has been imported.
+- **Improvement:** on a playlist's page, the export status and total time
+  share one row under the table, and the title shows only the track count.
+  "Export to USB: …" and "Last exported … to …" show the drive's name
+  instead of its folder or mount path, which is still shown on hover.
 - **Improvement:** "Import Playlists" on the USB view finishes a little
   faster. It no longer pauses between steps just to show progress messages.
 - **Improvement:** saving cue edits to a USB that another USB job is using
