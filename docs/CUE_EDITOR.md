@@ -30,7 +30,7 @@ them, and ± moves the bar starts one beat.
 
 ### Waveform
 
-The editor shows the full-detail colour waveform, zoomed to the first 2 minutes
+The editor shows the full-detail colour waveform, zoomed to the first 60 bars at the track's BPM
 on open.
 
 - Scroll to zoom, drag to pan, click to play from that point, double-click to

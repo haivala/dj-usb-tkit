@@ -27,7 +27,15 @@ import {
 
 export const MAX_CUES = 8;
 export const MIN_SPAN_MS = 1000;
-export const DEFAULT_SPAN_MS = 120_000;
+export const DEFAULT_SPAN_MS = 60_000;
+export const DEFAULT_VIEW_BARS = 60;
+
+/// The view the editor opens on: the first 60 bars (4 beats each) at the
+/// track's BPM, so beat lines are spaced the same on every track whatever
+/// its tempo. The editor only opens for analysed tracks, which have a BPM.
+export function defaultViewSpanMs(bpm) {
+  return (DEFAULT_VIEW_BARS * 4 * 60_000) / Number(bpm);
+}
 const BPM_NUDGE_STEP = 0.01;
 // Bar numbers are shown every N bars, N the smallest of these that keeps the
 // labels at least BAR_LABEL_MIN_PX apart.
@@ -620,7 +628,7 @@ export function createTrackDetailController(el, prefs = {}) {
     if (el.trackDetailStartNote) el.trackDetailStartNote.hidden = hasCues;
   }
 
-  // The modal opens zoomed to the first ~2 min, so make it unmistakable that
+  // The modal opens zoomed to the first 60 bars, so make it unmistakable that
   // the waveform is a window, not the whole track: show the visible span vs the
   // track length ("0:00–2:00 of 5:34"), accented while zoomed, and point at Fit.
   function renderZoomHint() {
@@ -1107,7 +1115,8 @@ export function createTrackDetailController(el, prefs = {}) {
       }));
       const start = startCue();
       if (start) start.followsFirstBeat = start.positionMs === working.firstBeatMs;
-      applyView(0, Math.min(DEFAULT_SPAN_MS, working.durationMs || DEFAULT_SPAN_MS));
+      const openSpan = defaultViewSpanMs(working.bpm);
+      applyView(0, Math.min(openSpan, working.durationMs || openSpan));
 
       const t = working.track;
       el.trackDetailTitle.textContent =

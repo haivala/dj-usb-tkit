@@ -483,7 +483,7 @@ test("bar numbers label the grid without crowding, down to every bar when zoomed
       xs: nodes.map((n) => n.getBoundingClientRect().left),
     }));
 
-  // 2 min at 128 BPM is 64 bars: labelled every Nth bar, never closer than 36 px.
+  // The opening view is 60 bars: labelled every Nth bar, never closer than 36 px.
   let { numbers, xs } = await barState();
   expect(numbers[0]).toBe(1);
   const step = numbers[1] - numbers[0];
@@ -506,17 +506,17 @@ test("the overview strip shows the visible window and moves the view", async ({ 
   const windowBox = page.locator("#trackDetailOverviewWindow");
   await expect(page.locator("#trackDetailOverviewCues .overview-cue")).toHaveCount(2);
 
-  // The modal opens on 0–2:00 of a 3:00 track: the box covers the first 2/3.
+  // The modal opens on 60 bars at 128 BPM (112.5 s) of a 3:00 track: the box covers 5/8.
   const ov = await overview.boundingBox();
   let box = await windowBox.boundingBox();
   expect(Math.abs(box.x - ov.x)).toBeLessThan(2);
-  expect(Math.abs(box.width - (ov.width * 2) / 3)).toBeLessThan(3);
+  expect(Math.abs(box.width - (ov.width * 5) / 8)).toBeLessThan(3);
 
   // Zoom in, then click near the end: the view (same zoom) centres there.
   for (let i = 0; i < 3; i += 1) await page.locator("#trackDetailZoomIn").click();
-  const zoomedWidth = (ov.width * 15) / 180; // 120 s / 2^3 of 180 s
+  const zoomedWidth = (ov.width * 112.5) / 8 / 180; // 112.5 s / 2^3 of 180 s
   await expect.poll(async () => (await windowBox.boundingBox()).width).toBeCloseTo(zoomedWidth, 0);
-  // 94% of 3:00 is 2:49, so the 15 s view (2:42–2:57) takes in the 2:50 cue.
+  // 94% of 3:00 is 2:49, so the 14 s view (2:42–2:56) takes in the 2:50 cue.
   await overview.click({ position: { x: ov.width * 0.94, y: ov.height / 2 } });
   await expect.poll(async () => {
     const b = await windowBox.boundingBox();
@@ -622,13 +622,14 @@ test("with Q on, a double-clicked cue lands on the nearest beat; Shift+double-cl
   await openCueEditor(page);
   const wf = page.locator("#trackDetailWaveform");
   const wfBox = await wf.boundingBox();
-  await wf.dblclick({ position: { x: wfBox.width * 0.25, y: 100 } });
+  // The opening view is 60 bars at 128 BPM = 112.5 s.
+  await wf.dblclick({ position: { x: wfBox.width * (30 / 112.5), y: 100 } });
   await wf.dblclick({ position: { x: wfBox.width * 0.62, y: 100 }, modifiers: ["Shift"] });
   const { cues } = await savedCues(page);
   expect(cues).toHaveLength(2);
   expect(Math.abs(cues[0].positionMs - 30000)).toBeLessThan(BEAT_MS);
   expect(offBeat(cues[0].positionMs)).toBeLessThanOrEqual(1);
-  expect(Math.abs(cues[1].positionMs - 0.62 * 120000)).toBeLessThan(400);
+  expect(Math.abs(cues[1].positionMs - 0.62 * 112500)).toBeLessThan(400);
   expect(offBeat(cues[1].positionMs)).toBeGreaterThan(1);
 });
 
@@ -943,7 +944,7 @@ test("double-click the waveform adds a cue at that position without starting pla
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailOverlay")).toBeVisible();
 
-  // Default view is 0–120 s of the 180 s track; x≈300/1227 ≈ 24 % ⇒ ~29 s.
+  // Default view is 60 bars (0–112.5 s) of the 180 s track; x≈300/1227 ≈ 24 % ⇒ ~28 s.
   await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
 
@@ -1043,8 +1044,8 @@ test("dragging a cue marker moves it without playing; Quantize (Q, on by default
     return Number(m) * 60000 + Number(rest) * 1000;
   };
 
-  // Default view is 0–120 s: drag the 30 s marker to the midpoint (≈60 s): on a beat.
-  await dragTo(0.5);
+  // Default view is 60 bars (0–112.5 s): drag the 30 s marker to ≈60 s: on a beat.
+  await dragTo(60 / 112.5);
   let ms = await listedMs();
   expect(ms).toBeGreaterThan(59000);
   expect(ms).toBeLessThan(61000);
@@ -1053,10 +1054,10 @@ test("dragging a cue marker moves it without playing; Quantize (Q, on by default
     await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
   ).toBe(false);
 
-  // Shift: placed where the pointer is (≈39.6 s), not pulled to a beat.
+  // Shift: placed where the pointer is (≈37.1 s), not pulled to a beat.
   await dragTo(0.33, { shift: true });
   ms = await listedMs();
-  expect(Math.abs(ms - 0.33 * 120000)).toBeLessThan(400);
+  expect(Math.abs(ms - 0.33 * 112500)).toBeLessThan(400);
 
   // Q off (remembered): a plain drag is free, Shift snaps.
   await quantize.click();
@@ -1070,8 +1071,8 @@ test("dragging a cue marker moves it without playing; Quantize (Q, on by default
   );
   expect(saveCall.request.cues).toHaveLength(1);
   const snapped = saveCall.request.cues[0].positionMs;
-  expect(snapped).toBeGreaterThan(34000);
-  expect(snapped).toBeLessThan(38000);
+  expect(snapped).toBeGreaterThan(33000);
+  expect(snapped).toBeLessThan(34500);
   expect(offBeatMs(snapped)).toBeLessThanOrEqual(1);
 });
 
@@ -1247,7 +1248,7 @@ test("opening the editor while another track plays stops that track", async ({ p
   await expect(other.locator(".waveform")).not.toHaveClass(/is-playing/);
 });
 
-test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows cue markers", async ({ page }) => {
+test("the modal opens zoomed to 60 bars; Fit shows the whole track; zoom windows cue markers", async ({ page }) => {
   // durationMs 180000; one cue inside the default 2-min view, one past it.
   await installTrackDetailMock(page, { seedCues: [30000, 170000] });
   await page.goto("/");
@@ -1256,7 +1257,7 @@ test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows 
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(2);
 
   const visibleMarkers = page.locator("#trackDetailCueMarkers .cue-marker:not(.off-view)");
-  // Default view is 0–120 s, so only the 30 s cue is on screen.
+  // Default view is 60 bars at 128 BPM (0–112.5 s), so only the 30 s cue is on screen.
   await expect(visibleMarkers).toHaveCount(1);
 
   // The zoom-range readout makes the initial zoomed-in view unmistakable: it
@@ -1266,7 +1267,7 @@ test("the modal opens zoomed to ~2 min; Fit shows the whole track; zoom windows 
   const totalTime = page.locator("#trackDetailTotalTime");
   await expect(zoomRange).toBeVisible();
   await expect(zoomRange).toHaveClass(/is-zoomed/);
-  await expect(zoomRange).toHaveText("0:00–2:00");
+  await expect(zoomRange).toHaveText("0:00–1:53");
   await expect(totalTime).toHaveText("3:00");
   const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
   const rangeBox = await zoomRange.boundingBox();

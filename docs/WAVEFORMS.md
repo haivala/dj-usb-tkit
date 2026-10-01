@@ -103,7 +103,7 @@ onto `get_track_detail`'s `detailWaveform` (the raw payload is tens of KB — a
 JSON number array would be ~3× that on the wire). The modal decodes it and
 renders only the visible `[startMs, endMs]` slice, so **scroll-to-zoom /
 drag-to-pan** shows the full ~150 entries/sec detail; it opens zoomed to the
-first ~2 minutes. The magnifier button is disabled for tracks with no analysis
+first 60 bars at the track's BPM. The magnifier button is disabled for tracks with no analysis
 (no `.EXT` ⇒ no PWV5). See `vanilla-ui/components/track-detail/waveform_detail.mjs`.
 
 ## Seek-index chunks (`PVBR`, `PVB2`)
