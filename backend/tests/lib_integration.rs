@@ -3704,13 +3704,20 @@ fn usb_parity_report_lists_missing_indexed_audio_paths_in_warnings() {
     let parity_response = backend.run_usb_parity_report(RunUsbParityReportRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
     });
-    assert!(parity_response.ok, "parity report failed: {parity_response:?}");
+    assert!(
+        parity_response.ok,
+        "parity report failed: {parity_response:?}"
+    );
     let parity = parity_response.data.expect("parity report");
 
     assert!(
-        parity.warnings.iter().any(|w| w.code == "usb.diagnostics.missing-indexed-audio"
-            && w.level == "warn"
-            && w.message.ends_with("/Contents/TestArtist/TestAlbum/missing.mp3")),
+        parity
+            .warnings
+            .iter()
+            .any(|w| w.code == "usb.diagnostics.missing-indexed-audio"
+                && w.level == "warn"
+                && w.message
+                    .ends_with("/Contents/TestArtist/TestAlbum/missing.mp3")),
         "each missing indexed audio path should be emitted to warnings/event log: {:#?}",
         parity.warnings
     );

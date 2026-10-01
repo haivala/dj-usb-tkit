@@ -69,6 +69,25 @@ pub fn sanitize_contents_component(value: &str) -> String {
     }
 }
 
+/// `sanitize_contents_component` for a file name, with the extension kept out
+/// of it: the script-diversity cap keeps the first scripts it meets, so a stem
+/// mixing several non-Latin scripts would otherwise use up the budget and the
+/// cap would drop the extension's Latin letters ("….mp3" -> "….3").
+pub fn sanitize_contents_file_name(value: &str) -> String {
+    let trimmed = value.trim();
+    match trimmed.rsplit_once('.') {
+        Some((stem, ext))
+            if !stem.trim().is_empty()
+                && !ext.is_empty()
+                && ext.len() <= 5
+                && ext.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            format!("{}.{ext}", sanitize_contents_component(stem))
+        }
+        _ => sanitize_contents_component(trimmed),
+    }
+}
+
 const CONTENT_COMPONENT_MAX_LEN: usize = 48;
 pub const CONTENT_FILENAME_MAX_LEN: usize = 48;
 
@@ -521,7 +540,7 @@ pub fn exported_media_target_path_with_ordinal(
     let raw_source_file_name = source
         .file_name()
         .and_then(|s| s.to_str())
-        .map(sanitize_contents_component)
+        .map(sanitize_contents_file_name)
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("{}.{}", sanitize_filename_component(title), extension));
     let artist_clean = sanitize_contents_component(artist);

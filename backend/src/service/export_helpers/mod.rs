@@ -28,8 +28,8 @@ pub use export_paths::{
     exported_media_target_path, exported_media_target_path_with_ordinal,
     filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path, limit_contents_file_name,
     limit_contents_file_name_with_suffix, normalize_owned_export_path,
-    prune_stale_export_owned_files, sanitize_contents_component, sanitize_filename_component,
-    stable_u32_hash, to_usb_relative_path, truncate_component,
+    prune_stale_export_owned_files, sanitize_contents_component, sanitize_contents_file_name,
+    sanitize_filename_component, stable_u32_hash, to_usb_relative_path, truncate_component,
 };
 pub use pdb_encoding::{
     PdbLayoutProfile, encode_album_row, encode_artist_row, encode_artwork_row, encode_key_row,
@@ -2926,6 +2926,44 @@ mod tests {
         let artist = "\u{13A0}\u{13A1} \u{16A0}\u{16A1} \u{2C00}\u{2C01} \u{2C80}\u{2C81} \u{07CA}\u{07CB} \u{A500}\u{A501} \u{10480}\u{10481} \u{10400}\u{10401}";
         let result = sanitize_contents_component(artist);
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn sanitize_contents_file_name_keeps_extension_past_script_cap() {
+        // Braille, Yi and Georgian fill the script budget before any Latin
+        // letter, so capping the whole name dropped the "mp" of "mp3" and
+        // the exported file ended in ".3", which a CDJ won't play.
+        let name = "\u{28CE}\u{2847}\u{A27A}\u{10DA} - 06 Title-.mp3";
+        assert!(sanitize_contents_component(name).ends_with(".3"));
+        assert!(sanitize_contents_file_name(name).ends_with("-.mp3"));
+    }
+
+    #[test]
+    fn sanitize_contents_file_name_sanitizes_stem_like_component() {
+        assert_eq!(sanitize_contents_file_name("a/b:c.flac"), "a_b_c.flac");
+        assert_eq!(sanitize_contents_file_name("Track.mp3"), "Track.mp3");
+        // Not an extension: the whole name goes through the component sanitizer.
+        assert_eq!(sanitize_contents_file_name("no extension"), "no extension");
+        assert_eq!(sanitize_contents_file_name(".hidden"), ".hidden");
+        assert_eq!(
+            sanitize_contents_file_name("Track.final mix"),
+            sanitize_contents_component("Track.final mix")
+        );
+    }
+
+    #[test]
+    fn exported_media_target_path_keeps_extension_for_multi_script_names() {
+        let source = Path::new("/home/user/Music/\u{28CE}\u{2847}\u{A27A}\u{10DA} - 06 Title-.mp3");
+        let result = exported_media_target_path(
+            Path::new("/mnt/usb/Contents"),
+            source,
+            "Artist",
+            Some("Album"),
+            "Title",
+            "mp3",
+        );
+        let file_name = result.file_name().unwrap().to_str().unwrap();
+        assert!(file_name.ends_with(".mp3"), "got {file_name:?}");
     }
 
     // --- truncate_component ---

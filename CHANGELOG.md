@@ -54,6 +54,13 @@
   the app. Already imported tracks get it the next time you import them
   (↻). A grid you moved in the cue editor is kept, unless you force a
   re-import.
+- **Fix:** exporting a track whose file name mixes several writing systems
+  (e.g. Braille, Yi and Georgian characters) no longer loses the file's
+  extension on the USB. The limit on writing systems per name also removed
+  the extension's letters (".mp3" became ".3"), so the CDJ couldn't play
+  the track. Export such tracks again from the original files to fix them
+  on the USB. Found with track 6 of 00000ooooo's album "–5"
+  (https://00000ooooo.bandcamp.com/album/--5).
 - **Chore:** made the pause/resume analysis test reliable when the full
   test suite runs in parallel.
 

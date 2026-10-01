@@ -1410,10 +1410,14 @@ mod tests {
             .db
             .connect()
             .unwrap()
-            .query_row("SELECT id FROM tracks WHERE title = 'Charlie'", [], |r| r.get(0))
+            .query_row("SELECT id FROM tracks WHERE title = 'Charlie'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         let detail = service
-            .get_track_detail(GetTrackDetailRequest { track_id: charlie_id })
+            .get_track_detail(GetTrackDetailRequest {
+                track_id: charlie_id,
+            })
             .expect("track detail");
         assert_eq!(detail.first_beat_ms, Some(437));
 
