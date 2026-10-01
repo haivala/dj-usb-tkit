@@ -23,16 +23,20 @@ use crate::models::{
 use crate::pdb_reader::parse_pdb;
 
 use super::BackendService;
+use super::SETTING_EXPORT_MASTER_DB_ID;
 use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
 use super::anlz::{
     AnlzAnalysisEdits, AnlzBundlePaths, WaveformData, apply_analysis_edits_to_anlz,
-    atomic_write_bytes, write_generated_anlz_bundle,
+    atomic_write_bytes, canonical_analysis_bundle_paths, read_beatgrid_tempo_from_anlz,
+    read_first_beat_from_anlz, write_generated_anlz_bundle,
 };
+use super::cues::collapse_anlz_cues;
+use super::export::APP_CONTENT_LINK_ID;
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRowData,
     encode_album_row, load_table_columns, remove_track_ids_from_pdb_playlist_entries,
-    replace_export_playlist_row_with_identity, table_exists, write_edb_playlist_with_conn,
-    write_pdb,
+    replace_export_playlist_row_with_identity, table_exists, to_usb_relative_path,
+    write_edb_playlist_with_conn, write_pdb,
 };
 use super::usb_staging;
 use super::usb_utils::{
@@ -41,6 +45,7 @@ use super::usb_utils::{
 };
 #[cfg(test)]
 use super::usb_vendor_compat::vendor_pdb_path;
+use crate::scanner::scan_audio_file;
 
 /// Player menu kinds that cannot be removed once present in the current menu.
 /// TRACK=131, PLAYLIST=132, FOLDER=144, SEARCH=145, HISTORY=149.
@@ -89,6 +94,9 @@ fn fix_always_applied(fix_id: &str) -> bool {
     )
 }
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
+const UNINDEXED_AUDIO_PLAYLIST_FIX_ID: &str = "add_unindexed_audio_playlist";
+/// USB playlist the unindexed-audio fix collects its files into.
+const UNINDEXED_AUDIO_PLAYLIST_NAME: &str = "Unindexed";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
 
 /// The order proposed fixes are shown in (and, for the first four entries,
@@ -124,7 +132,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_ALBUM_STRING_ALIGNMENT_FIX_ID,
     PDB_HEADER_COMPATIBILITY_FIX_ID,
     BPM_KEY_MISMATCH_FIX_ID,
-    "manual_reimport_unindexed_audio",
+    UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
     "remove_missing_audio_references",
     SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
 ];
@@ -3562,6 +3570,9 @@ impl BackendService {
         let mut missing_audio_track_ids = HashSet::<u32>::new();
         let mut missing_audio_paths = Vec::<String>::new();
         let mut unindexed_audio_paths = Vec::<String>::new();
+        // The same files as on-disk USB-relative paths (`/Contents/...`), not
+        // match keys -- what the unindexed-audio fix indexes.
+        let mut unindexed_audio_files = Vec::<String>::new();
         let mut remove_missing_audio_supported = false;
         let mut sync_edb_history_supported = false;
         let mut sync_edb_history_needed = false;
@@ -4167,11 +4178,18 @@ impl BackendService {
                 .iter()
                 .map(|p| contents_path_match_key(p))
                 .collect();
-            unindexed_audio_paths = all_contents_audio
+            unindexed_audio_files = all_contents_audio
+                .iter()
+                .filter(|p| {
+                    let key = normalize_path_for_contents_match(p);
+                    !key.is_empty() && !indexed_paths_ci.contains(&contents_path_match_key(&key))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            unindexed_audio_files.sort();
+            unindexed_audio_paths = unindexed_audio_files
                 .iter()
                 .map(|p| normalize_path_for_contents_match(p))
-                .filter(|p| !p.is_empty())
-                .filter(|p| !indexed_paths_ci.contains(&contents_path_match_key(p)))
                 .collect::<Vec<_>>();
             unindexed_audio_paths.sort();
             unindexed_audio_paths.dedup();
@@ -4182,15 +4200,18 @@ impl BackendService {
                         unindexed_audio_paths.len()
                     ));
                 proposed_fixes.push(RepairFixProposal {
-                        id: "manual_reimport_unindexed_audio".to_string(),
-                        title: "Manual Re-import Unindexed Audio".to_string(),
-                        description: "Automatic deletion is intentionally disabled for canonical-path index drift. Recommended flow: copy files to safety/media library, import into playlists, export again. (Strict raw-count drift is reported separately in parity checks.) See Event Log for full path list/details.".to_string(),
-                        supported: false,
-                        destructive: false,
-                        always_applied: false,
-                        estimated_writes: 0,
-                        estimated_deletes: 0,
-                    });
+                    id: UNINDEXED_AUDIO_PLAYLIST_FIX_ID.to_string(),
+                    title: "Add Unindexed Audio to a Playlist".to_string(),
+                    description: format!(
+                        "{} audio file(s) are on the USB but in no playlist (e.g. after restoring the databases from a backup). Adds them to a USB playlist \"{UNINDEXED_AUDIO_PLAYLIST_NAME}\", reusing their analysis files; nothing is copied or deleted. See Event Log for the file list.",
+                        unindexed_audio_files.len()
+                    ),
+                    supported: true,
+                    destructive: false,
+                    always_applied: false,
+                    estimated_writes: 2,
+                    estimated_deletes: 0,
+                });
                 warnings.push(logging::log(
                     Level::Warn,
                     "usb-diagnostics",
@@ -4850,6 +4871,35 @@ impl BackendService {
             } else if pdb_header_compatibility_repair.is_some() {
                 skipped_fixes
                     .push("Repair PDB Header Compatibility Field: not selected".to_string());
+            }
+
+            if selected.contains(UNINDEXED_AUDIO_PLAYLIST_FIX_ID) {
+                if unindexed_audio_files.is_empty() {
+                    skipped_fixes
+                        .push("Add Unindexed Audio to a Playlist: nothing to apply".to_string());
+                } else {
+                    match self.apply_fix_add_unindexed_audio_playlist(
+                        &usb_root,
+                        &unindexed_audio_files,
+                        fix_edb_conn.as_mut(),
+                        &mut warnings,
+                    ) {
+                        Ok((added, without_analysis)) => {
+                            let note = if without_analysis > 0 {
+                                format!(" ({without_analysis} without analysis files)")
+                            } else {
+                                String::new()
+                            };
+                            applied_fixes.push(format!(
+                                "Add Unindexed Audio to a Playlist: added {added} track(s) to \"{UNINDEXED_AUDIO_PLAYLIST_NAME}\"{note}"
+                            ));
+                        }
+                        Err(err) => failed_fixes
+                            .push(format!("Add Unindexed Audio to a Playlist failed: {err}")),
+                    }
+                }
+            } else if !unindexed_audio_files.is_empty() {
+                skipped_fixes.push("Add Unindexed Audio to a Playlist: not selected".to_string());
             }
 
             if selected.contains("remove_missing_audio_references") {
@@ -6098,6 +6148,201 @@ impl BackendService {
 
         tx.commit()?;
         Ok((history_rows.len(), history_content_rows.len()))
+    }
+
+    /// Index audio files that sit under `Contents/` but are in neither
+    /// database (`add_unindexed_audio_playlist`), typically left behind when
+    /// the databases were restored from a backup taken before an export. The
+    /// files and their analysis bundles are already on the stick, so this is
+    /// an additive export of a USB-only playlist: tags are read from the
+    /// files, BPM/first beat/cues from each file's canonical ANLZ bundle, and
+    /// the eDB + PDB writers append the tracks to `UNINDEXED_AUDIO_PLAYLIST_NAME`.
+    /// Returns (tracks added, tracks without an analysis bundle).
+    fn apply_fix_add_unindexed_audio_playlist(
+        &self,
+        usb_root: &std::path::Path,
+        files: &[String],
+        edb_conn: Option<&mut rusqlite::Connection>,
+        warnings: &mut Vec<WarningEntry>,
+    ) -> BackendResult<(usize, usize)> {
+        let local_conn = self.db.connect()?;
+        Self::ensure_track_export_identity_schema(&local_conn)?;
+        let app_master_db_id = Self::ensure_local_u32_setting(
+            &local_conn,
+            SETTING_EXPORT_MASTER_DB_ID,
+            "master-db-id",
+        )?;
+
+        let mut manifest_tracks = Vec::<ExportManifestTrack>::new();
+        let mut without_analysis = 0usize;
+        for rel in files {
+            // The ANLZ path hash and the DB rows both expect `/Contents/...`.
+            let rel = &rel.replace('\\', "/");
+            let Some(abs) = resolve_usb_side_path(usb_root, rel) else {
+                continue;
+            };
+            let abs = std::path::PathBuf::from(abs);
+            let scanned = match scan_audio_file(&abs) {
+                Ok(scanned) => scanned,
+                Err(err) => {
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-repair",
+                        "usb.repair.unindexed-audio.read-failed",
+                        format!("unindexed audio skipped, unreadable: {rel}: {err}"),
+                    ));
+                    continue;
+                }
+            };
+
+            let (dat_path, ext_path, _) = canonical_analysis_bundle_paths(usb_root, rel);
+            let (waveform_path, bpm, first_beat_ms, cues) = if dat_path.is_file() {
+                let dat = std::fs::read(&dat_path).unwrap_or_default();
+                let cue_bytes = std::fs::read(&ext_path).unwrap_or_else(|_| dat.clone());
+                (
+                    to_usb_relative_path(usb_root, &dat_path.to_string_lossy()),
+                    read_beatgrid_tempo_from_anlz(&dat).map(|t| f64::from(t) / 100.0),
+                    read_first_beat_from_anlz(&dat),
+                    collapse_anlz_cues(&cue_bytes),
+                )
+            } else {
+                without_analysis += 1;
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-repair",
+                    "usb.repair.unindexed-audio.no-analysis",
+                    format!("unindexed audio has no analysis files on the USB: {rel}"),
+                ));
+                (None, None, None, Vec::new())
+            };
+
+            // Identity keyed by the USB path, so re-running the fix on the
+            // same file gets the same content id. Our master_db_id makes
+            // desktop DJ software read the bundle from the USB, not its cache.
+            let identity_key = format!("usb-file:{rel}");
+            let (master_db_id, master_content_id, content_link) = Self::resolve_manifest_identity(
+                &local_conn,
+                &identity_key,
+                None,
+                true,
+                app_master_db_id,
+                APP_CONTENT_LINK_ID,
+            )?;
+            manifest_tracks.push(ExportManifestTrack {
+                id: identity_key,
+                master_db_id,
+                master_content_id,
+                content_link,
+                position: manifest_tracks.len() + 1,
+                track_number: scanned.track_number,
+                title: scanned.title,
+                artist: scanned.artist,
+                album: scanned.album,
+                bpm,
+                key: scanned.tonality,
+                source_path: rel.clone(),
+                exported_path: rel.clone(),
+                file_modified_at: scanned.file_modified_at,
+                file_size_bytes: scanned.file_size_bytes,
+                sample_rate_hz: scanned.sample_rate_hz,
+                bit_depth: scanned.bit_depth,
+                bitrate_kbps: scanned.bitrate_kbps,
+                disc_number: scanned.disc_number,
+                subtitle: scanned.subtitle,
+                comment: scanned.comment,
+                title_for_search: None,
+                kuvo_delivery_comment: None,
+                dj_play_count: None,
+                rating: None,
+                color_id: None,
+                artist_id_lyricist: None,
+                artist_id_original_artist: None,
+                artist_id_remixer: None,
+                artist_id_composer: None,
+                genre_id: None,
+                genre: scanned.genre,
+                label_id: None,
+                isrc: scanned.isrc,
+                release_year: scanned.release_year,
+                release_date: scanned.release_date,
+                recorded_date: scanned.recorded_date,
+                file_type: scanned
+                    .format_ext
+                    .as_deref()
+                    .map(Self::file_type_from_extension),
+                owns_exported_media: false,
+                owns_artwork: false,
+                owns_waveform: false,
+                artwork_path: None,
+                waveform_path,
+                duration_ms: detect_track_duration_ms(&abs),
+                first_beat_ms,
+                cues,
+            });
+        }
+        if manifest_tracks.is_empty() {
+            return Ok((0, without_analysis));
+        }
+
+        let playlist = ExportPlaylistData {
+            id: "usb-unindexed-audio".to_string(),
+            name: UNINDEXED_AUDIO_PLAYLIST_NAME.to_string(),
+            tracks: Vec::new(),
+        };
+        let manifest = ExportManifest {
+            version: 1,
+            generated_at: super::now(),
+            playlist_id: playlist.id.clone(),
+            playlist_name: playlist.name.clone(),
+            usb_root: usb_root.to_string_lossy().to_string(),
+            options: crate::models::ExportToUsbOptions {
+                include_artwork: true,
+                include_analysis: true,
+                prune_stale: false,
+                ..Default::default()
+            },
+            exported_tracks: manifest_tracks.len(),
+            skipped_tracks: 0,
+            warnings: Vec::new(),
+            tracks: manifest_tracks,
+        };
+
+        // Same order as export: eDB first, then the PDB takes its playlist id
+        // and sort order. Additive (no mirror), so an existing playlist of the
+        // same name is appended to rather than replaced.
+        let mut edb_playlist_id = None;
+        let mut edb_sort_order = None;
+        let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings));
+        match handle.as_mut().map(EdbConnHandle::conn) {
+            Some(conn) => {
+                let written = write_edb_playlist_with_conn(conn, &playlist, &manifest, false)?;
+                edb_playlist_id = u32::try_from(written.playlist_id).ok();
+                edb_sort_order = u32::try_from(written.sort_order).ok();
+            }
+            None => warnings.push(logging::log(
+                Level::Warn,
+                "usb-repair",
+                "usb.repair.unindexed-audio.edb-open-failed",
+                "unindexed audio: eDB unavailable, only the PDB was updated",
+            )),
+        }
+        let written = write_pdb(
+            usb_root,
+            &playlist,
+            &manifest,
+            false,
+            edb_playlist_id,
+            edb_sort_order,
+        )?;
+        warnings.extend(written.writer_warnings.into_iter().map(|message| {
+            logging::log(
+                Level::Warn,
+                "usb-repair",
+                "usb.repair.unindexed-audio.pdb-writer-warning",
+                message,
+            )
+        }));
+        Ok((manifest.tracks.len(), without_analysis))
     }
 
     fn apply_fix_remove_missing_audio_references(

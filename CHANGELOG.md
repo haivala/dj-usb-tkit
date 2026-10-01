@@ -74,6 +74,11 @@
   order, the name you gave it kept) instead of creating a copy. "Force update
   track data" replaces the tracks' BPM, key and cues with the library's,
   including your own edits.
+- **New feature:** the USB repair can add audio files that are on the USB but
+  in no playlist (for example after restoring the USB's databases from an
+  older backup) to a USB playlist called "Unindexed". The files' existing
+  analysis is reused, and nothing is copied or deleted. This replaces the old
+  "Manual Re-import Unindexed Audio" advice.
 - **Fix:** video files (`.mp4` files with a video track) are no longer
   imported into the library. Audio-only `.mp4`
   (AAC) files still are. Videos already in the library drop out on the next

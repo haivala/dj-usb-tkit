@@ -631,6 +631,12 @@ fn ensure_playlist_tracks_analysis_ready(
 /// `usb_utils::canonicalize_playlist_name` (alnum-only, used for matching a
 /// local playlist to its possibly-mangled eDB row), since that's a stricter
 /// match than "is this the playlist a user would call the same name".
+/// contentLink low 16 bits encode a format/version identifier that the DJ software
+/// checks when deciding whether analysis is "new generation".
+/// Reference fixtures use 0x000C0700 as baseline for newly exported
+/// content, then bump by +0x10000 on re-export (handled elsewhere).
+pub(crate) const APP_CONTENT_LINK_ID: i64 = 0x000C_0700;
+
 pub(crate) fn normalize_playlist_name_for_compare(value: &str) -> String {
     value.trim().to_lowercase()
 }
@@ -891,11 +897,7 @@ impl BackendService {
             SETTING_EXPORT_MASTER_DB_ID,
             "master-db-id",
         )?;
-        // contentLink low 16 bits encode a format/version identifier that the DJ software
-        // checks when deciding whether analysis is "new generation".
-        // Reference fixtures use 0x000C0700 as baseline for newly exported
-        // content, then bump by +0x10000 on re-export (handled elsewhere).
-        let app_content_link_id: i64 = 0x000C_0700;
+        let app_content_link_id = APP_CONTENT_LINK_ID;
 
         // Open the eDB once here and reuse it below for the write + verify
         // steps too, instead of each independently re-staging/re-opening it
@@ -1712,7 +1714,7 @@ impl BackendService {
         Ok(playlist)
     }
 
-    fn file_type_from_extension(ext: &str) -> i64 {
+    pub(crate) fn file_type_from_extension(ext: &str) -> i64 {
         // File type codes (USB export format):
         // MP3=1, MP4=3, M4A=4, FLAC=5, ALAC=6, WAV=11, AIFF=12
         match ext.trim().to_ascii_lowercase().as_str() {
@@ -1727,7 +1729,7 @@ impl BackendService {
         }
     }
 
-    fn resolve_manifest_identity(
+    pub(crate) fn resolve_manifest_identity(
         conn: &rusqlite::Connection,
         track_id: &str,
         existing_identity: Option<&UsbTrackIdentity>,
@@ -1756,7 +1758,9 @@ impl BackendService {
         Ok((None, None, None))
     }
 
-    fn ensure_track_export_identity_schema(conn: &rusqlite::Connection) -> BackendResult<()> {
+    pub(crate) fn ensure_track_export_identity_schema(
+        conn: &rusqlite::Connection,
+    ) -> BackendResult<()> {
         conn.execute_batch(
             r#"
         CREATE TABLE IF NOT EXISTS track_export_identity (
@@ -1770,7 +1774,7 @@ impl BackendService {
         Ok(())
     }
 
-    fn ensure_local_u32_setting(
+    pub(crate) fn ensure_local_u32_setting(
         conn: &rusqlite::Connection,
         key: &str,
         seed_suffix: &str,

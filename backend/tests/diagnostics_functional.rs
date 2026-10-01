@@ -4053,18 +4053,164 @@ fn repair_detects_unindexed_audio_under_contents() {
         "expected unindexed-audio issue detected: {:#?}",
         data.detected_issues
     );
-    // The reason it's manual-only is now baked into the fix's own description
-    // (no separate unsupported_items row duplicating it).
     assert!(
         data.proposed_fixes.iter().any(|f| {
-            f.id == "manual_reimport_unindexed_audio"
-                && !f.supported
-                && f.description.contains("copy files to safety/media library")
-                && f.description.contains("See Event Log")
+            f.id == "add_unindexed_audio_playlist"
+                && f.supported
+                && !f.destructive
+                && f.description.contains("1 audio file(s)")
+                && f.description.contains("\"Unindexed\"")
         }),
-        "expected the manual-only unindexed-audio guidance fix with full detail: {:#?}",
+        "expected the unindexed-audio playlist fix: {:#?}",
         data.proposed_fixes
     );
+}
+
+#[test]
+fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+
+    let stray_dir = usb
+        .join("Contents")
+        .join("Stray Artist")
+        .join("Stray Album");
+    fs::create_dir_all(&stray_dir).expect("create stray contents dir");
+    copy_audio_fixture(
+        &stray_dir,
+        "noart/track_no_art.mp3",
+        "99 Unindexed Stray.mp3",
+    );
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["add_unindexed_audio_playlist".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m.contains("added 1 track(s)")
+                && m.contains("\"Unindexed\"")
+                && m.contains("1 without analysis files")),
+        "expected the fix to report the added track: applied {:#?} failed {:#?}",
+        data.applied_fixes,
+        data.failed_fixes
+    );
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+
+    // Both databases now carry the playlist with the stray file; the
+    // existing playlist is untouched.
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let edb_paths: Vec<String> = conn
+        .prepare(
+            "SELECT c.path FROM playlist p
+             JOIN playlist_content pc ON pc.playlist_id = p.playlist_id
+             JOIN content c ON c.content_id = pc.content_id
+             WHERE p.name = 'Unindexed'",
+        )
+        .expect("prepare")
+        .query_map([], |r| r.get::<_, String>(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    assert_eq!(
+        edb_paths,
+        vec!["/Contents/Stray Artist/Stray Album/99 Unindexed Stray.mp3".to_string()]
+    );
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    let names: Vec<&str> = parsed
+        .playlist_tree
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert!(names.contains(&"Unindexed"), "PDB playlists: {names:?}");
+    assert!(
+        names.contains(&playlist_name.as_str()),
+        "PDB playlists: {names:?}"
+    );
+    assert!(
+        parsed
+            .tracks
+            .iter()
+            .any(|t| t.track_file_path.ends_with("/99 Unindexed Stray.mp3")),
+        "stray file should have a PDB track row"
+    );
+
+    // One pass is enough: a fresh preview no longer sees unindexed audio.
+    let after = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: false,
+            selected_fix_ids: vec![],
+        })
+        .data
+        .expect("preview data");
+    assert!(
+        !after
+            .proposed_fixes
+            .iter()
+            .any(|f| f.id == "add_unindexed_audio_playlist"),
+        "unindexed audio still reported: {:#?}",
+        after.detected_issues
+    );
+}
+
+#[test]
+fn repair_unindexed_audio_playlist_reuses_the_files_analysis_bundle() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+
+    // Simulate an exported track whose DB rows were lost: an audio file
+    // under a new path, with an analysis bundle (126.50 BPM grid) where
+    // export puts the bundle for that path.
+    let rel = "/Contents/Lost Artist/Lost Album/01 Lost Track.mp3";
+    let lost_dir = usb.join("Contents/Lost Artist/Lost Album");
+    fs::create_dir_all(&lost_dir).expect("create lost dir");
+    copy_audio_fixture(&lost_dir, "noart/track_no_art.mp3", "01 Lost Track.mp3");
+    let (dat, ext, twoex) = backend::service::anlz::canonical_analysis_bundle_paths(&usb, rel);
+    fs::create_dir_all(dat.parent().unwrap()).expect("create anlz dir");
+    backend::service::anlz::write_generated_anlz_bundle_with_first_beat(
+        &backend::service::anlz::WaveformData::empty(),
+        &backend::service::anlz::AnlzBundlePaths {
+            dat_path: dat.clone(),
+            ext_path: ext,
+            twoex_path: twoex,
+        },
+        rel,
+        Some(126.5),
+        180_000,
+        Some(250),
+        &[],
+    )
+    .expect("write analysis bundle");
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["add_unindexed_audio_playlist".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m.contains("added 1 track(s)") && !m.contains("without analysis")),
+        "applied {:#?} failed {:#?}",
+        data.applied_fixes,
+        data.failed_fixes
+    );
+
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb");
+    let added = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == rel)
+        .expect("lost track indexed in PDB");
+    let expected_anlz = format!("/{}", dat.strip_prefix(&usb).unwrap().to_string_lossy());
+    assert_eq!(added.anlz_path, expected_anlz);
+    assert_eq!(added.tempo_x100, 12650);
 }
 
 #[test]

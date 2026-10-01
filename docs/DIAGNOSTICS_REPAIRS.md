@@ -138,7 +138,7 @@ The current code can propose these repair IDs:
 | `repair_pdb_ec_data_page_conflict` | table `empty_candidate` pointer aliasing another table's data page | Assigns each conflicting table a new empty candidate beyond the current file tail and updates `next_unused_page` |
 | `repair_pdb_torn_growth_pages` | torn additive-growth write left by an interrupted export (e.g. USB disconnected mid-write) | Zeroes `empty_candidate` page(s) that hold garbage instead of a blank reusable page, truncates any never-populated file tail beyond `next_unused_page`, and recomputes `seqdb` |
 | `repair_pdb_truncated_table_chain` | a table's declared last page is beyond the physical end of the file (interrupted export left growth pointers ahead of the actual written data) | Points the table's `last`/`empty_candidate` fields back at the real last written page (found by walking the chain); does not touch page content. Applied before strict parity, since additive track appends hard-fail while the chain is unreachable |
-| `manual_reimport_unindexed_audio` | audio files under `Contents/` not indexed by PDB/eDB | Guidance-only proposal; no automatic deletion |
+| `add_unindexed_audio_playlist` | audio files under `Contents/` not indexed by PDB/eDB (e.g. databases restored from an older backup) | Additive export of a USB-only playlist `Unindexed`: tags read from each file, BPM/first beat/cues from the file's canonical ANLZ bundle (bundle reused, not rewritten; files without one are added without analysis). Nothing is copied or deleted |
 | `remove_missing_audio_references` | DB references to audio files missing from USB | Removes eDB content/playlist links and PDB playlist entries only when no unindexed audio drift is present |
 | `sync_edb_history_from_pdb` | eDB history counts differ from PDB-derived history payload | Replaces eDB `history` and `history_content` rows from current PDB history data |
 
@@ -149,8 +149,7 @@ Some findings intentionally do not have automatic repairs:
 | Finding | Behavior |
 | --- | --- |
 | malformed entries under `PIONEER/USBANLZ` | reported as unsupported; inspect event-log warnings and re-export affected tracks |
-| unindexed canonical audio files under `Contents/` | proposed as `manual_reimport_unindexed_audio`, which is guidance-only |
-| missing audio references while unindexed audio is also present | `remove_missing_audio_references` becomes preview-only because automatic deletion could remove the wrong DB side first |
+| missing audio references while unindexed audio is also present | `remove_missing_audio_references` becomes preview-only because automatic deletion could remove the wrong DB side first; apply `add_unindexed_audio_playlist`, then re-run diagnostics |
 | parity preview unavailable | repair preview continues, but strict parity upgrade is not proposed |
 
 ## Player Menu Behavior

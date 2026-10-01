@@ -87,50 +87,56 @@ pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTra
                 continue;
             }
 
-            let metadata = read_file_metadata(path)?;
-            let meta = read_embedded_metadata(path);
-            let (sample_rate_hz, bit_depth, bitrate_kbps) = read_audio_technical_metadata(path);
-            let wav_extensible_kind = read_wav_extensible_kind(path);
-            let (fallback_artist, fallback_title) = infer_artist_title(path);
-            let fallback_album = infer_album_from_path(path);
-            let fallback_track_number = infer_track_number_from_name(
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_default(),
-            );
-            let modified = metadata
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                .map(|dur| dur.as_secs().to_string());
-
-            tracks.push(ScannedTrack {
-                path: path.to_string_lossy().to_string(),
-                title: meta.title.unwrap_or(fallback_title),
-                artist: meta.artist.unwrap_or(fallback_artist),
-                album: meta.album.or(fallback_album),
-                track_number: meta.track_number.or(fallback_track_number),
-                tonality: meta.tonality,
-                file_size_bytes: i64::try_from(metadata.len()).ok(),
-                file_modified_at: modified,
-                format_ext: crate::utils::format_ext_from_path(&path.to_string_lossy()),
-                sample_rate_hz,
-                bit_depth,
-                bitrate_kbps,
-                wav_extensible_kind,
-                disc_number: meta.disc_number,
-                subtitle: meta.subtitle,
-                comment: meta.comment,
-                isrc: meta.isrc,
-                release_year: meta.release_year,
-                release_date: meta.release_date,
-                recorded_date: meta.recorded_date,
-                genre: meta.genre,
-            });
+            tracks.push(scan_audio_file(path)?);
         }
     }
 
     Ok(tracks)
+}
+
+/// Read tags and file facts for one audio file -- the per-file step of
+/// `scan_audio_files`, also used to index audio already sitting on a USB.
+pub fn scan_audio_file(path: &Path) -> BackendResult<ScannedTrack> {
+    let metadata = read_file_metadata(path)?;
+    let meta = read_embedded_metadata(path);
+    let (sample_rate_hz, bit_depth, bitrate_kbps) = read_audio_technical_metadata(path);
+    let wav_extensible_kind = read_wav_extensible_kind(path);
+    let (fallback_artist, fallback_title) = infer_artist_title(path);
+    let fallback_album = infer_album_from_path(path);
+    let fallback_track_number = infer_track_number_from_name(
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default(),
+    );
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|dur| dur.as_secs().to_string());
+
+    Ok(ScannedTrack {
+        path: path.to_string_lossy().to_string(),
+        title: meta.title.unwrap_or(fallback_title),
+        artist: meta.artist.unwrap_or(fallback_artist),
+        album: meta.album.or(fallback_album),
+        track_number: meta.track_number.or(fallback_track_number),
+        tonality: meta.tonality,
+        file_size_bytes: i64::try_from(metadata.len()).ok(),
+        file_modified_at: modified,
+        format_ext: crate::utils::format_ext_from_path(&path.to_string_lossy()),
+        sample_rate_hz,
+        bit_depth,
+        bitrate_kbps,
+        wav_extensible_kind,
+        disc_number: meta.disc_number,
+        subtitle: meta.subtitle,
+        comment: meta.comment,
+        isrc: meta.isrc,
+        release_year: meta.release_year,
+        release_date: meta.release_date,
+        recorded_date: meta.recorded_date,
+        genre: meta.genre,
+    })
 }
 
 fn read_audio_technical_metadata(path: &Path) -> (Option<u32>, Option<u8>, Option<u32>) {
