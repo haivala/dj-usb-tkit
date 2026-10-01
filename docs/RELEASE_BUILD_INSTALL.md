@@ -38,6 +38,7 @@ Primary commands:
 - Backend tests: `cargo test -q --manifest-path backend/Cargo.toml`
 - Frontend tests: `npm test --prefix vanilla-ui`
 - Frontend build: `npm run build --prefix vanilla-ui`
+- Docs screenshots and GIFs (`docs/assets/`): `npm run docs:media --prefix vanilla-ui` (needs cargo and ffmpeg). It synthesizes a 15-track demo library, analyzes it with the real backend and records every screenshot and GIF the docs use from the real frontend build; `-- <name>` records only those (e.g. `-- backup-view`). See `vanilla-ui/scripts/doc-media/record.mjs`.
 - Release script (Linux): `./scripts/release.sh`
 - Build setup (macOS): `./scripts/macos-build-setup.sh`
 - Build setup (Windows): `powershell -ExecutionPolicy Bypass -File scripts\windows-build-setup.ps1`

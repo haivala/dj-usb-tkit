@@ -52,6 +52,22 @@ away from the reference). Tempos whose half is a quarter value (173.5 →
 3. Use "Analyze Missing Tracks" for only that playlist's unanalyzed local tracks.
 4. Export after missing-analysis count reaches zero.
 
+### Analyze, Reanalyze and Analyze Selected
+
+What an analysis run does to a track depends on whether the track is already
+analyzed (has its waveform); the buttons' tooltips say the same:
+
+- **Analyze** (track row) and **Analyze Missing Tracks** (playlist page): a
+  first analysis. They add the missing waveform, BPM, key and first beat; a BPM
+  or key you edited, or one imported from rekordbox or Mixxx, is kept.
+- **Reanalyze** (track row, once analyzed): resets the waveform, BPM, key and
+  first beat to a fresh analysis, replacing imported or edited values. Cues
+  are kept.
+- **Analyze Selected** (the Library's scan button while tracks are selected):
+  each selected track gets one or the other, as above.
+
+The rule lives in one place, `kept_analysis_values` (`service/analysis.rs`).
+
 "Local" here is decided by the backend-computed `Track.isUsbPath` field (see
 `docs/APP_DATA_MODEL.md`), not a frontend guess — a track whose `filePath`
 falls under any known USB device root is excluded from "Analyze Missing"

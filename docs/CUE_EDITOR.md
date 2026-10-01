@@ -39,10 +39,13 @@ on open.
   beat) are wider and brighter. The lines run into a thin strip above and below
   the waveform, so the beats stay readable where the waveform is loud, and bar
   numbers sit in the strip below (every bar when zoomed in, every 2nd/4th/… bar
-  when zoomed out so they never crowd).
-- **Beat grid slider**: how strongly the grid shows, 0–100 (default 35,
-  remembered). It mostly sets the ordinary beats: bar starts always stay
-  visible.
+  when zoomed out so they never crowd). Lines closer than 8 px would hatch over
+  the waveform, so ordinary beat lines are left out until zooming in spreads
+  them that far apart (the opening 60-bar view shows bar lines only), and bar
+  lines thin to every 2nd/4th/… bar the same way when zoomed far out.
+- **Beat grid slider**: how strongly and how thick the grid shows, 0–100
+  (default 35, remembered). It mostly sets the ordinary beats (0.5–2 px wide):
+  bar starts (2–4 px) always stay visible.
 - **Greyed-out start**: everything before where the CDJ will start playback
   (the playback-start marker, else the first cue) is greyed out. With no cues
   nothing is greyed: the CDJ starts at the first audio.
