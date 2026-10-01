@@ -1267,7 +1267,7 @@ main {
 }
 
 .playlist-actions {
-  margin: 10px 0;
+  margin: 2px 0 18px;
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
