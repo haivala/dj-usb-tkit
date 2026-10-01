@@ -41,6 +41,9 @@ const BPM_NUDGE_STEP = 0.01;
 // labels at least BAR_LABEL_MIN_PX apart.
 const BAR_LABEL_STEPS = [1, 2, 4, 8, 16, 32, 64];
 const BAR_LABEL_MIN_PX = 36;
+// Ordinary beat lines closer than this would hatch over the waveform: only the
+// bar lines are drawn until zooming in spreads the beats this far apart.
+const BEAT_LINE_MIN_PX = 8;
 const UNDO_LIMIT = 100;
 // ←/→ with Shift, or without a beat grid: a fine nudge.
 const FINE_NUDGE_MS = 10;
@@ -367,6 +370,8 @@ export function createTrackDetailController(el, prefs = {}) {
     const from = Math.max(working.firstBeatMs, working.view.startMs - interval);
     const to = Math.min(working.durationMs, working.view.endMs + interval);
     const barStep = barLabelStep(interval);
+    const width = el.trackDetailWaveform?.clientWidth || 0;
+    const showBeats = !width || (interval / viewSpanMs()) * width >= BEAT_LINE_MIN_PX;
     // Snap `from` to the nearest grid line at or before it.
     const firstBeatIdx = Math.max(0, Math.floor((from - working.firstBeatMs) / interval));
     let safety = 0;
@@ -375,6 +380,7 @@ export function createTrackDetailController(el, prefs = {}) {
       if (t > to || safety > 8000) break;
       safety += 1;
       const downbeat = idx % 4 === 0;
+      if (!downbeat && !showBeats) continue;
       const line = cloneTemplate(host.ownerDocument, "tplBeatgridLine");
       if (downbeat) line.classList.add("is-downbeat");
       line.style.left = `${msToPct(t)}%`;

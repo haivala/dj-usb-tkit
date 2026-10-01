@@ -333,6 +333,14 @@ test("cue list rows carry the same letter as their waveform marker, in position 
 test("the Beat grid slider sets how strongly the grid shows, and is remembered", async ({ page }) => {
   await openCueEditor(page);
   const slider = page.locator("#trackDetailGridLevel");
+  // The opening 60-bar view only draws bar lines; one zoom step spreads the
+  // beats far enough apart to draw them too.
+  await page.locator("#trackDetailZoomIn").click();
+  const lineWidth = (selector) =>
+    page
+      .locator(`#trackDetailBeatgrid .beatgrid-line${selector}`)
+      .first()
+      .evaluate((n) => n.getBoundingClientRect().width);
   const gridOpacity = () =>
     page
       .locator("#trackDetailBeatgrid .beatgrid-line:not(.is-downbeat)")
@@ -345,6 +353,8 @@ test("the Beat grid slider sets how strongly the grid shows, and is remembered",
       .evaluate((n) => Number(getComputedStyle(n).opacity));
   await expect(slider).toHaveValue("35");
   const defaultOpacity = await gridOpacity();
+  const defaultBeatWidth = await lineWidth(":not(.is-downbeat)");
+  const defaultBarWidth = await lineWidth(".is-downbeat");
 
   // The thumb follows the pointer: a click lands on the matching value
   // (no inherited text-input padding skewing the track).
@@ -356,12 +366,16 @@ test("the Beat grid slider sets how strongly the grid shows, and is remembered",
 
   await slider.fill("100");
   await expect.poll(gridOpacity).toBe(1);
+  // The slider drives thickness too.
+  expect(await lineWidth(":not(.is-downbeat)")).toBeGreaterThan(defaultBeatWidth);
+  expect(await lineWidth(".is-downbeat")).toBeGreaterThan(defaultBarWidth);
   expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueBeatgridLevel"))).toBe("100");
 
   await slider.fill("0");
   const faint = await gridOpacity();
   expect(faint).toBeGreaterThan(0);
   expect(faint).toBeLessThan(defaultOpacity);
+  expect(await lineWidth(":not(.is-downbeat)")).toBeLessThan(defaultBeatWidth);
   // Bar starts stay visible even with the slider at 0.
   expect(await downbeatOpacity()).toBeGreaterThanOrEqual(0.6);
   expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueBeatgridLevel"))).toBe("0");
@@ -483,7 +497,14 @@ test("bar numbers label the grid without crowding, down to every bar when zoomed
       xs: nodes.map((n) => n.getBoundingClientRect().left),
     }));
 
-  // The opening view is 60 bars: labelled every Nth bar, never closer than 36 px.
+  // The opening view is 60 bars: ~5 px a beat is too dense for beat lines,
+  // so only the bar lines are drawn.
+  const beatLines = page.locator("#trackDetailBeatgrid .beatgrid-line:not(.is-downbeat)");
+  const barLines = page.locator("#trackDetailBeatgrid .beatgrid-line.is-downbeat");
+  await expect(beatLines).toHaveCount(0);
+  expect(await barLines.count()).toBeGreaterThanOrEqual(60);
+
+  // Labelled every Nth bar, never closer than 36 px.
   let { numbers, xs } = await barState();
   expect(numbers[0]).toBe(1);
   const step = numbers[1] - numbers[0];
@@ -498,6 +519,8 @@ test("bar numbers label the grid without crowding, down to every bar when zoomed
     ({ numbers } = await barState());
     return numbers.length > 1 ? numbers[1] - numbers[0] : 0;
   }).toBe(1);
+  // Zoomed in, every beat has its line again.
+  expect(await beatLines.count()).toBeGreaterThan(0);
 });
 
 test("the overview strip shows the visible window and moves the view", async ({ page }) => {

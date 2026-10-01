@@ -3875,23 +3875,25 @@ td button[data-action]:disabled,
   pointer-events: none;
 }
 .track-detail-prestart[hidden] { display: none; }
-/* The "Beat grid" slider sets --grid-level (0..1). It mostly drives the
-   ordinary beats; bar starts (wider, and white rather than red, which would
-   vanish into a bass-heavy RGB waveform) always stay visible. */
+/* The "Beat grid" slider sets --grid-level (0..1): how strong and how thick
+   the lines are. It mostly drives the ordinary beats; bar starts (wider, and
+   white rather than red, which would vanish into a bass-heavy RGB waveform)
+   always stay visible. Lines are centred on their beat. */
 /* Lines with a contrasting outline read over any waveform colour. */
 .beatgrid-line {
+  --line-width: calc(0.5px + 1.5px * var(--grid-level, 0.35));
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 1px;
+  width: var(--line-width);
+  margin-left: calc(var(--line-width) / -2);
   background: var(--beatgrid-line);
-  box-shadow: 0 0 0 1px var(--beatgrid-outline);
+  box-shadow: 0 0 0 calc(0.5px + 1px * var(--grid-level, 0.35)) var(--beatgrid-outline);
   opacity: calc(0.1 + 0.9 * var(--grid-level, 0.35));
 }
 .beatgrid-line.is-downbeat {
+  --line-width: calc(2px + 2px * var(--grid-level, 0.35));
   background: var(--beatgrid-downbeat);
-  width: 3px;
-  margin-left: -1px;
   opacity: calc(0.6 + 0.4 * var(--grid-level, 0.35));
 }
 /* Bar numbers in the strip under the waveform. */
