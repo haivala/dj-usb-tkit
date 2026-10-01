@@ -21,7 +21,7 @@ type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
 /// content fingerprint used to recognize a track that's already physically on
 /// the USB under a path this app didn't write (e.g. a Rekordbox-managed
 /// layout, or an older export run that used a different naming scheme).
-type ContentFingerprint = (u32, String, String);
+pub(crate) type ContentFingerprint = (u32, String, String);
 
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
@@ -67,7 +67,7 @@ fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<
 /// Build a content fingerprint from a size/title/artist triple, or `None` when
 /// the inputs are too weak to fingerprint safely (missing/non-positive size,
 /// or a title that canonicalizes to nothing).
-fn content_fingerprint_key(
+pub(crate) fn content_fingerprint_key(
     file_size_bytes: Option<i64>,
     title: &str,
     artist: &str,

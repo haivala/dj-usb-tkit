@@ -3946,14 +3946,118 @@ fn repair_remove_missing_audio_references_deletes_dangling_track_refs() {
 }
 
 #[test]
-fn repair_remove_missing_audio_references_is_manual_only_when_index_drift_present() {
+fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+
+    // The exported file was renamed and moved: its DB reference is now
+    // missing and the file itself unindexed. They are the same track.
+    let original = find_contents_audio_file(&usb);
+    let moved_dir = usb.join("Contents").join("Renamed Folder");
+    fs::create_dir_all(&moved_dir).expect("create moved dir");
+    fs::rename(&original, moved_dir.join("Renamed Track.mp3")).expect("rename audio");
+    let new_rel = "/Contents/Renamed Folder/Renamed Track.mp3";
+
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
+    let track_id_before = parse_pdb(&pdb_path).expect("parse pdb").tracks[0].id;
+    let content_id_before: i64 = open_edb(&edb_path)
+        .query_row("SELECT content_id FROM content LIMIT 1", [], |r| r.get(0))
+        .expect("content row");
+
+    let preview = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: false,
+            selected_fix_ids: vec![],
+        })
+        .data
+        .expect("preview data");
+    let ids: Vec<&str> = preview
+        .proposed_fixes
+        .iter()
+        .map(|f| f.id.as_str())
+        .collect();
+    assert!(ids.contains(&"relink_moved_audio"), "{ids:?}");
+    assert!(!ids.contains(&"add_unindexed_audio_playlist"), "{ids:?}");
+    assert!(!ids.contains(&"remove_missing_audio_references"), "{ids:?}");
+
+    // Default selection: every supported fix.
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec![],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m == "Relink Moved Audio Files: relinked 1 track(s)"),
+        "applied {:#?} failed {:#?}",
+        data.applied_fixes,
+        data.failed_fixes
+    );
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+
+    // Same PDB row and eDB row, new path, still in the original playlist.
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb");
+    let track = parsed
+        .tracks
+        .iter()
+        .find(|t| t.id == track_id_before)
+        .expect("track row kept");
+    assert_eq!(track.track_file_path, new_rel);
+    let playlist = parsed
+        .playlist_tree
+        .iter()
+        .find(|p| p.name == playlist_name)
+        .expect("original playlist");
+    assert!(
+        parsed
+            .playlist_entries
+            .iter()
+            .any(|e| e.playlist_id == playlist.id && e.track_id == track_id_before),
+        "track must stay in its playlist"
+    );
+    assert!(!parsed.playlist_tree.iter().any(|p| p.name == "Unindexed"));
+    let edb_path_after: String = open_edb(&edb_path)
+        .query_row(
+            "SELECT path FROM content WHERE content_id = ?1",
+            [content_id_before],
+            |r| r.get(0),
+        )
+        .expect("content row kept");
+    assert_eq!(edb_path_after, new_rel);
+
+    // One pass: nothing left to relink, add or remove.
+    let after = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: false,
+            selected_fix_ids: vec![],
+        })
+        .data
+        .expect("preview data");
+    assert!(
+        !after.proposed_fixes.iter().any(|f| matches!(
+            f.id.as_str(),
+            "relink_moved_audio"
+                | "add_unindexed_audio_playlist"
+                | "remove_missing_audio_references"
+        )),
+        "{:#?}",
+        after.proposed_fixes
+    );
+}
+
+#[test]
+fn repair_removes_missing_and_adds_unrelated_unindexed_audio_in_one_pass() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
 
+    // The exported file is gone, and a different track (other size, tags
+    // and name) sits unindexed on the USB: no pairing, so the reference is
+    // removed and the new file added.
     fs::remove_file(find_contents_audio_file(&usb)).expect("delete referenced audio file");
-
-    // Drop an unrelated, unindexed real audio file into Contents/ so
-    // canonical-path index drift is also present — this must force the
-    // missing-audio fix into manual-only mode.
     let stray_dir = usb
         .join("Contents")
         .join("Stray Artist")
@@ -3961,63 +4065,55 @@ fn repair_remove_missing_audio_references_is_manual_only_when_index_drift_presen
     fs::create_dir_all(&stray_dir).expect("create stray contents dir");
     copy_audio_fixture(
         &stray_dir,
-        "noart/track_no_art.mp3",
-        "99 Unindexed Stray.mp3",
+        "embedded/track_embedded.mp3",
+        "99 Unrelated.mp3",
     );
-
-    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-        apply: false,
-        selected_fix_ids: vec![],
-    });
-    assert!(preview.ok, "preview failed: {preview:?}");
-    let preview_data = preview.data.expect("preview data");
-    let proposal = preview_data
-        .proposed_fixes
-        .iter()
-        .find(|f| f.id == "remove_missing_audio_references")
-        .expect("remove_missing_audio_references should still be proposed");
-    assert!(
-        !proposal.supported,
-        "fix must be manual-only while index drift is present: {proposal:?}"
-    );
-
-    let track_id = {
-        let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
-        conn.query_row("SELECT content_id FROM content LIMIT 1", [], |r| {
-            r.get::<_, i64>(0)
-        })
-        .expect("content row")
-    };
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
-        selected_fix_ids: vec!["remove_missing_audio_references".to_string()],
+        selected_fix_ids: vec![],
     });
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
     assert!(
-        data.skipped_fixes
+        data.applied_fixes
             .iter()
-            .any(|m| m.contains("Remove Missing Audio References")
-                && m.contains("preview-only/manual")),
-        "expected manual-only skip message: {:#?}",
-        data.skipped_fixes
+            .any(|m| m.starts_with("Add Unindexed Audio to a Playlist: added 1 track(s)")),
+        "{:#?}",
+        data.applied_fixes
+    );
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m.starts_with("Remove Missing Audio References: removed")),
+        "{:#?}",
+        data.applied_fixes
+    );
+    assert!(
+        !data.applied_fixes.iter().any(|m| m.starts_with("Relink")),
+        "{:#?}",
+        data.applied_fixes
     );
 
-    // Nothing should have been deleted since the fix stayed unsupported.
-    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
-    let remaining_content: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM content WHERE content_id = ?1",
-            [track_id],
-            |r| r.get(0),
-        )
-        .expect("count content");
-    assert_eq!(
-        remaining_content, 1,
-        "content row must be untouched in manual-only mode"
+    let after = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: false,
+            selected_fix_ids: vec![],
+        })
+        .data
+        .expect("preview data");
+    assert!(
+        !after.proposed_fixes.iter().any(|f| matches!(
+            f.id.as_str(),
+            "relink_moved_audio"
+                | "add_unindexed_audio_playlist"
+                | "remove_missing_audio_references"
+        )),
+        "{:#?}",
+        after.proposed_fixes
     );
 }
 
