@@ -122,6 +122,15 @@
   175). Each nearby whole and half BPM is checked against the whole track;
   when none clearly fits, the BPM is rounded as before. On a sample of 218
   library tracks this matched the reference BPM for 197 instead of 139.
+  Track lists show every BPM with two decimals ("128.00", "87.50") and
+  right-align BPM and length so they line up; the format column is
+  left-aligned.
+- **Improvement:** the analyze buttons' tooltips say what each one changes.
+  "Analyze" and "Analyze Missing Tracks" only add the missing waveform, BPM,
+  key and first beat, keeping a BPM or key you edited or imported.
+  "Reanalyze" resets all of them to a fresh analysis, replacing imported or
+  edited values (cues are kept). "Analyze Selected" does the first for
+  unanalyzed tracks and the second for analyzed ones.
 - **Improvement:** the rekordbox import:
   - keeps an imported BPM or key when the app analyzes the track for the
     first time; "Reanalyze" still replaces it with the app's own detection.

@@ -3,7 +3,12 @@ import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mj
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
 import { computeExportButtonState, isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
-import { formatDurationMs, formatTimestampLocal, renderTrackListDurationSummary } from "../../track_utils.mjs";
+import {
+  formatDurationMs,
+  formatTimestampLocal,
+  renderTrackListDurationSummary,
+  ANALYZE_PLAYLIST_MISSING_TOOLTIP,
+} from "../../track_utils.mjs";
 
 const PLAYLIST_LOAD_LIMIT_DEFAULT = 150;
 
@@ -259,7 +264,7 @@ export function updatePlaylistExportButtons(ctx) {
       ? `Analyze Missing Tracks (${unanalyzedCount})`
       : "Analyze Missing Tracks";
     el.analyzePlaylistMissingBtn.dataset.tooltip = showAnalyzeMissing
-      ? "Analyze missing waveform, BPM, and duration for tracks in this playlist"
+      ? ANALYZE_PLAYLIST_MISSING_TOOLTIP
       : "No tracks in this playlist need analysis";
   }
   if (el.exportPlaylistBtn) {

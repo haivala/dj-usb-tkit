@@ -159,6 +159,11 @@ test("Selection + bulk add to playlist", async ({ page }) => {
     });
   });
   await expect(page.locator("#selectionCount")).toContainText("3 selected");
+  // With a selection, the scan button analyzes it and its tooltip says what
+  // that does to analyzed vs unanalyzed tracks.
+  const scanBtn = page.locator("#scanLibraryBtn");
+  await expect(scanBtn).toHaveText("Analyze Selected");
+  await expect(scanBtn).toHaveAttribute("data-tooltip", /analyzed tracks are reset/);
 
   await page.evaluate(() => {
     document.getElementById("addSelectedBtn")?.click();

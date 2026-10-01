@@ -1435,7 +1435,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
   expect(saveCall.request.cues).toHaveLength(1);
 
   // The open playlist's row redraws without a reload.
-  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("131.5");
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("131.50");
   await expect(row.locator(".td-key .key-pill")).toHaveText("Em");
 });
 
@@ -1657,7 +1657,7 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   });
   await page.goto("/");
   const libraryBpm = page.locator('#libraryTableBody .track-grid-row[data-track-id="local-1"] .td-bpm .bpm-pill');
-  await expect(libraryBpm).toHaveText("126");
+  await expect(libraryBpm).toHaveText("126.00");
 
   await openUsbView(page, "usb-playlists");
   await page.locator("#refreshUsbBtn").click();
@@ -1678,8 +1678,8 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   expect(saveCall.request.localTrackId).toBeNull();
 
   // The USB row redraws with the new BPM, and so does the library track.
-  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.5");
-  await expect(libraryBpm).toHaveText("128.5");
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.50");
+  await expect(libraryBpm).toHaveText("128.50");
 });
 
 test("cue editor edits the musical key from a USB playlist row and saves it through the USB commands", async ({ page }) => {
@@ -1726,7 +1726,7 @@ test("a USB save runs as a background job: the progress bar shows each write and
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
 
   await page.evaluate(() => window.__releaseUsbSave());
-  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.5");
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.50");
   await expect(page.locator("#progressFooter")).not.toHaveClass(/active/, { timeout: 3000 });
 });
 

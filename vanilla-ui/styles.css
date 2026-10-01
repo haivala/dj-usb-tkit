@@ -1587,12 +1587,14 @@ td.num, th.num {
   box-sizing: border-box;
 }
 
+/* BPM and key are fixed widths that fit their widest pill plus the cell
+   padding: "107.97" and "12A" in the 12px mono pill font. */
 .track-grid--library {
-  --track-grid-cols: 44px 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
+  --track-grid-cols: 44px 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 .track-grid--no-select {
-  --track-grid-cols: 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
+  --track-grid-cols: 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 /* App playlist tracks reserve a leading column for the drag-to-reorder
@@ -1600,7 +1602,7 @@ td.num, th.num {
    template, since USB playlist/history tracks use that same class but
    never reorder. */
 .track-grid[data-body-id="playlistTracksBody"] {
-  --track-grid-cols: 24px 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch minmax(5ch, 7ch) 5ch minmax(5ch, 14ch);
+  --track-grid-cols: 24px 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 .track-grid-row {
@@ -1752,8 +1754,23 @@ input[type="checkbox"] {
 
 /* ── pills: BPM & Key ──────────────────────────────── */
 
+/* Numbers are right-aligned, headers included, so they line up on the
+   decimal point / colon ("87.50" under "128.00", "9:08" under "13:45"). */
+.track-grid-body .td-bpm,
+.track-grid-body .td-length,
+.track-grid-cell.sortable[data-sort-key="bpm"],
+.track-grid-cell.sortable[data-sort-key="durationMs"] {
+  text-align: right;
+}
+
+/* Fixed-width pills (widest value plus padding and border), so the boxes
+   line up down the column: BPM fits "000.00", right-aligned to keep the
+   decimal points in line; a key fits three characters ("10A"), centred. */
 .bpm-pill {
   display: inline-block;
+  box-sizing: border-box;
+  min-width: calc(6ch + 18px);
+  text-align: right;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   font-weight: 500;
@@ -1766,6 +1783,9 @@ input[type="checkbox"] {
 
 .key-pill {
   display: inline-block;
+  box-sizing: border-box;
+  min-width: calc(3ch + 18px);
+  text-align: center;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   font-weight: 500;
@@ -1787,10 +1807,6 @@ input[type="checkbox"] {
 .key-pill--h9 { --key-hue: 270; }
 .key-pill--h10 { --key-hue: 300; }
 .key-pill--h11 { --key-hue: 330; }
-
-.td-format {
-  text-align: center;
-}
 
 .format-badge {
   display: inline-flex;

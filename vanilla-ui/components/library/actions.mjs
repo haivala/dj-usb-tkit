@@ -2,6 +2,7 @@ import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillKeyCell, coverElement } from "../../track_table.mjs";
+import { REANALYZE_TOOLTIP } from "../../track_utils.mjs";
 import {
   formatDurationMs,
   renderTrackListDurationSummary,
@@ -1182,7 +1183,7 @@ export function patchLibraryRowCells(ctx, row, track) {
     const analyzeBtn = actionTd.querySelector("[data-action='analyze-track']");
     if (analyzeBtn && track.analysisReady) {
       analyzeBtn.textContent = "Reanalyze";
-      analyzeBtn.dataset.tooltip = "Recompute waveform/BPM/key";
+      analyzeBtn.dataset.tooltip = REANALYZE_TOOLTIP;
     }
   }
 

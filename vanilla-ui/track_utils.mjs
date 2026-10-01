@@ -29,12 +29,25 @@ export function formatDurationMs(value) {
 
 // `track.bpm` is always carried through state as a number (or null) -- both
 // `normalizeTrack` and the realtime analysis patch store the raw numeric value.
-// This is the single place that turns it into display text: trims float noise
-// and a trailing `.00` without forcing decimals on a whole-number BPM.
+// This is the single place that turns it into display text: always two
+// decimals ("128.00", "87.50"), so a half BPM reads apart from a whole one and
+// the right-aligned column lines up on the decimal point.
+// What each analyze action does, for its tooltip. A first analysis only fills
+// in what's missing; analyzing an analyzed track resets it (backend
+// `kept_analysis_values`).
+export const ANALYZE_TOOLTIP =
+  "Add the missing waveform, BPM, key and first beat; a BPM or key you edited or imported is kept";
+export const REANALYZE_TOOLTIP =
+  "Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)";
+export const ANALYZE_SELECTED_TOOLTIP =
+  "Unanalyzed tracks get the missing waveform, BPM, key and first beat (edited or imported BPM/key kept); analyzed tracks are reset to a fresh analysis, replacing those values (cues are kept)";
+export const ANALYZE_PLAYLIST_MISSING_TOOLTIP =
+  "Add the missing waveform, BPM, key and first beat to this playlist's unanalyzed tracks; a BPM or key you edited or imported is kept";
+
 export function formatBpm(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return "";
-  return String(Math.round(n * 100) / 100);
+  return n.toFixed(2);
 }
 
 // The single "Total time: … (N without length)" renderer for every track-list

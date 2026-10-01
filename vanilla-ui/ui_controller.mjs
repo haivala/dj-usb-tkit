@@ -11,6 +11,7 @@ import { initTooltips } from "./tooltip.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
 import { renderEmptyState } from "./components/shell/actions.mjs";
 import { scanLibraryButtonLabel } from "./components/library/actions.mjs";
+import { ANALYZE_SELECTED_TOOLTIP } from "./track_utils.mjs";
 
 export function updateActivePlaylistIndicators(ctx) {
   const { state, el } = ctx;
@@ -105,6 +106,9 @@ export function updateScanLibraryButtonLabel(ctx) {
   const { state, el } = ctx;
   if (!el.scanLibraryBtn) return;
   el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.sourceRoots, state.selectedTrackIds.size);
+  // With a selection the button analyzes it (see scanLibraryButtonLabel).
+  if (state.selectedTrackIds.size > 0) el.scanLibraryBtn.dataset.tooltip = ANALYZE_SELECTED_TOOLTIP;
+  else delete el.scanLibraryBtn.dataset.tooltip;
 }
 
 export function closeSettingsDrawer(ctx) {
