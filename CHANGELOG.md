@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.3.0
+
 **Severity:** feature
 
 - **New feature:** import a Mixxx library. When the app finds Mixxx's
@@ -154,6 +156,8 @@
     with their buttons.
   - Playlist page: the export status and total time share one row under the
     table, and the title shows only the track count.
+  - Backups: "Refresh" sits next to the title, and each backup fits on one
+    line.
 - **Improvement:** USBs are shown by their name instead of their folder or
   mount path, which is still shown on hover: the selected USB on the USB
   Browser page, and "Export to USB: …" and "Last exported … to …" on a

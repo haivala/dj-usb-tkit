@@ -69,6 +69,7 @@
   <div class="app-layout">
     <aside class="nav-sidebar" id="navSidebar">
       <div class="nav-sidebar-header">
+        <div class="nav-section-label">Manage</div>
         <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" data-tooltip="Collapse sidebar" aria-label="Collapse sidebar">&#9666;</button>
       </div>
       <nav class="nav-items" role="navigation" aria-label="App sections">
@@ -433,11 +434,13 @@
       </section>
 
       <section class="panel" id="panel-backups" role="tabpanel" aria-hidden="true">
-        <h2>Backups</h2>
-        <p class="muted">Each backup includes both the PDB and eDB.</p>
-        <div class="event-log-toolbar">
-          <button id="backupsRefreshBtn" disabled>Refresh</button>
+        <div class="panel-header">
+          <h2>Backups</h2>
+          <div class="panel-header-actions">
+            <button id="backupsRefreshBtn" disabled>Refresh</button>
+          </div>
         </div>
+        <p class="muted">Each backup holds both of the USB's databases: legacy (PDB) and new (eDB).</p>
         <p class="muted" id="backupsSummary">No entries</p>
         <div class="event-log-list" id="backupsList" role="log" aria-live="polite"></div>
       </section>

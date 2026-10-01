@@ -1,11 +1,11 @@
 // Records the docs media in docs/assets/ -- the cue-editor and
-// playlist-import GIFs and the README / cue-editor screenshots -- from the
-// real frontend build.
+// playlist-import GIFs and the README / cue-editor / Backups screenshots --
+// from the real frontend build.
 //
 //   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
 //   npm run docs:media -- cue-editor cue-editor-drag-cues   (only those)
 //
-// 1. Synthesises a made-up 10-track library (two albums, both in the checked
+// 1. Synthesises a made-up 15-track library (three albums, all in the checked
 //    source folder; the other, unchecked one only shows the "Filtered" badge)
 //    with ffmpeg.
 // 2. Scans and analyzes it with the real backend (`dump_doc_gif_fixture`
@@ -67,6 +67,22 @@ const ALBUMS = [
       { title: "White Nights", bpm: 140, rootHz: 46.25, seconds: 180, breakdown: 3, minor: true },
       { title: "Driftwood", bpm: 134, rootHz: 65.41, seconds: 150, breakdown: 5, minor: false },
       { title: "Last Ferry", bpm: 138, rootHz: 51.91, seconds: 190, breakdown: 2, minor: true },
+    ],
+  },
+  {
+    // A third album, so the Library has more rows than fit and scrolls.
+    folder: "Syyskuu/Polar Night",
+    album: "Polar Night",
+    artist: "Revontuli Club",
+    cover:
+      "gradients=s=400x400:c0=0x064e3b:c1=0x22d3ee:c2=0xa3e635:n=3:x0=0:y0=400:x1=400:y1=0:seed=3," +
+      "drawgrid=w=50:h=50:t=2:c=black@0.15",
+    tracks: [
+      { title: "Aurora Loop", bpm: 120, rootHz: 55, seconds: 160, breakdown: 3, minor: false },
+      { title: "Ice Road", bpm: 123, rootHz: 41.2, seconds: 175, breakdown: 4, minor: true },
+      { title: "Midnight Sun", bpm: 125, rootHz: 49, seconds: 150, breakdown: 2, minor: false },
+      { title: "Snowblind", bpm: 127, rootHz: 61.74, seconds: 185, breakdown: 5, minor: true },
+      { title: "Tundra", bpm: 130, rootHz: 36.71, seconds: 165, breakdown: 3, minor: true },
     ],
   },
 ];
@@ -450,6 +466,31 @@ async function center(locator) {
 
 // --- 4. Screenshots ---
 
+// Made-up backups for the Backups panel, newest first: the latest on the USB,
+// older ones kept on this computer, each PDB + eDB with the reason it was taken.
+const BACKUPS = [
+  ["2026-09-26_18-04-12", "usb", "Before export (additive)", 4],
+  ["2026-09-26_17-52-40", "cache", "Before repair", 4],
+  ["2026-09-25_21-13-05", "cache", "Before menu update", 3],
+  ["2026-09-25_20-47-31", "cache", "Before export (mirror)", 3],
+  ["2026-09-19_22-30-18", "cache", "Before restore", 2],
+  ["2026-09-19_22-02-56", "cache", "Before export (additive)", 2],
+].map(([timestamp, location, reason, playlistCount], i) => {
+  const pdb = 1_480_000 + playlistCount * 12_288;
+  const edb = 1_020_000 + playlistCount * 8_192 - i * 4_096;
+  return {
+    timestamp,
+    location,
+    reason,
+    playlistCount,
+    sizeBytes: pdb + edb,
+    files: [
+      { stem: "export", filename: "export.pdb", sizeBytes: pdb },
+      { stem: "exportLibrary", filename: "exportLibrary.db", sizeBytes: edb },
+    ],
+  };
+});
+
 function shots(fixture) {
   const bpm = fixture.detail.track.bpm;
   const firstBeat = fixture.detail.firstBeatMs ?? 0;
@@ -457,10 +498,23 @@ function shots(fixture) {
 
   return [
     {
-      // README hero: the Library with a USB connected and a playlist active.
+      // README hero: the Library with a USB connected, a playlist active, an
+      // imported Mixxx library, and more tracks than fit (so it scrolls).
       name: "DJ-USB-Tkit",
-      opts: {},
+      opts: { externalLibraries: { mixxx: [] } },
       async run() {},
+    },
+    {
+      // docs/USB_EXPORT.md: the Backups panel, opened from Settings.
+      name: "backup-view",
+      opts: { backups: BACKUPS },
+      async run(page) {
+        await page.locator("#settingsBtn").click();
+        await page.locator("#openBackupsBtn").click();
+        await page.locator("#backupsList .event-log-row").first().waitFor();
+        await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
     },
     {
       // docs/CUE_EDITOR.md: a start marker off the first beat, one hot cue,
@@ -502,7 +556,9 @@ try {
     if (await fetch(BASE_URL).then(() => true, () => false)) break;
     await new Promise((r) => setTimeout(r, 100));
   }
-  browser = await chromium.launch();
+  // Headless Chromium hides scrollbars by default; the shots should show the
+  // app's own (e.g. a Library with more tracks than fit).
+  browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] });
   const only = process.argv.slice(2);
   const wanted = (name) => !only.length || only.includes(name);
   for (const scene of scenes(fixture)) {

@@ -434,8 +434,14 @@ body.library-onboarding {
 .nav-sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 8px 10px 4px;
+}
+
+/* "Manage" sits in the header row next to the collapse button; padded so it
+   lines up with the "Playlists" label below (8px list inset + 12px). */
+.nav-sidebar-header .nav-section-label {
+  padding: 0 0 0 10px;
 }
 
 .sidebar-collapse-btn {
@@ -3167,11 +3173,18 @@ td button[data-action]:disabled,
   color: var(--ink-secondary);
 }
 
-/* Backups rows show a reason ("Before playlist reorder") in the shared
+/* Backups rows show a reason ("Before export (additive)") in the shared
    .event-log-source column instead of the short eDB/PDB label the Event
-   Log panel puts there, so it needs more room. */
+   Log panel puts there, so it needs more room; the time column fits the
+   whole "2026-09-26 18:04:12" so each row stays on one line. */
+/* The backup count starts its own block under the description. */
+#backupsSummary {
+  margin-top: 14px;
+}
+
 #backupsList .event-log-row {
-  grid-template-columns: 92px 160px minmax(0, 1fr) auto;
+  grid-template-columns: 150px 190px minmax(0, 1fr) auto;
+  align-items: center;
 }
 
 .backups-row-actions {

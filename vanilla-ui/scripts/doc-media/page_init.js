@@ -1,9 +1,9 @@
 // Page init script for record.mjs: stands in for the Tauri backend with the
 // payloads the real backend produced (window.__DOC_GIF_FIXTURE__) plus
 // made-up playlists and a connected USB, and draws a cursor and a Shift
-// keycap, which a headless screencast doesn't show. With
-// `opts.externalLibraries`, a rekordbox and a Mixxx library are "detected"
-// and their made-up playlists can be imported.
+// keycap, which a headless screencast doesn't show. Each library named in
+// `opts.externalLibraries` (`rekordbox`, `mixxx`) is "detected" as imported,
+// and its made-up playlists can be imported.
 (() => {
   const { tracks, detail, sourceRoots, sourceRootEnabled, playlists } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
@@ -16,6 +16,8 @@
   ls.setItem("djusbtkit.sourceRootEnabled", JSON.stringify(sourceRootEnabled));
   ls.setItem("djusbtkit.cueStartOnFirstBeat", "0");
   ls.setItem("djusbtkit.cueQuantize", "1");
+  // An imported Mixxx library is switched on in the Libraries row.
+  if (opts.externalLibraries?.mixxx) ls.setItem("djusbtkit.mixxxDbEnabled", "1");
 
   const durationMs = detail.track.durationMs;
   const clock = { offsetMs: 0, startedAt: null, loaded: false };
@@ -73,11 +75,11 @@
           case "set_frontend_setting":
             return ok(null);
           case "detect_external_master_db":
-            return ok(external
+            return ok(external?.rekordbox
               ? { found: true, path: "C:/Users/dj/AppData/Roaming/Pioneer/rekordbox/master.db", imported: true }
               : { found: false, path: null, imported: false });
           case "detect_external_mixxx_db":
-            return ok(external
+            return ok(external?.mixxx
               ? { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite", imported: true }
               : { found: false, path: null, imported: false });
           case "list_rekordbox_playlists":
@@ -103,6 +105,8 @@
           }
           case "check_source_roots":
             return ok({ missing: [] });
+          case "list_usb_backups":
+            return ok({ items: opts.backups || [] });
           case "list_usb_devices":
             return ok({ items: [{ id: "usb-chiphead", rootPath: USB_ROOT }] });
           case "validate_usb_root":
