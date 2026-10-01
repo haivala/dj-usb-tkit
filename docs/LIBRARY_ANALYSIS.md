@@ -21,6 +21,23 @@ Analysis engine selection is user-controlled from Settings. The default engine i
 | `stratum` | Rust-native backend path | Yes | fast local default with no extra runtime setup |
 | `essentia` | JS/WASM runner path | No (opt-in) | alternate BPM/key behavior when users explicitly install and select it |
 
+### Stratum BPM: whole and half values
+
+stratum searches whole-BPM steps and is typically off by up to ±2 BPM, so its
+raw estimate isn't stored as is. `refine_bpm` (`service/bpm_key.rs`) tries
+every whole and half BPM within ±2 of it (inside the analysis BPM range)
+against the whole track: each candidate scores how consistently the onset
+envelope stays in phase with its beat. A tempo 0.5 BPM off drifts more than a
+beat over a few minutes, so the right one stands out. The best candidate is
+used when it scores at least 0.06 and 1.5× the runner-up; otherwise the
+estimate is rounded to a whole BPM. Half values matter most for slow tracks
+whose double is the real tempo (86.5 → 173, 87.5 → 175).
+
+Measured on 218 library tracks against rekordbox/tag BPMs (58 of them on a
+half BPM): rounding got 139 right, `refine_bpm` 197 (61 fixed, 3 changed
+away from the reference). Tempos whose half is a quarter value (173.5 →
+86.75) and estimates more than 2 BPM off are not corrected.
+
 ### How to use engines
 
 1. Open Settings and choose analysis engine (`stratum` or `essentia`).

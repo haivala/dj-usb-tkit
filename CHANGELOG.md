@@ -116,6 +116,12 @@
   isn't found, for example because its drive is unplugged. Deleting it also
   removed it from every playlist and lost its cues and edits. The track is
   now kept and listed in the Event Log as not found.
+- **Improvement:** analysis finds half BPMs (such as 87.5) and corrects
+  estimates up to 2 BPM off, instead of always rounding to a whole BPM. Half
+  values matter most for slow tracks whose double is the real tempo (87.5 →
+  175). Each nearby whole and half BPM is checked against the whole track;
+  when none clearly fits, the BPM is rounded as before. On a sample of 218
+  library tracks this matched the reference BPM for 197 instead of 139.
 - **Improvement:** the rekordbox import:
   - keeps an imported BPM or key when the app analyzes the track for the
     first time; "Reanalyze" still replaces it with the app's own detection.
