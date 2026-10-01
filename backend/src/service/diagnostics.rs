@@ -1527,10 +1527,7 @@ pub(crate) fn diagnose_pdb_integrity(
                 segments.push(fail_parts.join("; ") + " — run repair_usb_diagnostics to fix");
             }
             if !warn_parts.is_empty() {
-                segments.push(
-                    warn_parts.join("; ")
-                        + " — player-tolerant; repair available for full desktop DJ software compatibility",
-                );
+                segments.push(warn_parts.join("; ") + " — player-tolerant; repair available");
             }
             segments.join(" | ")
         };

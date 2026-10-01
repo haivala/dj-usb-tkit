@@ -43,6 +43,8 @@ export function updateUsbNameBadge(ctx) {
   if (!el?.usbNameBadge || !el?.usbNameBadgeLabel) return;
   const name = String(state.usbDeviceName || "").trim();
   el.usbNameBadgeLabel.textContent = name || "Not connected";
+  // The USB Browser heading shows the same name.
+  if (state.usbRoot && state.usbRootValid) ctx.updateUsbRootText?.(state.usbRoot, true);
 }
 
 export function updateSelectionCount(ctx) {

@@ -193,6 +193,12 @@
               <span class="usb-path-badge" id="usbRootPathText">No USB selected</span>
               <span class="usb-health-dot" id="usbHealthDot" data-tooltip="USB health unknown" aria-label="USB health unknown"></span>
             </div>
+            <div class="panel-header-actions hidden" id="usbDiagToolbar">
+              <button id="reDiagnoseBtn">Rediagnose USB</button>
+              <button id="runUsbParityBtn" data-tooltip="Check that the USB's legacy (PDB) and new (eDB) databases agree">Parity Report</button>
+              <span class="usb-cfg-toolbar-sep"></span>
+              <button id="previewRepairsBtn">Preview Fixes</button>
+            </div>
           </div>
           <div class="source-bar usb-cfg-recent-bar" id="usbRecentRow">
             <div class="source-filter-header" id="usbRecentHeader">
@@ -217,12 +223,6 @@
               <span class="usb-cfg-section-label">Health &amp; Diagnostics</span>
             </summary>
             <div class="usb-health-content">
-              <div class="usb-cfg-toolbar">
-                <button id="reDiagnoseBtn">Rediagnose USB</button>
-                <button id="runUsbParityBtn">Parity Report</button>
-                <span class="usb-cfg-toolbar-sep"></span>
-                <button id="previewRepairsBtn">Preview Fixes</button>
-              </div>
               <div class="diag-card hidden" id="usbDiagnosticsCard">
                 <div class="diag-status-row">
                   <span id="diagOverallStatus" class="diag-badge"></span>
@@ -828,6 +828,9 @@
   </template>
   <template id="tplDiagParityRow">
     <tr><td><span class="diag-dot"></span></td><td></td><td class="num"></td><td class="num"></td><td class="num"></td><td><span class="muted"></span></td></tr>
+  </template>
+  <template id="tplDiagParityIntro">
+    <p class="muted diag-intro">Compares the two databases on the USB: the legacy database (PDB) and the new database (eDB). On a healthy USB both hold the same playlists, tracks, track order and metadata. <strong>A FAIL means players may show different playlists or tracks depending on which database they read.</strong> Use Preview Fixes to see what can be repaired.</p>
   </template>
   <template id="tplDiagParitySummary">
     <div><h4>Parity Summary</h4><table class="diag-table"><thead><tr><th>Status</th><th>Metric</th><th>Count</th></tr></thead><tbody></tbody></table></div>

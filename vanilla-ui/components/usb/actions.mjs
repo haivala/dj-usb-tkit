@@ -214,6 +214,7 @@ export function renderParityReport(ctx, data) {
   };
   el.diagSections.replaceChildren();
   const div = diagSection(document, section.status, section.title);
+  div.appendChild(cloneTemplate(document, "tplDiagParityIntro"));
   if (Array.isArray(data.summaryRows) && data.summaryRows.length) {
     const summary = cloneTemplate(document, "tplDiagParitySummary");
     const tbody = summary.querySelector("tbody");
@@ -507,6 +508,9 @@ export function updateUsbConfigControlsVisibility(ctx) {
   const hasValidRoot = !!state.usbRoot && !!state.usbRootValid;
   if (el.usbSelectedControls) {
     el.usbSelectedControls.classList.toggle("hidden", !hasValidRoot);
+  }
+  if (el.usbDiagToolbar) {
+    el.usbDiagToolbar.classList.toggle("hidden", !hasValidRoot);
   }
   if (!hasValidRoot && el.usbDiagnosticsCard) {
     el.usbDiagnosticsCard.classList.add("hidden");
@@ -1654,9 +1658,14 @@ export function updateUsbRootText(ctx, path, valid = false) {
   if (!valid) {
     el.usbRootPathText.textContent = "No USB selected";
     el.usbRootPathText.classList.remove("usb-path-valid", "usb-path-invalid");
+    delete el.usbRootPathText.dataset.tooltip;
     return;
   }
-  el.usbRootPathText.textContent = path;
+  // Show the drive's name; the full folder is in the tooltip. The path is the
+  // label only until the name has been read (or for a drive without one).
+  const name = String(ctx.state?.usbDeviceName || "").trim();
+  el.usbRootPathText.textContent = name || path;
+  el.usbRootPathText.dataset.tooltip = path;
   el.usbRootPathText.classList.add("usb-path-valid");
   el.usbRootPathText.classList.remove("usb-path-invalid");
 }
