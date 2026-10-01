@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.3.1
+
 - **Fix:** the parity report's "Indexed audio file presence" check now
   lists each indexed audio file missing from the USB in the Event Log, not
   just how many there are. Unindexed files were already listed. When
