@@ -42,6 +42,11 @@ The original CDJ-2000 (fw 4.33) was added on that 0.2.0 run; it has not yet run
 `playback-start-position`.
 XDJ-1000MK2 (fw 1.44) was added on 0.2.6 and passes every scenario, the
 first XDJ in the matrix.
+On 0.3.1 (2026-10-01), the same CDJ-2000NXS and CDJ-2000NXS2 passed
+`normal-export` (playlist export, mount, browse, load, playback) while
+confirming the fix for exported file names losing their extension: a track
+from a multi-script album now loads and plays. The other scenarios were not
+re-run on 0.3.1.
 
 Additive export — adding tracks to a USB that was initialized by rekordbox,
 without wiping the existing library — has worked on hardware since the first
@@ -112,6 +117,8 @@ tested` row.
 | CDJ-2000NXS2 | 1.82 | 0.2.4 | `cue-points-and-edited-beatgrid` | pass | 2026-09-25 | maintainer | Cue editor works; cues trigger at their saved positions. |
 | CDJ-2000NXS2 | 1.82 | 0.2.4 | `playback-start-position` | pass | 2026-09-25 | maintainer | First hardware validation of the playback-start editor. Track loads at the chosen start position. |
 | XDJ-1000MK2 | 1.44 | 0.2.6 | everything tested | pass | 2026-09-29 | nack | First validation on XDJ-1000MK2. |
+| CDJ-2000NXS | 1.44 | 0.3.1 | `normal-export` | pass | 2026-10-01 | maintainer | Run to check the 0.3.1 fix, covering every `normal-export` operation: exported a playlist with the multi-script album "–5", USB insert, database mount, playlist browse, track load and playback all work. Track 6, re-exported from the original file, now keeps its `.mp3` extension and plays (previously unplayable). Other scenarios not re-run. |
+| CDJ-2000NXS2 | 1.82 | 0.3.1 | `normal-export` | pass | 2026-10-01 | maintainer | Run to check the 0.3.1 fix, covering every `normal-export` operation: exported a playlist with the multi-script album "–5", USB insert, database mount, playlist browse, track load and playback all work. Track 6, re-exported from the original file, now keeps its `.mp3` extension and plays (previously unplayable). Other scenarios not re-run. |
 
 ## Known Issues
 
