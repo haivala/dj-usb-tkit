@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags, params};
 use uuid::Uuid;
 
+use super::anlz::read_first_beat_from_anlz;
 use super::cues::{
     DEFAULT_HOTCUE_COLOR_ID, MAX_HOT_CUES, insert_track_cues, is_valid_color_id, track_has_cues,
 };
@@ -594,6 +595,12 @@ impl<'a> MasterDbTrackImporter<'a> {
             .unwrap_or_else(|| Uuid::now_v7().to_string());
 
         let waveform_path = self.resolve_anlz(t);
+        // rekordbox's tracks aren't analyzed locally, so its own beat grid is
+        // the only source of the cue editor's grid anchor.
+        let first_beat_ms = waveform_path
+            .as_deref()
+            .and_then(read_rekordbox_first_beat)
+            .map(i64::from);
         let artwork_path = self.copy_artwork(t, &track_id);
         let album = Some(&t.album).filter(|a| !a.is_empty());
 
@@ -617,6 +624,12 @@ impl<'a> MasterDbTrackImporter<'a> {
                     tonality = CASE WHEN ?5 IS NOT NULL
                                      AND (?13 OR tonality IS NULL OR tonality_source = 'rekordbox')
                                     THEN ?5 ELSE tonality END,
+                    first_beat_ms_source = CASE WHEN ?15 IS NOT NULL
+                                                 AND (?13 OR first_beat_ms IS NULL OR first_beat_ms_source = 'rekordbox')
+                                                THEN 'rekordbox' ELSE first_beat_ms_source END,
+                    first_beat_ms = CASE WHEN ?15 IS NOT NULL
+                                          AND (?13 OR first_beat_ms IS NULL OR first_beat_ms_source = 'rekordbox')
+                                         THEN ?15 ELSE first_beat_ms END,
                     duration_ms = COALESCE(duration_ms, ?6),
                     waveform_peaks_path = COALESCE(?7, waveform_peaks_path),
                     artwork_path = COALESCE(?8, artwork_path),
@@ -639,7 +652,8 @@ impl<'a> MasterDbTrackImporter<'a> {
                     track_id,
                     crate::utils::format_ext_from_path(&t.file_path),
                     self.force,
-                    t.genre
+                    t.genre,
+                    first_beat_ms
                 ],
             )?;
             self.updated += 1;
@@ -649,10 +663,12 @@ impl<'a> MasterDbTrackImporter<'a> {
                     id, title, artist, album, bpm, tonality, file_path, format_ext,
                     duration_ms, waveform_peaks_path, artwork_path, match_fingerprint,
                     master_db_source, created_at, updated_at,
-                    bpm_analyzer, tonality_source, genre
+                    bpm_analyzer, tonality_source, genre,
+                    first_beat_ms, first_beat_ms_source
                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
                      CASE WHEN ?5 IS NOT NULL THEN 'rekordbox' END,
-                     CASE WHEN ?6 IS NOT NULL THEN 'rekordbox' END, ?14)"#,
+                     CASE WHEN ?6 IS NOT NULL THEN 'rekordbox' END, ?14,
+                     ?15, CASE WHEN ?15 IS NOT NULL THEN 'rekordbox' END)"#,
                 params![
                     track_id,
                     t.title,
@@ -667,7 +683,8 @@ impl<'a> MasterDbTrackImporter<'a> {
                     artwork_path,
                     fingerprint,
                     self.now,
-                    t.genre
+                    t.genre,
+                    first_beat_ms
                 ],
             )?;
             self.existing.insert(t.file_path.clone(), track_id.clone());
@@ -1004,6 +1021,16 @@ impl BackendService {
     }
 }
 
+/// First beat of rekordbox's beat grid for a resolved ANLZ path. The grid
+/// (`PQTZ`) lives in the `.DAT` file, while the stored path usually points at
+/// the `.EXT` (preferred for its colour waveform), so read the `.DAT` first.
+fn read_rekordbox_first_beat(anlz_path: &str) -> Option<u32> {
+    let path = Path::new(anlz_path);
+    [path.with_extension("DAT"), path.to_path_buf()]
+        .iter()
+        .find_map(|p| read_first_beat_from_anlz(&std::fs::read(p).ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1310,6 +1337,101 @@ mod tests {
                 vec![53, 54_911, 60_000]
             )
         );
+    }
+
+    #[test]
+    fn rekordbox_import_takes_first_beat_from_rekordbox_beat_grid() {
+        use crate::models::GetTrackDetailRequest;
+        use crate::service::anlz::{WaveformData, build_anlz_dat_file, build_anlz_ext_file};
+
+        let rb_root = tempfile::tempdir().expect("rb root");
+        let media_root = tempfile::tempdir().expect("media root");
+        let (_service_dir, service) = test_service();
+        let media: Vec<PathBuf> = ["a.mp3", "b.flac", "c.wav"]
+            .iter()
+            .map(|n| media_root.path().join(n))
+            .collect();
+        for p in &media {
+            std::fs::write(p, b"audio").expect("write media");
+        }
+        let master = create_master_db_with_playlists(rb_root.path(), &media);
+        // Like a Windows rekordbox library: a /PIONEER/... virtual path
+        // resolving under <share>, with both .DAT (beat grid) and .EXT.
+        let anlz_dir = rb_root.path().join("share/PIONEER/USBANLZ/abc/def");
+        std::fs::create_dir_all(&anlz_dir).expect("anlz dir");
+        let waveform = WaveformData::empty();
+        std::fs::write(
+            anlz_dir.join("ANLZ0000.DAT"),
+            build_anlz_dat_file(&waveform, "", Some(128.0), 200_000, Some(437), &[]),
+        )
+        .expect("write dat");
+        std::fs::write(
+            anlz_dir.join("ANLZ0000.EXT"),
+            build_anlz_ext_file(&waveform, "", Some(128.0), 200_000, Some(437), &[]),
+        )
+        .expect("write ext");
+        let conn = Connection::open(&master).expect("open master");
+        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_MASTER_DB_KEY}';"))
+            .expect("key");
+        conn.execute(
+            "UPDATE djmdContent SET AnalysisDataPath = '/PIONEER/USBANLZ/abc/def/ANLZ0000.DAT' WHERE ID = '103'",
+            [],
+        )
+        .expect("set analysis path");
+        drop(conn);
+
+        let path = Some(master.to_string_lossy().to_string());
+        let import = |force| {
+            service
+                .import_rekordbox_playlist(ImportExternalPlaylistRequest {
+                    path: path.clone(),
+                    kind: ExternalPlaylistKind::Playlist,
+                    id: "11".to_string(),
+                    force,
+                })
+                .expect("import")
+        };
+        let charlie = || -> (Option<i64>, Option<String>) {
+            service
+                .db
+                .connect()
+                .unwrap()
+                .query_row(
+                    "SELECT first_beat_ms, first_beat_ms_source FROM tracks WHERE title = 'Charlie'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("charlie")
+        };
+
+        import(false);
+        assert_eq!(charlie(), (Some(437), Some("rekordbox".to_string())));
+        let charlie_id: String = service
+            .db
+            .connect()
+            .unwrap()
+            .query_row("SELECT id FROM tracks WHERE title = 'Charlie'", [], |r| r.get(0))
+            .unwrap();
+        let detail = service
+            .get_track_detail(GetTrackDetailRequest { track_id: charlie_id })
+            .expect("track detail");
+        assert_eq!(detail.first_beat_ms, Some(437));
+
+        // A grid moved in the cue editor survives a plain re-import...
+        service
+            .db
+            .connect()
+            .unwrap()
+            .execute(
+                "UPDATE tracks SET first_beat_ms = 900, first_beat_ms_source = 'user' WHERE title = 'Charlie'",
+                [],
+            )
+            .unwrap();
+        import(false);
+        assert_eq!(charlie(), (Some(900), Some("user".to_string())));
+        // ...and a forced one takes rekordbox's again.
+        import(true);
+        assert_eq!(charlie(), (Some(437), Some("rekordbox".to_string())));
     }
 
     #[test]

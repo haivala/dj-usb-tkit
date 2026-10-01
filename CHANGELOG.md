@@ -48,6 +48,12 @@
   timer stuck on "(paused)" while the next track, already started, is still
   being analyzed. The timer keeps counting until that track finishes, then
   shows "(paused)".
+- **Fix:** tracks imported from rekordbox now show their beat grid in the
+  cue editor. The import takes the first beat from rekordbox's own beat
+  grid; before, these tracks had no grid, because they aren't analyzed in
+  the app. Already imported tracks get it the next time you import them
+  (↻). A grid you moved in the cue editor is kept, unless you force a
+  re-import.
 - **Chore:** made the pause/resume analysis test reliable when the full
   test suite runs in parallel.
 
