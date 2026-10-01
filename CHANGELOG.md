@@ -83,32 +83,29 @@
   instead, so it stays in its playlists. Removing references to missing files
   no longer waits for a manual re-import first.
 - **Fix:** video files (`.mp4` files with a video track) are no longer
-  imported into the library. Audio-only `.mp4`
-  (AAC) files still are. Videos already in the library drop out on the next
-  scan.
-- **Fix:** analysis now reads the audio track of `.mp4` files that also
-  contain video, instead of failing on the video track.
+  imported into the library; audio-only `.mp4` (AAC) files still are, and
+  videos already in the library drop out on the next scan. Analysis now
+  reads the audio track of an `.mp4` that also contains video, instead of
+  failing on the video track.
 - **Fix:** a file whose audio can't be decoded now counts as failed (with
   the reason in the Event Log). Before, it was counted as analyzed, with a
   meaningless waveform drawn from the file's raw bytes and no BPM, key or
   length. A track that decodes but ends up without a BPM or length is now
-  reported as "incomplete" in the status line instead of "analyzed".
-- **Fix:** the USB repair for empty analysis files no longer writes a
-  waveform made from the file's raw bytes when the source audio can't be
-  decoded. It now reports that track as failed and leaves the file as it was.
-- **Fix:** tracks with no known BPM no longer get a made-up 120 BPM beat grid
-  in their analysis files; they get none. Moving the first beat of such a
-  track no longer rebuilds its grid at 120 BPM.
-- **Fix:** analysis files no longer contain a made-up phrase map. Every
-  track with a BPM got the same Intro / Verse / Chorus / Outro split into
-  equal quarters, which players showed as if it were real phrase analysis.
-  Phrases aren't analyzed, so none are written now. Phrase data rekordbox
-  wrote is still kept.
-- **Fix:** a track whose length is unknown no longer gets a waveform and beat
-  grid sized for a made-up 3-minute length. Analysis writes no waveform for
-  it. The USB repairs for empty analysis files and for beat-grid tempo take
-  the length from the audio file when the USB database has none, and
-  otherwise report the track instead of guessing.
+  reported as "incomplete" in the status line instead of "analyzed". The USB
+  repair for empty analysis files likewise reports such a track as failed
+  and leaves its file as it was, instead of writing a raw-bytes waveform.
+- **Fix:** analysis files no longer contain made-up data:
+  - A track with no known BPM gets no beat grid instead of a 120 BPM one,
+    and moving its first beat no longer rebuilds the grid at 120 BPM.
+  - No phrase map is written. Every track with a BPM got the same Intro /
+    Verse / Chorus / Outro split into equal quarters, which players showed
+    as if it were real phrase analysis. Phrase data rekordbox wrote is still
+    kept.
+  - A track whose length is unknown gets no waveform, instead of a waveform
+    and beat grid sized for a 3-minute length. The USB repairs for empty
+    analysis files and for beat-grid tempo take the length from the audio
+    file when the USB database has none, and otherwise report the track
+    instead of guessing.
 - **Fix:** starting a new job (creating a playlist, importing from the USB,
   exporting, …) right after another one finished no longer makes its
   progress bar disappear partway through. Before, the previous job's
@@ -119,54 +116,72 @@
   isn't found, for example because its drive is unplugged. Deleting it also
   removed it from every playlist and lost its cues and edits. The track is
   now kept and listed in the Event Log as not found.
-- **Improvement:** the rekordbox import now skips files the library doesn't take
-  (such as videos), like the folder scan does.
-- **Improvement:** a BPM or key imported from rekordbox is no longer replaced
-  when the app analyzes the track for the first time; "Reanalyze" still
-  replaces it with the app's own detection. Importing again updates
-  a BPM or key that still came from rekordbox, so a tempo corrected there
-  comes across; one you edited or reanalyzed in the app is kept. A track
-  rekordbox never analyzed now has an unknown BPM instead of 0.
-- **Improvement:** the rekordbox import brings in each track's genre from rekordbox.
-- **Improvement:** the Media Library's "+ Add Folder" and "Scan Libraries"
-  buttons sit next to its title, so they stay visible when the Sources section
-  collapses; the USB Browser, USB Playlists and USB History pages do the same
-  with their buttons. All page titles now share one size and style. The rekordbox chip moves out of the folder chips into its own
-  "Libraries" row, where its ↻ button replaces "Import RB"; its checkbox stays
-  disabled until the library has been imported.
-- **Improvement:** on a playlist's page, the export status and total time
-  share one row under the table, and the title shows only the track count.
-  "Export to USB: …" and "Last exported … to …" show the drive's name
-  instead of its folder or mount path, which is still shown on hover.
-- **Improvement:** "Import Playlists" on the USB view finishes a little
-  faster. It no longer pauses between steps just to show progress messages.
-- **Improvement:** saving cue edits to a USB that another USB job is using
-  now continues the moment that job finishes, instead of checking for it
-  every 200 ms.
-- **Improvement:** less overhead during analysis and other long jobs. The UI
-  no longer logs a line for every job event (each one also became an Event
-  Log entry and a write to the log file), and an open Event Log adds new
-  entries in place instead of redrawing up to 1,000 rows for each one.
-- **Improvement:** refreshing the library folders' "fully analyzed" (green)
-  status, which happens after every analysis batch and job, now uses its
-  own backend command. Before, it ran a full library browse (including
-  sorting every track) just to read that status.
+- **Improvement:** the rekordbox import:
+  - keeps an imported BPM or key when the app analyzes the track for the
+    first time; "Reanalyze" still replaces it with the app's own detection.
+    Importing again updates a BPM or key that still came from rekordbox, so
+    a tempo corrected there comes across; one you edited or reanalyzed in
+    the app is kept. A track rekordbox never analyzed now has an unknown BPM
+    instead of 0.
+  - brings in each track's genre.
+  - skips files the library doesn't take (such as videos), like the folder
+    scan does.
+- **Improvement:** page layouts. All page titles share one size and style,
+  and each page's buttons sit next to its title, so they stay visible:
+  - Media Library: "+ Add Folder" and "Scan Libraries" stay visible when the
+    Sources section collapses. The rekordbox chip moves out of the folder
+    chips into its own "Libraries" row, where its ↻ button replaces "Import
+    RB"; its checkbox stays disabled until the library has been imported.
+  - USB Browser: "Rediagnose USB", "Parity Report" and "Preview Fixes" moved
+    from inside Health & Diagnostics up next to the title and show once a
+    USB is selected; the title and buttons stay in place while the
+    diagnostics report scrolls. USB Playlists and USB History do the same
+    with their buttons.
+  - Playlist page: the export status and total time share one row under the
+    table, and the title shows only the track count.
+- **Improvement:** USBs are shown by their name instead of their folder or
+  mount path, which is still shown on hover: the selected USB on the USB
+  Browser page, and "Export to USB: …" and "Last exported … to …" on a
+  playlist's page.
+- **Improvement:** the Parity Report explains what it checks: that the USB's
+  legacy (PDB) and new (eDB) databases hold the same playlists, tracks, order
+  and metadata, and that a FAIL means players may show different playlists
+  depending on which database they read.
+- **Improvement:** the cue editor opens on the first 60 bars at the track's
+  BPM instead of the first 2 minutes, so beat lines are spaced the same on
+  every track whatever its tempo. Beat lines too close together to read are
+  left out until you zoom in, and bar lines thin out the same way when
+  zoomed far out. The "Beat grid" slider now sets how thick the lines are as
+  well as how strongly they show.
+- **Improvement:** less waiting and overhead:
+  - "Import Playlists" on the USB view no longer pauses between steps just
+    to show progress messages.
+  - Saving cue edits to a USB that another USB job is using continues the
+    moment that job finishes, instead of checking for it every 200 ms.
+  - During analysis and other long jobs, the UI no longer logs a line for
+    every job event (each one also became an Event Log entry and a write to
+    the log file), and an open Event Log adds new entries in place instead
+    of redrawing up to 1,000 rows for each one.
+  - Refreshing the library folders' "fully analyzed" (green) status, which
+    happens after every analysis batch and job, uses its own backend command
+    instead of a full library browse (including sorting every track).
 - **Chore:** new `docs/EXTERNAL_LIBRARIES.md` on importing tracks and
   playlists from rekordbox and Mixxx; the command and data-model docs list
   the new commands, source flags and the frontend settings allowlist.
-- **Chore:** a smaller frontend: the UI code shares one app context instead
-  of passing dependencies around by hand, all HTML now lives as templates in
-  `index.html` rather than being built in JavaScript (`main.js` went from
-  about 1,800 lines to 34), and the production bundle is minified
-  (447 KB → 211 KB). The UI also no longer re-checks and re-coerces the
-  track, USB playlist and player-menu data the backend already sends fully
-  typed.
-- **Chore:** further frontend cleanup: one status-message function instead
-  of two names for it, the playback-button helpers loaded as a normal module
-  instead of a global script, DOM references collected from `index.html`
-  automatically instead of a hand-kept list, and removal of unused app state.
-- **Chore:** retired 20 frontend unit tests that only repeated what the
-  end-to-end tests already check through the real UI.
+- **Chore:** a smaller, simpler frontend:
+  - The UI code shares one app context instead of passing dependencies
+    around by hand, and DOM references are collected from `index.html`
+    automatically instead of a hand-kept list.
+  - All HTML lives as templates in `index.html` rather than being built in
+    JavaScript (`main.js` went from about 1,800 lines to 34), and the
+    production bundle is minified (447 KB → 211 KB).
+  - The UI no longer re-checks and re-coerces the track, USB playlist and
+    player-menu data the backend already sends fully typed.
+  - One status-message function instead of two names for it, the
+    playback-button helpers loaded as a normal module instead of a global
+    script, and unused app state removed.
+  - 20 frontend unit tests that only repeated what the end-to-end tests
+    already check through the real UI were retired.
 
 ## 0.2.9
 

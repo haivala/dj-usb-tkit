@@ -37,13 +37,14 @@ export function defaultViewSpanMs(bpm) {
   return (DEFAULT_VIEW_BARS * 4 * 60_000) / Number(bpm);
 }
 const BPM_NUDGE_STEP = 0.01;
-// Bar numbers are shown every N bars, N the smallest of these that keeps the
-// labels at least BAR_LABEL_MIN_PX apart.
-const BAR_LABEL_STEPS = [1, 2, 4, 8, 16, 32, 64];
+// Bar numbers (and bar lines) are shown every N bars, N the smallest of these
+// that keeps them at least BAR_LABEL_MIN_PX (GRID_LINE_MIN_PX) apart.
+const BAR_STEPS = [1, 2, 4, 8, 16, 32, 64];
 const BAR_LABEL_MIN_PX = 36;
-// Ordinary beat lines closer than this would hatch over the waveform: only the
-// bar lines are drawn until zooming in spreads the beats this far apart.
-const BEAT_LINE_MIN_PX = 8;
+// Grid lines closer than this would hatch over the waveform. Ordinary beat
+// lines are left out until zooming in spreads the beats this far apart; bar
+// lines thin to every 2nd, 4th… bar (the bar-number steps) the same way.
+const GRID_LINE_MIN_PX = 8;
 const UNDO_LIMIT = 100;
 // ←/→ with Shift, or without a beat grid: a fine nudge.
 const FINE_NUDGE_MS = 10;
@@ -369,9 +370,10 @@ export function createTrackDetailController(el, prefs = {}) {
     if (!interval || !working.durationMs || working.firstBeatMs == null) return;
     const from = Math.max(working.firstBeatMs, working.view.startMs - interval);
     const to = Math.min(working.durationMs, working.view.endMs + interval);
-    const barStep = barLabelStep(interval);
     const width = el.trackDetailWaveform?.clientWidth || 0;
-    const showBeats = !width || (interval / viewSpanMs()) * width >= BEAT_LINE_MIN_PX;
+    const labelStep = barStep(interval, BAR_LABEL_MIN_PX);
+    const lineStep = width ? barStep(interval, GRID_LINE_MIN_PX) : 1;
+    const showBeats = !width || (interval / viewSpanMs()) * width >= GRID_LINE_MIN_PX;
     // Snap `from` to the nearest grid line at or before it.
     const firstBeatIdx = Math.max(0, Math.floor((from - working.firstBeatMs) / interval));
     let safety = 0;
@@ -380,13 +382,15 @@ export function createTrackDetailController(el, prefs = {}) {
       if (t > to || safety > 8000) break;
       safety += 1;
       const downbeat = idx % 4 === 0;
-      if (!downbeat && !showBeats) continue;
+      const bar = idx / 4; // 0-based
+      if (downbeat ? bar % lineStep !== 0 : !showBeats) continue;
       const line = cloneTemplate(host.ownerDocument, "tplBeatgridLine");
       if (downbeat) line.classList.add("is-downbeat");
       line.style.left = `${msToPct(t)}%`;
       host.appendChild(line);
-      const bar = idx / 4; // 0-based
-      if (downbeat && bar % barStep === 0) {
+      // Steps are powers of two and labels need more room, so every
+      // labelled bar also has its line.
+      if (downbeat && bar % labelStep === 0) {
         const label = cloneTemplate(host.ownerDocument, "tplBeatgridBar");
         label.style.left = `${msToPct(t)}%`;
         label.textContent = String(bar + 1);
@@ -395,13 +399,13 @@ export function createTrackDetailController(el, prefs = {}) {
     }
   }
 
-  /// Label every Nth bar so the numbers never crowd (1, 5, 9… when zoomed out).
-  function barLabelStep(interval) {
+  /// Every Nth bar, N the smallest step keeping those bars at least `minPx`
+  /// apart -- for bar numbers (1, 5, 9… when zoomed out) and bar lines.
+  function barStep(interval, minPx) {
     const width = el.trackDetailWaveform?.clientWidth || 0;
     const pxPerBar = width ? ((4 * interval) / viewSpanMs()) * width : 0;
     if (!pxPerBar) return 4;
-    return BAR_LABEL_STEPS.find((n) => n * pxPerBar >= BAR_LABEL_MIN_PX)
-      ?? BAR_LABEL_STEPS[BAR_LABEL_STEPS.length - 1];
+    return BAR_STEPS.find((n) => n * pxPerBar >= minPx) ?? BAR_STEPS[BAR_STEPS.length - 1];
   }
 
   /// The whole-track strip under the waveform: drawn once per track/width.

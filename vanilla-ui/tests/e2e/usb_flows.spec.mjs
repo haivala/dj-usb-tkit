@@ -411,11 +411,15 @@ test("USB initialize flow: invalid-but-writable root can be initialized and unlo
   await expect(page.locator("#usbInitRow")).not.toHaveClass(/hidden/);
   await expect(page.locator("#initializeUsbBtn")).toBeEnabled();
   await expect(page.locator("#usbInitHint")).toContainText("missing External library structure");
+  // The heading's diagnostics buttons only show for a usable USB.
+  await expect(page.locator("#usbDiagToolbar")).toBeHidden();
 
   await page.locator("#initializeUsbBtn").click();
 
   await expect(page.locator("#usbInitRow")).toHaveClass(/hidden/);
   await expect(page.locator("#usbSelectedControls")).not.toHaveClass(/hidden/);
+  await expect(page.locator("#usbDiagToolbar")).toBeVisible();
+  await expect(page.locator("#reDiagnoseBtn")).toBeVisible();
 });
 
 test("USB initialize hint renders structured warning messages", async ({ page }) => {

@@ -521,6 +521,21 @@ test("bar numbers label the grid without crowding, down to every bar when zoomed
   }).toBe(1);
   // Zoomed in, every beat has its line again.
   expect(await beatLines.count()).toBeGreaterThan(0);
+
+  // Packed tighter than 8 px a bar (whole 3:00 track at 512 BPM = 384 bars,
+  // ~3 px each), bar lines thin to every Nth bar too.
+  await page.locator("#trackDetailZoomFit").click();
+  await page.locator("#trackDetailBpmDouble").click();
+  await page.locator("#trackDetailBpmDouble").click();
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("512");
+  const barXs = await barLines.evaluateAll((nodes) =>
+    nodes.map((n) => n.getBoundingClientRect().left)
+  );
+  expect(barXs.length).toBeGreaterThan(20);
+  expect(barXs.length).toBeLessThan(384 / 2);
+  for (let i = 1; i < barXs.length; i += 1) {
+    expect(barXs[i] - barXs[i - 1]).toBeGreaterThanOrEqual(7.5);
+  }
 });
 
 test("the overview strip shows the visible window and moves the view", async ({ page }) => {
