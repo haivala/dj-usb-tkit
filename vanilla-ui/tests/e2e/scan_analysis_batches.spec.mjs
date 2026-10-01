@@ -960,33 +960,38 @@ test("library total duration advances only when each track is fully ready", asyn
 });
 
 test("pause button stops picking up new tracks and resume continues the batch", async ({ page }) => {
-  await installScanAnalysisMock(page, { trackCount: 5, pieceDelayMs: 40 });
+  await installScanAnalysisMock(page, { trackCount: 5, pieceDelayMs: 60 });
   await page.goto("/");
 
   await page.locator("#scanLibraryBtn").click();
   await expect(page.locator("#progressPauseBtn")).toBeVisible();
   await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
 
+  // Click pause in the same in-page poll that sees the first track become
+  // ready, as a direct DOM click (not Playwright's locator.click()) -- under
+  // a loaded parallel run, actionability retries against the repainting
+  // table can add enough real time for the whole batch to finish first.
   await page.waitForFunction(() => {
-    return document.querySelectorAll("#libraryTableBody .bpm-pill").length >= 1;
+    if (document.querySelectorAll("#libraryTableBody .bpm-pill").length < 1) return false;
+    document.getElementById("progressPauseBtn").click();
+    return true;
   });
-  await page.locator("#progressPauseBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.analysisPaused)).toBe(true);
 
   // A track already in flight when pause was clicked is allowed to finish
-  // (same as the backend's own worker loop), so give that a moment to
-  // settle before establishing the "paused" baseline count.
-  await page.waitForTimeout(250);
+  // (same as the backend's own worker loop), so wait out more than one full
+  // track (4 pieces x 60ms) before establishing the "paused" baseline count.
+  // "(paused)" isn't a usable settle signal here: it can briefly show in the
+  // gap between one track's ready event and the next track's first piece.
+  await page.waitForTimeout(400);
   const pausedCount = await page.locator("#libraryTableBody .bpm-pill").count();
   expect(pausedCount).toBeLessThan(5);
   // Give the batch plenty of time to have picked up further tracks if pause
   // wasn't actually blocking new work.
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(400);
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(pausedCount);
   // Only once the batch has genuinely stopped (no track still in flight)
-  // does the elapsed timer freeze on "(paused)" -- this is checked after
-  // settling rather than right after the click, since the click itself only
-  // stops new tracks from starting, not whatever was already running.
+  // does the elapsed timer freeze on "(paused)".
   await expect(page.locator("#progressText")).toContainText("(paused)");
 
   await page.locator("#progressPauseBtn").click();
@@ -1029,6 +1034,35 @@ test("pause clicked mid-track keeps the elapsed timer counting until that track 
   // Stays stopped -- no further tracks pick up.
   await page.waitForTimeout(300);
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(settledCount);
+});
+
+test("pause clicked between tracks unfreezes the timer if the next track was already picked up", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 3, pieceDelayMs: 300 });
+  await page.goto("/");
+
+  await page.locator("#scanLibraryBtn").click();
+  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+
+  // Click pause the moment track 1 is ready. By then the mock (like a real
+  // backend worker) is already past its pause check and working on track 2,
+  // but track 2's first piece hasn't been reported yet -- so with no rows
+  // analyzing, the UI freezes on "(paused)" right away.
+  await page.waitForFunction(() => {
+    if ((window.__scanTestStats?.pieceEventsByPiece?.bpm_key || 0) < 1) return false;
+    document.getElementById("progressPauseBtn").click();
+    return true;
+  });
+
+  // Track 2's first piece shows it was in flight after all, so the timer
+  // must go back to counting instead of staying frozen.
+  await page.waitForFunction(() => (window.__scanTestStats?.pieceEventsByPiece?.artwork || 0) >= 2);
+  await expect(page.locator("#progressText")).not.toContainText("(paused)");
+
+  // Once track 2 finishes, nothing else starts, so it's genuinely stopped.
+  await expect(page.locator("#progressText")).toContainText("(paused)");
+  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
+  await page.waitForTimeout(400);
+  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
 });
 
 test("cancel button stops the batch early and reports how many tracks completed", async ({ page }) => {

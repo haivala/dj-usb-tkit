@@ -39,6 +39,18 @@
 
 ## Unreleased
 
+- **Fix:** the parity report's "Indexed audio file presence" check now
+  lists each indexed audio file missing from the USB in the Event Log, not
+  just how many there are. Unindexed files were already listed. When
+  anything is missing or unindexed, the check gets a "→ event log" button
+  that opens the list.
+- **Fix:** pausing analysis right between two tracks no longer leaves the
+  timer stuck on "(paused)" while the next track, already started, is still
+  being analyzed. The timer keeps counting until that track finishes, then
+  shows "(paused)".
+- **Chore:** made the pause/resume analysis test reliable when the full
+  test suite runs in parallel.
+
 ## 0.3.0
 
 **Severity:** feature

@@ -94,6 +94,19 @@ export function resumeProgressHeartbeat(ctx) {
   el.progressText.textContent = `${state.progressBaseText} (${totalSecs}s)`;
 }
 
+// Undo a freeze that turned out to be premature: pause was clicked in the
+// gap after a worker had already picked up its next track but before that
+// track's first piece event arrived, so it looked like nothing was in
+// flight. The frozen interval was real work time, so unlike a resume the
+// start time isn't shifted.
+export function unfreezeProgressHeartbeat(ctx) {
+  const { state, el } = ctx;
+  if (!state.progressPausedAtMs) return;
+  state.progressPausedAtMs = null;
+  const totalSecs = Math.max(0, Math.floor((Date.now() - state.progressStartedAtMs) / 1000));
+  el.progressText.textContent = `${state.progressBaseText} (${totalSecs}s)`;
+}
+
 export function nextPaint() {
   return new Promise((resolve) => {
     requestAnimationFrame(() => resolve());
@@ -243,9 +256,14 @@ export function handleJobEvent(ctx, payload) {
     // timer should keep counting during that window instead of jumping to
     // "(paused)" immediately. Only once every in-flight track has actually
     // finished (no rows left in the "analyzing" state) has the batch really
-    // stopped.
-    if (state.analysisPaused && state.analyzingTrackIds && state.analyzingTrackIds.size === 0) {
-      pauseProgressHeartbeat(ctx);
+    // stopped. Conversely, a track still turning up while frozen means the
+    // freeze was premature (see unfreezeProgressHeartbeat).
+    if (state.analysisPaused && state.analyzingTrackIds) {
+      if (state.analyzingTrackIds.size === 0) {
+        pauseProgressHeartbeat(ctx);
+      } else {
+        unfreezeProgressHeartbeat(ctx);
+      }
     }
   }
 

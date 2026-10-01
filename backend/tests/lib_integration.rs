@@ -3693,6 +3693,30 @@ fn repair_usb_diagnostics_preview_lists_unindexed_audio_paths_in_warnings() {
 }
 
 #[test]
+fn usb_parity_report_lists_missing_indexed_audio_paths_in_warnings() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb root");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let _seed = seed_usb_missing_audio_fixture(&backend, &usb);
+
+    let parity_response = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity_response.ok, "parity report failed: {parity_response:?}");
+    let parity = parity_response.data.expect("parity report");
+
+    assert!(
+        parity.warnings.iter().any(|w| w.code == "usb.diagnostics.missing-indexed-audio"
+            && w.level == "warn"
+            && w.message.ends_with("/Contents/TestArtist/TestAlbum/missing.mp3")),
+        "each missing indexed audio path should be emitted to warnings/event log: {:#?}",
+        parity.warnings
+    );
+}
+
+#[test]
 fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
     let root = tempdir().expect("temp root");
     let usb = root.path().join("usb");

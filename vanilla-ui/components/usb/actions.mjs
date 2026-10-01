@@ -226,7 +226,7 @@ export function renderParityReport(ctx, data) {
     div.append(...summary.children);
   }
   for (const check of section.checks) {
-    renderDiagCheckRow(ctx, div, check);
+    renderDiagCheckRow(ctx, div, check, { withLogLink: true });
   }
   el.diagSections.appendChild(div);
 

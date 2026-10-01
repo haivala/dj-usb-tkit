@@ -1127,10 +1127,20 @@ impl BackendService {
             .iter()
             .map(|p| contents_path_match_key(p))
             .collect();
-        let missing_count = indexed_paths
+        let mut missing_paths: Vec<&String> = indexed_paths
             .iter()
             .filter(|p| !actual_files_ci.contains(&contents_path_match_key(p)))
-            .count();
+            .collect();
+        missing_paths.sort();
+        let missing_count = missing_paths.len();
+        for path in &missing_paths {
+            raw_warnings.push(logging::log(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.missing-indexed-audio",
+                format!("indexed audio file missing from USB: {path}"),
+            ));
+        }
         let mut extra_paths: Vec<String> = actual_files
             .iter()
             .filter(|p| !indexed_paths_ci.contains(&contents_path_match_key(p)))
@@ -3425,7 +3435,9 @@ pub(crate) fn build_usb_parity_comparison(
             label: "Indexed audio file presence".to_string(),
             status: raw_coverage.status.clone(),
             detail: raw_coverage.detail.clone(),
-            link: None,
+            // Each missing/unindexed path is logged individually.
+            link: (raw_coverage.missing_count + raw_coverage.extra_count > 0)
+                .then(|| "event-log".to_string()),
         });
     }
     checks.push(DiagCheck {
@@ -4434,6 +4446,7 @@ mod tests {
             .expect("indexed audio file presence check");
         assert!(matches!(raw_check.status, DiagStatus::Fail));
         assert!(raw_check.detail.contains("missing from USB"));
+        assert_eq!(raw_check.link.as_deref(), Some("event-log"));
 
         let raw_summary = summary_rows
             .iter()
