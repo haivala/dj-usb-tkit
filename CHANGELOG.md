@@ -39,6 +39,14 @@
 
 ## Unreleased
 
+- **Fix:** an export or scan started while an in-app update was downloading
+  could be cut short by the restart. The update now waits for it to finish
+  before installing.
+- **Fix:** after a failed in-app update the update banner stayed hidden;
+  it now comes back so the update can be retried.
+- **Fix:** the "Update & restart" button no longer appears for a release
+  that can't be installed in-app; it offers the download link instead.
+
 ## 0.3.2
 
 **Severity:** feature

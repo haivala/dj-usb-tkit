@@ -158,6 +158,10 @@ pub fn release_has_feature_flag(body: &str) -> bool {
     release_flags(body, "feature")
 }
 
+/// The manifest `tauri-plugin-updater` reads; only releases that carry it can
+/// be installed in-app.
+const UPDATER_MANIFEST_ASSET: &str = "latest.json";
+
 /// The asset on `release` matching `install_kind`, if any.
 fn download_url_for(release: &GithubRelease, install_kind: InstallKind) -> Option<String> {
     let suffix = install_kind.asset_suffix()?;
@@ -220,7 +224,13 @@ pub fn evaluate(
             .unwrap_or_else(|| RELEASES_PAGE_URL.to_string()),
         install_kind,
         download_url: download_url_for(latest, install_kind),
-        can_self_update: install_kind.can_self_update(),
+        // A release built without the updater signing key has no manifest,
+        // and the in-app updater would only fail on it.
+        can_self_update: install_kind.can_self_update()
+            && latest
+                .assets
+                .iter()
+                .any(|a| a.name == UPDATER_MANIFEST_ASSET),
     }
 }
 
@@ -271,7 +281,11 @@ mod tests {
 
     #[test]
     fn no_newer_release_reports_none() {
-        let info = evaluate("0.1.35", InstallKind::Unknown, &[rel("v0.1.35", None), rel("v0.1.34", None)]);
+        let info = evaluate(
+            "0.1.35",
+            InstallKind::Unknown,
+            &[rel("v0.1.35", None), rel("v0.1.34", None)],
+        );
         assert!(!info.update_available);
         assert_eq!(info.severity, "none");
     }
@@ -296,7 +310,11 @@ mod tests {
         draft.draft = true;
         let mut pre = rel("v8.8.8", None);
         pre.prerelease = true;
-        let info = evaluate("0.1.35", InstallKind::Unknown, &[draft, pre, rel("v0.1.36", None)]);
+        let info = evaluate(
+            "0.1.35",
+            InstallKind::Unknown,
+            &[draft, pre, rel("v0.1.36", None)],
+        );
         assert_eq!(info.latest_version, "0.1.36");
     }
 
@@ -340,7 +358,10 @@ mod tests {
             rel("v0.3.0", Some("**Severity:** feature")),
             rel("v0.3.1", Some("**Severity:** critical")),
         ];
-        assert_eq!(evaluate("0.2.4", InstallKind::Unknown, &releases).severity, "critical");
+        assert_eq!(
+            evaluate("0.2.4", InstallKind::Unknown, &releases).severity,
+            "critical"
+        );
     }
 
     #[test]
@@ -350,7 +371,10 @@ mod tests {
             rel("v0.2.3", Some("**Severity:** critical")),
             rel("v0.2.5", Some("Routine fixes.")),
         ];
-        assert_eq!(evaluate("0.2.4", InstallKind::Unknown, &releases).severity, "normal");
+        assert_eq!(
+            evaluate("0.2.4", InstallKind::Unknown, &releases).severity,
+            "normal"
+        );
     }
 
     #[test]
@@ -375,11 +399,17 @@ mod tests {
         ];
         let url = |kind| evaluate("0.3.0", kind, &releases).download_url;
         let dl = |name: &str| Some(format!("https://example.test/dl/{name}"));
-        assert_eq!(url(InstallKind::AppImage), dl("DJ_USB_Tkit_0.3.2_amd64.AppImage"));
+        assert_eq!(
+            url(InstallKind::AppImage),
+            dl("DJ_USB_Tkit_0.3.2_amd64.AppImage")
+        );
         assert_eq!(url(InstallKind::Deb), dl("DJ_USB_Tkit_0.3.2_amd64.deb"));
         assert_eq!(url(InstallKind::Rpm), dl("DJ_USB_Tkit-0.3.2-1.x86_64.rpm"));
         assert_eq!(url(InstallKind::Dmg), dl("DJ_USB_Tkit_0.3.2_aarch64.dmg"));
-        assert_eq!(url(InstallKind::Nsis), dl("DJ_USB_Tkit_0.3.2_x64-setup.exe"));
+        assert_eq!(
+            url(InstallKind::Nsis),
+            dl("DJ_USB_Tkit_0.3.2_x64-setup.exe")
+        );
         // MSI is no longer published; MSI installs are pointed at the NSIS setup.
         assert_eq!(url(InstallKind::Msi), dl("DJ_USB_Tkit_0.3.2_x64-setup.exe"));
         assert_eq!(url(InstallKind::Unknown), None);
@@ -387,7 +417,10 @@ mod tests {
 
     #[test]
     fn download_url_is_none_when_the_latest_release_lacks_that_asset() {
-        let releases = [with_assets(rel("v0.3.2", None), &["DJ_USB_Tkit_0.3.2_amd64.deb"])];
+        let releases = [with_assets(
+            rel("v0.3.2", None),
+            &["DJ_USB_Tkit_0.3.2_amd64.deb"],
+        )];
         let info = evaluate("0.3.0", InstallKind::Rpm, &releases);
         assert!(info.update_available);
         assert_eq!(info.download_url, None);
@@ -409,8 +442,29 @@ mod tests {
     }
 
     #[test]
+    fn no_self_update_without_an_updater_manifest() {
+        let without_manifest: Vec<&str> = ALL_ASSETS
+            .iter()
+            .copied()
+            .filter(|name| *name != "latest.json")
+            .collect();
+        let releases = [with_assets(rel("v0.3.2", None), &without_manifest)];
+        let info = evaluate("0.3.0", InstallKind::AppImage, &releases);
+        assert!(info.update_available);
+        assert!(!info.can_self_update);
+        // The direct download still works.
+        assert!(info.download_url.is_some());
+    }
+
+    #[test]
     fn install_kind_serializes_lowercase() {
-        assert_eq!(serde_json::to_string(&InstallKind::AppImage).unwrap(), "\"appimage\"");
-        assert_eq!(serde_json::to_string(&InstallKind::Nsis).unwrap(), "\"nsis\"");
+        assert_eq!(
+            serde_json::to_string(&InstallKind::AppImage).unwrap(),
+            "\"appimage\""
+        );
+        assert_eq!(
+            serde_json::to_string(&InstallKind::Nsis).unwrap(),
+            "\"nsis\""
+        );
     }
 }

@@ -339,6 +339,9 @@ test("a failed update shows the reason in the footer and can be retried", async 
   await expect(page.locator("#progressFooter")).toHaveClass(/active/);
   await expect(page.locator("#progressText")).toContainText("Update failed: signature mismatch (mock)");
   await expect(page.locator("#settingsUpdateActions .update-install-btn")).toBeEnabled();
+  // The banner comes back with the retry button.
+  await expect(page.locator("#updateBanner")).toBeVisible();
+  await expect(page.locator("#updateBannerActions .update-install-btn")).toBeEnabled();
   // The direct download stays on offer as the fallback (settings drawer is closed here).
   await expect(page.locator("#settingsUpdateActions .update-download-link")).not.toHaveClass(/hidden/);
 });

@@ -145,7 +145,9 @@ export async function installUpdate(ctx) {
   } catch {
     // Already reported: the backend emitted `job.failed` with the reason.
   } finally {
+    // Still running, so the install failed: put the banner back for a retry.
     state.updateInstalling = false;
     renderUpdateNotice(ctx);
+    renderUpdateBanner(ctx);
   }
 }

@@ -1,6 +1,8 @@
 #![cfg(feature = "tauri")]
 
+use std::collections::BTreeSet;
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use chrono::Utc;
@@ -52,6 +54,17 @@ use crate::models::{
 const JOB_EVENT_CHANNEL: &str = "job:event";
 const PLAYBACK_EVENT_CHANNEL: &str = "playback:event";
 const ESSENTIA_DOWNLOAD_EVENT: &str = "essentia_download_progress";
+
+/// Ids of jobs that have emitted `job.started` but not yet `job.completed` /
+/// `job.failed`, kept up to date by `emit_job_payload`. `install_update` waits
+/// for it to empty and holds it while installing: every job emits
+/// `job.started` before doing any work, so a job started meanwhile blocks
+/// there until the app has restarted instead of being cut short.
+static RUNNING_JOBS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+fn running_jobs() -> MutexGuard<'static, BTreeSet<String>> {
+    RUNNING_JOBS.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Cancellation flag for in-progress Essentia download. Managed Tauri state.
 pub struct EssentiaDownloadCancel(pub std::sync::Arc<std::sync::atomic::AtomicBool>);
@@ -200,6 +213,15 @@ fn emit_job_payload<R: tauri::Runtime>(
     event_name: &str,
     payload: JobEventPayload,
 ) {
+    match event_name {
+        "job.started" => {
+            running_jobs().insert(payload.job_id.clone());
+        }
+        "job.completed" | "job.failed" => {
+            running_jobs().remove(&payload.job_id);
+        }
+        _ => {}
+    }
     let direct_event_name = event_name.replace('.', ":");
     let _ = app.emit(&direct_event_name, payload.clone());
     if let Some(window) = app.get_webview_window("main") {
@@ -1999,6 +2021,10 @@ pub async fn check_for_update() -> ApiResponse<crate::service::update_check::Upd
 /// (`latest.json`) carries only installer-specific keys, so a deb/rpm/MSI
 /// install can't pick up another format's payload even if it got here.
 ///
+/// A job started while the update downloads (an export, a scan) is waited
+/// for before installing, and `RUNNING_JOBS` stays locked from then on so no
+/// new one can start before the restart cuts it short.
+///
 /// On Windows the NSIS installer exits the app itself once it starts, so the
 /// restart below is only reached on Linux (AppImage) and macOS.
 #[tauri::command]
@@ -2011,9 +2037,18 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
         job_type: "update",
         stage: "install_update",
     };
-    emit_job_event(&app, "job.started", identity, 0, 1, 0, "Checking for update...");
+    emit_job_event(
+        &app,
+        "job.started",
+        identity,
+        0,
+        1,
+        0,
+        "Checking for update...",
+    );
 
-    let result = async {
+    // Only ever ends in an error: success restarts the app.
+    let result: Result<std::convert::Infallible, String> = async {
         let update = app
             .updater()
             .map_err(|e| e.to_string())?
@@ -2027,8 +2062,8 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
         let version = update.version.clone();
         let mut downloaded: u64 = 0;
         let mut last_percent = None;
-        update
-            .download_and_install(
+        let bytes = update
+            .download(
                 |chunk_len, content_len| {
                     downloaded += chunk_len as u64;
                     let percent = content_len
@@ -2048,46 +2083,65 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
                         );
                     }
                 },
-                || {
-                    emit_job_event(
-                        &app,
-                        "job.progress",
-                        identity,
-                        1,
-                        1,
-                        100,
-                        format!("Installing update {version}..."),
-                    );
-                },
+                || {},
             )
             .await
             .map_err(|e| e.to_string())?;
-        Ok::<String, String>(version)
+
+        let mut waiting = false;
+        let _no_new_jobs = loop {
+            if let Some(lock) = lock_jobs_when_idle(&job_id) {
+                break lock;
+            }
+            if !waiting {
+                waiting = true;
+                emit_job_event(
+                    &app,
+                    "job.progress",
+                    identity,
+                    1,
+                    1,
+                    100,
+                    format!(
+                        "Update {version} downloaded, waiting for the running job to finish..."
+                    ),
+                );
+            }
+            let _ = tauri::async_runtime::spawn_blocking(|| {
+                thread::sleep(std::time::Duration::from_millis(500))
+            })
+            .await;
+        };
+
+        // Progress events don't touch `RUNNING_JOBS`, so this can't deadlock
+        // on the lock held above.
+        emit_job_event(
+            &app,
+            "job.progress",
+            identity,
+            1,
+            1,
+            100,
+            format!("Installing update {version} and restarting..."),
+        );
+        update.install(bytes).map_err(|e| e.to_string())?;
+        app.restart()
     }
     .await;
 
-    match result {
-        Ok(version) => {
-            emit_job_event(
-                &app,
-                "job.completed",
-                identity,
-                1,
-                1,
-                100,
-                format!("Update {version} installed, restarting..."),
-            );
-            app.restart()
-        }
-        Err(message) => {
-            crate::backend_log!(Warn, "update-install", "update install failed: {message}");
-            let message = format!("Update failed: {message}");
-            emit_job_failed(&app, identity, Some(message.clone()));
-            ApiResponse::failure(ErrorPayload {
-                code: ErrorCode::InternalError,
-                message,
-                details: None,
-            })
-        }
-    }
+    let Err(message) = result;
+    crate::backend_log!(Warn, "update-install", "update install failed: {message}");
+    let message = format!("Update failed: {message}");
+    emit_job_failed(&app, identity, Some(message.clone()));
+    ApiResponse::failure(ErrorPayload {
+        code: ErrorCode::InternalError,
+        message,
+        details: None,
+    })
+}
+
+/// `RUNNING_JOBS`, locked, once no job but `own_job_id` is running.
+fn lock_jobs_when_idle(own_job_id: &str) -> Option<MutexGuard<'static, BTreeSet<String>>> {
+    let jobs = running_jobs();
+    jobs.iter().all(|id| id == own_job_id).then_some(jobs)
 }
