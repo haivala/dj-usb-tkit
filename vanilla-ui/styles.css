@@ -2753,11 +2753,9 @@ td button[data-action]:disabled,
 .diag-badge.diag-warn { background: var(--diag-warn-bg); color: var(--diag-warn); }
 .diag-badge.diag-fail { background: var(--diag-fail-bg); color: var(--diag-fail); }
 
-.diag-status-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
+/* No report yet (or cleared): no empty badge in the Health & Diagnostics heading. */
+.diag-badge:empty {
+  display: none;
 }
 
 .diag-section {

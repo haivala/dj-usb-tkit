@@ -54,6 +54,9 @@
 - **Improvement:** "Rediagnose USB" and "Parity Report" now open Health &
   Diagnostics when they finish, whatever the result. The automatic check
   when you select a USB still opens it only when something isn't a pass.
+- **Improvement:** the diagnostics result (PASS / WARN / FAIL and how long
+  it took) now shows in the Health & Diagnostics heading, so it's visible
+  with the section closed.
 
 ## 0.3.2
 

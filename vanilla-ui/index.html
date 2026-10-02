@@ -226,14 +226,11 @@
           <details class="usb-health-card" id="usbHealthCard">
             <summary class="usb-health-summary">
               <span class="usb-cfg-section-label">Health &amp; Diagnostics</span>
+              <span id="diagOverallStatus" class="diag-badge"></span>
+              <span class="muted" id="diagDuration"></span>
             </summary>
             <div class="usb-health-content">
               <div class="diag-card hidden" id="usbDiagnosticsCard">
-                <div class="diag-status-row">
-                  <span id="diagOverallStatus" class="diag-badge"></span>
-                  <span class="muted" id="diagDuration"></span>
-                </div>
-
                 <!-- Diagnostics report view (default) -->
                 <div id="diagReportView">
                   <div id="diagSections"></div>
