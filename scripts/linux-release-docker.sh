@@ -71,6 +71,21 @@ CARGO_GIT_CACHE_DIR="${CARGO_GIT_CACHE_DIR:-$ROOT_DIR/.docker-cache/cargo-git}"
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-$ROOT_DIR/.docker-cache/npm}"
 mkdir -p "$CARGO_REGISTRY_CACHE_DIR" "$CARGO_GIT_CACHE_DIR" "$NPM_CACHE_DIR"
 
+# A pasted secret often carries a trailing newline, which the base64 decoder
+# rejects ("Invalid symbol 10"); base64 has no whitespace, so drop it all.
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+  TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d '[:space:]')"
+  export TAURI_SIGNING_PRIVATE_KEY
+fi
+# Same for a pasted password, but only trailing line breaks: other
+# whitespace (and any non-ASCII character) can be part of it.
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
+  while [[ "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" == *$'\n' || "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" == *$'\r' ]]; do
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD%?}"
+  done
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+fi
+
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 

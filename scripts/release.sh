@@ -18,6 +18,20 @@ FRONTEND_DIST_READY=0
 RUN_TESTS="${RUN_TESTS:-1}"
 TARGETS="${TARGETS:-}"
 EXTRA_TAURI_ARGS="${EXTRA_TAURI_ARGS:-}"
+# A pasted secret often carries a trailing newline, which the base64 decoder
+# rejects ("Invalid symbol 10"); base64 has no whitespace, so drop it all.
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+  TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d '[:space:]')"
+  export TAURI_SIGNING_PRIVATE_KEY
+fi
+# Same for a pasted password, but only trailing line breaks: other
+# whitespace (and any non-ASCII character) can be part of it.
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
+  while [[ "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" == *$'\n' || "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" == *$'\r' ]]; do
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD%?}"
+  done
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+fi
 # Signed updater artifacts (.sig, macOS .app.tar.gz) need the updater signing
 # key; without it (local builds) `tauri build` would fail, so only add them
 # when the key is present (CI passes it from repo secrets).
