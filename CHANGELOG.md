@@ -39,6 +39,12 @@
 
 ## Unreleased
 
+- **Improvement:** switching USB playlists now stops loading the previous
+  one, so quick changes don't pile up. Opening a playlist for the first
+  time can still be slow on Windows while Windows Defender scans its files.
+- **Improvement:** the Event Log shows how long each USB playlist or
+  history page took to load.
+
 ## 0.3.3
 
 - **Fix:** selecting a USB playlist while the previous one was still

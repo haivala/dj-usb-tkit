@@ -379,14 +379,17 @@ fn sort_usb_tracks(items: &mut [UsbTrack], sort_by: Option<&str>, sort_dir: Opti
 /// Fills in the expensive payload fields (waveform-preview bytes, artwork data
 /// URL) on an already-resolved cheap `UsbTrack`. Called only for the tracks on
 /// the returned page.
-fn hydrate_usb_track_in_place(track: &mut UsbTrack, notation: KeyNotation) {
-    if track.waveform_preview.is_none() {
+///
+/// `read_files: false` skips the on-USB reads (waveform, artwork) but still
+/// fills the cheap fields -- for a page whose load was superseded.
+fn hydrate_usb_track_in_place(track: &mut UsbTrack, notation: KeyNotation, read_files: bool) {
+    if read_files && track.waveform_preview.is_none() {
         track.waveform_preview = track
             .usb_analysis_path
             .as_deref()
             .and_then(load_waveform_preview_from_analysis_path);
     }
-    if track.artwork_data_url.is_none() {
+    if read_files && track.artwork_data_url.is_none() {
         track.artwork_data_url = track
             .artwork_path
             .as_deref()
@@ -439,6 +442,7 @@ fn paginate_and_hydrate_usb_tracks(
     req: &crate::models::FetchUsbTracksRequest,
     warnings: Vec<WarningEntry>,
     notation: KeyNotation,
+    is_superseded: impl Fn() -> bool,
 ) -> BackendResult<crate::models::FetchUsbTracksData> {
     let query = req.query.trim().to_lowercase();
     if !query.is_empty() {
@@ -472,8 +476,51 @@ fn paginate_and_hydrate_usb_tracks(
     let has_more = next_offset < total;
     let next_cursor = has_more.then(|| super::encode_offset_cursor(&signature, next_offset));
 
+    // Reading each row's waveform + artwork off the stick is the slow part
+    // (seconds per page on Windows). Once a newer load of this list has
+    // started, the frontend discards this page, so stop reading: abandoned
+    // loads would otherwise queue up on the USB ahead of the one on screen.
+    let started = std::time::Instant::now();
+    let mut read_count = 0usize;
+    let mut superseded = false;
     for track in &mut page {
-        hydrate_usb_track_in_place(track, notation);
+        superseded = superseded || is_superseded();
+        let track_started = std::time::Instant::now();
+        hydrate_usb_track_in_place(track, notation, !superseded);
+        if !superseded {
+            read_count += 1;
+        }
+        let track_ms = track_started.elapsed().as_millis();
+        if track_ms >= 500 {
+            logging::emit(
+                Level::Warn,
+                "usb-import",
+                &format!(
+                    "{command}: slow USB read for '{}' ({track_ms}ms): analysis {:?}, artwork {:?}",
+                    track.title, track.usb_analysis_path, track.artwork_path
+                ),
+            );
+        }
+    }
+    let elapsed = started.elapsed().as_millis();
+    if superseded {
+        logging::emit(
+            Level::Info,
+            "usb-import",
+            &format!(
+                "{command}: superseded by a newer load after reading {read_count} of {} track(s) in {elapsed}ms",
+                page.len()
+            ),
+        );
+    } else {
+        logging::emit(
+            Level::Info,
+            "usb-import",
+            &format!(
+                "{command}: read {} track(s) from the USB in {elapsed}ms",
+                page.len()
+            ),
+        );
     }
 
     Ok(crate::models::FetchUsbTracksData {
@@ -1170,9 +1217,8 @@ impl BackendService {
             playlist_entries: playlist_entries_total,
         };
         // Per-track materialization (local `tracks` rows, `track_usb_links`,
-        // ANLZ cue import) is deferred out of the import: the paginated
-        // `fetch_usb_playlist_tracks` materializes just the viewed page, and
-        // the add-to-playlist path materializes on demand. Importing every
+        // ANLZ cue import) is deferred out of the import: the add-to-playlist
+        // path materializes on demand (browsing pages never writes). Importing every
         // track of every playlist here meant thousands of scattered on-USB
         // ANLZ reads -- minutes on an HDD-backed stick -- for data no unviewed,
         // unadded row ever uses.
@@ -2358,7 +2404,7 @@ impl BackendService {
             edb_index.as_ref(),
         ) {
             Some((source, mut track)) => {
-                hydrate_usb_track_in_place(&mut track, self.key_notation()?);
+                hydrate_usb_track_in_place(&mut track, self.key_notation()?, true);
                 Ok(InspectUsbTrackData {
                     source,
                     track,
@@ -2470,7 +2516,7 @@ impl BackendService {
                     edb_index.as_ref(),
                 ) {
                     Some((source, mut track)) => {
-                        hydrate_usb_track_in_place(&mut track, notation);
+                        hydrate_usb_track_in_place(&mut track, notation, true);
                         InspectUsbTrackResult {
                             track_id: item.track_id,
                             source: Some(source),
@@ -2499,7 +2545,23 @@ impl BackendService {
         req: FetchUsbTracksRequest,
     ) -> BackendResult<FetchUsbTracksData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
+        logging::emit(
+            Level::Info,
+            "usb-import",
+            &format!("fetch_usb_playlist_tracks: loading {}", req.id),
+        );
+        let generation = Arc::clone(&self.usb_playlist_page_generation);
+        let this_load = generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let resolve_started = std::time::Instant::now();
         let resolved = self.usb_playlists_resolved(&usb_root)?;
+        let resolve_ms = resolve_started.elapsed().as_millis();
+        if resolve_ms >= 50 {
+            logging::emit(
+                Level::Info,
+                "usb-import",
+                &format!("USB playlist list took {resolve_ms}ms to resolve"),
+            );
+        }
         let playlist = resolved
             .items
             .iter()
@@ -2512,6 +2574,7 @@ impl BackendService {
             &req,
             resolved.warnings.clone(),
             self.key_notation()?,
+            || generation.load(std::sync::atomic::Ordering::SeqCst) != this_load,
         )?;
         self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
         Ok(data)
@@ -2523,7 +2586,23 @@ impl BackendService {
         req: FetchUsbTracksRequest,
     ) -> BackendResult<FetchUsbTracksData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
+        logging::emit(
+            Level::Info,
+            "usb-import",
+            &format!("fetch_usb_history_tracks: loading {}", req.id),
+        );
+        let generation = Arc::clone(&self.usb_history_page_generation);
+        let this_load = generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let resolve_started = std::time::Instant::now();
         let all = self.usb_histories_resolved(&usb_root)?;
+        let resolve_ms = resolve_started.elapsed().as_millis();
+        if resolve_ms >= 50 {
+            logging::emit(
+                Level::Info,
+                "usb-import",
+                &format!("USB history list took {resolve_ms}ms to resolve"),
+            );
+        }
         let history = all
             .items
             .iter()
@@ -2536,6 +2615,7 @@ impl BackendService {
             &req,
             all.warnings.clone(),
             self.key_notation()?,
+            || generation.load(std::sync::atomic::Ordering::SeqCst) != this_load,
         )?;
         self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
         Ok(data)
@@ -2731,12 +2811,61 @@ mod tests {
         build_history_track_date_index, build_track_match_fingerprint, build_usb_track_index,
         cleanup_empty_dirs_recursive, edb_track_index_from_playlist_tracks,
         filter_named_history_playlists, hydrate_usb_track_in_place, normalize_date_created, now,
-        push_usb_stage_timing, push_usb_stage_timing_with_threshold, select_history_rows,
-        slow_stage_threshold_ms, sum_usb_track_durations,
+        paginate_and_hydrate_usb_tracks, push_usb_stage_timing,
+        push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
+        sum_usb_track_durations,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
     use std::collections::HashMap;
+
+    #[test]
+    fn paginate_and_hydrate_stops_reading_files_once_superseded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let art = dir.path().join("art.jpg");
+        std::fs::write(&art, [0xFF, 0xD8, 0xFF, 0xD9]).expect("write art");
+        let tracks: Vec<UsbTrack> = (1..=3)
+            .map(|i| {
+                let mut track = make_track(&i.to_string(), &format!("/USB/Contents/{i}.mp3"));
+                track.artwork_path = Some(art.to_string_lossy().into_owned());
+                track.artwork_data_url = None;
+                track
+            })
+            .collect();
+        let req = crate::models::FetchUsbTracksRequest::default();
+
+        // A newer load starts after the first row: later rows skip the reads
+        // but keep their cheap fields.
+        let checks = std::cell::Cell::new(0);
+        let page = paginate_and_hydrate_usb_tracks(
+            "fetch_usb_playlist_tracks",
+            "pl",
+            tracks.clone(),
+            &req,
+            Vec::new(),
+            crate::service::key_notation::KeyNotation::Classic,
+            || {
+                checks.set(checks.get() + 1);
+                checks.get() > 1
+            },
+        )
+        .expect("page");
+        assert!(page.items[0].artwork_data_url.is_some());
+        assert!(page.items[1..].iter().all(|t| t.artwork_data_url.is_none()));
+        assert_eq!(page.items.len(), 3);
+
+        let page = paginate_and_hydrate_usb_tracks(
+            "fetch_usb_playlist_tracks",
+            "pl",
+            tracks,
+            &req,
+            Vec::new(),
+            crate::service::key_notation::KeyNotation::Classic,
+            || false,
+        )
+        .expect("page");
+        assert!(page.items.iter().all(|t| t.artwork_data_url.is_some()));
+    }
 
     fn make_track(id: &str, file_path: &str) -> UsbTrack {
         UsbTrack {
@@ -2807,7 +2936,7 @@ mod tests {
         complete.artwork_path = Some("/USB/art/a.jpg".to_string());
         complete.bpm = Some(128.0);
         complete.key = Some("8A".to_string());
-        hydrate_usb_track_in_place(&mut complete, super::KeyNotation::Classic);
+        hydrate_usb_track_in_place(&mut complete, super::KeyNotation::Classic, true);
         assert!(!complete.needs_hydration);
 
         // Any missing piece -> needs hydration.
@@ -2826,7 +2955,7 @@ mod tests {
             track.bpm = Some(128.0);
             track.key = Some("8A".to_string());
             tweak(&mut track);
-            hydrate_usb_track_in_place(&mut track, super::KeyNotation::Classic);
+            hydrate_usb_track_in_place(&mut track, super::KeyNotation::Classic, true);
             assert!(
                 track.needs_hydration,
                 "expected needs_hydration after tweak"
@@ -3948,13 +4077,19 @@ mod tests {
         };
         let count = |table: &str| -> i64 {
             let conn = service.db.connect().expect("connect");
-            conn.query_row(&format!("SELECT COUNT(1) FROM {table}"), [], |row| row.get(0))
-                .expect("count")
+            conn.query_row(&format!("SELECT COUNT(1) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .expect("count")
         };
 
         let page = fetch();
         assert_eq!(count("tracks"), 0, "browsing must not create track rows");
-        assert_eq!(count("track_usb_links"), 0, "browsing must not create USB links");
+        assert_eq!(
+            count("track_usb_links"),
+            0,
+            "browsing must not create USB links"
+        );
         assert!(page.items.iter().all(|t| t.local_track_id.is_none()));
 
         // Adding one to a playlist creates its local row; the next browse
@@ -3978,9 +4113,18 @@ mod tests {
 
         let page = fetch();
         assert_eq!(count("tracks"), tracks_after_add);
-        let found = page.items.iter().find(|t| t.file_path == added.file_path).expect("row");
+        let found = page
+            .items
+            .iter()
+            .find(|t| t.file_path == added.file_path)
+            .expect("row");
         assert_eq!(found.local_track_id.as_deref(), Some(local_id.as_str()));
-        assert!(page.items.iter().filter(|t| t.file_path != added.file_path).all(|t| t.local_track_id.is_none()));
+        assert!(
+            page.items
+                .iter()
+                .filter(|t| t.file_path != added.file_path)
+                .all(|t| t.local_track_id.is_none())
+        );
     }
 
     /// Regression: overlapping page loads (the previous playlist's still
@@ -4008,19 +4152,29 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 let mut errs = Vec::new();
                 for _ in 0..50 {
-                    if let Err(e) = service.fetch_usb_playlist_tracks(crate::models::FetchUsbTracksRequest {
-                        usb_root: Some(root.clone()),
-                        id: playlist_id.clone(),
-                        ..Default::default()
-                    }) {
+                    if let Err(e) =
+                        service.fetch_usb_playlist_tracks(crate::models::FetchUsbTracksRequest {
+                            usb_root: Some(root.clone()),
+                            id: playlist_id.clone(),
+                            ..Default::default()
+                        })
+                    {
                         errs.push(format!("{e}"));
                     }
                 }
                 errs
             }));
         }
-        let errs: Vec<String> = handles.into_iter().flat_map(|h| h.join().unwrap()).collect();
-        assert!(errs.is_empty(), "{} errors, first: {:?}", errs.len(), errs.first());
+        let errs: Vec<String> = handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect();
+        assert!(
+            errs.is_empty(),
+            "{} errors, first: {:?}",
+            errs.len(),
+            errs.first()
+        );
     }
 
     #[test]

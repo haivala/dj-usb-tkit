@@ -687,6 +687,11 @@ pub struct BackendService {
     /// each one read-modify-writes the same staged `export.pdb` / eDB.
     /// Shared across `.clone()`s (the Tauri state and the job threads).
     pub(crate) usb_write_lock: Arc<std::sync::Mutex<()>>,
+    /// Bumped by every `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks`
+    /// call, so a page load can tell a newer one started and stop reading
+    /// files for a page the frontend will discard.
+    pub(crate) usb_playlist_page_generation: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) usb_history_page_generation: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl BackendService {
@@ -698,6 +703,8 @@ impl BackendService {
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_write_lock: Arc::new(std::sync::Mutex::new(())),
+            usb_playlist_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            usb_history_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         };
         // Deliberately NOT called here (see `usb_staging::init_cache_root`'s
         // doc comment): `BackendService::new`/`BackendCommands::new` are the

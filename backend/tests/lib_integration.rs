@@ -12,9 +12,9 @@ use walkdir::WalkDir;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistRequest,
-    AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode,
-    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
-    FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
+    AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
+    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
+    GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
     MaterializeSourceTrackRequest, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
     ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
@@ -3360,7 +3360,11 @@ fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
 
     // Browsing is read-only: the stale local row is left as it was.
     let usb_tracks = usb_tracks_via_pages(&backend, &usb);
-    assert_eq!(reload().key.as_deref(), Some("Am"), "browsing must not write the local row");
+    assert_eq!(
+        reload().key.as_deref(),
+        Some("Am"),
+        "browsing must not write the local row"
+    );
 
     // Adding the USB track to a playlist refreshes the local row from the USB.
     let usb_track = usb_tracks
@@ -4951,7 +4955,10 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
             |row| row.get(0),
         )
         .expect("count track_usb_links");
-    assert_eq!(link_count, 0, "browsing must not record a track_usb_links row");
+    assert_eq!(
+        link_count, 0,
+        "browsing must not record a track_usb_links row"
+    );
 
     // Adding the USB row links this device's copy to the genuine local row.
     let added_id = add_usb_track_to_new_playlist(&backend, &usb, &usb_track);
@@ -4965,7 +4972,10 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .expect("count after add");
-    assert_eq!(track_count, 1, "adding the usb copy must not create a second tracks row");
+    assert_eq!(
+        track_count, 1,
+        "adding the usb copy must not create a second tracks row"
+    );
     assert_eq!(
         link_count, 1,
         "expected a track_usb_links row recording this device's copy"
