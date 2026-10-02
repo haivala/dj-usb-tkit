@@ -51,6 +51,9 @@
   to the USB's playlists once a USB is selected.
 - **Improvement:** empty-state buttons now sit side by side in one row,
   including the Library's "Add Folder" / "RB master.db" / "Mixxx library".
+- **Improvement:** "Rediagnose USB" and "Parity Report" now open Health &
+  Diagnostics when they finish, whatever the result. The automatic check
+  when you select a USB still opens it only when something isn't a pass.
 
 ## 0.3.2
 

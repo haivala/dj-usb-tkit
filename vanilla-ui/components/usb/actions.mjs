@@ -881,7 +881,9 @@ export async function refreshUsb(ctx) {
   ctx.scheduleProgressIdle(1200);
 }
 
-export async function runUsbDiagnostics(ctx) {
+// `openReport`: a run the user asked for opens Health & Diagnostics whatever
+// the result; the automatic run on USB select opens it only when not PASS.
+export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
   const { state } = ctx;
   const { emitStatus } = ctx;
   if (!state.usbRoot) {
@@ -894,15 +896,22 @@ export async function runUsbDiagnostics(ctx) {
     healthCard.classList.add("is-loading");
   }
   emitStatus("Running USB diagnostics...");
-  const data = await ctx.command("run_usb_diagnostics", {
-    usbRoot: state.usbRoot
-  });
-  state.playlistUsbExportStatusById = playlistUsbExportStatusById(data?.playlistUsbExportStatus);
-  ctx.updatePlaylistExportButtons();
-  await ctx.renderCurrentPlaylistTracksFromState();
-  renderDiagnosticsReport(ctx, data);
-  ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
-  emitStatus(`Diagnostics complete (${data.durationMs}ms)`);
+  try {
+    const data = await ctx.command("run_usb_diagnostics", {
+      usbRoot: state.usbRoot
+    });
+    state.playlistUsbExportStatusById = playlistUsbExportStatusById(data?.playlistUsbExportStatus);
+    ctx.updatePlaylistExportButtons();
+    await ctx.renderCurrentPlaylistTracksFromState();
+    renderDiagnosticsReport(ctx, data);
+    ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
+    emitStatus(`Diagnostics complete (${data.durationMs}ms)`);
+  } finally {
+    if (healthCard) {
+      healthCard.classList.remove("is-loading");
+      if (openReport) healthCard.open = true;
+    }
+  }
 }
 
 export async function runUsbParityReport(ctx) {
@@ -913,12 +922,18 @@ export async function runUsbParityReport(ctx) {
     return;
   }
   emitStatus("Running USB parity report...");
-  const data = await ctx.command("run_usb_parity_report", {
-    usbRoot: state.usbRoot
-  });
-  renderParityReport(ctx, data);
-  ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_parity_report");
-  emitStatus(`Parity report complete (${data.durationMs}ms)`);
+  try {
+    const data = await ctx.command("run_usb_parity_report", {
+      usbRoot: state.usbRoot
+    });
+    renderParityReport(ctx, data);
+    ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_parity_report");
+    emitStatus(`Parity report complete (${data.durationMs}ms)`);
+  } finally {
+    // Only ever run from its button: show the result, whatever it is.
+    const healthCard = ctx.document?.getElementById?.("usbHealthCard") ?? null;
+    if (healthCard) healthCard.open = true;
+  }
 }
 
 export async function previewUsbRepairs(ctx) {

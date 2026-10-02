@@ -80,7 +80,7 @@ export function bindUsbEvents(ctx) {
   });
 
   el.reDiagnoseBtn?.addEventListener("click", () => {
-    runUsbDiagnostics().catch(catchErr(emitStatus));
+    runUsbDiagnostics({ openReport: true }).catch(catchErr(emitStatus));
   });
 
   el.previewRepairsBtn?.addEventListener("click", () => {

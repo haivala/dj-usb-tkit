@@ -641,6 +641,44 @@ test("an open Event Log updates live: new entries on top, repeats coalesce, rows
   await expect(rows.first()).toContainText("live-flood-1199");
 });
 
+test("Rediagnose USB and Parity Report open Health & Diagnostics whatever the result", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  // A passing diagnostics run, which the automatic run on USB select leaves
+  // collapsed, and a failing parity report run.
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      const result = await invoke(command, payload);
+      if (command === "run_usb_diagnostics") result.data = { ...result.data, overallStatus: "PASS" };
+      if (command === "run_usb_parity_report" && window.__failParity) {
+        return { ok: false, error: { code: "PARITY_FAILED", message: "parity failed" } };
+      }
+      return result;
+    };
+  });
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  const usbHealthCard = page.locator("#usbHealthCard");
+  await expect(page.locator("#diagOverallStatus")).toHaveText("PASS");
+  await expect(usbHealthCard).not.toHaveAttribute("open");
+
+  await page.locator("#reDiagnoseBtn").click();
+  await expect(usbHealthCard).toHaveAttribute("open");
+  await expect(usbHealthCard).not.toHaveClass(/is-loading/);
+
+  await usbHealthCard.evaluate((node) => { node.open = false; });
+  await page.locator("#runUsbParityBtn").click();
+  await expect(usbHealthCard).toHaveAttribute("open");
+  await expect(page.locator("#diagSections")).toContainText("USB Strict Parity Report");
+
+  await usbHealthCard.evaluate((node) => { node.open = false; });
+  await page.evaluate(() => { window.__failParity = true; });
+  await page.locator("#runUsbParityBtn").click();
+  await expect(usbHealthCard).toHaveAttribute("open");
+});
+
 test("Diagnostics and parity render without warning panel", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
