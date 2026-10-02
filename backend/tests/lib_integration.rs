@@ -11,7 +11,8 @@ use walkdir::WalkDir;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode,
+    AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistRequest,
+    AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode,
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
     FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
     MaterializeSourceTrackRequest, RemoveTracksBySourceRootsRequest,
@@ -95,6 +96,49 @@ fn usb_tracks_via_pages(
         out.extend(page.data.expect("usb track page").items);
     }
     out
+}
+
+/// Add a browsed USB row to a new app playlist, the way the "+" button does;
+/// returns the local track id it resolved to. Adding (not browsing) is what
+/// creates local rows for USB tracks.
+fn add_usb_track_to_new_playlist(
+    backend: &BackendCommands,
+    usb_root: &Path,
+    track: &backend::models::UsbTrack,
+) -> Option<String> {
+    let created = backend.create_playlist(CreatePlaylistRequest {
+        name: format!("Added {}", track.title),
+    });
+    assert!(created.ok, "create playlist failed: {created:?}");
+    let root = usb_root.to_string_lossy().to_string();
+    let added = backend.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
+        playlist_id: created.data.expect("playlist data").playlist_id,
+        tracks: vec![AddTrackCandidate {
+            track_id: Some(track.id.clone()),
+            local_track_id: track.local_track_id.clone(),
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            bpm: track.bpm,
+            file_path: Some(track.file_path.clone()),
+            file_size_bytes: track.file_size_bytes,
+            key: track.key.clone(),
+            usb_root: Some(root.clone()),
+            usb_analysis_path: track.usb_analysis_path.clone(),
+            ..Default::default()
+        }],
+        dedupe: DedupeMode::Skip,
+        usb_root: Some(root),
+        usb_root_valid: true,
+    });
+    assert!(added.ok, "add usb track failed: {added:?}");
+    added
+        .data
+        .expect("add data")
+        .resolutions
+        .into_iter()
+        .next()
+        .and_then(|r| r.track_id)
 }
 
 fn seed_usb_unindexed_audio_fixture(backend: &BackendCommands, usb_root: &Path) -> String {
@@ -3148,7 +3192,7 @@ fn scan_library_rescan_preserves_existing_key_when_scanner_has_no_tonality() {
 }
 
 #[test]
-fn fetch_usb_playlists_materialization_clears_stale_local_key_when_usb_key_is_missing() {
+fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
     let root = tempdir().expect("temp root");
     let usb = root.path().join("usb");
     fs::create_dir_all(&usb).expect("create usb");
@@ -3301,20 +3345,30 @@ fn fetch_usb_playlists_materialization_clears_stale_local_key_when_usb_key_is_mi
     .expect("insert playlist content");
     drop(conn);
 
-    // The paginated page fetch (not the bare import) materializes the page's
-    // rows against the local library.
-    let _ = usb_tracks_via_pages(&backend, &usb);
+    let reload = || {
+        backend
+            .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
+                track_ids: vec![stale_local_id.clone()],
+            })
+            .data
+            .expect("reloaded local track")
+            .items
+            .into_iter()
+            .find(|t| t.id == stale_local_id)
+            .expect("materialized local track")
+    };
 
-    let reloaded = backend
-        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-            track_ids: vec![stale_local_id.clone()],
-        })
-        .data
-        .expect("reloaded local track")
-        .items
-        .into_iter()
-        .find(|t| t.id == stale_local_id)
-        .expect("materialized local track");
+    // Browsing is read-only: the stale local row is left as it was.
+    let usb_tracks = usb_tracks_via_pages(&backend, &usb);
+    assert_eq!(reload().key.as_deref(), Some("Am"), "browsing must not write the local row");
+
+    // Adding the USB track to a playlist refreshes the local row from the USB.
+    let usb_track = usb_tracks
+        .iter()
+        .find(|t| t.title.contains("usb_key_clear"))
+        .expect("usb track");
+    add_usb_track_to_new_playlist(&backend, &usb, usb_track);
+    let reloaded = reload();
 
     assert!(
         reloaded
@@ -4897,6 +4951,21 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
             |row| row.get(0),
         )
         .expect("count track_usb_links");
+    assert_eq!(link_count, 0, "browsing must not record a track_usb_links row");
+
+    // Adding the USB row links this device's copy to the genuine local row.
+    let added_id = add_usb_track_to_new_playlist(&backend, &usb, &usb_track);
+    assert_eq!(added_id.as_deref(), Some(local_track.id.as_str()));
+    let conn = rusqlite::Connection::open(&db_path).expect("reopen backend db");
+    let (track_count, link_count): (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT COUNT(1) FROM tracks),
+                    (SELECT COUNT(1) FROM track_usb_links WHERE track_id = ?1)",
+            rusqlite::params![local_track.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("count after add");
+    assert_eq!(track_count, 1, "adding the usb copy must not create a second tracks row");
     assert_eq!(
         link_count, 1,
         "expected a track_usb_links row recording this device's copy"
@@ -4994,7 +5063,7 @@ fn export_to_usb_records_usb_device_export_history() {
 /// the USB export again should fall back to creating a placeholder row
 /// (still linked so playback/UI works), not silently do nothing.
 #[test]
-fn fetch_usb_playlists_creates_placeholder_when_no_local_match() {
+fn adding_usb_track_creates_placeholder_when_no_local_match() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
     let usb = root.path().join("usb");
@@ -5061,13 +5130,16 @@ fn fetch_usb_playlists_creates_placeholder_when_no_local_match() {
         .find(|t| t.title.contains("Placeholder Case"))
         .expect("roundtrip usb track");
 
-    let placeholder_id = usb_track
-        .local_track_id
-        .clone()
-        .expect("placeholder track id should still be materialized");
+    assert_eq!(
+        usb_track.local_track_id, None,
+        "with no local copy left, browsing must not create a placeholder row"
+    );
+
+    let placeholder_id = add_usb_track_to_new_playlist(&backend, &usb, &usb_track)
+        .expect("adding must materialize a placeholder track");
     assert_ne!(
         placeholder_id, local_track.id,
-        "with no genuine local copy left, browsing must materialize a fresh placeholder row"
+        "with no genuine local copy left, adding must materialize a fresh placeholder row"
     );
 }
 

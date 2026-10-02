@@ -39,6 +39,14 @@
 
 ## Unreleased
 
+- **Fix:** selecting a USB playlist while the previous one was still
+  loading could fail with "an internal database error occurred". This
+  showed up mostly on Windows, on the second playlist selected.
+- **Improvement:** browsing a USB no longer writes to the app's library
+  database. A USB track is added to it only when you add the track to a
+  playlist.
+- **Improvement:** when a database error occurs, the Event Log now shows
+  the actual error, not just "an internal database error occurred".
 - **Fix:** an export or scan started while an in-app update was downloading
   could be cut short by the restart. The update now waits for it to finish
   before installing.

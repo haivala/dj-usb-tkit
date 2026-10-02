@@ -2703,6 +2703,23 @@ impl BackendService {
             .map(str::trim)
             .filter(|s| !s.is_empty());
 
+        let usb_origin = add_candidate_is_usb_origin(candidate, request_usb_root);
+        if usb_origin {
+            // Browsing a USB is read-only, so adding is where a USB track's
+            // local row is created (or matched) and linked to this device,
+            // and its ANLZ analysis imported.
+            if let Some(track_id) =
+                self.materialize_usb_add_candidate(candidate, request_usb_root)?
+            {
+                return Ok(AddTrackCandidateResolution {
+                    previous_id,
+                    track_id: Some(track_id),
+                    resolved_by: "usbMaterialized".to_string(),
+                    materialized: true,
+                });
+            }
+        }
+
         if let Some(local_track_id) = trimmed_string(candidate.local_track_id.as_deref()) {
             if let Some(path) = usb_anlz
                 && track_id_exists(conn, &local_track_id)?
@@ -2731,19 +2748,7 @@ impl BackendService {
             });
         }
 
-        if add_candidate_is_usb_origin(candidate, request_usb_root) {
-            // Deferred materialization: create/link the local row and import
-            // the ANLZ analysis on demand instead of dropping the candidate.
-            if let Some(track_id) =
-                self.materialize_usb_add_candidate(candidate, request_usb_root)?
-            {
-                return Ok(AddTrackCandidateResolution {
-                    previous_id,
-                    track_id: Some(track_id),
-                    resolved_by: "usbMaterialized".to_string(),
-                    materialized: true,
-                });
-            }
+        if usb_origin {
             return Ok(AddTrackCandidateResolution {
                 previous_id,
                 track_id: None,

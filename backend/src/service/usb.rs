@@ -1925,38 +1925,74 @@ impl BackendService {
         Ok((*data).clone())
     }
 
-    /// Materialize just the tracks on one already-paginated page: for each
-    /// row create/link a local `tracks` row and a `track_usb_links` row and
-    /// stash its `local_track_id` (used by the playback highlight and as the
-    /// add-to-playlist fast path). Pure DB work -- no on-USB ANLZ reads; cue /
-    /// beat-grid import is deferred to the add-to-playlist path. Both writes
-    /// are `ON CONFLICT DO UPDATE`, so concurrent scroll fetches are safe.
-    fn materialize_usb_track_page(
+    /// Fill in `local_track_id` for the tracks on one already-paginated page
+    /// from what the local DB already knows -- this device's
+    /// `track_usb_links` row, then a confident fingerprint match, then an
+    /// exact `file_path` row -- so the playback highlight can match a USB row
+    /// to the local track playing. Read-only: browsing a USB never writes;
+    /// local rows are created when a track is added to a playlist
+    /// (`materialize_usb_add_candidate`). A track with no local row keeps
+    /// `None`.
+    fn resolve_usb_track_page_local_ids(
         &self,
         tracks: &mut [UsbTrack],
         usb_root: &std::path::Path,
-    ) -> BackendResult<usize> {
-        let mut conn = self.db.connect()?;
-        let tx = conn.transaction()?;
-        let now_ts = now();
-        let usb_device_id = usb_utils::upsert_usb_device(&tx, usb_root, false, &now_ts)?;
-        let usb_root_paths = untainted_usb_root_paths(&tx)?;
-        let mut materialized = 0usize;
+    ) -> BackendResult<()> {
+        let conn = self.db.connect()?;
+        let root_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
+        let usb_device_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM usb_devices WHERE root_path_key = ?1",
+                params![root_key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let usb_root_paths = untainted_usb_root_paths(&conn)?;
 
         for track in tracks {
-            if self.materialize_usb_track_row(
-                &tx,
-                track,
-                &now_ts,
-                &usb_device_id,
-                &usb_root_paths,
-            )? {
-                materialized += 1;
+            let file_path = track.file_path.trim();
+            if file_path.is_empty() {
+                continue;
             }
+            let linked = match usb_device_id.as_deref() {
+                Some(device_id) => conn
+                    .query_row(
+                        "SELECT track_id FROM track_usb_links WHERE usb_device_id = ?1 AND usb_file_path = ?2",
+                        params![device_id, file_path],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?,
+                None => None,
+            };
+            let id = match linked {
+                Some(id) => Some(id),
+                None => {
+                    let fingerprint = build_track_match_fingerprint(
+                        &track.title,
+                        &track.artist,
+                        track.album.as_deref(),
+                    );
+                    match find_confident_fingerprint_match(
+                        &conn,
+                        &fingerprint,
+                        track.duration_ms.map(|v| v as i64),
+                        track.file_size_bytes,
+                        &usb_root_paths,
+                    )? {
+                        Some(id) => Some(id),
+                        None => conn
+                            .query_row(
+                                "SELECT id FROM tracks WHERE file_path = ?1 LIMIT 1",
+                                params![file_path],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .optional()?,
+                    }
+                }
+            };
+            track.local_track_id = id;
         }
-
-        tx.commit()?;
-        Ok(materialized)
+        Ok(())
     }
 
     /// Materialize a single USB-origin add-to-playlist candidate on demand:
@@ -2022,7 +2058,11 @@ impl BackendService {
         };
 
         let mut conn = self.db.connect()?;
-        let tx = conn.transaction()?;
+        // IMMEDIATE: this reads before it writes, and a deferred transaction
+        // that's beaten to the write lock fails at once with "database is
+        // locked" (busy_timeout can't help a read snapshot another writer
+        // has made stale) -- e.g. two adds running at once.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let now_ts = now();
         let usb_device_id = usb_utils::upsert_usb_device(&tx, &usb_root, false, &now_ts)?;
         let usb_root_paths = untainted_usb_root_paths(&tx)?;
@@ -2452,8 +2492,8 @@ impl BackendService {
     /// One paginated/searched/sorted page of a USB playlist's tracks, with the
     /// waveform-preview bytes + artwork data URLs hydrated server-side for that
     /// page. The playlist list is resolved from the parse cache (or once, on a
-    /// cache miss); only the returned page pays the per-track hydration I/O,
-    /// and only the returned page is materialized into local rows.
+    /// cache miss); only the returned page pays the per-track hydration I/O.
+    /// Read-only: it never writes to the local DB.
     pub fn fetch_usb_playlist_tracks(
         &self,
         req: FetchUsbTracksRequest,
@@ -2473,7 +2513,7 @@ impl BackendService {
             resolved.warnings.clone(),
             self.key_notation()?,
         )?;
-        self.materialize_usb_track_page(&mut data.items, &usb_root)?;
+        self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
         Ok(data)
     }
 
@@ -2497,7 +2537,7 @@ impl BackendService {
             all.warnings.clone(),
             self.key_notation()?,
         )?;
-        self.materialize_usb_track_page(&mut data.items, &usb_root)?;
+        self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
         Ok(data)
     }
 }
@@ -3833,9 +3873,8 @@ mod tests {
         assert_eq!(page1.total_duration_ms, 600_000);
         // The page is hydrated: format is populated (from Stage A) ...
         assert_eq!(page1.items[0].format_ext.as_deref(), Some("mp3"));
-        // ... and every page row carries a resolved local track id (the page
-        // is materialized into local rows by `materialize_usb_track_page`).
-        assert!(page1.items.iter().all(|t| t.local_track_id.is_some()));
+        // ... and browsing creates no local rows, so none has a local id yet.
+        assert!(page1.items.iter().all(|t| t.local_track_id.is_none()));
 
         let page2 = service
             .fetch_usb_playlist_tracks(req(crate::models::FetchUsbTracksRequest {
@@ -3883,6 +3922,105 @@ mod tests {
         assert_eq!(filtered.total, 1);
         assert_eq!(filtered.items.len(), 1);
         assert_eq!(filtered.items[0].title, "Alpha");
+    }
+
+    #[test]
+    fn fetch_usb_playlist_tracks_is_read_only_and_finds_tracks_added_since() {
+        let (_dir, usb_root) = seeded_playlist_usb_with_tracks(&[
+            ("t1", "Charlie", "c.mp3"),
+            ("t2", "Alpha", "a.flac"),
+        ]);
+        let (_dir2, service) = test_service();
+        let root = usb_root.to_string_lossy().to_string();
+        let list = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(root.clone()),
+            })
+            .expect("fetch playlists");
+        let fetch = || {
+            service
+                .fetch_usb_playlist_tracks(crate::models::FetchUsbTracksRequest {
+                    usb_root: Some(root.clone()),
+                    id: list.items[0].id.clone(),
+                    ..Default::default()
+                })
+                .expect("fetch tracks")
+        };
+        let count = |table: &str| -> i64 {
+            let conn = service.db.connect().expect("connect");
+            conn.query_row(&format!("SELECT COUNT(1) FROM {table}"), [], |row| row.get(0))
+                .expect("count")
+        };
+
+        let page = fetch();
+        assert_eq!(count("tracks"), 0, "browsing must not create track rows");
+        assert_eq!(count("track_usb_links"), 0, "browsing must not create USB links");
+        assert!(page.items.iter().all(|t| t.local_track_id.is_none()));
+
+        // Adding one to a playlist creates its local row; the next browse
+        // finds it through the USB link, still without writing.
+        let added = &page.items[0];
+        let local_id = service
+            .materialize_usb_add_candidate(
+                &crate::models::AddTrackCandidate {
+                    title: added.title.clone(),
+                    artist: added.artist.clone(),
+                    album: added.album.clone(),
+                    file_path: Some(added.file_path.clone()),
+                    usb_root: Some(root.clone()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .expect("materialize")
+            .expect("local id");
+        let tracks_after_add = count("tracks");
+
+        let page = fetch();
+        assert_eq!(count("tracks"), tracks_after_add);
+        let found = page.items.iter().find(|t| t.file_path == added.file_path).expect("row");
+        assert_eq!(found.local_track_id.as_deref(), Some(local_id.as_str()));
+        assert!(page.items.iter().filter(|t| t.file_path != added.file_path).all(|t| t.local_track_id.is_none()));
+    }
+
+    /// Regression: overlapping page loads (the previous playlist's still
+    /// running when the next is selected) failed with "database is locked".
+    #[test]
+    fn fetch_usb_playlist_tracks_survives_concurrent_calls() {
+        let (_dir, usb_root) = seeded_playlist_usb_with_tracks(&[
+            ("t1", "Charlie", "c.mp3"),
+            ("t2", "Alpha", "a.flac"),
+            ("t3", "Bravo", "b.wav"),
+        ]);
+        let (_dir2, service) = test_service();
+        let root = usb_root.to_string_lossy().to_string();
+        let list = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(root.clone()),
+            })
+            .expect("fetch playlists");
+        let playlist_id = list.items[0].id.clone();
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let service = service.clone();
+            let root = root.clone();
+            let playlist_id = playlist_id.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut errs = Vec::new();
+                for _ in 0..50 {
+                    if let Err(e) = service.fetch_usb_playlist_tracks(crate::models::FetchUsbTracksRequest {
+                        usb_root: Some(root.clone()),
+                        id: playlist_id.clone(),
+                        ..Default::default()
+                    }) {
+                        errs.push(format!("{e}"));
+                    }
+                }
+                errs
+            }));
+        }
+        let errs: Vec<String> = handles.into_iter().flat_map(|h| h.join().unwrap()).collect();
+        assert!(errs.is_empty(), "{} errors, first: {:?}", errs.len(), errs.first());
     }
 
     #[test]

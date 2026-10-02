@@ -73,6 +73,13 @@ impl From<BackendError> for ErrorPayload {
                 details: None,
             },
             BackendError::Db(_err) => {
+                // Release builds keep the SQLite detail out of the returned
+                // message, so put it in the Event Log -- otherwise it's lost.
+                crate::logging::emit(
+                    crate::logging::Level::Error,
+                    "database",
+                    &format!("database failure: {_err}"),
+                );
                 #[cfg(debug_assertions)]
                 let message = format!("database failure: {_err}");
                 #[cfg(not(debug_assertions))]
