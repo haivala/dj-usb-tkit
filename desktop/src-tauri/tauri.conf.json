@@ -39,6 +39,18 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVBRTE5MDc4OENGNzY4RDUKUldUVmFQZU1lSkRoNmhvcFdhN2F3MG1sRnM3N1ZqbWxwY0RYZkpWYmplZ29NK0R6S0xMdkVBNjIK",
+      "endpoints": [
+        "https://github.com/haivala/dj-usb-tkit/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": false,
     "resources": [

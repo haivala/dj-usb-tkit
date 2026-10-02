@@ -23,9 +23,45 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow builds Linux (`deb`, `rpm`, `AppImage`), macOS (`dmg`), and
-Windows (`nsis`, `msi`) bundles, uploads them as workflow artifacts, then
-creates or updates the GitHub Release assets for the tag.
+The workflow builds Linux (`deb`, `rpm`, `AppImage`), macOS (`dmg`, plus the
+`.app.tar.gz` the updater installs), and Windows (`nsis`) bundles, uploads them
+as workflow artifacts, then creates or updates the GitHub Release assets for
+the tag. MSI is no longer built: it needs admin rights to install and update,
+while the NSIS setup installs per-user.
+
+### In-app updater
+
+AppImage, NSIS and macOS installs update themselves from the banner's
+"Update & restart" button (`install_update` in `backend/src/tauri_commands.rs`,
+`tauri-plugin-updater`). deb/rpm installs belong to the package manager and only
+get a direct download link to their asset.
+
+Updates are verified with a minisign key (free, not a code-signing
+certificate). One-time setup:
+
+1. `npx --prefix desktop tauri signer generate -w ~/.tauri/djtkit.key`
+2. Put the public key (`~/.tauri/djtkit.key.pub`, one line) in
+   `desktop/src-tauri/tauri.conf.json` under `plugins.updater.pubkey`.
+3. Add repository secrets `TAURI_SIGNING_PRIVATE_KEY` (contents of
+   `~/.tauri/djtkit.key`) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+4. Back up the private key. Without it, installed apps can never update
+   themselves again: a new key means a new pubkey, which old builds don't trust.
+
+With the secrets set, `scripts/release.sh` and `scripts/linux-release-docker.sh`
+add `scripts/tauri.updater.conf.json` (`createUpdaterArtifacts`), so every
+updater artifact gets a `.sig`. The publish job runs
+`scripts/make_updater_manifest.mjs`, which:
+
+- renames assets with spaces (GitHub would turn them into dots);
+- checks that each signature is bound to the release version (the app sets
+  `requireSignedVersion`);
+- writes `latest.json` with only installer-specific keys
+  (`linux-x86_64-appimage`, `windows-x86_64-nsis`, `darwin-aarch64-app`).
+
+The app fetches the manifest from
+`releases/latest/download/latest.json`, so drafts and prereleases are never
+offered. Builds without the key (local builds, or CI before the secrets
+exist) skip all of this and publish as before.
 
 The workflow can also be run manually from GitHub Actions with an existing tag
 name. Manual runs can be marked as draft releases or prereleases.

@@ -18,6 +18,12 @@ FRONTEND_DIST_READY=0
 RUN_TESTS="${RUN_TESTS:-1}"
 TARGETS="${TARGETS:-}"
 EXTRA_TAURI_ARGS="${EXTRA_TAURI_ARGS:-}"
+# Signed updater artifacts (.sig, macOS .app.tar.gz) need the updater signing
+# key; without it (local builds) `tauri build` would fail, so only add them
+# when the key is present (CI passes it from repo secrets).
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+  EXTRA_TAURI_ARGS="--config $ROOT_DIR/scripts/tauri.updater.conf.json $EXTRA_TAURI_ARGS"
+fi
 BUNDLES="${BUNDLES:-}"
 LINUXDEPLOY_NO_STRIP="${LINUXDEPLOY_NO_STRIP:-1}"
 RUNTIME_BIN_DIR="$ROOT_DIR/desktop/runtime/bin"
@@ -90,7 +96,7 @@ if [[ -z "$BUNDLES" ]]; then
       BUNDLES="app,dmg"
       ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      BUNDLES="nsis,msi"
+      BUNDLES="nsis"
       ;;
     *)
       echo "error: unsupported host for default bundles: $(uname -s)" >&2

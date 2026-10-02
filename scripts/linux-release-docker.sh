@@ -87,6 +87,8 @@ docker run --rm \
   -e HOST_UID="$HOST_UID" \
   -e HOST_GID="$HOST_GID" \
   -e NO_STRIP="${NO_STRIP:-1}" \
+  -e TAURI_SIGNING_PRIVATE_KEY \
+  -e TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
   "$IMAGE_NAME" \
   bash -lc '
     set -euo pipefail
@@ -183,6 +185,12 @@ docker run --rm \
     rm -rf /project/desktop/runtime/bin /project/desktop/runtime/node_modules
 
     TAURI_BUILD_CONFIG="$TAURI_RELEASE_CONFIG"
+    # Signed updater artifacts (the AppImage .sig) need the signing key; only
+    # request them when CI passed it in, so local builds keep working.
+    TAURI_UPDATER_ARGS=()
+    if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+      TAURI_UPDATER_ARGS=(--config /project/scripts/tauri.updater.conf.json)
+    fi
 
     if [[ ! -f "/project/desktop/scripts/essentia_runner.cjs" ]]; then
       echo "error: missing packaged analysis runner: /project/desktop/scripts/essentia_runner.cjs" >&2
@@ -244,7 +252,7 @@ docker run --rm \
     (
       cd "$TAURI_DIR"
       set +e
-      "$TAURI_BIN" build --config "$TAURI_BUILD_CONFIG" --bundles "$BUNDLES" -v 2>&1 | tee "$HOST_LOG_DIR/container-build.log"
+      "$TAURI_BIN" build --config "$TAURI_BUILD_CONFIG" "${TAURI_UPDATER_ARGS[@]}" --bundles "$BUNDLES" -v 2>&1 | tee "$HOST_LOG_DIR/container-build.log"
       build_status=${PIPESTATUS[0]}
       set -e
       if [[ "$build_status" -ne 0 ]]; then

@@ -39,6 +39,21 @@
 
 ## Unreleased
 
+- **New feature:** the update notice can now install the update for you.
+  AppImage, Windows and macOS installs get an "Update & restart" button.
+  It downloads the new version, checks its signature, installs it and
+  restarts the app, with progress in the bottom bar. It waits until a
+  running export or scan is done. This works from the next release on;
+  this one still has to be installed by hand.
+- **Improvement:** the update notice links straight to the right download
+  for how you installed the app (.AppImage, .deb, .rpm, .dmg or Windows
+  setup), not just the release page. deb and rpm installs keep updating
+  through your package manager, so they get the link only.
+- **Improvement:** Windows now ships only the setup .exe. The MSI installer
+  is no longer built: it needed admin rights to install and update. If you
+  installed the MSI, uninstall it and install the setup .exe; the update
+  notice links to it.
+
 ## 0.3.1
 
 - **Fix:** the parity report's "Indexed audio file presence" check now

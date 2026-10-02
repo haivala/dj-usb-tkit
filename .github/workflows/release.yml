@@ -85,11 +85,12 @@ jobs:
           - name: macOS
             os: macos-latest
             artifact_suffix: macos
-            bundles: dmg
+            # `app` produces the .app.tar.gz the in-app updater installs.
+            bundles: app,dmg
           - name: Windows
             os: windows-2022
             artifact_suffix: windows
-            bundles: nsis,msi
+            bundles: nsis
     steps:
       - name: Check out release tag
         uses: actions/checkout@v4
@@ -203,6 +204,8 @@ jobs:
         env:
           BUNDLES: ${{ matrix.bundles }}
           RUN_TESTS: "0"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           ./scripts/linux-release-docker.sh
@@ -213,6 +216,8 @@ jobs:
         env:
           BUNDLES: ${{ matrix.bundles }}
           RUN_TESTS: "0"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           ./scripts/release.sh
@@ -253,8 +258,9 @@ jobs:
             target/release/bundle/**/*.deb
             target/release/bundle/**/*.rpm
             target/release/bundle/**/*.dmg
-            target/release/bundle/**/*.msi
             target/release/bundle/**/*.exe
+            target/release/bundle/**/*.app.tar.gz
+            target/release/bundle/**/*.sig
 
   publish:
     name: Publish GitHub Release
@@ -298,22 +304,6 @@ jobs:
             exit 1
           fi
 
-          mapfile -d '' files < <(
-            find release-assets -type f \( \
-              -name '*.AppImage' -o \
-              -name '*.deb' -o \
-              -name '*.rpm' -o \
-              -name '*.dmg' -o \
-              -name '*.msi' -o \
-              -name '*.exe' \
-            \) -print0 | sort -z
-          )
-
-          if [[ "${#files[@]}" -eq 0 ]]; then
-            echo "No release assets were downloaded." >&2
-            exit 1
-          fi
-
           version="${TAG#v}"
           notes_file="$(mktemp)"
           awk -v version="$version" '
@@ -324,6 +314,29 @@ jobs:
 
           if [[ ! -s "$notes_file" ]]; then
             printf 'Automated release for %s.\n' "$TAG" > "$notes_file"
+          fi
+
+          # Renames assets with spaces in their names and writes
+          # release-assets/latest.json for the in-app updater (skipped when the
+          # build had no signing key).
+          node scripts/make_updater_manifest.mjs release-assets "$TAG" "$notes_file"
+
+          # The .sig files are only inputs to latest.json; they aren't published.
+          mapfile -d '' files < <(
+            find release-assets -type f \( \
+              -name '*.AppImage' -o \
+              -name '*.deb' -o \
+              -name '*.rpm' -o \
+              -name '*.dmg' -o \
+              -name '*.exe' -o \
+              -name '*.app.tar.gz' -o \
+              -name 'latest.json' \
+            \) -print0 | sort -z
+          )
+
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "No release assets were downloaded." >&2
+            exit 1
           fi
 
           title="DJ USB Tkit $version"

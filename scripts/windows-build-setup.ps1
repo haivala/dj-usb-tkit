@@ -230,13 +230,12 @@ if (Test-Path $buildDir) {
 Set-Location "$ProjectRoot\desktop\src-tauri"
 $releaseConf = "$ProjectRoot\scripts\tauri.release.conf.json"
 Write-Host "  Building release..."
-& $tauriBin build --config "$releaseConf" --bundles nsis,msi
+& $tauriBin build --config "$releaseConf" --bundles nsis
 
 # ─── Done ────────────────────────────────────────────────────────────────────
 $bundleDir = "$ProjectRoot\target\release\bundle"
 Write-Host "`n=== Build complete! ===" -ForegroundColor Green
 Write-Host "Installers are in: $bundleDir" -ForegroundColor Cyan
-Write-Host "  - MSI:  $bundleDir\msi"
 Write-Host "  - NSIS: $bundleDir\nsis"
 explorer.exe $bundleDir
 

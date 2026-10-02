@@ -657,6 +657,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_handle = app.handle().clone();
 
@@ -868,6 +869,7 @@ fn main() {
             backend::tauri_commands::cancel_essentia_download,
             backend::tauri_commands::remove_essentia,
             backend::tauri_commands::check_for_update,
+            backend::tauri_commands::install_update,
             backend::tauri_commands::play_track_native,
             backend::tauri_commands::play_resolved_track,
             backend::tauri_commands::stop_playback_native,

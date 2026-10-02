@@ -1925,16 +1925,39 @@ pub fn remove_essentia(state: State<'_, BackendCommands>) -> ApiResponse<()> {
 const RELEASES_API_URL: &str =
     "https://api.github.com/repos/haivala/dj-usb-tkit/releases?per_page=10";
 
+/// Which release asset the running build came from. The bundler patches a
+/// marker into each packaged binary (`tauri::utils::platform::bundle_type`);
+/// debug builds (`cargo run`) are always `Unknown` -- on macOS `bundle_type`
+/// reports `App` even outside a bundle, and a dev build must never self-update.
+fn current_install_kind() -> crate::service::update_check::InstallKind {
+    use crate::service::update_check::InstallKind;
+    use tauri::utils::{config::BundleType, platform::bundle_type};
+
+    if cfg!(debug_assertions) {
+        return InstallKind::Unknown;
+    }
+    match bundle_type() {
+        Some(BundleType::AppImage) => InstallKind::AppImage,
+        Some(BundleType::Deb) => InstallKind::Deb,
+        Some(BundleType::Rpm) => InstallKind::Rpm,
+        Some(BundleType::Nsis) => InstallKind::Nsis,
+        Some(BundleType::Msi) => InstallKind::Msi,
+        Some(BundleType::App | BundleType::Dmg) => InstallKind::Dmg,
+        None => InstallKind::Unknown,
+    }
+}
+
 /// Checks GitHub Releases for a newer stable build than the running one.
 /// Version comparison and the severity rules live in
-/// `service::update_check`; this only does the fetch. A failed check is
-/// background noise -- it logs quietly and reports "no update" rather than
-/// surfacing an error.
+/// `service::update_check`; this only does the fetch and detects the install
+/// kind. A failed check is background noise -- it logs quietly and reports
+/// "no update" rather than surfacing an error.
 #[tauri::command]
 pub async fn check_for_update() -> ApiResponse<crate::service::update_check::UpdateInfo> {
     use crate::service::update_check::{self, GithubRelease, UpdateInfo};
 
     let current = env!("CARGO_PKG_VERSION");
+    let install_kind = current_install_kind();
 
     let fetch = async {
         let client = reqwest::Client::builder()
@@ -1958,10 +1981,113 @@ pub async fn check_for_update() -> ApiResponse<crate::service::update_check::Upd
     };
 
     match fetch.await {
-        Ok(releases) => ApiResponse::success(update_check::evaluate(current, &releases)),
+        Ok(releases) => {
+            ApiResponse::success(update_check::evaluate(current, install_kind, &releases))
+        }
         Err(message) => {
             crate::backend_log!(Warn, "update-check", "update check failed: {message}");
-            ApiResponse::success(UpdateInfo::none(current))
+            ApiResponse::success(UpdateInfo::none(current, install_kind))
+        }
+    }
+}
+
+/// Downloads, verifies and installs the newest release with
+/// `tauri-plugin-updater`, then restarts into it. Runs as an ordinary
+/// `job:event` job (`job_type: "update"`) so the footer progress bar and the
+/// event log show it like any other long operation. The frontend only offers
+/// this when `check_for_update` said `canSelfUpdate`; the updater manifest
+/// (`latest.json`) carries only installer-specific keys, so a deb/rpm/MSI
+/// install can't pick up another format's payload even if it got here.
+///
+/// On Windows the NSIS installer exits the app itself once it starts, so the
+/// restart below is only reached on Linux (AppImage) and macOS.
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let job_id = format!("job-update-{}", Uuid::now_v7());
+    let identity = JobIdentity {
+        job_id: &job_id,
+        job_type: "update",
+        stage: "install_update",
+    };
+    emit_job_event(&app, "job.started", identity, 0, 1, 0, "Checking for update...");
+
+    let result = async {
+        let update = app
+            .updater()
+            .map_err(|e| e.to_string())?
+            .check()
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| {
+                "no installable update is published for this platform yet; use the download link"
+                    .to_string()
+            })?;
+        let version = update.version.clone();
+        let mut downloaded: u64 = 0;
+        let mut last_percent = None;
+        update
+            .download_and_install(
+                |chunk_len, content_len| {
+                    downloaded += chunk_len as u64;
+                    let percent = content_len
+                        .filter(|total| *total > 0)
+                        .map_or(0, |total| (downloaded.saturating_mul(100) / total) as usize);
+                    // One event per whole percent, not per network chunk.
+                    if last_percent != Some(percent) {
+                        last_percent = Some(percent);
+                        emit_job_event(
+                            &app,
+                            "job.progress",
+                            identity,
+                            downloaded as usize,
+                            content_len.unwrap_or(0) as usize,
+                            percent,
+                            format!("Downloading update {version}..."),
+                        );
+                    }
+                },
+                || {
+                    emit_job_event(
+                        &app,
+                        "job.progress",
+                        identity,
+                        1,
+                        1,
+                        100,
+                        format!("Installing update {version}..."),
+                    );
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok::<String, String>(version)
+    }
+    .await;
+
+    match result {
+        Ok(version) => {
+            emit_job_event(
+                &app,
+                "job.completed",
+                identity,
+                1,
+                1,
+                100,
+                format!("Update {version} installed, restarting..."),
+            );
+            app.restart()
+        }
+        Err(message) => {
+            crate::backend_log!(Warn, "update-install", "update install failed: {message}");
+            let message = format!("Update failed: {message}");
+            emit_job_failed(&app, identity, Some(message.clone()));
+            ApiResponse::failure(ErrorPayload {
+                code: ErrorCode::InternalError,
+                message,
+                details: None,
+            })
         }
     }
 }

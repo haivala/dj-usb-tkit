@@ -6,16 +6,45 @@
 // (the `check_for_update` command / `backend/src/service/update_check.rs`).
 // This module only renders the `state.updateCheck` verdict:
 //   { updateAvailable, severity: "none"|"normal"|"feature"|"critical",
-//     currentVersion, latestVersion, releaseUrl }
+//     currentVersion, latestVersion, releaseUrl,
+//     installKind: "appimage"|"deb"|"rpm"|"nsis"|"msi"|"dmg"|"unknown",
+//     downloadUrl: string|null, canSelfUpdate }
+// `downloadUrl` (the latest release's asset for this install kind) and
+// `canSelfUpdate` (the in-app updater may replace this install) are both
+// decided by the backend.
 
 import { STORAGE_KEY_UPDATE_DISMISSED } from "./settings_keys.mjs";
 import { openExternalUrl } from "./ui_utils.mjs";
 
 export const RELEASES_PAGE_URL = "https://github.com/haivala/dj-usb-tkit/releases";
 
+// The download link and "Update & restart" button next to the settings note
+// and in the banner.
+function renderUpdateActions(ctx, container) {
+  if (!container) return;
+  const info = ctx.state.updateCheck;
+  const available = !!info?.updateAvailable;
+  const download = container.querySelector(".update-download-link");
+  const install = container.querySelector(".update-install-btn");
+
+  const downloadUrl = available ? info.downloadUrl : null;
+  download.classList.toggle("hidden", !downloadUrl);
+  download.onclick = (event) => {
+    event.preventDefault();
+    if (downloadUrl) openExternalUrl(ctx.window, downloadUrl);
+  };
+
+  install.classList.toggle("hidden", !(available && info.canSelfUpdate));
+  install.disabled = !!ctx.state.updateInstalling;
+  install.onclick = () => {
+    installUpdate(ctx);
+  };
+}
+
 export function renderUpdateNotice(ctx) {
   const { state, el } = ctx;
   if (!el.settingsUpdateNote) return;
+  renderUpdateActions(ctx, el.settingsUpdateActions);
 
   const info = state.updateCheck;
   const link = el.settingsUpdateNote.querySelector(".update-note-link");
@@ -44,6 +73,7 @@ export function renderUpdateBanner(ctx) {
   const { state, el, localStorage } = ctx;
   if (!el.updateBanner) return;
 
+  renderUpdateActions(ctx, el.updateBannerActions);
   const info = state.updateCheck;
   const bannerText = BANNER_TEXT[info?.severity];
   if (!info || !bannerText) {
@@ -87,5 +117,35 @@ export function dismissUpdateBanner(ctx) {
     }
   } catch {
     // Best-effort persistence only.
+  }
+}
+
+// Runs the backend's `install_update` job: progress, failure and the event-log
+// entries come through `job:event` like any other job (footer progress bar).
+// On success the app restarts, so the call never returns.
+export async function installUpdate(ctx) {
+  const { state, el } = ctx;
+  if (state.updateInstalling) return;
+  // A restart in the middle of an export or scan would cut it short.
+  if (state.activeJobId) {
+    ctx.emitMessage({
+      level: "warn",
+      source: "update",
+      code: "update.busy",
+      status: { text: "Finish the running job before updating." }
+    });
+    return;
+  }
+
+  state.updateInstalling = true;
+  el.updateBanner?.classList.add("hidden");
+  renderUpdateNotice(ctx);
+  try {
+    await ctx.command("install_update");
+  } catch {
+    // Already reported: the backend emitted `job.failed` with the reason.
+  } finally {
+    state.updateInstalling = false;
+    renderUpdateNotice(ctx);
   }
 }
