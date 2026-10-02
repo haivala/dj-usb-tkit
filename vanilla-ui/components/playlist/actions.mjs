@@ -751,14 +751,25 @@ export function renderPlaylistPanelChrome(ctx) {
   if (el.playlistEmptyState) {
     el.playlistEmptyState.replaceChildren();
     if (empty) {
+      // With a USB selected, its playlists are the tracks to add; without
+      // one, the USB view is where to select it.
+      const hasUsb = !!state.usbRoot && !!state.usbRootValid;
       renderEmptyState(el.playlistEmptyState, {
         icon: "♫",
         heading: "Browse Library or USB to add tracks",
+        actionLabel: "Media Library",
+        onAction: () => ctx.switchView("library").catch((err) => console.error(err)),
+        extraActions: [{
+          label: hasUsb ? "USB Playlists" : "USB",
+          onAction: () => ctx.switchView(hasUsb ? "usb-playlists" : "usb").catch((err) => console.error(err)),
+        }],
       });
     }
   }
   el.playlistTableWrap?.classList.toggle("hidden", empty);
   el.playlistTotalDuration?.classList.toggle("hidden", empty);
+  // "Not exported yet." says nothing useful about a playlist with no tracks.
+  el.playlistExportStatus?.classList.toggle("hidden", empty && !playlist.lastExportedAt);
   el.playlistSearchInput?.closest(".search-row")?.classList.toggle("hidden", empty);
   el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", empty);
   if (el.playlistSearchInput && el.playlistSearchInput.value !== (state.playlistTrackSearch || "")) {

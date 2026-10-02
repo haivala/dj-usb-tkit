@@ -3453,6 +3453,10 @@ td button[data-action]:disabled,
   margin-bottom: 16px;
 }
 
+.empty-state-actions {
+  justify-content: center;
+}
+
 .empty-state-action {
   margin-top: 4px;
 }

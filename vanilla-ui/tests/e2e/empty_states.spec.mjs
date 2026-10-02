@@ -57,6 +57,12 @@ test("Empty states render correctly", async ({ page }) => {
   await page.locator("#navPlaylistList .nav-new-input").press("Enter");
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
   await expect(page.locator("#playlistEmptyState")).toContainText("Browse Library or USB to add tracks");
+  await expect(page.locator("#playlistExportStatus")).toBeHidden();
+  await page.locator("#playlistEmptyState").getByRole("button", { name: "USB", exact: true }).click();
+  await expect(page.locator('.nav-item[data-view="usb"]')).toHaveClass(/active/);
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await page.locator("#playlistEmptyState").getByRole("button", { name: "Media Library" }).click();
+  await expect(page.locator('.nav-item[data-view="library"]')).toHaveClass(/active/);
 });
 
 test("Configured source folders with zero indexed tracks prompt scan and keep controls visible", async ({ page }) => {

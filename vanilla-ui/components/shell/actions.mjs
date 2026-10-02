@@ -97,7 +97,7 @@ export function renderEmptyState(container, { icon, heading, body, actionLabel, 
   }
   container.replaceChildren();
   container.appendChild(clone);
-  const emptyStateEl = container.querySelector(".empty-state");
+  const actionsEl = container.querySelector(".empty-state-actions") || container;
   for (const extra of extraActions) {
     if (!extra.label || !extra.onAction) continue;
     // A secondary copy of the template's action button.
@@ -106,6 +106,6 @@ export function renderEmptyState(container, { icon, heading, body, actionLabel, 
     btn.removeAttribute("data-primary");
     btn.textContent = extra.label;
     btn.addEventListener("click", extra.onAction, { once: true });
-    (emptyStateEl || container).appendChild(btn);
+    actionsEl.appendChild(btn);
   }
 }

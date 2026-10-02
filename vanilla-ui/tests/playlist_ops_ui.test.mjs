@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import {
   commitActivePlaylistSort,
   formatPlaylistExportStatus,
+  renderPlaylistPanelChrome,
   renderPlaylistList
 } from "../components/playlist/actions.mjs";
 import { bindPlaylistEvents } from "../components/playlist/events.mjs";
@@ -178,4 +179,43 @@ test("bindPlaylistEvents ignores playlist selection clicks while new playlist in
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(switched, []);
+});
+
+test("empty playlist links to the Media Library and to USB, or to USB Playlists once a USB is selected", async () => {
+  const { document } = makeDom().window;
+  const views = [];
+  const ctx = {
+    state: {
+      activeTab: "p1",
+      currentPlaylistId: "p1",
+      playlists: [{ id: "p1", name: "One" }],
+      analyzingTrackIds: new Set(),
+      selectedTrackIds: new Set(),
+      usbRoot: null,
+      usbRootValid: false,
+    },
+    el: elements(document, [
+      "navPlaylistList", "playlistPanelTitle", "playlistExportStatus", "playlistSearchInput",
+      "playlistEmptyState", "playlistTableWrap", "playlistTracksBody", "playlistTotalDuration",
+      "exportPlaylistBtn", "analyzePlaylistMissingBtn",
+    ]),
+    document,
+    playlistTracksCtl: { total: 0, loading: false },
+    switchView: async (view) => { views.push(view); },
+  };
+  const buttons = () => [...document.querySelectorAll("#playlistEmptyState .empty-state-action")];
+
+  renderPlaylistPanelChrome(ctx);
+  assert.deepEqual(buttons().map((b) => b.textContent), ["Media Library", "USB"]);
+  assert.equal(ctx.el.playlistExportStatus.classList.contains("hidden"), true);
+  buttons()[0].click();
+  buttons()[1].click();
+
+  ctx.state.usbRoot = "/mnt/usb";
+  ctx.state.usbRootValid = true;
+  renderPlaylistPanelChrome(ctx);
+  assert.deepEqual(buttons().map((b) => b.textContent), ["Media Library", "USB Playlists"]);
+  buttons()[1].click();
+
+  assert.deepEqual(views, ["library", "usb", "usb-playlists"]);
 });

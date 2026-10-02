@@ -46,6 +46,11 @@
   it now comes back so the update can be retried.
 - **Fix:** the "Update & restart" button no longer appears for a release
   that can't be installed in-app; it offers the download link instead.
+- **Improvement:** an empty app playlist no longer says "Not exported
+  yet." It now has buttons to the Media Library and to the USB view, or
+  to the USB's playlists once a USB is selected.
+- **Improvement:** empty-state buttons now sit side by side in one row,
+  including the Library's "Add Folder" / "RB master.db" / "Mixxx library".
 
 ## 0.3.2
 
