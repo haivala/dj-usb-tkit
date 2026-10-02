@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.3.3
+
 - **Fix:** selecting a USB playlist while the previous one was still
   loading could fail with "an internal database error occurred". This
   showed up mostly on Windows, on the second playlist selected.
