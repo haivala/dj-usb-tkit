@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+## 0.3.2
+
+**Severity:** feature
+
 - **New feature:** the update notice can now install the update for you.
   AppImage, Windows and macOS installs get an "Update & restart" button.
   It downloads the new version, checks its signature, installs it and
