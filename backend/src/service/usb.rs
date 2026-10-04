@@ -2009,16 +2009,20 @@ impl BackendService {
     /// local rows are created when a track is added to a playlist
     /// (`materialize_usb_add_candidate`). A track with no local row keeps
     /// `None`.
+    ///
+    /// Returns where the page's display files are read from: a matched local
+    /// track's own files first (see `usb_display_files`), so this runs
+    /// before the page is hydrated.
     fn resolve_usb_track_page_local_ids(
         &self,
         tracks: &mut [UsbTrack],
         usb_root: &std::path::Path,
-    ) -> BackendResult<()> {
+    ) -> BackendResult<UsbDisplaySource> {
         let conn = self.db.connect()?;
         let usb_device_id = usb_device_id_for_root(&conn, usb_root)?;
         let usb_root_paths = untainted_usb_root_paths(&conn)?;
 
-        for track in tracks {
+        for track in tracks.iter_mut() {
             let file_path = track.file_path.trim();
             if file_path.is_empty() {
                 continue;
@@ -2061,26 +2065,34 @@ impl BackendService {
             };
             track.local_track_id = id;
         }
-        Ok(())
+        self.build_usb_display_source(&conn, usb_root, usb_device_id, tracks)
+    }
+
+    /// Display-file source for rows with no resolved local track: the local
+    /// cache of this stick's reads, else the stick.
+    fn usb_display_source(&self, usb_root: &std::path::Path) -> BackendResult<UsbDisplaySource> {
+        let conn = self.db.connect()?;
+        let usb_device_id = usb_device_id_for_root(&conn, usb_root)?;
+        self.build_usb_display_source(&conn, usb_root, usb_device_id, &[])
     }
 
     /// Where `page`'s display files are read from: the matched local tracks'
-    /// own files (see `resolve_usb_track_page_local_ids`), else the local
-    /// cache of this stick's reads, else the stick.
-    fn usb_display_source(
+    /// own files, else the local cache of this stick's reads, else the stick.
+    fn build_usb_display_source(
         &self,
+        conn: &rusqlite::Connection,
         usb_root: &std::path::Path,
+        usb_device_id: Option<String>,
         page: &[UsbTrack],
     ) -> BackendResult<UsbDisplaySource> {
-        let conn = self.db.connect()?;
-        let device_key = match usb_device_id_for_root(&conn, usb_root)? {
+        let device_key = match usb_device_id {
             Some(id) => id,
             None => format!(
                 "root:{}",
                 super::normalize_source_root_for_matching(&usb_root.to_string_lossy())
             ),
         };
-        let mut usb_roots = usb_utils::all_usb_device_root_paths(&conn)?;
+        let mut usb_roots = usb_utils::all_usb_device_root_paths(conn)?;
         usb_roots.push(usb_root.to_string_lossy().into_owned());
 
         let mut library = HashMap::new();
@@ -2476,7 +2488,7 @@ impl BackendService {
             edb_index.as_ref(),
         ) {
             Some((source, mut track)) => {
-                let files = self.usb_display_source(&usb_root, &[])?;
+                let files = self.usb_display_source(&usb_root)?;
                 hydrate_usb_track_in_place(&mut track, self.key_notation()?, Some(&files));
                 Ok(InspectUsbTrackData {
                     source,
@@ -2546,7 +2558,7 @@ impl BackendService {
         let pdb_track_index = build_pdb_track_index(parsed.as_ref());
         let pdb = parsed.as_ref().zip(pdb_track_index.as_ref());
         let notation = self.key_notation()?;
-        let files = self.usb_display_source(&usb_root, &[])?;
+        let files = self.usb_display_source(&usb_root)?;
 
         let items = req
             .items
@@ -2650,8 +2662,7 @@ impl BackendService {
         )?;
         // Local ids first: a matched track's waveform + artwork come from the
         // library's own files instead of the stick.
-        self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
-        let files = self.usb_display_source(&usb_root, &data.items)?;
+        let files = self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
         hydrate_usb_page(
             "fetch_usb_playlist_tracks",
             &mut data.items,
@@ -2699,8 +2710,7 @@ impl BackendService {
         )?;
         // Local ids first: a matched track's waveform + artwork come from the
         // library's own files instead of the stick.
-        self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
-        let files = self.usb_display_source(&usb_root, &data.items)?;
+        let files = self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
         hydrate_usb_page(
             "fetch_usb_history_tracks",
             &mut data.items,
@@ -4220,6 +4230,82 @@ mod tests {
                 .iter()
                 .filter(|t| t.file_path != added.file_path)
                 .all(|t| t.local_track_id.is_none())
+        );
+    }
+
+    /// A row matched to a local track shows that track's own artwork:
+    /// local ids are resolved before the page is hydrated.
+    #[test]
+    fn fetch_usb_playlist_tracks_takes_matched_tracks_artwork_from_the_library() {
+        let (_dir, usb_root) = seeded_playlist_usb_with_tracks(&[
+            ("t1", "Charlie", "c.mp3"),
+            ("t2", "Alpha", "a.flac"),
+        ]);
+        let (data_dir, service) = test_service();
+        let root = usb_root.to_string_lossy().to_string();
+        let list = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(root.clone()),
+            })
+            .expect("fetch playlists");
+        let fetch = || {
+            service
+                .fetch_usb_playlist_tracks(crate::models::FetchUsbTracksRequest {
+                    usb_root: Some(root.clone()),
+                    id: list.items[0].id.clone(),
+                    ..Default::default()
+                })
+                .expect("fetch tracks")
+        };
+
+        let page = fetch();
+        assert!(page.items.iter().all(|t| t.artwork_data_url.is_none()));
+
+        let added = &page.items[0];
+        let local_id = service
+            .materialize_usb_add_candidate(
+                &crate::models::AddTrackCandidate {
+                    title: added.title.clone(),
+                    artist: added.artist.clone(),
+                    album: added.album.clone(),
+                    file_path: Some(added.file_path.clone()),
+                    usb_root: Some(root.clone()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .expect("materialize")
+            .expect("local id");
+        let local_art = data_dir.path().join("local-art.png");
+        std::fs::write(&local_art, b"\x89PNG local").expect("write local art");
+        service
+            .db
+            .connect()
+            .expect("connect")
+            .execute(
+                "UPDATE tracks SET artwork_path = ?1 WHERE id = ?2",
+                rusqlite::params![local_art.to_string_lossy(), local_id],
+            )
+            .expect("set local artwork");
+
+        let page = fetch();
+        let matched = page
+            .items
+            .iter()
+            .find(|t| t.file_path == added.file_path)
+            .expect("matched row");
+        assert_eq!(matched.local_track_id.as_deref(), Some(local_id.as_str()));
+        assert!(
+            matched
+                .artwork_data_url
+                .as_deref()
+                .is_some_and(|url| url.starts_with("data:image/png;base64,"))
+        );
+        assert!(
+            page.items
+                .iter()
+                .filter(|t| t.file_path != added.file_path)
+                .all(|t| t.artwork_data_url.is_none())
         );
     }
 
