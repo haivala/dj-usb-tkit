@@ -56,7 +56,7 @@
       </div>
       <div class="header-utility-group">
         <button class="help-btn" id="helpBtn" data-tooltip="Help" aria-label="Help">?</button>
-        <button class="settings-btn" id="settingsBtn" data-tooltip="Settings" aria-label="Settings">&#9881;</button>
+        <button class="settings-btn" id="settingsBtn" data-tooltip="Settings" aria-label="Settings">&#9881;<span class="settings-btn-dot hidden" id="settingsUpdateDot"></span></button>
       </div>
     </div>
   </header>
@@ -64,8 +64,8 @@
   <div class="update-banner hidden" id="updateBanner" role="alert">
     <span id="updateBannerText"><span class="update-banner-message"></span> — <a href="#" class="update-banner-link">view release</a></span>
     <span class="update-actions" id="updateBannerActions">
-      <a href="#" class="update-download-link hidden">download</a>
       <button class="update-install-btn hidden" type="button">Update &amp; restart</button>
+      <a href="#" class="update-download-link hidden">Download</a>
     </span>
     <button class="update-banner-dismiss" id="updateBannerDismissBtn" aria-label="Dismiss">&times;</button>
   </div>
@@ -182,6 +182,7 @@
                 </div>
               </div>
               <div class="track-grid-body" id="libraryTableBody" role="rowgroup"></div>
+              <div class="track-grid-loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading tracks…</div>
             </div>
           </div>
           <p class="muted track-total-time" id="libraryTotalDuration">Total time: 0:00</p>
@@ -276,11 +277,15 @@
           <div class="panel-header-actions">
             <button id="refreshUsbBtn" data-primary disabled>Import Playlists</button>
           </div>
+          <span class="muted panel-header-meta" id="usbCountsText"></span>
         </div>
-        <p class="muted" id="usbCountsText">0 playlists, 0 tracks</p>
         <div class="split">
-          <ul id="usbPlaylists" class="list left"><li class="muted">No playlists imported yet. Click "Import Playlists" to load from USB.</li></ul>
+          <ul id="usbPlaylists" class="list list-compact left"><li class="muted">No playlists imported yet. Click "Import Playlists" to load from USB.</li></ul>
           <div class="right hidden">
+            <div class="track-list-heading hidden" id="usbPlaylistHeading">
+              <h3 class="track-list-heading-name"></h3>
+              <span class="muted track-list-heading-count"></span>
+            </div>
             <div class="search-row">
               <input id="usbTrackSearch" placeholder="Search USB playlist tracks" />
             </div>
@@ -300,6 +305,7 @@
                   </div>
                 </div>
                 <div class="track-grid-body" id="usbPlaylistTracks" role="rowgroup"></div>
+                <div class="track-grid-loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading tracks…</div>
               </div>
             </div>
             <p class="muted track-total-time" id="usbPlaylistTotalDuration">Total time: 0:00</p>
@@ -315,11 +321,15 @@
             <button id="refreshHistoryBtn" data-primary disabled>Import History</button>
             <button id="exportHistoryTracklistBtn" disabled>Export Tracklist</button>
           </div>
+          <span class="muted panel-header-meta" id="historyCountsText"></span>
         </div>
-        <p class="muted" id="historyCountsText">0 sessions, 0 tracks</p>
         <div class="split">
-          <ul id="historyList" class="list left"><li class="muted">No history imported yet. Click "Import History" to load from USB.</li></ul>
+          <ul id="historyList" class="list list-compact left"><li class="muted">No history imported yet. Click "Import History" to load from USB.</li></ul>
           <div class="right hidden">
+            <div class="track-list-heading hidden" id="historyHeading">
+              <h3 class="track-list-heading-name"></h3>
+              <span class="muted track-list-heading-count"></span>
+            </div>
             <div class="search-row">
               <input id="historyTrackSearch" placeholder="Search history tracks" />
             </div>
@@ -339,6 +349,7 @@
                   </div>
                 </div>
                 <div class="track-grid-body" id="historyTracks" role="rowgroup"></div>
+                <div class="track-grid-loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading tracks…</div>
               </div>
             </div>
             <p class="muted track-total-time" id="historyTotalDuration">Total time: 0:00</p>
@@ -397,6 +408,7 @@
               </div>
             </div>
             <div class="track-grid-body" id="playlistTracksBody" role="rowgroup"></div>
+            <div class="track-grid-loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading tracks…</div>
           </div>
         </div>
         <div class="playlist-footer">
@@ -455,15 +467,21 @@
       <h2>Settings</h2>
       <div class="settings-meta">
         <span class="settings-version" id="settingsVersionText">Version 0.1.0-RC3</span>
-        <span class="settings-update-note hidden" id="settingsUpdateNote"><a href="#" class="update-note-link"></a></span>
-        <span class="update-actions" id="settingsUpdateActions">
-          <a href="#" class="update-download-link hidden">download</a>
-          <button class="update-install-btn hidden" type="button">Update &amp; restart</button>
-        </span>
+        <button class="settings-update-check-btn hidden" id="settingsUpdateCheckBtn" type="button" data-tooltip="Check for updates" aria-label="Check for updates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><polyline points="20 4 20 9 15 9"></polyline></svg></button>
       </div>
       <button class="settings-close" id="settingsCloseBtn" aria-label="Close settings">&times;</button>
     </div>
     <div class="settings-body">
+      <!-- Only shown when there is something to say: an update to install, a
+           failed check, or the answer to a manual check. -->
+      <div class="settings-update-card hidden" id="settingsUpdateSection" role="status">
+        <span class="settings-update-status" id="settingsUpdateStatus"></span>
+        <a href="#" class="update-note-link hidden" id="settingsUpdateReleaseLink">What's new &#8599;</a>
+        <span class="update-actions" id="settingsUpdateActions">
+          <button class="update-install-btn hidden" type="button">Update &amp; restart</button>
+          <a href="#" class="update-download-link hidden">Download</a>
+        </span>
+      </div>
       <div class="settings-section">
         <div class="settings-section-label">Theme</div>
         <div class="theme-selector" id="themeSelector">
@@ -510,7 +528,6 @@
             <option value="essentia">Essentia</option>
           </select>
         </label>
-        <span class="analysis-engine-status" id="analysisEngineStatus"></span>
         <div id="essentiaInstallRow" class="essentia-install-row hidden">
           <span id="essentiaNodeStatus"></span>
           <div class="essentia-install-actions">
@@ -758,8 +775,8 @@
     <div role="row" class="track-grid-row">
       <div role="cell" class="track-grid-cell td-drag"><span class="drag-handle" data-playlist-track-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">⠿</span></div>
       <div role="cell" class="track-grid-cell td-select"><input type="checkbox" /></div>
-      <div role="cell" class="track-grid-cell td-cover"></div>
-      <div role="cell" class="track-grid-cell td-waveform"><div class="waveform-cell"><button class="transport-btn"></button><div class="waveform" data-action="scrub-play" aria-label="waveform preview" data-tooltip="Play from here"><i class="waveform-playhead" aria-hidden="true"></i></div><button class="waveform-detail-btn" data-action="edit-track-detail" aria-label="Cue points &amp; beat grid"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="21" y1="21" x2="15.5" y2="15.5"></line></svg></button></div></div>
+      <div role="cell" class="track-grid-cell td-cover"><div class="cover-play"><button class="transport-btn"></button></div></div>
+      <div role="cell" class="track-grid-cell td-waveform"><div class="waveform-cell"><div class="waveform" data-action="scrub-play" aria-label="waveform preview" data-tooltip="Play from here"><i class="waveform-playhead" aria-hidden="true"></i></div><button class="waveform-detail-btn" data-action="edit-track-detail" aria-label="Cue points &amp; beat grid"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="21" y1="21" x2="15.5" y2="15.5"></line></svg></button></div></div>
       <div role="cell" class="track-grid-cell td-track"><div class="track-info-cell">
         <span class="track-title"></span>
         <span class="track-artist"></span>

@@ -100,7 +100,8 @@ export function createTrackRow(ctx, track, options) {
     selectCell.remove();
   }
 
-  cell("cover").append(coverElement(doc, buildCoverSrcCandidates(ctx, track)));
+  // The play button sits over the cover (see .cover-play).
+  cell("cover").firstElementChild.prepend(coverElement(doc, buildCoverSrcCandidates(ctx, track)));
 
   const transport = row.querySelector(".transport-btn");
   if (options.secondaryActionLabel) {

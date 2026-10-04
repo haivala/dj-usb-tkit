@@ -1136,11 +1136,12 @@ export function patchLibraryRowCells(ctx, row, track) {
         img.src = coverCandidates[0];
         img.dataset.fallbacks = coverCandidates.slice(1).join("|");
       } else {
-        coverTd.replaceChildren(coverElement(row.ownerDocument, coverCandidates));
+        // Swap only the cover: the play button shares the cell (.cover-play).
+        coverTd.querySelector(".cover-thumb")?.replaceWith(coverElement(row.ownerDocument, coverCandidates));
         attachCoverFallbackHandlers(coverTd);
       }
-    } else if (coverTd.querySelector("img.cover-thumb")) {
-      coverTd.replaceChildren(coverElement(row.ownerDocument, []));
+    } else {
+      coverTd.querySelector("img.cover-thumb")?.replaceWith(coverElement(row.ownerDocument, []));
     }
   }
 

@@ -455,6 +455,9 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   await page.locator("#refreshUsbBtn").click();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 
+  // The remove × only shows on the hovered row.
+  await expect(page.locator('[data-usb-remove-playlist="usb-1"]')).toBeHidden();
+  await page.locator('[data-usb-playlist="usb-1"]').hover();
   await page.locator('[data-usb-remove-playlist="usb-1"]').click();
   await expect(page.locator("#confirmOverlay")).toBeVisible();
   await expect(page.locator("#confirmMessage")).toHaveText('Remove USB playlist "Warmup" from the stick?');
@@ -462,6 +465,7 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   await expect(page.locator("#confirmOverlay")).toBeHidden();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 
+  await page.locator('[data-usb-playlist="usb-1"]').hover();
   await page.locator('[data-usb-remove-playlist="usb-1"]').click();
   await page.locator("#confirmOkBtn").click();
 

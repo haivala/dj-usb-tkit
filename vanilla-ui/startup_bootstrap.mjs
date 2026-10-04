@@ -1,6 +1,6 @@
 import { STATIC_TABS } from "./app_state.mjs";
 import { createThemeManager, createAccentManager } from "./components/settings/actions.mjs";
-import { renderUpdateNotice, renderUpdateBanner } from "./update_check.mjs";
+import { refreshUpdateCheck, UPDATE_RECHECK_INTERVAL_MS } from "./update_check.mjs";
 import { normalizeAnalysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE } from "./components/library/actions.mjs";
 import {
   STORAGE_KEY_EXPORT_PRUNE_STALE,
@@ -37,19 +37,10 @@ export async function hydrateAppVersionLabel(ctx) {
   el.settingsVersionText.textContent = `Version ${version}`;
 }
 
-export async function checkForUpdate(ctx) {
+export function checkForUpdate(ctx) {
   if (!ctx.isTauriRuntime()) return;
-  try {
-    // Backend-owned: `check_for_update` knows the running version and does the
-    // GitHub fetch + version compare itself (see backend/src/service/update_check.rs).
-    const info = await ctx.command("check_for_update");
-    if (!info) return;
-    ctx.state.updateCheck = info;
-    renderUpdateNotice(ctx);
-    renderUpdateBanner(ctx);
-  } catch {
-    // An update check must never disrupt startup.
-  }
+  refreshUpdateCheck(ctx);
+  setInterval(() => refreshUpdateCheck(ctx), UPDATE_RECHECK_INTERVAL_MS);
 }
 
 export function restoreStoredUiPrefs(ctx) {

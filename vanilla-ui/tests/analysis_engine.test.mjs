@@ -9,7 +9,6 @@ const ENGINE_HTML = `<!doctype html><body>
     <option value="stratum">Stratum (built-in)</option>
     <option value="essentia">Essentia</option>
   </select>
-  <span id="analysisEngineStatus"></span>
   <div id="essentiaInstallRow" class="hidden">
     <span id="essentiaNodeStatus"></span>
     <button id="essentiaDownloadBtn">Download ~5 MB</button>
@@ -27,7 +26,6 @@ function makeDom() {
     document: doc,
     el: {
       analysisEngineSelect: doc.querySelector("#analysisEngineSelect"),
-      analysisEngineStatus: doc.querySelector("#analysisEngineStatus"),
       essentiaInstallRow: doc.querySelector("#essentiaInstallRow"),
       essentiaNodeStatus: doc.querySelector("#essentiaNodeStatus"),
       essentiaDownloadBtn: doc.querySelector("#essentiaDownloadBtn"),

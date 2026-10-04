@@ -88,6 +88,19 @@ impl InstallKind {
     }
 }
 
+/// The one thing the update UI offers for an available update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateAction {
+    /// "Update & restart": the in-app updater replaces this install.
+    Install,
+    /// A direct link to the release asset for this install kind.
+    Download,
+    /// Nothing to offer beyond the release page (up to date, or no matching
+    /// asset).
+    None,
+}
+
 /// The verdict handed to the frontend. Mirrors the object the old
 /// `vanilla-ui/update_check.mjs` `fetchUpdateInfo` produced.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -108,6 +121,12 @@ pub struct UpdateInfo {
     pub download_url: Option<String>,
     /// An update is available and the in-app updater may install it.
     pub can_self_update: bool,
+    /// What the update UI offers: the in-app install when it can run,
+    /// otherwise the direct download. `download_url` stays set either way so
+    /// a failed in-app install can still fall back to it.
+    pub action: UpdateAction,
+    /// The releases couldn't be fetched, so "no update" means "unknown".
+    pub check_failed: bool,
 }
 
 impl UpdateInfo {
@@ -121,6 +140,16 @@ impl UpdateInfo {
             install_kind,
             download_url: None,
             can_self_update: false,
+            action: UpdateAction::None,
+            check_failed: false,
+        }
+    }
+
+    /// The check couldn't reach the releases list.
+    pub fn failed(current_version: &str, install_kind: InstallKind) -> Self {
+        Self {
+            check_failed: true,
+            ..Self::none(current_version, install_kind)
         }
     }
 }
@@ -209,6 +238,22 @@ pub fn evaluate(
         "normal"
     };
 
+    let download_url = download_url_for(latest, install_kind);
+    // A release built without the updater signing key has no manifest, and
+    // the in-app updater would only fail on it.
+    let can_self_update = install_kind.can_self_update()
+        && latest
+            .assets
+            .iter()
+            .any(|a| a.name == UPDATER_MANIFEST_ASSET);
+    let action = if can_self_update {
+        UpdateAction::Install
+    } else if download_url.is_some() {
+        UpdateAction::Download
+    } else {
+        UpdateAction::None
+    };
+
     UpdateInfo {
         update_available: true,
         severity: severity.to_string(),
@@ -223,14 +268,10 @@ pub fn evaluate(
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| RELEASES_PAGE_URL.to_string()),
         install_kind,
-        download_url: download_url_for(latest, install_kind),
-        // A release built without the updater signing key has no manifest,
-        // and the in-app updater would only fail on it.
-        can_self_update: install_kind.can_self_update()
-            && latest
-                .assets
-                .iter()
-                .any(|a| a.name == UPDATER_MANIFEST_ASSET),
+        download_url,
+        can_self_update,
+        action,
+        check_failed: false,
     }
 }
 
@@ -452,8 +493,35 @@ mod tests {
         let info = evaluate("0.3.0", InstallKind::AppImage, &releases);
         assert!(info.update_available);
         assert!(!info.can_self_update);
-        // The direct download still works.
+        // The direct download still works, and is what the UI offers.
         assert!(info.download_url.is_some());
+        assert_eq!(info.action, UpdateAction::Download);
+    }
+
+    #[test]
+    fn action_offers_one_way_to_update_per_install_kind() {
+        let releases = [with_assets(rel("v0.3.2", None), ALL_ASSETS)];
+        let action = |kind| evaluate("0.3.0", kind, &releases).action;
+        assert_eq!(action(InstallKind::AppImage), UpdateAction::Install);
+        assert_eq!(action(InstallKind::Nsis), UpdateAction::Install);
+        assert_eq!(action(InstallKind::Dmg), UpdateAction::Install);
+        assert_eq!(action(InstallKind::Deb), UpdateAction::Download);
+        assert_eq!(action(InstallKind::Rpm), UpdateAction::Download);
+        assert_eq!(action(InstallKind::Msi), UpdateAction::Download);
+        assert_eq!(action(InstallKind::Unknown), UpdateAction::None);
+        assert_eq!(
+            evaluate("0.3.2", InstallKind::AppImage, &releases).action,
+            UpdateAction::None
+        );
+    }
+
+    #[test]
+    fn a_failed_check_is_flagged_not_reported_as_up_to_date() {
+        let info = UpdateInfo::failed("0.3.0", InstallKind::AppImage);
+        assert!(info.check_failed);
+        assert!(!info.update_available);
+        assert_eq!(info.action, UpdateAction::None);
+        assert!(!UpdateInfo::none("0.3.0", InstallKind::AppImage).check_failed);
     }
 
     #[test]

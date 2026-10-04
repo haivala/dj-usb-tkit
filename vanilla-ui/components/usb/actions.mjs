@@ -1445,16 +1445,44 @@ function renderUsbSideList(list, items, emptyText) {
 export function renderUsbPlaylists(ctx) {
   const { state, el, document } = ctx;
   renderUsbSideList(el.usbPlaylists, state.usbPlaylists.map((playlist, index) => {
-    const count = Number(playlist.trackCount ?? playlist.tracks?.length ?? 0);
     const li = cloneTemplate(document, "tplUsbPlaylistItem");
     li.dataset.usbPlaylistLi = String(index);
     const btn = li.firstElementChild;
     btn.dataset.usbPlaylistIndex = String(index);
     btn.dataset.usbPlaylist = playlist.id;
-    btn.querySelector(".playlist-label").textContent = `${playlist.name} (${count})`;
+    btn.querySelector(".playlist-label").textContent = playlist.name;
     btn.querySelector(".playlist-remove").dataset.usbRemovePlaylist = playlist.id;
     return li;
   }), 'No playlists imported yet. Click "Import Playlists" to load from USB.');
+  renderUsbPlaylistHeading(ctx);
+}
+
+// Name + track count of the list shown in a USB track table, above it.
+// `item` is the open playlist/history (null hides the heading).
+function renderTrackListHeading(heading, item, count) {
+  if (!heading) return;
+  heading.classList.toggle("hidden", !item);
+  if (!item) return;
+  heading.querySelector(".track-list-heading-name").textContent = item.name;
+  heading.querySelector(".track-list-heading-count").textContent = `${count} ${count === 1 ? "track" : "tracks"}`;
+}
+
+function findByScopeId(items, scopeId) {
+  return scopeId == null ? null : (items || []).find((item) => String(item.id) === String(scopeId)) || null;
+}
+
+export function renderUsbPlaylistHeading(ctx) {
+  const playlist = findByScopeId(ctx.state.usbPlaylists, ctx.usbPlaylistTracksCtl?.scopeId);
+  renderTrackListHeading(
+    ctx.el.usbPlaylistHeading,
+    playlist,
+    Number(playlist?.trackCount ?? playlist?.tracks?.length ?? 0),
+  );
+}
+
+export function renderHistoryHeading(ctx) {
+  const history = findByScopeId(ctx.state.histories, ctx.usbHistoryTracksCtl?.scopeId);
+  renderTrackListHeading(ctx.el.historyHeading, history, history?.tracks?.length ?? 0);
 }
 
 export function renderHistoryList(ctx) {
@@ -1468,14 +1496,16 @@ export function renderHistoryList(ctx) {
     return li;
   }).reverse();
   renderUsbSideList(el.historyList, items, 'No history imported yet. Click "Import History" to load from USB.');
+  renderHistoryHeading(ctx);
 }
 
 // The USB-playlist and USB-history track tables' data layer: paginated +
 // searched + sorted + per-page-hydrated by the backend, rendered via the shared
 // controller. Selection/search/sort/scroll all go through it.
-function createUsbTracksController(ctx, { bodyId, fetchCommand, secondaryActionType, actionType }) {
+function createUsbTracksController(ctx, { bodyId, fetchCommand, secondaryActionType, actionType, onScopeChange }) {
   return createTrackListController({
     bodyId,
+    onScopeChange,
     getElements: () => ({
       body: ctx.el[bodyId],
       wrap: ctx.el[bodyId]?.closest?.(".table-wrap"),
@@ -1515,6 +1545,7 @@ export function createUsbPlaylistTracksController(ctx) {
     fetchCommand: "fetch_usb_playlist_tracks",
     actionType: "add-usb",
     secondaryActionType: "play-usb",
+    onScopeChange: () => renderUsbPlaylistHeading(ctx),
   });
 }
 
@@ -1524,6 +1555,7 @@ export function createUsbHistoryTracksController(ctx) {
     fetchCommand: "fetch_usb_history_tracks",
     actionType: "add-history",
     secondaryActionType: "play-history",
+    onScopeChange: () => renderHistoryHeading(ctx),
   });
 }
 

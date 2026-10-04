@@ -87,7 +87,9 @@ function installBasicTauriMock(page, opts = {}) {
             return { ok: true, data: { items: [], warnings: [] } };
           }
           if (command === "check_for_update" && opts?.updateCheck) {
-            return { ok: true, data: opts.updateCheck };
+            // `nextUpdateChecks` (set by a test) answers the later re-checks.
+            const next = window.__nextUpdateChecks?.shift();
+            return { ok: true, data: next || opts.updateCheck };
           }
           if (command === "install_update") {
             const job = { jobId: "job-update-1", jobType: "update", stage: "install_update", current: 0, total: 1 };
@@ -247,6 +249,8 @@ const updateCheck = (severity, extra = {}) => ({
   installKind: "unknown",
   downloadUrl: null,
   canSelfUpdate: false,
+  action: "none",
+  checkFailed: false,
   ...extra,
 });
 
@@ -254,6 +258,7 @@ const selfUpdatable = (severity) => updateCheck(severity, {
   installKind: "nsis",
   downloadUrl: "https://example.test/dl/DJ_USB_Tkit_0.3.0_x64-setup.exe",
   canSelfUpdate: true,
+  action: "install",
 });
 
 test("a feature release shows the new-features banner; dismissing it sticks for that version", async ({ page }) => {
@@ -289,8 +294,9 @@ test("a normal release shows no banner", async ({ page }) => {
   await installBasicTauriMock(page, { updateCheck: updateCheck("normal") });
   await page.goto("/");
 
-  // The check has landed (the settings note shows it)…
-  await expect(page.locator("#settingsUpdateNote")).toHaveText("Update available: 0.3.0");
+  // The check has landed (the settings update line and the dot show it)…
+  await expect(page.locator("#settingsUpdateStatus")).toHaveText("Version 0.3.0 is available.");
+  await expect(page.locator("#settingsUpdateDot")).toBeVisible();
   // …and a routine release stays out of the way.
   await expect(page.locator("#updateBanner")).toBeHidden();
 });
@@ -298,7 +304,7 @@ test("a normal release shows no banner", async ({ page }) => {
 test("a package-manager install gets a direct download link, not the in-app updater", async ({ page }) => {
   const debUrl = "https://example.test/dl/DJ_USB_Tkit_0.3.0_amd64.deb";
   await installBasicTauriMock(page, {
-    updateCheck: updateCheck("feature", { installKind: "deb", downloadUrl: debUrl })
+    updateCheck: updateCheck("feature", { installKind: "deb", downloadUrl: debUrl, action: "download" })
   });
   await page.goto("/");
 
@@ -360,4 +366,44 @@ test("Update & restart waits for a running job instead of cutting it short", asy
   await page.locator("#updateBannerActions .update-install-btn").click();
   await expect(page.locator("#statusText")).toContainText("Finish the running job before updating.");
   expect(await page.evaluate(() => window.__calls.some((c) => c.command === "install_update"))).toBe(false);
+});
+
+test("settings update line offers one action, and the header button re-checks on demand", async ({ page }) => {
+  await installBasicTauriMock(page, { updateCheck: selfUpdatable("normal") });
+  await page.goto("/");
+  await expect(page.locator("#settingsUpdateDot")).toBeVisible();
+  await expect(page.locator("#settingsBtn")).toHaveAttribute("aria-label", "Settings (update available)");
+
+  await page.locator("#settingsBtn").click();
+  const line = page.locator("#settingsUpdateSection");
+  const checkBtn = page.locator(".settings-header #settingsUpdateCheckBtn");
+  // The update line is the first thing in the body.
+  await expect(page.locator(".settings-body > :first-child")).toHaveId("settingsUpdateSection");
+  await expect(line).toBeVisible();
+  await expect(line.locator("#settingsUpdateStatus")).toHaveText("Version 0.3.0 is available.");
+  await expect(line.locator("#settingsUpdateReleaseLink")).toBeVisible();
+  // A self-updating install gets the in-app update only, not the download too.
+  await expect(line.locator(".update-install-btn")).toBeVisible();
+  await expect(line.locator(".update-download-link")).toBeHidden();
+
+  // A re-check that can't reach GitHub says so instead of "up to date"…
+  const noUpdate = (checkFailed) => ({
+    updateAvailable: false, severity: "none", currentVersion: "0.3.0", latestVersion: "0.3.0",
+    releaseUrl: "https://example.test", installKind: "nsis", downloadUrl: null, canSelfUpdate: false,
+    action: "none", checkFailed
+  });
+  await page.evaluate((checks) => { window.__nextUpdateChecks = checks; }, [noUpdate(true), noUpdate(false)]);
+  await checkBtn.click();
+  await expect(line.locator("#settingsUpdateStatus")).toHaveText("Couldn't check for updates.");
+  await expect(line.locator("#settingsUpdateReleaseLink")).toBeHidden();
+
+  // …and a manual re-check answers "Up to date" until the drawer closes.
+  await checkBtn.click();
+  await expect(line.locator("#settingsUpdateStatus")).toHaveText("Up to date.");
+  await expect(line.locator(".update-install-btn")).toBeHidden();
+  await expect(page.locator("#settingsUpdateDot")).toBeHidden();
+  await page.locator("#settingsCloseBtn").click();
+  await page.locator("#settingsBtn").click();
+  await expect(line).toBeHidden();
+  await expect(checkBtn).toBeVisible();
 });

@@ -1,5 +1,6 @@
 import { openExternalUrl, cloneTemplate } from "../../ui_utils.mjs";
 import { normalizeAnalysisBpmRange } from "../library/actions.mjs";
+import { refreshUpdateCheck } from "../../update_check.mjs";
 import {
   STORAGE_KEY_HELP_SEEN,
   FRONTEND_DB_KEY_HELP_SEEN,
@@ -94,6 +95,9 @@ export function bindSettingsEvents(ctx) {
     el.settingsBackdrop.classList.remove("hidden");
   });
   el.settingsCloseBtn?.addEventListener("click", closeSettingsDrawer);
+  el.settingsUpdateCheckBtn?.addEventListener("click", () => {
+    refreshUpdateCheck(ctx, { manual: true });
+  });
   el.settingsBackdrop?.addEventListener("click", closeSettingsDrawer);
 
   el.helpBtn?.addEventListener("click", () => {

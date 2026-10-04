@@ -111,6 +111,11 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
 
   await expect(page.locator("#historyList")).toContainText("HISTORY 001");
   await page.locator('#historyList [data-history-index]').click();
+  // Same layout as USB Playlists: totals on the header line, the open
+  // session's name + track count above its table.
+  await expect(page.locator(".panel-header #historyCountsText")).toHaveText("1 sessions, 3 tracks");
+  await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText("HISTORY 001");
+  await expect(page.locator("#historyHeading .track-list-heading-count")).toHaveText("4 tracks");
 
   await expect(page.locator("#exportHistoryTracklistBtn")).toBeEnabled();
   await page.locator("#exportHistoryTracklistBtn").click();

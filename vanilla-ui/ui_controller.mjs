@@ -12,6 +12,7 @@ import { cloneTemplate } from "./ui_utils.mjs";
 import { renderEmptyState } from "./components/shell/actions.mjs";
 import { scanLibraryButtonLabel } from "./components/library/actions.mjs";
 import { ANALYZE_SELECTED_TOOLTIP } from "./track_utils.mjs";
+import { clearManualUpdateCheck } from "./update_check.mjs";
 
 export function updateActivePlaylistIndicators(ctx) {
   const { state, el } = ctx;
@@ -114,6 +115,7 @@ export function updateScanLibraryButtonLabel(ctx) {
 export function closeSettingsDrawer(ctx) {
   ctx.el.settingsDrawer.classList.add("hidden");
   ctx.el.settingsBackdrop.classList.add("hidden");
+  clearManualUpdateCheck(ctx);
 }
 
 export function updateUsbHealthDot(ctx, status) {

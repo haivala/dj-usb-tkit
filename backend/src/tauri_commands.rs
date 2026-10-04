@@ -2008,7 +2008,7 @@ pub async fn check_for_update() -> ApiResponse<crate::service::update_check::Upd
         }
         Err(message) => {
             crate::backend_log!(Warn, "update-check", "update check failed: {message}");
-            ApiResponse::success(UpdateInfo::none(current, install_kind))
+            ApiResponse::success(UpdateInfo::failed(current, install_kind))
         }
     }
 }

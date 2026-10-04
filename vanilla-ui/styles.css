@@ -988,6 +988,11 @@ main {
   padding-left: 16px;
 }
 
+/* Summary text on the header line, after the actions. */
+.panel-header-meta {
+  font-size: 13px;
+}
+
 /* A labelled row of source chips: folders, then imported DJ libraries. */
 .source-row {
   display: flex;
@@ -1236,22 +1241,29 @@ main {
   transform: rotate(90deg);
 }
 
-@keyframes diag-spin {
+/* The one loading spinner: `.spinner` on an element, or listed here for a
+   pseudo-element. */
+@keyframes spin {
   to { transform: rotate(360deg); }
 }
 
+.spinner,
 .usb-health-card.is-loading .usb-cfg-section-label::after {
   content: '';
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
   border: 1.5px solid currentColor;
   border-top-color: transparent;
   border-radius: 50%;
-  animation: diag-spin 600ms linear infinite;
-  margin-left: 8px;
+  animation: spin 600ms linear infinite;
   vertical-align: middle;
   opacity: 0.6;
+}
+
+.usb-health-card.is-loading .usb-cfg-section-label::after {
+  margin-left: 8px;
 }
 
 .usb-health-content {
@@ -1523,8 +1535,11 @@ button[data-export-playlist]:hover {
   border: 1px solid var(--line);
 }
 
+/* Fixed height (8px + 18px + 10px), so a list beside the table can end
+   level with the table: see #usbPlaylists. */
 .track-total-time {
   margin: 8px 2px 0;
+  line-height: 18px;
   padding-bottom: 10px;
   text-align: right;
   flex-shrink: 0;
@@ -1596,11 +1611,11 @@ td.num, th.num {
 /* BPM and key are fixed widths that fit their widest pill plus the cell
    padding: "107.97" and "12A" in the 12px mono pill font. */
 .track-grid--library {
-  --track-grid-cols: 44px 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 .track-grid--no-select {
-  --track-grid-cols: 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 /* App playlist tracks reserve a leading column for the drag-to-reorder
@@ -1608,7 +1623,7 @@ td.num, th.num {
    template, since USB playlist/history tracks use that same class but
    never reorder. */
 .track-grid[data-body-id="playlistTracksBody"] {
-  --track-grid-cols: 24px 52px 220px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 24px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 .track-grid-row {
@@ -1735,6 +1750,24 @@ td.num, th.num {
 
 .track-grid-row.track-grid-row-empty .track-grid-empty {
   padding: 12px;
+}
+
+/* Loading indicator, toggled by the track-list controller's `data-loading` on
+   the body: "page" replaces the rows, "more" sits below them. */
+.track-grid-loading {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  color: var(--muted);
+}
+
+.track-grid-body[data-loading] + .track-grid-loading {
+  display: flex;
+}
+
+.track-grid-body[data-loading="page"] > .track-grid-row {
+  display: none;
 }
 
 
@@ -1896,11 +1929,6 @@ input[type="checkbox"] {
   white-space: nowrap;
 }
 
-#historyList li button {
-  width: 190px;
-  text-align: center;
-}
-
 /* inline remove x inside the button */
 .list li button .playlist-remove {
   flex-shrink: 0;
@@ -1971,6 +1999,88 @@ input[type="checkbox"] {
 
 .track-grid-row.dragging {
   opacity: 0.5;
+}
+
+/* USB playlists / history: a compact list like the sidebar's playlists,
+   ending level with the track table (above the "Total time" line). Remove
+   only shows on the row being hovered or focused, so it isn't clicked by
+   accident. The stable gutter + right padding keep the rows off the
+   scrollbar, and the width from jumping when it appears. */
+.list-compact {
+  gap: 1px;
+  margin-bottom: 36px; /* .track-total-time's height */
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+}
+
+.list-compact li {
+  margin-bottom: 0;
+}
+
+.list-compact li button {
+  height: auto;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-left: 3px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.list-compact li button:hover {
+  background: var(--card-hover);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.list-compact li button.active {
+  background: var(--accent-glow);
+  border-color: transparent;
+  border-left-color: var(--accent);
+  box-shadow: none;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.list-compact li button .playlist-remove {
+  visibility: hidden;
+}
+
+.list-compact li button:hover .playlist-remove,
+.list-compact li button:focus-visible .playlist-remove {
+  visibility: visible;
+}
+
+.list-compact li.dragging button {
+  border-style: dashed;
+  border-color: var(--line);
+}
+
+/* Name + track count of the list shown in the table, above its search. */
+.track-list-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 10px;
+  flex: none;
+}
+
+.track-list-heading-name {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-family: 'Outfit', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-list-heading-count {
+  font-size: 13px;
+  flex-shrink: 0;
 }
 
 /* ── split layout ───────────────────────────────────── */
@@ -2162,6 +2272,51 @@ input[type="checkbox"] {
 }
 
 /* ── cover & waveform ───────────────────────────────── */
+
+/* Play/stop over the cover: shown on the hovered row, on keyboard focus, and
+   while the track plays. Scoped under .track-grid-cell to win over the
+   generic `.track-grid-cell button[data-action]` tint. */
+.cover-play {
+  position: relative;
+  width: 36px;
+  height: 36px;
+}
+
+.track-grid-cell .cover-play .transport-btn {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.track-grid-cell .cover-play .transport-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.track-grid-row:hover .cover-play .transport-btn,
+.track-grid-cell .cover-play .transport-btn:focus-visible,
+.track-grid-cell .cover-play .transport-btn.is-playing {
+  opacity: 1;
+}
+
+.track-grid-cell .cover-play .transport-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+.track-grid-cell .cover-play .transport-btn.is-playing {
+  border-color: var(--accent-hot);
+  color: var(--accent-hot);
+}
 
 .cover-thumb {
   display: block;
@@ -2663,21 +2818,13 @@ td button[data-action]:disabled,
   padding: 0 8px;
 }
 
-.analysis-engine-status {
-  display: block;
-  font-size: 11px;
-  color: var(--ink-tertiary);
-  padding: 0 2px;
-  min-height: 14px;
-}
-.analysis-engine-status.warn {
-  color: var(--warn, #e6a700);
-}
-
+/* Status and its buttons on one line; a long status (the Node.js hint)
+   wraps the buttons below it. */
 .essentia-install-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   padding: 4px 2px 2px;
   font-size: 11px;
   color: var(--ink-secondary);
@@ -2688,8 +2835,9 @@ td button[data-action]:disabled,
   flex-wrap: wrap;
 }
 .essentia-btn {
+  height: 24px;
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 0 8px;
   border-radius: 4px;
   border: 1px solid var(--line);
   background: var(--surface-2, var(--surface));
@@ -3008,39 +3156,91 @@ td button[data-action]:disabled,
   margin-bottom: 12px;
 }
 
+/* Settings header: version + re-check button, left of the close button. */
 .settings-meta {
   margin-left: auto;
   margin-right: 12px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  text-align: right;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
 .settings-version {
-  display: inline-block;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
 
-.settings-update-note {
-  display: block;
-  margin-top: 2px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+.settings-update-check-btn {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
-.settings-update-note .update-note-link {
+.settings-update-check-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.settings-update-check-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line);
+  background: var(--bg-raised);
+  box-shadow: none;
+}
+
+.settings-update-check-btn:disabled {
+  cursor: default;
+}
+
+/* Same rotation as the shared .spinner. */
+.settings-update-check-btn.is-checking svg {
+  animation: spin 600ms linear infinite;
+}
+
+/* Update line: first thing in the settings body, only when there is
+   something to say. */
+.settings-update-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 24px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings-update-card.is-available {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.update-note-link {
+  font-size: 12px;
   color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
 }
 
-/* Download link / "Update & restart", shared by the settings note and banner. */
+.settings-update-card #settingsUpdateActions {
+  margin-left: auto;
+}
+
+/* Download link / "Update & restart", shared by the settings update line and banner. */
 .update-actions {
   display: inline-flex;
   align-items: center;
@@ -3051,23 +3251,14 @@ td button[data-action]:disabled,
   display: none;
 }
 
-#settingsUpdateActions {
-  margin-top: 4px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+.update-download-link {
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 #settingsUpdateActions .update-download-link {
   color: var(--accent);
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.update-banner .update-download-link {
-  color: inherit;
-  text-decoration: underline;
-  cursor: pointer;
 }
 
 .update-install-btn {
@@ -3081,7 +3272,34 @@ td button[data-action]:disabled,
 }
 
 #settingsUpdateActions .update-install-btn {
-  color: var(--accent);
+  padding: 6px 14px;
+  border-color: var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+#settingsUpdateActions .update-install-btn:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+/* Update-available dot on the header settings button. */
+.settings-btn {
+  position: relative;
+}
+
+.settings-btn-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+  pointer-events: none;
 }
 
 .update-install-btn:hover:not(:disabled) {

@@ -44,6 +44,25 @@
   time can still be slow on Windows while Windows Defender scans its files.
 - **Improvement:** the Event Log shows how long each USB playlist or
   history page took to load.
+- **Improvement:** the USB Playlists and USB History lists are more
+  compact, and the playlist list shows only names. The open playlist's or
+  session's name and track count are shown above its tracks, and the
+  remove button appears on the row under the mouse.
+- **Improvement:** a track's play button now sits on its cover art and
+  shows when you hover the row, which leaves more room for the other
+  columns in every track list.
+- **Improvement:** track lists show a "Loading tracks…" spinner while a
+  page is loading. When you switch to another playlist, the previous
+  playlist's tracks are no longer shown while the new one loads.
+- **Improvement:** when an update is waiting, it's the first thing in
+  Settings, with one action: "Update & restart" for AppImage, Windows and
+  macOS installs, or a download for deb/rpm. The download also appears if
+  an in-app update fails.
+- **Improvement:** a dot on the Settings button shows when an update is
+  available, so routine updates are noticed without opening Settings.
+- **Improvement:** the app checks for updates again every 6 hours, and
+  a button next to the version in Settings checks right away. A check
+  that can't reach GitHub now says so instead of looking up to date.
 
 ## 0.3.3
 

@@ -18,6 +18,10 @@ import { loadMoreIfNearBottom } from "../../track_utils.mjs";
 
 const DEFAULT_PAGE_SIZE = 150;
 const SCROLL_THRESHOLD_PX = 120;
+// A fetch that answers within this long never shows the loading indicator, so
+// fast views (local library, app playlists) don't flash it on every search
+// keystroke / sort click. Slow ones (USB pages hydrating from the stick) do.
+const LOADING_INDICATOR_DELAY_MS = 200;
 
 export function createTrackListController(config = {}) {
   const {
@@ -39,6 +43,9 @@ export function createTrackListController(config = {}) {
     onPage = () => {},
     // (envelope) -> void  (e.g. library consumes sourceRootAnalysis)
     onResponse = () => {},
+    // (scopeId) -> void  -- the shown list changed (load with a new scopeId,
+    // or clear); e.g. the USB playlist view's heading.
+    onScopeChange = () => {},
     // () => tableSortState  (the shell's per-body { key, dir } sort map)
     getTableSortState = () => ({}),
     // Optional external backing for `ctl.items` -- the library and app playlist
@@ -69,6 +76,38 @@ export function createTrackListController(config = {}) {
     seq: 0,
     _scrollBound: false,
   };
+
+  // Loading indicator: `data-loading` on the body -- "page" hides the current
+  // rows (a page-1 load replaces them), "more" keeps them (an append). The
+  // CSS shows the `.track-grid-loading` element that follows the body.
+  let loadingTimer = null;
+  function setLoadingIndicator(mode) {
+    const { body } = getElements();
+    if (!body?.dataset) return;
+    if (mode) {
+      body.dataset.loading = mode;
+      body.setAttribute("aria-busy", "true");
+    } else {
+      delete body.dataset.loading;
+      body.removeAttribute("aria-busy");
+    }
+  }
+  function hideLoadingIndicator() {
+    clearTimeout(loadingTimer);
+    loadingTimer = null;
+    setLoadingIndicator(null);
+  }
+  function scheduleLoadingIndicator(mode, { immediate = false } = {}) {
+    hideLoadingIndicator();
+    if (immediate) {
+      setLoadingIndicator(mode);
+      return;
+    }
+    loadingTimer = setTimeout(() => {
+      loadingTimer = null;
+      setLoadingIndicator(mode);
+    }, LOADING_INDICATOR_DELAY_MS);
+  }
   Object.defineProperty(ctl, "items", {
     get: readItems,
     set: writeItems,
@@ -83,9 +122,10 @@ export function createTrackListController(config = {}) {
     enumerable: true,
   });
 
-  async function run(cursor, { append, limit }) {
+  async function run(cursor, { append, limit, showLoadingNow = false }) {
     const seq = append ? ctl.seq : (ctl.seq += 1);
     ctl.loading = true;
+    scheduleLoadingIndicator(append ? "more" : "page", { immediate: showLoadingNow });
     try {
       const data = (await fetchPage({
         scopeId: ctl.scopeId,
@@ -96,6 +136,7 @@ export function createTrackListController(config = {}) {
         limit: Number.isFinite(limit) && limit > 0 ? limit : pageSize,
       })) || {};
       if (seq !== ctl.seq) return;
+      hideLoadingIndicator();
 
       onResponse(data);
       const page = (data.items || []).map((item) => normalize(item));
@@ -120,15 +161,25 @@ export function createTrackListController(config = {}) {
       });
       onPage(page, { first: !append });
     } finally {
-      if (seq === ctl.seq) ctl.loading = false;
+      if (seq === ctl.seq) {
+        ctl.loading = false;
+        // A failed fetch: drop the indicator so a "page" load doesn't leave
+        // the old rows hidden behind "Loading..." forever.
+        hideLoadingIndicator();
+      }
     }
   }
 
   // Load a (possibly different) list from page 1. Pass `{ scopeId }` when the
-  // selected playlist/history/root changed.
+  // selected playlist/history/root changed. Switching to a different list
+  // shows the loading indicator at once: the rows on screen belong to the
+  // previous list and must not linger under the new one's name.
   ctl.load = async (opts = {}) => {
+    let scopeChanged = false;
     if (Object.prototype.hasOwnProperty.call(opts, "scopeId")) {
+      scopeChanged = opts.scopeId !== ctl.scopeId;
       ctl.scopeId = opts.scopeId;
+      if (scopeChanged) onScopeChange(ctl.scopeId);
     }
     ctl.items = [];
     ctl.nextCursor = null;
@@ -136,7 +187,7 @@ export function createTrackListController(config = {}) {
     // Optional one-shot page-size override for this first fetch (e.g. the
     // library loads a bigger first page right after a scan). loadMore() keeps
     // using the configured pageSize.
-    await run(null, { append: false, limit: opts.limit });
+    await run(null, { append: false, limit: opts.limit, showLoadingNow: scopeChanged });
   };
 
   // Re-fetch page 1 with the current scope/query/sort (search or sort change).
@@ -155,11 +206,13 @@ export function createTrackListController(config = {}) {
   ctl.clear = async () => {
     ctl.seq += 1;
     ctl.scopeId = null;
+    onScopeChange(null);
     ctl.items = [];
     ctl.total = 0;
     ctl.nextCursor = null;
     ctl.hasMore = false;
     ctl.loading = false;
+    hideLoadingIndicator();
     const { body, durationTarget } = getElements();
     if (body) await renderTrackTable(body, [], rowOptions());
     renderDurationSummary(durationTarget, { totalDurationMs: 0, durationKnownCount: 0, trackCount: 0 });

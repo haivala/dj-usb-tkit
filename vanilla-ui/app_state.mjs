@@ -35,6 +35,11 @@ export function createInitialState() {
     essentiaInstalled: false,
     essentiaDownloading: false,
     updateCheck: null,
+    updateChecking: false,
+    // The last check was the user's (re-check button): show "Up to date".
+    updateCheckManual: false,
+    updateInstalling: false,
+    updateInstallFailed: false,
     // Pending progress-footer hide (job_manager.mjs scheduleProgressIdle).
     progressIdleTimer: null,
     // Resolvers waiting for the running USB job to end (waitForUsbJobIdle).
