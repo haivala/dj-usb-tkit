@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+**Severity:** feature
+
 - **Improvement:** switching USB playlists now stops loading the previous
   one, so quick changes don't pile up.
 - **Improvement:** USB playlists open much faster on Windows, where Windows
@@ -68,6 +70,14 @@
 - **Improvement:** the app checks for updates again every 6 hours, and
   a button next to the version in Settings checks right away. A check
   that can't reach GitHub now says so instead of looking up to date.
+- **Improvement:** analysis finds BPMs that fall between whole and half
+  values, such as 174.79, instead of rounding them to the nearest half BPM,
+  so the beat grid no longer drifts through the track. Tracks whose tempo is
+  a whole or half BPM keep that value. A BPM that is off by 3:2 or 4:3, such
+  as 83 for a 125 track or 116 for a 174 track, is corrected when the real
+  tempo clearly fits the track better. The beat grid's first beat is placed
+  on an actual beat of the track; before, it was often around a tenth of a
+  second off.
 
 ## 0.3.3
 

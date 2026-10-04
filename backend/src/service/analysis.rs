@@ -42,7 +42,7 @@ use super::{
     has_core_analysis_fields, now, track_has_core_analysis_for_source_status,
 };
 
-const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
+pub(super) const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
 // Reserved for the OS, the Tauri/WebKit UI process, and other running apps.
 const ANALYSIS_MEMORY_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 // Extra margin on top of the flat headroom, since per-worker budgets below are estimates.

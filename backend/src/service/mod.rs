@@ -3,6 +3,8 @@
 pub(crate) mod analysis;
 pub mod anlz;
 pub(crate) mod bpm_key;
+#[cfg(test)]
+mod bpm_reference_eval;
 pub mod cues;
 mod diagnostics;
 mod export;

@@ -21,22 +21,39 @@ Analysis engine selection is user-controlled from Settings. The default engine i
 | `stratum` | Rust-native backend path | Yes | fast local default with no extra runtime setup |
 | `essentia` | JS/WASM runner path | No (opt-in) | alternate BPM/key behavior when users explicitly install and select it |
 
-### Stratum BPM: whole and half values
+### Stratum BPM and first beat
 
 stratum searches whole-BPM steps and is typically off by up to ±2 BPM, so its
-raw estimate isn't stored as is. `refine_bpm` (`service/bpm_key.rs`) tries
-every whole and half BPM within ±2 of it (inside the analysis BPM range)
-against the whole track: each candidate scores how consistently the onset
-envelope stays in phase with its beat. A tempo 0.5 BPM off drifts more than a
-beat over a few minutes, so the right one stands out. The best candidate is
-used when it scores at least 0.06 and 1.5× the runner-up; otherwise the
-estimate is rounded to a whole BPM. Half values matter most for slow tracks
-whose double is the real tempo (86.5 → 173, 87.5 → 175).
+raw estimate isn't stored as is. `refine_bpm` (`service/bpm_key.rs`) scores
+tempos by how consistently the onset envelope stays in phase with their beat
+over the whole track; a tempo even 0.1 BPM off drifts a beat over ten
+minutes, so the right one stands out. Each tempo is scored on the beat and
+on its 2× and 4× subdivisions, which keeps the score sharp when a backbeat
+falls half a beat off (drum & bass analyzed at 87 instead of 174).
 
-Measured on 218 library tracks against rekordbox/tag BPMs (58 of them on a
-half BPM): rounding got 139 right, `refine_bpm` 197 (61 fixed, 3 changed
-away from the reference). Tempos whose half is a quarter value (173.5 →
-86.75) and estimates more than 2 BPM off are not corrected.
+1. **Tempo family.** stratum's estimate is compared with its 3/2, 3/4, 2/3
+   and 4/3 relatives inside the analysis BPM range; a relative replaces it
+   only when it scores clearly higher (`TEMPO_FAMILY`: 8× for 3/2 and 3/4,
+   whose subdivisions also line up with stratum's own beats, 2.5× for the
+   others). Halving and doubling are never done: at those, every onset
+   still lands on the grid and the score can't tell which is right.
+2. **Precise tempo.** Every tempo within ±2 BPM is tried in 0.01 steps. The
+   best one must score at least 0.06 and 1.5× anything 0.5 BPM or more away;
+   the nearest whole or half BPM is used instead when it scores at least 0.9
+   of the best (`GRID_SNAP_COHERENCE`), so tempos between whole and half
+   values (174.79) are found and whole or half ones stay exact. When no
+   tempo stands out, the whole and half BPMs alone are compared the same
+   way, and failing that the estimate is rounded to a whole BPM.
+3. **First beat.** stratum's beats follow its own estimate and are often well
+   off a beat, so the first beat is placed from the onsets of the track's
+   first minute at the final BPM (`first_beat_secs`): the phase on the beat
+   picks which beat it is, and the phases on the 2× and 4× subdivisions
+   place it more precisely. stratum's first beat is used only when that
+   isn't possible (silence).
+
+The opt-in `bpm_reference_accuracy` test (`service/bpm_reference_eval.rs`)
+compares the BPM and first beat with rekordbox's analysis of a USB playlist
+or a list of tracks, for checking changes to these steps.
 
 ### How to use engines
 
@@ -123,7 +140,8 @@ Analysis output ownership is local and deterministic:
 - generated artifact paths are stored in local DB fields and reused by export
 
 The beat-grid anchor `first_beat_ms` is estimated at analysis time
-(`estimate_first_beat_ms`) but is **user-editable** from the track-detail
+(see "Stratum BPM and first beat" above; `estimate_first_beat_ms` from the
+waveform when analysis gives none) but is **user-editable** from the track-detail
 ("Cues") modal alongside cue points. Once edited, `first_beat_ms_source` flips
 to `'user'` and re-analysis keeps the user's value instead of re-estimating.
 See `docs/CUE_EDITOR.md`, `docs/APP_DATA_MODEL.md` (TrackCue) and `docs/USB_EXPORT.md`.
