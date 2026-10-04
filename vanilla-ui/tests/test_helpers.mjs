@@ -40,6 +40,9 @@ export async function withSilencedConsole(fn) {
 // wants to observe (only calls made *through ctx* see an overridden action).
 export function makeTestCtx(overrides = {}) {
   const dom = new JSDOM(INDEX_HTML);
+  // jsdom can't draw on a canvas: answer like a browser with no 2d context
+  // (the app then skips drawing) instead of logging "Not implemented".
+  dom.window.HTMLCanvasElement.prototype.getContext = () => null;
   const stored = new Map();
   const localStorage = {
     getItem: (key) => (stored.has(key) ? stored.get(key) : null),

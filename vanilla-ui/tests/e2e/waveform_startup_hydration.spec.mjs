@@ -27,6 +27,7 @@ function installWaveformStartupMock(page) {
         fileSizeBytes: 1000,
         waveformPeaksPath: "/tmp/t-1.DAT",
         waveformPreview: [],
+        analysisReady: true,
         createdAt: "2026-03-01T00:00:00Z",
         updatedAt: "2026-03-01T00:00:00Z"
       },
@@ -74,12 +75,47 @@ function installWaveformStartupMock(page) {
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
           }
+          if (command === "resolve_track_identity") {
+            return { ok: true, data: { trackId: payload?.request?.trackId ?? null } };
+          }
+          if (command === "get_track_detail") {
+            // Two minutes of PWV5 detail entries (2 bytes each, ~150/s):
+            // R(3) G(3) B(3) height(5), with a varying height.
+            let bytes = "";
+            for (let i = 0; i < 120 * 150; i += 1) {
+              const entry = (7 << 13) | (5 << 10) | (3 << 7) | ((4 + ((i * 7) % 28)) << 2);
+              bytes += String.fromCharCode(entry >> 8, entry & 0xff);
+            }
+            return {
+              ok: true,
+              data: {
+                track: { ...baseTracks[0], durationMs: 120_000, bpm: 120 },
+                detailWaveform: btoa(bytes),
+                firstBeatMs: 100,
+                cues: [],
+                keyOptions: []
+              }
+            };
+          }
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
         }
       },
       event: { listen }
     };
   });
+}
+
+// Whether every canvas matching `selector` has visible pixels drawn on it.
+function canvasesDrawn(page, selector) {
+  return page.evaluate(
+    (sel) =>
+      [...document.querySelectorAll(sel)].map((canvas) => {
+        if (!canvas.width || !canvas.height) return false;
+        const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+        return pixels.some((value, i) => i % 4 === 3 && value > 0);
+      }),
+    selector
+  );
 }
 
 test("startup hydrates waveform previews for tracks with waveform paths", async ({ page }) => {
@@ -91,6 +127,26 @@ test("startup hydrates waveform previews for tracks with waveform paths", async 
   await expect.poll(async () => {
     return page.locator("#libraryTableBody .waveform.waveform-canvas").count();
   }).toBe(2);
+
+  // The waveforms are actually drawn, not just laid out: both row canvases
+  // have visible pixels.
+  await expect
+    .poll(() => canvasesDrawn(page, "#libraryTableBody .waveform-canvas-el"))
+    .toEqual([true, true]);
+});
+
+test("the cue editor draws the track's detail waveform", async ({ page }) => {
+  await installWaveformStartupMock(page);
+  await page.goto("/");
+
+  const row = page.locator("#libraryTableBody .track-grid-row").first();
+  await row.hover();
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+
+  await expect
+    .poll(() => canvasesDrawn(page, "#trackDetailWaveform > .waveform-canvas-el"))
+    .toEqual([true]);
 });
 
 function installSourceChipAnalysisMock(page) {
