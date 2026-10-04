@@ -1,6 +1,5 @@
 //! Direct-service-level tests for the USB-vs-local track dedup/merge and
-//! playback-resolution fixes (see TODO.md "Fix USB-vs-local track/playback
-//! source-of-truth bugs"). These seed `tracks`/`usb_devices` rows directly
+//! playback-resolution fixes. These seed `tracks`/`usb_devices` rows directly
 //! via raw SQL rather than going through a full USB export/browse roundtrip
 //! (covered separately in `lib_integration.rs`), so they can exercise
 //! specific confidence-gate and merge scenarios cheaply.

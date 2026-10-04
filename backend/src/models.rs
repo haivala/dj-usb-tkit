@@ -967,7 +967,7 @@ pub struct DeleteUsbBackupData {
     pub deleted: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbTrack {
     pub id: String,

@@ -33,6 +33,9 @@ use super::export_helpers::{
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
 };
 use super::key_notation::KeyNotation;
+use super::usb_display_files::{
+    DisplayReadCounts, LibraryDisplayFiles, UsbDisplaySource, library_files_off_usb,
+};
 use super::usb_helpers::{
     PlaylistCandidate, build_usb_track_id_index, decode_history_playlist_id,
     decode_history_track_id, dedupe_usb_playlists_by_name, history_entry_sort_key,
@@ -380,21 +383,15 @@ fn sort_usb_tracks(items: &mut [UsbTrack], sort_by: Option<&str>, sort_dir: Opti
 /// URL) on an already-resolved cheap `UsbTrack`. Called only for the tracks on
 /// the returned page.
 ///
-/// `read_files: false` skips the on-USB reads (waveform, artwork) but still
-/// fills the cheap fields -- for a page whose load was superseded.
-fn hydrate_usb_track_in_place(track: &mut UsbTrack, notation: KeyNotation, read_files: bool) {
-    if read_files && track.waveform_preview.is_none() {
-        track.waveform_preview = track
-            .usb_analysis_path
-            .as_deref()
-            .and_then(load_waveform_preview_from_analysis_path);
-    }
-    if read_files && track.artwork_data_url.is_none() {
-        track.artwork_data_url = track
-            .artwork_path
-            .as_deref()
-            .and_then(artwork_path_to_data_url);
-    }
+/// `files: None` skips the file reads (waveform, artwork) but still fills the
+/// cheap fields -- for a page whose load was superseded. See
+/// `UsbDisplaySource` for where the files are read from.
+fn hydrate_usb_track_in_place(
+    track: &mut UsbTrack,
+    notation: KeyNotation,
+    files: Option<&UsbDisplaySource>,
+) -> DisplayReadCounts {
+    let counts = files.map(|files| files.fill(track)).unwrap_or_default();
     // USB rows only carry `format_ext` -- no sample rate / bit depth / bitrate
     // and no WAV extensible-header flag -- so this only ever flags a genuinely
     // unrecognised extension. Mirrors `Track.format_compat`.
@@ -431,18 +428,18 @@ fn hydrate_usb_track_in_place(track: &mut UsbTrack, notation: KeyNotation, read_
     track.needs_hydration = !(has_waveform && has_artwork && has_bpm && has_key);
     (track.key_display, track.key_color) =
         super::key_notation::key_display_fields(track.key.as_deref(), notation);
+    counts
 }
 
-/// Filter → whole-list aggregates → sort → offset-slice → hydrate the page.
-/// Shared by `fetch_usb_playlist_tracks` and `fetch_usb_history_tracks`.
-fn paginate_and_hydrate_usb_tracks(
+/// Filter → whole-list aggregates → sort → offset-slice. The page comes back
+/// un-hydrated (see `hydrate_usb_page`). Shared by `fetch_usb_playlist_tracks`
+/// and `fetch_usb_history_tracks`.
+fn paginate_usb_tracks(
     command: &str,
     scope_id: &str,
     mut tracks: Vec<UsbTrack>,
     req: &crate::models::FetchUsbTracksRequest,
     warnings: Vec<WarningEntry>,
-    notation: KeyNotation,
-    is_superseded: impl Fn() -> bool,
 ) -> BackendResult<crate::models::FetchUsbTracksData> {
     let query = req.query.trim().to_lowercase();
     if !query.is_empty() {
@@ -471,22 +468,46 @@ fn paginate_and_hydrate_usb_tracks(
         req.limit.clamp(1, 5000)
     };
 
-    let mut page: Vec<UsbTrack> = tracks.into_iter().skip(start).take(limit).collect();
+    let page: Vec<UsbTrack> = tracks.into_iter().skip(start).take(limit).collect();
     let next_offset = start + page.len();
     let has_more = next_offset < total;
     let next_cursor = has_more.then(|| super::encode_offset_cursor(&signature, next_offset));
 
-    // Reading each row's waveform + artwork off the stick is the slow part
-    // (seconds per page on Windows). Once a newer load of this list has
-    // started, the frontend discards this page, so stop reading: abandoned
-    // loads would otherwise queue up on the USB ahead of the one on screen.
+    Ok(crate::models::FetchUsbTracksData {
+        items: page,
+        total,
+        next_cursor,
+        has_more,
+        total_duration_ms,
+        duration_known_count,
+        warnings,
+    })
+}
+
+/// Hydrates a page from `paginate_usb_tracks`. Reading each row's waveform +
+/// artwork off the stick is the slow part (seconds per page on Windows).
+/// Once a newer load of this list has started, the frontend discards this
+/// page, so stop reading: abandoned loads would otherwise queue up on the
+/// USB ahead of the one on screen.
+fn hydrate_usb_page(
+    command: &str,
+    page: &mut [UsbTrack],
+    notation: KeyNotation,
+    files: &UsbDisplaySource,
+    is_superseded: impl Fn() -> bool,
+) {
     let started = std::time::Instant::now();
     let mut read_count = 0usize;
+    let mut counts = DisplayReadCounts::default();
     let mut superseded = false;
-    for track in &mut page {
+    for track in page.iter_mut() {
         superseded = superseded || is_superseded();
         let track_started = std::time::Instant::now();
-        hydrate_usb_track_in_place(track, notation, !superseded);
+        counts.add(hydrate_usb_track_in_place(
+            track,
+            notation,
+            (!superseded).then_some(files),
+        ));
         if !superseded {
             read_count += 1;
         }
@@ -503,12 +524,16 @@ fn paginate_and_hydrate_usb_tracks(
         }
     }
     let elapsed = started.elapsed().as_millis();
+    let sources = format!(
+        "files: {} from library, {} from local cache, {} from USB",
+        counts.library, counts.cache, counts.usb
+    );
     if superseded {
         logging::emit(
             Level::Info,
             "usb-import",
             &format!(
-                "{command}: superseded by a newer load after reading {read_count} of {} track(s) in {elapsed}ms",
+                "{command}: superseded by a newer load after reading {read_count} of {} track(s) in {elapsed}ms ({sources})",
                 page.len()
             ),
         );
@@ -517,21 +542,26 @@ fn paginate_and_hydrate_usb_tracks(
             Level::Info,
             "usb-import",
             &format!(
-                "{command}: read {} track(s) from the USB in {elapsed}ms",
+                "{command}: read {} track(s) in {elapsed}ms ({sources})",
                 page.len()
             ),
         );
     }
+}
 
-    Ok(crate::models::FetchUsbTracksData {
-        items: page,
-        total,
-        next_cursor,
-        has_more,
-        total_duration_ms,
-        duration_known_count,
-        warnings,
-    })
+/// The registered `usb_devices` id for the stick mounted at `usb_root`.
+fn usb_device_id_for_root(
+    conn: &rusqlite::Connection,
+    usb_root: &std::path::Path,
+) -> BackendResult<Option<String>> {
+    let root_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
+    Ok(conn
+        .query_row(
+            "SELECT id FROM usb_devices WHERE root_path_key = ?1",
+            params![root_key],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 fn build_history_track_date_index(
@@ -1985,14 +2015,7 @@ impl BackendService {
         usb_root: &std::path::Path,
     ) -> BackendResult<()> {
         let conn = self.db.connect()?;
-        let root_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
-        let usb_device_id: Option<String> = conn
-            .query_row(
-                "SELECT id FROM usb_devices WHERE root_path_key = ?1",
-                params![root_key],
-                |row| row.get(0),
-            )
-            .optional()?;
+        let usb_device_id = usb_device_id_for_root(&conn, usb_root)?;
         let usb_root_paths = untainted_usb_root_paths(&conn)?;
 
         for track in tracks {
@@ -2039,6 +2062,55 @@ impl BackendService {
             track.local_track_id = id;
         }
         Ok(())
+    }
+
+    /// Where `page`'s display files are read from: the matched local tracks'
+    /// own files (see `resolve_usb_track_page_local_ids`), else the local
+    /// cache of this stick's reads, else the stick.
+    fn usb_display_source(
+        &self,
+        usb_root: &std::path::Path,
+        page: &[UsbTrack],
+    ) -> BackendResult<UsbDisplaySource> {
+        let conn = self.db.connect()?;
+        let device_key = match usb_device_id_for_root(&conn, usb_root)? {
+            Some(id) => id,
+            None => format!(
+                "root:{}",
+                super::normalize_source_root_for_matching(&usb_root.to_string_lossy())
+            ),
+        };
+        let mut usb_roots = usb_utils::all_usb_device_root_paths(&conn)?;
+        usb_roots.push(usb_root.to_string_lossy().into_owned());
+
+        let mut library = HashMap::new();
+        let mut stmt = conn
+            .prepare_cached("SELECT waveform_peaks_path, artwork_path FROM tracks WHERE id = ?1")?;
+        for id in page
+            .iter()
+            .filter_map(|track| track.local_track_id.as_deref())
+        {
+            if library.contains_key(id) {
+                continue;
+            }
+            let files = stmt
+                .query_row(params![id], |row| {
+                    Ok(LibraryDisplayFiles {
+                        waveform_path: row.get(0)?,
+                        artwork_path: row.get(1)?,
+                    })
+                })
+                .optional()?;
+            if let Some(files) = files {
+                library.insert(id.to_string(), library_files_off_usb(files, &usb_roots));
+            }
+        }
+        Ok(UsbDisplaySource::new(
+            &self.db.data_dir(),
+            usb_root,
+            device_key,
+            library,
+        ))
     }
 
     /// Materialize a single USB-origin add-to-playlist candidate on demand:
@@ -2404,7 +2476,8 @@ impl BackendService {
             edb_index.as_ref(),
         ) {
             Some((source, mut track)) => {
-                hydrate_usb_track_in_place(&mut track, self.key_notation()?, true);
+                let files = self.usb_display_source(&usb_root, &[])?;
+                hydrate_usb_track_in_place(&mut track, self.key_notation()?, Some(&files));
                 Ok(InspectUsbTrackData {
                     source,
                     track,
@@ -2473,6 +2546,7 @@ impl BackendService {
         let pdb_track_index = build_pdb_track_index(parsed.as_ref());
         let pdb = parsed.as_ref().zip(pdb_track_index.as_ref());
         let notation = self.key_notation()?;
+        let files = self.usb_display_source(&usb_root, &[])?;
 
         let items = req
             .items
@@ -2516,7 +2590,7 @@ impl BackendService {
                     edb_index.as_ref(),
                 ) {
                     Some((source, mut track)) => {
-                        hydrate_usb_track_in_place(&mut track, notation, true);
+                        hydrate_usb_track_in_place(&mut track, notation, Some(&files));
                         InspectUsbTrackResult {
                             track_id: item.track_id,
                             source: Some(source),
@@ -2567,16 +2641,24 @@ impl BackendService {
             .iter()
             .find(|playlist| playlist.id == req.id)
             .ok_or_else(|| BackendError::NotFound(format!("USB playlist not found: {}", req.id)))?;
-        let mut data = paginate_and_hydrate_usb_tracks(
+        let mut data = paginate_usb_tracks(
             "fetch_usb_playlist_tracks",
             &req.id,
             playlist.tracks.clone(),
             &req,
             resolved.warnings.clone(),
-            self.key_notation()?,
-            || generation.load(std::sync::atomic::Ordering::SeqCst) != this_load,
         )?;
+        // Local ids first: a matched track's waveform + artwork come from the
+        // library's own files instead of the stick.
         self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
+        let files = self.usb_display_source(&usb_root, &data.items)?;
+        hydrate_usb_page(
+            "fetch_usb_playlist_tracks",
+            &mut data.items,
+            self.key_notation()?,
+            &files,
+            || generation.load(std::sync::atomic::Ordering::SeqCst) != this_load,
+        );
         Ok(data)
     }
 
@@ -2608,16 +2690,24 @@ impl BackendService {
             .iter()
             .find(|history| history.id == req.id)
             .ok_or_else(|| BackendError::NotFound(format!("USB history not found: {}", req.id)))?;
-        let mut data = paginate_and_hydrate_usb_tracks(
+        let mut data = paginate_usb_tracks(
             "fetch_usb_history_tracks",
             &req.id,
             history.tracks.clone(),
             &req,
             all.warnings.clone(),
-            self.key_notation()?,
-            || generation.load(std::sync::atomic::Ordering::SeqCst) != this_load,
         )?;
+        // Local ids first: a matched track's waveform + artwork come from the
+        // library's own files instead of the stick.
         self.resolve_usb_track_page_local_ids(&mut data.items, &usb_root)?;
+        let files = self.usb_display_source(&usb_root, &data.items)?;
+        hydrate_usb_page(
+            "fetch_usb_history_tracks",
+            &mut data.items,
+            self.key_notation()?,
+            &files,
+            || generation.load(std::sync::atomic::Ordering::SeqCst) != this_load,
+        );
         Ok(data)
     }
 }
@@ -2807,11 +2897,11 @@ fn resolve_usb_track_from_sources(
 #[cfg(test)]
 mod tests {
     use super::{
-        SLOW_USB_STAGE_MS, apply_history_dates_from_track_date_created,
+        SLOW_USB_STAGE_MS, UsbDisplaySource, apply_history_dates_from_track_date_created,
         build_history_track_date_index, build_track_match_fingerprint, build_usb_track_index,
         cleanup_empty_dirs_recursive, edb_track_index_from_playlist_tracks,
-        filter_named_history_playlists, hydrate_usb_track_in_place, normalize_date_created, now,
-        paginate_and_hydrate_usb_tracks, push_usb_stage_timing,
+        filter_named_history_playlists, hydrate_usb_page, hydrate_usb_track_in_place,
+        normalize_date_created, now, paginate_usb_tracks, push_usb_stage_timing,
         push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
         sum_usb_track_durations,
     };
@@ -2820,7 +2910,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn paginate_and_hydrate_stops_reading_files_once_superseded() {
+    fn hydrate_usb_page_stops_reading_files_once_superseded() {
         let dir = tempfile::tempdir().expect("tempdir");
         let art = dir.path().join("art.jpg");
         std::fs::write(&art, [0xFF, 0xD8, 0xFF, 0xD9]).expect("write art");
@@ -2833,37 +2923,43 @@ mod tests {
             })
             .collect();
         let req = crate::models::FetchUsbTracksRequest::default();
+        let files = UsbDisplaySource::direct(dir.path());
 
         // A newer load starts after the first row: later rows skip the reads
         // but keep their cheap fields.
-        let checks = std::cell::Cell::new(0);
-        let page = paginate_and_hydrate_usb_tracks(
+        let mut page = paginate_usb_tracks(
             "fetch_usb_playlist_tracks",
             "pl",
             tracks.clone(),
             &req,
             Vec::new(),
+        )
+        .expect("page");
+        let checks = std::cell::Cell::new(0);
+        hydrate_usb_page(
+            "fetch_usb_playlist_tracks",
+            &mut page.items,
             crate::service::key_notation::KeyNotation::Classic,
+            &files,
             || {
                 checks.set(checks.get() + 1);
                 checks.get() > 1
             },
-        )
-        .expect("page");
+        );
         assert!(page.items[0].artwork_data_url.is_some());
         assert!(page.items[1..].iter().all(|t| t.artwork_data_url.is_none()));
         assert_eq!(page.items.len(), 3);
 
-        let page = paginate_and_hydrate_usb_tracks(
+        let mut page =
+            paginate_usb_tracks("fetch_usb_playlist_tracks", "pl", tracks, &req, Vec::new())
+                .expect("page");
+        hydrate_usb_page(
             "fetch_usb_playlist_tracks",
-            "pl",
-            tracks,
-            &req,
-            Vec::new(),
+            &mut page.items,
             crate::service::key_notation::KeyNotation::Classic,
+            &files,
             || false,
-        )
-        .expect("page");
+        );
         assert!(page.items.iter().all(|t| t.artwork_data_url.is_some()));
     }
 
@@ -2936,7 +3032,7 @@ mod tests {
         complete.artwork_path = Some("/USB/art/a.jpg".to_string());
         complete.bpm = Some(128.0);
         complete.key = Some("8A".to_string());
-        hydrate_usb_track_in_place(&mut complete, super::KeyNotation::Classic, true);
+        hydrate_usb_track_in_place(&mut complete, super::KeyNotation::Classic, None);
         assert!(!complete.needs_hydration);
 
         // Any missing piece -> needs hydration.
@@ -2955,7 +3051,7 @@ mod tests {
             track.bpm = Some(128.0);
             track.key = Some("8A".to_string());
             tweak(&mut track);
-            hydrate_usb_track_in_place(&mut track, super::KeyNotation::Classic, true);
+            hydrate_usb_track_in_place(&mut track, super::KeyNotation::Classic, None);
             assert!(
                 track.needs_hydration,
                 "expected needs_hydration after tweak"

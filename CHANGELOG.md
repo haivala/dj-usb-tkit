@@ -40,10 +40,15 @@
 ## Unreleased
 
 - **Improvement:** switching USB playlists now stops loading the previous
-  one, so quick changes don't pile up. Opening a playlist for the first
-  time can still be slow on Windows while Windows Defender scans its files.
+  one, so quick changes don't pile up.
+- **Improvement:** USB playlists open much faster on Windows, where Windows
+  Defender scans every file read from the stick. Tracks you also have in
+  your library show their waveform and cover art from the library, and
+  everything read from a stick is kept on the computer, so each file is
+  read from the stick only once, even across restarts.
 - **Improvement:** the Event Log shows how long each USB playlist or
-  history page took to load.
+  history page took to load, and how many of its files came from the
+  library, the local copy or the stick.
 - **Improvement:** the USB Playlists and USB History lists are more
   compact, and the playlist list shows only names. The open playlist's or
   session's name and track count are shown above its tracks, and the

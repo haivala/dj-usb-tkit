@@ -16,6 +16,7 @@ mod repair;
 pub mod update_check;
 mod usb;
 pub mod usb_backups;
+pub(crate) mod usb_display_files;
 pub(crate) mod usb_helpers;
 pub(crate) mod usb_identity;
 pub mod usb_staging;

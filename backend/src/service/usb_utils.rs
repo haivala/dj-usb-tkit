@@ -342,6 +342,21 @@ pub(crate) fn has_write_access(root: &std::path::Path) -> bool {
 }
 
 pub(crate) fn load_waveform_preview_from_analysis_path(path: &str) -> Option<Vec<u8>> {
+    for candidate in waveform_preview_candidates(path) {
+        let Ok(bytes) = std::fs::read(&candidate) else {
+            continue;
+        };
+        if let Some(peaks) = extract_waveform_preview_from_anlz_bytes(&bytes, WAVEFORM_PREVIEW_BINS)
+            && !peaks.is_empty()
+        {
+            return Some(peaks);
+        }
+    }
+    None
+}
+
+/// The ANLZ files `load_waveform_preview_from_analysis_path` tries, in order.
+pub(crate) fn waveform_preview_candidates(path: &str) -> Vec<std::path::PathBuf> {
     let base = std::path::PathBuf::from(path);
     let mut candidates = Vec::<std::path::PathBuf>::new();
     let ext = base
@@ -368,18 +383,7 @@ pub(crate) fn load_waveform_preview_from_analysis_path(path: &str) -> Option<Vec
         candidates.push(base.with_extension("DAT"));
         candidates.push(base.clone());
     }
-
-    for candidate in candidates {
-        let Ok(bytes) = std::fs::read(&candidate) else {
-            continue;
-        };
-        if let Some(peaks) = extract_waveform_preview_from_anlz_bytes(&bytes, WAVEFORM_PREVIEW_BINS)
-            && !peaks.is_empty()
-        {
-            return Some(peaks);
-        }
-    }
-    None
+    candidates
 }
 
 /// Extract the raw PWV4 payload from a desktop library ANLZ `.EXT` file (no conversion).
