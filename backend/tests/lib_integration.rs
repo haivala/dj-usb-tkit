@@ -4375,7 +4375,7 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
     let track_titles = tracks.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
 
     let created = backend.create_playlist(CreatePlaylistRequest {
-        name: "USB_TEST_1to1".to_string(),
+        name: "USB Test Playlist".to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("create playlist data").playlist_id;
@@ -5420,8 +5420,8 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     // Seed a track already on the USB under a path this app's own
     // exported_media_target_path() would never generate — simulating a
     // Rekordbox-managed layout, or an older export run's naming scheme.
-    let foreign_relative = "/Contents/Foreign Scheme/Unflinching-1.mp3";
-    let foreign_abs = usb.join("Contents/Foreign Scheme/Unflinching-1.mp3");
+    let foreign_relative = "/Contents/Foreign Scheme/Steadfast-1.mp3";
+    let foreign_abs = usb.join("Contents/Foreign Scheme/Steadfast-1.mp3");
     fs::create_dir_all(foreign_abs.parent().expect("foreign parent")).expect("create foreign dir");
     let audio_bytes = b"fake-mp3-bytes-for-fingerprint-fallback-regression-test";
     fs::write(&foreign_abs, audio_bytes).expect("write foreign audio");
@@ -5456,9 +5456,9 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
             content_link: None,
             position: 1,
             track_number: Some(1),
-            title: "Unflinching".to_string(),
+            title: "Steadfast".to_string(),
             artist: "Kuro".to_string(),
-            album: Some("KURO".to_string()),
+            album: Some("TESTO".to_string()),
             bpm: Some(86.0),
             key: Some("8A".to_string()),
             source_path: "/tmp/does-not-matter.mp3".to_string(),
@@ -5507,14 +5507,14 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     // scheme would compute differently from the foreign scheme above.
     let source_dir = root.path().join("library-source");
     fs::create_dir_all(&source_dir).expect("create source dir");
-    let source_path = source_dir.join("Unflinching.mp3");
+    let source_path = source_dir.join("Steadfast.mp3");
     fs::write(&source_path, audio_bytes).expect("write local source audio");
 
     let materialized = backend.materialize_source_track(MaterializeSourceTrackRequest {
         file_path: source_path.to_string_lossy().to_string(),
-        title: "Unflinching".to_string(),
+        title: "Steadfast".to_string(),
         artist: "Kuro".to_string(),
-        album: Some("KURO".to_string()),
+        album: Some("TESTO".to_string()),
         track_number: None,
         key: None,
         file_size_bytes: None,
@@ -5591,13 +5591,13 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     );
 
     let after = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb after export");
-    let unflinching_rows: Vec<_> = after
+    let steadfast_rows: Vec<_> = after
         .tracks
         .iter()
-        .filter(|t| t.title == "Unflinching")
+        .filter(|t| t.title == "Steadfast")
         .collect();
     assert_eq!(
-        unflinching_rows.len(),
+        steadfast_rows.len(),
         1,
         "expected exactly one PDB row for the fingerprint-matched track, found: {:?}",
         after
@@ -5607,8 +5607,8 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
             .collect::<Vec<_>>()
     );
     assert_eq!(
-        unflinching_rows[0].id, seeded_track_id,
+        steadfast_rows[0].id, seeded_track_id,
         "the existing seeded row's PDB track id must be reused, not replaced by a new one"
     );
-    assert_eq!(unflinching_rows[0].track_file_path, foreign_relative);
+    assert_eq!(steadfast_rows[0].track_file_path, foreign_relative);
 }

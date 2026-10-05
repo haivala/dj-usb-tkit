@@ -2127,8 +2127,8 @@ mod tests {
 
     #[test]
     fn content_fingerprint_key_normalizes_case_and_punctuation() {
-        let a = content_fingerprint_key(Some(1234), "Unflinching", "KURO 黒").unwrap();
-        let b = content_fingerprint_key(Some(1234), " unflinching ", "kuro 黒").unwrap();
+        let a = content_fingerprint_key(Some(1234), "Steadfast", "TESTO 試").unwrap();
+        let b = content_fingerprint_key(Some(1234), " steadfast ", "testo 試").unwrap();
         assert_eq!(a, b);
     }
 
@@ -2193,16 +2193,16 @@ mod tests {
         // identical on-disk filename. Each must resolve to a distinct path.
         let media_root = PathBuf::from("/usb/Contents");
         let mut claimed = HashMap::new();
-        let artist = "June Rodriguez";
-        let album = "Deep Tribal House Music Frequencies";
+        let artist = "Jane Placeholder";
+        let album = "Long Synthetic House Album Title";
         let titles = [
-            "01 Rktex",
-            "02 Oceans Deep",
-            "03 Revolt",
-            "04 Mundo Hondo",
-            "05 Star69",
-            "06 Oracion",
-            "07 Rescue",
+            "01 Demo Part A",
+            "02 Demo Part B",
+            "03 Demo Part C",
+            "04 Demo Part D",
+            "05 Demo Part E",
+            "06 Demo Part F",
+            "07 Demo Part G",
         ];
         let mut targets = Vec::new();
         for title in titles {
@@ -2305,18 +2305,18 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("Contents/Foreign Scheme"))
             .expect("create contents dir");
         std::fs::write(
-            dir.path().join("Contents/Foreign Scheme/Unflinching-1.mp3"),
+            dir.path().join("Contents/Foreign Scheme/Steadfast-1.mp3"),
             b"data",
         )
         .expect("write file");
 
         let result = existing_usb_relative_if_present(
             dir.path(),
-            "/Contents/Foreign Scheme/Unflinching-1.mp3",
+            "/Contents/Foreign Scheme/Steadfast-1.mp3",
         );
         assert_eq!(
             result.as_deref(),
-            Some("/Contents/Foreign Scheme/Unflinching-1.mp3")
+            Some("/Contents/Foreign Scheme/Steadfast-1.mp3")
         );
     }
 

@@ -51,6 +51,11 @@ falls half a beat off (drum & bass analyzed at 87 instead of 174).
    place it more precisely. stratum's first beat is used only when that
    isn't possible (silence).
 
+A BPM detected this way is stored with `bpm_analyzer = "stratum-v2"`; a bare
+`"stratum"` marks a track analyzed before these steps existed. Bump the
+version in `AnalysisEngine::bpm_analyzer` whenever a change here would give
+already-analyzed tracks a different BPM.
+
 The opt-in `bpm_reference_accuracy` test (`service/bpm_reference_eval.rs`)
 compares the BPM and first beat with rekordbox's analysis of a USB playlist
 or a list of tracks, for checking changes to these steps.

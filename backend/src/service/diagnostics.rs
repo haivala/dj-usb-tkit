@@ -5318,19 +5318,19 @@ mod tests {
     #[test]
     fn track_identity_key_preserves_unicode_path_segments() {
         let pdb_key = super::track_identity_key(
-            "/Contents/劇団レコード/Album/track.flac",
-            "Get Higher",
-            "劇団レコード",
+            "/Contents/星空レコード/Album/track.flac",
+            "Sample Ascent",
+            "星空レコード",
             None,
         );
         let edb_key = super::track_identity_key(
-            "/Contents/劇団レコード/Album/track.flac",
-            "Get Higher",
-            "劇団レコード",
+            "/Contents/星空レコード/Album/track.flac",
+            "Sample Ascent",
+            "星空レコード",
             None,
         );
         assert_eq!(pdb_key, edb_key);
-        assert!(pdb_key.contains("劇団レコード"));
+        assert!(pdb_key.contains("星空レコード"));
     }
 
     #[test]

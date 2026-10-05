@@ -2704,23 +2704,20 @@ mod diag_tests {
 
     #[test]
     fn canonicalize_playlist_name_preserves_unicode_letters() {
-        assert_eq!(canonicalize_playlist_name("劇団レコード"), "劇団レコード");
-        assert_eq!(canonicalize_playlist_name("夢路歩"), "夢路歩");
-        assert_eq!(
-            canonicalize_playlist_name("Aural Imbalance"),
-            "auralimbalance"
-        );
+        assert_eq!(canonicalize_playlist_name("星空レコード"), "星空レコード");
+        assert_eq!(canonicalize_playlist_name("月影歩"), "月影歩");
+        assert_eq!(canonicalize_playlist_name("Night Signal"), "nightsignal");
     }
 
     #[test]
     fn canonicalize_playlist_name_distinguishes_unicode_artist_names() {
         assert_ne!(
-            canonicalize_playlist_name("劇団レコード"),
-            canonicalize_playlist_name("夢路歩")
+            canonicalize_playlist_name("星空レコード"),
+            canonicalize_playlist_name("月影歩")
         );
         assert_ne!(
-            canonicalize_playlist_name("夢路歩"),
-            canonicalize_playlist_name("かめりあ")
+            canonicalize_playlist_name("月影歩"),
+            canonicalize_playlist_name("ひかりの")
         );
     }
 
@@ -2734,7 +2731,7 @@ mod diag_tests {
                 .collect()
         }
 
-        let original = "/Contents/ヒゲドライバー feat. ころねぽち/beatmania IIDX 31 EPOLIS ORIGINAL SOUNDTRACK/02 - ヒゲドライバー feat. ころねぽち - あるビー!.flac";
+        let original = "/Contents/星空ドライバー feat. ねこまち/Sample Game 31 ORIGINAL SOUNDTRACK/02 - 星空ドライバー feat. ねこまち - あおビー!.flac";
         let mojibake = latin1_mojibake(&latin1_mojibake(original));
         assert_eq!(repair_utf8_mojibake(&mojibake), original);
     }

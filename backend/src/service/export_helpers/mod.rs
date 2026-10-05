@@ -304,6 +304,12 @@ pub struct LocalTrackForAnalysis {
     /// Values the analysis keeps instead of replacing them with its own
     /// detection (see `analysis::kept_analysis_values`).
     pub kept: KeptAnalysis,
+    /// Existing anchor used when audio cannot establish a new one.
+    pub existing_first_beat_ms: Option<u32>,
+    /// A first beat the first analysis keeps: one set in the cue editor, or
+    /// one imported with the kept BPM. A reanalysis keeps none (see
+    /// `analysis::row_to_track_for_analysis`).
+    pub kept_first_beat_ms: Option<u32>,
 }
 
 /// A BPM / key that an analysis run keeps: set by the user or imported from
@@ -320,6 +326,8 @@ pub struct LocalAnalysisResult {
     pub bpm_analyzer: Option<String>,
     pub key: Option<String>,
     pub first_beat_ms: Option<u32>,
+    /// Whether this analysis placed `first_beat_ms`, rather than keeping one.
+    pub first_beat_estimated: bool,
     pub duration_ms: Option<u64>,
     pub artwork_path: Option<String>,
     pub waveform_peaks_path: Option<String>,
@@ -5102,11 +5110,11 @@ mod tests {
         // or an older export run's naming scheme) — this is what export.rs's
         // content-fingerprint fallback resolves `exported_path` to when it
         // matches an existing on-USB track by file size + normalized title/artist.
-        let foreign_path = "/Contents/Foreign Scheme/Unflinching-1.mp3";
+        let foreign_path = "/Contents/Foreign Scheme/Steadfast-1.mp3";
 
         let mut track_a = mapping_test_track();
         track_a.id = "local-track-a".to_string();
-        track_a.title = "Unflinching".to_string();
+        track_a.title = "Steadfast".to_string();
         track_a.artist = "Kuro".to_string();
         track_a.exported_path = foreign_path.to_string();
 
@@ -5146,7 +5154,7 @@ mod tests {
         // gets re-exported after the fix).
         let mut track_b = mapping_test_track();
         track_b.id = "local-track-b".to_string();
-        track_b.title = "Unflinching".to_string();
+        track_b.title = "Steadfast".to_string();
         track_b.artist = "Kuro".to_string();
         track_b.exported_path = foreign_path.to_string();
         manifest.tracks = vec![track_b];

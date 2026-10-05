@@ -1854,16 +1854,16 @@ mod tests {
                 bit_depth: Some(16),
                 duration_seconds: Some(289),
                 file_type: Some(1),
-                isrc: Some("DEOB62100547".to_string()),
+                isrc: Some("ZZXXX2100001".to_string()),
                 date_added: Some("2025-08-28".to_string()),
                 release_date: Some("2021-01-01".to_string()),
-                dj_comment: Some("Visit https://iliantape.bandcamp.com".to_string()),
-                file_name: Some("Atrice - IT049 - Q - 01 Hatara.mp3".to_string()),
+                dj_comment: Some("Visit https://example.com".to_string()),
+                file_name: Some("Demo Artist - DEMO001 - Sample - 01 Sample Track.mp3".to_string()),
                 publish_track_info_on: Some(true),
                 autoload_hotcues_on: Some(true),
-                title: "Hatara".to_string(),
-                anlz_path: "/PIONEER/USBANLZ/P017/0000075D/ANLZ0000.DAT".to_string(),
-                file_path: "/Contents/Atrice/IT049 - Q/Atrice - IT049 - Q - 01 Hatara.mp3"
+                title: "Sample Track".to_string(),
+                anlz_path: "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT".to_string(),
+                file_path: "/Contents/Demo Artist/DEMO001 - Sample/Demo Artist - DEMO001 - Sample - 01 Sample Track.mp3"
                     .to_string(),
             },
             crate::service::export_helpers::PdbLayoutProfile::Current,
@@ -1873,7 +1873,7 @@ mod tests {
 
         assert_eq!(
             track.string_slots[0].decoded_value.as_deref(),
-            Some("DEOB62100547")
+            Some("ZZXXX2100001")
         );
         assert_eq!(track.string_slots[6].decoded_value.as_deref(), Some("ON"));
         assert_eq!(track.string_slots[7].decoded_value.as_deref(), Some("ON"));
@@ -1887,19 +1887,21 @@ mod tests {
         );
         assert_eq!(
             track.string_slots[16].decoded_value.as_deref(),
-            Some("Visit https://iliantape.bandcamp.com")
+            Some("Visit https://example.com")
         );
         assert_eq!(
             track.string_slots[17].decoded_value.as_deref(),
-            Some("Hatara")
+            Some("Sample Track")
         );
         assert_eq!(
             track.string_slots[19].decoded_value.as_deref(),
-            Some("Atrice - IT049 - Q - 01 Hatara.mp3")
+            Some("Demo Artist - DEMO001 - Sample - 01 Sample Track.mp3")
         );
         assert_eq!(
             track.string_slots[20].decoded_value.as_deref(),
-            Some("/Contents/Atrice/IT049 - Q/Atrice - IT049 - Q - 01 Hatara.mp3")
+            Some(
+                "/Contents/Demo Artist/DEMO001 - Sample/Demo Artist - DEMO001 - Sample - 01 Sample Track.mp3"
+            )
         );
     }
 

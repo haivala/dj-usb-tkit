@@ -16,9 +16,10 @@
 //!
 //! Optional: `BPM_REFERENCE_RANGE` (default `70-180`), `BPM_REFERENCE_JOBS`
 //! (default 6), `BPM_REFERENCE_SAMPLE` (analyze only this many tracks, evenly
-//! spread), `BPM_REFERENCE_OUT` (per-track CSV) and `BPM_REFERENCE_CACHE`
-//! (stratum's raw estimates, reused by later runs so tuning `refine_bpm`
-//! skips stratum).
+//! spread), `BPM_REFERENCE_OUT` (per-track CSV; by default
+//! `test-results/bpm-reference/<time>_<playlist or list name>.csv`) and
+//! `BPM_REFERENCE_CACHE` (stratum's raw estimates, reused by later runs so
+//! tuning `refine_bpm` skips stratum).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -215,6 +216,33 @@ fn analyze(
     outcome(stratum, refined, peak, family, own_first_beat)
 }
 
+/// `test-results/bpm-reference/<local time>_<set>.csv` in the repository,
+/// the set named after the playlist or the list file.
+fn default_csv_path(list: Option<&Path>, playlist: &str) -> PathBuf {
+    let set = list
+        .and_then(|l| l.file_stem())
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| playlist.to_string());
+    let set: String = set
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let set = set.trim_matches('_');
+    let time = chrono::Local::now().format("%Y-%m-%d_%H%M%S");
+    let backend = Path::new(env!("CARGO_MANIFEST_DIR"));
+    backend
+        .parent()
+        .unwrap_or(backend)
+        .join("test-results/bpm-reference")
+        .join(format!("{time}_{set}.csv"))
+}
+
 #[test]
 #[ignore = "needs reference BPMs; set BPM_REFERENCE_PDB or BPM_REFERENCE_LIST"]
 fn bpm_reference_accuracy() {
@@ -317,7 +345,10 @@ fn bpm_reference_accuracy() {
         }
         std::fs::write(cache_path, text).expect("write BPM_REFERENCE_CACHE");
     }
-    if let Some(out) = std::env::var_os("BPM_REFERENCE_OUT") {
+    {
+        let out = std::env::var_os("BPM_REFERENCE_OUT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| default_csv_path(list.as_deref(), &playlist));
         let mut csv = String::from(
             "reference,raw,final,error,peak,snap_ratio,family_margin,family_final,\
              rb_first_ms,rb_grid_bpm,stratum_first_ms,first_beat_ms,title,path\n",
@@ -347,7 +378,11 @@ fn bpm_reference_accuracy() {
                 o.path.display()
             ));
         }
-        std::fs::write(out, csv).expect("write BPM_REFERENCE_OUT");
+        if let Some(dir) = out.parent() {
+            std::fs::create_dir_all(dir).expect("create the CSV's folder");
+        }
+        std::fs::write(&out, csv).expect("write BPM_REFERENCE_OUT");
+        println!("per-track CSV: {}", out.display());
     }
 
     println!(

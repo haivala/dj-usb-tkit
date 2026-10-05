@@ -75,9 +75,12 @@
   so the beat grid no longer drifts through the track. Tracks whose tempo is
   a whole or half BPM keep that value. A BPM that is off by 3:2 or 4:3, such
   as 83 for a 125 track or 116 for a 174 track, is corrected when the real
-  tempo clearly fits the track better. The beat grid's first beat is placed
-  on an actual beat of the track; before, it was often around a tenth of a
-  second off.
+  tempo clearly fits the track better, and a tempo that clearly fits is
+  found even when the first estimate is several BPM off. The beat grid's
+  first beat is placed on an actual beat of the track; before, it was often
+  around a tenth of a second off. The BPM's tooltip says "stratum-v2" for
+  tracks analyzed this way, so tracks still carrying an older analysis can
+  be told apart.
 
 ## 0.3.3
 

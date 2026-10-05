@@ -2831,9 +2831,9 @@ pub(crate) mod writer_tests {
             parent_id: 0,
             sort_order: 3,
             is_folder: false,
-            name: " DnB 2024".into(),
+            name: "Medium Playlist".into(),
         });
-        for i in 0..317u32 {
+        for i in 0..300u32 {
             data.playlist_entries.push(PdbPlaylistEntryRow {
                 entry_index: i + 1,
                 track_id: 10_000 + i,
@@ -2852,11 +2852,11 @@ pub(crate) mod writer_tests {
             .collect::<Vec<_>>();
         entries.sort_by_key(|e| e.entry_index);
 
-        assert_eq!(entries.len(), 317);
+        assert_eq!(entries.len(), 300);
         assert_eq!(entries.first().map(|e| e.entry_index), Some(1));
-        assert_eq!(entries.last().map(|e| e.entry_index), Some(317));
+        assert_eq!(entries.last().map(|e| e.entry_index), Some(300));
         assert_eq!(entries.first().map(|e| e.track_id), Some(10_000));
-        assert_eq!(entries.last().map(|e| e.track_id), Some(10_316));
+        assert_eq!(entries.last().map(|e| e.track_id), Some(10_299));
     }
 
     #[test]
@@ -2867,23 +2867,23 @@ pub(crate) mod writer_tests {
             parent_id: 0,
             sort_order: 1,
             is_folder: false,
-            name: "-=[LABEL_SORT]=-".into(),
+            name: "Large Playlist".into(),
         });
         data.playlist_tree.push(PdbPlaylistTreeRow {
             id: 24,
             parent_id: 0,
             sort_order: 3,
             is_folder: false,
-            name: " DnB 2024".into(),
+            name: "Medium Playlist".into(),
         });
-        for i in 0..9_995u32 {
+        for i in 0..10_000u32 {
             data.playlist_entries.push(PdbPlaylistEntryRow {
                 entry_index: i + 1,
                 track_id: 20_000 + i,
                 playlist_id: 1,
             });
         }
-        for i in 0..317u32 {
+        for i in 0..300u32 {
             data.playlist_entries.push(PdbPlaylistEntryRow {
                 entry_index: i + 1,
                 track_id: 40_000 + i,
@@ -2894,19 +2894,19 @@ pub(crate) mod writer_tests {
         let bytes = write_pdb(&data).unwrap();
         let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).unwrap();
 
-        let label_count = parsed
+        let large_count = parsed
             .playlist_entries
             .iter()
             .filter(|e| e.playlist_id == 1)
             .count();
-        let dnb_count = parsed
+        let medium_count = parsed
             .playlist_entries
             .iter()
             .filter(|e| e.playlist_id == 24)
             .count();
 
-        assert_eq!(label_count, 9_995);
-        assert_eq!(dnb_count, 317);
+        assert_eq!(large_count, 10_000);
+        assert_eq!(medium_count, 300);
     }
 
     // ── remove_duplicate_playlist_entries_inplace tests ─────────────────

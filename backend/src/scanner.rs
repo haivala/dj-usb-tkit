@@ -561,9 +561,9 @@ mod tests {
     #[test]
     fn infer_artist_title_whitespace_around_dash() {
         let (artist, title) =
-            infer_artist_title(Path::new("/music/  Aphex Twin  -  Windowlicker  .flac"));
-        assert_eq!(artist, "Aphex Twin");
-        assert_eq!(title, "Windowlicker");
+            infer_artist_title(Path::new("/music/  Demo Artist  -  Demo Title  .flac"));
+        assert_eq!(artist, "Demo Artist");
+        assert_eq!(title, "Demo Title");
     }
 
     // --- infer_track_number_from_name ---

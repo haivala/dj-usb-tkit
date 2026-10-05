@@ -155,7 +155,7 @@ test("removing a source folder deletes corresponding tracks from the library", a
 test("a long source folder path wraps inside the confirm dialog", async ({ page }) => {
   await installSourceRemovalMock(page);
   const longRoot =
-    "/home/someone/Data/Omat/Work/rekordbox/USB_DISCONNECTS_AUDIO_FILES/WAV_EXPORTS_WITH_A_VERY_LONG_NAME";
+    "/home/someone/Music/Library/Collections/USB_SOURCE_AUDIO_FILES/WAV_EXPORTS_WITH_A_VERY_LONG_NAME";
   await page.addInitScript((root) => {
     window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify([root, "/music/b"]));
   }, longRoot);

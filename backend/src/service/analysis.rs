@@ -33,7 +33,7 @@ use crate::models::{
 };
 
 use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
-use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum};
+use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum, first_beat_secs};
 use super::export_helpers::{
     KeptAnalysis, LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash,
 };
@@ -69,6 +69,9 @@ const TRACK_ANALYSIS_UPDATE_SQL: &str = r#"
                     waveform_peaks_path = COALESCE(?5, waveform_peaks_path),
                     bpm_analyzer = COALESCE(?8, bpm_analyzer),
                     first_beat_ms = COALESCE(?9, first_beat_ms),
+                    first_beat_ms_source = CASE
+                        WHEN ?9 IS NOT NULL THEN 'estimated'
+                        ELSE first_beat_ms_source END,
                     updated_at = ?6
                 WHERE id = ?7
                 "#;
@@ -1156,7 +1159,12 @@ fn persist_done_result(
                 now(),
                 track.id,
                 local.bpm_analyzer,
-                local.first_beat_ms.map(|v| v as i64),
+                // Only a first beat this analysis placed is written; a kept
+                // one stays as it is, with its source.
+                local
+                    .first_beat_ms
+                    .filter(|_| local.first_beat_estimated)
+                    .map(|v| v as i64),
             ])?;
             let ready = has_core_analysis_fields(
                 local.waveform_peaks_path.as_deref(),
@@ -1302,24 +1310,41 @@ pub(crate) fn kept_analysis_values(
     }
 }
 
-const ANALYSIS_TRACK_COLS: &str =
-    "id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path";
+const ANALYSIS_TRACK_COLS: &str = "id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path, first_beat_ms, first_beat_ms_source";
 
 fn row_to_track_for_analysis(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalTrackForAnalysis> {
     let has_waveform = row
         .get::<_, Option<String>>(7)?
         .is_some_and(|p| !p.trim().is_empty());
+    let existing_first_beat_ms = row
+        .get::<_, Option<i64>>(8)?
+        .and_then(|ms| u32::try_from(ms).ok());
+    let bpm_source: Option<String> = row.get(4)?;
+    let kept = kept_analysis_values(
+        has_waveform,
+        row.get(3)?,
+        bpm_source.as_deref(),
+        row.get::<_, Option<String>>(5)?.as_deref(),
+        row.get::<_, Option<String>>(6)?.as_deref(),
+    );
+    // Like the BPM and key, a first beat set in the cue editor is kept by the
+    // first analysis and replaced by a reanalysis. An imported one is kept
+    // only with the BPM imported alongside it: it lines up with that BPM's
+    // grid.
+    let kept_first_beat_ms = match row.get::<_, Option<String>>(9)?.as_deref() {
+        Some("user") if !has_waveform => existing_first_beat_ms,
+        Some(source) if kept.bpm.is_some() && bpm_source.as_deref() == Some(source) => {
+            existing_first_beat_ms
+        }
+        _ => None,
+    };
     Ok(LocalTrackForAnalysis {
         id: row.get(0)?,
         title: row.get(1)?,
         file_path: row.get(2)?,
-        kept: kept_analysis_values(
-            has_waveform,
-            row.get(3)?,
-            row.get::<_, Option<String>>(4)?.as_deref(),
-            row.get::<_, Option<String>>(5)?.as_deref(),
-            row.get::<_, Option<String>>(6)?.as_deref(),
-        ),
+        kept,
+        existing_first_beat_ms,
+        kept_first_beat_ms,
     })
 }
 
@@ -1403,15 +1428,7 @@ fn analyze_track_with_usb_fallback_with_updates<F>(
 where
     F: FnMut(TrackPartialUpdate),
 {
-    analyze_local_track_with_updates(
-        &track.file_path,
-        &track.id,
-        &track.kept,
-        waveform_dir,
-        artwork_dir,
-        bpm_params,
-        &mut on_update,
-    )
+    analyze_local_track_with_updates(track, waveform_dir, artwork_dir, bpm_params, &mut on_update)
 }
 
 pub(crate) fn resolve_analysis_worker_count_with_cap(
@@ -1555,14 +1572,20 @@ struct BpmDetectionParams {
 }
 
 fn analyze_local_track_with_updates(
-    file_path: &str,
-    track_id: &str,
-    kept: &KeptAnalysis,
+    track: &LocalTrackForAnalysis,
     waveform_dir: &Path,
     artwork_dir: &Path,
     bpm_params: BpmDetectionParams,
     on_update: &mut dyn FnMut(TrackPartialUpdate),
 ) -> BackendResult<LocalAnalysisResult> {
+    let LocalTrackForAnalysis {
+        id: track_id,
+        file_path,
+        kept,
+        existing_first_beat_ms,
+        kept_first_beat_ms,
+        ..
+    } = track;
     let BpmDetectionParams {
         bpm_min,
         bpm_max,
@@ -1600,9 +1623,16 @@ fn analyze_local_track_with_updates(
     let bpm = kept.bpm.or(bpm_key_result.bpm);
     let bpm_analyzer = bpm
         .filter(|_| kept.bpm.is_none())
-        .map(|_| engine.as_str().to_string());
+        .map(|_| engine.bpm_analyzer().to_string());
     let key = kept.key.clone().or(bpm_key_result.key);
-    let first_beat_ms = bpm_key_result.first_beat_ms;
+    let (first_beat_ms, first_beat_estimated) = first_beat_for_saved_bpm(
+        &samples,
+        sample_rate,
+        kept.bpm,
+        bpm_key_result.first_beat_ms,
+        *existing_first_beat_ms,
+        *kept_first_beat_ms,
+    );
     let duration_ms = detect_track_duration_ms(&path)
         .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate));
 
@@ -1665,11 +1695,37 @@ fn analyze_local_track_with_updates(
         bpm_analyzer,
         key,
         first_beat_ms,
+        first_beat_estimated,
         duration_ms,
         artwork_path: persisted_artwork,
         waveform_peaks_path,
         waveform_preview,
     })
+}
+
+/// The track's first beat after analysis, and whether this analysis placed
+/// it (`false` for a kept one, or the existing one when the audio gives none).
+fn first_beat_for_saved_bpm(
+    samples: &[f32],
+    sample_rate: u32,
+    kept_bpm: Option<f64>,
+    detected_first_beat_ms: Option<u32>,
+    existing_first_beat_ms: Option<u32>,
+    kept_first_beat_ms: Option<u32>,
+) -> (Option<u32>, bool) {
+    if kept_first_beat_ms.is_some() {
+        return (kept_first_beat_ms, false);
+    }
+    let placed = match kept_bpm {
+        Some(bpm) => {
+            first_beat_secs(samples, sample_rate, bpm).map(|secs| (secs * 1000.0).round() as u32)
+        }
+        None => detected_first_beat_ms,
+    };
+    match placed {
+        Some(ms) => (Some(ms), true),
+        None => (existing_first_beat_ms, false),
+    }
 }
 
 fn duration_ms_from_decoded(sample_count: usize, sample_rate: u32) -> Option<u64> {
@@ -2545,11 +2601,12 @@ fn biquad_apply(samples: &[f32], b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        AnalysisEngine, EssentiaResult, build_waveform_data_from_samples,
-        build_waveform_preview_from_audio, build_waveform_preview_from_samples,
-        collect_tracks_for_analysis, combine_worker_caps, count_tracks_missing_core_fields,
-        decode_audio_mono_samples, discover_cover_art_in_dir, discover_cover_art_in_parent,
-        discover_cover_art_path, duration_ms_from_decoded, essentia_result_has_detected_values,
+        AnalysisEngine, EssentiaResult, TRACK_ANALYSIS_UPDATE_SQL,
+        build_waveform_data_from_samples, build_waveform_preview_from_audio,
+        build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
+        count_tracks_missing_core_fields, decode_audio_mono_samples, discover_cover_art_in_dir,
+        discover_cover_art_in_parent, discover_cover_art_path, duration_ms_from_decoded,
+        essentia_result_has_detected_values, first_beat_for_saved_bpm,
         has_memory_headroom_for_engine, kept_analysis_values, local_analysis_bundle_paths,
         normalize_essentia_result, persist_library_artwork_thumbnail_from_image,
         resolve_analysis_bpm_range, resolve_analysis_engine,
@@ -2587,6 +2644,8 @@ mod tests {
               duration_ms INTEGER,
               artwork_path TEXT,
               waveform_peaks_path TEXT,
+              first_beat_ms INTEGER,
+              first_beat_ms_source TEXT,
               updated_at TEXT NOT NULL
             );
             "#,
@@ -2647,15 +2706,18 @@ mod tests {
         setup_tracks_table(&conn);
         conn.execute_batch(
             r#"
-            INSERT INTO tracks (id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path, updated_at)
+            INSERT INTO tracks (id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path, first_beat_ms, first_beat_ms_source, updated_at)
             VALUES
-              ('fresh', 'Fresh', '/m/a.mp3', 140.0, 'mixxx', 'Dm', 'mixxx', NULL, '1'),
-              ('analyzed', 'Analyzed', '/m/b.mp3', 140.0, 'user', 'Dm', 'user', '/a/ANLZ0000.DAT', '2');
+              ('fresh', 'Fresh', '/m/a.mp3', 140.0, 'mixxx', 'Dm', 'mixxx', NULL, 250, 'user', '1'),
+              ('analyzed', 'Analyzed', '/m/b.mp3', 140.0, 'user', 'Dm', 'user', '/a/ANLZ0000.DAT', 300, 'user', '2'),
+              ('imported', 'Imported', '/m/c.mp3', 140.0, 'rekordbox', NULL, NULL, NULL, 120, 'rekordbox', '3'),
+              ('edited-bpm', 'Edited BPM', '/m/d.mp3', 141.0, 'user', NULL, NULL, NULL, 120, 'rekordbox', '4'),
+              ('reanalyzed', 'Reanalyzed', '/m/e.mp3', 140.0, 'rekordbox', NULL, NULL, '/a/ANLZ0001.DAT', 120, 'rekordbox', '5');
             "#,
         )
         .expect("insert tracks");
-        let tracks = collect_tracks_for_analysis(&conn, &["fresh".into(), "analyzed".into()])
-            .expect("collect");
+        let ids = ["fresh", "analyzed", "imported", "edited-bpm", "reanalyzed"];
+        let tracks = collect_tracks_for_analysis(&conn, &ids.map(String::from)).expect("collect");
         assert_eq!(
             tracks[0].kept,
             KeptAnalysis {
@@ -2664,6 +2726,112 @@ mod tests {
             }
         );
         assert_eq!(tracks[1].kept, KeptAnalysis::default());
+        assert_eq!(tracks[0].existing_first_beat_ms, Some(250));
+        assert_eq!(tracks[1].existing_first_beat_ms, Some(300));
+        assert_eq!(tracks[0].kept_first_beat_ms, Some(250));
+        assert_eq!(tracks[1].kept_first_beat_ms, None);
+        // An imported first beat stays only with the BPM imported with it.
+        assert_eq!(tracks[2].kept_first_beat_ms, Some(120));
+        assert_eq!(tracks[3].kept_first_beat_ms, None);
+        assert_eq!(tracks[4].kept_first_beat_ms, None);
+    }
+
+    #[test]
+    fn retained_bpm_sets_its_own_first_beat_unless_one_is_kept() {
+        let sample_rate = 44_100u32;
+        let mut samples = vec![0.0; sample_rate as usize * 10];
+        let period_samples = f64::from(sample_rate) * 60.0 / 120.0;
+        for beat in 0..20 {
+            let start = (0.2 * f64::from(sample_rate) + f64::from(beat) * period_samples) as usize;
+            samples[start..start + 100].fill(1.0);
+        }
+        let (first, placed) = first_beat_for_saved_bpm(
+            &samples,
+            sample_rate,
+            Some(120.0),
+            Some(100),
+            Some(300),
+            None,
+        );
+        assert!(first.is_some_and(|ms| ms.abs_diff(200) <= 10), "{first:?}");
+        assert!(placed);
+        assert_eq!(
+            first_beat_for_saved_bpm(
+                &samples,
+                sample_rate,
+                Some(120.0),
+                Some(100),
+                Some(300),
+                Some(250)
+            ),
+            (Some(250), false)
+        );
+        assert_eq!(
+            first_beat_for_saved_bpm(&samples, sample_rate, None, Some(100), Some(300), None),
+            (Some(100), true)
+        );
+        assert_eq!(
+            first_beat_for_saved_bpm(
+                &[0.0; 512],
+                sample_rate,
+                Some(120.0),
+                Some(100),
+                Some(300),
+                None
+            ),
+            (Some(300), false)
+        );
+    }
+
+    #[test]
+    fn analysis_update_marks_a_new_first_beat_as_estimated() {
+        let conn = Connection::open_in_memory().expect("open db");
+        setup_tracks_table(&conn);
+        conn.execute_batch(
+            "INSERT INTO tracks (id, title, file_path, first_beat_ms, first_beat_ms_source, updated_at)
+             VALUES ('user', 'User', '/m/u.mp3', 250, 'user', '1'),
+                    ('same', 'Same', '/m/m.mp3', 250, 'user', '1'),
+                    ('imported', 'Imported', '/m/i.mp3', 300, 'rekordbox', '1'),
+                    ('kept', 'Kept', '/m/k.mp3', 300, 'rekordbox', '1');",
+        )
+        .expect("insert tracks");
+        for (id, anchor) in [
+            ("user", Some(200)),
+            ("same", Some(250)),
+            ("imported", Some(200)),
+            ("kept", None),
+        ] {
+            conn.execute(
+                TRACK_ANALYSIS_UPDATE_SQL,
+                rusqlite::params![
+                    120.0,
+                    Option::<String>::None,
+                    10_000,
+                    Option::<String>::None,
+                    Option::<String>::None,
+                    "2",
+                    id,
+                    Option::<String>::None,
+                    anchor,
+                ],
+            )
+            .expect("persist analysis");
+        }
+        let beat = |id| {
+            conn.query_row(
+                "SELECT first_beat_ms, first_beat_ms_source FROM tracks WHERE id = ?1",
+                [id],
+                |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
+            )
+            .expect("read beat")
+        };
+        // A first beat the analysis placed is marked estimated, even when it
+        // lands on the old value; with none placed, the old one and its
+        // source stay.
+        assert_eq!(beat("user"), (200, "estimated".to_string()));
+        assert_eq!(beat("same"), (250, "estimated".to_string()));
+        assert_eq!(beat("imported"), (200, "estimated".to_string()));
+        assert_eq!(beat("kept"), (300, "rekordbox".to_string()));
     }
 
     fn insert_track(conn: &Connection, id: &str, title: &str) {

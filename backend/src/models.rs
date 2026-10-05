@@ -101,7 +101,9 @@ pub struct Track {
     pub album: Option<String>,
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,
-    /// `"stratum"` / `"essentia"` for a detected value, `"user"` after a manual edit.
+    /// `AnalysisEngine::bpm_analyzer` for a detected value (`"stratum-v2"`,
+    /// `"essentia"`; a bare `"stratum"` is from before BPM refinement),
+    /// `"user"` after a manual edit.
     pub bpm_analyzer: Option<String>,
     pub key: Option<String>,
     /// `"stratum"` / `"essentia"` for a detected value, `"user"` after a manual edit.

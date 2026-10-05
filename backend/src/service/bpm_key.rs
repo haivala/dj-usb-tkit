@@ -23,9 +23,13 @@ impl AnalysisEngine {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    /// What a detected BPM's `bpm_analyzer` is set to: the engine, plus the
+    /// version of its BPM steps when they have changed, so tracks analyzed
+    /// before a change can be found. A bare `"stratum"` is stratum's raw
+    /// estimate, before `refine_bpm`.
+    pub fn bpm_analyzer(&self) -> &'static str {
         match self {
-            Self::Stratum => "stratum",
+            Self::Stratum => "stratum-v2",
             Self::Essentia => "essentia",
         }
     }
@@ -141,11 +145,21 @@ pub(super) fn refine_bpm(
     bpm_min: u32,
     bpm_max: u32,
 ) -> f64 {
+    let local_peak = find_tempo_peak(samples, sample_rate, raw, bpm_min, bpm_max);
+    if local_peak.is_none()
+        && let Some(candidate) = broad_tempo_candidate(samples, sample_rate, raw, bpm_min, bpm_max)
+    {
+        return refine_near_estimate(samples, sample_rate, candidate, bpm_min, bpm_max);
+    }
     let estimate = match tempo_family_alternative(samples, sample_rate, raw, bpm_min, bpm_max) {
         Some((alternative, margin)) if margin >= 1.0 => alternative,
         _ => raw,
     };
-    refine_near_estimate(samples, sample_rate, estimate, bpm_min, bpm_max)
+    if estimate == raw {
+        bpm_from_peak(local_peak, raw)
+    } else {
+        refine_near_estimate(samples, sample_rate, estimate, bpm_min, bpm_max)
+    }
 }
 
 /// `refine_bpm` without the 3:2 / 4:3 check.
@@ -156,11 +170,70 @@ pub(super) fn refine_near_estimate(
     bpm_min: u32,
     bpm_max: u32,
 ) -> f64 {
-    match find_tempo_peak(samples, sample_rate, raw, bpm_min, bpm_max) {
+    bpm_from_peak(
+        find_tempo_peak(samples, sample_rate, raw, bpm_min, bpm_max),
+        raw,
+    )
+}
+
+fn bpm_from_peak(peak: Option<TempoPeak>, raw: f32) -> f64 {
+    match peak {
         None => f64::from(raw.round()),
         Some(peak) if peak.grid_coherence >= GRID_SNAP_COHERENCE * peak.coherence => peak.grid,
         Some(peak) => (peak.bpm * 100.0).round() / 100.0,
     }
+}
+
+/// Rescue a strong off-grid tempo when the full-track search around stratum's
+/// estimate has no clear peak. A short window lets us search more broadly at
+/// 0.05 BPM resolution without slowing every successful local search. The
+/// full track is still used by `refine_near_estimate` for the final BPM.
+fn broad_tempo_candidate(
+    samples: &[f32],
+    sample_rate: u32,
+    raw: f32,
+    bpm_min: u32,
+    bpm_max: u32,
+) -> Option<f32> {
+    const WINDOW_SECS: usize = 120;
+    const STEP: f64 = 0.05;
+    const MIN_SCORE: f64 = 0.1;
+    const MIN_LEAD: f64 = 1.25;
+
+    let window = &samples[..samples.len().min(sample_rate as usize * WINDOW_SECS)];
+    let envelope = onset_envelope(window);
+    let frame_secs = ONSET_HOP as f64 / f64::from(sample_rate);
+    let (min, max) = (f64::from(bpm_min), f64::from(bpm_max));
+    let raw = f64::from(raw);
+    let candidates = [
+        (1.0, 10.0),
+        (1.5, 3.0),
+        (0.75, 2.0),
+        (2.0 / 3.0, 2.0),
+        (4.0 / 3.0, 3.0),
+    ]
+    .iter()
+    .filter_map(|&(factor, radius)| {
+        let centre = raw * factor;
+        let steps = (radius / STEP).round() as i32;
+        (-steps..=steps)
+            .map(|step| centre + f64::from(step) * STEP)
+            .filter(|&bpm| bpm >= min && bpm <= max)
+            .map(|bpm| (bpm, subdivided_coherence(&envelope, frame_secs, bpm)))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+    })
+    .collect::<Vec<_>>();
+    let &(bpm, score) = candidates.iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
+    let rival = candidates
+        .iter()
+        .filter(|&&(other, _)| {
+            (other - bpm).abs() >= RIVAL_DISTANCE
+                && (other * 2.0 - bpm).abs() >= RIVAL_DISTANCE
+                && (other / 2.0 - bpm).abs() >= RIVAL_DISTANCE
+        })
+        .map(|&(_, score)| score)
+        .fold(0.0, f64::max);
+    (score >= MIN_SCORE && score >= MIN_LEAD * rival).then_some(bpm as f32)
 }
 
 /// The tempo related to stratum's estimate by 3:2 or 4:3 (`TEMPO_FAMILY`)
@@ -168,7 +241,8 @@ pub(super) fn refine_near_estimate(
 /// over the estimate divided by the lead its factor requires, so 1.0 or
 /// more means it should replace the estimate. Both are compared at their
 /// best whole or half BPM within the search radius, which is enough to
-/// tell tempo families apart.
+/// tell tempo families apart. The winning BPM is passed to the fine search
+/// so it stays within that search's radius.
 pub(super) fn tempo_family_alternative(
     samples: &[f32],
     sample_rate: u32,
@@ -185,21 +259,20 @@ pub(super) fn tempo_family_alternative(
         (-steps..=steps)
             .map(|step| (centre * 2.0).round() / 2.0 + f64::from(step) * 0.5)
             .filter(|&bpm| bpm >= min && bpm <= max)
-            .map(|bpm| subdivided_coherence(&envelope, frame_secs, bpm))
-            .fold(0.0, f64::max)
+            .map(|bpm| (bpm, subdivided_coherence(&envelope, frame_secs, bpm)))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
     };
-    let own = best_near(raw, BPM_SEARCH_RADIUS);
+    let own = best_near(raw, BPM_SEARCH_RADIUS)?.1;
     if own <= 0.0 {
         return None;
     }
     TEMPO_FAMILY
         .iter()
         .map(|&(factor, required)| (raw * factor, factor, required))
-        .filter(|&(centre, _, _)| centre >= min && centre <= max)
-        .map(|(centre, factor, required)| {
+        .filter_map(|(centre, factor, required)| {
             // stratum's error scales with the factor.
-            let score = best_near(centre, BPM_SEARCH_RADIUS * factor.max(1.0));
-            (centre as f32, score / own / required)
+            let (bpm, score) = best_near(centre, BPM_SEARCH_RADIUS * factor.max(1.0))?;
+            Some((bpm as f32, score / own / required))
         })
         .max_by(|a, b| a.1.total_cmp(&b.1))
 }
@@ -496,6 +569,32 @@ mod tests {
         // stratum answering 83 for a 125 track.
         let samples = click_track(125.0, 44100);
         assert_eq!(refine_bpm(&samples, 44100, 83.2, 70, 180), 125.0);
+    }
+
+    #[test]
+    fn refine_bpm_uses_the_tempo_that_won_the_family_search() {
+        // A raw 85 BPM estimate puts the 3:2 centre at 127.5, but the
+        // strongest candidate is 124.5, outside a ±2 search from 127.5.
+        let samples = click_track(124.5, 44100);
+        assert_eq!(refine_bpm(&samples, 44100, 85.0, 70, 180), 124.5);
+    }
+
+    #[test]
+    fn refine_bpm_checks_valid_family_tempo_near_range_limit() {
+        let samples = click_track(179.0, 44100);
+        assert_eq!(refine_bpm(&samples, 44100, 120.5, 70, 180), 179.0);
+    }
+
+    #[test]
+    fn refine_bpm_recovers_a_strong_tempo_beyond_the_local_search() {
+        let samples = click_track(173.71, 44100);
+        assert!((refine_bpm(&samples, 44100, 166.5, 70, 180) - 173.71).abs() <= 0.05);
+    }
+
+    #[test]
+    fn refine_bpm_checks_off_grid_tempo_families() {
+        let samples = click_track(158.22, 44100);
+        assert!((refine_bpm(&samples, 44100, 105.04, 70, 180) - 158.22).abs() <= 0.05);
     }
 
     #[test]
