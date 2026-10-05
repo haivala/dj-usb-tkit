@@ -1043,19 +1043,19 @@ main {
   cursor: pointer;
 }
 
-.source-chip-missing .source-chip-toggle {
-  accent-color: var(--danger);
-  cursor: pointer;
-}
-
-.source-chip-toggle {
+/* input.* so these outrank the global input[type="checkbox"] rule */
+.source-chip input.source-chip-toggle {
   width: 14px;
   height: 14px;
   min-width: 14px;
   margin: 0;
   padding: 0;
-  accent-color: var(--success);
-  border-radius: 4px;
+  --check-color: var(--success);
+}
+
+.source-chip-missing input.source-chip-toggle {
+  --check-color: var(--danger);
+  cursor: pointer;
 }
 
 .source-chip-path {
@@ -1781,14 +1781,64 @@ td.num, th.num {
   50%      { border-bottom-color: var(--analyze-glow-b); }
 }
 
-/* checkbox styling */
+/* checkbox styling: drawn by the app so both themes match on every platform
+   (native boxes stay white in dark mode); --check-color tints the checked box */
 input[type="checkbox"] {
+  --check-color: var(--accent);
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
   min-width: auto;
   width: 16px;
   height: 16px;
-  accent-color: var(--accent);
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid color-mix(in srgb, var(--muted) 70%, var(--line));
+  border-radius: 4px;
+  background: var(--card);
   cursor: pointer;
-  border-radius: 3px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+input[type="checkbox"]::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  margin-top: -2px;
+  border: solid var(--ink-on-accent);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0);
+  transition: transform 120ms ease;
+}
+
+input[type="checkbox"]:hover {
+  border-color: var(--check-color);
+}
+
+input[type="checkbox"]:checked {
+  border-color: var(--check-color);
+  background: var(--check-color);
+}
+
+input[type="checkbox"]:checked::after {
+  transform: rotate(45deg) scale(1);
+}
+
+input[type="checkbox"]:focus {
+  box-shadow: none;
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--check-color);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ── pills: BPM & Key ──────────────────────────────── */
@@ -2796,11 +2846,7 @@ td button[data-action]:disabled,
 }
 
 .usb-cfg-toggle-row input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
   min-width: 16px;
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 
 .usb-cfg-toggle-row input[type="radio"] {

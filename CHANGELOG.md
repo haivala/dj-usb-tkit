@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.3.4
+
 **Severity:** feature
 
 - **Improvement:** switching USB playlists now stops loading the previous
@@ -58,6 +60,9 @@
 - **Improvement:** a track's play button now sits on its cover art and
   shows when you hover the row, which leaves more room for the other
   columns in every track list.
+- **Improvement:** checkboxes follow the app's light and dark theme instead
+  of showing the system's white boxes. A checked source folder or library
+  shows a green check, and a missing folder a red one.
 - **Improvement:** track lists show a "Loading tracks…" spinner while a
   page is loading. When you switch to another playlist, the previous
   playlist's tracks are no longer shown while the new one loads.

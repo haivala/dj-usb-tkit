@@ -14,6 +14,9 @@
 //    which also stands in for the playlists and a connected USB), drives the
 //    app in headless Chromium, and writes each GIF scene (lossless frames
 //    over CDP, encoded with ffmpeg) and each screenshot.
+// 4. Every GIF and screenshot gets a footer added below it (so it covers
+//    nothing): the scene's caption, and "DJ USB Tkit v<version>" from
+//    package.json.
 import { chromium } from "@playwright/test";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -32,6 +35,12 @@ const EDITOR_TITLE = "Demo Groove";
 // What the source folders look like in the app (long, so the chips truncate).
 const SHOWN_ROOT = "/home/dj/Music/Projects/Chiphead.Music";
 const FOLDERS = ["Syyskuu", "Heinäkuu"];
+const VERSION = JSON.parse(readFileSync(join(uiDir, "package.json"), "utf8")).version;
+const FOOTER_HEIGHT = 28;
+// ffmpeg filter: grow the image by the footer's height and lay the footer
+// (ffmpeg input `input`) over the new strip.
+const footerFilter = (input) =>
+  `pad=iw:ih+${FOOTER_HEIGHT}[p];[p][${input}:v]overlay=0:H-h`;
 
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", ...opts });
 
@@ -306,7 +315,33 @@ async function capture(page, framesDir, scene, { fullWindow = false } = {}) {
   return { frames, crop };
 }
 
-function encodeGif({ frames, crop }, framesDir, out) {
+// Renders a footer `width` pixels wide in the app's font and dark colours:
+// the caption on the left, the app name and version on the right.
+async function renderFooter(browser, caption, width, out) {
+  const page = await browser.newPage({ viewport: { width, height: FOOTER_HEIGHT }, deviceScaleFactor: 1 });
+  // Same origin as the fonts, which would otherwise be blocked as cross-origin.
+  await page.goto(`${BASE_URL}styles.css`);
+  await page.setContent(`<!doctype html><style>
+    @font-face { font-family: Outfit; src: url(${BASE_URL}assets/fonts/google/Outfit-400.ttf); font-weight: 400; }
+    @font-face { font-family: Outfit; src: url(${BASE_URL}assets/fonts/google/Outfit-500.ttf); font-weight: 500; }
+    html, body { margin: 0; }
+    footer { box-sizing: border-box; display: flex; align-items: center; gap: 16px; height: ${FOOTER_HEIGHT}px;
+      padding: 0 10px; background: #0c0a12; border-top: 1px solid #2a2538; font: 400 12px/1 Outfit, sans-serif; }
+    .caption { flex: 1; min-width: 0; color: #9b93ad; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .version { color: #e4dff0; font-weight: 500; white-space: nowrap; }
+  </style><footer><span class="caption"></span><span class="version">DJ USB Tkit v${VERSION}</span></footer>`);
+  await page.locator(".caption").evaluate((el, text) => { el.textContent = text; }, caption);
+  await page.evaluate(() => document.fonts.ready);
+  await page.screenshot({ path: out });
+  await page.close();
+  return out;
+}
+
+function addFooter(raw, footer, out) {
+  run("ffmpeg", ["-v", "error", "-y", "-i", raw, "-i", footer, "-lavfi", `[0:v]${footerFilter(1)}`, out]);
+}
+
+function encodeGif({ frames, crop }, framesDir, footer, out) {
   // Frames only arrive when the page changes: hold each until the next one.
   let list = "";
   frames.forEach((f, i) => {
@@ -318,11 +353,12 @@ function encodeGif({ frames, crop }, framesDir, out) {
   writeFileSync(listFile, list);
   const palette = join(framesDir, "palette.png");
   const vf = `fps=12,crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${GIF_WIDTH}:-1:flags=lanczos`;
-  const input = ["-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", listFile];
-  run("ffmpeg", [...input, "-vf", `${vf},palettegen=max_colors=128:stats_mode=diff`, palette]);
+  const input = ["-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", listFile, "-i", footer];
+  const tagged = `[0:v]${vf},${footerFilter(1)}`;
+  run("ffmpeg", [...input, "-lavfi", `${tagged},palettegen=max_colors=128:stats_mode=diff`, palette]);
   run("ffmpeg", [
     ...input, "-i", palette,
-    "-lavfi", `${vf}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`,
+    "-lavfi", `${tagged}[x];[x][2:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`,
     out,
   ]);
   console.log(`wrote ${relative(repoDir, out)}`);
@@ -342,6 +378,7 @@ function scenes(fixture) {
     {
       // BPM and first beat off, then fixed by typing: the grid follows.
       name: "cue-editor-beatgrid",
+      caption: "Typing the BPM and first beat: the beat grid follows",
       opts: { cues: [], bpm: bpm - 2, firstBeatMs: firstBeat + 215 },
       async run(page, wf, record) {
         await page.mouse.move(700, 230);
@@ -362,6 +399,7 @@ function scenes(fixture) {
     {
       // Cue A dragged with Quantize on (hops beat to beat), cue B with Shift (free).
       name: "cue-editor-drag-cues",
+      caption: "Dragging cues: A snaps beat to beat with Q on, B moves freely with Shift",
       opts: {
         cues: [
           { positionMs: onBeat(8), colorId: 5, name: "Intro" },
@@ -387,6 +425,7 @@ function scenes(fixture) {
     {
       // "First beat" adds the start marker; dragging it makes it a "Start marker".
       name: "cue-editor-playback-start",
+      caption: "First beat adds the start marker; dragging it makes it a Start marker",
       opts: {
         cues: [
           { positionMs: onBeat(12), colorId: 5, name: "Drop in" },
@@ -413,6 +452,7 @@ function scenes(fixture) {
       // docs/EXTERNAL_LIBRARIES.md: Import under New, pick a rekordbox
       // playlist from the grouped list, and it opens as a new playlist.
       name: "import-playlist",
+      caption: "Importing a rekordbox playlist: it opens as a new playlist",
       editor: false,
       opts: {
         externalLibraries: {
@@ -499,14 +539,21 @@ function shots(fixture) {
   return [
     {
       // README hero: the Library with a USB connected, a playlist active, an
-      // imported Mixxx library, and more tracks than fit (so it scrolls).
+      // imported Mixxx library, and more tracks than fit (so it scrolls). One
+      // row hovered, so its play button shows on the cover art.
       name: "DJ-USB-Tkit",
+      caption: "The Library, with a USB connected and a playlist active",
       opts: { externalLibraries: { mixxx: [] } },
-      async run() {},
+      async run(page) {
+        const row = page.locator("#libraryTableBody .track-grid-row").nth(1);
+        await row.locator(".track-grid-cell", { hasText: "Low Orbit" }).hover();
+        await page.waitForTimeout(400);
+      },
     },
     {
       // docs/USB_EXPORT.md: the Backups panel, opened from Settings.
       name: "backup-view",
+      caption: "Backups of the USB's databases, on the USB and on this computer",
       opts: { backups: BACKUPS },
       async run(page) {
         await page.locator("#settingsBtn").click();
@@ -520,6 +567,7 @@ function shots(fixture) {
       // docs/CUE_EDITOR.md: a start marker off the first beat, one hot cue,
       // paused mid-intro, the hot cue selected.
       name: "cue-editor",
+      caption: "The cue editor: a start marker, a hot cue and the beat grid",
       opts: {
         cues: [
           { positionMs: onBeat(3), playbackStart: true },
@@ -572,16 +620,20 @@ try {
       captured = await capture(page, framesDir, body, captureOpts);
     });
     await ctx.close();
-    encodeGif(captured, framesDir, join(outDir, `${scene.name}.gif`));
+    const footer = await renderFooter(browser, scene.caption, GIF_WIDTH, join(work, `footer-${scene.name}.png`));
+    encodeGif(captured, framesDir, footer, join(outDir, `${scene.name}.gif`));
   }
   for (const shot of shots(fixture)) {
     if (!wanted(shot.name)) continue;
     const { ctx, page } = await openApp(browser, fixture, shot.opts);
     await connectUsbAndPickPlaylist(page, fixture);
     await shot.run(page);
-    const out = join(outDir, `${shot.name}.png`);
-    await page.screenshot({ path: out });
+    const raw = join(work, `${shot.name}.png`);
+    await page.screenshot({ path: raw });
     await ctx.close();
+    const out = join(outDir, `${shot.name}.png`);
+    const footer = await renderFooter(browser, shot.caption, VIEWPORT.width, join(work, `footer-${shot.name}.png`));
+    addFooter(raw, footer, out);
     console.log(`wrote ${relative(repoDir, out)}`);
   }
 } finally {
