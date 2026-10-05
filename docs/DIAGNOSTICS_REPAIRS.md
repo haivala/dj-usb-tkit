@@ -9,6 +9,8 @@ Diagnostics read a USB export and report whether the databases, media paths,
 analysis references, playlists, and player menu state look usable. Diagnostics
 do not write to the USB.
 
+![Health & Diagnostics: the USB's databases checked area by area](assets/usb-diagnostics.png)
+
 Repairs are separate explicit actions. A repair request can run in preview mode
 or apply mode. Preview mode reports proposed fixes, unsupported issues,
 estimated writes, and estimated deletes. Apply mode writes only selected fixes,
@@ -102,6 +104,8 @@ fallback, or id fallback depending on which data is available.
 preview, then builds a repair catalog from the current findings.
 
 When `apply=false`, no files are changed.
+
+![Preview Fixes for a renamed audio file, an empty analysis file and a playlist the PDB and eDB disagree on](assets/usb-repair-preview.png)
 
 When `apply=true`:
 

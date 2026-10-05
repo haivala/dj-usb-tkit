@@ -4,8 +4,18 @@
 // keycap, which a headless screencast doesn't show. Each library named in
 // `opts.externalLibraries` (`rekordbox`, `mixxx`) is "detected" as imported,
 // and its made-up playlists can be imported.
+//
+// The USB views answer with what the real backend returned for the demo
+// library exported to a USB (`fixture.usb`); `opts.brokenUsb` swaps in the
+// damaged copy's diagnostics. History sessions, which only a player writes,
+// are made from those USB tracks (`fixture.usbHistory`). Exporting replays
+// the real export's progress messages as job events; `opts.unexported`
+// playlists show as not exported until then. `opts.tauriRuntime` makes the
+// page pass for the Tauri runtime (as tests/e2e/smoke.spec.mjs does), which
+// the app needs to follow job events and to show its version
+// (`opts.appVersion`).
 (() => {
-  const { tracks, detail, sourceRoots, sourceRootEnabled, playlists } = window.__DOC_GIF_FIXTURE__;
+  const { tracks, detail, sourceRoots, sourceRootEnabled, playlists, usb, usbHistory } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
   const USB_ROOT = "/run/media/dj/Chiphead";
   const ls = window.localStorage;
@@ -43,6 +53,52 @@
     playlists.push({ id, name: item.name, tracks: items, imported: true });
     return ok({ playlistId: id, name: item.name, added: items.length, indexed: 0, notFound: [], warnings: [] });
   };
+  // USB track rows by title, from every exported playlist.
+  const usbTracksByTitle = new Map(
+    Object.values(usb?.playlistTracks || {}).flatMap((resp) => resp.data.items.map((t) => [t.title, t]))
+  );
+  const usbTracksPage = (items) => ok({
+    ...Object.values(usb.playlistTracks)[0].data,
+    items,
+    total: items.length,
+    hasMore: false,
+    nextCursor: null,
+    totalDurationMs: sumMs(items),
+    durationKnownCount: items.length,
+  });
+  const historySessions = (usbHistory || []).map(({ id, name, createdAt, titles }) => {
+    const items = titles.map((title) => usbTracksByTitle.get(title)).filter(Boolean);
+    return { id, name, createdAt, items };
+  });
+  const listeners = new Map();
+  const emitEvent = (name, payload) => {
+    for (const cb of listeners.get(name) || []) cb({ event: name, payload });
+  };
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const exportedNow = new Set();
+  const isExported = (id, items, imported) =>
+    exportedNow.has(id) || (!!items.length && !imported && !(opts.unexported || []).includes(id));
+  // Replays the recorded export of playlist `name` as the backend's job
+  // events, over about `opts.exportMs`.
+  const replayExport = async (playlistId) => {
+    const name = playlists.find((p) => p.id === playlistId)?.name;
+    const run = usb.exports[name];
+    const job = { jobId: "job-doc-export", jobType: "export", stage: "export_to_usb" };
+    const emit = (event, current, total, message) => emitEvent("job:event", {
+      event, ...job, current, total, percent: Math.min(100, Math.floor((current * 100) / Math.max(1, total))),
+      message, timestamp: new Date().toISOString(),
+    });
+    emit("job.started", 0, 1, "USB: Exporting playlist");
+    const stepMs = (opts.exportMs || 3000) / Math.max(1, run.progress.length);
+    for (const [current, total, message] of run.progress) {
+      await sleep(stepMs);
+      emit("job.progress", current, Math.max(1, total), message || "USB: Exporting playlist");
+    }
+    exportedNow.add(playlistId);
+    emit("job.completed", 1, 1, "USB: Export complete");
+    return run.response;
+  };
+
   const listExternal = (source) =>
     ok({ items: external[source].map(({ id, name, kind, titles }) => ({ id, name, kind, trackCount: titles.length })) });
 
@@ -51,14 +107,23 @@
     id,
     name,
     source: "app",
-    lastExportedAt: items.length && !imported ? exportedAt : null,
-    lastExportedUsbRoot: items.length && !imported ? USB_ROOT : null,
-    lastExportedTrackCount: (!imported && items.length) || null,
+    lastExportedAt: isExported(id, items, imported) ? exportedAt : null,
+    lastExportedUsbRoot: isExported(id, items, imported) ? USB_ROOT : null,
+    lastExportedTrackCount: isExported(id, items, imported) ? items.length : null,
     trackCount: items.length,
     totalDurationMs: sumMs(items),
     createdAt: exportedAt,
     updatedAt: exportedAt,
   }));
+
+  if (opts.tauriRuntime) {
+    window.isTauri = true;
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) =>
+        cmd === "plugin:app|version" ? opts.appVersion : window.__TAURI__.core.invoke(cmd, args),
+      convertFileSrc: (path) => path,
+    };
+  }
 
   window.__TAURI__ = {
     core: {
@@ -103,6 +168,25 @@
               durationKnownCount: items.length,
             });
           }
+          case "check_for_update":
+            return ok({
+              updateAvailable: false, severity: "none", currentVersion: opts.appVersion, latestVersion: opts.appVersion,
+              releaseUrl: "", installKind: "appimage", downloadUrl: null, canSelfUpdate: false, action: "none",
+              checkFailed: false,
+            });
+          case "get_frontend_settings":
+            return ok({ values: {}, nodeAvailable: false, essentiaInstalled: false });
+          case "get_source_root_analysis":
+            return ok({
+              items: (r.sourceRoots || sourceRoots).map((sourceRoot) => {
+                const total = tracks.filter((t) => t.filePath.startsWith(`${sourceRoot}/`)).length;
+                return { sourceRoot, total, analyzed: total, fullyAnalyzed: true };
+              }),
+            });
+          case "set_theme_background":
+            return null;
+          case "allow_asset_paths":
+            return 0;
           case "check_source_roots":
             return ok({ missing: [] });
           case "list_usb_backups":
@@ -122,10 +206,33 @@
           case "get_usb_device_name":
             return ok({ name: "Chiphead" });
           case "run_usb_diagnostics":
-            return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
+            if (!usb) return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
+            return opts.brokenUsb ? usb.brokenDiagnostics : usb.diagnostics;
+          case "repair_usb_diagnostics":
+            return usb.repairPreview;
           case "fetch_usb_playlists":
+            return usb ? usb.playlists : ok({ items: [], warnings: [] });
+          case "fetch_usb_playlist_tracks":
+            return usb.playlistTracks[r.id];
           case "fetch_usb_histories":
-            return ok({ items: [], warnings: [] });
+            if (!usb) return ok({ items: [], warnings: [] });
+            return ok({
+              ...usb.histories.data,
+              items: historySessions.map(({ id, name, createdAt, items }) => ({
+                id, name, createdAt, tracks: items, totalDurationMs: sumMs(items), durationKnownCount: items.length,
+              })),
+              counts: {
+                ...usb.histories.data.counts,
+                importedPlaylists: historySessions.length,
+                importedTracks: historySessions.reduce((n, h) => n + h.items.length, 0),
+              },
+            });
+          case "fetch_usb_history_tracks":
+            return usbTracksPage(historySessions.find((h) => h.id === r.id)?.items || []);
+          case "get_usb_player_menu_config":
+            return usb.playerMenu;
+          case "export_to_usb":
+            return replayExport(r.playlistId);
           case "list_tracks":
           case "search_tracks":
             return ok({ total: tracks.length, items: tracks });
@@ -177,11 +284,17 @@
           case "set_playback_metronome":
             return ok({ enabled: !!r.enabled && r.bpm > 0 });
           default:
+            console.warn(`doc-media: not stubbed: ${command}`);
             return { ok: false, error: { code: "UNKNOWN", message: `Not stubbed: ${command}` } };
         }
       },
     },
-    event: { listen: async () => () => {} },
+    event: {
+      listen: async (name, cb) => {
+        listeners.set(name, [...(listeners.get(name) || []), cb]);
+        return () => listeners.set(name, (listeners.get(name) || []).filter((fn) => fn !== cb));
+      },
+    },
   };
 
   const installOverlay = () => {

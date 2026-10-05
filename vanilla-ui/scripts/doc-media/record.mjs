@@ -9,7 +9,9 @@
 //    source folder; the other, unchecked one only shows the "Filtered" badge)
 //    with ffmpeg.
 // 2. Scans and analyzes it with the real backend (`dump_doc_gif_fixture`
-//    bin) and dumps what the frontend would receive.
+//    bin), exports the sidebar's playlists to a scratch USB (and damages a
+//    copy of it, for the repair shots), and dumps what the frontend would
+//    receive.
 // 3. Serves dist/ with Tauri's invoke stubbed from that dump (page_init.js,
 //    which also stands in for the playlists and a connected USB), drives the
 //    app in headless Chromium, and writes each GIF scene (lossless frames
@@ -123,6 +125,48 @@ function synthesizeTrack(path, { title, artist, album, cover, bpm, rootHz, minor
   ]);
 }
 
+// Sidebar order top to bottom; `current` is the active playlist. The ones
+// with tracks are exported to the USB, in this order.
+const PLAYLISTS = [
+  { id: "pl-event1", name: "Event 1", titles: ["Afterglow", "White Nights", "Last Ferry", "Pier Lights"] },
+  { id: "pl-bass", name: "Bass", current: true, titles: ["Low Orbit", "Northbound", "Sauna Talk", "Driftwood", EDITOR_TITLE] },
+  { id: "pl-house", name: "House", titles: ["Frost Line", "Afterglow", "Pier Lights"] },
+  { id: "pl-1", name: "Playlist 1", titles: [] },
+];
+// USB history sessions (only a player writes these), from the USB's tracks.
+const USB_HISTORY = [
+  { id: "hist-2", name: "HISTORY 002", createdAt: "2026-09-26", titles: ["Northbound", "Low Orbit", "Sauna Talk", "Frost Line", "Afterglow", "Driftwood"] },
+  { id: "hist-1", name: "HISTORY 001", createdAt: "2026-09-19", titles: ["White Nights", "Pier Lights", "Last Ferry"] },
+];
+const USB_NAME = "Chiphead";
+const USB_ROOT = `/run/media/dj/${USB_NAME}`;
+
+// Swaps the scratch paths in the backend's USB responses for the ones shown,
+// and inlines artwork the page can't read from disk.
+function presentUsbResponses(usb, swaps) {
+  let text = JSON.stringify(usb);
+  for (const [from, to] of swaps) text = text.split(from).join(to);
+  const mime = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png" };
+  const inline = (node) => {
+    if (Array.isArray(node)) return node.forEach(inline);
+    if (!node || typeof node !== "object") return;
+    if (typeof node.artworkPath === "string") {
+      const real = swaps.reduce((path, [from, to]) => path.split(to).join(from), node.artworkPath);
+      try {
+        const type = mime[extname(real).toLowerCase()] || "image/jpeg";
+        node.artworkDataUrl = `data:${type};base64,${readFileSync(real).toString("base64")}`;
+      } catch {
+        // Not on disk: no artwork.
+      }
+      node.artworkPath = null;
+    }
+    Object.values(node).forEach(inline);
+  };
+  const out = JSON.parse(text);
+  inline(out);
+  return out;
+}
+
 function buildFixture(work) {
   const src = join(work, "Chiphead.Music");
   for (const { folder, tracks, ...albumTags } of ALBUMS) {
@@ -134,12 +178,30 @@ function buildFixture(work) {
   }
 
   const json = join(work, "fixture.json");
+  const usbRoot = join(work, "usb");
+  const brokenUsbRoot = join(work, "usb-broken");
+  const usbSpec = join(work, "usb-spec.json");
+  writeFileSync(usbSpec, JSON.stringify({
+    usbRoot,
+    usbName: USB_NAME,
+    brokenUsbRoot,
+    playlists: PLAYLISTS.filter((p) => p.titles.length).map(({ name, titles }) => ({ name, titles })),
+  }));
   run("cargo", [
     "run", "-q", "--release", "-p", "backend", "--features", "dev-tools", "--bin", "dump_doc_gif_fixture",
-    "--", join(work, "data"), src, EDITOR_TITLE, json,
+    "--", join(work, "data"), src, EDITOR_TITLE, json, usbSpec,
   ], { cwd: repoDir });
 
   const fixture = JSON.parse(readFileSync(json, "utf8"));
+  // The broken copy's root first: the clean one is a prefix of it. The
+  // backend's playlist ids become the sidebar's, so per-playlist export
+  // status (e.g. the export button's label) finds its playlist.
+  const playlistIds = Object.entries(fixture.usb.exports)
+    .map(([name, { playlistId }]) => [playlistId, PLAYLISTS.find((p) => p.name === name).id]);
+  fixture.usb = presentUsbResponses(fixture.usb, [
+    [brokenUsbRoot, USB_ROOT], [usbRoot, USB_ROOT], [src, SHOWN_ROOT], ...playlistIds,
+  ]);
+  fixture.usbHistory = USB_HISTORY;
   // The page can't read local files: inline artwork, and show made-up paths.
   const mime = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png" };
   for (const track of fixture.tracks) {
@@ -160,14 +222,10 @@ function buildFixture(work) {
   fixture.sourceRoots = FOLDERS.map((f) => `${SHOWN_ROOT}/${f}`);
   // Heinäkuu unchecked, so the Library shows the "Filtered" badge.
   fixture.sourceRootEnabled = { [fixture.sourceRoots[0]]: true, [fixture.sourceRoots[1]]: false };
-  const byTitle = (...titles) => fixture.tracks.filter((t) => titles.includes(t.title));
-  // Sidebar order top to bottom; `current` is the active playlist.
-  fixture.playlists = [
-    { id: "pl-event1", name: "Event 1", tracks: byTitle("Afterglow", "White Nights", "Last Ferry", "Pier Lights") },
-    { id: "pl-bass", name: "Bass", current: true, tracks: byTitle("Low Orbit", "Northbound", "Sauna Talk", "Driftwood", EDITOR_TITLE) },
-    { id: "pl-house", name: "House", tracks: byTitle("Frost Line", "Afterglow", "Pier Lights") },
-    { id: "pl-1", name: "Playlist 1", tracks: [] },
-  ];
+  fixture.playlists = PLAYLISTS.map(({ titles, ...playlist }) => ({
+    ...playlist,
+    tracks: fixture.tracks.filter((t) => titles.includes(t.title)),
+  }));
   return fixture;
 }
 
@@ -180,6 +238,9 @@ async function openApp(browser, fixture, opts) {
   });
   await ctx.addInitScript({ path: join(here, "page_init.js") });
   const page = await ctx.newPage();
+  page.on("console", (msg) => {
+    if (msg.type() === "warning" && msg.text().startsWith("doc-media:")) console.warn(msg.text());
+  });
   await page.goto(BASE_URL);
   await page.locator("#libraryTableBody .track-grid-row", { hasText: EDITOR_TITLE }).waitFor();
   await page.waitForTimeout(300);
@@ -496,7 +557,55 @@ function scenes(fixture) {
         }, { fullWindow: true });
       },
     },
+    {
+      // docs/USB_EXPORT.md: exporting a not-yet-exported playlist, with the
+      // real export's progress messages.
+      name: "export-playlist",
+      caption: "Exporting a playlist to the USB: progress in the footer, then the export status",
+      editor: false,
+      opts: { unexported: ["pl-house"], exportMs: 3500, tauriRuntime: true, appVersion: VERSION },
+      async run(page, _wf, record) {
+        await connectUsbAndPickPlaylist(page, fixture);
+        await page.locator('.nav-playlist-item[data-playlist-id="pl-house"]').click();
+        await page.locator("#playlistTracksBody .track-grid-row").first().waitFor();
+        await page.mouse.move(820, 420);
+        await page.waitForTimeout(300);
+        await record(async () => {
+          await page.waitForTimeout(700);
+          await clickOn(page, page.locator("#exportPlaylistBtn"), 300);
+          await page.locator("#statusText", { hasText: "Export complete" }).waitFor({ timeout: 20000 });
+          await moveTo(page, 820, 420, 20);
+          await page.waitForTimeout(2500);
+        }, { fullWindow: true });
+      },
+    },
   ];
+}
+
+async function openNav(page, view) {
+  await page.locator(`.nav-item[data-view="${view}"]`).click();
+  await page.waitForTimeout(300);
+}
+
+// Opens the USB view's Health & Diagnostics card.
+async function openHealthCard(page) {
+  await openNav(page, "usb");
+  await page.locator("#usbHealthCard").evaluate((card) => { card.open = true; });
+  await page.locator("#diagSections > *").first().waitFor();
+}
+
+// Shows a USB side list's item `name`, importing the list first if needed.
+async function openUsbListItem(page, { importBtn, list, name, body }) {
+  const item = page.locator(`${list} li`, { hasText: name });
+  if (!(await item.count())) await page.locator(importBtn).click();
+  await item.click();
+  await page.locator(`${body} .track-grid-row`).first().waitFor();
+  await waitProgressHidden(page);
+}
+
+// The progress footer lingers a moment after a job: wait it out.
+async function waitProgressHidden(page) {
+  await page.waitForFunction(() => !document.querySelector("#progressFooter")?.classList.contains("active"));
 }
 
 async function center(locator) {
@@ -560,6 +669,82 @@ function shots(fixture) {
         await page.locator("#openBackupsBtn").click();
         await page.locator("#backupsList .event-log-row").first().waitFor();
         await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
+    },
+    {
+      // docs/USB_IMPORT.md: a USB playlist open, one row hovered.
+      name: "usb-playlists",
+      caption: "USB Playlists: the playlists on the USB, and the open playlist's tracks",
+      opts: {},
+      async run(page) {
+        await openNav(page, "usb-playlists");
+        await openUsbListItem(page, { importBtn: "#refreshUsbBtn", list: "#usbPlaylists", name: "Bass", body: "#usbPlaylistTracks" });
+        await page.locator("#usbPlaylistTracks .track-grid-row").nth(1).locator(".track-grid-cell").nth(2).hover();
+        await page.waitForTimeout(500);
+      },
+    },
+    {
+      // docs/USB_IMPORT.md: a history session played on a player.
+      name: "usb-history",
+      caption: "USB History: the sessions played on the USB, and the open session's tracks",
+      opts: {},
+      async run(page) {
+        await openNav(page, "usb-history");
+        await openUsbListItem(page, { importBtn: "#refreshHistoryBtn", list: "#historyList", name: "HISTORY 002", body: "#historyTracks" });
+        await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
+    },
+    {
+      // docs/USB_EXPORT.md: the Player Menu editor.
+      name: "player-menu",
+      caption: "Player Menu: the browse categories the players show for this USB",
+      opts: {},
+      async run(page) {
+        await openNav(page, "usb-player-menu");
+        await page.locator("#usbPlayerMenuCurrent .player-menu-item", { hasText: "KEY" }).click();
+        await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
+    },
+    {
+      // docs/DIAGNOSTICS_REPAIRS.md: the diagnostics report of the exported
+      // USB.
+      name: "usb-diagnostics",
+      caption: "Health & Diagnostics: the USB's databases checked area by area",
+      opts: {},
+      async run(page) {
+        await openHealthCard(page);
+        await waitProgressHidden(page);
+        await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
+    },
+    {
+      // docs/DIAGNOSTICS_REPAIRS.md: the fixes proposed for a copy of that
+      // USB with a renamed audio file, an emptied analysis file and a
+      // playlist entry missing from the eDB.
+      name: "usb-repair-preview",
+      caption: "Preview Fixes for a renamed file, an empty analysis file and a playlist the PDB and eDB disagree on",
+      opts: { brokenUsb: true },
+      async run(page) {
+        await openHealthCard(page);
+        await page.locator("#previewRepairsBtn").click();
+        await page.locator("#diagRepairFixes li").first().waitFor();
+        await waitProgressHidden(page);
+        await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
+    },
+    {
+      // README / docs/USB_EXPORT.md: the Settings drawer.
+      name: "settings",
+      caption: "Settings: theme, analysis, export sync mode and backups",
+      opts: { tauriRuntime: true, appVersion: VERSION },
+      async run(page) {
+        await page.locator("#settingsBtn").click();
+        await page.mouse.move(VIEWPORT.width / 3, VIEWPORT.height - 2);
         await page.waitForTimeout(500);
       },
     },

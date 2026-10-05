@@ -4,7 +4,11 @@
 
 USB import reads USB database data from the selected USB root and builds one in-app view of playlists, histories, and tracks. When possible, the import path tolerates incomplete or corrupted USB metadata and returns warnings instead of failing the entire operation.
 
+![USB Playlists: the playlists on the USB, and the open playlist's tracks](assets/usb-playlists.png)
+
 For large USB libraries, import is metadata-first. Playlist and history lists can load without reading full waveform/artwork payload bytes for every track. Rich track previews are hydrated on demand when the UI requests them.
+
+![USB History: the sessions played on the USB, and the open session's tracks](assets/usb-history.png)
 
 ## Deep technical details
 

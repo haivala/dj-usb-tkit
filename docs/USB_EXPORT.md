@@ -15,11 +15,17 @@ In practical terms:
 - use `additive` when you want to keep existing USB playlist members and only append missing local members
 - both modes affect only the exported playlist target; unrelated playlists are left as-is
 
+The sync mode and the backup-before-export option are in Settings:
+
+![Settings, with the Export sync mode and the Backups options](assets/settings.png)
+
 Export is intentionally tied to a quick prep loop:
 
 - users can prepare playlists first
 - analyze only missing tracks for that playlist
 - then export once required analysis fields are present
+
+![Exporting a playlist: progress in the footer, then the export status](assets/export-playlist.gif)
 
 Export is designed for deterministic re-runs. Re-exporting the same playlist should produce predictable results, and optional cleanup can prune stale export-owned files when enabled.
 
@@ -342,6 +348,10 @@ Player browse-category metadata is stored in two related places:
 - eDB `menuItem` stores the newer-player category catalog.
 - eDB `category` stores the active/visible category subset and order through
   `isVisible` and `sequenceNo`.
+
+The USB view's Player Menu editor shows and changes the visible categories:
+
+![The Player Menu editor: hidden categories on the left, the player's menu on the right](assets/player-menu.png)
 
 App-initialized USBs seed the current 27-row PDB catalog, but existing USBs can
 carry smaller or source-specific PDB menu profiles. Normal playlist export

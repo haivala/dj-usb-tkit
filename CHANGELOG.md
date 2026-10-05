@@ -39,6 +39,12 @@
 
 ## Unreleased
 
+- **Chore:** the docs show more of the app: USB Playlists and History, the
+  Player Menu editor, Health & Diagnostics, the repair preview, Settings,
+  and a playlist export. Their USB views come from the demo library really
+  exported to a USB, and every screenshot and GIF has a caption and the app
+  version below it.
+
 ## 0.3.4
 
 **Severity:** feature
