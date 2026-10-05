@@ -29,16 +29,18 @@ turns the chip on:
 | Genre | yes | yes |
 | BPM, key, length | yes | yes (plus sample rate) |
 | Cover image | yes (rekordbox's artwork file) | only a cover image *file* next to the track; embedded covers come from the app's own analysis |
+| First beat (beat-grid anchor) | yes, from rekordbox's beat grid | yes, the first beat of Mixxx's beat grid (`BeatGrid-2.0` / `BeatMap-1.0`) |
 | Waveform | rekordbox's own analysis files are used in place | no; the app's analysis makes one |
 | Hot cues | yes: hot cues (and hot loops) on pads A–H, with colour and name, then memory cues (see below) | yes: hot cues and saved loops on pads 1–8, with colour and label; the main cue becomes the playback-start cue |
 
-Mixxx stores its waveforms and beat grids in its own formats, so Mixxx tracks
-need the app's analysis before export, like any folder track. rekordbox tracks
+Mixxx stores its waveforms in its own format, so Mixxx tracks need the app's
+analysis before export, like any folder track. Only the first beat of a Mixxx
+beat grid is used; the app's grid is built from it and the BPM. rekordbox tracks
 point at rekordbox's analysis files instead.
 
 The first analysis of an imported track keeps the imported BPM and key, so a
 tempo or key the DJ corrected in rekordbox or Mixxx isn't lost, and writes
-that BPM into the beat grid. **Reanalyze** on the analyzed track replaces
+that BPM into the beat grid, starting at the imported first beat. **Reanalyze** on the analyzed track replaces
 them with the app's own detection. A BPM you set yourself in the cue editor
 behaves the same way. The BPM tooltip shows where the value came from
 ("From Mixxx", "From rekordbox", "Manually set").
@@ -184,9 +186,10 @@ ids overlap). The list commands return the matching local playlist as
 `existingPlaylist`, and an import saves into it (`save_imported_playlist`).
 
 `tracks.master_db_source` and `tracks.mixxx_db_source` record where a track
-came from. An import that fills in a track's BPM or key sets
-`bpm_analyzer` / `tonality_source` to `rekordbox` or `mixxx` (a cue-editor edit
-sets `user`). `analysis::kept_analysis_values` keeps a value with one of those
+came from. An import that fills in a track's BPM, key or first beat sets
+`bpm_analyzer` / `tonality_source` / `first_beat_ms_source` to `rekordbox` or
+`mixxx` (a cue-editor edit sets `user`), only over a value that is missing or
+came from the same library, unless forced. `analysis::kept_analysis_values` keeps a value with one of those
 sources when the track has no waveform yet (its first analysis); a track that
 already has one is reanalyzed and gets the detected values. The library filter requests (`browse_source_files`,
 `list_matching_track_ids`, `add_library_selection_to_playlist`,

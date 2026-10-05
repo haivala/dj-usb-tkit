@@ -2,10 +2,11 @@
 //!
 //! Mixxx keeps its library in a plain (unencrypted) SQLite file. Tracks are
 //! upserted into the local `tracks` table flagged `mixxx_db_source`, the same
-//! way `scan_master_db` imports a rekordbox library. Mixxx waveforms/beat
-//! grids use Mixxx's own formats, so imported tracks go through the app's own
-//! analysis like any folder track; hot cues are imported straight into
-//! `track_cues` (they only need a position, not analysis).
+//! way `scan_master_db` imports a rekordbox library. Mixxx waveforms use
+//! Mixxx's own format, so imported tracks go through the app's own analysis
+//! like any folder track; hot cues are imported straight into `track_cues`
+//! (they only need a position, not analysis), and the first beat of Mixxx's
+//! beat grid becomes the track's first beat, as rekordbox's does.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -123,6 +124,124 @@ fn mixxx_samples_to_ms(position: f64, sample_rate: u32) -> Option<u32> {
     (ms <= f64::from(u32::MAX)).then_some(ms as u32)
 }
 
+/// The first beat of a Mixxx beat grid (`library.beats`), in ms. Mixxx
+/// stores it as protobuf: a constant grid (`BeatGrid-2.0`) as its BPM and
+/// first beat, a variable one (`BeatMap-1.0`) as every beat. Positions are in
+/// frames, not the interleaved samples of `cues`. A grid starting before the
+/// track is moved forward by whole beats, which leaves the grid unchanged.
+fn mixxx_first_beat_ms(version: Option<&str>, beats: &[u8], sample_rate: u32) -> Option<u32> {
+    if sample_rate == 0 {
+        return None;
+    }
+    let frame = match version? {
+        "BeatGrid-2.0" => {
+            let fields = proto_fields(beats)?;
+            let bpm = proto_message(&fields, 1)
+                .and_then(|bpm| proto_fixed64(&bpm, 1))
+                .map(f64::from_bits)
+                .filter(|bpm| bpm.is_finite() && *bpm > 0.0)?;
+            let first = mixxx_beat_frame(&proto_message(&fields, 2)?)?;
+            let beat = 60.0 * f64::from(sample_rate) / bpm;
+            if first < 0.0 {
+                first + (-first / beat).ceil() * beat
+            } else {
+                first
+            }
+        }
+        "BeatMap-1.0" => proto_fields(beats)?
+            .iter()
+            .filter_map(|(field, value)| match value {
+                ProtoValue::Bytes(beat) if *field == 1 => proto_fields(beat),
+                _ => None,
+            })
+            .filter_map(|beat| mixxx_beat_frame(&beat))
+            .find(|frame| *frame >= 0.0)?,
+        _ => return None,
+    };
+    let ms = (frame / f64::from(sample_rate) * 1000.0).round();
+    (ms <= f64::from(u32::MAX)).then_some(ms as u32)
+}
+
+/// A Mixxx `Beat`'s frame position; `None` for a beat switched off.
+fn mixxx_beat_frame(beat: &[(u64, ProtoValue<'_>)]) -> Option<f64> {
+    let enabled = proto_varint(beat, 2).is_none_or(|v| v != 0);
+    // int32: a negative position is sent sign-extended to 64 bits.
+    let frame = proto_varint(beat, 1).map_or(0, |v| v as i64 as i32);
+    enabled.then_some(f64::from(frame))
+}
+
+enum ProtoValue<'a> {
+    Varint(u64),
+    Fixed64(u64),
+    Bytes(&'a [u8]),
+    Fixed32,
+}
+
+/// The fields of one protobuf message, in order; `None` if it is malformed.
+fn proto_fields(mut buf: &[u8]) -> Option<Vec<(u64, ProtoValue<'_>)>> {
+    fn varint(buf: &mut &[u8]) -> Option<u64> {
+        let mut value = 0u64;
+        for shift in (0..64).step_by(7) {
+            let (&byte, rest) = buf.split_first()?;
+            *buf = rest;
+            value |= u64::from(byte & 0x7f) << shift;
+            if byte & 0x80 == 0 {
+                return Some(value);
+            }
+        }
+        None
+    }
+    let mut fields = Vec::new();
+    while !buf.is_empty() {
+        let key = varint(&mut buf)?;
+        let value = match key & 7 {
+            0 => ProtoValue::Varint(varint(&mut buf)?),
+            1 => {
+                let (bytes, rest) = buf.split_first_chunk::<8>()?;
+                buf = rest;
+                ProtoValue::Fixed64(u64::from_le_bytes(*bytes))
+            }
+            2 => {
+                let len = usize::try_from(varint(&mut buf)?).ok()?;
+                let bytes = buf.get(..len)?;
+                buf = &buf[len..];
+                ProtoValue::Bytes(bytes)
+            }
+            5 => {
+                buf = buf.get(4..)?;
+                ProtoValue::Fixed32
+            }
+            _ => return None,
+        };
+        fields.push((key >> 3, value));
+    }
+    Some(fields)
+}
+
+fn proto_varint(fields: &[(u64, ProtoValue<'_>)], number: u64) -> Option<u64> {
+    fields.iter().rev().find_map(|(field, value)| match value {
+        ProtoValue::Varint(v) if *field == number => Some(*v),
+        _ => None,
+    })
+}
+
+fn proto_fixed64(fields: &[(u64, ProtoValue<'_>)], number: u64) -> Option<u64> {
+    fields.iter().rev().find_map(|(field, value)| match value {
+        ProtoValue::Fixed64(v) if *field == number => Some(*v),
+        _ => None,
+    })
+}
+
+fn proto_message<'a>(
+    fields: &[(u64, ProtoValue<'a>)],
+    number: u64,
+) -> Option<Vec<(u64, ProtoValue<'a>)>> {
+    fields.iter().rev().find_map(|(field, value)| match value {
+        ProtoValue::Bytes(bytes) if *field == number => proto_fields(bytes),
+        _ => None,
+    })
+}
+
 /// One row of Mixxx's `cues` table.
 #[derive(Debug, Clone)]
 pub(crate) struct MixxxCue {
@@ -232,6 +351,7 @@ struct MixxxTrack {
     sample_rate: Option<u32>,
     cover_location: Option<String>,
     genre: Option<String>,
+    first_beat_ms: Option<u32>,
 }
 
 fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
@@ -241,7 +361,7 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
         r#"
         SELECT l.id, tl.location, l.title, l.artist, l.album, l.bpm,
                {key_id}, l.key, l.duration, l.samplerate, {cover_type}, {cover_location},
-               {genre}
+               {genre}, {beats}, {beats_version}
         FROM library l
         JOIN track_locations tl ON tl.id = l.location
         WHERE IFNULL({mixxx_deleted}, 0) = 0
@@ -252,6 +372,8 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
         cover_type = column_or_null(&library_cols, "l", "coverart_type"),
         cover_location = column_or_null(&library_cols, "l", "coverart_location"),
         genre = column_or_null(&library_cols, "l", "genre"),
+        beats = column_or_null(&library_cols, "l", "beats"),
+        beats_version = column_or_null(&library_cols, "l", "beats_version"),
         mixxx_deleted = column_or_null(&library_cols, "l", "mixxx_deleted"),
         fs_deleted = column_or_null(&location_cols, "tl", "fs_deleted"),
     );
@@ -264,6 +386,12 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
             let key_text: Option<String> = row.get(7)?;
             let cover_type: Option<i64> = row.get(10)?;
             let cover_location: Option<String> = row.get(11)?;
+            let sample_rate = row
+                .get::<_, Option<i64>>(9)?
+                .and_then(|sr| u32::try_from(sr).ok())
+                .filter(|sr| *sr > 0);
+            let beats: Option<Vec<u8>> = row.get(13)?;
+            let beats_version: Option<String> = row.get(14)?;
             Ok(MixxxTrack {
                 mixxx_id: row.get(0)?,
                 file_path: row.get(1)?,
@@ -276,10 +404,7 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
                     .get::<_, Option<f64>>(8)?
                     .filter(|d| *d > 0.0)
                     .map(|d| (d * 1000.0).round() as i64),
-                sample_rate: row
-                    .get::<_, Option<i64>>(9)?
-                    .and_then(|sr| u32::try_from(sr).ok())
-                    .filter(|sr| *sr > 0),
+                sample_rate,
                 cover_location: cover_location
                     .filter(|_| cover_type == Some(MIXXX_COVER_TYPE_FILE))
                     .filter(|l| !l.trim().is_empty()),
@@ -288,6 +413,9 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
                     .as_deref()
                     .and_then(non_empty_db_value)
                     .map(str::to_string),
+                first_beat_ms: beats.zip(sample_rate).and_then(|(beats, sr)| {
+                    mixxx_first_beat_ms(beats_version.as_deref(), &beats, sr)
+                }),
             })
         })
         .map_err(|e| BackendError::Validation(format!("Mixxx library row error: {e}")))?
@@ -523,11 +651,12 @@ impl<'a> MixxxTrackImporter<'a> {
 
         if existing_id.is_some() {
             tx.execute(
-                // Mixxx's BPM / key replace the track's when it has none, when
-                // they still came from Mixxx (so a tempo corrected in Mixxx comes
-                // across), or when forced -- never a value the user edited or the
-                // app's analysis set otherwise. A value taken is marked as Mixxx's,
-                // so the first analysis keeps it (see `kept_analysis_values`).
+                // Mixxx's BPM / key / first beat replace the track's when it has
+                // none, when they still came from Mixxx (so a tempo corrected in
+                // Mixxx comes across), or when forced -- never a value the user
+                // edited or the app's analysis set otherwise. A value taken is
+                // marked as Mixxx's, so the first analysis keeps it (see
+                // `kept_analysis_values`).
                 // SET expressions see the row's old values.
                 r#"UPDATE tracks SET
                     title = ?1, artist = ?2, album = ?3,
@@ -544,6 +673,12 @@ impl<'a> MixxxTrackImporter<'a> {
                     tonality = CASE WHEN ?5 IS NOT NULL
                                      AND (?13 OR tonality IS NULL OR tonality_source = 'mixxx')
                                     THEN ?5 ELSE tonality END,
+                    first_beat_ms_source = CASE WHEN ?15 IS NOT NULL
+                                                 AND (?13 OR first_beat_ms IS NULL OR first_beat_ms_source = 'mixxx')
+                                                THEN 'mixxx' ELSE first_beat_ms_source END,
+                    first_beat_ms = CASE WHEN ?15 IS NOT NULL
+                                          AND (?13 OR first_beat_ms IS NULL OR first_beat_ms_source = 'mixxx')
+                                         THEN ?15 ELSE first_beat_ms END,
                     duration_ms = COALESCE(duration_ms, ?6),
                     sample_rate_hz = COALESCE(sample_rate_hz, ?7),
                     artwork_path = COALESCE(?8, artwork_path),
@@ -567,6 +702,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     track_id,
                     self.force,
                     t.genre,
+                    t.first_beat_ms,
                 ],
             )?;
             self.updated += 1;
@@ -576,10 +712,12 @@ impl<'a> MixxxTrackImporter<'a> {
                     id, title, artist, album, bpm, tonality, file_path, format_ext,
                     duration_ms, sample_rate_hz, artwork_path, match_fingerprint,
                     mixxx_db_source, created_at, updated_at,
-                    bpm_analyzer, tonality_source, genre
+                    bpm_analyzer, tonality_source, genre,
+                    first_beat_ms, first_beat_ms_source
                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
                      CASE WHEN ?5 IS NOT NULL THEN 'mixxx' END,
-                     CASE WHEN ?6 IS NOT NULL THEN 'mixxx' END, ?14)"#,
+                     CASE WHEN ?6 IS NOT NULL THEN 'mixxx' END, ?14,
+                     ?15, CASE WHEN ?15 IS NOT NULL THEN 'mixxx' END)"#,
                 params![
                     track_id,
                     t.title,
@@ -595,6 +733,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     fingerprint,
                     self.now,
                     t.genre,
+                    t.first_beat_ms,
                 ],
             )?;
             self.existing.insert(t.file_path.clone(), track_id.clone());
@@ -960,6 +1099,115 @@ mod tests {
         assert_eq!(mixxx_key_name(Some(0), Some(" 8A ")).as_deref(), Some("8A"));
         assert_eq!(mixxx_key_name(None, Some("not a key")), None);
         assert_eq!(mixxx_key_name(Some(25), None), None);
+    }
+
+    /// Protobuf for a Mixxx `Beat`.
+    fn proto_beat(frame: i32, enabled: Option<bool>) -> Vec<u8> {
+        let mut out = vec![0x08];
+        proto_varint_bytes(i64::from(frame) as u64, &mut out);
+        if let Some(enabled) = enabled {
+            out.extend([0x10, u8::from(enabled)]);
+        }
+        out
+    }
+
+    fn proto_varint_bytes(mut v: u64, out: &mut Vec<u8>) {
+        while v >= 0x80 {
+            out.push((v as u8) | 0x80);
+            v >>= 7;
+        }
+        out.push(v as u8);
+    }
+
+    fn proto_bytes(field: u8, bytes: &[u8], out: &mut Vec<u8>) {
+        out.push(field << 3 | 2);
+        proto_varint_bytes(bytes.len() as u64, out);
+        out.extend_from_slice(bytes);
+    }
+
+    /// Protobuf for a Mixxx `BeatGrid` (`BeatGrid-2.0`).
+    fn proto_beat_grid(bpm: f64, first_frame: i32) -> Vec<u8> {
+        let mut bpm_message = vec![0x09];
+        bpm_message.extend(bpm.to_bits().to_le_bytes());
+        bpm_message.extend([0x10, 1]); // source, ignored
+        let mut out = Vec::new();
+        proto_bytes(1, &bpm_message, &mut out);
+        proto_bytes(2, &proto_beat(first_frame, None), &mut out);
+        out
+    }
+
+    /// Protobuf for a Mixxx `BeatMap` (`BeatMap-1.0`).
+    fn proto_beat_map(beats: &[(i32, Option<bool>)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for &(frame, enabled) in beats {
+            proto_bytes(1, &proto_beat(frame, enabled), &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn mixxx_first_beat_reads_beat_grids_in_frames() {
+        let grid = proto_beat_grid(120.0, 22_050);
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatGrid-2.0"), &grid, 44_100),
+            Some(500)
+        );
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatGrid-2.0"), &grid, 48_000),
+            Some(459)
+        );
+        // A grid starting before the track moves forward by whole beats
+        // (22 050 frames at 120 BPM).
+        let early = proto_beat_grid(120.0, -11_025);
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatGrid-2.0"), &early, 44_100),
+            Some(250)
+        );
+        // A grid with no BPM can't be placed.
+        let mut no_bpm = Vec::new();
+        proto_bytes(2, &proto_beat(22_050, None), &mut no_bpm);
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatGrid-2.0"), &no_bpm, 44_100),
+            None
+        );
+    }
+
+    #[test]
+    fn mixxx_first_beat_reads_the_first_enabled_beat_of_a_beat_map() {
+        let map = proto_beat_map(&[
+            (-500, None),
+            (1_000, Some(false)),
+            (44_100, Some(true)),
+            (66_150, None),
+        ]);
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatMap-1.0"), &map, 44_100),
+            Some(1000)
+        );
+        let none_enabled = proto_beat_map(&[(1_000, Some(false))]);
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatMap-1.0"), &none_enabled, 44_100),
+            None
+        );
+    }
+
+    #[test]
+    fn mixxx_first_beat_ignores_unknown_or_broken_grids() {
+        let grid = proto_beat_grid(120.0, 22_050);
+        assert_eq!(mixxx_first_beat_ms(None, &grid, 44_100), None);
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatGrid-1.0"), &grid, 44_100),
+            None
+        );
+        assert_eq!(mixxx_first_beat_ms(Some("BeatGrid-2.0"), &grid, 0), None);
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatGrid-2.0"), &grid[..5], 44_100),
+            None
+        );
+        assert_eq!(
+            mixxx_first_beat_ms(Some("BeatMap-1.0"), &[0xff; 3], 44_100),
+            None
+        );
     }
 
     #[test]
@@ -1777,6 +2025,101 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM playlists", [], |r| r.get(0))
             .unwrap();
         assert_eq!(playlists, 2);
+    }
+
+    #[test]
+    fn scan_mixxx_db_imports_the_first_beat_of_mixxx_beat_grids() {
+        let mixxx_root = tempfile::tempdir().expect("mixxx root");
+        let media_root = tempfile::tempdir().expect("media root");
+        let (_service_dir, service) = test_service();
+        let paths: Vec<PathBuf> = ["grid.mp3", "map.mp3", "none.mp3"]
+            .iter()
+            .map(|n| media_root.path().join(n))
+            .collect();
+        for p in &paths {
+            std::fs::write(p, b"audio").expect("write media");
+        }
+        let track = |path: &Path, title| (path.to_str().unwrap().to_string(), title);
+        let tracks = [
+            track(&paths[0], "Grid"),
+            track(&paths[1], "Map"),
+            track(&paths[2], "None"),
+        ];
+        let fixture: Vec<FixtureTrack<'_>> = tracks
+            .iter()
+            .map(|(path, title)| (path.as_str(), *title, Some(22), 44_100, 0, None, 0))
+            .collect();
+        let mixxx_path = create_mixxx_db_fixture(mixxx_root.path(), &fixture, &[]);
+        let set_grid = |id: i64, version: &str, beats: Vec<u8>| {
+            Connection::open(&mixxx_path)
+                .expect("open mixxx fixture")
+                .execute(
+                    "UPDATE library SET beats_version = ?2, beats = ?3 WHERE id = ?1",
+                    params![id, version, beats],
+                )
+                .expect("set beats");
+        };
+        Connection::open(&mixxx_path)
+            .expect("open mixxx fixture")
+            .execute_batch(
+                "ALTER TABLE library ADD COLUMN beats BLOB;
+                 ALTER TABLE library ADD COLUMN beats_version TEXT;",
+            )
+            .expect("add beats columns");
+        set_grid(1, "BeatGrid-2.0", proto_beat_grid(124.0, 22_050));
+        set_grid(2, "BeatMap-1.0", proto_beat_map(&[(44_100, None)]));
+        let scan = || {
+            service
+                .scan_mixxx_db(ScanMixxxDbRequest {
+                    path: Some(mixxx_path.to_string_lossy().to_string()),
+                })
+                .expect("scan mixxx db");
+        };
+        let conn = || service.db.connect().expect("service db");
+        let beat = |title: &str| -> (Option<u32>, Option<String>) {
+            conn()
+                .query_row(
+                    "SELECT first_beat_ms, first_beat_ms_source FROM tracks WHERE title = ?1",
+                    params![title],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("track row")
+        };
+
+        scan();
+        assert_eq!(beat("Grid"), (Some(500), Some("mixxx".to_string())));
+        assert_eq!(beat("Map"), (Some(1000), Some("mixxx".to_string())));
+        assert_eq!(beat("None"), (None, None));
+
+        // The first analysis keeps it, with the Mixxx BPM it belongs to.
+        let ids: Vec<String> = ["Grid", "None"]
+            .iter()
+            .map(|title| {
+                conn()
+                    .query_row("SELECT id FROM tracks WHERE title = ?1", [title], |r| {
+                        r.get(0)
+                    })
+                    .expect("track id")
+            })
+            .collect();
+        let analysis =
+            super::super::analysis::collect_tracks_for_analysis(&conn(), &ids).expect("collect");
+        assert_eq!(analysis[0].kept_first_beat_ms, Some(500));
+        assert_eq!(analysis[1].kept_first_beat_ms, None);
+
+        // A grid moved in Mixxx comes across; one moved in the app is kept.
+        set_grid(1, "BeatGrid-2.0", proto_beat_grid(124.0, 33_075));
+        set_grid(2, "BeatMap-1.0", proto_beat_map(&[(88_200, None)]));
+        conn()
+            .execute(
+                "UPDATE tracks SET first_beat_ms = 900, first_beat_ms_source = 'user'
+                 WHERE title = 'Map'",
+                [],
+            )
+            .expect("move first beat");
+        scan();
+        assert_eq!(beat("Grid"), (Some(750), Some("mixxx".to_string())));
+        assert_eq!(beat("Map"), (Some(900), Some("user".to_string())));
     }
 
     #[test]

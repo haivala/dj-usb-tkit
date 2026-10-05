@@ -80,8 +80,9 @@ What an analysis run does to a track depends on whether the track is already
 analyzed (has its waveform); the buttons' tooltips say the same:
 
 - **Analyze** (track row) and **Analyze Missing Tracks** (playlist page): a
-  first analysis. They add the missing waveform, BPM, key and first beat; a BPM
-  or key you edited, or one imported from rekordbox or Mixxx, is kept.
+  first analysis. They add the missing waveform, BPM, key and first beat; a BPM,
+  key or first beat you edited, or one imported from rekordbox or Mixxx, is
+  kept (an imported first beat only together with the BPM imported with it).
 - **Reanalyze** (track row, once analyzed): resets the waveform, BPM, key and
   first beat to a fresh analysis, replacing imported or edited values. Cues
   are kept.
@@ -148,7 +149,10 @@ The beat-grid anchor `first_beat_ms` is estimated at analysis time
 (see "Stratum BPM and first beat" above; `estimate_first_beat_ms` from the
 waveform when analysis gives none) but is **user-editable** from the track-detail
 ("Cues") modal alongside cue points. Once edited, `first_beat_ms_source` flips
-to `'user'` and re-analysis keeps the user's value instead of re-estimating.
+to `'user'`; an import sets `'rekordbox'` or `'mixxx'`. Like the BPM and key,
+a first analysis keeps an edited first beat, and an imported one when the BPM
+imported with it is kept; a reanalysis places a new one. Every first beat an
+analysis places is stored as `'estimated'`, even when it lands on the old value.
 See `docs/CUE_EDITOR.md`, `docs/APP_DATA_MODEL.md` (TrackCue) and `docs/USB_EXPORT.md`.
 
 Waveform output has two resolutions. The frontend receives a downsampled preview (`2400` bins), but local `DAT/EXT/2EX` cache files are generated from detail-resolution waveform data: `max(2400, ceil(duration_seconds * 150) + 4)`. This keeps `PWV3`, `PWV5`, and `PWV7` dense enough for CDJ detailed waveform views while avoiding large UI payloads. See `docs/WAVEFORMS.md`.

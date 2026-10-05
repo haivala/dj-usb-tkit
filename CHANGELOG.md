@@ -70,6 +70,10 @@
 - **Improvement:** the app checks for updates again every 6 hours, and
   a button next to the version in Settings checks right away. A check
   that can't reach GitHub now says so instead of looking up to date.
+- **Improvement:** the Mixxx import takes each track's first beat from its
+  Mixxx beat grid, so the app's beat grid lines up with the one in Mixxx,
+  including a grid you adjusted there. A first beat you moved in the cue
+  editor is kept unless you force the import.
 - **Improvement:** analysis finds BPMs that fall between whole and half
   values, such as 174.79, instead of rounding them to the nearest half BPM,
   so the beat grid no longer drifts through the track. Tracks whose tempo is
