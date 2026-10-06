@@ -60,7 +60,9 @@
 - **Improvement:** the track list's format and BPM values are plain text,
   not boxes. When you hover a row, the values with more details get a dotted
   underline, and the pointer turns into a question mark over them. A format
-  that needs attention keeps its coloured box.
+  that needs attention keeps its coloured box, which in the dark theme is
+  now a soft tint instead of a bright fill, and no longer wraps onto two
+  lines.
 - **Chore:** the docs show more of the app: USB Playlists and History, the
   Player Menu editor, Health & Diagnostics, the repair preview, Settings,
   and a playlist export. Their USB views come from the demo library really

@@ -85,6 +85,12 @@
   --action-btn-border: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.3);
   --action-btn-hover-bg: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.12);
   --badge-active-bg: hsla(calc(var(--accent-h) + 30), 75%, 55%, 0.12);
+  --fmt-warn-bg: #ffdca8;
+  --fmt-warn-fg: #7a3e00;
+  --fmt-warn-border: #f1b55a;
+  --fmt-autofix-bg: #cfe8ff;
+  --fmt-autofix-fg: #0b4f8a;
+  --fmt-autofix-border: #7bb8ec;
   --playhead-bg:  rgba(0,0,0,0.85);
   --playhead-glow: rgba(0,0,0,0.5);
   --wave-prestart-dim: rgba(255,255,255,0.6);
@@ -130,6 +136,12 @@
     --action-btn-border: hsla(var(--accent-h), var(--accent-s), 65%, 0.3);
     --action-btn-hover-bg: hsla(var(--accent-h), var(--accent-s), 65%, 0.2);
     --badge-active-bg: hsla(calc(var(--accent-h) + 30), 75%, 60%, 0.15);
+    --fmt-warn-bg: hsla(35, 90%, 55%, 0.15);
+    --fmt-warn-fg: hsl(38, 95%, 70%);
+    --fmt-warn-border: hsla(35, 80%, 50%, 0.4);
+    --fmt-autofix-bg: hsla(205, 85%, 55%, 0.15);
+    --fmt-autofix-fg: hsl(205, 90%, 75%);
+    --fmt-autofix-border: hsla(205, 70%, 50%, 0.4);
     --playhead-bg:  rgba(255,255,255,0.95);
     --playhead-glow: rgba(255,255,255,0.7);
     --wave-prestart-dim: rgba(0,0,0,0.55);
@@ -175,6 +187,12 @@
   --action-btn-border: hsla(var(--accent-h), var(--accent-s), 65%, 0.3);
   --action-btn-hover-bg: hsla(var(--accent-h), var(--accent-s), 65%, 0.2);
   --badge-active-bg: hsla(calc(var(--accent-h) + 30), 75%, 60%, 0.15);
+  --fmt-warn-bg: hsla(35, 90%, 55%, 0.15);
+  --fmt-warn-fg: hsl(38, 95%, 70%);
+  --fmt-warn-border: hsla(35, 80%, 50%, 0.4);
+  --fmt-autofix-bg: hsla(205, 85%, 55%, 0.15);
+  --fmt-autofix-fg: hsl(205, 90%, 75%);
+  --fmt-autofix-border: hsla(205, 70%, 50%, 0.4);
   --playhead-bg:  rgba(255,255,255,0.95);
   --playhead-glow: rgba(255,255,255,0.7);
   --wave-prestart-dim: rgba(0,0,0,0.55);
@@ -1612,11 +1630,11 @@ td.num, th.num {
 /* BPM and key are fixed widths that fit their widest pill plus the cell
    padding: "107.97" and "12A" in the 12px mono pill font. */
 .track-grid--library {
-  --track-grid-cols: 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 9ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 .track-grid--no-select {
-  --track-grid-cols: 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 9ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 /* App playlist tracks reserve a leading column for the drag-to-reorder
@@ -1624,7 +1642,7 @@ td.num, th.num {
    template, since USB playlist/history tracks use that same class but
    never reorder. */
 .track-grid[data-body-id="playlistTracksBody"] {
-  --track-grid-cols: 24px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 7ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 24px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 9ch) 8ch 78px 58px minmax(5ch, 14ch);
 }
 
 .track-grid-row {
@@ -1900,6 +1918,7 @@ input[type="checkbox"]:disabled {
 .format-badge {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   font-weight: 600;
@@ -1916,21 +1935,28 @@ input[type="checkbox"]:disabled {
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
+/* Pills are badges, not text to select: a plain arrow, or the help cursor
+   where there's a tooltip to read. */
+.bpm-pill,
+.key-pill,
+.format-badge {
+  cursor: default;
+}
 .bpm-pill[data-tooltip],
 .format-badge[data-tooltip] {
   cursor: help;
 }
 
 .format-badge.warn {
-  background: #ffdca8;
-  color: #7a3e00;
-  border-color: #f1b55a;
+  background: var(--fmt-warn-bg);
+  color: var(--fmt-warn-fg);
+  border-color: var(--fmt-warn-border);
 }
 
 .format-badge.autofix {
-  background: #cfe8ff;
-  color: #0b4f8a;
-  border-color: #7bb8ec;
+  background: var(--fmt-autofix-bg);
+  color: var(--fmt-autofix-fg);
+  border-color: var(--fmt-autofix-border);
 }
 
 /* ── lists (USB/History sidebar) ────────────────────── */
