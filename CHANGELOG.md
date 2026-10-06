@@ -49,6 +49,8 @@
   instead of a white square.
 - **Fix:** in the light theme, the track list's keys are readable. Their
   text was a pale colour meant for the dark theme.
+- **Fix:** AIFF files with padding before the audio can be analyzed and
+  played. They used to fail with "No support for AIFF block-aligned data".
 - **Fix:** the cue editor button is disabled for a track that has no
   waveform, even if it has a BPM and key. Its tooltip says to analyze the
   track first.

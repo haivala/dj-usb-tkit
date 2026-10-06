@@ -1785,12 +1785,12 @@ fn duration_ms_from_decoded(sample_count: usize, sample_rate: u32) -> Option<u64
 
 pub(crate) fn detect_track_duration_ms(path: &Path) -> Option<u64> {
     // Deterministic single-source duration resolution: Symphonia metadata only.
-    let file = File::open(path).ok()?;
+    let source = crate::symphonia_decoder::open_media_source(path).ok()?;
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
         hint.with_extension(ext);
     }
-    let source = MediaSourceStream::new(Box::new(file), Default::default());
+    let source = MediaSourceStream::new(source, Default::default());
     let probed = symphonia::default::get_probe()
         .format(
             &hint,
@@ -2179,12 +2179,12 @@ fn decode_audio_mono_samples_symphonia(
     path: &Path,
     max_samples: usize,
 ) -> Result<(Vec<f32>, u32), String> {
-    let file = File::open(path).map_err(|err| err.to_string())?;
+    let source = crate::symphonia_decoder::open_media_source(path).map_err(|err| err.to_string())?;
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
         hint.with_extension(ext);
     }
-    let source = MediaSourceStream::new(Box::new(file), Default::default());
+    let source = MediaSourceStream::new(source, Default::default());
     let probed = symphonia::default::get_probe()
         .format(
             &hint,

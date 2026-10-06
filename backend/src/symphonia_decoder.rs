@@ -71,6 +71,150 @@ impl Seek for FileMediaSource {
     }
 }
 
+/// Opens `path` as a symphonia `MediaSource`. Every symphonia reader in the backend goes
+/// through here, so they all handle the same files.
+///
+/// AIFF/AIFF-C files whose `SSND` chunk has a non-zero `offset` (padding between the chunk
+/// header and the first sample; some encoders write a few KB of it) are rejected by
+/// symphonia 0.5 ("No support for AIFF block-aligned data"). For those, the file is served
+/// through `AiffSsndOffsetSource`, which hides the padding so the file reads like one with
+/// `offset == 0`.
+pub(crate) fn open_media_source(path: &Path) -> std::io::Result<Box<dyn MediaSource>> {
+    let mut file = File::open(path)?;
+    let len = file.metadata()?.len();
+    if let Some(layout) = AiffSsndOffsetSource::detect(&mut file, len) {
+        file.seek(SeekFrom::Start(0))?;
+        return Ok(Box::new(AiffSsndOffsetSource::new(file, len, layout)));
+    }
+    file.seek(SeekFrom::Start(0))?;
+    Ok(Box::new(FileMediaSource::new(file)))
+}
+
+/// Where an AIFF file's `SSND` padding sits, from `AiffSsndOffsetSource::detect`.
+struct AiffSsndLayout {
+    form_size: u32,
+    ssnd_pos: u64,
+    ssnd_size: u32,
+    offset: u32,
+}
+
+/// A view of an AIFF file with its `SSND` padding cut out: the FORM and SSND sizes shrink
+/// by the padding, the SSND `offset`/`blockSize` fields read as 0, and everything after
+/// them is shifted back over the padding. Positions are in that view.
+struct AiffSsndOffsetSource {
+    file: File,
+    /// Up to here the view is the file itself (apart from `patches`).
+    split: u64,
+    /// Bytes skipped at `split`: the padding.
+    skip: u64,
+    len: u64,
+    /// Rewritten big-endian u32 fields: (position, value).
+    patches: [(u64, [u8; 4]); 4],
+    pos: u64,
+}
+
+impl AiffSsndOffsetSource {
+    /// Walks the chunks of a FORM AIFF/AIFC file and returns its SSND layout when the
+    /// `offset` is non-zero; `None` for anything else (including other formats).
+    fn detect(file: &mut File, len: u64) -> Option<AiffSsndLayout> {
+        let mut header = [0u8; 12];
+        file.seek(SeekFrom::Start(0)).ok()?;
+        file.read_exact(&mut header).ok()?;
+        if &header[0..4] != b"FORM" || !(&header[8..12] == b"AIFF" || &header[8..12] == b"AIFC") {
+            return None;
+        }
+        let form_size = u32::from_be_bytes(header[4..8].try_into().ok()?);
+        let mut pos = 12u64;
+        while pos + 8 <= len {
+            let mut chunk = [0u8; 8];
+            file.seek(SeekFrom::Start(pos)).ok()?;
+            file.read_exact(&mut chunk).ok()?;
+            let size = u32::from_be_bytes(chunk[4..8].try_into().ok()?);
+            if &chunk[0..4] == b"SSND" {
+                let mut fields = [0u8; 4];
+                file.read_exact(&mut fields).ok()?;
+                let offset = u32::from_be_bytes(fields);
+                // The padding must fit in the chunk, after the 8 bytes of offset/blockSize.
+                if offset == 0 || u64::from(offset) + 8 > u64::from(size) {
+                    return None;
+                }
+                return Some(AiffSsndLayout { form_size, ssnd_pos: pos, ssnd_size: size, offset });
+            }
+            pos += 8 + u64::from(size) + u64::from(size & 1);
+        }
+        None
+    }
+
+    fn new(file: File, len: u64, layout: AiffSsndLayout) -> Self {
+        let AiffSsndLayout { form_size, ssnd_pos, ssnd_size, offset } = layout;
+        Self {
+            file,
+            split: ssnd_pos + 16,
+            skip: u64::from(offset),
+            len: len - u64::from(offset),
+            patches: [
+                (4, form_size.saturating_sub(offset).to_be_bytes()),
+                (ssnd_pos + 4, (ssnd_size - offset).to_be_bytes()),
+                (ssnd_pos + 8, [0; 4]),
+                (ssnd_pos + 12, [0; 4]),
+            ],
+            pos: 0,
+        }
+    }
+}
+
+impl MediaSource for AiffSsndOffsetSource {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.len)
+    }
+}
+
+impl Read for AiffSsndOffsetSource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.pos >= self.len || buf.is_empty() {
+            return Ok(0);
+        }
+        let start = self.pos;
+        let (real, max) = if start < self.split {
+            (start, (self.split - start) as usize)
+        } else {
+            (start + self.skip, (self.len - start) as usize)
+        };
+        let want = buf.len().min(max);
+        self.file.seek(SeekFrom::Start(real))?;
+        let n = self.file.read(&mut buf[..want])?;
+        for (at, bytes) in &self.patches {
+            for (i, byte) in bytes.iter().enumerate() {
+                let p = at + i as u64;
+                if p >= start && p < start + n as u64 {
+                    buf[(p - start) as usize] = *byte;
+                }
+            }
+        }
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl Seek for AiffSsndOffsetSource {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let next = match pos {
+            SeekFrom::Start(p) => Some(p),
+            SeekFrom::End(d) => self.len.checked_add_signed(d),
+            SeekFrom::Current(d) => self.pos.checked_add_signed(d),
+        };
+        let next = next.ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek before start")
+        })?;
+        self.pos = next;
+        Ok(next)
+    }
+}
+
 #[derive(Debug)]
 pub struct DecoderError(pub String);
 
@@ -99,11 +243,8 @@ pub struct SeekableSymphoniaSource {
 
 impl SeekableSymphoniaSource {
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
-        let file = File::open(path).map_err(|err| DecoderError(err.to_string()))?;
-        let mss = MediaSourceStream::new(
-            Box::new(FileMediaSource::new(file)) as Box<dyn MediaSource>,
-            Default::default(),
-        );
+        let source = open_media_source(path).map_err(|err| DecoderError(err.to_string()))?;
+        let mss = MediaSourceStream::new(source, Default::default());
 
         let mut hint = Hint::new();
         if let Some(ext) = path.extension().and_then(|v| v.to_str()) {
@@ -316,6 +457,71 @@ mod tests {
     fn flac_fixture_path() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/audio/formats/track_format_flac.flac")
+    }
+
+    /// A 16-bit stereo AIFF-C `sowt` file whose SSND chunk has `offset` bytes of padding
+    /// (0xEE) before `frames` frames of samples.
+    fn write_padded_aifc(path: &Path, offset: u32, frames: u32) {
+        let data_len = frames * 4;
+        let ssnd_size = 8 + offset + data_len;
+        let comm: Vec<u8> = [
+            &2u16.to_be_bytes()[..],
+            &frames.to_be_bytes(),
+            &16u16.to_be_bytes(),
+            // 44100 as an 80-bit extended float.
+            &[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0],
+            b"sowt",
+            &[0, 0],
+        ]
+        .concat();
+        let mut body = Vec::new();
+        body.extend_from_slice(b"AIFC");
+        body.extend_from_slice(b"FVER");
+        body.extend_from_slice(&4u32.to_be_bytes());
+        body.extend_from_slice(&0xA280_5140u32.to_be_bytes());
+        body.extend_from_slice(b"COMM");
+        body.extend_from_slice(&(comm.len() as u32).to_be_bytes());
+        body.extend_from_slice(&comm);
+        body.extend_from_slice(b"SSND");
+        body.extend_from_slice(&ssnd_size.to_be_bytes());
+        body.extend_from_slice(&offset.to_be_bytes());
+        body.extend_from_slice(&0u32.to_be_bytes());
+        body.extend(std::iter::repeat_n(0xEE, offset as usize));
+        for i in 0..frames {
+            let v = ((i % 200) as i16 - 100) * 100;
+            body.extend_from_slice(&v.to_le_bytes());
+            body.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut file = b"FORM".to_vec();
+        file.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        file.extend_from_slice(&body);
+        std::fs::write(path, file).unwrap();
+    }
+
+    #[test]
+    fn aiff_with_ssnd_padding_decodes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("padded.aiff");
+        write_padded_aifc(&path, 2280, 44_100);
+
+        let mut source = SeekableSymphoniaSource::open(&path).expect("padded AIFF should open");
+        assert_eq!(source.channels(), 2);
+        assert_eq!(source.sample_rate(), 44_100);
+        // The first samples are the audio, not the 0xEE padding.
+        let first: Vec<i16> = source.by_ref().take(4).collect();
+        assert_eq!(first, vec![-10_000, -10_000, -9_900, -9_900]);
+        assert_eq!(source.count(), 44_100 * 2 - 4);
+    }
+
+    #[test]
+    fn aiff_without_padding_is_read_as_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plain.aiff");
+        write_padded_aifc(&path, 0, 100);
+        let mut file = File::open(&path).unwrap();
+        let len = file.metadata().unwrap().len();
+        assert!(AiffSsndOffsetSource::detect(&mut file, len).is_none());
+        assert!(SeekableSymphoniaSource::open(&path).is_ok());
     }
 
     #[test]
