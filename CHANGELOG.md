@@ -40,11 +40,18 @@
 ## Unreleased
 
 - **Fix:** a track row now pulses as analyzing for the whole time the
-  track is being analyzed. Before, it only lit up for a moment at the very
-  end, so during a large analysis most rows never showed it.
+  track is being analyzed. Before, it only lit up sometimes or a moment 
+  at the very end, so during a large analysis some rows never showed it.
 - **Fix:** the beat grid in the cue editor looks even. Lines used to be
   drawn between screen pixels, so some looked thicker or fainter than
   others and their spacing seemed to wobble.
+- **Fix:** where a list's two scrollbars meet, the corner is dark now
+  instead of a white square.
+- **Fix:** in the light theme, the track list's keys are readable. Their
+  text was a pale colour meant for the dark theme.
+- **Fix:** the cue editor button is disabled for a track that has no
+  waveform, even if it has a BPM and key. Its tooltip says to analyze the
+  track first.
 - **Improvement:** reanalyzing a track clears its BPM and key as soon as
   its analysis starts, so you can see the fresh values come in. A first
   analysis still keeps a BPM or key you edited or imported in view.
@@ -53,13 +60,6 @@
   playback starts), leaving more room for the waveform. The BPM and first
   beat boxes have up/down arrows that match the light or dark theme, and
   the BPM box shows two decimals (119.00), as in the track list.
-- **Fix:** where a list's two scrollbars meet, the corner is dark now
-  instead of a white square.
-- **Fix:** in the light theme, the track list's keys are readable. Their
-  text was a pale colour meant for the dark theme.
-- **Fix:** the cue editor button is disabled for a track that has no
-  waveform, even if it has a BPM and key. Its tooltip says to analyze the
-  track first.
 - **Improvement:** the cue editor's header shows the track's cover art, its
   title, and the artist and album below it, like the track's row in the list.
 - **Improvement:** the track list's sort arrows sit right after each
@@ -73,8 +73,8 @@
   that needs attention keeps its coloured box, which in the dark theme is
   now a soft tint instead of a bright fill, and no longer wraps onto two
   lines.
-- **Chore:** the docs show more of the app: USB Playlists and History, the
-  Player Menu editor, Health & Diagnostics, the repair preview, Settings,
+- **Chore:** the docs show more of the app for 0.3.4: USB Playlists and History,
+  the Player Menu editor, Health & Diagnostics, the repair preview, Settings,
   and a playlist export. Their USB views come from the demo library really
   exported to a USB, and every screenshot and GIF has a caption and the app
   version below it.
