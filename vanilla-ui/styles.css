@@ -234,6 +234,7 @@ body.library-onboarding {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar-corner { background: var(--bg); }
 
 /* ── topbar ─────────────────────────────────────────── */
 
@@ -1852,7 +1853,7 @@ input[type="checkbox"]:disabled {
   text-align: right;
 }
 
-/* Fixed-width pills (widest value plus padding and border), so the boxes
+/* Fixed-width pills (widest value plus padding and border), so the values
    line up down the column: BPM fits "000.00", right-aligned to keep the
    decimal points in line; a key fits three characters ("10A"), centred. */
 .bpm-pill {
@@ -1865,9 +1866,8 @@ input[type="checkbox"]:disabled {
   font-weight: 500;
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--bg);
   color: var(--ink-secondary);
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
 }
 
 .key-pill {
@@ -1905,9 +1905,20 @@ input[type="checkbox"]:disabled {
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--bg);
   color: var(--ink-secondary);
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
+}
+
+/* No box (the border stays, transparent, so nothing shifts): hovering the
+   row underlines the values that have a tooltip, hinting there's more. */
+.track-grid-row:hover .bpm-pill[data-tooltip],
+.track-grid-row:hover .format-badge[data-tooltip] {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.bpm-pill[data-tooltip],
+.format-badge[data-tooltip] {
+  cursor: help;
 }
 
 .format-badge.warn {

@@ -53,6 +53,14 @@
   playback starts), leaving more room for the waveform. The BPM and first
   beat boxes have up/down arrows that match the light or dark theme, and
   the BPM box shows two decimals (119.00), as in the track list.
+- **Fix:** where a list's two scrollbars meet, the corner is dark now
+  instead of a white square.
+- **Improvement:** the button next to a track's waveform that opens the cue
+  editor shows a cue marker instead of a magnifying glass.
+- **Improvement:** the track list's format and BPM values are plain text,
+  not boxes. When you hover a row, the values with more details get a dotted
+  underline, and the pointer turns into a question mark over them. A format
+  that needs attention keeps its coloured box.
 - **Chore:** the docs show more of the app: USB Playlists and History, the
   Player Menu editor, Health & Diagnostics, the repair preview, Settings,
   and a playlist export. Their USB views come from the demo library really
