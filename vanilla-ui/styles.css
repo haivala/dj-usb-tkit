@@ -3915,17 +3915,75 @@ td button[data-action]:disabled,
 }
 .track-detail-header h3 { margin: 0; }
 .track-detail-hint { font-size: 11px; color: var(--muted); }
-.track-detail-firstbeat {
+/* BPM / Key on the first row, First beat / Playback start on the second: a
+   four-column grid (label, controls, label, controls) so both rows line up. */
+.track-detail-fields {
+  display: grid;
+  grid-template-columns: max-content max-content max-content max-content;
+  align-items: center;
+  gap: 10px 10px;
+  margin-bottom: 12px;
+}
+.track-detail-field-group { display: contents; }
+/* Second-column labels sit against their controls ("Key" is much shorter
+   than "Playback starts at"). */
+.track-detail-field-group:nth-child(even) > :first-child { margin-left: 24px; justify-self: end; }
+.track-detail-fields label,
+.track-detail-field-label { font-size: 13px; font-weight: 600; color: var(--ink-secondary); }
+.track-detail-field-controls {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 12px;
 }
-.track-detail-firstbeat label { font-weight: 600; }
-.track-detail-firstbeat input { width: 96px; }
-.track-detail-key-label { margin-left: 12px; }
-.track-detail-row-label { font-size: 13px; font-weight: 600; color: var(--ink-secondary); }
-.track-detail-start-row { gap: 10px; }
+/* Beats the global `input { min-width }`. The native spinner is swapped
+   for the themed ▲/▼ of `.number-stepper` (room kept on the right). */
+.track-detail-field-controls input[type="number"] {
+  min-width: 0;
+  width: calc(7ch + 36px);
+  padding: 0 24px 0 10px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.track-detail-field-controls input[type="number"]::-webkit-inner-spin-button,
+.track-detail-field-controls input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* A number input with its own themed step arrows on the right edge. */
+.number-stepper { position: relative; display: inline-flex; }
+.number-stepper-btns {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  bottom: 3px;
+  width: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.number-stepper-btns button {
+  flex: 1;
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: var(--card-hover);
+  color: var(--ink-secondary);
+  font-size: 9px;
+  line-height: 1;
+  box-shadow: none;
+}
+.number-stepper-btns button:hover { background: var(--accent); color: var(--ink-on-accent); box-shadow: none; }
+.number-stepper-btns button:active { transform: none; filter: brightness(0.9); }
+.number-stepper input:disabled + .number-stepper-btns { opacity: 0.4; pointer-events: none; }
+.track-detail-unit { font-size: 12px; color: var(--muted); }
+@media (max-width: 720px) {
+  .track-detail-fields { grid-template-columns: max-content max-content; }
+  .track-detail-field-group:nth-child(even) > :first-child { margin-left: 0; justify-self: start; }
+}
 /* Two-way choice: joined buttons, the chosen one filled with the accent. */
 .track-detail-segmented {
   display: inline-flex;
@@ -4223,25 +4281,26 @@ td button[data-action]:disabled,
   pointer-events: none;
 }
 .track-detail-prestart[hidden] { display: none; }
-/* The "Beat grid" slider sets --grid-level (0..1): how strong the lines
-   are. It mostly drives the ordinary beats; bar starts (wider, and
+/* The "Beat grid" slider sets --grid-level (0..1): how strong and how thick
+   the lines are. It mostly drives the ordinary beats; bar starts (wider, and
    white rather than red, which would vanish into a bass-heavy RGB waveform)
    always stay visible. Lines are centred on their beat. */
 /* Lines with a contrasting outline read over any waveform colour. */
 .beatgrid-line {
-  /* Whole device pixels (--dpx, set by renderBeatgrid), so every line
-     rasterises the same; the "Beat grid" slider sets the strength. */
+  /* Widths in whole device pixels, set by renderBeatgrid, so every line
+     rasterises the same way at any position. */
   position: absolute;
   top: 0;
   bottom: 0;
-  width: var(--dpx, 1px);
+  width: var(--beat-w, 1px);
+  margin-left: var(--beat-ml, 0px);
   background: var(--beatgrid-line);
   box-shadow: 0 0 0 var(--dpx, 1px) var(--beatgrid-outline);
   opacity: calc(0.1 + 0.9 * var(--grid-level, 0.35));
 }
 .beatgrid-line.is-downbeat {
-  width: calc(2 * var(--dpx, 1px));
-  margin-left: calc(-1 * var(--dpx, 1px));
+  width: var(--bar-w, 2px);
+  margin-left: var(--bar-ml, -1px);
   background: var(--beatgrid-downbeat);
   opacity: calc(0.6 + 0.4 * var(--grid-level, 0.35));
 }

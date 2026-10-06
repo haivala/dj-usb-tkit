@@ -356,6 +356,8 @@ export function bindTrackDetailEvents(ctx) {
     if (handled) event.preventDefault();
   });
 
+  bindNumberSteppers(el.trackDetailBpm?.closest(".track-detail-fields"));
+
   el.trackDetailFirstBeatMinus?.addEventListener("click", () =>
     trackDetailDialog.nudgeFirstBeat(-1)
   );
@@ -411,6 +413,45 @@ export function bindTrackDetailEvents(ctx) {
   // live in the list, the playback-start cue in the "Playback starts at" row.
   for (const host of [el.trackDetailCueList, el.trackDetailStartCue]) {
     bindCueRows(host, ctx, playFromCue);
+  }
+}
+
+// The themed ▲/▼ inside a `.number-stepper` box stand in for the native
+// spin buttons (hidden: neither webview lets them be themed). Same behaviour:
+// one `step` of the input per press, repeating while held, and a `change`
+// event per step.
+const STEPPER_REPEAT_DELAY_MS = 400;
+const STEPPER_REPEAT_MS = 60;
+function bindNumberSteppers(root) {
+  if (!root) return;
+  let timer = 0;
+  const stop = () => {
+    clearTimeout(timer);
+    clearInterval(timer);
+    timer = 0;
+  };
+  const step = (input, dir) => {
+    if (input.disabled) return;
+    if (dir > 0) input.stepUp();
+    else input.stepDown();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  root.addEventListener("pointerdown", (event) => {
+    const btn = event.target.closest?.(".number-stepper-btns button");
+    if (!btn || event.button !== 0) return;
+    const input = btn.closest(".number-stepper")?.querySelector("input");
+    if (!input) return;
+    event.preventDefault(); // keep focus where it is
+    const dir = Number(btn.dataset.step);
+    stop();
+    step(input, dir);
+    timer = setTimeout(() => {
+      timer = setInterval(() => step(input, dir), STEPPER_REPEAT_MS);
+    }, STEPPER_REPEAT_DELAY_MS);
+  });
+  for (const type of ["pointerup", "pointerleave", "pointercancel"]) {
+    root.addEventListener(type, stop);
   }
 }
 

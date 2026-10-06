@@ -14,6 +14,7 @@
 import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_detail.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { formatBpm } from "../../track_utils.mjs";
 import {
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
   FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
@@ -378,8 +379,16 @@ export function createTrackDetailController(el, prefs = {}) {
     // smears some across two pixels and not others, so an even grid looks
     // uneven (and its spacing jitters). The % fallback is for an unlaid-out host.
     const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
-    // One device pixel (at least one per CSS px on HiDPI), for the line widths.
-    host.style.setProperty("--dpx", `${Math.max(1, Math.round(dpr)) / dpr}px`);
+    // Widths in whole device pixels too (at least one per CSS px on HiDPI),
+    // thicker as the "Beat grid" slider goes up; centred on the line's pixel.
+    const dpx = Math.max(1, Math.round(dpr)) / dpr;
+    const setWidth = (name, devicePx) => {
+      host.style.setProperty(`--${name}-w`, `${devicePx * dpx}px`);
+      host.style.setProperty(`--${name}-ml`, `${-Math.floor(devicePx / 2) * dpx}px`);
+    };
+    setWidth("beat", 1 + Math.round((level / 100) * 2));
+    setWidth("bar", 2 + Math.round((level / 100) * 2));
+    host.style.setProperty("--dpx", `${dpx}px`);
     const lineLeft = (t) => width
       ? `${Math.round(((t - working.view.startMs) / viewSpanMs()) * width * dpr) / dpr}px`
       : `${msToPct(t)}%`;
@@ -735,7 +744,8 @@ export function createTrackDetailController(el, prefs = {}) {
         working.firstBeatMs == null ? "" : String(working.firstBeatMs);
     }
     if (el.trackDetailBpm) {
-      el.trackDetailBpm.value = working.bpm == null ? "" : String(working.bpm);
+      // Two decimals, as in the track list (the ▲/▼ step is 0.01).
+      el.trackDetailBpm.value = working.bpm == null ? "" : formatBpm(working.bpm);
     }
     syncKeySelect();
     renderView();

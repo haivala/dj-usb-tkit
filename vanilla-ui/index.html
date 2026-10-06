@@ -668,33 +668,45 @@
         <button class="settings-close" id="trackDetailCloseBtn" aria-label="Close">&times;</button>
       </div>
 
-      <div class="track-detail-firstbeat">
-        <label for="trackDetailBpm">BPM</label>
-        <button type="button" id="trackDetailBpmMinus" data-tooltip="-0.01 BPM">&minus;</button>
-        <input type="number" id="trackDetailBpm" min="1" max="999" step="0.01" />
-        <button type="button" id="trackDetailBpmPlus" data-tooltip="+0.01 BPM">+</button>
-        <button type="button" id="trackDetailBpmHalf" data-tooltip="Halve the BPM (analysis caught double tempo)">÷2</button>
-        <button type="button" id="trackDetailBpmDouble" data-tooltip="Double the BPM (analysis caught half tempo)">×2</button>
-        <label for="trackDetailKey" class="track-detail-key-label">Key</label>
-        <button type="button" id="trackDetailKeyMinus" data-tooltip="Previous key">&minus;</button>
-        <select id="trackDetailKey"><!-- options from the track detail's keyOptions --></select>
-        <button type="button" id="trackDetailKeyPlus" data-tooltip="Next key">+</button>
-      </div>
-
-      <div class="track-detail-firstbeat">
-        <label for="trackDetailFirstBeatMs">First beat (ms)</label>
-        <button type="button" id="trackDetailFirstBeatMinus" data-tooltip="Back one beat">&minus;</button>
-        <input type="number" id="trackDetailFirstBeatMs" min="0" step="1" />
-        <button type="button" id="trackDetailFirstBeatPlus" data-tooltip="Forward one beat">+</button>
-      </div>
-
-      <div class="track-detail-firstbeat track-detail-start-row">
-        <span class="track-detail-row-label" id="trackDetailStartLabel">Playback starts at</span>
-        <div class="track-detail-segmented" role="radiogroup" aria-labelledby="trackDetailStartLabel">
-          <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstCue" data-tooltip="The CDJ loads on cue A">First cue</button>
-          <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstBeat">First beat</button>
+      <!-- Row 1: the track's tags (BPM, key); row 2: where things start. -->
+      <div class="track-detail-fields">
+        <div class="track-detail-field-group">
+          <label for="trackDetailBpm">BPM</label>
+          <div class="track-detail-field-controls">
+            <button type="button" id="trackDetailBpmMinus" data-tooltip="-0.01 BPM">&minus;</button>
+            <span class="number-stepper"><input type="number" id="trackDetailBpm" min="1" max="999" step="0.01" /><span class="number-stepper-btns" aria-hidden="true"><button type="button" tabindex="-1" data-step="1">&#9652;</button><button type="button" tabindex="-1" data-step="-1">&#9662;</button></span></span>
+            <button type="button" id="trackDetailBpmPlus" data-tooltip="+0.01 BPM">+</button>
+            <button type="button" id="trackDetailBpmHalf" data-tooltip="Halve the BPM (analysis caught double tempo)">÷2</button>
+            <button type="button" id="trackDetailBpmDouble" data-tooltip="Double the BPM (analysis caught half tempo)">×2</button>
+          </div>
         </div>
-        <span class="track-detail-start-note" id="trackDetailStartNote" hidden>No cue points yet: the CDJ starts at the first audio</span>
+        <div class="track-detail-field-group">
+          <label for="trackDetailKey">Key</label>
+          <div class="track-detail-field-controls">
+            <button type="button" id="trackDetailKeyMinus" data-tooltip="Previous key">&minus;</button>
+            <select id="trackDetailKey"><!-- options from the track detail's keyOptions --></select>
+            <button type="button" id="trackDetailKeyPlus" data-tooltip="Next key">+</button>
+          </div>
+        </div>
+        <div class="track-detail-field-group">
+          <label for="trackDetailFirstBeatMs">First beat</label>
+          <div class="track-detail-field-controls">
+            <button type="button" id="trackDetailFirstBeatMinus" data-tooltip="Back one beat">&minus;</button>
+            <span class="number-stepper"><input type="number" id="trackDetailFirstBeatMs" min="0" step="1" /><span class="number-stepper-btns" aria-hidden="true"><button type="button" tabindex="-1" data-step="1">&#9652;</button><button type="button" tabindex="-1" data-step="-1">&#9662;</button></span></span>
+            <button type="button" id="trackDetailFirstBeatPlus" data-tooltip="Forward one beat">+</button>
+            <span class="track-detail-unit">ms</span>
+          </div>
+        </div>
+        <div class="track-detail-field-group">
+          <span class="track-detail-field-label" id="trackDetailStartLabel">Playback starts at</span>
+          <div class="track-detail-field-controls">
+            <div class="track-detail-segmented" role="radiogroup" aria-labelledby="trackDetailStartLabel">
+              <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstCue" data-tooltip="The CDJ loads on cue A">First cue</button>
+              <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstBeat">First beat</button>
+            </div>
+            <span class="track-detail-start-note" id="trackDetailStartNote" hidden>No cue points yet: the CDJ starts at the first audio</span>
+          </div>
+        </div>
       </div>
 
       <div class="track-detail-waveform-wrap">

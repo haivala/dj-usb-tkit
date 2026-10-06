@@ -527,7 +527,7 @@ test("bar numbers label the grid without crowding, down to every bar when zoomed
   await page.locator("#trackDetailZoomFit").click();
   await page.locator("#trackDetailBpmDouble").click();
   await page.locator("#trackDetailBpmDouble").click();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("512");
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("512.00");
   const barXs = await barLines.evaluateAll((nodes) =>
     nodes.map((n) => n.getBoundingClientRect().left)
   );
@@ -671,15 +671,62 @@ test("with Q on, a double-clicked cue lands on the nearest beat; Shift+double-cl
   expect(offBeat(cues[1].positionMs)).toBeGreaterThan(1);
 });
 
+test("beat grid lines sit on whole device pixels, evenly spaced, at a fractional-pixel tempo", async ({ page }) => {
+  await openCueEditor(page);
+  // 119 BPM at this zoom puts the beats a fractional number of pixels apart.
+  await page.locator("#trackDetailBpm").fill("119");
+  await page.locator("#trackDetailBpm").press("Enter");
+  await page.locator("#trackDetailZoomIn").click();
+  const { lefts, dpr } = await page.evaluate(() => ({
+    dpr: window.devicePixelRatio || 1,
+    lefts: [...document.querySelectorAll("#trackDetailBeatgrid .beatgrid-line")]
+      .map((n) => parseFloat(n.style.left))
+  }));
+  expect(lefts.length).toBeGreaterThan(20);
+  for (const left of lefts) {
+    expect(Math.abs(left * dpr - Math.round(left * dpr))).toBeLessThan(1e-6);
+  }
+  // Snapping moves a line at most half a device pixel, so neighbours stay
+  // within one device pixel of the true beat spacing.
+  const gaps = lefts.slice(1).map((l, i) => l - lefts[i]);
+  expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1 / dpr + 1e-6);
+});
+
+test("the themed ▲/▼ arrows step the input itself: 0.01 BPM and 1 ms, not a whole beat", async ({ page }) => {
+  await openCueEditor(page);
+  const bpm = page.locator("#trackDetailBpm");
+  const firstBeat = page.locator("#trackDetailFirstBeatMs");
+  const arrow = (input, dir) =>
+    input.locator(`xpath=..`).locator(`.number-stepper-btns button[data-step="${dir}"]`);
+  await expect(bpm).toHaveValue("128.00");
+  await expect(firstBeat).toHaveValue("120");
+
+  await arrow(bpm, 1).click();
+  await expect(bpm).toHaveValue("128.01");
+  await arrow(bpm, -1).click();
+  await arrow(bpm, -1).click();
+  await expect(bpm).toHaveValue("127.99");
+
+  await arrow(firstBeat, 1).click();
+  await expect(firstBeat).toHaveValue("121");
+  await arrow(firstBeat, -1).click();
+  await arrow(firstBeat, -1).click();
+  await expect(firstBeat).toHaveValue("119");
+  // The arrows go through the same change handling as typing: they're saved.
+  const saved = await savedCues(page);
+  expect(saved.bpm).toBe(127.99);
+  expect(saved.firstBeatMs).toBe(119);
+});
+
 test("÷2 and ×2 fix a half/double-tempo BPM in one click", async ({ page }) => {
   await openCueEditor(page);
   const bpm = page.locator("#trackDetailBpm");
-  await expect(bpm).toHaveValue("128");
+  await expect(bpm).toHaveValue("128.00");
   await page.locator("#trackDetailBpmHalf").click();
-  await expect(bpm).toHaveValue("64");
+  await expect(bpm).toHaveValue("64.00");
   await page.locator("#trackDetailBpmDouble").click();
   await page.locator("#trackDetailBpmDouble").click();
-  await expect(bpm).toHaveValue("256");
+  await expect(bpm).toHaveValue("256.00");
   // The grid follows: twice as many beat lines as at 128.
   expect((await savedCues(page)).bpm).toBe(256);
 });
@@ -751,7 +798,7 @@ test("undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name ty
   await page.locator("#trackDetailWaveform").dblclick({ position: { x: 700, y: 100 } });
   await expect(rows).toHaveCount(2);
   await page.locator("#trackDetailBpmDouble").click();
-  await expect(bpm).toHaveValue("256");
+  await expect(bpm).toHaveValue("256.00");
   const name = page.locator("#trackDetailCueList .cue-row .cue-row-name").first();
   const originalName = await name.inputValue();
   await name.fill("");
@@ -761,7 +808,7 @@ test("undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name ty
   await page.keyboard.press("Control+z"); // the whole name at once
   await expect(page.locator("#trackDetailCueList .cue-row .cue-row-name").first()).toHaveValue(originalName);
   await page.keyboard.press("Control+z");
-  await expect(bpm).toHaveValue("128");
+  await expect(bpm).toHaveValue("128.00");
   await undo.click();
   await expect(rows).toHaveCount(1);
   await expect(undo).toBeDisabled();
@@ -770,7 +817,7 @@ test("undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name ty
   await page.keyboard.press("Control+Shift+z");
   await expect(rows).toHaveCount(2);
   await redo.click();
-  await expect(bpm).toHaveValue("256");
+  await expect(bpm).toHaveValue("256.00");
 
   // A new edit clears the redo steps.
   await page.locator("#trackDetailBpmHalf").click();
@@ -851,7 +898,7 @@ test("track-detail modal edits BPM, saves it, and the library row/tooltip update
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
 
   await expect(page.locator("#trackDetailOverlay")).toBeVisible();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("128");
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
 
   await page.locator("#trackDetailBpm").fill("140.25");
   await page.locator("#trackDetailBpm").dispatchEvent("change");
@@ -968,7 +1015,7 @@ test("BPM stepper nudges by 0.01 and clamps to a positive value", async ({ page 
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailOverlay")).toBeVisible();
 
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("128");
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
   await page.locator("#trackDetailBpmPlus").click();
   await expect(page.locator("#trackDetailBpm")).toHaveValue("128.01");
   await page.locator("#trackDetailBpmMinus").click();
@@ -1666,7 +1713,7 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await row.locator('[data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailOverlay")).toBeVisible();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("126");
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("126.00");
 
   await page.locator("#trackDetailBpm").fill("128.5");
   await page.locator("#trackDetailBpm").dispatchEvent("change");
