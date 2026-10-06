@@ -39,6 +39,12 @@
 
 ## Unreleased
 
+- **Fix:** a track row now pulses as analyzing for the whole time the
+  track is being analyzed. Before, it only lit up for a moment at the very
+  end, so during a large analysis most rows never showed it.
+- **Improvement:** reanalyzing a track clears its BPM and key as soon as
+  its analysis starts, so you can see the fresh values come in. A first
+  analysis still keeps a BPM or key you edited or imported in view.
 - **Chore:** the docs show more of the app: USB Playlists and History, the
   Player Menu editor, Health & Diagnostics, the repair preview, Settings,
   and a playlist export. Their USB views come from the demo library really

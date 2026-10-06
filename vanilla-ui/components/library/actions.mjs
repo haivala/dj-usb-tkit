@@ -1060,6 +1060,16 @@ export function patchTrackAnalysisFields(ctx, track, payload) {
     track[key] = next;
     changed = true;
   };
+  // A reanalysis replaces the BPM / key: clear them as the track starts so the
+  // row visibly refills with the fresh values (the batch's final hydrate
+  // restores the stored ones if the analysis fails).
+  if (payload.trackStarted === true && payload.reanalysis === true) {
+    setIfChanged("bpm", null);
+    setIfChanged("bpmAnalyzer", null);
+    setIfChanged("key", null);
+    setIfChanged("keyDisplay", "");
+    setIfChanged("keyColor", null);
+  }
   const bpm = Number(payload.bpm);
   if (payload.bpm !== undefined && payload.bpm !== null && Number.isFinite(bpm) && bpm > 0) {
     // Store the raw number, same as normalizeTrack -- display formatting is

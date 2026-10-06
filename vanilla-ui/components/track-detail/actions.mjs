@@ -374,6 +374,15 @@ export function createTrackDetailController(el, prefs = {}) {
     const labelStep = barStep(interval, BAR_LABEL_MIN_PX);
     const lineStep = width ? barStep(interval, GRID_LINE_MIN_PX) : 1;
     const showBeats = !width || (interval / viewSpanMs()) * width >= GRID_LINE_MIN_PX;
+    // Lines sit on whole device pixels: at a fractional position the browser
+    // smears some across two pixels and not others, so an even grid looks
+    // uneven (and its spacing jitters). The % fallback is for an unlaid-out host.
+    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    // One device pixel (at least one per CSS px on HiDPI), for the line widths.
+    host.style.setProperty("--dpx", `${Math.max(1, Math.round(dpr)) / dpr}px`);
+    const lineLeft = (t) => width
+      ? `${Math.round(((t - working.view.startMs) / viewSpanMs()) * width * dpr) / dpr}px`
+      : `${msToPct(t)}%`;
     // Snap `from` to the nearest grid line at or before it.
     const firstBeatIdx = Math.max(0, Math.floor((from - working.firstBeatMs) / interval));
     let safety = 0;
@@ -386,13 +395,14 @@ export function createTrackDetailController(el, prefs = {}) {
       if (downbeat ? bar % lineStep !== 0 : !showBeats) continue;
       const line = cloneTemplate(host.ownerDocument, "tplBeatgridLine");
       if (downbeat) line.classList.add("is-downbeat");
-      line.style.left = `${msToPct(t)}%`;
+      const left = lineLeft(t);
+      line.style.left = left;
       host.appendChild(line);
       // Steps are powers of two and labels need more room, so every
       // labelled bar also has its line.
       if (downbeat && bar % labelStep === 0) {
         const label = cloneTemplate(host.ownerDocument, "tplBeatgridBar");
-        label.style.left = `${msToPct(t)}%`;
+        label.style.left = left;
         label.textContent = String(bar + 1);
         host.appendChild(label);
       }

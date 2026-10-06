@@ -3,8 +3,9 @@ import { test, expect } from "./coverage-fixture.mjs";
 // NOTE: analysis is dispatched as a single `analyze_new_tracks` batch call per
 // analyzeTrackIds() invocation (see components/library/actions.mjs). The
 // backend reports progressive per-track/per-piece updates during that call
-// via `job:event` events (stage: "analyze_new_tracks", trackReady: false for
-// each of the 4 pieces, then a final trackReady: true event per track) — see
+// via `job:event` events (stage: "analyze_new_tracks"; a trackStarted event
+// as a worker picks the track up, trackReady: false for each of the 4 pieces,
+// then a final trackReady: true event per track) — see
 // backend/src/service/analysis.rs (analyze_local_track_with_updates,
 // build_partial_progress, build_done_progress_success) and
 // backend/src/tauri_commands.rs (analyze_new_tracks, emit_job_event_with_track).
@@ -22,6 +23,8 @@ function installScanAnalysisMock(page, opts = {}) {
   const variedArtists = !!opts?.variedArtists;
   const analysisBpmRange = String(opts?.analysisBpmRange || "70-180");
   const pauseBeforeBpmKey = !!opts?.pauseBeforeBpmKey;
+  const holdAfterTrackStart = !!opts?.holdAfterTrackStart;
+  const seedBpmKey = !!opts?.seedBpmKey;
   return page.addInitScript(({
     trackCount,
     pieceDelayMs,
@@ -31,7 +34,9 @@ function installScanAnalysisMock(page, opts = {}) {
     seedArtwork,
     variedArtists,
     analysisBpmRange,
-    pauseBeforeBpmKey
+    pauseBeforeBpmKey,
+    holdAfterTrackStart,
+    seedBpmKey
   }) => {
     // registerBackendJobEvents() (components/playback/actions.mjs) gates the
     // "job:event" listen() call behind isTauriRuntime(), which checks
@@ -115,6 +120,12 @@ function installScanAnalysisMock(page, opts = {}) {
     if (seedArtwork) {
       for (const track of tracks) {
         track.artworkPath = `/tmp/${track.id}.jpg`;
+      }
+    }
+    if (seedBpmKey) {
+      for (const track of tracks) {
+        track.bpm = 99;
+        track.key = "8B";
       }
     }
 
@@ -236,6 +247,17 @@ function installScanAnalysisMock(page, opts = {}) {
             ...extra
           });
         };
+
+        // A worker picked the track up (build_started_progress): sent before
+        // the decode, and a reanalysis when the track already has a waveform.
+        emitPartial({ trackStarted: true, reanalysis: !!track.waveformPeaksPath });
+        if (holdAfterTrackStart) {
+          // Stands in for the decode + BPM/key detection, where the real
+          // backend emits nothing: held until the test releases it, so it can
+          // assert the row's state while the track is being worked on.
+          await new Promise((resolve) => { window.__heldTrack = { id, release: resolve }; });
+          window.__heldTrack = null;
+        }
 
         await sleep(Math.max(0, pieceDelayMs));
         track.artworkPath = `/tmp/${id}.jpg`;
@@ -374,6 +396,10 @@ function installScanAnalysisMock(page, opts = {}) {
             const items = withAnalysisReady(tracks.filter((t) => ids.includes(String(t.id))));
             return { ok: true, data: { items } };
           }
+          if (command === "resolve_track_identity") {
+            const id = String(payload?.request?.trackId ?? payload?.trackId ?? "");
+            return { ok: true, data: { trackId: tracks.some((t) => t.id === id) ? id : null } };
+          }
           if (command === "analyze_new_tracks") {
             analyzeNewTracksCalls += 1;
             const req = payload?.request || {};
@@ -437,7 +463,7 @@ function installScanAnalysisMock(page, opts = {}) {
         return analysisCancelled;
       }
     };
-  }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange, pauseBeforeBpmKey });
+  }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange, pauseBeforeBpmKey, holdAfterTrackStart, seedBpmKey });
 }
 
 function installPagedMaterializeAnalyzeMock(page, opts = {}) {
@@ -880,6 +906,81 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.bpmRangeSeen)).toEqual({ min: 70, max: 180 });
   await expect(page.locator("#libraryTotalDuration")).toHaveText("Total time: 3:00");
   await expect(page.locator("#libraryTableBody .track-grid-row").first()).not.toHaveClass(/is-analyzing/);
+});
+
+test("every track in a large batch pulses as analyzing while a worker is on it", async ({ page }, testInfo) => {
+  testInfo.setTimeout(testInfo.timeout * 3);
+  const trackCount = 25;
+  await installScanAnalysisMock(page, { trackCount, pieceDelayMs: 0, holdAfterTrackStart: true });
+  await page.goto("/");
+
+  await page.locator("#scanLibraryBtn").click();
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(trackCount);
+
+  const seen = new Set();
+  for (let i = 0; i < trackCount; i += 1) {
+    // The mock holds each track right after its trackStarted event -- the
+    // stretch where the real backend decodes and detects BPM/key without
+    // emitting anything. The row must already pulse there, not only once
+    // the first finished piece arrives.
+    const heldId = await page.waitForFunction(
+      (prev) => {
+        const id = window.__heldTrack?.id;
+        return id && !prev.includes(id) ? id : null;
+      },
+      [...seen]
+    ).then((h) => h.jsonValue());
+    seen.add(heldId);
+    const row = page.locator(`#libraryTableBody .track-grid-row[data-track-id="${heldId}"]`);
+    await expect(row).toHaveClass(/is-analyzing/);
+    await expect(page.locator("#libraryTableBody .track-grid-row.is-analyzing")).toHaveCount(1);
+    await page.evaluate(() => window.__heldTrack.release());
+  }
+
+  await expect(page.locator("#statusText")).toContainText(`analyzed ${trackCount}, failed 0`);
+  await expect(page.locator("#libraryTableBody .track-grid-row.is-analyzing")).toHaveCount(0);
+});
+
+test("reanalyze clears the row's BPM and key until the fresh values arrive", async ({ page }) => {
+  await installScanAnalysisMock(page, {
+    trackCount: 1,
+    pieceDelayMs: 0,
+    holdAfterTrackStart: true,
+    seedExistingWaveform: true,
+    seedDuration: true,
+    seedBpmKey: true
+  });
+  await page.goto("/");
+
+  const row = page.locator("#libraryTableBody .track-grid-row").first();
+  await expect(row.locator(".td-bpm")).toHaveText("99.00");
+  await expect(row.locator(".td-key")).toHaveText("8B");
+
+  await row.locator('[data-action="analyze-track"]').click();
+  await page.waitForFunction(() => !!window.__heldTrack);
+  await expect(row).toHaveClass(/is-analyzing/);
+  await expect(row.locator(".td-bpm")).toHaveText("-");
+  await expect(row.locator(".td-key")).toHaveText("-");
+
+  await page.evaluate(() => window.__heldTrack.release());
+  await expect(row).not.toHaveClass(/is-analyzing/);
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("121.00");
+  await expect(row.locator(".td-key .key-pill")).toHaveText("2A");
+});
+
+test("a first analysis keeps the row's imported BPM and key while it runs", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true, seedBpmKey: true });
+  await page.goto("/");
+
+  // The scan analyzes the unanalyzed track.
+  await page.locator("#scanLibraryBtn").click();
+  const row = page.locator("#libraryTableBody .track-grid-row").first();
+  await page.waitForFunction(() => !!window.__heldTrack);
+  await expect(row).toHaveClass(/is-analyzing/);
+  await expect(row.locator(".td-bpm")).toHaveText("99.00");
+  await expect(row.locator(".td-key")).toHaveText("8B");
+  await page.evaluate(() => window.__heldTrack.release());
+  await expect(row).not.toHaveClass(/is-analyzing/);
 });
 
 test("scan progressively changes action buttons to Reanalyze", async ({ page }, testInfo) => {

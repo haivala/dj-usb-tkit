@@ -2092,22 +2092,25 @@ fn analyze_new_tracks_emits_per_file_progress() {
         total: usize,
         file_path: String,
         track_ready: bool,
+        track_started: bool,
+        reanalysis: bool,
         has_waveform: bool,
         has_duration: bool,
         has_bpm_or_key: bool,
     }
 
-    let progress = Arc::new(Mutex::new(Vec::<ProgressEvent>::new()));
-    let progress_ref = Arc::clone(&progress);
-    let analyzed_response = backend.analyze_new_tracks_with_progress(
-        AnalyzeNewTracksRequest {
-            bpm_min: None,
-            bpm_max: None,
-            track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
-            analysis_engine: None,
-            ..Default::default()
-        },
-        move |progress| {
+    let analyze_with_progress = |track_ids: Vec<String>| {
+        let progress = Arc::new(Mutex::new(Vec::<ProgressEvent>::new()));
+        let progress_ref = Arc::clone(&progress);
+        let response = backend.analyze_new_tracks_with_progress(
+            AnalyzeNewTracksRequest {
+                bpm_min: None,
+                bpm_max: None,
+                track_ids,
+                analysis_engine: None,
+                ..Default::default()
+            },
+            move |progress| {
             progress_ref
                 .lock()
                 .expect("progress lock")
@@ -2116,6 +2119,8 @@ fn analyze_new_tracks_emits_per_file_progress() {
                     total: progress.total,
                     file_path: progress.file_path.clone(),
                     track_ready: progress.track_ready,
+                    track_started: progress.track_started,
+                    reanalysis: progress.reanalysis,
                     has_waveform: progress
                         .waveform_preview
                         .as_ref()
@@ -2125,8 +2130,13 @@ fn analyze_new_tracks_emits_per_file_progress() {
                     has_duration: progress.duration_ms.is_some(),
                     has_bpm_or_key: progress.bpm.is_some() || progress.key.is_some(),
                 });
-        },
-    );
+            },
+        );
+        let calls = progress.lock().expect("progress lock final").clone();
+        (response, calls)
+    };
+    let (analyzed_response, calls) =
+        analyze_with_progress(tracks.iter().map(|t| t.id.clone()).collect());
     assert!(
         analyzed_response.ok,
         "analyze internal failed: {analyzed_response:?}"
@@ -2139,7 +2149,6 @@ fn analyze_new_tracks_emits_per_file_progress() {
         "analysis count mismatch"
     );
 
-    let calls = progress.lock().expect("progress lock final");
     assert!(
         calls.len() >= 2,
         "expected progress events, got {}",
@@ -2166,6 +2175,30 @@ fn analyze_new_tracks_emits_per_file_progress() {
     assert!(
         calls.iter().all(|c| c.file_path.ends_with(".wav")),
         "progress payload should include file paths"
+    );
+    // Every track's first event marks it started -- before the decode, so the
+    // row shows "analyzing" for the whole time a worker is on it.
+    for track in &tracks {
+        let first = calls
+            .iter()
+            .find(|c| c.file_path == track.file_path)
+            .expect("events for every track");
+        assert!(first.track_started, "first event of a track must be track_started");
+        assert!(!first.reanalysis, "a first analysis is not a reanalysis");
+    }
+    assert_eq!(
+        calls.iter().filter(|c| c.track_started).count(),
+        2,
+        "expected one track_started event per file"
+    );
+
+    // Analyzing it again (the lone-track path) is a reanalysis.
+    let (reanalyzed_response, calls) = analyze_with_progress(vec![tracks[0].id.clone()]);
+    assert!(reanalyzed_response.ok, "reanalyze failed: {reanalyzed_response:?}");
+    let first = calls.first().expect("reanalysis events");
+    assert!(
+        first.track_started && first.reanalysis,
+        "a reanalysis starts with track_started + reanalysis: {first:?}"
     );
 }
 

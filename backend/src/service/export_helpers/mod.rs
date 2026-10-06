@@ -310,6 +310,9 @@ pub struct LocalTrackForAnalysis {
     /// one imported with the kept BPM. A reanalysis keeps none (see
     /// `analysis::row_to_track_for_analysis`).
     pub kept_first_beat_ms: Option<u32>,
+    /// The track already has its waveform, so this run is a reanalysis that
+    /// replaces its BPM / key (see `analysis::kept_analysis_values`).
+    pub reanalysis: bool,
 }
 
 /// A BPM / key that an analysis run keeps: set by the user or imported from

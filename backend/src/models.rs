@@ -77,6 +77,10 @@ pub struct JobEventPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub track_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_started: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reanalysis: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub failed: Option<bool>,
     /// Authoritative "this track now has its core analysis" (see
     /// `Track::analysis_ready`). Present on analysis progress events; the

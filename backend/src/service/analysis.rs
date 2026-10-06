@@ -189,6 +189,13 @@ pub struct AnalyzeTrackProgress {
     pub waveform_preview: Option<Vec<u8>>,
     pub duration_ms: Option<u64>,
     pub track_ready: bool,
+    /// First event of a track: a worker just picked it up. Sent before the
+    /// decode so the row shows "analyzing" for the whole time it is worked on,
+    /// not only from its first finished piece.
+    pub track_started: bool,
+    /// On the `track_started` event: this run replaces the track's BPM / key,
+    /// so the row clears them until the fresh values arrive.
+    pub reanalysis: bool,
     pub failed: bool,
     /// Authoritative "this track now has its core analysis" -- same rule as
     /// `Track::analysis_ready`. The frontend patches rows from this and never
@@ -234,11 +241,32 @@ fn build_partial_progress(
         waveform_preview: update.waveform_preview,
         duration_ms: update.duration_ms,
         track_ready: false,
+        track_started: false,
+        reanalysis: false,
         failed: false,
         analysis_ready: false,
         error_message: None,
         library_total_duration_ms: None,
         library_duration_unknown_count: None,
+    }
+}
+
+fn build_started_progress(
+    current: usize,
+    total: usize,
+    track: &LocalTrackForAnalysis,
+) -> AnalyzeTrackProgress {
+    AnalyzeTrackProgress {
+        track_started: true,
+        reanalysis: track.reanalysis,
+        ..build_partial_progress(
+            current,
+            total,
+            track.id.clone(),
+            track.title.clone(),
+            track.file_path.clone(),
+            TrackPartialUpdate::default(),
+        )
     }
 }
 
@@ -264,6 +292,8 @@ fn build_done_progress_success(
         waveform_preview: local.waveform_preview.clone(),
         duration_ms: local.duration_ms,
         track_ready: true,
+        track_started: false,
+        reanalysis: false,
         failed: false,
         analysis_ready: has_core_analysis_fields(
             local.waveform_peaks_path.as_deref(),
@@ -298,6 +328,8 @@ fn build_done_progress_error(
         waveform_preview: None,
         duration_ms: None,
         track_ready: true,
+        track_started: false,
+        reanalysis: false,
         failed: true,
         analysis_ready: false,
         error_message: Some(error_message),
@@ -780,6 +812,9 @@ impl BackendService {
             ));
 
             enum WorkerEvent {
+                Started {
+                    track: LocalTrackForAnalysis,
+                },
                 Partial {
                     worker_idx: usize,
                     track_id: String,
@@ -837,6 +872,14 @@ impl BackendService {
                             break;
                         };
 
+                        if tx
+                            .send(WorkerEvent::Started {
+                                track: track.clone(),
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
                         let started = Instant::now();
                         let track_id = track.id.clone();
                         let track_title = track.title.clone();
@@ -899,6 +942,9 @@ impl BackendService {
                     }
                 };
                 match evt {
+                    WorkerEvent::Started { track } => {
+                        on_progress(&build_started_progress(completed_count, total, &track));
+                    }
                     WorkerEvent::Partial {
                         worker_idx,
                         track_id,
@@ -1007,6 +1053,7 @@ impl BackendService {
             let tx_db = conn.unchecked_transaction()?;
             let mut persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
             for track in tracks.drain(..) {
+                on_progress(&build_started_progress(completed_count, total, &track));
                 // The batch (`total > 1`) branch above sizes a worker pool
                 // against available memory, but a lone single-track analyze
                 // -- the common "click Analyze on this row" action -- has no
@@ -1345,6 +1392,7 @@ fn row_to_track_for_analysis(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalT
         kept,
         existing_first_beat_ms,
         kept_first_beat_ms,
+        reanalysis: has_waveform,
     })
 }
 
