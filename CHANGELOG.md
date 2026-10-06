@@ -55,6 +55,11 @@
   the BPM box shows two decimals (119.00), as in the track list.
 - **Fix:** where a list's two scrollbars meet, the corner is dark now
   instead of a white square.
+- **Fix:** in the light theme, the track list's keys are readable. Their
+  text was a pale colour meant for the dark theme.
+- **Improvement:** the track list's sort arrows sit right after each
+  column's name, so they no longer look like they belong to the next column.
+  The column the list is sorted by is shown in the accent colour.
 - **Improvement:** the button next to a track's waveform that opens the cue
   editor shows a cue marker instead of a magnifying glass.
 - **Improvement:** the track list's format and BPM values are plain text,

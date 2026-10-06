@@ -4,7 +4,7 @@ export function clearTrackSort(tableSortState, bodyId, grid) {
   grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
     h.classList.remove("sort-asc", "sort-desc");
     const labelEl = h.querySelector(".sort-label");
-    if (labelEl) labelEl.textContent = h.dataset.sortDefault || "";
+    if (labelEl && h.dataset.sortDefault) labelEl.textContent = h.dataset.sortDefault;
   });
   grid.querySelector(".sort-hint")?.classList.add("hidden");
 }
@@ -54,7 +54,7 @@ export function handleSortHeaderClick(ctx, event) {
     grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
       h.classList.remove("sort-asc", "sort-desc");
       const labelEl = h.querySelector(".sort-label");
-      if (labelEl) labelEl.textContent = h.dataset.sortDefault || "";
+      if (labelEl && h.dataset.sortDefault) labelEl.textContent = h.dataset.sortDefault;
     });
     const ownerTh = allKeys.includes(nextState.key)
       ? th

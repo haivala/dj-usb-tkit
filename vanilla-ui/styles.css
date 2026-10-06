@@ -91,6 +91,7 @@
   --fmt-autofix-bg: #cfe8ff;
   --fmt-autofix-fg: #0b4f8a;
   --fmt-autofix-border: #7bb8ec;
+  --key-pill-fg-l: 32%;
   --playhead-bg:  rgba(0,0,0,0.85);
   --playhead-glow: rgba(0,0,0,0.5);
   --wave-prestart-dim: rgba(255,255,255,0.6);
@@ -142,6 +143,7 @@
     --fmt-autofix-bg: hsla(205, 85%, 55%, 0.15);
     --fmt-autofix-fg: hsl(205, 90%, 75%);
     --fmt-autofix-border: hsla(205, 70%, 50%, 0.4);
+    --key-pill-fg-l: 75%;
     --playhead-bg:  rgba(255,255,255,0.95);
     --playhead-glow: rgba(255,255,255,0.7);
     --wave-prestart-dim: rgba(0,0,0,0.55);
@@ -193,6 +195,7 @@
   --fmt-autofix-bg: hsla(205, 85%, 55%, 0.15);
   --fmt-autofix-fg: hsl(205, 90%, 75%);
   --fmt-autofix-border: hsla(205, 70%, 50%, 0.4);
+  --key-pill-fg-l: 75%;
   --playhead-bg:  rgba(255,255,255,0.95);
   --playhead-glow: rgba(255,255,255,0.7);
   --wave-prestart-dim: rgba(0,0,0,0.55);
@@ -1687,8 +1690,6 @@ td.num, th.num {
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
-  position: relative;
-  padding-right: 18px;
   transition: color 120ms ease;
 }
 
@@ -1696,33 +1697,52 @@ td.num, th.num {
   color: var(--ink-secondary);
 }
 
-.track-grid-cell.sortable::after {
+/* The arrows sit right after the label text, not at the cell's edge, so
+   each one reads as its own column's -- also in left-aligned columns. */
+.track-grid-cell.sortable .sort-label {
+  position: relative;
+  padding-right: 14px;
+}
+
+.track-grid-cell.sortable .sort-label::after,
+.track-grid-cell.sortable .sort-label::before {
   content: "";
   position: absolute;
-  right: 5px;
+  right: 0;
   top: 50%;
-  transform: translateY(-50%);
   border: 4px solid transparent;
+  transition: border-color 120ms ease;
+}
+
+.track-grid-cell.sortable .sort-label::after {
   border-bottom-color: var(--line);
-  margin-top: -5px;
+  margin-top: -9px;
 }
 
-.track-grid-cell.sortable::before {
-  content: "";
-  position: absolute;
-  right: 5px;
-  top: 50%;
-  transform: translateY(-50%);
-  border: 4px solid transparent;
+.track-grid-cell.sortable .sort-label::before {
   border-top-color: var(--line);
-  margin-top: 3px;
+  margin-top: 1px;
 }
 
-.track-grid-cell.sortable.sort-asc::after {
+.track-grid-cell.sortable:hover .sort-label::after {
+  border-bottom-color: var(--muted);
+}
+
+.track-grid-cell.sortable:hover .sort-label::before {
+  border-top-color: var(--muted);
+}
+
+/* The sorted column: accent label and arrow, so it's clear at a glance. */
+.track-grid-cell.sortable.sort-asc,
+.track-grid-cell.sortable.sort-desc {
+  color: var(--accent);
+}
+
+.track-grid-cell.sortable.sort-asc .sort-label::after {
   border-bottom-color: var(--accent);
 }
 
-.track-grid-cell.sortable.sort-desc::before {
+.track-grid-cell.sortable.sort-desc .sort-label::before {
   border-top-color: var(--accent);
 }
 
@@ -1899,7 +1919,7 @@ input[type="checkbox"]:disabled {
   padding: 2px 8px;
   border-radius: 4px;
   background: hsla(var(--key-hue, 270), 60%, 50%, 0.15);
-  color: hsla(var(--key-hue, 270), 70%, 75%, 1);
+  color: hsl(var(--key-hue, 270), 70%, var(--key-pill-fg-l));
   border: 1px solid hsla(var(--key-hue, 270), 50%, 40%, 0.3);
 }
 .key-pill--h0 { --key-hue: 0; }
