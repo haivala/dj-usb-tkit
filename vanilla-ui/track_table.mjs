@@ -27,6 +27,17 @@ export function fillBpmCell(cell, track) {
   cell.replaceChildren(pill);
 }
 
+// The cue editor button: enabled once the track is analyzed (`ready`) and
+// its row has a waveform to edit on -- a reanalysis clears the waveform, so
+// the button waits for the new one. `ready` is kept on the button, because
+// live patches of USB rows get the library track, which has no USB analysis.
+export function setCueButtonState(button, { ready = button.dataset.cueReady === "true", hasWaveform }) {
+  button.dataset.cueReady = String(!!ready);
+  const enabled = !!ready && !!hasWaveform;
+  button.disabled = !enabled;
+  button.dataset.tooltip = enabled ? "Edit cue points & beat grid" : "Analyze this track first";
+}
+
 // The key cell. The backend sends the label in the user's key notation
 // (`keyDisplay`, Classic or Camelot) and the wheel colour group (`keyColor`,
 // 0..11); this only renders them. `key` itself is the classic value the
@@ -130,7 +141,8 @@ export function createTrackRow(ctx, track, options) {
       .filter((v) => Number.isFinite(v))
     : [];
   const hasColorWaveform = Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6;
-  if (hasColorWaveform || (peaks.length > 0 && peaks.some((v) => v > 0))) {
+  const hasWaveform = hasColorWaveform || (peaks.length > 0 && peaks.some((v) => v > 0));
+  if (hasWaveform) {
     waveform.classList.add("waveform-canvas");
     waveform.dataset.peaks = peaks.join(",");
     waveform.prepend(cloneTemplate(doc, "tplWaveformCanvas"));
@@ -143,8 +155,7 @@ export function createTrackRow(ctx, track, options) {
     const cueReady = options.origin === "usb" ? !!track.usbAnalysisPath : !!track.analysisReady;
     cueButton.dataset.index = String(options.index);
     cueButton.dataset.id = renderTrackId;
-    cueButton.disabled = !cueReady;
-    cueButton.dataset.tooltip = cueReady ? "Edit cue points & beat grid" : "Analyze this track first";
+    setCueButtonState(cueButton, { ready: cueReady, hasWaveform });
   } else {
     cueButton.remove();
   }

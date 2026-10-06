@@ -1,7 +1,7 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
-import { fillBpmCell, fillKeyCell, coverElement } from "../../track_table.mjs";
+import { fillBpmCell, fillKeyCell, coverElement, setCueButtonState } from "../../track_table.mjs";
 import { REANALYZE_TOOLTIP } from "../../track_utils.mjs";
 import {
   formatDurationMs,
@@ -1185,6 +1185,11 @@ export function patchLibraryRowCells(ctx, row, track) {
         waveformDiv.classList.remove("waveform-canvas");
         const canvas = waveformDiv.querySelector("canvas");
         if (canvas) canvas.remove();
+      }
+      const cueButton = waveformTd.querySelector(".waveform-detail-btn");
+      if (cueButton) {
+        const ready = row.dataset.trackOrigin === "local" ? !!track.analysisReady : undefined;
+        setCueButtonState(cueButton, { ready, hasWaveform: hasRenderableWaveform });
       }
     }
   }

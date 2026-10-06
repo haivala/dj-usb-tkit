@@ -14,6 +14,8 @@
 import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_detail.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { coverElement } from "../../track_table.mjs";
+import { buildCoverSrcCandidates, attachCoverFallbackHandlers } from "../library/actions.mjs";
 import { formatBpm } from "../../track_utils.mjs";
 import {
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
@@ -1112,7 +1114,7 @@ export function createTrackDetailController(el, prefs = {}) {
       if (resolver) resolver(result || null);
     },
 
-    open({ track, firstBeatMs, cues, durationMs, bpm, key, keyOptions: keyGroups }) {
+    open({ track, firstBeatMs, cues, durationMs, bpm, key, keyOptions: keyGroups, coverCandidates = [] }) {
       if (open) api.close(null);
       open = true;
       working.track = track || {};
@@ -1149,8 +1151,14 @@ export function createTrackDetailController(el, prefs = {}) {
       applyView(0, Math.min(openSpan, working.durationMs || openSpan));
 
       const t = working.track;
-      el.trackDetailTitle.textContent =
-        `${t.album ? t.album + " · " : ""}${t.artist ? t.artist + " – " : ""}${t.title || "Track"}`;
+      el.trackDetailTitle.textContent = t.title || "Track";
+      if (el.trackDetailSubtitle) {
+        el.trackDetailSubtitle.textContent = [t.artist, t.album].filter(Boolean).join(" · ");
+      }
+      if (el.trackDetailCover) {
+        el.trackDetailCover.replaceChildren(coverElement(el.trackDetailCover.ownerDocument, coverCandidates));
+        attachCoverFallbackHandlers(el.trackDetailCover);
+      }
       el.trackDetailOverlay.hidden = false;
       render();
       // Re-measure once layout has settled (canvas is otherwise sized from a
@@ -1276,6 +1284,7 @@ async function openUsbTrackDetail(ctx, track) {
     bpm: track.bpm,
     key: track.key,
     keyOptions: detail.keyOptions,
+    coverCandidates: buildCoverSrcCandidates(ctx, track),
   });
   if (!payload) return;
 
@@ -1377,6 +1386,7 @@ export async function openTrackDetail(ctx, track) {
     bpm: detail.track?.bpm,
     key: detail.track?.key,
     keyOptions: detail.keyOptions,
+    coverCandidates: buildCoverSrcCandidates(ctx, track),
   });
   if (!payload) return;
 

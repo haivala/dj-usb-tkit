@@ -57,6 +57,11 @@
   instead of a white square.
 - **Fix:** in the light theme, the track list's keys are readable. Their
   text was a pale colour meant for the dark theme.
+- **Fix:** the cue editor button is disabled for a track that has no
+  waveform, even if it has a BPM and key. Its tooltip says to analyze the
+  track first.
+- **Improvement:** the cue editor's header shows the track's cover art, its
+  title, and the artist and album below it, like the track's row in the list.
 - **Improvement:** the track list's sort arrows sit right after each
   column's name, so they no longer look like they belong to the next column.
   The column the list is sorted by is shown in the accent colour.

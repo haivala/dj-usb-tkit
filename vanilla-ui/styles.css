@@ -3971,6 +3971,30 @@ td button[data-action]:disabled,
   margin-bottom: 12px;
 }
 .track-detail-header h3 { margin: 0; }
+/* Cover, title and "artist · album", like the track's row in the list. */
+.track-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.track-detail-cover .cover-thumb {
+  width: 44px;
+  height: 44px;
+}
+.track-detail-names { min-width: 0; }
+.track-detail-names h3,
+.track-detail-subtitle {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.track-detail-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.track-detail-subtitle:empty { display: none; }
 .track-detail-hint { font-size: 11px; color: var(--muted); }
 /* BPM / Key on the first row, First beat / Playback start on the second: a
    four-column grid (label, controls, label, controls) so both rows line up. */
