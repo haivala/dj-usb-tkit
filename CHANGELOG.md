@@ -50,7 +50,9 @@
   analysis still keeps a BPM or key you edited or imported in view.
 - **Improvement:** the cue editor's BPM, key, first beat and playback-start
   controls fit on two compact rows (BPM and key, then first beat and where
-  playback starts), leaving more room for the waveform.
+  playback starts), leaving more room for the waveform. The BPM and first
+  beat boxes have up/down arrows that match the light or dark theme, and
+  the BPM box shows two decimals (119.00), as in the track list.
 - **Chore:** the docs show more of the app: USB Playlists and History, the
   Player Menu editor, Health & Diagnostics, the repair preview, Settings,
   and a playlist export. Their USB views come from the demo library really
