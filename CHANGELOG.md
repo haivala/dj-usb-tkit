@@ -42,12 +42,12 @@
 - **Fix:** a track row now pulses as analyzing for the whole time the
   track is being analyzed. Before, it only lit up for a moment at the very
   end, so during a large analysis most rows never showed it.
-- **Improvement:** reanalyzing a track clears its BPM and key as soon as
-  its analysis starts, so you can see the fresh values come in. A first
-  analysis still keeps a BPM or key you edited or imported in view.
 - **Fix:** the beat grid in the cue editor looks even. Lines used to be
   drawn between screen pixels, so some looked thicker or fainter than
   others and their spacing seemed to wobble.
+- **Improvement:** reanalyzing a track clears its BPM and key as soon as
+  its analysis starts, so you can see the fresh values come in. A first
+  analysis still keeps a BPM or key you edited or imported in view.
 - **Improvement:** the cue editor's BPM, key, first beat and playback-start
   controls fit on two compact rows (BPM and key, then first beat and where
   playback starts), leaving more room for the waveform.
