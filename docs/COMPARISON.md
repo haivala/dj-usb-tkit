@@ -14,7 +14,7 @@ database health, which is what this project actually implements.
 | | DJ USB Tkit | Rekordbox |
 | --- | --- | --- |
 | Platform | Windows, macOS, Linux | Windows, macOS only ([no official Linux build](../docs/USB_IMPORT.md)) |
-| License | Open source (MIT) | Closed source, proprietary |
+| License | Open source (AGPL-3.0-or-later) | Closed source, proprietary |
 | Runs fully offline | Yes — local-first, no account or cloud dependency required | Has optional cloud/account-linked features |
 | USB export sync control | Explicit `mirror` or `additive` mode per export (see below) | Playlist re-export behavior is not user-selectable the same way |
 | USB playlist sorting | Drag-and-drop reorder of playlists already on the USB, written back to PDB and eDB in place | Requires the library to be managed and re-exported from Rekordbox |
@@ -43,7 +43,7 @@ in addition to Windows and macOS.
 ## Open source
 
 The full application — indexing, analysis, PDB/eDB writers, diagnostics, and
-repair logic — is MIT-licensed and readable. See [LICENSE](../LICENSE) and
+repair logic — is AGPL-3.0-or-later licensed and readable. See [LICENSE](../LICENSE) and
 [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Export you can control: mirror vs. additive
