@@ -2,6 +2,7 @@
 
 pub(crate) mod analysis;
 pub mod anlz;
+mod anlz_seek;
 pub(crate) mod bpm_key;
 #[cfg(test)]
 mod bpm_reference_eval;

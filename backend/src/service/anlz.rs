@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::error::BackendResult;
 
+use super::anlz_seek::{PVBR_PAYLOAD_LEN, SeekIndex};
 use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 
 /// Waveform data with both amplitude peaks (0-100) and frequency bands (0-5) per bin.
@@ -602,14 +603,80 @@ pub(crate) fn ppth_path_from_anlz(data: &[u8]) -> Option<String> {
 // Offset 16+:   400 u32 byte offsets + u32 total samples (1604 bytes)
 //
 // All zeros is what rekordbox itself writes for non-MP3 files and, apart from the
-// total, for CBR MP3s. The real layout and the rules rekordbox follows are in
-// docs/WAVEFORMS.md ("Seek-index chunks"); they are not written until a player is
-// shown to need them, and never approximated.
+// total, for CBR MP3s. Generated bundles keep it empty; the USB repair "Add
+// Missing Seek Data" fills it (and `.EXT`'s `PVB2` for FLACs) in on the stick from
+// the audio file, via [`with_seek_index`]. The rules are in docs/WAVEFORMS.md
+// ("Seek-index chunks").
 
 fn append_pvbr_chunk(file: &mut Vec<u8>) {
     let header = vec![0u8; 4]; // unknown1 = 0
-    let payload = vec![0u8; 1604]; // empty index and total
+    let payload = vec![0u8; PVBR_PAYLOAD_LEN]; // empty index and total
     append_anlz_chunk(file, b"PVBR", &header, &payload);
+}
+
+/// Every chunk of a `PMAI` file as (fourcc, byte range). `None` unless the
+/// whole file walks cleanly, so a patch never lands in a damaged file.
+fn anlz_chunk_ranges(data: &[u8]) -> Option<Vec<([u8; 4], std::ops::Range<usize>)>> {
+    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
+        return None;
+    }
+    let mut chunks = Vec::new();
+    let mut pos = 28usize;
+    while pos < data.len() {
+        let header_len = read_u32_be_at(data, pos + 4)? as usize;
+        let total_len = read_u32_be_at(data, pos + 8)? as usize;
+        if header_len < 12 || total_len < header_len || pos + total_len > data.len() {
+            return None;
+        }
+        chunks.push((data[pos..pos + 4].try_into().ok()?, pos..pos + total_len));
+        pos += total_len;
+    }
+    Some(chunks)
+}
+
+/// The total sample count in a `.DAT`'s `PVBR`; `None` without a
+/// well-formed one. Zero means the seek index is empty.
+pub(crate) fn pvbr_total_samples(dat: &[u8]) -> Option<u32> {
+    let (_, range) = anlz_chunk_ranges(dat)?
+        .into_iter()
+        .find(|(tag, range)| tag == b"PVBR" && range.len() == 16 + PVBR_PAYLOAD_LEN)?;
+    read_u32_be_at(dat, range.end - 4)
+}
+
+/// Whether an `.EXT` has a `PVB2`; `None` when the file doesn't walk cleanly.
+pub(crate) fn has_pvb2_chunk(ext: &[u8]) -> Option<bool> {
+    anlz_chunk_ranges(ext).map(|chunks| chunks.iter().any(|(tag, _)| tag == b"PVB2"))
+}
+
+/// `data` with its seek index set: a `.DAT`'s `PVBR` payload replaced in
+/// place, or an `.EXT`'s `PVB2` replaced or appended at the end (where
+/// rekordbox writes it). Every other chunk is kept byte for byte. `None` when
+/// the file doesn't walk cleanly or a `.DAT` has no `PVBR` to fill.
+pub(super) fn with_seek_index(data: &[u8], index: &SeekIndex) -> Option<Vec<u8>> {
+    let chunks = anlz_chunk_ranges(data)?;
+    match index {
+        SeekIndex::Pvbr(payload) => {
+            let (_, range) = chunks
+                .into_iter()
+                .find(|(tag, range)| tag == b"PVBR" && range.len() == 16 + PVBR_PAYLOAD_LEN)?;
+            if payload.len() != PVBR_PAYLOAD_LEN {
+                return None;
+            }
+            let mut out = data.to_vec();
+            out[range.start + 16..range.end].copy_from_slice(payload);
+            Some(out)
+        }
+        SeekIndex::Pvb2(chunk) => {
+            let mut out = data[..28].to_vec();
+            for (tag, range) in chunks {
+                if &tag != b"PVB2" {
+                    out.extend_from_slice(&data[range]);
+                }
+            }
+            append_anlz_chunk(&mut out, b"PVB2", &chunk.header, &chunk.payload);
+            Some(out)
+        }
+    }
 }
 
 // ===========================================================================
@@ -2326,6 +2393,75 @@ mod tests {
         assert_eq!(&std::fs::read(&paths.dat_path).unwrap()[0..4], b"PMAI");
         assert_eq!(&std::fs::read(&paths.ext_path).unwrap()[0..4], b"PMAI");
         assert_eq!(&std::fs::read(&paths.twoex_path).unwrap()[0..4], b"PMAI");
+    }
+
+    #[test]
+    fn with_seek_index_fills_pvbr_in_place_and_keeps_other_chunks() {
+        let dat = build_anlz_dat_file(
+            &WaveformData::from_peaks(vec![128; 400]),
+            "",
+            Some(128.0),
+            30_000,
+            None,
+            &[],
+        );
+        assert_eq!(pvbr_total_samples(&dat), Some(0));
+        let mut payload = vec![0u8; PVBR_PAYLOAD_LEN];
+        payload[4..8].copy_from_slice(&417u32.to_be_bytes());
+        payload[PVBR_PAYLOAD_LEN - 4..].copy_from_slice(&11_520u32.to_be_bytes());
+
+        let patched = with_seek_index(&dat, &SeekIndex::Pvbr(payload.clone())).unwrap();
+        assert_eq!(patched.len(), dat.len());
+        assert_eq!(pvbr_total_samples(&patched), Some(11_520));
+        assert_eq!(
+            find_chunk_payload(&patched, "PVBR").unwrap(),
+            payload.as_slice()
+        );
+        assert_eq!(collect_chunk_tags(&patched), collect_chunk_tags(&dat));
+        for tag in ["PQTZ", "PWAV", "PWV2"] {
+            assert_eq!(
+                find_chunk_payload(&patched, tag),
+                find_chunk_payload(&dat, tag)
+            );
+        }
+    }
+
+    #[test]
+    fn with_seek_index_appends_or_replaces_pvb2_at_the_end() {
+        let ext = build_anlz_ext_file(
+            &WaveformData::from_peaks(vec![128; 400]),
+            "",
+            Some(128.0),
+            30_000,
+            None,
+            &[],
+        );
+        assert_eq!(has_pvb2_chunk(&ext), Some(false));
+        let chunk = |entries: u32| super::super::anlz_seek::Pvb2Chunk {
+            header: [&[0u8; 12][..], &entries.to_be_bytes(), &20u32.to_be_bytes()].concat(),
+            payload: vec![0u8; entries as usize * 20],
+        };
+
+        let once = with_seek_index(&ext, &SeekIndex::Pvb2(chunk(3))).unwrap();
+        assert_eq!(has_pvb2_chunk(&once), Some(true));
+        let mut tags = collect_chunk_tags(&ext);
+        tags.push("PVB2".to_string());
+        assert_eq!(collect_chunk_tags(&once), tags);
+        assert_eq!(read_u32_be_at(&once, 8), Some(once.len() as u32));
+
+        let twice = with_seek_index(&once, &SeekIndex::Pvb2(chunk(5))).unwrap();
+        assert_eq!(collect_chunk_tags(&twice), tags);
+        assert_eq!(find_chunk_payload(&twice, "PVB2").unwrap().len(), 5 * 20);
+        assert_eq!(&twice[28..ext.len()], &ext[28..]);
+    }
+
+    #[test]
+    fn with_seek_index_refuses_a_damaged_file() {
+        let mut dat = build_anlz_dat_file(&WaveformData::empty(), "", None, 30_000, None, &[]);
+        let len = dat.len();
+        dat.truncate(len - 3);
+        assert_eq!(pvbr_total_samples(&dat), None);
+        assert!(with_seek_index(&dat, &SeekIndex::Pvbr(vec![0; PVBR_PAYLOAD_LEN])).is_none());
     }
 
     // --- Cue points ---

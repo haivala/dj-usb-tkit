@@ -65,10 +65,19 @@ jobs:
             exit 1
           fi
 
+          # A semver prerelease tag (v0.3.7-rc.1) is always a GitHub
+          # prerelease. GitHub never makes a prerelease "latest", so the
+          # in-app updater (releases/latest/download/latest.json) and the
+          # update check keep stable installs off it.
+          prerelease="${{ inputs.prerelease || false }}"
+          if [[ "${tag%%+*}" == *-* ]]; then
+            prerelease=true
+          fi
+
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
           echo "draft=${{ inputs.draft || false }}" >> "$GITHUB_OUTPUT"
-          echo "prerelease=${{ inputs.prerelease || false }}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.name }}

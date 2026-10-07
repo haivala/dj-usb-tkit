@@ -115,23 +115,22 @@ first 60 bars at the track's BPM. The magnifier button is disabled for tracks wi
 rekordbox writes two chunks that help a player find the byte position of a given time in
 files whose bitrate varies. Bundles imported from rekordbox are exported with these chunks
 intact. The bundles this app generates write `PVBR` as all zeros and never write `PVB2`.
-Tracks play correctly this way, including FLACs on a CDJ-2000NXS2.
+Tracks play correctly this way on a CDJ-2000NXS2, including FLACs.
 
-Our working guess (not verified) is that newer players use the audio file's own seek
-data: the `SEEKTABLE` in a FLAC, or the `Xing` table of contents in a VBR MP3. Not every
-file has one, though; in the libraries checked, about one FLAC in seven had no
-`SEEKTABLE`. The test that would settle it: on the player, try cue jumps, needle search
-and loops in files with no seek data anywhere (a FLAC without a `SEEKTABLE`, a VBR MP3
-without a `Xing` header), exported by this app.
-- If those land correctly, the player needs no index at all.
-- If they are off or slow while files with their own seek data are fine, the guess holds.
+An XDJ-AZ, though, rejected the beat grid of an app-analysed CBR MP3 ("please analyse this
+track in rekordbox") while accepting the rekordbox bundle of the same file. The only
+seek-related difference is `PVBR`'s total, which rekordbox fills in for every MP3. Whether
+the XDJ-AZ also needs `PVB2` for FLACs is not known yet.
 
-Either way, only older players would be left as candidates for needing rekordbox's chunks.
+Until that is settled on hardware, analysis is unchanged and the seek data is added on the
+stick only, by the USB repair **Add Missing Seek Data** (`add_missing_seek_data`, see
+`docs/DIAGNOSTICS_REPAIRS.md`). It reads each MP3 and FLAC on the USB and fills an empty
+`PVBR` in place, or adds `PVB2` at the end of the `.EXT`, following the rules below. A file
+those rules don't cover is skipped and named in the Event Log, never approximated. Export
+copies the app's own bundle over the stick's, so a re-exported track needs the repair again.
 
-We only write data that is identical to what rekordbox writes, so both stay empty until a
-hardware test shows that some player needs them. A seek table can be computed from the
-audio file, so the formats and rules below were worked out from rekordbox exports so the
-decision can be revisited.
+The seek data is computed from the audio file (`backend/src/service/anlz_seek.rs`) with
+the rules below, which were worked out from rekordbox exports.
 
 ### `PVBR` (`.DAT`, MP3 seek index)
 
@@ -164,7 +163,7 @@ test set (encoders, bitrate modes, header types, tags, short clips, other format
 real libraries built up over years. Every MP3 these rules cover matched, except one CBR
 file that got a filled index for no reason we could find in the file.
 
-rekordbox's behaviour is not predictable in these cases, so this app would keep `PVBR`
+rekordbox's behaviour is not predictable in these cases, so the repair keeps `PVBR`
 at zeros for them:
 
 - **APE or Lyrics3 tags:** rekordbox appears to count those bytes as about one more frame
@@ -210,6 +209,7 @@ entry counts is resolved from track duration metadata first, then falls back to 
 - Local analysis path: `backend/src/service/analysis.rs`
 - USB export ANLZ path: `backend/src/service/export_helpers/export_paths.rs`
 - ANLZ chunk writer: `backend/src/service/anlz.rs`
+- MP3/FLAC seek-index parser: `backend/src/service/anlz_seek.rs`
 
 ## Verification
 

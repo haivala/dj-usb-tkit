@@ -39,6 +39,21 @@
 
 ## Unreleased
 
+## 0.3.7-rc.1
+
+Release candidate for testing seek data on the XDJ-AZ.
+
+- **Fix:** New USB repair **Add Missing Seek Data**. App-analysed MP3s got an empty seek
+  index (`PVBR`), which the XDJ-AZ answers with "please analyse this track in rekordbox";
+  FLACs got none (`PVB2`). The repair reads each MP3 and FLAC on the stick and writes the
+  seek index rekordbox writes for it. Beat grids, cues and waveforms are kept, and
+  rekordbox's own bundles are never touched. Files it can't index exactly are skipped and
+  named in the Event Log. Analysis itself is unchanged, so re-exporting a track brings
+  back the empty seek data: run the repair again after an export.
+- **Chore:** Release candidates. A `v0.3.7-rc.1`-style tag is published as a GitHub
+  prerelease, so stable installs are never offered it, by the update check or by the
+  in-app updater. A release-candidate install is offered its final release (0.3.7)
+  once that is out.
 - **Chore:** The docs screenshots and GIFs no longer show the app version, in
   their footer or in the Settings drawer, so they only need re-recording after
   a UI change. All of them were re-recorded once to drop it.

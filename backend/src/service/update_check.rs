@@ -167,6 +167,11 @@ pub fn parse_semver(tag: &str) -> Option<[u32; 3]> {
     Some([major, minor, patch])
 }
 
+/// `"0.3.7-rc.1"` is a prerelease of `0.3.7`; build metadata (`+...`) isn't.
+fn is_prerelease(version: &str) -> bool {
+    version.split('+').next().unwrap_or_default().contains('-')
+}
+
 /// Whether the body carries `Severity: <severity>`, ignoring markdown bold,
 /// extra whitespace and case.
 fn release_flags(body: &str, severity: &str) -> bool {
@@ -217,7 +222,8 @@ pub fn evaluate(
         .iter()
         .filter(|r| !r.draft && !r.prerelease)
         .filter_map(|r| parse_semver(&r.tag_name).map(|v| (r, v)))
-        .filter(|(_, v)| *v > current)
+        // A release candidate is older than its own final release.
+        .filter(|(_, v)| *v > current || (*v == current && is_prerelease(current_version)))
         .collect();
     newer.sort_by_key(|(_, v)| *v);
 
@@ -318,6 +324,27 @@ mod tests {
         assert_eq!(parse_semver("1.2.3-beta.1"), Some([1, 2, 3]));
         assert_eq!(parse_semver("1.2"), None);
         assert_eq!(parse_semver("nightly"), None);
+    }
+
+    #[test]
+    fn release_candidate_is_offered_its_final_release() {
+        let releases = [rel("v0.3.7", None), rel("v0.3.6", None)];
+        let info = evaluate("0.3.7-rc.1", InstallKind::Unknown, &releases);
+        assert!(info.update_available);
+        assert_eq!(info.latest_version, "0.3.7");
+
+        let info = evaluate("0.3.7", InstallKind::Unknown, &releases);
+        assert!(!info.update_available);
+        let info = evaluate("0.3.7+build.5", InstallKind::Unknown, &releases);
+        assert!(!info.update_available);
+    }
+
+    #[test]
+    fn stable_users_are_never_offered_a_release_candidate() {
+        let mut rc = rel("v0.3.7-rc.1", None);
+        rc.prerelease = true;
+        let info = evaluate("0.3.6", InstallKind::Unknown, &[rc]);
+        assert!(!info.update_available);
     }
 
     #[test]
