@@ -137,12 +137,11 @@ fn browse_path_key(path: &str) -> String {
     path.trim().replace('\\', "/").to_ascii_lowercase()
 }
 
-/// True when `path` names a file that currently exists on disk. Used by
+/// The file a stored `tracks.file_path` names on this machine. Used by
 /// playback resolution to prefer a library row whose file is actually
 /// present over a stale/duplicate row pointing at a moved-or-deleted file.
-fn file_path_exists(path: &str) -> bool {
-    let trimmed = path.trim();
-    !trimmed.is_empty() && Path::new(trimmed).is_file()
+fn stored_file_path(path: &str) -> &Path {
+    Path::new(path.trim())
 }
 
 pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
@@ -237,9 +236,8 @@ fn sanitize_source_roots(source_roots: Vec<String>) -> Vec<String> {
     roots
 }
 
-fn source_root_is_usable(root: &str) -> bool {
-    let path = Path::new(root);
-    path.exists() && path.is_dir()
+fn source_root_is_usable(root: &Path) -> bool {
+    root.is_dir()
 }
 
 fn source_root_status(root: &str) -> SourceRootStatus {
@@ -334,7 +332,7 @@ where
 {
     let missing: Vec<String> = configured_source_roots(conn)?
         .into_iter()
-        .filter(|root| !source_root_is_usable(root))
+        .filter(|root| !source_root_is_usable(Path::new(root)))
         .collect();
     if missing.is_empty() {
         return Ok(Vec::new());
@@ -454,13 +452,15 @@ pub(crate) fn external_playlist_key(library: &str, kind: ExternalPlaylistKind, i
 
 /// The name of the drive at `usb_root`: the on-drive marker when it's plugged
 /// in, else the name cached for it in `usb_devices`.
-pub(crate) fn usb_drive_name(conn: &rusqlite::Connection, usb_root: &str) -> Option<String> {
-    if let Some(name) = usb_identity::read_drive_name(Path::new(usb_root.trim())) {
+pub(crate) fn usb_drive_name(conn: &rusqlite::Connection, usb_root: &Path) -> Option<String> {
+    if let Some(name) = usb_identity::read_drive_name(usb_root) {
         return Some(name);
     }
     conn.query_row(
         "SELECT label FROM usb_devices WHERE root_path_key = ?1",
-        params![normalize_source_root_for_matching(usb_root)],
+        params![normalize_source_root_for_matching(
+            &usb_root.to_string_lossy()
+        )],
         |row| row.get::<_, Option<String>>(0),
     )
     .optional()
@@ -665,9 +665,8 @@ fn rekordbox_db_analysis_file_candidates(master_path: &Path, db_path: &str) -> V
 /// possibly without `PWV6`/`.2EX`), and cache maintenance must never touch it.
 /// Cache files are named by `local_analysis_bundle_paths`' source-path hash,
 /// not the track id, so the stored path is the only reliable way to find them.
-fn local_cache_bundle_dat(waveform_dir: &Path, waveform_peaks_path: &str) -> Option<PathBuf> {
-    let dat = PathBuf::from(waveform_peaks_path.trim());
-    (dat.parent() == Some(waveform_dir)).then_some(dat)
+fn local_cache_bundle_dat(waveform_dir: &Path, waveform_peaks_path: &Path) -> Option<PathBuf> {
+    (waveform_peaks_path.parent() == Some(waveform_dir)).then(|| waveform_peaks_path.to_path_buf())
 }
 
 fn remove_bundle_files(dat: &Path) {
@@ -1016,7 +1015,7 @@ impl BackendService {
     }
 
     pub fn initialize_usb(&self, req: InitializeUsbRequest) -> BackendResult<InitializeUsbData> {
-        let data = initialize_usb_util(&req.usb_root)?;
+        let data = initialize_usb_util(Path::new(&req.usb_root))?;
         self.invalidate_usb_parse_cache();
         Ok(data)
     }
@@ -1032,7 +1031,7 @@ impl BackendService {
         let mut existing_roots = Vec::<String>::new();
         let mut not_found = Vec::<String>::new();
         for root in source_roots {
-            if source_root_is_usable(&root) {
+            if source_root_is_usable(Path::new(&root)) {
                 existing_roots.push(root);
             } else {
                 not_found.push(root);
@@ -1303,7 +1302,7 @@ impl BackendService {
                     tx.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
                     if let Some(dat) = waveform_peaks_path
                         .as_deref()
-                        .and_then(|p| local_cache_bundle_dat(&waveform_dir, p))
+                        .and_then(|p| local_cache_bundle_dat(&waveform_dir, Path::new(p.trim())))
                     {
                         orphaned_cache_bundles.push(dat);
                     }
@@ -1339,7 +1338,9 @@ impl BackendService {
                 .filter_map(|r| r.ok())
                 .collect();
             for (id, waveform_peaks_path) in &rows {
-                let Some(dat) = local_cache_bundle_dat(&waveform_dir, waveform_peaks_path) else {
+                let Some(dat) =
+                    local_cache_bundle_dat(&waveform_dir, Path::new(waveform_peaks_path.trim()))
+                else {
                     continue;
                 };
                 if let Ok(bytes) = std::fs::read(dat.with_extension("2EX"))
@@ -2191,7 +2192,7 @@ impl BackendService {
                     matched_by: "self".to_string(),
                     track_id: Some(track.id),
                 };
-                if file_path_exists(&track.file_path) {
+                if stored_file_path(&track.file_path).is_file() {
                     return Ok(data);
                 }
                 weak_self = Some(data);
@@ -2342,7 +2343,7 @@ impl BackendService {
             playlist.last_exported_usb_name = playlist
                 .last_exported_usb_root
                 .as_deref()
-                .and_then(|root| usb_drive_name(&conn, root));
+                .and_then(|root| usb_drive_name(&conn, Path::new(root.trim())));
         }
         Ok(ListPlaylistsData { items })
     }
@@ -3395,18 +3396,23 @@ pub(crate) fn row_to_track(
     // PWAV/PWV2 from .DAT if extended analysis hasn't been run.
     let (waveform_preview, waveform_color_data) = if include_previews {
         if is_rekordbox_db {
-            let color = waveform_peaks_path.as_deref().and_then(read_pwv4_from_anlz);
+            let color = waveform_peaks_path
+                .as_deref()
+                .map(Path::new)
+                .and_then(read_pwv4_from_anlz);
             if color.is_some() {
                 (None, color)
             } else {
                 let preview = waveform_peaks_path
                     .as_deref()
+                    .map(Path::new)
                     .and_then(load_waveform_preview_from_analysis_path);
                 (preview, None)
             }
         } else {
             let preview = waveform_peaks_path
                 .as_deref()
+                .map(Path::new)
                 .and_then(load_waveform_preview_from_analysis_path);
             (preview, None)
         }
@@ -3542,7 +3548,7 @@ fn best_candidate(candidates: Vec<Track>, req: &ResolvePlaybackSourceRequest) ->
             continue;
         }
         let score = score_playback_candidate(&candidate, req);
-        if score > best_on_disk_score && file_path_exists(&candidate.file_path) {
+        if score > best_on_disk_score && stored_file_path(&candidate.file_path).is_file() {
             best_on_disk_score = score;
             best_on_disk = Some(candidate.clone());
         }
@@ -4421,10 +4427,10 @@ mod tests {
     #[test]
     fn source_root_is_usable_true_for_dir_false_for_missing() {
         let dir = tempfile::tempdir().expect("tempdir");
-        assert!(source_root_is_usable(dir.path().to_str().unwrap()));
-        assert!(!source_root_is_usable(
+        assert!(source_root_is_usable(dir.path()));
+        assert!(!source_root_is_usable(Path::new(
             "/definitely/does/not/exist/anywhere"
-        ));
+        )));
     }
 
     #[test]

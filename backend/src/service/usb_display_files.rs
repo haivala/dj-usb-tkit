@@ -127,29 +127,30 @@ impl UsbDisplaySource {
         if track.waveform_preview.is_none() {
             let from_library = library
                 .and_then(|files| files.waveform_path.as_deref())
+                .map(Path::new)
                 .and_then(load_waveform_preview_from_analysis_path)
                 .filter(|preview| !preview.is_empty());
             track.waveform_preview = if from_library.is_some() {
                 counts.library += 1;
                 from_library
             } else {
-                track
-                    .usb_analysis_path
-                    .as_deref()
-                    .and_then(|path| self.read_usb_file(FileKind::Waveform, path, &mut counts))
+                track.usb_analysis_path.as_deref().and_then(|path| {
+                    self.read_usb_file(FileKind::Waveform, Path::new(path), &mut counts)
+                })
             };
         }
 
         if track.artwork_data_url.is_none() {
             let from_library = library
                 .and_then(|files| files.artwork_path.as_deref())
+                .map(Path::new)
                 .and_then(artwork_path_to_data_url);
             track.artwork_data_url = if from_library.is_some() {
                 counts.library += 1;
                 from_library
             } else {
                 track.artwork_path.as_deref().and_then(|path| {
-                    self.read_usb_file(FileKind::Artwork, path, &mut counts)
+                    self.read_usb_file(FileKind::Artwork, Path::new(path), &mut counts)
                         .and_then(|bytes| String::from_utf8(bytes).ok())
                 })
             };
@@ -160,7 +161,7 @@ impl UsbDisplaySource {
     fn read_usb_file(
         &self,
         kind: FileKind,
-        path: &str,
+        path: &Path,
         counts: &mut DisplayReadCounts,
     ) -> Option<Vec<u8>> {
         let read = || match kind {
@@ -173,7 +174,7 @@ impl UsbDisplaySource {
         };
         let sig = match kind {
             FileKind::Waveform => waveform_signature(path),
-            FileKind::Artwork => file_signature(Path::new(path)),
+            FileKind::Artwork => file_signature(path),
         };
         // Nothing to stat -> nothing to read either.
         let sig = sig?;
@@ -205,10 +206,8 @@ impl UsbDisplaySource {
     }
 
     /// Path on the stick, independent of where it is mounted.
-    fn stick_relative_path(&self, path: &str) -> String {
-        let relative = Path::new(path)
-            .strip_prefix(&self.usb_root)
-            .unwrap_or(Path::new(path));
+    fn stick_relative_path(&self, path: &Path) -> String {
+        let relative = path.strip_prefix(&self.usb_root).unwrap_or(path);
         relative.to_string_lossy().replace('\\', "/")
     }
 }
@@ -301,7 +300,7 @@ fn file_signature(path: &Path) -> Option<String> {
 
 /// The preview can come from any of the `.EXT` / `.2EX` / `.DAT` siblings,
 /// so the signature covers each one that exists.
-fn waveform_signature(path: &str) -> Option<String> {
+fn waveform_signature(path: &Path) -> Option<String> {
     let parts: Vec<String> = waveform_preview_candidates(path)
         .iter()
         .filter_map(|candidate| {

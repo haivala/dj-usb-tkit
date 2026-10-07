@@ -88,6 +88,10 @@
 - **Improvement:** on the empty library screen, the rekordbox import button
   says "rekordbox library", like the "Mixxx library" one next to it, instead
   of "RB master.db".
+- **Chore:** backend helpers that read files on this machine (artwork,
+  waveforms, ANLZ, USB setup, source folders) take `Path` instead of text.
+  `CONTRIBUTING.md` explains where paths stay text: the API, the database,
+  and rekordbox's own `/Contents/…` and `/PIONEER/…` paths.
 - **Chore:** the rekordbox library's "master DB" names in the code, docs,
   database and settings are now "rekordbox DB", matching the Mixxx ones. The
   environment override is `DJUSBTKIT_REKORDBOX_DB_PATH`; the old

@@ -440,8 +440,7 @@ mod tests {
         let td = tempfile::tempdir().expect("tempdir");
         let usb_root = td.path().join("USB_TEST");
         std::fs::create_dir_all(&usb_root).expect("create usb root");
-        crate::service::initialize_usb(usb_root.to_str().expect("utf-8 usb root path"))
-            .expect("initialize usb");
+        crate::service::initialize_usb(&usb_root).expect("initialize usb");
         (td, usb_root)
     }
 

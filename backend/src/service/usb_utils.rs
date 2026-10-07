@@ -21,9 +21,8 @@ use super::usb_vendor_compat::{
     desktop_master_db_rel_path, vendor_db_dir, vendor_pdb_path,
 };
 
-pub(crate) fn artwork_path_to_data_url(path: &str) -> Option<String> {
-    let p = std::path::Path::new(path);
-    let ext = p
+pub(crate) fn artwork_path_to_data_url(path: &Path) -> Option<String> {
+    let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_ascii_lowercase())?;
@@ -34,7 +33,7 @@ pub(crate) fn artwork_path_to_data_url(path: &str) -> Option<String> {
         "webp" => "image/webp",
         _ => return None,
     };
-    let bytes = std::fs::read(p).ok()?;
+    let bytes = std::fs::read(path).ok()?;
     if bytes.is_empty() {
         return None;
     }
@@ -42,15 +41,15 @@ pub(crate) fn artwork_path_to_data_url(path: &str) -> Option<String> {
     Some(format!("data:{mime};base64,{encoded}"))
 }
 
-pub(crate) fn canonicalize_or_self(path: std::path::PathBuf) -> std::path::PathBuf {
+pub(crate) fn canonicalize_or_self(path: PathBuf) -> PathBuf {
     std::fs::canonicalize(&path).unwrap_or_else(|_| normalize_path_components(&path))
 }
 
 /// Resolve `.` and `..` components without touching the filesystem.
 /// Used as fallback when `std::fs::canonicalize` fails (path doesn't exist).
-fn normalize_path_components(path: &std::path::Path) -> std::path::PathBuf {
+fn normalize_path_components(path: &Path) -> PathBuf {
     use std::path::Component;
-    let mut out = std::path::PathBuf::new();
+    let mut out = PathBuf::new();
     for component in path.components() {
         match component {
             Component::ParentDir => {
@@ -63,8 +62,8 @@ fn normalize_path_components(path: &std::path::Path) -> std::path::PathBuf {
     out
 }
 
-pub(crate) fn normalize_usb_root_path(path: std::path::PathBuf) -> std::path::PathBuf {
-    let lower_name = |p: &std::path::Path| {
+pub(crate) fn normalize_usb_root_path(path: PathBuf) -> PathBuf {
+    let lower_name = |p: &Path| {
         p.file_name()
             .and_then(|s| s.to_str())
             .map(|s| s.to_ascii_lowercase())
@@ -204,11 +203,11 @@ pub(crate) fn all_usb_device_root_paths(conn: &rusqlite::Connection) -> BackendR
     Ok(paths)
 }
 
-pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<std::path::PathBuf> {
+pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<PathBuf> {
     if let Some(requested_root) = requested_root {
         let trimmed = requested_root.trim();
         if !trimmed.is_empty() {
-            let candidate = std::path::PathBuf::from(trimmed);
+            let candidate = PathBuf::from(trimmed);
             if candidate.exists() {
                 return Ok(normalize_usb_root_path(canonicalize_or_self(candidate)));
             }
@@ -236,7 +235,7 @@ pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<st
     if let Ok(override_path) = std::env::var(USB_ROOT_ENV_KEY) {
         let trimmed = override_path.trim();
         if !trimmed.is_empty() {
-            let candidate = std::path::PathBuf::from(trimmed);
+            let candidate = PathBuf::from(trimmed);
             if candidate.exists() {
                 return Ok(normalize_usb_root_path(canonicalize_or_self(candidate)));
             }
@@ -274,7 +273,7 @@ pub(crate) fn parse_staged_pdb(usb_root: &Path) -> BackendResult<crate::pdb_read
     parse_pdb(&path)
 }
 
-pub(crate) fn resolve_usb_side_path(usb_root: &std::path::Path, raw: &str) -> Option<String> {
+pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -313,9 +312,9 @@ pub(crate) fn resolve_usb_side_path(usb_root: &std::path::Path, raw: &str) -> Op
         return Some(resolved.to_string_lossy().to_string());
     }
 
-    if std::path::Path::new(&normalized).is_absolute() {
+    if Path::new(&normalized).is_absolute() {
         return Some(
-            canonicalize_or_self(std::path::PathBuf::from(&normalized))
+            canonicalize_or_self(PathBuf::from(&normalized))
                 .to_string_lossy()
                 .to_string(),
         );
@@ -328,7 +327,7 @@ pub(crate) fn resolve_usb_side_path(usb_root: &std::path::Path, raw: &str) -> Op
     Some(resolved.to_string_lossy().to_string())
 }
 
-pub(crate) fn has_write_access(root: &std::path::Path) -> bool {
+pub(crate) fn has_write_access(root: &Path) -> bool {
     let probe_dir = root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
     let target = if probe_dir.is_dir() {
         probe_dir
@@ -342,7 +341,7 @@ pub(crate) fn has_write_access(root: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn load_waveform_preview_from_analysis_path(path: &str) -> Option<Vec<u8>> {
+pub(crate) fn load_waveform_preview_from_analysis_path(path: &Path) -> Option<Vec<u8>> {
     for candidate in waveform_preview_candidates(path) {
         let Ok(bytes) = std::fs::read(&candidate) else {
             continue;
@@ -357,9 +356,9 @@ pub(crate) fn load_waveform_preview_from_analysis_path(path: &str) -> Option<Vec
 }
 
 /// The ANLZ files `load_waveform_preview_from_analysis_path` tries, in order.
-pub(crate) fn waveform_preview_candidates(path: &str) -> Vec<std::path::PathBuf> {
-    let base = std::path::PathBuf::from(path);
-    let mut candidates = Vec::<std::path::PathBuf>::new();
+pub(crate) fn waveform_preview_candidates(path: &Path) -> Vec<PathBuf> {
+    let base = path.to_path_buf();
+    let mut candidates = Vec::<PathBuf>::new();
     let ext = base
         .extension()
         .and_then(|s| s.to_str())
@@ -389,8 +388,8 @@ pub(crate) fn waveform_preview_candidates(path: &str) -> Vec<std::path::PathBuf>
 
 /// Extract the raw PWV4 payload from a desktop library ANLZ `.EXT` file (no conversion).
 /// Returns the 1200 × 6 byte payload, or None if the file/chunk is absent.
-pub(crate) fn read_pwv4_from_anlz(dat_path: &str) -> Option<Vec<u8>> {
-    let base = std::path::PathBuf::from(dat_path);
+pub(crate) fn read_pwv4_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
+    let base = dat_path.to_path_buf();
     let ext_path = if base
         .extension()
         .and_then(|e| e.to_str())
@@ -409,8 +408,8 @@ pub(crate) fn read_pwv4_from_anlz(dat_path: &str) -> Option<Vec<u8>> {
 /// ANLZ `.EXT` file (no conversion). 2 bytes/entry, BE u16:
 /// `R(3) | G(3) | B(3) | Height(5) | _(2)`. Entry count is duration-derived
 /// (`ceil(duration_s * 150) + 4`), so this can be tens of thousands of entries.
-pub(crate) fn read_pwv5_from_anlz(dat_path: &str) -> Option<Vec<u8>> {
-    let base = std::path::PathBuf::from(dat_path);
+pub(crate) fn read_pwv5_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
+    let base = dat_path.to_path_buf();
     let ext_path = if base
         .extension()
         .and_then(|e| e.to_str())
@@ -539,7 +538,7 @@ pub(crate) fn downsample_waveform_payload(payload: &[u8], bins: usize) -> Vec<u8
     peaks
 }
 
-pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<WarningEntry> {
+pub(crate) fn scan_anlz_warnings(usb_root: &Path) -> Vec<WarningEntry> {
     let anlz_root = usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_ANALYSIS_DIR);
     if !anlz_root.exists() {
         return Vec::new();
@@ -637,7 +636,7 @@ pub(crate) fn scan_anlz_warnings(usb_root: &std::path::Path) -> Vec<WarningEntry
     warnings
 }
 
-fn is_known_anlz_metadata_file(path: &std::path::Path) -> bool {
+fn is_known_anlz_metadata_file(path: &Path) -> bool {
     let parts = path
         .components()
         .filter_map(|c| c.as_os_str().to_str())
@@ -652,7 +651,7 @@ fn is_known_anlz_metadata_file(path: &std::path::Path) -> bool {
     tail[0].eq_ignore_ascii_case("USBMNG.DAT")
 }
 
-fn is_malformed_anlz_entry_name(path: &std::path::Path) -> bool {
+fn is_malformed_anlz_entry_name(path: &Path) -> bool {
     // Expected shapes:
     //   .../USBANLZ/PXXX/<8HEX>/ANLZ0000.(DAT|EXT|2EX)
     //   .../USBANLZ/PXXX/<8HEX>   (directory)
@@ -723,7 +722,7 @@ fn is_malformed_anlz_entry_name(path: &std::path::Path) -> bool {
     false
 }
 
-pub(crate) fn sanitize_warning_path(path: &std::path::Path) -> String {
+pub(crate) fn sanitize_warning_path(path: &Path) -> String {
     path.to_string_lossy()
         .chars()
         .flat_map(|c| {
@@ -815,7 +814,7 @@ pub(crate) fn load_existing_analysis_paths_by_pdb_track_path(
     out
 }
 
-pub(crate) fn collect_contents_audio_files(usb_root: &std::path::Path) -> Vec<String> {
+pub(crate) fn collect_contents_audio_files(usb_root: &Path) -> Vec<String> {
     let contents_root = usb_root.join(USB_CONTENTS_DIR);
     if !contents_root.exists() {
         return Vec::new();
@@ -912,12 +911,11 @@ pub(crate) fn repair_utf8_mojibake(value: &str) -> String {
 
 // ── Initialize empty USB ─────────────────────────────
 
-pub fn initialize_usb(usb_root: &str) -> BackendResult<crate::models::InitializeUsbData> {
-    let root = Path::new(usb_root);
+pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsbData> {
     if !root.is_dir() {
         return Err(BackendError::Internal(format!(
             "USB root does not exist: {}",
-            usb_root
+            root.display()
         )));
     }
 
@@ -971,7 +969,7 @@ pub fn initialize_usb(usb_root: &str) -> BackendResult<crate::models::Initialize
     }
 
     Ok(crate::models::InitializeUsbData {
-        path: usb_root.to_string(),
+        path: root.to_string_lossy().into_owned(),
         created_dirs: created,
     })
 }
@@ -1413,9 +1411,7 @@ pub fn detect_external_rekordbox_db() -> crate::models::DetectExternalRekordboxD
     }
 }
 
-pub(crate) fn external_rekordbox_db_candidates() -> Vec<std::path::PathBuf> {
-    use std::path::PathBuf;
-
+pub(crate) fn external_rekordbox_db_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
 
     // Check env var overrides first
@@ -1852,7 +1848,7 @@ mod diag_tests {
 
     #[test]
     fn normalize_usb_root_path_from_subfolders() {
-        let root = std::path::PathBuf::from("/tmp/USB");
+        let root = PathBuf::from("/tmp/USB");
         assert_eq!(normalize_usb_root_path(root.join(USB_CONTENTS_DIR)), root);
         assert_eq!(
             normalize_usb_root_path(root.join(USB_VENDOR_ROOT_DIR)),
@@ -2061,7 +2057,7 @@ mod diag_tests {
         }
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let result = initialize_usb(tmp.to_str().unwrap()).unwrap();
+        let result = initialize_usb(&tmp).unwrap();
         assert_eq!(result.path, tmp.to_str().unwrap());
         assert!(!result.created_dirs.is_empty());
 
@@ -2092,7 +2088,7 @@ mod diag_tests {
         );
 
         // Running initialize again should be idempotent (no error)
-        let result2 = initialize_usb(tmp.to_str().unwrap()).unwrap();
+        let result2 = initialize_usb(&tmp).unwrap();
         assert!(
             result2.created_dirs.is_empty(),
             "second run creates nothing"
@@ -2107,7 +2103,7 @@ mod diag_tests {
         let cache_dir = tempfile::tempdir().expect("cache dir").keep();
         let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
 
-        let result = initialize_usb(usb.path().to_str().expect("usb path")).unwrap();
+        let result = initialize_usb(usb.path()).unwrap();
         assert!(!result.created_dirs.is_empty());
 
         let db_dir = usb.path().join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
@@ -2175,7 +2171,7 @@ mod diag_tests {
 
         // First init: populates both the USB and the local cache with a
         // full PDB/eDB.
-        initialize_usb(usb.path().to_str().expect("usb path")).unwrap();
+        initialize_usb(usb.path()).unwrap();
 
         // Simulate the user manually deleting PIONEER and Contents directly
         // on the USB, then reconnecting -- the local cache directory (same
@@ -2185,8 +2181,8 @@ mod diag_tests {
         std::fs::remove_dir_all(usb.path().join(USB_CONTENTS_DIR)).unwrap();
 
         // Re-initializing must succeed, not fail with a stale-schema DB error.
-        let result = initialize_usb(usb.path().to_str().expect("usb path"))
-            .expect("re-initialize after manual wipe should succeed");
+        let result =
+            initialize_usb(usb.path()).expect("re-initialize after manual wipe should succeed");
         assert!(!result.created_dirs.is_empty());
 
         let edb_usb_path = usb
@@ -2206,7 +2202,7 @@ mod diag_tests {
     #[test]
     fn initialize_usb_seeds_reference_menu_defaults() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        initialize_usb(tmp.path().to_str().expect("usb path")).expect("initialize usb");
+        initialize_usb(tmp.path()).expect("initialize usb");
 
         let db_path = tmp
             .path()
@@ -2711,7 +2707,7 @@ mod diag_tests {
             [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x02, 0x00, 0x00, 0xFF, 0xD9],
         )
         .unwrap();
-        let result = artwork_path_to_data_url(tmp.to_str().unwrap());
+        let result = artwork_path_to_data_url(&tmp);
         assert!(result.is_some(), "should produce data URL for .jpg file");
         let url = result.unwrap();
         assert!(
@@ -2727,7 +2723,7 @@ mod diag_tests {
         let tmp = std::env::temp_dir().join("__test_artwork_png__.png");
         // Minimal PNG-like bytes (just needs non-empty content + .png extension)
         std::fs::write(&tmp, b"\x89PNG\r\n\x1a\n fake png data").unwrap();
-        let result = artwork_path_to_data_url(tmp.to_str().unwrap());
+        let result = artwork_path_to_data_url(&tmp);
         assert!(result.is_some(), "should produce data URL for .png file");
         let url = result.unwrap();
         assert!(
@@ -2775,7 +2771,7 @@ mod diag_tests {
     fn artwork_path_to_data_url_returns_none_for_unsupported_extension() {
         let tmp = std::env::temp_dir().join("__test_artwork_txt__.txt");
         std::fs::write(&tmp, b"not an image").unwrap();
-        let result = artwork_path_to_data_url(tmp.to_str().unwrap());
+        let result = artwork_path_to_data_url(&tmp);
         assert!(result.is_none(), "should return None for .txt file");
         std::fs::remove_file(&tmp).ok();
     }
@@ -2784,14 +2780,15 @@ mod diag_tests {
     fn artwork_path_to_data_url_returns_none_for_empty_file() {
         let tmp = std::env::temp_dir().join("__test_artwork_empty__.jpg");
         std::fs::write(&tmp, b"").unwrap();
-        let result = artwork_path_to_data_url(tmp.to_str().unwrap());
+        let result = artwork_path_to_data_url(&tmp);
         assert!(result.is_none(), "should return None for empty file");
         std::fs::remove_file(&tmp).ok();
     }
 
     #[test]
     fn artwork_path_to_data_url_returns_none_for_missing_file() {
-        let result = artwork_path_to_data_url("/tmp/__nonexistent_artwork_test_file__.jpg");
+        let result =
+            artwork_path_to_data_url(Path::new("/tmp/__nonexistent_artwork_test_file__.jpg"));
         assert!(result.is_none(), "should return None for missing file");
     }
 

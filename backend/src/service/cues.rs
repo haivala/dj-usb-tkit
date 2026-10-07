@@ -762,6 +762,7 @@ impl BackendService {
         let detail_waveform = track
             .waveform_peaks_path
             .as_deref()
+            .map(Path::new)
             .and_then(read_pwv5_from_anlz)
             .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
 
@@ -915,7 +916,7 @@ impl BackendService {
         Ok(UsbTrackAnalysisDetail {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
             cues: cues_for_editor(collapse_anlz_cues(&bytes)),
-            detail_waveform: read_pwv5_from_anlz(&dat_abs)
+            detail_waveform: read_pwv5_from_anlz(dat_path)
                 .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
             key_options: key_option_groups(notation),
         })

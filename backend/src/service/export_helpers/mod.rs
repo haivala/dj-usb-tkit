@@ -3906,8 +3906,7 @@ mod tests {
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
 
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let playlist = ExportPlaylistData {
             id: "pl-last".to_string(),
@@ -4094,8 +4093,7 @@ mod tests {
         )
         .unwrap();
 
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         // Export playlist A with tracks t1, t2
         let playlist_a = ExportPlaylistData {
@@ -4264,8 +4262,7 @@ mod tests {
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
 
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         // Export playlist A with tracks t1, t2
         let playlist_a = ExportPlaylistData {
@@ -4339,8 +4336,7 @@ mod tests {
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
 
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         // 20 tracks → 20 playlist entries per playlist → enough to stress
         let tracks_a: Vec<ExportTrackData> = (0..20)
@@ -4512,8 +4508,7 @@ mod tests {
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
 
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let pdb_path = usb_root
             .join(USB_VENDOR_ROOT_DIR)
@@ -4570,8 +4565,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
         let pdb_path = usb_root
             .join(USB_VENDOR_ROOT_DIR)
             .join(USB_VENDOR_DB_DIR)
@@ -4687,8 +4681,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
         let pdb_path = usb_root
             .join(USB_VENDOR_ROOT_DIR)
             .join(USB_VENDOR_DB_DIR)
@@ -4717,8 +4710,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
         let pdb_path = usb_root
             .join(USB_VENDOR_ROOT_DIR)
             .join(USB_VENDOR_DB_DIR)
@@ -4751,8 +4743,7 @@ mod tests {
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
 
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let playlist = ExportPlaylistData {
             id: "pl-dict".to_string(),
@@ -4901,8 +4892,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let mut unlock_warnings = Vec::<WarningEntry>::new();
         let conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
@@ -5002,8 +4992,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let playlist = ExportPlaylistData {
             id: "pl-alias-path".to_string(),
@@ -5101,8 +5090,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let playlist = ExportPlaylistData {
             id: "pl-fingerprint-fallback".to_string(),
@@ -5190,8 +5178,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let playlist = ExportPlaylistData {
             id: "pl-alias-edb".to_string(),
@@ -5259,8 +5246,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let mut unlock_warnings = Vec::<WarningEntry>::new();
         let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
@@ -5347,8 +5333,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let mut unlock_warnings = Vec::<WarningEntry>::new();
         let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
@@ -5466,8 +5451,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .unwrap();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let mut unlock_warnings = Vec::<WarningEntry>::new();
         let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
@@ -5588,8 +5572,7 @@ mod tests {
         let usb_root = dir.path();
         std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
             .expect("create pdb dir");
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let playlist = ExportPlaylistData {
             id: "pl-keys".to_string(),
@@ -5892,8 +5875,7 @@ mod tests {
         // field list even though duration/title/anlz_path were.
         let dir = tempdir().unwrap();
         let usb_root = dir.path();
-        crate::service::usb_utils::initialize_usb(usb_root.to_string_lossy().as_ref())
-            .expect("initialize usb skeleton");
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
         let playlist = ExportPlaylistData {
             id: "pl-refresh".to_string(),

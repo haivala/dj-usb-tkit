@@ -69,6 +69,8 @@ The app checks GitHub Releases for newer versions on startup (`vanilla-ui/update
 
 Every `CHANGELOG.md` entry is prefixed with its category — `**New feature:**`, `**Fix:**`, `**Improvement:**`, or `**Chore:**`. When a release is flagged critical, mark the specific critical entry/entries with `(CRITICAL)` appended to their prefix (e.g. `**Fix (CRITICAL):**`) and have the `**Severity:**` line point at them, since not every entry in a critical release is necessarily itself critical. Full convention and examples are in the comment at the top of `CHANGELOG.md`.
 
+In the backend, a value that names a file on this machine is a `Path` / `PathBuf` from where it's parsed until where it's stored or sent: internal functions take `&Path`, not `&str`. Convert at the boundaries only: API models (`models.rs`) and SQLite columns stay `String`, since they go to JSON or the database as text. Paths in rekordbox's own formats (`/Contents/…`, `/PIONEER/…` in the PDB, eDB and `master.db`) are strings relative to the USB or library folder, not paths on this machine, so they stay strings too.
+
 ## Suggested Workflow
 
 1. create a branch for your change

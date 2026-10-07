@@ -1,6 +1,7 @@
 //! USB validation, playlist/history fetching, track inspection.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::Arc;
 
 use chrono::NaiveDate;
@@ -69,7 +70,7 @@ pub(crate) struct StagedFileSig {
 }
 
 impl StagedFileSig {
-    fn of(path: &std::path::Path) -> Option<Self> {
+    fn of(path: &Path) -> Option<Self> {
         let meta = std::fs::metadata(path).ok()?;
         let dur = meta
             .modified()
@@ -113,7 +114,7 @@ pub(crate) type UsbHistoriesCache =
 
 fn build_usb_track_index(
     parsed: &crate::pdb_reader::ParsedPdb,
-    usb_root: &std::path::Path,
+    usb_root: &Path,
 ) -> HashMap<u32, UsbTrack> {
     parsed
         .tracks
@@ -194,7 +195,7 @@ fn edb_track_index_from_playlist_tracks(
 
 fn merge_full_edb_track_index(
     conn: &rusqlite::Connection,
-    usb_root: &std::path::Path,
+    usb_root: &Path,
     track_by_id: &mut HashMap<u32, UsbTrack>,
     warnings: &mut Vec<WarningEntry>,
 ) {
@@ -552,7 +553,7 @@ fn hydrate_usb_page(
 /// The registered `usb_devices` id for the stick mounted at `usb_root`.
 fn usb_device_id_for_root(
     conn: &rusqlite::Connection,
-    usb_root: &std::path::Path,
+    usb_root: &Path,
 ) -> BackendResult<Option<String>> {
     let root_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
     Ok(conn
@@ -581,7 +582,7 @@ fn build_history_track_date_index(
 }
 
 /// Recursively remove empty directories bottom-up.
-fn cleanup_empty_dirs_recursive(dir: &std::path::Path) {
+fn cleanup_empty_dirs_recursive(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -896,7 +897,7 @@ impl BackendService {
     /// Staged-file signature key for the parse cache. Also forces the local
     /// staging copies to be in sync, so the subsequent `stage_pdb` /
     /// `open_edb_from_usb_root` calls in the resolve are no-ops.
-    pub(crate) fn usb_parse_cache_key(&self, usb_root: &std::path::Path) -> UsbParseCacheKey {
+    pub(crate) fn usb_parse_cache_key(&self, usb_root: &Path) -> UsbParseCacheKey {
         let pdb = super::usb_staging::stage_pdb(usb_root)
             .ok()
             .as_deref()
@@ -946,7 +947,7 @@ impl BackendService {
     /// The resolved USB histories for a stick, from cache or a fresh parse.
     fn usb_histories_resolved(
         &self,
-        usb_root: &std::path::Path,
+        usb_root: &Path,
     ) -> BackendResult<Arc<crate::models::FetchUsbHistoriesData>> {
         let key = self.usb_parse_cache_key(usb_root);
         if let Some(hit) = self.usb_histories_cache_hit(&key) {
@@ -968,10 +969,7 @@ impl BackendService {
     /// The resolved (pre-materialization) playlists for a stick, from cache or
     /// a fresh parse. Used by `fetch_usb_playlist_tracks` to avoid re-parsing
     /// the whole stick per page.
-    fn usb_playlists_resolved(
-        &self,
-        usb_root: &std::path::Path,
-    ) -> BackendResult<Arc<CachedUsbPlaylists>> {
+    fn usb_playlists_resolved(&self, usb_root: &Path) -> BackendResult<Arc<CachedUsbPlaylists>> {
         let key = self.usb_parse_cache_key(usb_root);
         if let Some(hit) = self.usb_playlists_cache_hit(&key) {
             return Ok(hit);
@@ -995,7 +993,7 @@ impl BackendService {
     fn finish_usb_playlists(
         &self,
         resolved: &CachedUsbPlaylists,
-        usb_root: &std::path::Path,
+        usb_root: &Path,
     ) -> BackendResult<FetchUsbPlaylistsData> {
         let local_playlists = self.list_playlists()?.items;
         let conn = self.db.connect()?;
@@ -2016,7 +2014,7 @@ impl BackendService {
     fn resolve_usb_track_page_local_ids(
         &self,
         tracks: &mut [UsbTrack],
-        usb_root: &std::path::Path,
+        usb_root: &Path,
     ) -> BackendResult<UsbDisplaySource> {
         let conn = self.db.connect()?;
         let usb_device_id = usb_device_id_for_root(&conn, usb_root)?;
@@ -2070,7 +2068,7 @@ impl BackendService {
 
     /// Display-file source for rows with no resolved local track: the local
     /// cache of this stick's reads, else the stick.
-    fn usb_display_source(&self, usb_root: &std::path::Path) -> BackendResult<UsbDisplaySource> {
+    fn usb_display_source(&self, usb_root: &Path) -> BackendResult<UsbDisplaySource> {
         let conn = self.db.connect()?;
         let usb_device_id = usb_device_id_for_root(&conn, usb_root)?;
         self.build_usb_display_source(&conn, usb_root, usb_device_id, &[])
@@ -2081,7 +2079,7 @@ impl BackendService {
     fn build_usb_display_source(
         &self,
         conn: &rusqlite::Connection,
-        usb_root: &std::path::Path,
+        usb_root: &Path,
         usb_device_id: Option<String>,
         page: &[UsbTrack],
     ) -> BackendResult<UsbDisplaySource> {
@@ -2199,7 +2197,7 @@ impl BackendService {
         self.materialize_usb_track_row(&tx, &mut track, &now_ts, &usb_device_id, &usb_root_paths)?;
         if let (Some(id), Some(path)) = (track.local_track_id.as_deref(), analysis_path.as_deref())
         {
-            super::cues::import_anlz_cues_for_track(&tx, id, std::path::Path::new(path))?;
+            super::cues::import_anlz_cues_for_track(&tx, id, Path::new(path))?;
         }
         tx.commit()?;
         Ok(track.local_track_id)
@@ -2751,7 +2749,7 @@ struct TrackHints<'a> {
 fn resolve_usb_track_from_sources(
     track_id: u32,
     hints: TrackHints<'_>,
-    usb_root: &std::path::Path,
+    usb_root: &Path,
     // Paired together (rather than two separate params) to keep the
     // argument count down: `pdb_track_index` is always built from `parsed`
     // and the two are only ever passed as a matching pair.
@@ -2827,6 +2825,7 @@ fn resolve_usb_track_from_sources(
                 let usb_analysis_path = resolve_usb_side_path(usb_root, &t.anlz_path);
                 let waveform_preview = usb_analysis_path
                     .as_deref()
+                    .map(Path::new)
                     .and_then(load_waveform_preview_from_analysis_path);
                 let format_ext =
                     crate::utils::format_ext_from_path(&t.track_file_path).or_else(|| {
@@ -2867,7 +2866,12 @@ fn resolve_usb_track_from_sources(
                         format_ext,
                         usb_media_path: Some(t.track_file_path.clone()),
                         artwork_data_url: include_artwork_data_url
-                            .then(|| artwork_path.as_deref().and_then(artwork_path_to_data_url))
+                            .then(|| {
+                                artwork_path
+                                    .as_deref()
+                                    .map(Path::new)
+                                    .and_then(artwork_path_to_data_url)
+                            })
                             .flatten(),
                         artwork_path,
                         waveform_peaks_path: usb_analysis_path.clone(),
@@ -2895,6 +2899,7 @@ fn resolve_usb_track_from_sources(
                 track.waveform_preview = track
                     .usb_analysis_path
                     .as_deref()
+                    .map(Path::new)
                     .and_then(load_waveform_preview_from_analysis_path);
             }
             return Some(("eDB".to_string(), track));
@@ -2906,6 +2911,8 @@ fn resolve_usb_track_from_sources(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{
         SLOW_USB_STAGE_MS, UsbDisplaySource, apply_history_dates_from_track_date_created,
         build_history_track_date_index, build_track_match_fingerprint, build_usb_track_index,
@@ -3624,8 +3631,7 @@ mod tests {
         let td = tempfile::tempdir().expect("tempdir");
         let usb_root = td.path().join("USB_TEST");
         std::fs::create_dir_all(&usb_root).expect("create usb root");
-        crate::service::initialize_usb(usb_root.to_str().expect("utf-8 usb root path"))
-            .expect("initialize usb");
+        crate::service::initialize_usb(&usb_root).expect("initialize usb");
         (td, usb_root)
     }
 
@@ -3677,7 +3683,7 @@ mod tests {
     fn make_export_manifest(
         playlist_id: &str,
         playlist_name: &str,
-        usb_root: &std::path::Path,
+        usb_root: &Path,
         tracks: &[(&str, &str, &str)],
     ) -> crate::service::export_helpers::ExportManifest {
         crate::service::export_helpers::ExportManifest {
@@ -4996,7 +5002,7 @@ mod tests {
         let usb_root_path = "/mnt/usb-device";
         crate::service::usb_utils::upsert_usb_device(
             &conn,
-            std::path::Path::new(usb_root_path),
+            Path::new(usb_root_path),
             false,
             &now(),
         )
