@@ -89,7 +89,8 @@
   says "rekordbox library", like the "Mixxx library" one next to it, instead
   of "RB master.db".
 - **Chore:** backend helpers that read files on this machine (artwork,
-  waveforms, ANLZ, USB setup, source folders) take `Path` instead of text.
+  waveforms, ANLZ, USB setup, source folders) take `Path` instead of text,
+  and a USB database path resolved against the stick is a `PathBuf`.
   `CONTRIBUTING.md` explains where paths stay text: the API, the database,
   and rekordbox's own `/Contents/…` and `/PIONEER/…` paths.
 - **Chore:** the rekordbox library's "master DB" names in the code, docs,

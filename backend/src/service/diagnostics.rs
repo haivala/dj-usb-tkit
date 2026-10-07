@@ -1909,7 +1909,6 @@ pub(crate) fn detect_bpm_key_mismatches(
         let anlz_dat_path = (scan_anlz && pdb_tempo_x100 > 0)
             .then(|| super::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path))
             .flatten()
-            .map(std::path::PathBuf::from)
             .filter(|dat| {
                 [dat.clone(), dat.with_extension("EXT")].iter().any(|p| {
                     std::fs::read(p)

@@ -39,7 +39,9 @@ use super::export_helpers::{
     PdbLayoutProfile, key_names_match, load_table_columns_tx, write_edb_cues_for_content,
 };
 use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_setting};
-use super::usb_utils::{read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path};
+use super::usb_utils::{
+    read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path, resolve_usb_side_path_text,
+};
 use super::{BackendService, TRACK_COLS, apply_frontend_track_fields, now, row_to_track};
 
 /// Highest number of cue points a track can carry (one per CDJ hot-cue pad A–H).
@@ -900,7 +902,7 @@ impl BackendService {
         }
         let dat_abs = resolve_usb_side_path(&usb_root, raw)
             .ok_or_else(|| BackendError::NotFound(format!("USB analysis path not found: {raw}")))?;
-        let dat_path = Path::new(&dat_abs);
+        let dat_path = dat_abs.as_path();
         let bytes = std::fs::read(dat_path.with_extension("EXT"))
             .or_else(|_| std::fs::read(dat_path))
             .map_err(|_| {
@@ -967,7 +969,7 @@ impl BackendService {
         // 2. Absolute ANLZ path, must exist.
         let dat_abs = resolve_usb_side_path(&usb_root, raw)
             .ok_or_else(|| BackendError::NotFound(format!("USB analysis path not found: {raw}")))?;
-        let dat_path = Path::new(&dat_abs);
+        let dat_path = dat_abs.as_path();
         if !dat_path.is_file() {
             return Err(BackendError::NotFound(format!(
                 "USB analysis bundle missing: {raw}"
@@ -1183,7 +1185,7 @@ impl BackendService {
                 .optional()
                 .ok()?;
             if let Some(device_id) = device_id {
-                let resolved = resolve_usb_side_path(usb_root, media_raw);
+                let resolved = resolve_usb_side_path_text(usb_root, media_raw);
                 let link: Option<String> = conn
                     .query_row(
                         "SELECT track_id FROM track_usb_links

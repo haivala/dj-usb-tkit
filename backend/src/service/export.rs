@@ -57,11 +57,7 @@ fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<
     }
     let rel = to_usb_relative_path(usb_root, candidate)?;
     let abs = resolve_usb_side_path(usb_root, &rel)?;
-    if Path::new(&abs).is_file() {
-        Some(rel)
-    } else {
-        None
-    }
+    if abs.is_file() { Some(rel) } else { None }
 }
 
 /// Build a content fingerprint from a size/title/artist triple, or `None` when
@@ -174,8 +170,8 @@ fn existing_usb_relative_if_present(usb_root: &Path, relative: &str) -> Option<S
         return None;
     }
     let abs = resolve_usb_side_path(usb_root, trimmed)?;
-    if Path::new(&abs).is_file() {
-        to_usb_relative_path(usb_root, &abs)
+    if abs.is_file() {
+        to_usb_relative_path(usb_root, &abs.to_string_lossy())
     } else {
         None
     }
@@ -236,7 +232,7 @@ fn validate_manifest_path(
             ));
             return Some(normalized);
         };
-        if !Path::new(&abs).is_file() {
+        if !abs.is_file() {
             issues.record(format!(
                 "{label} file for track '{track_id}' is missing: {normalized}"
             ));
@@ -396,7 +392,7 @@ fn run_manifest_invariant_check(
                     crate::service::export_helpers::analysis_bundle_path_variants(&analysis_path)
                 {
                     let missing = resolve_usb_side_path(usb_root, &variant)
-                        .map(|abs| !Path::new(&abs).is_file())
+                        .map(|abs| !abs.is_file())
                         .unwrap_or(true);
                     if missing {
                         issues.record(format!(
@@ -1547,25 +1543,27 @@ impl BackendService {
 
         for track in &manifest.tracks {
             let media_path = resolve_usb_side_path(usb_root, &track.exported_path)
-                .unwrap_or_else(|| track.exported_path.clone());
-            if !Path::new(&media_path).is_file() {
+                .unwrap_or_else(|| PathBuf::from(&track.exported_path));
+            if !media_path.is_file() {
                 return Err(BackendError::Internal(format!(
                     "export verification failed: media file missing for track '{}': {}",
-                    track.id, media_path
+                    track.id,
+                    media_path.display()
                 )));
             }
 
             if let Some(art) = track.artwork_path.as_deref() {
                 let art_abs =
-                    resolve_usb_side_path(usb_root, art).unwrap_or_else(|| art.to_string());
-                if !Path::new(&art_abs).is_file() {
+                    resolve_usb_side_path(usb_root, art).unwrap_or_else(|| PathBuf::from(art));
+                if !art_abs.is_file() {
                     warnings.push(logging::log(
                         Level::Warn,
                         "export",
                         "export.verify-artwork-missing",
                         format!(
                             "export verification warning: artwork missing for track '{}': {}",
-                            track.id, art_abs
+                            track.id,
+                            art_abs.display()
                         ),
                     ));
                 }
@@ -1573,15 +1571,16 @@ impl BackendService {
 
             if let Some(anlz) = track.waveform_path.as_deref() {
                 let anlz_abs =
-                    resolve_usb_side_path(usb_root, anlz).unwrap_or_else(|| anlz.to_string());
-                if !Path::new(&anlz_abs).is_file() {
+                    resolve_usb_side_path(usb_root, anlz).unwrap_or_else(|| PathBuf::from(anlz));
+                if !anlz_abs.is_file() {
                     warnings.push(logging::log(
                         Level::Warn,
                         "export",
                         "export.verify-analysis-missing",
                         format!(
                             "export verification warning: analysis file missing for track '{}': {}",
-                            track.id, anlz_abs
+                            track.id,
+                            anlz_abs.display()
                         ),
                     ));
                 }

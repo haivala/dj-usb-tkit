@@ -411,10 +411,9 @@ pub fn ensure_analysis_bundle_ppth(
     track_path: &str,
     track: &ExportTrackData,
 ) -> BackendResult<()> {
-    let dat_abs = resolve_usb_side_path(usb_root, analysis_path).ok_or_else(|| {
+    let dat_path = resolve_usb_side_path(usb_root, analysis_path).ok_or_else(|| {
         BackendError::Validation(format!("invalid USB analysis path: {analysis_path}"))
     })?;
-    let dat_path = PathBuf::from(dat_abs);
     let ext_path = dat_path.with_extension("EXT");
     let twoex_path = dat_path.with_extension("2EX");
 
@@ -887,7 +886,7 @@ pub fn prune_stale_export_owned_files(
             ));
             continue;
         }
-        let Some(abs) = resolve_usb_side_path(usb_root, &normalized) else {
+        let Some(abs_path) = resolve_usb_side_path(usb_root, &normalized) else {
             skipped += 1;
             warnings.push(logging::log(
                 Level::Warn,
@@ -897,7 +896,6 @@ pub fn prune_stale_export_owned_files(
             ));
             continue;
         };
-        let abs_path = PathBuf::from(&abs);
         if !abs_path.starts_with(usb_root) {
             skipped += 1;
             warnings.push(logging::log(
@@ -945,7 +943,7 @@ pub fn normalize_owned_export_path(usb_root: &Path, path: &str) -> Option<String
         return None;
     }
     if let Some(abs) = resolve_usb_side_path(usb_root, trimmed) {
-        return to_usb_relative_path(usb_root, &abs)
+        return to_usb_relative_path(usb_root, &abs.to_string_lossy())
             .or_else(|| Some(as_usb_relative_path(trimmed)));
     }
     None

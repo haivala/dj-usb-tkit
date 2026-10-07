@@ -273,7 +273,11 @@ pub(crate) fn parse_staged_pdb(usb_root: &Path) -> BackendResult<crate::pdb_read
     parse_pdb(&path)
 }
 
-pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<String> {
+/// The file a path from the USB's databases names: `/Contents/…` and
+/// `/PIONEER/…` (or bare relative paths) resolve under `usb_root` and must stay
+/// inside it; absolute paths, `file://` URLs and Windows drive paths pass
+/// through. `None` for an empty path or one that escapes `usb_root`.
+pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<PathBuf> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -285,14 +289,14 @@ pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<String
     }
 
     if normalized.starts_with("file://") {
-        return Some(normalized);
+        return Some(PathBuf::from(normalized));
     }
 
     let is_windows_abs = normalized.len() > 2
         && normalized.as_bytes().get(1) == Some(&b':')
         && normalized.as_bytes().get(2) == Some(&b'/');
     if is_windows_abs {
-        return Some(normalized);
+        return Some(PathBuf::from(normalized));
     }
 
     // Resolve relative paths under usb_root, then verify containment
@@ -309,22 +313,24 @@ pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<String
         if !resolved.starts_with(&canon_root) {
             return None; // path traversal attempt
         }
-        return Some(resolved.to_string_lossy().to_string());
+        return Some(resolved);
     }
 
-    if Path::new(&normalized).is_absolute() {
-        return Some(
-            canonicalize_or_self(PathBuf::from(&normalized))
-                .to_string_lossy()
-                .to_string(),
-        );
+    let normalized = PathBuf::from(normalized);
+    if normalized.is_absolute() {
+        return Some(canonicalize_or_self(normalized));
     }
 
     let resolved = canonicalize_or_self(usb_root.join(&normalized));
     if !resolved.starts_with(&canon_root) {
         return None; // path traversal attempt
     }
-    Some(resolved.to_string_lossy().to_string())
+    Some(resolved)
+}
+
+/// [`resolve_usb_side_path`] as text, for API fields and DB keys.
+pub(crate) fn resolve_usb_side_path_text(usb_root: &Path, raw: &str) -> Option<String> {
+    resolve_usb_side_path(usb_root, raw).map(|path| path.to_string_lossy().into_owned())
 }
 
 pub(crate) fn has_write_access(root: &Path) -> bool {
@@ -736,10 +742,9 @@ pub(crate) fn sanitize_warning_path(path: &Path) -> String {
 }
 
 pub(crate) fn analysis_bundle_exists(usb_root: &Path, anlz_path: &str) -> bool {
-    let Some(dat_abs) = resolve_usb_side_path(usb_root, anlz_path) else {
+    let Some(dat) = resolve_usb_side_path(usb_root, anlz_path) else {
         return false;
     };
-    let dat = PathBuf::from(dat_abs);
     if !dat.is_file() {
         return false;
     }
@@ -2910,7 +2915,7 @@ mod diag_tests {
             result.is_some(),
             "should resolve valid vendor-relative path"
         );
-        let resolved = result.unwrap();
+        let resolved = result.unwrap().to_string_lossy().into_owned();
         assert!(
             resolved.contains(USB_VENDOR_ROOT_DIR),
             "resolved path should contain vendor root segment: {resolved}"

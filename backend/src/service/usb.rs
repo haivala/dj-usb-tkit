@@ -46,7 +46,7 @@ use super::usb_helpers::{
 use super::usb_utils::{
     self, artwork_path_to_data_url, canonicalize_or_self, canonicalize_playlist_name,
     has_write_access, load_waveform_preview_from_analysis_path, normalize_usb_root_path,
-    parse_history_numeric_id, resolve_usb_root, resolve_usb_side_path,
+    parse_history_numeric_id, resolve_usb_root, resolve_usb_side_path_text,
 };
 use super::usb_vendor_compat::{
     USB_CONTENTS_DIR, USB_VENDOR_ROOT_DIR, vendor_edb_path, vendor_pdb_path,
@@ -130,10 +130,10 @@ fn build_usb_track_index(
             let artwork_path = parsed
                 .artworks
                 .get(&t.artwork_id)
-                .and_then(|p| resolve_usb_side_path(usb_root, p));
-            let resolved_file_path = resolve_usb_side_path(usb_root, &t.track_file_path)
+                .and_then(|p| resolve_usb_side_path_text(usb_root, p));
+            let resolved_file_path = resolve_usb_side_path_text(usb_root, &t.track_file_path)
                 .unwrap_or_else(|| t.track_file_path.clone());
-            let usb_analysis_path = resolve_usb_side_path(usb_root, &t.anlz_path);
+            let usb_analysis_path = resolve_usb_side_path_text(usb_root, &t.anlz_path);
             let format_ext = crate::utils::format_ext_from_path(&t.track_file_path).or_else(|| {
                 t.file_name
                     .as_deref()
@@ -2777,7 +2777,7 @@ fn resolve_usb_track_from_sources(
                 .get(&t.artist_id)
                 .cloned()
                 .unwrap_or_else(|| "Unknown Artist".to_string());
-            let resolved_file_path = resolve_usb_side_path(usb_root, &t.track_file_path)
+            let resolved_file_path = resolve_usb_side_path_text(usb_root, &t.track_file_path)
                 .unwrap_or_else(|| t.track_file_path.clone());
             let mut score = 0i32;
             if !file_hint.is_empty() {
@@ -2819,10 +2819,10 @@ fn resolve_usb_track_from_sources(
                 let artwork_path = parsed
                     .artworks
                     .get(&t.artwork_id)
-                    .and_then(|p| resolve_usb_side_path(usb_root, p));
-                let resolved_file_path = resolve_usb_side_path(usb_root, &t.track_file_path)
+                    .and_then(|p| resolve_usb_side_path_text(usb_root, p));
+                let resolved_file_path = resolve_usb_side_path_text(usb_root, &t.track_file_path)
                     .unwrap_or_else(|| t.track_file_path.clone());
-                let usb_analysis_path = resolve_usb_side_path(usb_root, &t.anlz_path);
+                let usb_analysis_path = resolve_usb_side_path_text(usb_root, &t.anlz_path);
                 let waveform_preview = usb_analysis_path
                     .as_deref()
                     .map(Path::new)

@@ -4200,10 +4200,7 @@ impl BackendService {
                         continue;
                     }
                     let exists = resolve_usb_side_path(&usb_root, &track.track_file_path)
-                        .as_deref()
-                        .map(std::path::Path::new)
-                        .map(std::path::Path::is_file)
-                        .unwrap_or(false);
+                        .is_some_and(|path| path.is_file());
                     if exists {
                         continue;
                     }
@@ -4299,7 +4296,7 @@ impl BackendService {
                     .iter()
                     .map(|rel| {
                         let fingerprint = resolve_usb_side_path(&usb_root, rel)
-                            .and_then(|abs| scan_audio_file(Path::new(&abs)).ok())
+                            .and_then(|abs| scan_audio_file(&abs).ok())
                             .and_then(|t| {
                                 content_fingerprint_key(t.file_size_bytes, &t.title, &t.artist)
                             });
@@ -6063,7 +6060,7 @@ impl BackendService {
 
         #[derive(Clone)]
         struct AnalysisRepairTarget {
-            source_audio: String,
+            source_audio: std::path::PathBuf,
             analysis_dir: std::path::PathBuf,
             track_path: String,
             // Known-good tempo/duration from the already-parsed PDB row, so a
@@ -6095,8 +6092,7 @@ impl BackendService {
                     resolve_usb_side_path(usb_root, &t.anlz_path),
                     resolve_usb_side_path(usb_root, &t.track_file_path),
                 ) {
-                    let analysis_path = std::path::PathBuf::from(&a);
-                    let analysis_dir = analysis_path
+                    let analysis_dir = a
                         .parent()
                         .map(std::path::Path::to_path_buf)
                         .unwrap_or_else(|| usb_root.to_path_buf());
@@ -6110,7 +6106,10 @@ impl BackendService {
                             .filter(|s| *s > 0)
                             .map(|s| s as u64 * 1000),
                     };
-                    map_by_file.insert(canonicalize_playlist_name(&a), target.clone());
+                    map_by_file.insert(
+                        canonicalize_playlist_name(&a.to_string_lossy()),
+                        target.clone(),
+                    );
                     map_by_dir.insert(
                         canonicalize_playlist_name(&analysis_dir.to_string_lossy()),
                         target,
@@ -6143,8 +6142,7 @@ impl BackendService {
                         resolve_usb_side_path(usb_root, p),
                     )
                 {
-                    let analysis_path = std::path::PathBuf::from(&ra);
-                    let analysis_dir = analysis_path
+                    let analysis_dir = ra
                         .parent()
                         .map(std::path::Path::to_path_buf)
                         .unwrap_or_else(|| usb_root.to_path_buf());
@@ -6156,7 +6154,7 @@ impl BackendService {
                         duration_ms: length_seconds.filter(|v| *v > 0).map(|v| v as u64 * 1000),
                     };
                     map_by_file
-                        .entry(canonicalize_playlist_name(&ra))
+                        .entry(canonicalize_playlist_name(&ra.to_string_lossy()))
                         .or_insert_with(|| target.clone());
                     map_by_dir
                         .entry(canonicalize_playlist_name(&analysis_dir.to_string_lossy()))
@@ -6191,18 +6189,18 @@ impl BackendService {
                 continue;
             };
             let source_audio = target.source_audio;
-            if !std::path::Path::new(&source_audio).is_file() {
+            if !source_audio.is_file() {
                 skipped += 1;
                 warnings.push(logging::log(
                     Level::Warn,
                     "usb-repair",
                     "usb.repair.empty-analysis.source-missing",
-                    format!("repair skipped (empty analysis): source audio missing for {empty_path} -> {source_audio}"),
+                    format!("repair skipped (empty analysis): source audio missing for {empty_path} -> {}", source_audio.display()),
                 ));
                 continue;
             }
             let waveform = build_waveform_preview_from_audio(
-                std::path::Path::new(&source_audio),
+                &source_audio,
                 super::WAVEFORM_PREVIEW_BINS,
                 2_000_000,
             )
@@ -6213,13 +6211,16 @@ impl BackendService {
                     Level::Error,
                     "usb-repair",
                     "usb.repair.empty-analysis.analyze-failed",
-                    format!("repair failed (empty analysis): unable to analyze source audio {source_audio}"),
+                    format!(
+                        "repair failed (empty analysis): unable to analyze source audio {}",
+                        source_audio.display()
+                    ),
                 ));
                 continue;
             }
             let Some(duration_ms) = target
                 .duration_ms
-                .or_else(|| detect_track_duration_ms(std::path::Path::new(&source_audio)))
+                .or_else(|| detect_track_duration_ms(&source_audio))
             else {
                 failed += 1;
                 warnings.push(logging::log(
@@ -6227,7 +6228,8 @@ impl BackendService {
                     "usb-repair",
                     "usb.repair.empty-analysis.duration-unknown",
                     format!(
-                        "repair failed (empty analysis): track length unknown for {source_audio}"
+                        "repair failed (empty analysis): track length unknown for {}",
+                        source_audio.display()
                     ),
                 ));
                 continue;
@@ -6376,7 +6378,6 @@ impl BackendService {
             let Some(dat) = resolve_usb_side_path(usb_root, anlz_path) else {
                 continue;
             };
-            let dat = std::path::PathBuf::from(dat);
             for file in [
                 dat.clone(),
                 dat.with_extension("EXT"),
@@ -6486,7 +6487,6 @@ impl BackendService {
             let Some(abs) = resolve_usb_side_path(usb_root, rel) else {
                 continue;
             };
-            let abs = std::path::PathBuf::from(abs);
             let scanned = match scan_audio_file(&abs) {
                 Ok(scanned) => scanned,
                 Err(err) => {
@@ -8309,7 +8309,9 @@ mod tests {
 
         let empty_path =
             resolve_usb_side_path(&usb_root, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT")
-                .expect("resolve anlz path");
+                .expect("resolve anlz path")
+                .to_string_lossy()
+                .into_owned();
 
         let mut warnings = Vec::new();
         let (fixed, skipped, failed, _writes) = service
@@ -8381,7 +8383,9 @@ mod tests {
 
         let empty_path =
             resolve_usb_side_path(&usb_root, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT")
-                .expect("resolve anlz path");
+                .expect("resolve anlz path")
+                .to_string_lossy()
+                .into_owned();
 
         let mut warnings = Vec::new();
         let (fixed, skipped, failed, _writes) = service

@@ -11,7 +11,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::metadata::sanitize_metadata;
 use crate::models::{UsbTrack, WarningEntry};
-use crate::service::usb_utils::resolve_usb_side_path;
+use crate::service::usb_utils::resolve_usb_side_path_text;
 use crate::service::usb_vendor_compat::{
     DEFAULT_MASTER_DB_KEY, DEFAULT_USB_EDB_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
 };
@@ -407,7 +407,7 @@ pub fn try_read_track_index_from_edb_with_conn(
         let length_seconds: Option<i64> = row.get(9)?;
         let resolved_file_path = path
             .as_deref()
-            .and_then(|p| resolve_usb_side_path(usb_root, p))
+            .and_then(|p| resolve_usb_side_path_text(usb_root, p))
             .unwrap_or_default();
         let format_ext = path.as_deref().and_then(crate::utils::format_ext_from_path);
         Ok((
@@ -436,14 +436,14 @@ pub fn try_read_track_index_from_edb_with_conn(
                 usb_media_path: path,
                 artwork_path: image_path
                     .as_deref()
-                    .and_then(|p| resolve_usb_side_path(usb_root, p)),
+                    .and_then(|p| resolve_usb_side_path_text(usb_root, p)),
                 artwork_data_url: None,
                 waveform_peaks_path: analysis_path
                     .as_deref()
-                    .and_then(|p| resolve_usb_side_path(usb_root, p)),
+                    .and_then(|p| resolve_usb_side_path_text(usb_root, p)),
                 usb_analysis_path: analysis_path
                     .as_deref()
-                    .and_then(|p| resolve_usb_side_path(usb_root, p)),
+                    .and_then(|p| resolve_usb_side_path_text(usb_root, p)),
                 usb_analysis_path_raw: analysis_path,
                 waveform_preview: None,
                 duration_ms: length_seconds
@@ -765,20 +765,20 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             let resolved_image_path = if resolve_paths {
                 image_path
                     .as_deref()
-                    .and_then(|p| resolve_usb_side_path(usb_root, p))
+                    .and_then(|p| resolve_usb_side_path_text(usb_root, p))
             } else {
                 image_path.clone()
             };
             let resolved_analysis_path = if resolve_paths {
                 analysis_path
                     .as_deref()
-                    .and_then(|p| resolve_usb_side_path(usb_root, p))
+                    .and_then(|p| resolve_usb_side_path_text(usb_root, p))
             } else {
                 analysis_path.clone()
             };
             let resolved_file_path = if resolve_paths {
                 path.as_deref()
-                    .and_then(|p| resolve_usb_side_path(usb_root, p))
+                    .and_then(|p| resolve_usb_side_path_text(usb_root, p))
                     .unwrap_or_default()
             } else {
                 path.clone().unwrap_or_default()
