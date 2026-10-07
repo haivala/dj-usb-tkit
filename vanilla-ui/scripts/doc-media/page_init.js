@@ -12,12 +12,14 @@
 // the real export's progress messages as job events; `opts.unexported`
 // playlists show as not exported until then. `opts.tauriRuntime` makes the
 // page pass for the Tauri runtime (as tests/e2e/smoke.spec.mjs does), which
-// the app needs to follow job events and to show its version
-// (`opts.appVersion`).
+// the app needs to follow job events. The Settings drawer's version label is
+// hidden, so the media doesn't go stale with every release.
 (() => {
   const { tracks, detail, sourceRoots, sourceRootEnabled, playlists, usb, usbHistory } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
   const USB_ROOT = "/run/media/dj/Chiphead";
+  // Never shown (the label is hidden); the update check just needs a value.
+  const DOC_APP_VERSION = "0.0.0";
   const ls = window.localStorage;
   ls.setItem("djusbtkit.helpSeen", "1");
   ls.setItem("djusbtkit.theme", "dark");
@@ -116,11 +118,17 @@
     updatedAt: exportedAt,
   }));
 
+  document.addEventListener("DOMContentLoaded", () => {
+    const style = document.createElement("style");
+    style.textContent = "#settingsVersionText { visibility: hidden; }";
+    document.head.append(style);
+  });
+
   if (opts.tauriRuntime) {
     window.isTauri = true;
     window.__TAURI_INTERNALS__ = {
       invoke: async (cmd, args) =>
-        cmd === "plugin:app|version" ? opts.appVersion : window.__TAURI__.core.invoke(cmd, args),
+        cmd === "plugin:app|version" ? DOC_APP_VERSION : window.__TAURI__.core.invoke(cmd, args),
       convertFileSrc: (path) => path,
     };
   }
@@ -170,7 +178,7 @@
           }
           case "check_for_update":
             return ok({
-              updateAvailable: false, severity: "none", currentVersion: opts.appVersion, latestVersion: opts.appVersion,
+              updateAvailable: false, severity: "none", currentVersion: DOC_APP_VERSION, latestVersion: DOC_APP_VERSION,
               releaseUrl: "", installKind: "appimage", downloadUrl: null, canSelfUpdate: false, action: "none",
               checkFailed: false,
             });

@@ -17,8 +17,8 @@
 //    app in headless Chromium, and writes each GIF scene (lossless frames
 //    over CDP, encoded with ffmpeg) and each screenshot.
 // 4. Every GIF and screenshot gets a footer added below it (so it covers
-//    nothing): the scene's caption, and "DJ USB Tkit v<version>" from
-//    package.json.
+//    nothing): the scene's caption and "DJ USB Tkit". No version anywhere,
+//    so the media only needs re-recording after a UI change.
 import { chromium } from "@playwright/test";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -37,7 +37,6 @@ const EDITOR_TITLE = "Demo Groove";
 // What the source folders look like in the app (long, so the chips truncate).
 const SHOWN_ROOT = "/home/dj/Music/Projects/Chiphead.Music";
 const FOLDERS = ["Syyskuu", "Heinäkuu"];
-const VERSION = JSON.parse(readFileSync(join(uiDir, "package.json"), "utf8")).version;
 const FOOTER_HEIGHT = 28;
 // ffmpeg filter: grow the image by the footer's height and lay the footer
 // (ffmpeg input `input`) over the new strip.
@@ -377,7 +376,7 @@ async function capture(page, framesDir, scene, { fullWindow = false } = {}) {
 }
 
 // Renders a footer `width` pixels wide in the app's font and dark colours:
-// the caption on the left, the app name and version on the right.
+// the caption on the left, the app name on the right.
 async function renderFooter(browser, caption, width, out) {
   const page = await browser.newPage({ viewport: { width, height: FOOTER_HEIGHT }, deviceScaleFactor: 1 });
   // Same origin as the fonts, which would otherwise be blocked as cross-origin.
@@ -389,8 +388,8 @@ async function renderFooter(browser, caption, width, out) {
     footer { box-sizing: border-box; display: flex; align-items: center; gap: 16px; height: ${FOOTER_HEIGHT}px;
       padding: 0 10px; background: #0c0a12; border-top: 1px solid #2a2538; font: 400 12px/1 Outfit, sans-serif; }
     .caption { flex: 1; min-width: 0; color: #9b93ad; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .version { color: #e4dff0; font-weight: 500; white-space: nowrap; }
-  </style><footer><span class="caption"></span><span class="version">DJ USB Tkit v${VERSION}</span></footer>`);
+    .app-name { color: #e4dff0; font-weight: 500; white-space: nowrap; }
+  </style><footer><span class="caption"></span><span class="app-name">DJ USB Tkit</span></footer>`);
   await page.locator(".caption").evaluate((el, text) => { el.textContent = text; }, caption);
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: out });
@@ -563,7 +562,7 @@ function scenes(fixture) {
       name: "export-playlist",
       caption: "Exporting a playlist to the USB: progress in the footer, then the export status",
       editor: false,
-      opts: { unexported: ["pl-house"], exportMs: 3500, tauriRuntime: true, appVersion: VERSION },
+      opts: { unexported: ["pl-house"], exportMs: 3500, tauriRuntime: true },
       async run(page, _wf, record) {
         await connectUsbAndPickPlaylist(page, fixture);
         await page.locator('.nav-playlist-item[data-playlist-id="pl-house"]').click();
@@ -741,7 +740,7 @@ function shots(fixture) {
       // README / docs/USB_EXPORT.md: the Settings drawer.
       name: "settings",
       caption: "Settings: theme, analysis, export sync mode and backups",
-      opts: { tauriRuntime: true, appVersion: VERSION },
+      opts: { tauriRuntime: true },
       async run(page) {
         await page.locator("#settingsBtn").click();
         await page.mouse.move(VIEWPORT.width / 3, VIEWPORT.height - 2);

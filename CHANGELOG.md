@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+- **Chore:** The docs screenshots and GIFs no longer show the app version, in
+  their footer or in the Settings drawer, so they only need re-recording after
+  a UI change. All of them were re-recorded once to drop it.
+
 ## 0.3.6
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
