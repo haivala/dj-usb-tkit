@@ -39,26 +39,28 @@
 
 ## Unreleased
 
+## 0.3.5
+
 - **New feature:** on Linux, a rekordbox library running under Wine is
   found and can be imported. The app looks in `$WINEPREFIX`, `~/.wine`, and
   Bottles bottles, and maps rekordbox's `C:` / `Z:` track paths to where the
   files are on Linux. The Windows build doesn't work under Wine, so use the
   Linux build for this.
+- **Fix:** AIFF files with padding before the audio can be analyzed and
+  played. They used to fail with "No support for AIFF block-aligned data".
 - **Fix:** a track row now pulses as analyzing for the whole time the
-  track is being analyzed. Before, it only lit up sometimes or a moment 
+  track is being analyzed. Before, it only lit up sometimes or a moment
   at the very end, so during a large analysis some rows never showed it.
+- **Fix:** the cue editor button is disabled for a track that has no
+  waveform, even if it has a BPM and key. Its tooltip says to analyze the
+  track first.
+- **Fix:** in the light theme, the track list's keys are readable. Their
+  text was a pale colour meant for the dark theme.
 - **Fix:** the beat grid in the cue editor looks even. Lines used to be
   drawn between screen pixels, so some looked thicker or fainter than
   others and their spacing seemed to wobble.
 - **Fix:** where a list's two scrollbars meet, the corner is dark now
   instead of a white square.
-- **Fix:** in the light theme, the track list's keys are readable. Their
-  text was a pale colour meant for the dark theme.
-- **Fix:** AIFF files with padding before the audio can be analyzed and
-  played. They used to fail with "No support for AIFF block-aligned data".
-- **Fix:** the cue editor button is disabled for a track that has no
-  waveform, even if it has a BPM and key. Its tooltip says to analyze the
-  track first.
 - **Improvement:** reanalyzing a track clears its BPM and key as soon as
   its analysis starts, so you can see the fresh values come in. A first
   analysis still keeps a BPM or key you edited or imported in view.
@@ -69,9 +71,6 @@
   the BPM box shows two decimals (119.00), as in the track list.
 - **Improvement:** the cue editor's header shows the track's cover art, its
   title, and the artist and album below it, like the track's row in the list.
-- **Improvement:** the track list's sort arrows sit right after each
-  column's name, so they no longer look like they belong to the next column.
-  The column the list is sorted by is shown in the accent colour.
 - **Improvement:** the button next to a track's waveform that opens the cue
   editor shows a cue marker instead of a magnifying glass.
 - **Improvement:** the track list's format and BPM values are plain text,
@@ -80,24 +79,27 @@
   that needs attention keeps its coloured box, which in the dark theme is
   now a soft tint instead of a bright fill, and no longer wraps onto two
   lines.
-- **Chore:** the docs show more of the app for 0.3.4: USB Playlists and History,
-  the Player Menu editor, Health & Diagnostics, the repair preview, Settings,
-  and a playlist export. Their USB views come from the demo library really
-  exported to a USB, and every screenshot and GIF has a caption and the app
-  version below it.
+- **Improvement:** the track list's sort arrows sit right after each
+  column's name, so they no longer look like they belong to the next column.
+  The column the list is sorted by is shown in the accent colour.
 - **Improvement:** on the empty library screen, the rekordbox import button
   says "rekordbox library", like the "Mixxx library" one next to it, instead
   of "RB master.db".
-- **Chore:** backend helpers that read files on this machine (artwork,
-  waveforms, ANLZ, USB setup, source folders) take `Path` instead of text,
-  and a USB database path resolved against the stick is a `PathBuf`.
-  `CONTRIBUTING.md` explains where paths stay text: the API, the database,
-  and rekordbox's own `/Contents/…` and `/PIONEER/…` paths.
 - **Chore:** the rekordbox library's "master DB" names in the code, docs,
   database and settings are now "rekordbox DB", matching the Mixxx ones. The
   environment override is `DJUSBTKIT_REKORDBOX_DB_PATH`; the old
   `DJUSBTKIT_MASTER_DB_PATH` still works. Existing libraries and the
   rekordbox chip's on/off state carry over on the first start.
+- **Chore:** backend helpers that read files on this machine (artwork,
+  waveforms, ANLZ, USB setup, source folders) take `Path` instead of text,
+  and a USB database path resolved against the stick is a `PathBuf`.
+  `CONTRIBUTING.md` explains where paths stay text: the API, the database,
+  and rekordbox's own `/Contents/…` and `/PIONEER/…` paths.
+- **Chore:** the docs show more of the app for 0.3.4: USB Playlists and History,
+  the Player Menu editor, Health & Diagnostics, the repair preview, Settings,
+  and a playlist export. Their USB views come from the demo library really
+  exported to a USB, and every screenshot and GIF has a caption and the app
+  version below it.
 
 ## 0.3.4
 
