@@ -42,7 +42,10 @@ use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_se
 use super::usb_utils::{
     read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path, resolve_usb_side_path_text,
 };
-use super::{BackendService, TRACK_COLS, apply_frontend_track_fields, now, row_to_track};
+use super::{
+    BackendService, TRACK_COLS, apply_frontend_track_fields, local_cache_bundle_dat, now,
+    row_to_track,
+};
 
 /// Highest number of cue points a track can carry (one per CDJ hot-cue pad A–H).
 pub const MAX_HOT_CUES: u8 = 8;
@@ -1227,7 +1230,9 @@ impl BackendService {
     /// carries the current `track_cues` + stored first beat.
     ///
     /// Returns `false` when the track has no analysis cache yet (nothing to
-    /// rewrite).
+    /// rewrite), or when its bundle lives outside the app's cache: a rekordbox
+    /// import points into rekordbox's own library, which must never be
+    /// modified. Export re-applies the edits from the database either way.
     fn regenerate_cached_anlz_analysis_edits(&self, track_id: &str) -> BackendResult<bool> {
         let conn = self.db.connect()?;
         let row = conn
@@ -1249,7 +1254,12 @@ impl BackendService {
         let Some((Some(dat_path), bpm, duration_ms, first_beat_ms)) = row else {
             return Ok(false);
         };
-        let dat_path = Path::new(&dat_path);
+        let waveform_dir = self.db.data_dir().join("analysis").join("waveforms");
+        let Some(dat_path) = local_cache_bundle_dat(&waveform_dir, Path::new(dat_path.trim()))
+        else {
+            return Ok(false);
+        };
+        let dat_path = dat_path.as_path();
         if !dat_path.is_file() {
             return Ok(false);
         }

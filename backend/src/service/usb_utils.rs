@@ -741,16 +741,15 @@ pub(crate) fn sanitize_warning_path(path: &Path) -> String {
         .collect::<String>()
 }
 
+/// Whether the `.DAT` + `.EXT` pair of an analysis bundle exists. `anlz_path`
+/// may name any member of the bundle: a rekordbox import stores the `.EXT`.
+/// The `.2EX` is optional, since rekordbox's own bundles from older analyses
+/// have none, and exporting the pair is still what rekordbox would put on a stick.
 pub(crate) fn analysis_bundle_exists(usb_root: &Path, anlz_path: &str) -> bool {
-    let Some(dat) = resolve_usb_side_path(usb_root, anlz_path) else {
+    let Some(path) = resolve_usb_side_path(usb_root, anlz_path) else {
         return false;
     };
-    if !dat.is_file() {
-        return false;
-    }
-    let ext = dat.with_extension("EXT");
-    let twoex = dat.with_extension("2EX");
-    ext.is_file() && twoex.is_file()
+    path.with_extension("DAT").is_file() && path.with_extension("EXT").is_file()
 }
 
 pub(crate) fn load_existing_analysis_paths_by_content_path(

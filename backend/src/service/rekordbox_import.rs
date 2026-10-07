@@ -1455,6 +1455,75 @@ mod tests {
     }
 
     #[test]
+    fn saving_edits_never_writes_into_rekordbox_anlz_files() {
+        use crate::models::{SaveTrackAnalysisEditsRequest, TrackCueInput};
+        use crate::service::anlz::{WaveformData, build_anlz_dat_file, build_anlz_ext_file};
+
+        let rb_root = tempfile::tempdir().expect("rb root");
+        let media_root = tempfile::tempdir().expect("media root");
+        let (_service_dir, service) = test_service();
+        let media: Vec<PathBuf> = ["a.mp3", "b.flac", "c.wav"]
+            .iter()
+            .map(|n| media_root.path().join(n))
+            .collect();
+        for p in &media {
+            std::fs::write(p, b"audio").expect("write media");
+        }
+        let master = create_rekordbox_db_with_playlists(rb_root.path(), &media);
+        let anlz_dir = rb_root.path().join("share/PIONEER/USBANLZ/abc/def");
+        std::fs::create_dir_all(&anlz_dir).expect("anlz dir");
+        let waveform = WaveformData::empty();
+        let dat = build_anlz_dat_file(&waveform, "", Some(128.0), 200_000, Some(437), &[]);
+        let ext = build_anlz_ext_file(&waveform, "", Some(128.0), 200_000, Some(437), &[]);
+        std::fs::write(anlz_dir.join("ANLZ0000.DAT"), &dat).expect("write dat");
+        std::fs::write(anlz_dir.join("ANLZ0000.EXT"), &ext).expect("write ext");
+        let conn = Connection::open(&master).expect("open master");
+        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_MASTER_DB_KEY}';"))
+            .expect("key");
+        conn.execute(
+            "UPDATE djmdContent SET AnalysisDataPath = '/PIONEER/USBANLZ/abc/def/ANLZ0000.DAT' WHERE ID = '103'",
+            [],
+        )
+        .expect("set analysis path");
+        drop(conn);
+
+        service
+            .import_rekordbox_playlist(ImportExternalPlaylistRequest {
+                path: Some(master.to_string_lossy().to_string()),
+                kind: ExternalPlaylistKind::Playlist,
+                id: "11".to_string(),
+                force: false,
+            })
+            .expect("import");
+        let charlie_id: String = service
+            .db
+            .connect()
+            .unwrap()
+            .query_row("SELECT id FROM tracks WHERE title = 'Charlie'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+
+        let saved = service
+            .save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+                track_id: charlie_id,
+                first_beat_ms: Some(900),
+                bpm: None,
+                key: None,
+                cues: Some(vec![TrackCueInput {
+                    position_ms: 1_500,
+                    color_id: None,
+                    name: Some("Intro".to_string()),
+                    playback_start: false,
+                }]),
+            })
+            .expect("save edits");
+        assert!(!saved.anlz_regenerated);
+        assert_eq!(std::fs::read(anlz_dir.join("ANLZ0000.DAT")).unwrap(), dat);
+        assert_eq!(std::fs::read(anlz_dir.join("ANLZ0000.EXT")).unwrap(), ext);
+    }
+
+    #[test]
     fn list_and_import_rekordbox_playlists_and_history() {
         let rb_root = tempfile::tempdir().expect("rb root");
         let media_root = tempfile::tempdir().expect("media root");

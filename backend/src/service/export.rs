@@ -470,13 +470,13 @@ fn estimate_export_new_bytes(
         total = total.saturating_add(source_len);
 
         if options.include_analysis
-            && let Some(dat) = track.waveform_peaks_path.as_deref()
+            && let Some(bundle) = track.waveform_peaks_path.as_deref()
         {
-            let dat = Path::new(dat);
+            let bundle = Path::new(bundle);
             for variant in [
-                dat.to_path_buf(),
-                dat.with_extension("EXT"),
-                dat.with_extension("2EX"),
+                bundle.with_extension("DAT"),
+                bundle.with_extension("EXT"),
+                bundle.with_extension("2EX"),
             ] {
                 if let Ok(m) = std::fs::metadata(&variant) {
                     total = total.saturating_add(m.len());
@@ -609,12 +609,12 @@ fn ensure_playlist_tracks_analysis_ready(
     }
     Err(BackendError::ValidationWithDetails(
         format!(
-            "export blocked: {missing}/{total} playlist tracks are missing required analysis (waveform, bpm, duration, DAT/EXT/2EX files); run analysis first"
+            "export blocked: {missing}/{total} playlist tracks are missing required analysis (waveform, bpm, duration, DAT/EXT files); run analysis first"
         ),
         json!({
             "validationType": "missing_analysis",
             "requiredFields": ["waveform", "bpm", "duration"],
-            "requiredFiles": ["DAT", "EXT", "2EX"],
+            "requiredFiles": ["DAT", "EXT"],
             "missingTrackCount": missing,
             "missingAnalysisBundleCount": missing_analysis_bundle,
             "totalTrackCount": total,
@@ -1137,7 +1137,7 @@ impl BackendService {
                         retain_waveform = true;
                     } else if !export_dry_run
                         && track.waveform_peaks_path.is_some()
-                        && let Some(relative) = export_analysis_bundle_for_track(
+                        && let Some((relative, files_written)) = export_analysis_bundle_for_track(
                             track,
                             &usb_root,
                             &exported_path,
@@ -1145,7 +1145,7 @@ impl BackendService {
                         )?
                     {
                         analysis_relative = Some(relative);
-                        exported_analysis_files += 3;
+                        exported_analysis_files += files_written;
                         owns_waveform = true;
                         retain_waveform = true;
                     }
@@ -1640,7 +1640,10 @@ impl BackendService {
                    t.dj_play_count, t.rating, t.color_id, t.artist_id_lyricist, t.artist_id_original_artist,
                    t.artist_id_remixer, t.artist_id_composer, t.genre_id, t.genre, t.label_id, t.isrc, t.release_year,
                    t.release_date, t.recorded_date, t.artwork_path, t.waveform_peaks_path, t.duration_ms, pt.position,
-                   t.format_ext, t.first_beat_ms
+                   t.format_ext, t.first_beat_ms,
+                   (t.rekordbox_db_source = 1
+                    AND COALESCE(t.bpm_analyzer, 'rekordbox') = 'rekordbox'
+                    AND COALESCE(t.first_beat_ms_source, 'rekordbox') = 'rekordbox')
             FROM playlist_tracks pt
             JOIN tracks t ON t.id = pt.track_id
             WHERE pt.playlist_id = ?1
@@ -1697,6 +1700,7 @@ impl BackendService {
                     .as_deref()
                     .map(Self::file_type_from_extension),
                 first_beat_ms: row.get::<_, Option<i64>>(37)?.map(|v| v as u32),
+                beatgrid_from_rekordbox: row.get(38)?,
                 cues: Vec::new(),
             })
         })?;
@@ -1970,6 +1974,7 @@ mod tests {
             waveform_peaks_path: Some("/tmp/waveform.dat".to_string()),
             duration_ms: Some(120_000),
             first_beat_ms: None,
+            beatgrid_from_rekordbox: false,
             position: 0,
         }
     }
@@ -2023,6 +2028,22 @@ mod tests {
         missing_bundle.waveform_peaks_path =
             Some(dir.path().join("missing.DAT").to_string_lossy().to_string());
         assert!(!has_required_analysis(dir.path(), &missing_bundle));
+    }
+
+    #[test]
+    fn required_analysis_accepts_rekordbox_bundle_without_2ex() {
+        // rekordbox imports store the `.EXT`; older rekordbox analyses have no `.2EX`.
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("ANLZ0000.DAT"), b"dat").expect("write DAT");
+        std::fs::write(dir.path().join("ANLZ0000.EXT"), b"ext").expect("write EXT");
+        let mut track = make_track();
+        track.waveform_peaks_path = Some(
+            dir.path()
+                .join("ANLZ0000.EXT")
+                .to_string_lossy()
+                .to_string(),
+        );
+        assert!(has_required_analysis(dir.path(), &track));
     }
 
     #[test]

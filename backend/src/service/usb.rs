@@ -3676,6 +3676,7 @@ mod tests {
             waveform_peaks_path: None,
             duration_ms: Some(200_000),
             first_beat_ms: None,
+            beatgrid_from_rekordbox: false,
             position: 0,
         }
     }

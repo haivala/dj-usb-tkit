@@ -39,6 +39,21 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** Tracks imported from a rekordbox library now keep rekordbox's beat
+  grid on the USB. Export was writing rekordbox's `.EXT` analysis file in place
+  of the `.DAT`, so players such as the XDJ-AZ found no beat grid, disabled
+  sync and asked for the track to be analysed in rekordbox. The `.DAT` now
+  arrives intact, including rekordbox's MP3 seek index (`PVBR`). A beat grid
+  that hasn't been edited here is exported exactly as rekordbox made it, so
+  variable-tempo grids are no longer flattened to one tempo. rekordbox bundles
+  without a `.2EX` file (older analyses) no longer block the export.
+  ([#6](https://github.com/haivala/dj-usb-tkit/issues/6))
+- **Fix:** Saving cue or first-beat edits on a track imported from rekordbox no
+  longer rewrites the analysis files inside the rekordbox library. The edits
+  are kept in this app's library and written onto the USB at export.
+
 ## 0.3.5
 
 - **New feature:** on Linux, a rekordbox library running under Wine is

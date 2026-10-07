@@ -67,6 +67,10 @@ pub struct ExportTrackData {
     pub waveform_peaks_path: Option<String>,
     pub duration_ms: Option<u64>,
     pub first_beat_ms: Option<u32>,
+    /// The analysis bundle came from rekordbox and its tempo and first beat
+    /// haven't been changed here since, so export keeps rekordbox's own
+    /// (possibly variable-tempo) beat grid instead of rebuilding it.
+    pub beatgrid_from_rekordbox: bool,
     pub cues: Vec<crate::models::TrackCue>,
     pub position: usize,
 }

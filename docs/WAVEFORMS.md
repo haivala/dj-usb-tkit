@@ -11,7 +11,7 @@ The app stores a small waveform preview for UI use, but player ANLZ files need h
 - UI preview payloads are downsampled to `WAVEFORM_PREVIEW_BINS` (`2400`) before being returned to the frontend.
 - Local ANLZ cache generation uses detail-resolution waveform data: `max(2400, ceil(duration_seconds * 150) + 4)`.
 - USB export does not generate ANLZ; it copies previously generated `DAT/EXT/2EX` bundles.
-- Normal USB export requires waveform path, BPM, duration, and existing `DAT/EXT/2EX` files before media copy starts.
+- Normal USB export requires waveform path, BPM, duration, and existing `DAT` + `EXT` files before media copy starts. A `2EX` is copied when present; rekordbox bundles from older analyses have none.
 - ANLZ detail chunk entry counts are `ceil(duration_seconds * 150) + 4`, with a minimum of `400`.
 - Preview chunks stay fixed-size:
   - `PWAV` = 400 entries in `.DAT`
@@ -51,6 +51,10 @@ USB export does not generate or regenerate ANLZ from source audio. Export is a c
 
 - if a track has a local or USB-side `DAT/EXT/2EX` bundle, export uses that bundle even if the
   contents are older or low-detail,
+- the stored path may name any file of the bundle (a rekordbox import stores the `.EXT`); export
+  always resolves the `.DAT`, `.EXT` and `.2EX` siblings from it,
+- a rekordbox bundle whose tempo and first beat haven't been edited here keeps its own
+  `PQTZ`/`PQT2` beat grid; otherwise the grid is rebuilt from the track's tempo and first beat,
 - local analysis cache bundles are generated without a `PPTH` path chunk,
 - export injects or replaces the `PPTH` path chunk when the file is structurally parseable,
 - if the bundle files are missing, export is blocked before media copy starts.
@@ -109,7 +113,8 @@ first 60 bars at the track's BPM. The magnifier button is disabled for tracks wi
 ## Seek-index chunks (`PVBR`, `PVB2`)
 
 rekordbox writes two chunks that help a player find the byte position of a given time in
-files whose bitrate varies. This app writes `PVBR` as all zeros and never writes `PVB2`.
+files whose bitrate varies. Bundles imported from rekordbox are exported with these chunks
+intact. The bundles this app generates write `PVBR` as all zeros and never write `PVB2`.
 Tracks play correctly this way, including FLACs on a CDJ-2000NXS2.
 
 Our working guess (not verified) is that newer players use the audio file's own seek

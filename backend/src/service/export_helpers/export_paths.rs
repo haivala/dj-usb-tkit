@@ -363,19 +363,23 @@ fn write_bytes_if_different(target: &Path, bytes: &[u8]) -> BackendResult<()> {
     Ok(())
 }
 
-/// Build the ANLZ reconciliation for an export track from the local master,
-/// unconditionally. Both export paths (retain + fresh) apply this so the
-/// on-USB bundle always ends up matching the local analysis: cues (an empty
-/// list clears them), user first beat, analyzed tempo. Applying it on every
-/// track is free — `apply_analysis_edits_to_anlz` plus `write_bytes_if_different`
-/// make an already-correct bundle a no-op — and it removes the incidental
-/// `has_edits` predicate a future change to the export gate could quietly break.
+/// Build the ANLZ reconciliation for an export track from the local master.
+/// Both export paths (retain + fresh) apply this so the on-USB bundle always
+/// ends up matching the local analysis: cues (an empty list clears them), user
+/// first beat, analyzed tempo. Applying it on every track is free —
+/// `apply_analysis_edits_to_anlz` plus `write_bytes_if_different` make an
+/// already-correct bundle a no-op — and it removes the incidental `has_edits`
+/// predicate a future change to the export gate could quietly break.
+///
+/// The one exception is a beat grid that is still rekordbox's own: rebuilding
+/// it would flatten a variable-tempo grid into a constant one, so it is kept
+/// as rekordbox wrote it (`bpm: None` leaves `PQTZ`/`PQT2` untouched).
 fn anlz_edits_from_export_track<'a>(
     track: &'a ExportTrackData,
     cues: &'a [AnlzCue],
 ) -> AnlzAnalysisEdits<'a> {
     AnlzAnalysisEdits {
-        bpm: track.bpm,
+        bpm: track.bpm.filter(|_| !track.beatgrid_from_rekordbox),
         duration_ms: track.duration_ms,
         first_beat_ms: track.first_beat_ms,
         cues: Some(cues),
@@ -430,21 +434,32 @@ pub fn ensure_analysis_bundle_ppth(
         let out = apply_analysis_edits_to_anlz(&ensure_ppth_chunk(&bytes, track_path), &edits);
         write_bytes_if_different(path, &out)?;
     }
-    let bytes = std::fs::read(&twoex_path)?;
-    let with_ppth = ensure_ppth_chunk(&bytes, track_path);
-    write_bytes_if_different(&twoex_path, &with_ppth)?;
+    // rekordbox's own bundles from older analyses have no `.2EX`.
+    if twoex_path.is_file() {
+        let bytes = std::fs::read(&twoex_path)?;
+        let with_ppth = ensure_ppth_chunk(&bytes, track_path);
+        write_bytes_if_different(&twoex_path, &with_ppth)?;
+    }
     Ok(())
 }
 
+/// Copy a track's analysis bundle onto the USB. Returns the USB-relative
+/// `.DAT` path and the number of bundle files written (2 or 3).
+///
+/// `waveform_peaks_path` may name any member of the bundle: the app's own
+/// cache stores the `.DAT`, a rekordbox import stores the `.EXT` (for its
+/// colour waveform). The `.DAT` is always resolved from it, so rekordbox's
+/// beat grid (`PQTZ`) and seek index (`PVBR`) reach the stick. A missing
+/// `.2EX` is skipped: rekordbox's own bundles from older analyses have none.
 pub fn export_analysis_bundle_for_track(
     track: &ExportTrackData,
     usb_root: &Path,
     track_path: &str,
     warnings: &mut Vec<WarningEntry>,
-) -> BackendResult<Option<String>> {
+) -> BackendResult<Option<(String, usize)>> {
     let (dat_path, ext_path, twoex_path) = canonical_analysis_bundle_paths(usb_root, track_path);
 
-    let Some(local_dat_str) = track.waveform_peaks_path.as_deref() else {
+    let Some(local_bundle_str) = track.waveform_peaks_path.as_deref() else {
         warnings.push(logging::log(
             Level::Warn,
             "export",
@@ -457,10 +472,11 @@ pub fn export_analysis_bundle_for_track(
         return Ok(None);
     };
 
-    let local_dat = Path::new(local_dat_str);
-    let local_ext = local_dat.with_extension("EXT");
-    let local_twoex = local_dat.with_extension("2EX");
-    if !local_dat.is_file() || !local_ext.is_file() || !local_twoex.is_file() {
+    let local_bundle = Path::new(local_bundle_str);
+    let local_dat = local_bundle.with_extension("DAT");
+    let local_ext = local_bundle.with_extension("EXT");
+    let local_twoex = local_bundle.with_extension("2EX");
+    if !local_dat.is_file() || !local_ext.is_file() {
         warnings.push(logging::log(
             Level::Warn,
             "export",
@@ -482,11 +498,19 @@ pub fn export_analysis_bundle_for_track(
     // "bpm is always set at export" invariant.
     let cues = anlz_cues_from_track_cues(&track.cues);
     let edits = anlz_edits_from_export_track(track, cues.as_slice());
-    write_anlz_with_export_path(local_dat, &dat_path, track_path, Some(&edits))?;
+    write_anlz_with_export_path(&local_dat, &dat_path, track_path, Some(&edits))?;
     write_anlz_with_export_path(&local_ext, &ext_path, track_path, Some(&edits))?;
-    write_anlz_with_export_path(&local_twoex, &twoex_path, track_path, None)?;
-    Ok(to_usb_relative_path(usb_root, &dat_path.to_string_lossy())
-        .or_else(|| Some(dat_path.to_string_lossy().to_string())))
+    let mut files_written = 2;
+    if local_twoex.is_file() {
+        write_anlz_with_export_path(&local_twoex, &twoex_path, track_path, None)?;
+        files_written += 1;
+    } else if twoex_path.is_file() {
+        // Left by an earlier export of a different bundle for this path.
+        std::fs::remove_file(&twoex_path)?;
+    }
+    let relative = to_usb_relative_path(usb_root, &dat_path.to_string_lossy())
+        .unwrap_or_else(|| dat_path.to_string_lossy().to_string());
+    Ok(Some((relative, files_written)))
 }
 
 pub fn exported_media_target_path(

@@ -3423,6 +3423,7 @@ mod tests {
             waveform_peaks_path: Some(stale_dat.to_string_lossy().to_string()),
             duration_ms: Some(30_000),
             first_beat_ms: None,
+            beatgrid_from_rekordbox: false,
             position: 1,
         };
 
@@ -3508,6 +3509,7 @@ mod tests {
             waveform_peaks_path: Some(local_dat.to_string_lossy().to_string()),
             duration_ms: Some(1_000),
             first_beat_ms: None,
+            beatgrid_from_rekordbox: false,
             position: 1,
         };
 
@@ -3608,6 +3610,123 @@ mod tests {
         );
     }
 
+    /// A rekordbox library bundle as `rekordbox_import` stores it: the track
+    /// points at the `.EXT`, the `.DAT` carries a filled `PVBR` and a 128 BPM
+    /// grid, and there is no `.2EX`. Returns (path to `.EXT`, source `PVBR` chunk).
+    fn write_rekordbox_style_bundle(dir: &Path) -> (PathBuf, Vec<u8>) {
+        use crate::service::anlz::{build_anlz_dat_file, build_anlz_ext_file};
+
+        let waveform = WaveformData::from_peaks(vec![128; 400]);
+        let mut dat = build_anlz_dat_file(&waveform, "", Some(128.0), 200_000, Some(437), &[]);
+        let pvbr = dat
+            .windows(4)
+            .position(|w| w == b"PVBR")
+            .expect("generated DAT has a PVBR");
+        // Fill the seek index the way rekordbox does for a VBR MP3.
+        for i in 0..400u32 {
+            let at = pvbr + 16 + i as usize * 4;
+            dat[at..at + 4].copy_from_slice(&(1_000 + i * 417).to_be_bytes());
+        }
+        dat[pvbr + 16 + 1600..pvbr + 16 + 1604].copy_from_slice(&8_820_000u32.to_be_bytes());
+        let pvbr_chunk = dat[pvbr..pvbr + 16 + 1604].to_vec();
+
+        let anlz_dir = dir.join("share/PIONEER/USBANLZ/abc/def");
+        fs::create_dir_all(&anlz_dir).unwrap();
+        fs::write(anlz_dir.join("ANLZ0000.DAT"), &dat).unwrap();
+        fs::write(
+            anlz_dir.join("ANLZ0000.EXT"),
+            build_anlz_ext_file(&waveform, "", Some(128.0), 200_000, Some(437), &[]),
+        )
+        .unwrap();
+        (anlz_dir.join("ANLZ0000.EXT"), pvbr_chunk)
+    }
+
+    #[test]
+    fn export_analysis_copies_rekordbox_dat_when_track_points_at_ext() {
+        use crate::service::anlz::read_beatgrid_tempo_from_anlz;
+
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path().join("usb");
+        fs::create_dir_all(&usb_root).unwrap();
+        let (rb_ext, pvbr_chunk) = write_rekordbox_style_bundle(dir.path());
+
+        let exported_path = "/Contents/Artist/Album/track.mp3";
+        let (dat, ext, twoex) = canonical_analysis_bundle_paths(&usb_root, exported_path);
+        // A `.2EX` left by an earlier export of this path must not survive
+        // next to a bundle that has none.
+        fs::create_dir_all(twoex.parent().unwrap()).unwrap();
+        fs::write(&twoex, b"STALE-2EX").unwrap();
+
+        // The tempo differs from the grid's on purpose: an unedited
+        // rekordbox grid is kept as rekordbox wrote it.
+        let track = ExportTrackData {
+            bpm: Some(140.0),
+            duration_ms: Some(200_000),
+            first_beat_ms: Some(437),
+            waveform_peaks_path: Some(rb_ext.to_string_lossy().to_string()),
+            beatgrid_from_rekordbox: true,
+            ..make_test_track("t-rb", "Track", "track.mp3")
+        };
+
+        let mut warnings = Vec::new();
+        let (_, files_written) =
+            export_analysis_bundle_for_track(&track, &usb_root, exported_path, &mut warnings)
+                .expect("export rekordbox bundle")
+                .expect("bundle exported");
+        assert!(warnings.is_empty(), "no warnings expected: {warnings:?}");
+        assert_eq!(files_written, 2);
+
+        let dat_bytes = fs::read(&dat).unwrap();
+        let ext_bytes = fs::read(&ext).unwrap();
+        assert!(
+            dat_bytes.windows(pvbr_chunk.len()).any(|w| w == pvbr_chunk),
+            "rekordbox's PVBR must reach the USB .DAT unchanged"
+        );
+        assert_eq!(
+            read_beatgrid_tempo_from_anlz(&dat_bytes),
+            Some(12_800),
+            "the USB .DAT must carry rekordbox's own beat grid"
+        );
+        assert!(
+            ext_bytes.windows(4).any(|w| w == b"PWV3")
+                && !ext_bytes.windows(4).any(|w| w == b"PVBR"),
+            "the USB .EXT must come from rekordbox's .EXT"
+        );
+        assert!(!twoex.exists(), "stale .2EX must be removed");
+    }
+
+    #[test]
+    fn export_analysis_rebuilds_rekordbox_grid_once_edited_here() {
+        use crate::service::anlz::read_beatgrid_tempo_from_anlz;
+
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path().join("usb");
+        fs::create_dir_all(&usb_root).unwrap();
+        let (rb_ext, _) = write_rekordbox_style_bundle(dir.path());
+
+        let exported_path = "/Contents/Artist/Album/track.mp3";
+        let track = ExportTrackData {
+            bpm: Some(140.0),
+            duration_ms: Some(200_000),
+            first_beat_ms: Some(437),
+            waveform_peaks_path: Some(rb_ext.to_string_lossy().to_string()),
+            beatgrid_from_rekordbox: false,
+            ..make_test_track("t-rb-edited", "Track", "track.mp3")
+        };
+
+        let mut warnings = Vec::new();
+        export_analysis_bundle_for_track(&track, &usb_root, exported_path, &mut warnings)
+            .expect("export rekordbox bundle")
+            .expect("bundle exported");
+
+        let (dat, ..) = canonical_analysis_bundle_paths(&usb_root, exported_path);
+        assert_eq!(
+            read_beatgrid_tempo_from_anlz(&fs::read(&dat).unwrap()),
+            Some(14_000),
+            "an edited tempo must still rebuild the grid"
+        );
+    }
+
     #[test]
     fn export_analysis_does_not_regenerate_when_local_dat_missing() {
         let dir = tempdir().unwrap();
@@ -3662,6 +3781,7 @@ mod tests {
             waveform_peaks_path: Some("/nonexistent/path/DEADBEEF.DAT".to_string()),
             duration_ms: Some(30_000),
             first_beat_ms: None,
+            beatgrid_from_rekordbox: false,
             position: 1,
         };
 
@@ -3951,6 +4071,7 @@ mod tests {
                 waveform_peaks_path: None,
                 duration_ms: Some(195_000),
                 first_beat_ms: None,
+                beatgrid_from_rekordbox: false,
                 position: 0,
             }],
         };
@@ -5784,6 +5905,7 @@ mod tests {
             waveform_peaks_path: None,
             duration_ms: Some(180_000),
             first_beat_ms: None,
+            beatgrid_from_rekordbox: false,
             position: 0,
         }
     }
@@ -6320,6 +6442,7 @@ mod tests {
                 waveform_peaks_path: None,
                 duration_ms: None,
                 first_beat_ms: None,
+                beatgrid_from_rekordbox: false,
                 position: 0,
             }],
         };
