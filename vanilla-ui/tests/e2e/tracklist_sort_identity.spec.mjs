@@ -10,7 +10,7 @@ function baseTauriMock() {
     append_frontend_log: async () => null,
     show_window: async () => null,
     get_backend_log_buffer: async () => [],
-    detect_external_master_db: async () => ({ ok: true, data: { found: false, path: null } }),
+    detect_external_rekordbox_db: async () => ({ ok: true, data: { found: false, path: null } }),
     set_frontend_setting: async (request) => ({ ok: true, data: { key: request.key, value: request.value } }),
     get_frontend_settings: async () => ({ ok: true, data: { settings: {} } }),
     resolve_playback_source: async () => ({ ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } }),

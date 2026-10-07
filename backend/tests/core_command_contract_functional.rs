@@ -12,7 +12,7 @@ use backend::models::{
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
     ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
     RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanMasterDbRequest, SearchTracksRequest,
+    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanRekordboxDbRequest, SearchTracksRequest,
     SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -479,13 +479,13 @@ fn take_playback_transitions_hands_off_the_receiver_exactly_once() {
 }
 
 #[test]
-fn scan_master_db_reports_validation_error_for_missing_path() {
+fn scan_rekordbox_db_reports_validation_error_for_missing_path() {
     let root = tempdir().expect("temp root");
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
     let missing_path = root.path().join("does-not-exist/master.db");
-    let response = backend.scan_master_db(ScanMasterDbRequest {
+    let response = backend.scan_rekordbox_db(ScanRekordboxDbRequest {
         path: Some(missing_path.to_string_lossy().to_string()),
     });
 
@@ -1056,11 +1056,11 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
 }
 
 #[test]
-fn detect_external_master_db_returns_a_response() {
+fn detect_external_rekordbox_db_returns_a_response() {
     let root = tempdir().expect("temp root");
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    let response = backend.detect_external_master_db();
+    let response = backend.detect_external_rekordbox_db();
     assert!(response.ok, "detect failed: {response:?}");
 }

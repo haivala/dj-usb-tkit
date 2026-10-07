@@ -55,7 +55,7 @@ function installTrackDetailMock(page, opts = {}) {
             if (r.key === "ui_key_notation_v1") opts.camelot = r.value === "camelot";
             return { ok: true, data: null };
           }
-          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_backend_log_buffer") return [];
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
@@ -1415,7 +1415,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "get_backend_log_buffer") return [];
           if (command === "list_playlists") {
             return { ok: true, data: { items: [{ id: "pl-1", name: "My Set", source: "local", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] } };
@@ -1563,7 +1563,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
           if (command === "show_window") return null;
           if (command === "allow_asset_paths") return null;
           if (command === "get_backend_log_buffer") return [];
-          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "check_source_roots") return { ok: true, data: { roots: [] } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
@@ -1846,7 +1846,7 @@ test("cue button is disabled for an un-analyzed track", async ({ page }) => {
     window.__TAURI__ = {
       core: {
         invoke: async (command) => {
-          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_backend_log_buffer") return [];
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") return { ok: true, data: { items: [], warnings: [] } };

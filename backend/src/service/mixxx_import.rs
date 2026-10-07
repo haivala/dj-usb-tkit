@@ -2,7 +2,7 @@
 //!
 //! Mixxx keeps its library in a plain (unencrypted) SQLite file. Tracks are
 //! upserted into the local `tracks` table flagged `mixxx_db_source`, the same
-//! way `scan_master_db` imports a rekordbox library. Mixxx waveforms use
+//! way `scan_rekordbox_db` imports a rekordbox library. Mixxx waveforms use
 //! Mixxx's own format, so imported tracks go through the app's own analysis
 //! like any folder track; hot cues are imported straight into `track_cues`
 //! (they only need a position, not analysis), and the first beat of Mixxx's
@@ -1462,7 +1462,7 @@ mod tests {
             row("SELECT id, title, tonality, bpm FROM tracks WHERE file_path = ?1");
         let (duration_ms, sample_rate, artwork, flags): (Option<i64>, Option<i64>, Option<String>, (i64, i64)) = conn
             .query_row(
-                "SELECT duration_ms, sample_rate_hz, artwork_path, mixxx_db_source, master_db_source
+                "SELECT duration_ms, sample_rate_hz, artwork_path, mixxx_db_source, rekordbox_db_source
                  FROM tracks WHERE id = ?1",
                 params![new_id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, (r.get(3)?, r.get(4)?))),
@@ -1574,11 +1574,11 @@ mod tests {
         drop(conn);
 
         // Browse: Mixxx tracks show only when the Mixxx source is included.
-        let browse = |include_master_db: bool, include_mixxx_db: bool| {
+        let browse = |include_rekordbox_db: bool, include_mixxx_db: bool| {
             service
                 .browse_source_files(BrowseSourceFilesRequest {
                     source_roots: Vec::new(),
-                    include_master_db,
+                    include_rekordbox_db,
                     include_mixxx_db,
                     query: String::new(),
                     limit: 100,

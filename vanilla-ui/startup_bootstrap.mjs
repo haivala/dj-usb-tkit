@@ -222,7 +222,7 @@ export async function initApp(ctx) {
   ctx.setProgress(false, 0, "Idle");
   ctx.loadSourceRootsFromStorage();
   ctx.loadSourceRootEnabledFromStorage();
-  ctx.loadMasterDbEnabledFromStorage();
+  ctx.loadRekordboxDbEnabledFromStorage();
   ctx.loadMixxxDbEnabledFromStorage();
   ctx.loadSourcesEverConfiguredFromStorage();
   await ctx.loadUsbDevices();
@@ -242,7 +242,7 @@ export async function initApp(ctx) {
 
   ctx.renderSourceChips();
   ctx.refreshSourceRootAnalysisStatus().catch(() => {});
-  await ctx.detectExternalMasterDb();
+  await ctx.detectExternalRekordboxDb();
   await ctx.detectExternalMixxxDb();
   ctx.bindEvents();
   await ctx.switchView("library");

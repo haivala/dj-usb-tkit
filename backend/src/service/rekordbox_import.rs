@@ -1,7 +1,7 @@
 //! Rekordbox desktop library import: tracks and playlists from `master.db`.
 //!
 //! Tracks are upserted into the local `tracks` table flagged
-//! `master_db_source`, pointing at the desktop library's own ANLZ files for
+//! `rekordbox_db_source`, pointing at the desktop library's own ANLZ files for
 //! waveforms. A playlist or history session imports as a new local playlist,
 //! importing its tracks the same way.
 
@@ -16,12 +16,13 @@ use super::cues::{
     DEFAULT_HOTCUE_COLOR_ID, MAX_HOT_CUES, insert_track_cues, is_valid_color_id, track_has_cues,
 };
 
-use super::usb_utils::external_master_db_candidates;
+use super::usb_utils::external_rekordbox_db_candidates;
 use super::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
 use super::{
     BackendService, annotate_imported_playlists, build_track_match_fingerprint,
-    external_playlist_key, master_db_analysis_file_candidates, no_importable_tracks_error,
-    non_empty_db_value, now, resolve_master_db_resource_path, save_imported_playlist,
+    external_playlist_key, no_importable_tracks_error, non_empty_db_value, now,
+    rekordbox_db_analysis_file_candidates, resolve_rekordbox_db_resource_path,
+    save_imported_playlist,
 };
 use crate::edb::table_exists;
 use crate::error::{BackendError, BackendResult};
@@ -29,7 +30,7 @@ use crate::logging::{self, Level};
 use crate::models::{
     ExternalPlaylistKind, ExternalPlaylistSummary, ImportExternalPlaylistData,
     ImportExternalPlaylistRequest, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
-    ScanLibraryData, ScanMasterDbRequest, TrackCue, WarningEntry,
+    ScanLibraryData, ScanRekordboxDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
 
@@ -44,11 +45,11 @@ const RB_ROOT_PARENT: &str = "root";
 
 /// Resolve the `master.db` to use (explicit path, else auto-detect) and open
 /// it read-only with the desktop library key.
-fn open_master_db(path: Option<&str>) -> BackendResult<(PathBuf, Connection)> {
+fn open_rekordbox_db(path: Option<&str>) -> BackendResult<(PathBuf, Connection)> {
     let master_path = if let Some(p) = path.filter(|s| !s.trim().is_empty()) {
         PathBuf::from(p.trim())
     } else {
-        external_master_db_candidates()
+        external_rekordbox_db_candidates()
             .into_iter()
             .find(|c| c.is_file())
             .ok_or_else(|| BackendError::Validation("master.db not found".to_string()))?
@@ -90,7 +91,7 @@ struct RbTrack {
     genre: Option<String>,
 }
 
-fn load_master_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
+fn load_rekordbox_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
     // Query all non-deleted tracks with available metadata.
     // FolderPath is the full file path (despite the name).
     // BPM is stored as centiBPM integer (12600 = 126.00 BPM).
@@ -492,7 +493,7 @@ fn load_rb_cues(conn: &Connection, content_id: &str) -> BackendResult<Vec<RbCue>
 /// Upserts `master.db` tracks into the local `tracks` table and tallies what
 /// happened. Shared by the whole-library import and the playlist import so
 /// both treat a track identically.
-struct MasterDbTrackImporter<'a> {
+struct RekordboxTrackImporter<'a> {
     master: &'a Connection,
     /// Take BPM, key and cues from rekordbox even over the app's own values
     /// (the playlist import's "force update").
@@ -520,7 +521,7 @@ struct MasterDbTrackImporter<'a> {
     warnings: Vec<WarningEntry>,
 }
 
-impl<'a> MasterDbTrackImporter<'a> {
+impl<'a> RekordboxTrackImporter<'a> {
     fn new(
         master: &'a Connection,
         master_path: PathBuf,
@@ -635,7 +636,7 @@ impl<'a> MasterDbTrackImporter<'a> {
                     artwork_path = COALESCE(?8, artwork_path),
                     format_ext = COALESCE(format_ext, ?12),
                     match_fingerprint = ?9,
-                    master_db_source = 1,
+                    rekordbox_db_source = 1,
                     updated_at = ?10
                    WHERE id = ?11"#,
                 params![
@@ -662,7 +663,7 @@ impl<'a> MasterDbTrackImporter<'a> {
                 r#"INSERT INTO tracks (
                     id, title, artist, album, bpm, tonality, file_path, format_ext,
                     duration_ms, waveform_peaks_path, artwork_path, match_fingerprint,
-                    master_db_source, created_at, updated_at,
+                    rekordbox_db_source, created_at, updated_at,
                     bpm_analyzer, tonality_source, genre,
                     first_beat_ms, first_beat_ms_source
                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
@@ -730,7 +731,7 @@ impl<'a> MasterDbTrackImporter<'a> {
         if self.sample_anlz.is_none() {
             self.sample_anlz = Some(anlz_rel.to_string());
         }
-        let resolved = master_db_analysis_file_candidates(&self.master_path, anlz_rel)
+        let resolved = rekordbox_db_analysis_file_candidates(&self.master_path, anlz_rel)
             .into_iter()
             .find(|p| p.is_file());
         if let Some(anlz_abs) = resolved {
@@ -740,8 +741,8 @@ impl<'a> MasterDbTrackImporter<'a> {
             self.anlz_miss += 1;
             self.warnings.push(logging::log(
                 Level::Warn,
-                "scan-master-db",
-                "scan.master-db.anlz-not-found",
+                "scan-rekordbox-db",
+                "scan.rekordbox-db.anlz-not-found",
                 format!("ANLZ not found (AnalysisDataPath={anlz_rel:?})"),
             ));
             None
@@ -758,13 +759,13 @@ impl<'a> MasterDbTrackImporter<'a> {
             self.sample_img = Some(img_rel.to_string());
         }
         let Some(src) =
-            resolve_master_db_resource_path(&self.master_path, img_rel, |p| p.is_file())
+            resolve_rekordbox_db_resource_path(&self.master_path, img_rel, |p| p.is_file())
         else {
             self.artwork_miss += 1;
             self.warnings.push(logging::log(
                 Level::Warn,
-                "scan-master-db",
-                "scan.master-db.artwork-not-found",
+                "scan-rekordbox-db",
+                "scan.rekordbox-db.artwork-not-found",
                 format!("artwork not found (ImagePath={img_rel:?})"),
             ));
             return None;
@@ -780,8 +781,8 @@ impl<'a> MasterDbTrackImporter<'a> {
                 self.artwork_miss += 1;
                 self.warnings.push(logging::log(
                     Level::Error,
-                    "scan-master-db",
-                    "scan.master-db.artwork-copy-failed",
+                    "scan-rekordbox-db",
+                    "scan.rekordbox-db.artwork-copy-failed",
                     format!("artwork copy failed {src:?} -> {dest:?}: {e}"),
                 ));
                 None
@@ -793,33 +794,33 @@ impl<'a> MasterDbTrackImporter<'a> {
     fn finish_warnings(&mut self) -> Vec<WarningEntry> {
         let mut summary = |level, code: &str, message: String| {
             self.warnings
-                .push(logging::log(level, "scan-master-db", code, message));
+                .push(logging::log(level, "scan-rekordbox-db", code, message));
         };
         if let Some(p) = &self.sample_anlz {
             summary(
                 Level::Info,
-                "scan.master-db.anlz-sample",
+                "scan.rekordbox-db.anlz-sample",
                 format!("AnalysisDataPath sample: {p}"),
             );
         }
         if let Some(p) = &self.sample_img {
             summary(
                 Level::Info,
-                "scan.master-db.image-sample",
+                "scan.rekordbox-db.image-sample",
                 format!("ImagePath sample: {p}"),
             );
         }
         if self.cue_tracks > 0 {
             summary(
                 Level::Info,
-                "scan.master-db.cues-imported",
+                "scan.rekordbox-db.cues-imported",
                 format!("cues imported for {} track(s)", self.cue_tracks),
             );
         }
         if self.cue_tracks_kept_local > 0 {
             summary(
                 Level::Info,
-                "scan.master-db.cues-kept-local",
+                "scan.rekordbox-db.cues-kept-local",
                 format!(
                     "{} track(s) already had cues; their rekordbox cues were not imported",
                     self.cue_tracks_kept_local
@@ -829,7 +830,7 @@ impl<'a> MasterDbTrackImporter<'a> {
         if self.memory_cues_skipped > 0 {
             summary(
                 Level::Info,
-                "scan.master-db.memory-cues-skipped",
+                "scan.rekordbox-db.memory-cues-skipped",
                 format!(
                     "{} rekordbox memory cue(s) not imported: no free cue slot after the hot cues",
                     self.memory_cues_skipped
@@ -839,7 +840,7 @@ impl<'a> MasterDbTrackImporter<'a> {
         if self.unsupported > 0 {
             summary(
                 Level::Info,
-                "scan.master-db.unsupported-skipped",
+                "scan.rekordbox-db.unsupported-skipped",
                 format!(
                     "{} track(s) skipped: not a supported audio file",
                     self.unsupported
@@ -849,35 +850,35 @@ impl<'a> MasterDbTrackImporter<'a> {
         if self.anlz_null > 0 {
             summary(
                 Level::Info,
-                "scan.master-db.anlz-null",
+                "scan.rekordbox-db.anlz-null",
                 format!("{} track(s) have no AnalysisDataPath", self.anlz_null),
             );
         }
         if self.anlz_miss > 0 {
             summary(
                 Level::Warn,
-                "scan.master-db.anlz-miss-summary",
+                "scan.rekordbox-db.anlz-miss-summary",
                 format!("{} ANLZ path(s) not found on disk", self.anlz_miss),
             );
         }
         if self.anlz_ok > 0 {
             summary(
                 Level::Info,
-                "scan.master-db.anlz-ok",
+                "scan.rekordbox-db.anlz-ok",
                 format!("{} ANLZ path(s) resolved OK", self.anlz_ok),
             );
         }
         if self.artwork_null > 0 {
             summary(
                 Level::Info,
-                "scan.master-db.artwork-null",
+                "scan.rekordbox-db.artwork-null",
                 format!("{} track(s) have no ImagePath", self.artwork_null),
             );
         }
         if self.artwork_miss > 0 {
             summary(
                 Level::Warn,
-                "scan.master-db.artwork-miss-summary",
+                "scan.rekordbox-db.artwork-miss-summary",
                 format!(
                     "{} artwork source file(s) not found or copy failed",
                     self.artwork_miss
@@ -887,7 +888,7 @@ impl<'a> MasterDbTrackImporter<'a> {
         if self.artwork_ok > 0 {
             summary(
                 Level::Info,
-                "scan.master-db.artwork-ok",
+                "scan.rekordbox-db.artwork-ok",
                 format!("{} artwork file(s) copied OK", self.artwork_ok),
             );
         }
@@ -896,14 +897,14 @@ impl<'a> MasterDbTrackImporter<'a> {
 }
 
 impl BackendService {
-    pub fn scan_master_db(&self, req: ScanMasterDbRequest) -> BackendResult<ScanLibraryData> {
-        let (master_path, conn) = open_master_db(req.path.as_deref())?;
-        let tracks = load_master_db_tracks(&conn)?;
+    pub fn scan_rekordbox_db(&self, req: ScanRekordboxDbRequest) -> BackendResult<ScanLibraryData> {
+        let (master_path, conn) = open_rekordbox_db(req.path.as_deref())?;
+        let tracks = load_rekordbox_db_tracks(&conn)?;
 
         let mut db_conn = self.db.connect()?;
         let tx = db_conn.transaction()?;
         let mut importer =
-            MasterDbTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
+            RekordboxTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
         for t in &tracks {
             importer.upsert(&tx, t)?;
         }
@@ -914,10 +915,10 @@ impl BackendService {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,
             updated: importer.updated,
-            // Imports never remove tracks (see `MasterDbTrackImporter::upsert`).
+            // Imports never remove tracks (see `RekordboxTrackImporter::upsert`).
             removed: 0,
             not_found: importer.not_found,
-            // Master-DB scan isn't scoped to source folders; the post-scan
+            // rekordbox DB scan isn't scoped to source folders; the post-scan
             // library facts are only surfaced for `scan_library`.
             scoped_track_count: 0,
             album_count: 0,
@@ -930,7 +931,7 @@ impl BackendService {
         &self,
         req: ListExternalPlaylistsRequest,
     ) -> BackendResult<ListExternalPlaylistsData> {
-        let (_, conn) = open_master_db(req.path.as_deref())?;
+        let (_, conn) = open_rekordbox_db(req.path.as_deref())?;
         let mut items = list_rekordbox_playlists_from(&conn)?;
         let local = self.db.connect()?;
         annotate_imported_playlists(&local, REKORDBOX_LIBRARY, &mut items)?;
@@ -945,14 +946,14 @@ impl BackendService {
         &self,
         req: ImportExternalPlaylistRequest,
     ) -> BackendResult<ImportExternalPlaylistData> {
-        let (master_path, conn) = open_master_db(req.path.as_deref())?;
+        let (master_path, conn) = open_rekordbox_db(req.path.as_deref())?;
         let (rb_name, entry_ids) = load_rb_list_entries(&conn, req.kind, req.id.trim())?;
         let name = non_empty_db_value(&rb_name)
             .map(str::to_string)
             .unwrap_or_else(|| "rekordbox playlist".to_string());
 
         let wanted: HashSet<&str> = entry_ids.iter().map(String::as_str).collect();
-        let tracks_by_id: HashMap<String, RbTrack> = load_master_db_tracks(&conn)?
+        let tracks_by_id: HashMap<String, RbTrack> = load_rekordbox_db_tracks(&conn)?
             .into_iter()
             .filter(|t| wanted.contains(t.content_id.as_str()))
             .map(|t| (t.content_id.clone(), t))
@@ -961,7 +962,7 @@ impl BackendService {
         let mut db_conn = self.db.connect()?;
         let tx = db_conn.transaction()?;
         let mut importer =
-            MasterDbTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
+            RekordboxTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
         importer.force = req.force;
 
         let mut local_ids: Vec<String> = Vec::new();
@@ -994,16 +995,16 @@ impl BackendService {
         if duplicates > 0 {
             warnings.push(logging::log(
                 Level::Info,
-                "scan-master-db",
-                "scan.master-db.playlist-duplicates-skipped",
+                "scan-rekordbox-db",
+                "scan.rekordbox-db.playlist-duplicates-skipped",
                 format!("{duplicates} repeated track(s) in {name:?} added once"),
             ));
         }
         if deleted_in_rekordbox > 0 {
             warnings.push(logging::log(
                 Level::Warn,
-                "scan-master-db",
-                "scan.master-db.playlist-tracks-deleted",
+                "scan-rekordbox-db",
+                "scan.rekordbox-db.playlist-tracks-deleted",
                 format!(
                     "{deleted_in_rekordbox} track(s) in {name:?} are no longer in the rekordbox library"
                 ),
@@ -1043,7 +1044,7 @@ mod tests {
 
     /// A `master.db` shaped like rekordbox 6/7's: text ids, `root` parents,
     /// folders (Attribute 1) and a smart playlist (Attribute 4).
-    fn create_master_db_with_playlists(root: &Path, media: &[PathBuf]) -> PathBuf {
+    fn create_rekordbox_db_with_playlists(root: &Path, media: &[PathBuf]) -> PathBuf {
         let path = root.join("master.db");
         let conn = Connection::open(&path).expect("create master db");
         conn.execute_batch(&format!("PRAGMA key='{DEFAULT_MASTER_DB_KEY}';"))
@@ -1271,7 +1272,7 @@ mod tests {
             std::fs::write(p, b"audio").expect("write media");
         }
         let path = Some(
-            create_master_db_with_playlists(rb_root.path(), &media)
+            create_rekordbox_db_with_playlists(rb_root.path(), &media)
                 .to_string_lossy()
                 .to_string(),
         );
@@ -1354,7 +1355,7 @@ mod tests {
         for p in &media {
             std::fs::write(p, b"audio").expect("write media");
         }
-        let master = create_master_db_with_playlists(rb_root.path(), &media);
+        let master = create_rekordbox_db_with_playlists(rb_root.path(), &media);
         // Like a Windows rekordbox library: a /PIONEER/... virtual path
         // resolving under <share>, with both .DAT (beat grid) and .EXT.
         let anlz_dir = rb_root.path().join("share/PIONEER/USBANLZ/abc/def");
@@ -1451,7 +1452,7 @@ mod tests {
             std::fs::write(p, b"audio").expect("write media");
         }
         let path = Some(
-            create_master_db_with_playlists(rb_root.path(), &media)
+            create_rekordbox_db_with_playlists(rb_root.path(), &media)
                 .to_string_lossy()
                 .to_string(),
         );
@@ -1490,8 +1491,8 @@ mod tests {
         assert_eq!(imported.not_found, vec!["/nowhere/missing.mp3".to_string()]);
         let codes: Vec<_> = imported.warnings.iter().map(|w| w.code.as_str()).collect();
         for code in [
-            "scan.master-db.playlist-duplicates-skipped",
-            "scan.master-db.playlist-tracks-deleted",
+            "scan.rekordbox-db.playlist-duplicates-skipped",
+            "scan.rekordbox-db.playlist-tracks-deleted",
         ] {
             assert!(codes.contains(&code), "expected {code}, got {codes:?}");
         }

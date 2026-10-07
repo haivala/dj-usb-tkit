@@ -71,7 +71,7 @@ function installTauriMock(page, mode) {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") {
+          if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: false, path: null } };
           }
           if (command === "pick_usb_folder") {

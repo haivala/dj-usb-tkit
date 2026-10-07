@@ -628,7 +628,7 @@ impl BackendService {
                 let visible = self.compute_visible_library_tracks(
                     &conn,
                     &req.source_roots,
-                    ExternalLibraries::from_flags(req.include_master_db, req.include_mixxx_db),
+                    ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
                     &req.query,
                 )?;
                 Some(
@@ -638,7 +638,7 @@ impl BackendService {
                         // master.db doesn't need local analysis -- matches the
                         // frontend's old post-scan `pendingTrackIds` filter.
                         .filter(|track| {
-                            !(req.include_master_db && track.master_db_source)
+                            !(req.include_rekordbox_db && track.rekordbox_db_source)
                                 && !track_has_core_analysis_for_source_status(track)
                         })
                         .map(|track| track.id.clone())
@@ -731,7 +731,8 @@ impl BackendService {
         // locally from a possibly-partial (paginated) view. No filter
         // context (no source roots and master.db off) opts this out at no
         // extra cost -- the two progress fields just stay `None`.
-        let libraries = ExternalLibraries::from_flags(req.include_master_db, req.include_mixxx_db);
+        let libraries =
+            ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db);
         let mut library_context = if !req.source_roots.is_empty() || libraries.any() {
             let visible = self.compute_visible_library_tracks(
                 &conn,
@@ -751,7 +752,7 @@ impl BackendService {
                 }
                 let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
                 let countable = track_has_core_analysis_for_source_status(track)
-                    || (track.master_db_source && has_duration);
+                    || (track.rekordbox_db_source && has_duration);
                 if countable && let Some(d) = track.duration_ms {
                     total_ms += d;
                     known_count += 1;

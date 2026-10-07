@@ -800,7 +800,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             backend::tauri_commands::scan_library,
-            backend::tauri_commands::scan_master_db,
+            backend::tauri_commands::scan_rekordbox_db,
             backend::tauri_commands::scan_mixxx_db,
             backend::tauri_commands::list_mixxx_playlists,
             backend::tauri_commands::import_mixxx_playlist,
@@ -862,7 +862,7 @@ fn main() {
             backend::tauri_commands::run_usb_diagnostics,
             backend::tauri_commands::run_usb_parity_report,
             backend::tauri_commands::repair_usb_diagnostics,
-            backend::tauri_commands::detect_external_master_db,
+            backend::tauri_commands::detect_external_rekordbox_db,
             backend::tauri_commands::detect_external_mixxx_db,
             backend::tauri_commands::initialize_usb,
             backend::tauri_commands::download_essentia,

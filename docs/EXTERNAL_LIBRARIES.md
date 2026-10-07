@@ -159,7 +159,7 @@ the app:
 
 | Library | Environment override | Locations tried, in order |
 | --- | --- | --- |
-| rekordbox | `DJUSBTKIT_MASTER_DB_PATH` | macOS `~/Library/Application Support/Pioneer DJ/rekordbox/master.db`, then `~/Library/Application Support/Pioneer/rekordbox/master.db`, then `~/Library/Pioneer/rekordbox/master.db`; Windows `%APPDATA%\Pioneer\rekordbox\master.db` (or the same under `%USERPROFILE%\AppData\Roaming`) |
+| rekordbox | `DJUSBTKIT_REKORDBOX_DB_PATH` (the old name `DJUSBTKIT_MASTER_DB_PATH` still works) | macOS `~/Library/Application Support/Pioneer DJ/rekordbox/master.db`, then `~/Library/Application Support/Pioneer/rekordbox/master.db`, then `~/Library/Pioneer/rekordbox/master.db`; Windows `%APPDATA%\Pioneer\rekordbox\master.db` (or the same under `%USERPROFILE%\AppData\Roaming`) |
 | Mixxx | `DJUSBTKIT_MIXXX_DB_PATH` | Linux `~/.mixxx/mixxxdb.sqlite`; macOS `~/Library/Containers/org.mixxx.mixxx/Data/Library/Application Support/Mixxx/mixxxdb.sqlite`, then `~/Library/Application Support/Mixxx/mixxxdb.sqlite`; Windows `%LOCALAPPDATA%\Mixxx\mixxxdb.sqlite` |
 
 `master.db` is SQLCipher-encrypted with rekordbox's fixed desktop key.
@@ -168,12 +168,12 @@ the app:
 
 ### Code layout
 
-- `backend/src/service/rekordbox_import.rs`: `scan_master_db`,
+- `backend/src/service/rekordbox_import.rs`: `scan_rekordbox_db`,
   `list_rekordbox_playlists`, `import_rekordbox_playlist`
 - `backend/src/service/mixxx_import.rs`: `detect_external_mixxx_db`,
   `scan_mixxx_db`, `list_mixxx_playlists`, `import_mixxx_playlist`
 
-Each module has one per-track importer (`MasterDbTrackImporter`,
+Each module has one per-track importer (`RekordboxTrackImporter`,
 `MixxxTrackImporter`) that the whole-library import and the playlist import
 share, so a track is treated the same whichever way it arrives. The playlist
 import runs in one transaction; when it finds no importable track it returns
@@ -185,7 +185,7 @@ upserts.
 ids overlap). The list commands return the matching local playlist as
 `existingPlaylist`, and an import saves into it (`save_imported_playlist`).
 
-`tracks.master_db_source` and `tracks.mixxx_db_source` record where a track
+`tracks.rekordbox_db_source` and `tracks.mixxx_db_source` record where a track
 came from. An import that fills in a track's BPM, key or first beat sets
 `bpm_analyzer` / `tonality_source` / `first_beat_ms_source` to `rekordbox` or
 `mixxx` (a cue-editor edit sets `user`), only over a value that is missing or
@@ -193,8 +193,8 @@ came from the same library, unless forced. `analysis::kept_analysis_values` keep
 sources when the track has no waveform yet (its first analysis); a track that
 already has one is reanalyzed and gets the detected values. The library filter requests (`browse_source_files`,
 `list_matching_track_ids`, `add_library_selection_to_playlist`,
-`analyze_new_tracks`) carry `includeMasterDb` / `includeMixxxDb`; a track is
-included when `(includeMasterDb && masterDbSource) || (includeMixxxDb &&
+`analyze_new_tracks`) carry `includeRekordboxDb` / `includeMixxxDb`; a track is
+included when `(includeRekordboxDb && rekordboxDbSource) || (includeMixxxDb &&
 mixxxDbSource)`.
 
 ### rekordbox `master.db` fields read

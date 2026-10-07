@@ -149,10 +149,10 @@
                 <span class="source-row-label">Libraries</span>
                 <div class="source-chips" id="libraryChipsContainer"></div>
               </div>
-              <label class="external-master-db-toggle hidden" id="externalMasterDbToggle">
-                <input type="checkbox" id="externalMasterDbCheckbox" />
-                <span class="external-master-db-toggle-label">External Library</span>
-                <span class="external-master-db-toggle-path muted" id="externalMasterDbPath"></span>
+              <label class="external-rekordbox-db-toggle hidden" id="externalRekordboxDbToggle">
+                <input type="checkbox" id="externalRekordboxDbCheckbox" />
+                <span class="external-rekordbox-db-toggle-label">External Library</span>
+                <span class="external-rekordbox-db-toggle-path muted" id="externalRekordboxDbPath"></span>
               </label>
             </div>
           </div>
@@ -824,12 +824,12 @@
 
   <!-- Status line, library sources, sidebar playlists -->
   <template id="tplStatusWarningLink"><a href="#" class="status-warning-link"></a></template>
-  <template id="tplSourceChipMasterDb">
-    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-master-db="true" aria-label="Toggle rekordbox library" /><span class="source-chip-path">rekordbox</span><button class="source-chip-import" type="button" data-import-library="rekordbox" data-tooltip="Import from rekordbox" aria-label="Import from rekordbox">&#8635;</button></span>
+  <template id="tplSourceChipRekordboxDb">
+    <span class="source-chip source-chip-library"><input class="source-chip-toggle" type="checkbox" data-rekordbox-db="true" aria-label="Toggle rekordbox library" /><span class="source-chip-path">rekordbox</span><button class="source-chip-import" type="button" data-import-library="rekordbox" data-tooltip="Import from rekordbox" aria-label="Import from rekordbox">&#8635;</button></span>
   </template>
   <template id="tplSelectOptgroup"><optgroup></optgroup></template>
   <template id="tplSourceChipMixxxDb">
-    <span class="source-chip source-chip-master-db"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" aria-label="Toggle Mixxx library" /><span class="source-chip-path">Mixxx</span><button class="source-chip-import" type="button" data-import-library="mixxx" data-tooltip="Import from Mixxx" aria-label="Import from Mixxx">&#8635;</button></span>
+    <span class="source-chip source-chip-library"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" aria-label="Toggle Mixxx library" /><span class="source-chip-path">Mixxx</span><button class="source-chip-import" type="button" data-import-library="mixxx" data-tooltip="Import from Mixxx" aria-label="Import from Mixxx">&#8635;</button></span>
   </template>
   <template id="tplSourceChip">
     <span class="source-chip"><input class="source-chip-toggle" type="checkbox" aria-label="Filter source" /><span class="source-chip-path"></span><button class="source-chip-remove" aria-label="Remove">&times;</button></span>

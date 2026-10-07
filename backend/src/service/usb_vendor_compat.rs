@@ -16,7 +16,9 @@ pub(crate) const USB_CONTENTS_PREFIX: &str = "/Contents/";
 pub(crate) const USB_ARTWORK_PREFIX: &str = "/PIONEER/Artwork/";
 pub(crate) const USB_ANALYSIS_PREFIX: &str = "/PIONEER/USBANLZ/";
 
-pub(crate) const MASTER_DB_ENV_KEY: &str = "DJUSBTKIT_MASTER_DB_PATH";
+pub(crate) const REKORDBOX_DB_ENV_KEY: &str = "DJUSBTKIT_REKORDBOX_DB_PATH";
+/// Pre-rename name of [`REKORDBOX_DB_ENV_KEY`], still honoured.
+pub(crate) const LEGACY_REKORDBOX_DB_ENV_KEY: &str = "DJUSBTKIT_MASTER_DB_PATH";
 pub(crate) const USB_ROOT_ENV_KEY: &str = "DJUSBTKIT_USB_ROOT";
 
 pub const DEFAULT_MASTER_DB_KEY: &str =

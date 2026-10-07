@@ -6,7 +6,7 @@ use rusqlite::Connection;
 
 use crate::error::{BackendError, BackendResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, Clone)]
 pub struct Db {
@@ -201,6 +201,7 @@ impl Db {
             "#,
         )?;
 
+        rename_legacy_rekordbox_names(&conn)?;
         ensure_tracks_column(&conn, "track_number", "INTEGER")?;
         ensure_tracks_column(&conn, "waveform_peaks_path", "TEXT")?;
         ensure_tracks_column(&conn, "match_fingerprint", "TEXT")?;
@@ -224,7 +225,7 @@ impl Db {
         ensure_tracks_column(&conn, "first_beat_ms", "INTEGER")?;
         ensure_tracks_column(&conn, "first_beat_ms_source", "TEXT")?;
         ensure_tracks_column(&conn, "genre", "TEXT")?;
-        ensure_tracks_column(&conn, "master_db_source", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_tracks_column(&conn, "rekordbox_db_source", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_tracks_column(&conn, "mixxx_db_source", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_tracks_column(&conn, "wav_extensible_kind", "TEXT")?;
         ensure_tracks_column(&conn, "tonality_source", "TEXT")?;
@@ -271,7 +272,7 @@ const ALLOWED_TRACK_COLUMNS: &[&str] = &[
     "first_beat_ms",
     "first_beat_ms_source",
     "genre",
-    "master_db_source",
+    "rekordbox_db_source",
     "mixxx_db_source",
     "wav_extensible_kind",
     "tonality_source",
@@ -354,6 +355,32 @@ fn ensure_column(
     Ok(())
 }
 
+/// Schema v3 renamed the rekordbox library's "master DB" names: the
+/// `tracks.master_db_source` column and the chip's stored on/off setting.
+/// Both steps are no-ops once done, and on a fresh database.
+fn rename_legacy_rekordbox_names(conn: &Connection) -> BackendResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(tracks)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let has = |name: &str| columns.iter().any(|c| c.eq_ignore_ascii_case(name));
+    if has("master_db_source") && !has("rekordbox_db_source") {
+        conn.execute_batch(
+            "ALTER TABLE tracks RENAME COLUMN master_db_source TO rekordbox_db_source",
+        )?;
+    }
+    conn.execute(
+        "UPDATE OR IGNORE app_settings SET key = 'ui_rekordbox_db_enabled_v1'
+         WHERE key = 'ui_master_db_enabled_v1'",
+        [],
+    )?;
+    conn.execute(
+        "DELETE FROM app_settings WHERE key = 'ui_master_db_enabled_v1'",
+        [],
+    )?;
+    Ok(())
+}
+
 fn set_schema_version(conn: &Connection, version: i64) -> BackendResult<()> {
     conn.execute(
         r#"
@@ -392,6 +419,54 @@ mod tests {
             )
             .expect("schema_version row");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrate_renames_legacy_master_db_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        {
+            let db = Db::new(dir.path()).expect("db init");
+            let conn = db.connect().expect("db connect");
+            // Put the database back in its pre-v3 shape.
+            conn.execute_batch(
+                r#"
+                ALTER TABLE tracks RENAME COLUMN rekordbox_db_source TO master_db_source;
+                INSERT INTO tracks (id, title, artist, file_path, created_at, updated_at,
+                                    master_db_source)
+                  VALUES ('t1', 'T', 'A', '/m/a.mp3', 'now', 'now', 1);
+                INSERT INTO app_settings (key, value, updated_at)
+                  VALUES ('ui_master_db_enabled_v1', 'false', 'now');
+                "#,
+            )
+            .expect("downgrade schema");
+        }
+
+        let db = Db::new(dir.path()).expect("db reopen");
+        let conn = db.connect().expect("db connect");
+        let source: i64 = conn
+            .query_row(
+                "SELECT rekordbox_db_source FROM tracks WHERE id = 't1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("renamed column keeps its value");
+        assert_eq!(source, 1);
+        let setting: String = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'ui_rekordbox_db_enabled_v1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("setting moved to the new key");
+        assert_eq!(setting, "false");
+        let legacy: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM app_settings WHERE key = 'ui_master_db_enabled_v1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count legacy setting");
+        assert_eq!(legacy, 0);
     }
 
     #[test]

@@ -64,7 +64,7 @@ drive selection from being rendered against a newer selected drive.
 ### Library
 
 - `scan_library`
-- `scan_master_db`
+- `scan_rekordbox_db`
 - `scan_mixxx_db`
 - `search_tracks`
 - `list_tracks`
@@ -159,14 +159,14 @@ drive selection from being rendered against a newer selected drive.
 - `inspect_usb_tracks`
 - `initialize_usb`
 - `export_to_usb`
-- `detect_external_master_db`
+- `detect_external_rekordbox_db`
 
 ### External libraries
 
 See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
 
-- `detect_external_master_db` / `detect_external_mixxx_db` — `{ found, path }`
-- `scan_master_db` / `scan_mixxx_db` — `{ path? }`; imports every track of the
+- `detect_external_rekordbox_db` / `detect_external_mixxx_db` — `{ found, path }`
+- `scan_rekordbox_db` / `scan_mixxx_db` — `{ path? }`; imports every track of the
   library, returns the `scan_library` result shape (`indexed`, `updated`,
   `removed`, `notFound`, `warnings`)
 - `list_rekordbox_playlists` / `list_mixxx_playlists` — `{ path? }`; returns

@@ -4,7 +4,7 @@ import {
   refreshSourceRootAnalysisStatus,
   relocateSourceRoot,
   renderSourceChips,
-  scanMasterDb
+  scanRekordboxDb
 } from "../components/library/actions.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
 
@@ -24,18 +24,18 @@ function makeChipHarness(state) {
   };
 }
 
-async function runScanMasterDb(command) {
+async function runScanRekordboxDb(command) {
   const statuses = [];
   const logged = [];
   const ctx = makeTestCtx({
     emitStatus: (message) => statuses.push(message),
     command,
     refreshCurrentPlaylistTracks: async () => {},
-    detectExternalMasterDb: async () => {},
+    detectExternalRekordboxDb: async () => {},
     logWarnings: (source, warnings) => { logged.push({ source, warnings }); }
   });
-  ctx.state.externalMasterDbPath = "/path/to/master.db";
-  await scanMasterDb(ctx);
+  ctx.state.externalRekordboxDbPath = "/path/to/master.db";
+  await scanRekordboxDb(ctx);
   return { statuses, logged };
 }
 
@@ -167,8 +167,8 @@ test("relocateSourceRoot replaces source and preserves playlist track identity s
   assert.ok(statuses.at(-1).includes("2 track path(s) updated"));
 });
 
-test("scanMasterDb reports success, failure, and structured warnings", async () => {
-  const success = await runScanMasterDb(async () => ({
+test("scanRekordboxDb reports success, failure, and structured warnings", async () => {
+  const success = await runScanRekordboxDb(async () => ({
     indexed: 3,
     updated: 1,
     notFound: [],
@@ -177,19 +177,19 @@ test("scanMasterDb reports success, failure, and structured warnings", async () 
   assert.equal(success.statuses[0], "Importing from desktop library...");
   assert.ok(success.statuses.at(-1).startsWith("Desktop library import done:"), success.statuses.at(-1));
 
-  const failure = await runScanMasterDb(async () => { throw new Error("db locked"); });
+  const failure = await runScanRekordboxDb(async () => { throw new Error("db locked"); });
   assert.equal(failure.statuses[0], "Importing from desktop library...");
   assert.ok(failure.statuses[1].startsWith("Desktop library import failed:"), failure.statuses[1]);
 
-  const warning = await runScanMasterDb(async () => ({
+  const warning = await runScanRekordboxDb(async () => ({
     indexed: 3,
     updated: 1,
     notFound: [],
     warnings: [{
       level: "warn",
-      code: "master_db.scan_diag",
+      code: "rekordbox_db.scan_diag",
       message: "3 file(s) had unreadable ANLZ analysis",
-      source: "scan_master_db"
+      source: "scan_rekordbox_db"
     }]
   }));
   assert.equal(warning.logged.length, 1);
@@ -203,7 +203,7 @@ test("refreshSourceRootAnalysisStatus asks about every non-missing root and skip
   const state = {
     sourceRoots: ["/music/a", "/music/b"],
     sourceRootEnabled: { "/music/a": true, "/music/b": false },
-    masterDbEnabled: true,
+    rekordboxDbEnabled: true,
     sourceRootAnalysisStatus: {}
   };
   const calls = [];
@@ -232,7 +232,7 @@ test("refreshSourceRootAnalysisStatus asks about every non-missing root and skip
     sourceRoots: ["/music/a"],
     sourceRootEnabled: { "/music/a": true },
     missingSourceRoots: new Set(["/music/a"]),
-    masterDbEnabled: false,
+    rekordboxDbEnabled: false,
     sourceRootAnalysisStatus: {}
   };
   let noOpCalls = 0;

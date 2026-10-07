@@ -51,7 +51,7 @@ function installWaveformStartupMock(page) {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") {
+          if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: false, path: null } };
           }
           if (command === "list_playlists") {
@@ -211,7 +211,7 @@ function installSourceChipAnalysisMock(page) {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") {
+          if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: true, path: "/music/master.db", imported: true } };
           }
           if (command === "detect_external_mixxx_db") {
@@ -340,17 +340,17 @@ test("source chips show analyzed green on startup and adding a source indexes it
 
   // The library chips sit in their own "Libraries" row, not among the folders.
   await expect(page.locator("#libraryChipsRow")).toBeVisible();
-  await expect(page.locator("#sourceChipsContainer .source-chip-toggle[data-master-db]")).toHaveCount(0);
+  await expect(page.locator("#sourceChipsContainer .source-chip-toggle[data-rekordbox-db]")).toHaveCount(0);
 
   // The rekordbox chip's checkbox (imported library) is a pure browse-filter
   // toggle -- it must never trigger a rescan, only a re-filtered reload of
   // what's already indexed.
-  const masterDbToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-master-db="true"]');
-  await expect(masterDbToggle).toBeVisible();
-  await expect(masterDbToggle).toHaveAttribute("aria-label", "Toggle rekordbox library");
-  await expect(masterDbToggle).toBeEnabled();
-  await masterDbToggle.check();
-  await expect(masterDbToggle).toBeChecked();
+  const rekordboxDbToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-rekordbox-db="true"]');
+  await expect(rekordboxDbToggle).toBeVisible();
+  await expect(rekordboxDbToggle).toHaveAttribute("aria-label", "Toggle rekordbox library");
+  await expect(rekordboxDbToggle).toBeEnabled();
+  await rekordboxDbToggle.check();
+  await expect(rekordboxDbToggle).toBeChecked();
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
 
   // Mixxx isn't imported yet: its checkbox is disabled until the chip's ↻ runs
@@ -367,7 +367,7 @@ test("source chips show analyzed green on startup and adding a source indexes it
   await expect(mixxxToggle).toBeEnabled();
   await expect(mixxxToggle).toBeChecked();
   await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(true);
-  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMasterDb)).toBe(true);
+  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeRekordboxDb)).toBe(true);
 
   // Unticking only filters: no import, and the browse drops Mixxx.
   await mixxxToggle.uncheck();
@@ -428,7 +428,7 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
     request: { path: "/music/master.db", kind: "playlist", id: "1234567890", force: true }
   });
   await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
-  await expect(page.locator('.source-chip-toggle[data-master-db="true"]')).toBeChecked();
+  await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
 });
 
 // Regression coverage for: searching the library used to make a fully
@@ -481,7 +481,7 @@ function installSourceChipSearchMock(page) {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") {
+          if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: false, path: null } };
           }
           if (command === "list_playlists") return { ok: true, data: { items: [] } };

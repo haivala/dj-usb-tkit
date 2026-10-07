@@ -40,7 +40,7 @@ function makeState(overrides = {}) {
     usbRecentRoots: [],
     sourceRoots: [],
     sourceRootEnabled: {},
-    masterDbEnabled: false,
+    rekordboxDbEnabled: false,
     sourcesEverConfigured: false,
     ...overrides
   };

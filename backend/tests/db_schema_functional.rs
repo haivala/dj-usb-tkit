@@ -78,7 +78,7 @@ fn db_migration_is_idempotent_and_adds_expected_columns() {
             |row| row.get(0),
         )
         .expect("schema_version value");
-    assert_eq!(schema_version, 2);
+    assert_eq!(schema_version, 3);
 }
 
 fn seed_legacy_backend_schema(db_path: &Path) {

@@ -182,7 +182,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") {
+          if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: false, path: null } };
           }
           if (command === "list_playlists") {
@@ -428,7 +428,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") {
+          if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: false, path: null } };
           }
           if (command === "list_playlists") {
@@ -574,7 +574,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") {
+          if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: false, path: null } };
           }
           if (command === "list_playlists") {
@@ -680,7 +680,7 @@ test("selecting a playlist with tracks right after an empty one still paints its
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
@@ -780,7 +780,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") {
+          if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: false, path: null } };
           }
           if (command === "list_playlists") {
@@ -1169,7 +1169,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
@@ -1287,7 +1287,7 @@ function installTwoPlaylistTauriMock(page) {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };

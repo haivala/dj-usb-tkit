@@ -18,13 +18,13 @@ export function bindLibraryEvents(ctx) {
     withProgress,
     persistSourceRoots,
     persistSourceRootEnabled,
-    persistMasterDbEnabled,
+    persistRekordboxDbEnabled,
     persistMixxxDbEnabled,
     persistSourcesEverConfigured,
     pickSourceFolders,
     relocateSourceRoot,
     scanLibrary,
-    scanMasterDb,
+    scanRekordboxDb,
     scanMixxxDb,
     analyzeSelectedTracks,
     addLibrarySelectionToCurrentPlaylist,
@@ -35,7 +35,7 @@ export function bindLibraryEvents(ctx) {
   // "enabled/total" over the folder chips plus each imported library chip.
   const emitSourceFilterCounts = () => {
     const libraries = [
-      [state.externalMasterDbPath && state.masterDbImported, state.masterDbEnabled],
+      [state.externalRekordboxDbPath && state.rekordboxDbImported, state.rekordboxDbEnabled],
       [state.externalMixxxDbPath && state.mixxxDbImported, state.mixxxDbEnabled],
     ].filter(([available]) => !!available);
     const enabled = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots).length
@@ -168,9 +168,9 @@ export function bindLibraryEvents(ctx) {
     const checkbox = event.target.closest(".source-chip-toggle");
     if (!checkbox) return;
     const enabling = checkbox.checked;
-    if (checkbox.dataset.masterDb === "true") {
-      state.masterDbEnabled = enabling;
-      persistMasterDbEnabled(enabling);
+    if (checkbox.dataset.rekordboxDb === "true") {
+      state.rekordboxDbEnabled = enabling;
+      persistRekordboxDbEnabled(enabling);
     } else if (checkbox.dataset.mixxxDb === "true") {
       state.mixxxDbEnabled = enabling;
       persistMixxxDbEnabled(enabling);
@@ -185,7 +185,7 @@ export function bindLibraryEvents(ctx) {
   el.libraryChipsContainer?.addEventListener("click", (event) => {
     const importBtn = event.target.closest(".source-chip-import");
     if (!importBtn) return;
-    const scan = importBtn.dataset.importLibrary === "rekordbox" ? scanMasterDb : scanMixxxDb;
+    const scan = importBtn.dataset.importLibrary === "rekordbox" ? scanRekordboxDb : scanMixxxDb;
     scan().catch(catchErr(emitStatus));
   });
 
@@ -228,7 +228,7 @@ export function bindLibraryEvents(ctx) {
         progress(40, "Enumerating tracks...");
         return command("list_matching_track_ids", {
           sourceRoots: ctx.enabledLibrarySourceRoots(),
-          includeMasterDb: state.masterDbEnabled === true,
+          includeRekordboxDb: state.rekordboxDbEnabled === true,
           includeMixxxDb: state.mixxxDbEnabled === true,
           query: String(state.libraryQuery || "").trim(),
         });

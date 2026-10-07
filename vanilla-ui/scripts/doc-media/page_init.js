@@ -139,7 +139,7 @@
             return [];
           case "set_frontend_setting":
             return ok(null);
-          case "detect_external_master_db":
+          case "detect_external_rekordbox_db":
             return ok(external?.rekordbox
               ? { found: true, path: "C:/Users/dj/AppData/Roaming/Pioneer/rekordbox/master.db", imported: true }
               : { found: false, path: null, imported: false });

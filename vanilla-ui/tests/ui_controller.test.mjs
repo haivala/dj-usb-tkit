@@ -152,9 +152,9 @@ test("source, settings, health, name badge, and onboarding helpers update compac
     state: {
       sourceRoots: ["/a"],
       sourceRootEnabled: { "/a": true },
-      externalMasterDbPath: "/path/to/master.db",
-      masterDbImported: true,
-      masterDbEnabled: false
+      externalRekordboxDbPath: "/path/to/master.db",
+      rekordboxDbImported: true,
+      rekordboxDbEnabled: false
     },
     el
   });
@@ -170,9 +170,9 @@ test("source, settings, health, name badge, and onboarding helpers update compac
     state: {
       sourceRoots: ["/a"],
       sourceRootEnabled: { "/a": true },
-      externalMasterDbPath: "/path/to/master.db",
-      masterDbImported: false,
-      masterDbEnabled: false
+      externalRekordboxDbPath: "/path/to/master.db",
+      rekordboxDbImported: false,
+      rekordboxDbEnabled: false
     },
     el
   });
@@ -181,9 +181,9 @@ test("source, settings, health, name badge, and onboarding helpers update compac
     state: {
       sourceRoots: ["/a"],
       sourceRootEnabled: { "/a": true },
-      externalMasterDbPath: "/path/to/master.db",
-      masterDbImported: true,
-      masterDbEnabled: false
+      externalRekordboxDbPath: "/path/to/master.db",
+      rekordboxDbImported: true,
+      rekordboxDbEnabled: false
     },
     el
   });

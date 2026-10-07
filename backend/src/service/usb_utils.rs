@@ -1,4 +1,4 @@
-//! USB utility functions: path resolution, export DB access, master DB access.
+//! USB utility functions: path resolution, export DB access, rekordbox DB access.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,9 +15,10 @@ use crate::pdb_reader::parse_pdb;
 
 use super::WAVEFORM_PREVIEW_BINS;
 use super::usb_vendor_compat::{
-    DEFAULT_USB_EDB_KEY, MASTER_DB_ENV_KEY, USB_ANALYSIS_DIR, USB_CONTENTS_DIR, USB_ROOT_ENV_KEY,
-    USB_VENDOR_DB_DIR, USB_VENDOR_DB_DIR_LOWER, USB_VENDOR_ROOT_DIR, USB_VENDOR_ROOT_DIR_LOWER,
-    USB_VENDOR_ROOT_PREFIX, desktop_master_db_rel_path, vendor_db_dir, vendor_pdb_path,
+    DEFAULT_USB_EDB_KEY, LEGACY_REKORDBOX_DB_ENV_KEY, REKORDBOX_DB_ENV_KEY, USB_ANALYSIS_DIR,
+    USB_CONTENTS_DIR, USB_ROOT_ENV_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_DB_DIR_LOWER,
+    USB_VENDOR_ROOT_DIR, USB_VENDOR_ROOT_DIR_LOWER, USB_VENDOR_ROOT_PREFIX,
+    desktop_master_db_rel_path, vendor_db_dir, vendor_pdb_path,
 };
 
 pub(crate) fn artwork_path_to_data_url(path: &str) -> Option<String> {
@@ -1392,12 +1393,12 @@ fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
 
 // ── External library master.db autodetection ────────────────
 
-pub fn detect_external_master_db() -> crate::models::DetectExternalMasterDbData {
-    let candidates = external_master_db_candidates();
+pub fn detect_external_rekordbox_db() -> crate::models::DetectExternalRekordboxDbData {
+    let candidates = external_rekordbox_db_candidates();
 
     for candidate in &candidates {
         if candidate.is_file() {
-            return crate::models::DetectExternalMasterDbData {
+            return crate::models::DetectExternalRekordboxDbData {
                 found: true,
                 path: Some(candidate.to_string_lossy().to_string()),
                 imported: false,
@@ -1405,23 +1406,25 @@ pub fn detect_external_master_db() -> crate::models::DetectExternalMasterDbData 
         }
     }
 
-    crate::models::DetectExternalMasterDbData {
+    crate::models::DetectExternalRekordboxDbData {
         found: false,
         path: None,
         imported: false,
     }
 }
 
-pub(crate) fn external_master_db_candidates() -> Vec<std::path::PathBuf> {
+pub(crate) fn external_rekordbox_db_candidates() -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
 
     let mut candidates = Vec::new();
 
-    // Check env var override first
-    if let Ok(env_path) = std::env::var(MASTER_DB_ENV_KEY) {
-        let trimmed = env_path.trim();
-        if !trimmed.is_empty() {
-            candidates.push(PathBuf::from(trimmed));
+    // Check env var overrides first
+    for key in [REKORDBOX_DB_ENV_KEY, LEGACY_REKORDBOX_DB_ENV_KEY] {
+        if let Ok(env_path) = std::env::var(key) {
+            let trimmed = env_path.trim();
+            if !trimmed.is_empty() {
+                candidates.push(PathBuf::from(trimmed));
+            }
         }
     }
 
@@ -1968,40 +1971,40 @@ mod diag_tests {
     }
 
     #[test]
-    fn detect_external_master_db_env_override_nonexistent() {
+    fn detect_external_rekordbox_db_env_override_nonexistent() {
         let _guard = env_var_lock().lock().expect("env var lock");
         // Point to a path that doesn't exist — should return found: false
         unsafe {
             std::env::set_var(
-                "DJUSBTKIT_MASTER_DB_PATH",
-                "/tmp/__nonexistent_external_master_db_test__",
+                "DJUSBTKIT_REKORDBOX_DB_PATH",
+                "/tmp/__nonexistent_external_rekordbox_db_test__",
             )
         };
-        let result = detect_external_master_db();
-        unsafe { std::env::remove_var("DJUSBTKIT_MASTER_DB_PATH") };
+        let result = detect_external_rekordbox_db();
+        unsafe { std::env::remove_var("DJUSBTKIT_REKORDBOX_DB_PATH") };
         assert!(!result.found);
         assert!(result.path.is_none());
     }
 
     #[test]
-    fn detect_external_master_db_env_override_existing_file() {
+    fn detect_external_rekordbox_db_env_override_existing_file() {
         let _guard = env_var_lock().lock().expect("env var lock");
         let tmp = std::env::temp_dir().join("__test_external_master.db");
         std::fs::write(&tmp, b"fake").unwrap();
-        unsafe { std::env::set_var("DJUSBTKIT_MASTER_DB_PATH", tmp.to_str().unwrap()) };
-        let result = detect_external_master_db();
-        unsafe { std::env::remove_var("DJUSBTKIT_MASTER_DB_PATH") };
+        unsafe { std::env::set_var("DJUSBTKIT_REKORDBOX_DB_PATH", tmp.to_str().unwrap()) };
+        let result = detect_external_rekordbox_db();
+        unsafe { std::env::remove_var("DJUSBTKIT_REKORDBOX_DB_PATH") };
         std::fs::remove_file(&tmp).ok();
         assert!(result.found);
         assert_eq!(result.path.unwrap(), tmp.to_string_lossy().to_string());
     }
 
     #[test]
-    fn external_master_db_candidates_includes_env_override() {
+    fn external_rekordbox_db_candidates_includes_env_override() {
         let _guard = env_var_lock().lock().expect("env var lock");
-        unsafe { std::env::set_var("DJUSBTKIT_MASTER_DB_PATH", "/custom/path/master.db") };
-        let candidates = external_master_db_candidates();
-        unsafe { std::env::remove_var("DJUSBTKIT_MASTER_DB_PATH") };
+        unsafe { std::env::set_var("DJUSBTKIT_REKORDBOX_DB_PATH", "/custom/path/master.db") };
+        let candidates = external_rekordbox_db_candidates();
+        unsafe { std::env::remove_var("DJUSBTKIT_REKORDBOX_DB_PATH") };
         assert!(
             candidates
                 .iter()
@@ -2010,10 +2013,23 @@ mod diag_tests {
     }
 
     #[test]
-    fn external_master_db_candidates_includes_macos_library_pioneer_path() {
+    fn external_rekordbox_db_candidates_honours_legacy_env_override() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        unsafe { std::env::set_var("DJUSBTKIT_MASTER_DB_PATH", "/legacy/path/master.db") };
+        let candidates = external_rekordbox_db_candidates();
+        unsafe { std::env::remove_var("DJUSBTKIT_MASTER_DB_PATH") };
+        assert!(
+            candidates
+                .iter()
+                .any(|p| p.to_str() == Some("/legacy/path/master.db"))
+        );
+    }
+
+    #[test]
+    fn external_rekordbox_db_candidates_includes_macos_library_pioneer_path() {
         let _guard = env_var_lock().lock().expect("env var lock");
         let home = std::env::var("HOME").expect("HOME must be set for this test");
-        let candidates = external_master_db_candidates();
+        let candidates = external_rekordbox_db_candidates();
         let expected = PathBuf::from(home).join("Library/Pioneer/rekordbox/master.db");
         assert!(candidates.contains(&expected));
     }

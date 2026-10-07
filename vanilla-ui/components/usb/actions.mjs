@@ -518,22 +518,22 @@ export function updateUsbConfigControlsVisibility(ctx) {
   ctx.updateUsbEmptyState();
 }
 
-export async function detectExternalMasterDb(ctx) {
+export async function detectExternalRekordboxDb(ctx) {
   const { state, el } = ctx;
   try {
-    const data = await ctx.command("detect_external_master_db");
+    const data = await ctx.command("detect_external_rekordbox_db");
     const found = !!data?.found && !!data?.path;
-    state.externalMasterDbPath = found ? data.path : null;
-    state.masterDbImported = found && data.imported === true;
-    if (!found) state.masterDbEnabled = false;
+    state.externalRekordboxDbPath = found ? data.path : null;
+    state.rekordboxDbImported = found && data.imported === true;
+    if (!found) state.rekordboxDbEnabled = false;
   } catch (err) {
-    state.externalMasterDbPath = null;
-    state.masterDbImported = false;
-    state.masterDbEnabled = false;
-    ctx.warn("External master DB detection failed:", err);
+    state.externalRekordboxDbPath = null;
+    state.rekordboxDbImported = false;
+    state.rekordboxDbEnabled = false;
+    ctx.warn("External rekordbox DB detection failed:", err);
   }
   // Hide the legacy toggle element; the chip in renderSourceChips is the control
-  el.externalMasterDbToggle?.classList.add("hidden");
+  el.externalRekordboxDbToggle?.classList.add("hidden");
   ctx.renderSourceChips();
 }
 

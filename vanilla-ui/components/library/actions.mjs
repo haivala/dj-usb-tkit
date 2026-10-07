@@ -379,8 +379,8 @@ function renderLibraryChips(ctx) {
   if (!el.libraryChipsContainer) return;
   const libraries = [
     {
-      path: state.externalMasterDbPath, imported: state.masterDbImported, enabled: state.masterDbEnabled,
-      template: "tplSourceChipMasterDb", label: "rekordbox"
+      path: state.externalRekordboxDbPath, imported: state.rekordboxDbImported, enabled: state.rekordboxDbEnabled,
+      template: "tplSourceChipRekordboxDb", label: "rekordbox"
     },
     {
       path: state.externalMixxxDbPath, imported: state.mixxxDbImported, enabled: state.mixxxDbEnabled,
@@ -452,7 +452,7 @@ export function renderSourceChips(ctx) {
 
   ctx.persistSourceRootEnabled(state.sourceRootEnabled);
   if (el.importPlaylistItem) {
-    el.importPlaylistItem.classList.toggle("hidden", !state.externalMasterDbPath && !state.externalMixxxDbPath);
+    el.importPlaylistItem.classList.toggle("hidden", !state.externalRekordboxDbPath && !state.externalMixxxDbPath);
   }
   ctx.updateScanLibraryButtonLabel();
   ctx.updateSourceFilterIndicator();
@@ -487,7 +487,7 @@ export function renderLibraryChrome(ctx) {
     el.libraryEmptyState.replaceChildren();
     if (noSources) {
       const extraActions = [
-        ...(state.externalMasterDbPath ? [{ label: "RB master.db", onAction: () => scanMasterDb(ctx) }] : []),
+        ...(state.externalRekordboxDbPath ? [{ label: "RB master.db", onAction: () => scanRekordboxDb(ctx) }] : []),
         ...(state.externalMixxxDbPath ? [{ label: "Mixxx library", onAction: () => scanMixxxDb(ctx) }] : []),
       ];
       renderEmptyState(el.libraryEmptyState, {
@@ -530,15 +530,15 @@ export function createLibraryTracksController(ctx) {
       const enabledRoots = (ctx.state.sourceRoots || []).filter(
         (root) => ctx.state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(ctx.state, root),
       );
-      const includeMasterDb = ctx.state.masterDbEnabled === true;
+      const includeRekordboxDb = ctx.state.rekordboxDbEnabled === true;
       const includeMixxxDb = ctx.state.mixxxDbEnabled === true;
       ctx.state.libraryQuery = String(query || "").trim();
-      if (!enabledRoots.length && !includeMasterDb && !includeMixxxDb) {
+      if (!enabledRoots.length && !includeRekordboxDb && !includeMixxxDb) {
         return { total: 0, items: [], nextCursor: null, hasMore: false, totalDurationMs: 0, durationKnownCount: 0 };
       }
       return ctx.command("browse_source_files", {
         sourceRoots: enabledRoots,
-        includeMasterDb,
+        includeRekordboxDb,
         includeMixxxDb,
         query: ctx.state.libraryQuery,
         sortBy: sortBy || null,
@@ -749,18 +749,18 @@ export async function analyzeSelectedTracks(ctx) {
   await ctx.refreshCurrentPlaylistTracks();
 }
 
-export async function scanMasterDb(ctx) {
+export async function scanRekordboxDb(ctx) {
   await importExternalLibrary(ctx, {
-    command: "scan_master_db",
-    path: ctx.state.externalMasterDbPath,
+    command: "scan_rekordbox_db",
+    path: ctx.state.externalRekordboxDbPath,
     label: "Desktop library",
     logSource: "master.db",
-    codePrefix: "master_db",
+    codePrefix: "rekordbox_db",
     enable: () => {
-      ctx.state.masterDbEnabled = true;
-      ctx.persistMasterDbEnabled(true);
+      ctx.state.rekordboxDbEnabled = true;
+      ctx.persistRekordboxDbEnabled(true);
     },
-    detect: () => ctx.detectExternalMasterDb(),
+    detect: () => ctx.detectExternalRekordboxDb(),
   });
 }
 
@@ -875,7 +875,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
       sourceRoots: (state.sourceRoots || []).filter(
         (root) => state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(state, root)
       ),
-      includeMasterDb: state.masterDbEnabled === true,
+      includeRekordboxDb: state.rekordboxDbEnabled === true,
       includeMixxxDb: state.mixxxDbEnabled === true,
       query: String(state.libraryQuery || "").trim()
     });

@@ -1142,7 +1142,7 @@ main {
 
 /* ── External Library toggle ──────────────────────── */
 
-.external-master-db-toggle {
+.external-rekordbox-db-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1155,17 +1155,17 @@ main {
   white-space: nowrap;
 }
 
-.external-master-db-toggle:hover {
+.external-rekordbox-db-toggle:hover {
   border-color: var(--accent);
 }
 
-.external-master-db-toggle-label {
+.external-rekordbox-db-toggle-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--ink-secondary);
 }
 
-.external-master-db-toggle-path {
+.external-rekordbox-db-toggle-path {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   max-width: 200px;

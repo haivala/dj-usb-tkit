@@ -134,9 +134,9 @@ pub struct Track {
     pub waveform_color_data: Option<Vec<u8>>,
     pub created_at: String,
     pub updated_at: String,
-    pub master_db_source: bool,
+    pub rekordbox_db_source: bool,
     /// Imported from a Mixxx library (`mixxxdb.sqlite`). Independent of
-    /// `master_db_source`: a file in both libraries carries both flags.
+    /// `rekordbox_db_source`: a file in both libraries carries both flags.
     #[serde(default)]
     pub mixxx_db_source: bool,
     /// Authoritative: true when `file_path` falls under any known USB device
@@ -306,7 +306,7 @@ pub struct ListTracksData {
 pub struct BrowseSourceFilesRequest {
     pub source_roots: Vec<String>,
     #[serde(default)]
-    pub include_master_db: bool,
+    pub include_rekordbox_db: bool,
     #[serde(default)]
     pub include_mixxx_db: bool,
     pub query: String,
@@ -620,7 +620,7 @@ pub struct ListMatchingTrackIdsRequest {
     #[serde(default)]
     pub source_roots: Vec<String>,
     #[serde(default)]
-    pub include_master_db: bool,
+    pub include_rekordbox_db: bool,
     #[serde(default)]
     pub include_mixxx_db: bool,
     #[serde(default)]
@@ -645,7 +645,7 @@ pub struct AddLibrarySelectionToPlaylistRequest {
     #[serde(default)]
     pub source_roots: Vec<String>,
     #[serde(default)]
-    pub include_master_db: bool,
+    pub include_rekordbox_db: bool,
     #[serde(default)]
     pub include_mixxx_db: bool,
     #[serde(default)]
@@ -1453,7 +1453,7 @@ pub struct AnalyzeNewTracksRequest {
     pub playlist_id: Option<String>,
     /// When `track_ids` is empty and `playlist_id` is unset: restrict
     /// auto-selection to the current library filter (`source_roots` +
-    /// `include_master_db` + `query`) instead of the whole DB.
+    /// `include_rekordbox_db` + `query`) instead of the whole DB.
     #[serde(default)]
     pub scope_to_library_filter: bool,
     /// Preferred: the raw range string from the settings dropdown, e.g.
@@ -1471,7 +1471,7 @@ pub struct AnalyzeNewTracksRequest {
     #[serde(default)]
     pub source_roots: Vec<String>,
     #[serde(default)]
-    pub include_master_db: bool,
+    pub include_rekordbox_db: bool,
     #[serde(default)]
     pub include_mixxx_db: bool,
     #[serde(default)]
@@ -1951,11 +1951,11 @@ pub struct RepairUsbDiagnosticsData {
     pub diagnostics: Option<Box<RunUsbDiagnosticsData>>,
 }
 
-// ── detect_external_master_db ──────────────────────────────
+// ── detect_external_rekordbox_db ──────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DetectExternalMasterDbData {
+pub struct DetectExternalRekordboxDbData {
     pub found: bool,
     pub path: Option<String>,
     /// Tracks from this library are in the local library (it was imported);
@@ -1966,7 +1966,7 @@ pub struct DetectExternalMasterDbData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScanMasterDbRequest {
+pub struct ScanRekordboxDbRequest {
     #[serde(default)]
     pub path: Option<String>,
 }

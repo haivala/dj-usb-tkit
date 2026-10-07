@@ -12,7 +12,7 @@ For large USB libraries, import is metadata-first. Playlist and history lists ca
 
 ## Deep technical details
 
-USB import is implemented as a merge pipeline across multiple database representations, not as a single-file parser. The backend reads from PDB and eDB, and can use the master DB as an additional source when available. The merge stage resolves conflicts and missing fields into one API payload per playlist/history/track set.
+USB import is implemented as a merge pipeline across multiple database representations, not as a single-file parser. The backend reads from PDB and eDB, and can use the rekordbox DB (`master.db`) as an additional source when available. The merge stage resolves conflicts and missing fields into one API payload per playlist/history/track set.
 
 For field-level structure details, see `docs/PDB.md` and `docs/eDB.md`.
 
@@ -31,7 +31,7 @@ Known DB data surfaces used by import:
   - artwork and dictionary ID references used by track rows
   - history-family tables (`t11/t12`, `t17/t18`, and `t19`)
 
-Track metadata resolution for imported playlist entries is multi-source. The importer attempts to resolve each referenced track ID through PDB row data, then eDB content data, then optional master-DB fallback, and skips unresolvable orphan entries instead of failing the whole playlist import.
+Track metadata resolution for imported playlist entries is multi-source. The importer attempts to resolve each referenced track ID through PDB row data, then eDB content data, then optional rekordbox DB fallback, and skips unresolvable orphan entries instead of failing the whole playlist import.
 
 ### Cue points and beat grid on import
 
@@ -45,10 +45,10 @@ happens when the local track has **no cues yet** and (for the first beat) **no
 value yet** — local edits always win over what is on the stick, so re-importing
 a stick you exported never clobbers newer local work.
 
-`detect_external_master_db` locates the local rekordbox `master.db` by checking
+`detect_external_rekordbox_db` locates the local rekordbox `master.db` by checking
 a fixed candidate list in order and returning the first path that exists:
 
-1. `$DJUSBTKIT_MASTER_DB_PATH` env override, when set (used for tests/debugging)
+1. `$DJUSBTKIT_REKORDBOX_DB_PATH` env override, when set (used for tests/debugging)
 2. macOS: `~/Library/Application Support/Pioneer DJ/rekordbox/master.db`
 3. macOS: `~/Library/Application Support/Pioneer/rekordbox/master.db` (older installs)
 4. macOS: `~/Library/Pioneer/rekordbox/master.db` (current rekordbox installs, which
@@ -59,7 +59,7 @@ a fixed candidate list in order and returning the first path that exists:
 There is no Linux candidate: rekordbox has no official Linux install, so no
 real install path exists to check there.
 
-See `external_master_db_candidates` in `backend/src/service/usb_utils.rs`.
+See `external_rekordbox_db_candidates` in `backend/src/service/usb_utils.rs`.
 
 The import service deliberately favors responsiveness over eager payload loading. `fetch_usb_playlists` and `fetch_usb_histories` resolve the playlist/history **list** and its counts, not per-track payloads. Expensive per-track hydration (waveform preview bytes, artwork data URLs) is deferred and paid one page at a time.
 

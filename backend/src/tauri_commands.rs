@@ -18,18 +18,19 @@ use crate::models::{
     AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
     BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
     CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
-    DeleteUsbBackupRequest, DetectExternalMasterDbData, DetectExternalMixxxDbData, ExportToUsbData,
-    ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
-    GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
-    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
-    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, ImportExternalPlaylistData,
-    ImportExternalPlaylistRequest, InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData,
-    InspectUsbTrackRequest, InspectUsbTracksData, InspectUsbTracksRequest, JobEventPayload,
-    ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
-    ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData, ListTracksRequest,
-    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
+    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
+    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
+    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest,
+    GetSourceRootAnalysisData, GetSourceRootAnalysisRequest, GetTrackDetailRequest,
+    GetTracksByIdsData, GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
+    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
+    ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
+    InspectUsbTracksRequest, JobEventPayload, ListExternalPlaylistsData,
+    ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
+    ListPlaylistsData, ListTracksData, ListTracksRequest, ListUsbBackupsData,
+    ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
     MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
     PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
     PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
@@ -43,12 +44,12 @@ use crate::models::{
     RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
     RunUsbParityReportData, RunUsbParityReportRequest, SaveTrackAnalysisEditsData,
     SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
-    ScanLibraryData, ScanLibraryRequest, ScanMasterDbRequest, ScanMixxxDbRequest, SearchTracksData,
-    SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest, SetFrontendSettingData,
-    SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameData,
-    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail, ValidateUsbRootData,
-    ValidateUsbRootRequest,
+    ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest,
+    SearchTracksData, SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
+    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail,
+    ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -607,16 +608,16 @@ pub async fn scan_library(
 }
 
 #[tauri::command]
-pub async fn scan_master_db(
+pub async fn scan_rekordbox_db(
     app: AppHandle,
     state: State<'_, BackendCommands>,
-    request: ScanMasterDbRequest,
+    request: ScanRekordboxDbRequest,
 ) -> Result<ApiResponse<ScanLibraryData>, String> {
     let job_id = Uuid::now_v7().to_string();
     let identity = JobIdentity {
         job_id: &job_id,
         job_type: "scan",
-        stage: "scan_master_db",
+        stage: "scan_rekordbox_db",
     };
     emit_job_event(
         &app,
@@ -638,17 +639,18 @@ pub async fn scan_master_db(
     );
 
     let commands = state.inner().clone();
-    let response = match tauri::async_runtime::spawn_blocking(move || {
-        commands.scan_master_db(request)
-    })
-    .await
-    {
-        Ok(resp) => resp,
-        Err(err) => ApiResponse::failure(
-            crate::error::BackendError::Internal(format!("scan_master_db task failed: {err}"))
+    let response =
+        match tauri::async_runtime::spawn_blocking(move || commands.scan_rekordbox_db(request))
+            .await
+        {
+            Ok(resp) => resp,
+            Err(err) => ApiResponse::failure(
+                crate::error::BackendError::Internal(format!(
+                    "scan_rekordbox_db task failed: {err}"
+                ))
                 .into(),
-        ),
-    };
+            ),
+        };
     if response.ok {
         let summary = response
             .data
@@ -1646,10 +1648,10 @@ pub async fn repair_usb_diagnostics(
 }
 
 #[tauri::command]
-pub fn detect_external_master_db(
+pub fn detect_external_rekordbox_db(
     state: State<'_, BackendCommands>,
-) -> ApiResponse<DetectExternalMasterDbData> {
-    state.detect_external_master_db()
+) -> ApiResponse<DetectExternalRekordboxDbData> {
+    state.detect_external_rekordbox_db()
 }
 
 #[tauri::command]

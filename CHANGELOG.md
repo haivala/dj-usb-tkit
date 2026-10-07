@@ -80,6 +80,11 @@
   and a playlist export. Their USB views come from the demo library really
   exported to a USB, and every screenshot and GIF has a caption and the app
   version below it.
+- **Chore:** the rekordbox library's "master DB" names in the code, docs,
+  database and settings are now "rekordbox DB", matching the Mixxx ones. The
+  environment override is `DJUSBTKIT_REKORDBOX_DB_PATH`; the old
+  `DJUSBTKIT_MASTER_DB_PATH` still works. Existing libraries and the
+  rekordbox chip's on/off state carry over on the first start.
 
 ## 0.3.4
 
@@ -746,7 +751,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
   backend analysis gate instead.
 - **Fix:** every track in an opened playlist is now correctly flagged as coming from the
   external master database (or not) — a mismatched column list in the playlist-tracks query
-  made them all look non-master-db.
+  made them all look non-rekordbox-db.
 - **Fix:** opening an app playlist that has tracks right after viewing an empty one now paints
   its waveforms — the empty playlist's "no tracks" state hides the track table, and the
   waveform canvases were being measured (and locked to 1×1) while still hidden, then never
@@ -1474,7 +1479,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
   same corruption could show up as `warn` from one command and `error` from
   another); a separate live-event path used by only two files; a handful of
   `eprintln!`-only messages that never reached the UI at all (notably
-  `scan_master_db`'s ANLZ/artwork-miss diagnostics); and command failures,
+  `scan_rekordbox_db`'s ANLZ/artwork-miss diagnostics); and command failures,
   which never reached the Event Log at all. Every message now states its own
   level/code at the point it's created and is emitted through one function
   that both returns it in the command's response and pushes it live — so a
@@ -1485,7 +1490,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
   limit reached" notice silently disappearing after the Event Log unification
   above changed several commands' `warnings` field from plain strings to
   structured entries (`{level, code, message, source}`). `validate_usb_root`,
-  `analyze_new_tracks`, and `scan_master_db` warning consumers in the frontend
+  `analyze_new_tracks`, and `scan_rekordbox_db` warning consumers in the frontend
   now read the `message` field instead of stringifying or re-joining the
   whole entry.
 

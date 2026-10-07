@@ -6,7 +6,7 @@ This is the documentation set for DJ USB Tkit.
 
 - `PDB` = `export.pdb`
 - `eDB` = `exportLibrary.db`
-- `master DB` = `master.db` (rekordbox's desktop library)
+- `rekordbox DB` = `master.db` (rekordbox's desktop library)
 - `Mixxx DB` = `mixxxdb.sqlite` (Mixxx's library)
 - `local DB` = app local SQLite database
 

@@ -12,7 +12,7 @@ function installEmptyStateMock(page) {
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
-          if (command === "detect_external_master_db") return { ok: true, data: { found: false, path: null } };
+          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };

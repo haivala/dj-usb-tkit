@@ -310,14 +310,14 @@ export async function createPlaylist(ctx, name) {
 const PLAYLIST_IMPORT_SOURCES = [
   {
     label: "rekordbox",
-    pathKey: "externalMasterDbPath",
+    pathKey: "externalRekordboxDbPath",
     listCommand: "list_rekordbox_playlists",
     importCommand: "import_rekordbox_playlist",
     enable: (ctx) => {
-      ctx.state.masterDbEnabled = true;
-      ctx.persistMasterDbEnabled(true);
+      ctx.state.rekordboxDbEnabled = true;
+      ctx.persistRekordboxDbEnabled(true);
     },
-    detect: (ctx) => ctx.detectExternalMasterDb()
+    detect: (ctx) => ctx.detectExternalRekordboxDb()
   },
   {
     label: "Mixxx",
@@ -550,7 +550,7 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
     return command("add_library_selection_to_playlist", {
       playlistId: playlist.id,
       sourceRoots: ctx.enabledLibrarySourceRoots(),
-      includeMasterDb: state.masterDbEnabled === true,
+      includeRekordboxDb: state.rekordboxDbEnabled === true,
       includeMixxxDb: state.mixxxDbEnabled === true,
       query: String(state.libraryQuery || "").trim(),
       trackIds: allMatching ? [] : trackIds,

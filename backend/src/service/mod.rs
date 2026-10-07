@@ -26,9 +26,9 @@ pub(crate) mod usb_utils;
 pub mod usb_vendor_compat;
 
 // Re-export functions used by commands.rs via crate::service::*
-pub use usb_utils::{detect_external_master_db, initialize_usb};
+pub use usb_utils::{detect_external_rekordbox_db, initialize_usb};
 use usb_utils::{
-    detect_external_master_db as detect_external_master_db_util,
+    detect_external_rekordbox_db as detect_external_rekordbox_db_util,
     initialize_usb as initialize_usb_util, load_waveform_preview_from_analysis_path,
     read_pwv4_from_anlz,
 };
@@ -52,7 +52,7 @@ use crate::models::{
     AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData,
     AddTracksToPlaylistRequest, BrowseSourceFilesData, BrowseSourceFilesRequest,
     CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
-    DedupeMode, DeletePlaylistData, DeletePlaylistRequest, DetectExternalMasterDbData,
+    DedupeMode, DeletePlaylistData, DeletePlaylistRequest, DetectExternalRekordboxDbData,
     ExternalPlaylistKind, ExternalPlaylistSummary, GetFrontendSettingsData, GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetSourceRootAnalysisData, GetSourceRootAnalysisRequest,
     GetTracksByIdsData, GetTracksByIdsRequest, ImportedPlaylistRef, InitializeUsbData,
@@ -91,7 +91,7 @@ pub(crate) const SETTING_UI_ANALYSIS_ENGINE: &str = "ui_analysis_engine_v1";
 pub(crate) const SETTING_UI_SIDEBAR_COLLAPSED: &str = "ui_sidebar_collapsed_v1";
 pub(crate) const SETTING_UI_HELP_SEEN: &str = "ui_help_seen_v1";
 pub(crate) const SETTING_UI_KEY_NOTATION: &str = "ui_key_notation_v1";
-pub(crate) const SETTING_UI_MASTER_DB_ENABLED: &str = "ui_master_db_enabled_v1";
+pub(crate) const SETTING_UI_REKORDBOX_DB_ENABLED: &str = "ui_rekordbox_db_enabled_v1";
 pub(crate) const SETTING_UI_MIXXX_DB_ENABLED: &str = "ui_mixxx_db_enabled_v1";
 pub(crate) const SETTING_UI_SOURCES_EVER_CONFIGURED: &str = "ui_sources_ever_configured_v1";
 pub(crate) const SETTING_UI_CUE_START_ON_FIRST_BEAT: &str = "ui_cue_start_on_first_beat_v1";
@@ -105,7 +105,7 @@ const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
 pub(crate) const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm, tonality, file_path, \
     file_size_bytes, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, duration_ms, \
     artwork_path, waveform_peaks_path, bpm_analyzer, created_at, updated_at, \
-    COALESCE(master_db_source, 0) AS master_db_source, wav_extensible_kind, tonality_source, \
+    COALESCE(rekordbox_db_source, 0) AS rekordbox_db_source, wav_extensible_kind, tonality_source, \
     COALESCE(mixxx_db_source, 0) AS mixxx_db_source";
 
 type ExistingTrackSnapshot = (
@@ -397,25 +397,25 @@ fn track_has_core_analysis_for_source_status(track: &Track) -> bool {
 /// source folders (the rekordbox `master.db` and Mixxx chips).
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ExternalLibraries {
-    pub master_db: bool,
+    pub rekordbox_db: bool,
     pub mixxx_db: bool,
 }
 
 impl ExternalLibraries {
-    pub(crate) fn from_flags(master_db: bool, mixxx_db: bool) -> Self {
+    pub(crate) fn from_flags(rekordbox_db: bool, mixxx_db: bool) -> Self {
         Self {
-            master_db,
+            rekordbox_db,
             mixxx_db,
         }
     }
 
     pub(crate) fn any(self) -> bool {
-        self.master_db || self.mixxx_db
+        self.rekordbox_db || self.mixxx_db
     }
 
     /// True when `track` was imported from one of the enabled libraries.
     pub(crate) fn includes(self, track: &Track) -> bool {
-        (self.master_db && track.master_db_source) || (self.mixxx_db && track.mixxx_db_source)
+        (self.rekordbox_db && track.rekordbox_db_source) || (self.mixxx_db && track.mixxx_db_source)
     }
 }
 
@@ -469,10 +469,10 @@ pub(crate) fn usb_drive_name(conn: &rusqlite::Connection, usb_root: &str) -> Opt
     .filter(|name| !name.trim().is_empty())
 }
 
-/// Whether any track carries the import flag `column` (`master_db_source` /
+/// Whether any track carries the import flag `column` (`rekordbox_db_source` /
 /// `mixxx_db_source`), i.e. that library has been imported.
 pub(crate) fn has_tracks_flagged(conn: &rusqlite::Connection, column: &str) -> BackendResult<bool> {
-    debug_assert!(matches!(column, "master_db_source" | "mixxx_db_source"));
+    debug_assert!(matches!(column, "rekordbox_db_source" | "mixxx_db_source"));
     Ok(conn.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM tracks WHERE {column} = 1)"),
         [],
@@ -603,7 +603,7 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
-fn master_db_resource_candidates(master_path: &Path, db_path: &str) -> Vec<PathBuf> {
+fn rekordbox_db_resource_candidates(master_path: &Path, db_path: &str) -> Vec<PathBuf> {
     let Some(raw) = non_empty_db_value(db_path) else {
         return Vec::new();
     };
@@ -634,7 +634,7 @@ fn master_db_resource_candidates(master_path: &Path, db_path: &str) -> Vec<PathB
     candidates
 }
 
-fn resolve_master_db_resource_path<F>(
+fn resolve_rekordbox_db_resource_path<F>(
     master_path: &Path,
     db_path: &str,
     exists: F,
@@ -642,14 +642,14 @@ fn resolve_master_db_resource_path<F>(
 where
     F: Fn(&Path) -> bool,
 {
-    master_db_resource_candidates(master_path, db_path)
+    rekordbox_db_resource_candidates(master_path, db_path)
         .into_iter()
         .find(|p| exists(p.as_path()))
 }
 
-fn master_db_analysis_file_candidates(master_path: &Path, db_path: &str) -> Vec<PathBuf> {
+fn rekordbox_db_analysis_file_candidates(master_path: &Path, db_path: &str) -> Vec<PathBuf> {
     let mut candidates = Vec::<PathBuf>::new();
-    for base in master_db_resource_candidates(master_path, db_path) {
+    for base in rekordbox_db_resource_candidates(master_path, db_path) {
         push_unique_path(&mut candidates, base.with_extension("EXT"));
         push_unique_path(&mut candidates, base.with_extension("2EX"));
         push_unique_path(&mut candidates, base.with_extension("DAT"));
@@ -1006,11 +1006,11 @@ impl BackendService {
         run_playback_preflight(&req.path)
     }
 
-    pub fn detect_external_master_db(&self) -> BackendResult<DetectExternalMasterDbData> {
+    pub fn detect_external_rekordbox_db(&self) -> BackendResult<DetectExternalRekordboxDbData> {
         let conn = self.db.connect()?;
-        Ok(DetectExternalMasterDbData {
-            imported: has_tracks_flagged(&conn, "master_db_source")?,
-            ..detect_external_master_db_util()
+        Ok(DetectExternalRekordboxDbData {
+            imported: has_tracks_flagged(&conn, "rekordbox_db_source")?,
+            ..detect_external_rekordbox_db_util()
         })
     }
 
@@ -1593,7 +1593,7 @@ impl BackendService {
                         waveform_color_data: None,
                         created_at: now.clone(),
                         updated_at: now,
-                        master_db_source: false,
+                        rekordbox_db_source: false,
                         mixxx_db_source: false,
                         is_usb_path: false,
                         // Freshly scanned, not yet indexed -- no analysis.
@@ -1660,7 +1660,7 @@ impl BackendService {
         source_roots.sort();
         source_roots.dedup();
         let libraries = ExternalLibraries {
-            master_db: req.include_master_db,
+            rekordbox_db: req.include_rekordbox_db,
             mixxx_db: req.include_mixxx_db,
         };
         if source_roots.is_empty() && !libraries.any() {
@@ -1685,10 +1685,10 @@ impl BackendService {
             "browse_source_files",
             &query,
             &roots_signature,
-            if libraries.master_db {
-                "master_db"
+            if libraries.rekordbox_db {
+                "rekordbox_db"
             } else {
-                "no_master_db"
+                "no_rekordbox_db"
             },
             if libraries.mixxx_db {
                 "mixxx_db"
@@ -1726,7 +1726,7 @@ impl BackendService {
         for track in &items {
             let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
             let countable = track_has_core_analysis_for_source_status(track)
-                || (track.master_db_source && has_duration);
+                || (track.rekordbox_db_source && has_duration);
             if countable && let Some(d) = track.duration_ms {
                 total_duration_ms += d;
                 duration_known_count += 1;
@@ -2356,14 +2356,14 @@ impl BackendService {
         playlist_id: &str,
     ) -> BackendResult<Vec<Track>> {
         // Column order MUST stay in lockstep with `TRACK_COLS` / `row_to_track`
-        // (which reads `master_db_source` positionally at index 19) -- this JOIN
+        // (which reads `rekordbox_db_source` positionally at index 19) -- this JOIN
         // needs `t.`-prefixed names so it can't reuse `TRACK_COLS` verbatim.
         let mut stmt = conn.prepare(
             r#"
             SELECT t.id, t.title, t.artist, t.album, t.track_number, t.bpm, t.tonality, t.file_path,
                    t.file_size_bytes, t.format_ext, t.sample_rate_hz, t.bit_depth, t.bitrate_kbps, t.duration_ms,
                    t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at,
-                   COALESCE(t.master_db_source, 0) AS master_db_source, t.wav_extensible_kind,
+                   COALESCE(t.rekordbox_db_source, 0) AS rekordbox_db_source, t.wav_extensible_kind,
                    COALESCE(t.mixxx_db_source, 0) AS mixxx_db_source
             FROM playlist_tracks pt
             JOIN tracks t ON t.id = pt.track_id
@@ -2570,7 +2570,7 @@ impl BackendService {
         let visible = self.compute_visible_library_tracks(
             &conn,
             &req.source_roots,
-            ExternalLibraries::from_flags(req.include_master_db, req.include_mixxx_db),
+            ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
             &req.query,
         )?;
         let track_ids: Vec<String> = visible.into_iter().map(|track| track.id).collect();
@@ -2588,7 +2588,7 @@ impl BackendService {
         let visible = self.compute_visible_library_tracks(
             &conn,
             &req.source_roots,
-            ExternalLibraries::from_flags(req.include_master_db, req.include_mixxx_db),
+            ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
             &req.query,
         )?;
 
@@ -2908,7 +2908,7 @@ impl BackendService {
                     SELECT t.id, t.title, t.artist, t.album, t.track_number, t.bpm, t.tonality, t.file_path,
                            t.file_size_bytes, t.format_ext, t.sample_rate_hz, t.bit_depth, t.bitrate_kbps, t.duration_ms,
                            t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at,
-                           COALESCE(t.master_db_source, 0) AS master_db_source, t.wav_extensible_kind,
+                           COALESCE(t.rekordbox_db_source, 0) AS rekordbox_db_source, t.wav_extensible_kind,
                    COALESCE(t.mixxx_db_source, 0) AS mixxx_db_source
                     FROM playlist_tracks pt
                     JOIN tracks t ON t.id = pt.track_id
@@ -3073,7 +3073,7 @@ fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_SIDEBAR_COLLAPSED,
         SETTING_UI_HELP_SEEN,
         SETTING_UI_KEY_NOTATION,
-        SETTING_UI_MASTER_DB_ENABLED,
+        SETTING_UI_REKORDBOX_DB_ENABLED,
         SETTING_UI_MIXXX_DB_ENABLED,
         SETTING_UI_SOURCES_EVER_CONFIGURED,
         SETTING_UI_CUE_START_ON_FIRST_BEAT,
@@ -3389,11 +3389,11 @@ pub(crate) fn row_to_track(
     // artworkPath via Tauri's asset protocol (convertFileSrc) instead.
     // Embedding full images as data URLs in JSON causes IPC/memory crashes
     // when hydrating many tracks at once.
-    let is_master_db = row.get::<_, i64>(19).unwrap_or(0) != 0;
+    let is_rekordbox_db = row.get::<_, i64>(19).unwrap_or(0) != 0;
     // master.db tracks: try PWV4 color data from .EXT first; fall back to greyscale
     // PWAV/PWV2 from .DAT if extended analysis hasn't been run.
     let (waveform_preview, waveform_color_data) = if include_previews {
-        if is_master_db {
+        if is_rekordbox_db {
             let color = waveform_peaks_path.as_deref().and_then(read_pwv4_from_anlz);
             if color.is_some() {
                 (None, color)
@@ -3462,7 +3462,7 @@ pub(crate) fn row_to_track(
         waveform_color_data,
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
-        master_db_source: is_master_db,
+        rekordbox_db_source: is_rekordbox_db,
         mixxx_db_source: row.get::<_, i64>("mixxx_db_source").unwrap_or(0) != 0,
         // Filled in by callers that expose Track to the frontend (see
         // apply_frontend_track_fields); internal-only callers leave this false.
@@ -3817,7 +3817,7 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::ScanMasterDbRequest;
+    use crate::models::ScanRekordboxDbRequest;
 
     // --- build_track_match_fingerprint ---
 
@@ -3928,9 +3928,9 @@ mod tests {
     }
 
     #[test]
-    fn master_db_resource_candidates_prefer_windows_share_for_pioneer_paths() {
+    fn rekordbox_db_resource_candidates_prefer_windows_share_for_pioneer_paths() {
         let master_path = Path::new("/tmp/AppData/Roaming/Pioneer/rekordbox/master.db");
-        let candidates = master_db_resource_candidates(
+        let candidates = rekordbox_db_resource_candidates(
             master_path,
             "/PIONEER/USBANLZ/b13/f6121-04a7-4e91-9d08-0b039109a193/ANLZ0000.DAT",
         );
@@ -3949,15 +3949,16 @@ mod tests {
     }
 
     #[test]
-    fn master_db_resource_candidates_ignore_blank_values() {
-        let candidates = master_db_resource_candidates(Path::new("/tmp/rekordbox/master.db"), " ");
+    fn rekordbox_db_resource_candidates_ignore_blank_values() {
+        let candidates =
+            rekordbox_db_resource_candidates(Path::new("/tmp/rekordbox/master.db"), " ");
         assert!(candidates.is_empty());
     }
 
     #[test]
-    fn master_db_analysis_file_candidates_prefer_ext_for_pwv4() {
+    fn rekordbox_db_analysis_file_candidates_prefer_ext_for_pwv4() {
         let master_path = Path::new("/tmp/AppData/Roaming/Pioneer/rekordbox/master.db");
-        let candidates = master_db_analysis_file_candidates(
+        let candidates = rekordbox_db_analysis_file_candidates(
             master_path,
             "/PIONEER/USBANLZ/b13/f6121-04a7-4e91-9d08-0b039109a193/ANLZ0000.DAT",
         );
@@ -3976,7 +3977,7 @@ mod tests {
         );
     }
 
-    fn create_master_db_fixture(
+    fn create_rekordbox_db_fixture(
         root: &Path,
         rows: &[(&str, &str, Option<&str>, Option<&str>)],
     ) -> PathBuf {
@@ -4038,7 +4039,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_master_db_imports_updates_keeps_missing_and_reports_resource_warnings() {
+    fn scan_rekordbox_db_imports_updates_keeps_missing_and_reports_resource_warnings() {
         let master_root = tempfile::tempdir().expect("master root");
         let media_root = tempfile::tempdir().expect("media root");
         let (_service_dir, service) = test_service();
@@ -4059,7 +4060,7 @@ mod tests {
         std::fs::write(&image_path, b"jpg").expect("write artwork");
 
         let removed_path = media_root.path().join("removed.mp3");
-        let master_path = create_master_db_fixture(
+        let master_path = create_rekordbox_db_fixture(
             master_root.path(),
             &[
                 (
@@ -4101,13 +4102,13 @@ mod tests {
 
         let imported = || {
             service
-                .detect_external_master_db()
+                .detect_external_rekordbox_db()
                 .expect("detect")
                 .imported
         };
         assert!(!imported(), "nothing imported yet");
         let result = service
-            .scan_master_db(ScanMasterDbRequest {
+            .scan_rekordbox_db(ScanRekordboxDbRequest {
                 path: Some(master_path.to_string_lossy().to_string()),
             })
             .expect("scan master db");
@@ -4128,14 +4129,14 @@ mod tests {
             .map(|warning| warning.code.as_str())
             .collect::<Vec<_>>();
         for code in [
-            "scan.master-db.anlz-sample",
-            "scan.master-db.image-sample",
-            "scan.master-db.anlz-null",
-            "scan.master-db.anlz-miss-summary",
-            "scan.master-db.anlz-ok",
-            "scan.master-db.artwork-null",
-            "scan.master-db.artwork-miss-summary",
-            "scan.master-db.artwork-ok",
+            "scan.rekordbox-db.anlz-sample",
+            "scan.rekordbox-db.image-sample",
+            "scan.rekordbox-db.anlz-null",
+            "scan.rekordbox-db.anlz-miss-summary",
+            "scan.rekordbox-db.anlz-ok",
+            "scan.rekordbox-db.artwork-null",
+            "scan.rekordbox-db.artwork-miss-summary",
+            "scan.rekordbox-db.artwork-ok",
         ] {
             assert!(
                 warning_codes.contains(&code),
@@ -4188,7 +4189,7 @@ mod tests {
 
         let imported_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM tracks WHERE master_db_source = 1",
+                "SELECT COUNT(*) FROM tracks WHERE rekordbox_db_source = 1",
                 [],
                 |row| row.get(0),
             )
@@ -4514,24 +4515,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_master_db_resource_path_returns_first_existing_candidate() {
+    fn resolve_rekordbox_db_resource_path_returns_first_existing_candidate() {
         let master_path = Path::new("/tmp/rekordbox/master.db");
         let db_path = "/PIONEER/USBANLZ/x/ANLZ0000.DAT";
-        let expected = master_db_resource_candidates(master_path, db_path)
+        let expected = rekordbox_db_resource_candidates(master_path, db_path)
             .into_iter()
             .nth(1)
             .expect("at least two candidates");
         let expected_for_closure = expected.clone();
         let resolved =
-            resolve_master_db_resource_path(master_path, db_path, |p| p == expected_for_closure);
+            resolve_rekordbox_db_resource_path(master_path, db_path, |p| p == expected_for_closure);
         assert_eq!(resolved, Some(expected));
     }
 
     #[test]
-    fn resolve_master_db_resource_path_none_when_nothing_exists() {
+    fn resolve_rekordbox_db_resource_path_none_when_nothing_exists() {
         let master_path = Path::new("/tmp/rekordbox/master.db");
         let resolved =
-            resolve_master_db_resource_path(master_path, "/PIONEER/x/ANLZ0000.DAT", |_| false);
+            resolve_rekordbox_db_resource_path(master_path, "/PIONEER/x/ANLZ0000.DAT", |_| false);
         assert!(resolved.is_none());
     }
 
@@ -4631,7 +4632,7 @@ mod tests {
             waveform_color_data: None,
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
-            master_db_source: false,
+            rekordbox_db_source: false,
             mixxx_db_source: false,
             is_usb_path: false,
             analysis_ready: false,
@@ -4648,13 +4649,13 @@ mod tests {
         file_path: &str,
         duration_ms: Option<i64>,
         file_size_bytes: Option<i64>,
-        master_db_source: bool,
+        rekordbox_db_source: bool,
     ) {
         let fp = build_track_match_fingerprint(title, artist, None);
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, file_size_bytes, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, file_size_bytes, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))",
-            params![id, title, artist, file_path, duration_ms, file_size_bytes, fp, master_db_source as i64],
+            params![id, title, artist, file_path, duration_ms, file_size_bytes, fp, rekordbox_db_source as i64],
         )
         .expect("insert track");
     }
@@ -4967,8 +4968,8 @@ mod tests {
         );
         // master.db-sourced -- must survive get_playlist_tracks' hand-written
         // SELECT (regression: its column list was misaligned vs `row_to_track`,
-        // which reads master_db_source positionally, so every playlist track
-        // came back master_db_source=false).
+        // which reads rekordbox_db_source positionally, so every playlist track
+        // came back rekordbox_db_source=false).
         insert_full_track(
             &conn,
             "t3",
@@ -5011,10 +5012,10 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing track {id}"))
         };
         assert!(
-            by_id("t3").master_db_source,
-            "master_db_source must survive get_playlist_tracks"
+            by_id("t3").rekordbox_db_source,
+            "rekordbox_db_source must survive get_playlist_tracks"
         );
-        assert!(!by_id("t1").master_db_source);
+        assert!(!by_id("t1").rekordbox_db_source);
     }
 
     #[test]
@@ -5597,12 +5598,12 @@ mod tests {
     }
 
     #[test]
-    fn browse_source_files_empty_without_roots_or_master_db() {
+    fn browse_source_files_empty_without_roots_or_rekordbox_db() {
         let (_dir, service) = test_service();
         let result = service
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
-                include_master_db: false,
+                include_rekordbox_db: false,
                 include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
@@ -5615,7 +5616,7 @@ mod tests {
     }
 
     #[test]
-    fn browse_source_files_includes_master_db_tracks_when_requested() {
+    fn browse_source_files_includes_rekordbox_db_tracks_when_requested() {
         let (_dir, service) = test_service();
         let conn = service.db.connect().expect("connect");
         insert_full_track(
@@ -5633,7 +5634,7 @@ mod tests {
         let result = service
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
-                include_master_db: true,
+                include_rekordbox_db: true,
                 include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
@@ -5643,7 +5644,7 @@ mod tests {
             .expect("browse source files");
         assert_eq!(result.total, 1);
         assert_eq!(result.items[0].id, "t1");
-        assert!(result.items[0].master_db_source);
+        assert!(result.items[0].rekordbox_db_source);
     }
 
     #[test]
@@ -5653,15 +5654,15 @@ mod tests {
         // Fully core-analyzed (bpm + waveform + duration): countable via the
         // primary rule.
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES ('t1', 'Analyzed', 'Artist', '/master/a.mp3', 200000, 120.0, '/data/a.dat', ?1, 1, datetime('now'), datetime('now'))",
             params![build_track_match_fingerprint("Analyzed", "Artist", None)],
         )
         .expect("insert t1");
         // master.db track with only a duration: countable via the
-        // master-db-specific OR-branch, not the primary rule.
+        // rekordbox-db-specific OR-branch, not the primary rule.
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES ('t2', 'Master Only', 'Artist', '/master/b.mp3', 100000, ?1, 1, datetime('now'), datetime('now'))",
             params![build_track_match_fingerprint("Master Only", "Artist", None)],
         )
@@ -5669,7 +5670,7 @@ mod tests {
         // No analysis at all: not countable, excluded from both the sum and
         // the known count, but still present in `total`.
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES ('t3', 'Unanalyzed', 'Artist', '/master/c.mp3', ?1, 1, datetime('now'), datetime('now'))",
             params![build_track_match_fingerprint("Unanalyzed", "Artist", None)],
         )
@@ -5679,7 +5680,7 @@ mod tests {
         let result = service
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
-                include_master_db: true,
+                include_rekordbox_db: true,
                 include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
@@ -5698,7 +5699,7 @@ mod tests {
         let conn = service.db.connect().expect("connect");
         for (id, title) in [("m1", "Zeta"), ("m2", "Alpha"), ("m3", "Mu")] {
             conn.execute(
-                "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, master_db_source, created_at, updated_at)
+                "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
                  VALUES (?1, ?2, 'Artist', ?3, ?4, 1, datetime('now'), datetime('now'))",
                 params![id, title, format!("/master/{id}.mp3"), build_track_match_fingerprint(title, "Artist", None)],
             )
@@ -5707,7 +5708,7 @@ mod tests {
         drop(conn);
 
         let req = |cursor: Option<String>| BrowseSourceFilesRequest {
-            include_master_db: true,
+            include_rekordbox_db: true,
             include_mixxx_db: false,
             limit: 2,
             cursor,
@@ -5744,14 +5745,14 @@ mod tests {
         let conn = service.db.connect().expect("connect");
         // Fully core-analyzed: bpm + waveform path + duration.
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES ('ready', 'Ready', 'Artist', '/master/ready.mp3', 200000, 120.0, '/data/ready.dat', ?1, 1, datetime('now'), datetime('now'))",
             params![build_track_match_fingerprint("Ready", "Artist", None)],
         )
         .expect("insert ready");
         // Has duration + bpm but no waveform path -> still needs analysis.
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES ('missing', 'Missing', 'Artist', '/master/missing.mp3', 200000, 120.0, ?1, 1, datetime('now'), datetime('now'))",
             params![build_track_match_fingerprint("Missing", "Artist", None)],
         )
@@ -5761,7 +5762,7 @@ mod tests {
         let result = service
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
-                include_master_db: true,
+                include_rekordbox_db: true,
                 include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
@@ -5787,7 +5788,7 @@ mod tests {
         let conn = service.db.connect().expect("connect");
         // master.db import path leaves format_ext NULL.
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES ('m1', 'Song', 'Artist', '/master/Artist/Song.FLAC', ?1, 1, datetime('now'), datetime('now'))",
             params![build_track_match_fingerprint("Song", "Artist", None)],
         )
@@ -5797,7 +5798,7 @@ mod tests {
         let browsed = service
             .browse_source_files(BrowseSourceFilesRequest {
                 source_roots: Vec::new(),
-                include_master_db: true,
+                include_rekordbox_db: true,
                 include_mixxx_db: false,
                 query: String::new(),
                 limit: 100,
@@ -5855,13 +5856,13 @@ mod tests {
         // titles deliberately share no substring, so a query matching one
         // matches zero tracks in the other's source root.
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES ('t1', 'Findable Alpha', 'Artist', ?1, 200000, 120.0, '/data/a.dat', ?2, 0, datetime('now'), datetime('now'))",
             params![path_a_str, build_track_match_fingerprint("Findable Alpha", "Artist", None)],
         )
         .expect("insert t1");
         conn.execute(
-            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
              VALUES ('t2', 'Unrelated Bravo', 'Artist', ?1, 200000, 120.0, '/data/b.dat', ?2, 0, datetime('now'), datetime('now'))",
             params![path_b_str, build_track_match_fingerprint("Unrelated Bravo", "Artist", None)],
         )
@@ -5874,7 +5875,7 @@ mod tests {
                     root_a.path().to_string_lossy().to_string(),
                     root_b.path().to_string_lossy().to_string(),
                 ],
-                include_master_db: false,
+                include_rekordbox_db: false,
                 include_mixxx_db: false,
                 // Matches only the track in root_a -- root_b's track matches
                 // nothing, which used to collapse its `total` to 0 and flip
@@ -5924,14 +5925,14 @@ mod tests {
             let fingerprint = build_track_match_fingerprint(title, "Artist", None);
             if analyzed {
                 conn.execute(
-                    "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, master_db_source, created_at, updated_at)
+                    "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
                      VALUES (?1, ?2, 'Artist', ?3, 200000, 120.0, '/data/w.dat', ?4, 0, datetime('now'), datetime('now'))",
                     params![id, title, path, fingerprint],
                 )
                 .expect("insert analyzed track");
             } else {
                 conn.execute(
-                    "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, master_db_source, created_at, updated_at)
+                    "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
                      VALUES (?1, ?2, 'Artist', ?3, ?4, 0, datetime('now'), datetime('now'))",
                     params![id, title, path, fingerprint],
                 )
