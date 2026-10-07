@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.3.6
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** Tracks imported from a rekordbox library now keep rekordbox's beat
