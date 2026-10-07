@@ -2180,7 +2180,8 @@ fn decode_audio_mono_samples_symphonia(
     path: &Path,
     max_samples: usize,
 ) -> Result<(Vec<f32>, u32), String> {
-    let source = crate::symphonia_decoder::open_media_source(path).map_err(|err| err.to_string())?;
+    let source =
+        crate::symphonia_decoder::open_media_source(path).map_err(|err| err.to_string())?;
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
         hint.with_extension(ext);

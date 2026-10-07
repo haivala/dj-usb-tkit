@@ -39,6 +39,11 @@
 
 ## Unreleased
 
+- **New feature:** on Linux, a rekordbox library running under Wine is
+  found and can be imported. The app looks in `$WINEPREFIX`, `~/.wine`, and
+  Bottles bottles, and maps rekordbox's `C:` / `Z:` track paths to where the
+  files are on Linux. The Windows build doesn't work under Wine, so use the
+  Linux build for this.
 - **Fix:** a track row now pulses as analyzing for the whole time the
   track is being analyzed. Before, it only lit up sometimes or a moment 
   at the very end, so during a large analysis some rows never showed it.

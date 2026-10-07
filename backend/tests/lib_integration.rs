@@ -2111,25 +2111,25 @@ fn analyze_new_tracks_emits_per_file_progress() {
                 ..Default::default()
             },
             move |progress| {
-            progress_ref
-                .lock()
-                .expect("progress lock")
-                .push(ProgressEvent {
-                    current: progress.current,
-                    total: progress.total,
-                    file_path: progress.file_path.clone(),
-                    track_ready: progress.track_ready,
-                    track_started: progress.track_started,
-                    reanalysis: progress.reanalysis,
-                    has_waveform: progress
-                        .waveform_preview
-                        .as_ref()
-                        .map(|p| !p.is_empty())
-                        .unwrap_or(false)
-                        || progress.waveform_peaks_path.is_some(),
-                    has_duration: progress.duration_ms.is_some(),
-                    has_bpm_or_key: progress.bpm.is_some() || progress.key.is_some(),
-                });
+                progress_ref
+                    .lock()
+                    .expect("progress lock")
+                    .push(ProgressEvent {
+                        current: progress.current,
+                        total: progress.total,
+                        file_path: progress.file_path.clone(),
+                        track_ready: progress.track_ready,
+                        track_started: progress.track_started,
+                        reanalysis: progress.reanalysis,
+                        has_waveform: progress
+                            .waveform_preview
+                            .as_ref()
+                            .map(|p| !p.is_empty())
+                            .unwrap_or(false)
+                            || progress.waveform_peaks_path.is_some(),
+                        has_duration: progress.duration_ms.is_some(),
+                        has_bpm_or_key: progress.bpm.is_some() || progress.key.is_some(),
+                    });
             },
         );
         let calls = progress.lock().expect("progress lock final").clone();
@@ -2183,7 +2183,10 @@ fn analyze_new_tracks_emits_per_file_progress() {
             .iter()
             .find(|c| c.file_path == track.file_path)
             .expect("events for every track");
-        assert!(first.track_started, "first event of a track must be track_started");
+        assert!(
+            first.track_started,
+            "first event of a track must be track_started"
+        );
         assert!(!first.reanalysis, "a first analysis is not a reanalysis");
     }
     assert_eq!(
@@ -2194,7 +2197,10 @@ fn analyze_new_tracks_emits_per_file_progress() {
 
     // Analyzing it again (the lone-track path) is a reanalysis.
     let (reanalyzed_response, calls) = analyze_with_progress(vec![tracks[0].id.clone()]);
-    assert!(reanalyzed_response.ok, "reanalyze failed: {reanalyzed_response:?}");
+    assert!(
+        reanalyzed_response.ok,
+        "reanalyze failed: {reanalyzed_response:?}"
+    );
     let first = calls.first().expect("reanalysis events");
     assert!(
         first.track_started && first.reanalysis,

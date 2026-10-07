@@ -1460,6 +1460,10 @@ pub(crate) fn external_rekordbox_db_candidates() -> Vec<std::path::PathBuf> {
         );
     }
 
+    // rekordbox installed under Wine
+    #[cfg(target_os = "linux")]
+    candidates.extend(super::wine_paths::wine_rekordbox_db_candidates());
+
     candidates
 }
 
@@ -2010,6 +2014,21 @@ mod diag_tests {
                 .iter()
                 .any(|p| p.to_str() == Some("/custom/path/master.db"))
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn external_rekordbox_db_candidates_includes_wineprefix() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        let prefix = tempfile::tempdir().expect("prefix");
+        std::fs::create_dir_all(prefix.path().join("drive_c/users/dj")).expect("user dir");
+        unsafe { std::env::set_var("WINEPREFIX", prefix.path()) };
+        let candidates = external_rekordbox_db_candidates();
+        unsafe { std::env::remove_var("WINEPREFIX") };
+        let expected = prefix
+            .path()
+            .join("drive_c/users/dj/AppData/Roaming/Pioneer/rekordbox/master.db");
+        assert!(candidates.contains(&expected), "{candidates:?}");
     }
 
     #[test]

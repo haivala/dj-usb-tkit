@@ -24,6 +24,7 @@ pub(crate) mod usb_identity;
 pub mod usb_staging;
 pub(crate) mod usb_utils;
 pub mod usb_vendor_compat;
+mod wine_paths;
 
 // Re-export functions used by commands.rs via crate::service::*
 pub use usb_utils::{detect_external_rekordbox_db, initialize_usb};
@@ -4036,6 +4037,41 @@ mod tests {
         .expect("insert deleted row");
         drop(conn);
         master_path
+    }
+
+    #[test]
+    fn scan_rekordbox_db_maps_wine_drive_paths_to_linux_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prefix = tmp.path().join("prefix");
+        std::fs::create_dir_all(prefix.join("dosdevices")).expect("dosdevices");
+        let music = prefix.join("drive_c/users/dj/Music");
+        std::fs::create_dir_all(&music).expect("music dir");
+        std::os::unix::fs::symlink("../drive_c", prefix.join("dosdevices/c:")).expect("c:");
+        std::fs::write(music.join("a.mp3"), b"audio").expect("write track");
+        let (_service_dir, service) = test_service();
+
+        let master_path = create_rekordbox_db_fixture(
+            &prefix.join("drive_c/users/dj/AppData/Roaming/Pioneer"),
+            &[("C:/users/dj/Music/a.mp3", "Under Wine", None, None)],
+        );
+        let result = service
+            .scan_rekordbox_db(ScanRekordboxDbRequest {
+                path: Some(master_path.to_string_lossy().to_string()),
+            })
+            .expect("scan rekordbox db");
+        assert_eq!(result.indexed, 1);
+        assert!(result.not_found.is_empty(), "{:?}", result.not_found);
+
+        let conn = service.db.connect().expect("service db");
+        let file_path: String = conn
+            .query_row(
+                "SELECT file_path FROM tracks WHERE title = 'Under Wine'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("imported track");
+        let expected = music.canonicalize().expect("music").join("a.mp3");
+        assert_eq!(PathBuf::from(file_path), expected);
     }
 
     #[test]

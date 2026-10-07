@@ -18,6 +18,7 @@ use super::cues::{
 
 use super::usb_utils::external_rekordbox_db_candidates;
 use super::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
+use super::wine_paths::{translate_wine_path, wine_prefix_of};
 use super::{
     BackendService, annotate_imported_playlists, build_track_match_fingerprint,
     external_playlist_key, no_importable_tracks_error, non_empty_db_value, now,
@@ -79,7 +80,7 @@ fn open_rekordbox_db(path: Option<&str>) -> BackendResult<(PathBuf, Connection)>
 
 struct RbTrack {
     content_id: String,
-    file_path: String,
+    file_path: PathBuf,
     title: String,
     artist: String,
     album: String,
@@ -91,7 +92,7 @@ struct RbTrack {
     genre: Option<String>,
 }
 
-fn load_rekordbox_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
+fn load_rekordbox_db_tracks(conn: &Connection, master_path: &Path) -> BackendResult<Vec<RbTrack>> {
     // Query all non-deleted tracks with available metadata.
     // FolderPath is the full file path (despite the name).
     // BPM is stored as centiBPM integer (12600 = 126.00 BPM).
@@ -99,6 +100,8 @@ fn load_rekordbox_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
     // AnalysisDataPath and ImagePath are desktop library virtual paths on Windows
     // (/PIONEER/...) and resolve under the share directory.
     // Genre is a FK into djmdGenre; read it only where the schema has both.
+    // Under Wine, FolderPath is a Windows path into the prefix's drives.
+    let wine_prefix = wine_prefix_of(master_path);
     let has_genre = table_exists(conn, "djmdGenre")
         && crate::edb::load_table_columns(conn, "djmdContent")?
             .iter()
@@ -137,7 +140,7 @@ fn load_rekordbox_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
     let tracks = stmt
         .query_map([], |row| {
             Ok(RbTrack {
-                file_path: row.get::<_, String>(0)?,
+                file_path: PathBuf::from(row.get::<_, String>(0)?),
                 title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 album: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
@@ -160,7 +163,13 @@ fn load_rekordbox_db_tracks(conn: &Connection) -> BackendResult<Vec<RbTrack>> {
         })
         .map_err(|e| BackendError::Validation(format!("master.db row error: {e}")))?
         .filter_map(|r| r.ok())
-        .filter(|t| !t.file_path.trim().is_empty())
+        .filter(|t| !t.file_path.to_string_lossy().trim().is_empty())
+        .map(|mut t| {
+            if let Some(path) = wine_prefix.and_then(|p| translate_wine_path(p, &t.file_path)) {
+                t.file_path = path;
+            }
+            t
+        })
         .collect();
     Ok(tracks)
 }
@@ -500,7 +509,7 @@ struct RekordboxTrackImporter<'a> {
     force: bool,
     has_cue_table: bool,
     master_path: PathBuf,
-    existing: HashMap<String, String>,
+    existing: HashMap<PathBuf, String>,
     artwork_dir: PathBuf,
     now: String,
     indexed: usize,
@@ -532,7 +541,10 @@ impl<'a> RekordboxTrackImporter<'a> {
         let existing = {
             let mut stmt = tx.prepare("SELECT file_path, id FROM tracks")?;
             stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    PathBuf::from(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                ))
             })?
             .filter_map(|r| r.ok())
             .collect()
@@ -572,13 +584,14 @@ impl<'a> RekordboxTrackImporter<'a> {
         // A missing file is skipped and reported, never deleted: the drive it's
         // on may just be unplugged, and deleting the track would take its
         // cues, edits and places in every playlist with it.
-        if !Path::new(&t.file_path).exists() {
-            self.not_found.push(t.file_path.clone());
+        if !t.file_path.exists() {
+            self.not_found
+                .push(t.file_path.to_string_lossy().into_owned());
             return Ok(None);
         }
 
         // Same rule as the folder scan (rekordbox also takes video files).
-        if !is_library_audio_file(Path::new(&t.file_path)) {
+        if !is_library_audio_file(&t.file_path) {
             self.unsupported += 1;
             return Ok(None);
         }
@@ -591,6 +604,8 @@ impl<'a> RekordboxTrackImporter<'a> {
 
         // Resolve (or generate) the track ID before any file writes
         let existing_id = self.existing.get(&t.file_path).cloned();
+        let file_path = t.file_path.to_string_lossy();
+        let format_ext = crate::utils::format_ext_from_path(&file_path);
         let track_id = existing_id
             .clone()
             .unwrap_or_else(|| Uuid::now_v7().to_string());
@@ -651,7 +666,7 @@ impl<'a> RekordboxTrackImporter<'a> {
                     fingerprint,
                     self.now,
                     track_id,
-                    crate::utils::format_ext_from_path(&t.file_path),
+                    format_ext,
                     self.force,
                     t.genre,
                     first_beat_ms
@@ -677,8 +692,8 @@ impl<'a> RekordboxTrackImporter<'a> {
                     album,
                     t.bpm,
                     t.tonality,
-                    t.file_path,
-                    crate::utils::format_ext_from_path(&t.file_path),
+                    file_path,
+                    format_ext,
                     t.duration_ms,
                     waveform_path,
                     artwork_path,
@@ -899,7 +914,7 @@ impl<'a> RekordboxTrackImporter<'a> {
 impl BackendService {
     pub fn scan_rekordbox_db(&self, req: ScanRekordboxDbRequest) -> BackendResult<ScanLibraryData> {
         let (master_path, conn) = open_rekordbox_db(req.path.as_deref())?;
-        let tracks = load_rekordbox_db_tracks(&conn)?;
+        let tracks = load_rekordbox_db_tracks(&conn, &master_path)?;
 
         let mut db_conn = self.db.connect()?;
         let tx = db_conn.transaction()?;
@@ -953,7 +968,7 @@ impl BackendService {
             .unwrap_or_else(|| "rekordbox playlist".to_string());
 
         let wanted: HashSet<&str> = entry_ids.iter().map(String::as_str).collect();
-        let tracks_by_id: HashMap<String, RbTrack> = load_rekordbox_db_tracks(&conn)?
+        let tracks_by_id: HashMap<String, RbTrack> = load_rekordbox_db_tracks(&conn, &master_path)?
             .into_iter()
             .filter(|t| wanted.contains(t.content_id.as_str()))
             .map(|t| (t.content_id.clone(), t))

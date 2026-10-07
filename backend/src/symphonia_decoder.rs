@@ -138,7 +138,12 @@ impl AiffSsndOffsetSource {
                 if offset == 0 || u64::from(offset) + 8 > u64::from(size) {
                     return None;
                 }
-                return Some(AiffSsndLayout { form_size, ssnd_pos: pos, ssnd_size: size, offset });
+                return Some(AiffSsndLayout {
+                    form_size,
+                    ssnd_pos: pos,
+                    ssnd_size: size,
+                    offset,
+                });
             }
             pos += 8 + u64::from(size) + u64::from(size & 1);
         }
@@ -146,7 +151,12 @@ impl AiffSsndOffsetSource {
     }
 
     fn new(file: File, len: u64, layout: AiffSsndLayout) -> Self {
-        let AiffSsndLayout { form_size, ssnd_pos, ssnd_size, offset } = layout;
+        let AiffSsndLayout {
+            form_size,
+            ssnd_pos,
+            ssnd_size,
+            offset,
+        } = layout;
         Self {
             file,
             split: ssnd_pos + 16,

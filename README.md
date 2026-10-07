@@ -45,6 +45,12 @@ chmod +x DJ_USB_Tkit_*_amd64.AppImage
 ./DJ_USB_Tkit_*_amd64.AppImage
 ```
 
+If rekordbox runs under Wine, use this Linux build, not the Windows one: the
+Windows build's interface (WebView2) stays blank under Wine. The Linux build
+finds rekordbox's library in `$WINEPREFIX`, `~/.wine`, or a Bottles bottle.
+For a prefix somewhere else, start the app with `WINEPREFIX=/path/to/prefix`
+(see [docs/EXTERNAL_LIBRARIES.md](docs/EXTERNAL_LIBRARIES.md)).
+
 ## Current Capabilities
 
 - Library scanning, playlist management, and native local playback.

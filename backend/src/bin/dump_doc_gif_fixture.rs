@@ -168,13 +168,19 @@ fn dump_usb(svc: &BackendService, spec: &Value, id_of: impl Fn(&str) -> String) 
         svc.fetch_usb_playlists(request("fetch_usb_playlists", root.clone())),
     );
     let mut playlist_tracks = serde_json::Map::new();
-    for item in playlists["data"]["items"].as_array().expect("usb playlists") {
+    for item in playlists["data"]["items"]
+        .as_array()
+        .expect("usb playlists")
+    {
         let id = item["id"].as_str().expect("usb playlist id");
         let tracks = svc.fetch_usb_playlist_tracks(request(
             "fetch_usb_playlist_tracks",
             json!({ "usbRoot": usb_root, "id": id }),
         ));
-        playlist_tracks.insert(id.to_string(), response("fetch_usb_playlist_tracks", tracks));
+        playlist_tracks.insert(
+            id.to_string(),
+            response("fetch_usb_playlist_tracks", tracks),
+        );
     }
     let histories = response(
         "fetch_usb_histories",
@@ -226,7 +232,10 @@ fn break_usb_copy(usb: &Path, broken: &Path) {
         found.sort();
         found
     };
-    for entry in walkdir::WalkDir::new(usb).into_iter().filter_map(Result::ok) {
+    for entry in walkdir::WalkDir::new(usb)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
         let target = broken.join(entry.path().strip_prefix(usb).expect("under usb"));
         if entry.file_type().is_dir() {
             fs::create_dir_all(&target).unwrap_or_else(|e| fail("copy usb", e));
@@ -235,12 +244,19 @@ fn break_usb_copy(usb: &Path, broken: &Path) {
         }
     }
     let audio = files(&broken.join("Contents"), "mp3");
-    let renamed = audio.first().unwrap_or_else(|| fail("break usb", "no audio"));
+    let renamed = audio
+        .first()
+        .unwrap_or_else(|| fail("break usb", "no audio"));
     let stem = renamed.file_stem().expect("stem").to_string_lossy();
-    fs::rename(renamed, renamed.with_file_name(format!("{stem} (edit).mp3")))
-        .unwrap_or_else(|e| fail("rename audio", e));
+    fs::rename(
+        renamed,
+        renamed.with_file_name(format!("{stem} (edit).mp3")),
+    )
+    .unwrap_or_else(|e| fail("rename audio", e));
     let analysis = files(&broken.join("PIONEER/USBANLZ"), "dat");
-    let emptied = analysis.last().unwrap_or_else(|| fail("break usb", "no analysis"));
+    let emptied = analysis
+        .last()
+        .unwrap_or_else(|| fail("break usb", "no analysis"));
     fs::write(emptied, []).unwrap_or_else(|e| fail("empty analysis", e));
 
     let edb = backend::edb::edb_path_from_usb_root(broken);

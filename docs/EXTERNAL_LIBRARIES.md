@@ -159,8 +159,17 @@ the app:
 
 | Library | Environment override | Locations tried, in order |
 | --- | --- | --- |
-| rekordbox | `DJUSBTKIT_REKORDBOX_DB_PATH` (the old name `DJUSBTKIT_MASTER_DB_PATH` still works) | macOS `~/Library/Application Support/Pioneer DJ/rekordbox/master.db`, then `~/Library/Application Support/Pioneer/rekordbox/master.db`, then `~/Library/Pioneer/rekordbox/master.db`; Windows `%APPDATA%\Pioneer\rekordbox\master.db` (or the same under `%USERPROFILE%\AppData\Roaming`) |
+| rekordbox | `DJUSBTKIT_REKORDBOX_DB_PATH` (the old name `DJUSBTKIT_MASTER_DB_PATH` still works) | macOS `~/Library/Application Support/Pioneer DJ/rekordbox/master.db`, then `~/Library/Application Support/Pioneer/rekordbox/master.db`, then `~/Library/Pioneer/rekordbox/master.db`; Windows `%APPDATA%\Pioneer\rekordbox\master.db` (or the same under `%USERPROFILE%\AppData\Roaming`); Linux, rekordbox under Wine: `drive_c/users/<user>/AppData/Roaming/Pioneer/rekordbox/master.db` in `$WINEPREFIX`, then `~/.wine`, then each Bottles bottle (`~/.local/share/bottles/bottles/*`, or the Flatpak's `~/.var/app/com.usebottles.bottles/data/bottles/bottles/*`) |
 | Mixxx | `DJUSBTKIT_MIXXX_DB_PATH` | Linux `~/.mixxx/mixxxdb.sqlite`; macOS `~/Library/Containers/org.mixxx.mixxx/Data/Library/Application Support/Mixxx/mixxxdb.sqlite`, then `~/Library/Application Support/Mixxx/mixxxdb.sqlite`; Windows `%LOCALAPPDATA%\Mixxx\mixxxdb.sqlite` |
+
+A `master.db` inside a Wine prefix (a folder with `dosdevices/`) stores
+Windows track paths such as `C:/Users/dj/Music/a.mp3` or
+`Z:/home/dj/Music/a.mp3`. Each is mapped to a Linux path through the prefix's
+drive link (`dosdevices/c:` → `drive_c`, `z:` → `/`), so `Z:/home/dj/...`
+becomes `/home/dj/...`, the same path a folder scan finds. A path on a drive
+the prefix doesn't map is kept as it is and the track is reported as not
+found. This also applies when the environment override points into a prefix.
+See `backend/src/service/wine_paths.rs`.
 
 `master.db` is SQLCipher-encrypted with rekordbox's fixed desktop key.
 `mixxxdb.sqlite` is plain SQLite. Both are opened with
