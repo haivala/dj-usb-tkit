@@ -487,7 +487,7 @@ export function renderLibraryChrome(ctx) {
     el.libraryEmptyState.replaceChildren();
     if (noSources) {
       const extraActions = [
-        ...(state.externalRekordboxDbPath ? [{ label: "RB master.db", onAction: () => scanRekordboxDb(ctx) }] : []),
+        ...(state.externalRekordboxDbPath ? [{ label: "rekordbox library", onAction: () => scanRekordboxDb(ctx) }] : []),
         ...(state.externalMixxxDbPath ? [{ label: "Mixxx library", onAction: () => scanMixxxDb(ctx) }] : []),
       ];
       renderEmptyState(el.libraryEmptyState, {

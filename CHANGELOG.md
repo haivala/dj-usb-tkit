@@ -85,6 +85,9 @@
   and a playlist export. Their USB views come from the demo library really
   exported to a USB, and every screenshot and GIF has a caption and the app
   version below it.
+- **Improvement:** on the empty library screen, the rekordbox import button
+  says "rekordbox library", like the "Mixxx library" one next to it, instead
+  of "RB master.db".
 - **Chore:** the rekordbox library's "master DB" names in the code, docs,
   database and settings are now "rekordbox DB", matching the Mixxx ones. The
   environment override is `DJUSBTKIT_REKORDBOX_DB_PATH`; the old
