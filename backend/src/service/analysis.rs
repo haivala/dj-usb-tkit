@@ -32,7 +32,9 @@ use crate::models::{
     WarningEntry,
 };
 
-use super::anlz::{AnlzBundlePaths, WaveformData, write_generated_anlz_bundle_with_first_beat};
+use super::anlz::{
+    AnlzBundlePaths, WaveformData, fill_mp3_pvbr, write_generated_anlz_bundle_with_first_beat,
+};
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum, first_beat_secs};
 use super::export_helpers::{
     KeptAnalysis, LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash,
@@ -1711,6 +1713,9 @@ fn analyze_local_track_with_updates(
                 first_beat_ms,
                 &[],
             )?;
+            // MP3s get rekordbox's seek index; a file it can't be reproduced
+            // for exactly keeps the empty one (logged by `fill_mp3_pvbr`).
+            let _ = fill_mp3_pvbr(&bundle_paths.dat_path, &path);
             Some(bundle_paths.dat_path.to_string_lossy().to_string())
         } else {
             None

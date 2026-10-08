@@ -27,7 +27,7 @@ use super::SETTING_EXPORT_MASTER_DB_ID;
 use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
 use super::anlz::{
     AnlzAnalysisEdits, AnlzBundlePaths, GridUpgrade, WaveformData, apply_analysis_edits_to_anlz,
-    atomic_write_bytes, canonical_analysis_bundle_paths, ensure_ppth_chunk,
+    atomic_write_bytes, canonical_analysis_bundle_paths, ensure_ppth_chunk, fill_mp3_pvbr,
     has_misplaced_pqtz_header, has_pvb2_chunk, pqt2_checksum_ok, pvbr_total_samples,
     read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, upgrade_bundle_beat_grid,
     with_seek_index, write_generated_anlz_bundle,
@@ -6517,6 +6517,8 @@ impl BackendService {
                 ));
                 continue;
             }
+            // As local analysis does: MP3s get rekordbox's seek index.
+            let _ = fill_mp3_pvbr(&bundle_paths.dat_path, &source_audio);
             fixed += 1;
             writes += 3;
         }

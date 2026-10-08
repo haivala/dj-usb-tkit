@@ -18,7 +18,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::models::RunDataMigrationsData;
 
 use super::BackendService;
-use super::anlz::{GridUpgrade, upgrade_bundle_beat_grid};
+use super::anlz::{GridUpgrade, PvbrFill, fill_mp3_pvbr, upgrade_bundle_beat_grid};
 
 pub(crate) type Progress<'a> = &'a mut dyn FnMut(usize, usize, &str);
 
@@ -76,6 +76,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         phase: Phase::Background,
         label: "Upgrading cached beat grids",
         run: upgrade_cached_beat_grids,
+    },
+    Migration {
+        id: "0.3.7-cache-mp3-seek-index",
+        phase: Phase::Background,
+        label: "Adding MP3 seek data",
+        run: fill_cached_mp3_seek_indexes,
     },
 ];
 
@@ -253,6 +259,65 @@ fn upgrade_cached_beat_grids(
         Info,
         "migrations",
         "rewrote {rewritten} cached beat grid(s) in the 0.3.7 format"
+    );
+    Ok(if retry {
+        Outcome::RetryLater
+    } else {
+        Outcome::Done
+    })
+}
+
+/// `0.3.7-cache-mp3-seek-index`: give cached MP3 bundles the `PVBR` seek
+/// index rekordbox writes (docs/WAVEFORMS.md "Seek-index chunks"), which
+/// analysis writes from 0.3.7 on. Needs each source file: one that's missing
+/// (e.g. on an unplugged drive) is skipped and gets it when re-analysed.
+fn fill_cached_mp3_seek_indexes(
+    svc: &BackendService,
+    progress: Progress<'_>,
+) -> BackendResult<Outcome> {
+    let waveform_dir = svc.db.data_dir().join("analysis").join("waveforms");
+    let bundles: Vec<(std::path::PathBuf, std::path::PathBuf)> = {
+        let conn = svc.db.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT file_path, waveform_peaks_path FROM tracks
+             WHERE waveform_peaks_path IS NOT NULL AND waveform_peaks_path != ''",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.filter_map(Result::ok)
+            .filter_map(|(audio, dat)| {
+                let audio = std::path::PathBuf::from(audio.trim());
+                let is_mp3 = audio
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("mp3"));
+                let dat =
+                    super::local_cache_bundle_dat(&waveform_dir, std::path::Path::new(dat.trim()))?;
+                is_mp3.then_some((dat, audio))
+            })
+            .collect()
+    };
+
+    let total = bundles.len();
+    let (mut filled, mut missing) = (0usize, 0usize);
+    let mut retry = false;
+    for (i, (dat, audio)) in bundles.iter().enumerate() {
+        if !audio.is_file() {
+            missing += 1;
+        } else if dat.is_file() {
+            match fill_mp3_pvbr(dat, audio) {
+                Ok(PvbrFill::Filled) => filled += 1,
+                Ok(_) => {}
+                Err(_) => retry = true,
+            }
+        }
+        progress(i + 1, total, "");
+    }
+    crate::backend_log!(
+        Info,
+        "migrations",
+        "added the MP3 seek index to {filled} cached bundle(s); {missing} source file(s) not found"
     );
     Ok(if retry {
         Outcome::RetryLater

@@ -128,9 +128,11 @@ stay in `db.rs` `migrate()` and are versioned by `schema_version`.
   calls it once after the initial load, and it shows in the footer progress bar as a
   `migration` job. With nothing pending it returns at once and emits no job events. While
   one runs, starting analysis and saving analysis edits are refused with "Finishing a data
-  upgrade", so a fresh analysis file can't be overwritten. The first one,
-  `0.3.7-cache-beat-grids`, rewrites cached beat grids in the 0.3.7 format
-  (`docs/WAVEFORMS.md`, "Beat-grid layout").
+  upgrade", so a fresh analysis file can't be overwritten. `0.3.7-cache-beat-grids`
+  rewrites cached beat grids in the 0.3.7 format (`docs/WAVEFORMS.md`, "Beat-grid
+  layout"), and `0.3.7-cache-mp3-seek-index` adds rekordbox's `PVBR` seek index to
+  cached MP3 bundles from their source files ("Seek-index chunks"; a missing source file
+  is skipped, and the track gets it when re-analysed).
 
 A migration that finishes is recorded and never runs again. One that reports
 `RetryLater` or fails is logged, isn't recorded, and runs again on the next launch; it

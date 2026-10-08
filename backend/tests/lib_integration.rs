@@ -5651,3 +5651,79 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     );
     assert_eq!(steadfast_rows[0].track_file_path, foreign_relative);
 }
+
+#[test]
+fn analysis_writes_rekordbox_mp3_seek_index_but_no_flac_one() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio");
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("media dir");
+    fs::copy(
+        fixtures.join("embedded/track_embedded.mp3"),
+        media.join("a.mp3"),
+    )
+    .expect("mp3");
+    fs::copy(
+        fixtures.join("formats/track_format_flac.flac"),
+        media.join("b.flac"),
+    )
+    .expect("flac");
+
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    let ids: Vec<String> = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        track_ids: ids,
+        ..Default::default()
+    });
+    assert!(analyze.ok, "analyze failed: {analyze:?}");
+
+    let tracks = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search")
+        .items;
+    let pvbr_total = |dat: &[u8]| {
+        let at = dat.windows(4).position(|w| w == b"PVBR").expect("PVBR");
+        u32::from_be_bytes(dat[at + 16 + 1600..at + 16 + 1604].try_into().unwrap())
+    };
+    for track in tracks {
+        let dat = fs::read(track.waveform_peaks_path.as_deref().expect("bundle")).expect("DAT");
+        let ext = fs::read(
+            Path::new(track.waveform_peaks_path.as_deref().unwrap()).with_extension("EXT"),
+        )
+        .expect("EXT");
+        if track.file_path.ends_with(".mp3") {
+            assert!(pvbr_total(&dat) > 0, "MP3 gets the PVBR total");
+        } else {
+            assert_eq!(
+                pvbr_total(&dat),
+                0,
+                "FLAC keeps the empty PVBR rekordbox writes"
+            );
+            assert!(
+                !ext.windows(4).any(|w| w == b"PVB2"),
+                "no PVB2 at analysis time"
+            );
+        }
+    }
+}

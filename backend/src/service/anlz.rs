@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::error::BackendResult;
 
-use super::anlz_seek::{PVBR_PAYLOAD_LEN, SeekIndex};
+use super::anlz_seek::{PVBR_PAYLOAD_LEN, SeekIndex, SeekIndexSkip, seek_index_for_audio};
 use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 
 /// Waveform data with both amplitude peaks (0-100) and frequency bands (0-5) per bin.
@@ -820,6 +820,72 @@ fn append_pvbr_chunk(file: &mut Vec<u8>) {
     let header = vec![0u8; 4]; // unknown1 = 0
     let payload = vec![0u8; PVBR_PAYLOAD_LEN]; // empty index and total
     append_anlz_chunk(file, b"PVBR", &header, &payload);
+}
+
+/// What [`fill_mp3_pvbr`] did with a `.DAT`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PvbrFill {
+    Filled,
+    /// The `PVBR` already has a sample total (rekordbox's, or filled before).
+    AlreadySet,
+    /// Not an MP3: the empty `PVBR` is what rekordbox writes too.
+    NotMp3,
+    /// The `.DAT` has no well-formed `PVBR` to fill.
+    NoPvbrChunk,
+    /// An MP3 whose seek index can't be reproduced exactly; the `PVBR`
+    /// stays empty rather than guessed.
+    Skipped(SeekIndexSkip),
+}
+
+/// Fill an empty `PVBR` in a `.DAT` from its source MP3, in place: the 400
+/// offsets (zero for CBR) and the sample total rekordbox writes. Only MP3s
+/// get one; FLAC's `PVB2` is left to the USB repair (its long-track rule is
+/// not exact). Safe to call again.
+pub(super) fn fill_mp3_pvbr(dat_path: &Path, audio_path: &Path) -> BackendResult<PvbrFill> {
+    let fill = try_fill_mp3_pvbr(dat_path, audio_path);
+    match &fill {
+        Ok(PvbrFill::Skipped(skip)) => crate::backend_log!(
+            Info,
+            "anlz",
+            "MP3 seek index not written ({}): {}",
+            skip.describe(),
+            audio_path.display()
+        ),
+        Err(err) => crate::backend_log!(
+            Warn,
+            "anlz",
+            "MP3 seek index not written ({err}): {}",
+            audio_path.display()
+        ),
+        _ => {}
+    }
+    fill
+}
+
+fn try_fill_mp3_pvbr(dat_path: &Path, audio_path: &Path) -> BackendResult<PvbrFill> {
+    let is_mp3 = audio_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mp3"));
+    if !is_mp3 {
+        return Ok(PvbrFill::NotMp3);
+    }
+    let dat = std::fs::read(dat_path)?;
+    match pvbr_total_samples(&dat) {
+        Some(0) => {}
+        Some(_) => return Ok(PvbrFill::AlreadySet),
+        None => return Ok(PvbrFill::NoPvbrChunk),
+    }
+    let index = match seek_index_for_audio(audio_path) {
+        Ok(Some(index @ SeekIndex::Pvbr(_))) => index,
+        Ok(_) => return Ok(PvbrFill::NotMp3),
+        Err(skip) => return Ok(PvbrFill::Skipped(skip)),
+    };
+    let Some(patched) = with_seek_index(&dat, &index) else {
+        return Ok(PvbrFill::NoPvbrChunk);
+    };
+    atomic_write_bytes(dat_path, &patched)?;
+    Ok(PvbrFill::Filled)
 }
 
 /// Every chunk of a `PMAI` file as (fourcc, byte range). `None` unless the
@@ -2822,6 +2888,34 @@ mod tests {
         assert_eq!(collect_chunk_tags(&twice), tags);
         assert_eq!(find_chunk_payload(&twice, "PVB2").unwrap().len(), 5 * 20);
         assert_eq!(&twice[28..ext.len()], &ext[28..]);
+    }
+
+    #[test]
+    fn fill_mp3_pvbr_writes_the_index_once_and_only_for_mp3s() {
+        let dir = tempdir().unwrap();
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio");
+        let dat_path = dir.path().join("A.DAT");
+        let dat = build_anlz_dat_file(
+            &WaveformData::from_peaks(vec![128; 400]),
+            "",
+            Some(120.0),
+            30_000,
+            None,
+            &[],
+        );
+        std::fs::write(&dat_path, &dat).unwrap();
+
+        let flac = fixtures.join("formats/track_format_flac.flac");
+        assert_eq!(fill_mp3_pvbr(&dat_path, &flac).unwrap(), PvbrFill::NotMp3);
+        let mp3 = fixtures.join("embedded/track_embedded.mp3");
+        assert_eq!(fill_mp3_pvbr(&dat_path, &mp3).unwrap(), PvbrFill::Filled);
+        let filled = std::fs::read(&dat_path).unwrap();
+        assert!(pvbr_total_samples(&filled).is_some_and(|total| total > 0));
+        assert_eq!(filled.len(), dat.len());
+        assert_eq!(
+            fill_mp3_pvbr(&dat_path, &mp3).unwrap(),
+            PvbrFill::AlreadySet
+        );
     }
 
     #[test]
