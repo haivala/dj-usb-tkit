@@ -113,3 +113,32 @@ These are intentionally app-owned and persisted locally rather than copied from 
 Settings are stored as key/value records in backend storage, with frontend persistence mirroring selected keys for UX continuity.
 
 `set_frontend_setting` only accepts keys listed in `frontend_ui_setting_keys` (`backend/src/service/mod.rs`); any other key fails with "unsupported frontend setting key". A new `FRONTEND_DB_KEY_*` in `vanilla-ui/settings_keys.mjs` must be added there too; the backend test `frontend_ui_setting_keys_cover_every_frontend_db_key` fails when one is missing.
+
+## Data migrations
+
+One-time upgrades of data that an older app version wrote live in one registry,
+`MIGRATIONS` in `backend/src/service/migrations.rs`. The `data_migrations` table
+(`id`, `applied_at`) records which ones have run. Schema changes are separate: they
+stay in `db.rs` `migrate()` and are versioned by `schema_version`.
+
+- **Startup** migrations are quick and run at the end of `BackendService::new`, before
+  the UI reads anything. Moving USB devices out of the old settings keys, filling
+  `match_fingerprint` and merging duplicate USB placeholder tracks are of this kind.
+- **Background** migrations run through the `run_data_migrations` command. The frontend
+  calls it once after the initial load, and it shows in the footer progress bar as a
+  `migration` job. With nothing pending it returns at once and emits no job events. While
+  one runs, starting analysis and saving analysis edits are refused with "Finishing a data
+  upgrade", so a fresh analysis file can't be overwritten. The first one,
+  `0.3.7-cache-beat-grids`, rewrites cached beat grids in the 0.3.7 format
+  (`docs/WAVEFORMS.md`, "Beat-grid layout").
+
+A migration that finishes is recorded and never runs again. One that reports
+`RetryLater` or fails is logged, isn't recorded, and runs again on the next launch; it
+never stops the app from starting.
+
+To add one, append an entry to `MIGRATIONS`, with a new id such as
+`"0.3.8-what-it-does"`. Rules:
+- ids are never renamed or reused;
+- a migration must be safe to re-run, so it touches only data still in the old state and
+  writes files atomically (a crash before it is recorded just repeats harmless work);
+- a `Background` migration reports progress per item.

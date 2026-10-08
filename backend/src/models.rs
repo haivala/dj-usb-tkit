@@ -841,6 +841,15 @@ pub struct FetchUsbPlaylistsRequest {
     pub usb_root: Option<String>,
 }
 
+/// What a `run_data_migrations` pass did: the ids it completed, and those
+/// that will run again on the next launch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunDataMigrationsData {
+    pub ran: Vec<String>,
+    pub retry_later: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeUsbPlaceholderTracksData {

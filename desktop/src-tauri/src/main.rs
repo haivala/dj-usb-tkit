@@ -844,6 +844,7 @@ fn main() {
             backend::tauri_commands::restore_usb_backup,
             backend::tauri_commands::delete_usb_backup,
             backend::tauri_commands::merge_orphaned_usb_placeholder_tracks,
+            backend::tauri_commands::run_data_migrations,
             backend::tauri_commands::fetch_usb_playlists,
             backend::tauri_commands::fetch_usb_histories,
             backend::tauri_commands::get_usb_player_menu_config,

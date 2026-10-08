@@ -5,6 +5,7 @@ import {
   applySidebarCollapsedUi,
   hydrateAppVersionLabel,
   restoreStoredUiPrefs,
+  runDataMigrations,
   runDeferredInitialLoad,
   showHelpOnFirstVisit,
   switchView
@@ -134,6 +135,30 @@ test("runDeferredInitialLoad loads initial data, selects fallback playlists, and
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(existing.currentPlaylistId, "p2");
   assert.equal(existing.startupPhase, false);
+});
+
+test("runDeferredInitialLoad runs the data migrations after the initial load", async () => {
+  const calls = [];
+  const state = { playlists: [], currentPlaylistId: null, startupPhase: true };
+  runDeferredInitialLoad(deferredCtx(state, calls, {
+    command: async (name) => { calls.push(`command:${name}`); return { ran: [], retryLater: [] }; }
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls.at(-1), "command:run_data_migrations");
+  assert.ok(calls.indexOf("tracks") < calls.indexOf("command:run_data_migrations"));
+});
+
+test("runDataMigrations logs a failure instead of throwing", async () => {
+  const logs = [];
+  const result = await runDataMigrations({
+    command: async () => { throw new Error("disk full"); },
+    pushEventLog: (entry) => logs.push(entry)
+  });
+  assert.equal(result, null);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].level, "warn");
+  assert.match(logs[0].message, /Data upgrade failed: disk full/);
+  assert.equal(await runDataMigrations({}), null, "no backend: nothing to do");
 });
 
 // Every collaborator switchView touches, as no-ops; tests override the ones

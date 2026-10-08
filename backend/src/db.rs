@@ -176,6 +176,11 @@ impl Db {
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS data_migrations (
+              id TEXT PRIMARY KEY,
+              applied_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS schema_version (
               id INTEGER PRIMARY KEY CHECK (id = 1),
               version INTEGER NOT NULL,

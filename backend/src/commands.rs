@@ -31,15 +31,15 @@ use crate::models::{
     ReorderPlaylistTracksRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
     ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    RunUsbParityReportData, RunUsbParityReportRequest, SaveTrackAnalysisEditsData,
-    SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
-    ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest,
-    SearchTracksData, SearchTracksRequest, SetAnalysisPausedData, SetFrontendSettingData,
-    SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameData,
-    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail, ValidateUsbRootData,
-    ValidateUsbRootRequest,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
+    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
+    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
+    SaveUsbTrackAnalysisEditsRequest, ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest,
+    ScanRekordboxDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
+    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail,
+    ValidateUsbRootData, ValidateUsbRootRequest,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -360,6 +360,21 @@ impl BackendCommands {
         &self,
     ) -> ApiResponse<MergeUsbPlaceholderTracksData> {
         wrap(self.service.merge_orphaned_usb_placeholder_tracks())
+    }
+
+    /// Ids of the background data migrations still to run.
+    pub fn pending_data_migrations(&self) -> ApiResponse<Vec<String>> {
+        wrap(self.service.pending_data_migrations())
+    }
+
+    pub fn run_data_migrations_with_progress<F>(
+        &self,
+        on_progress: F,
+    ) -> ApiResponse<RunDataMigrationsData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        wrap(self.service.run_data_migrations(on_progress))
     }
 
     pub fn fetch_usb_playlists(

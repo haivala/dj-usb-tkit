@@ -13,6 +13,7 @@ pub mod export_helpers;
 mod export_log;
 pub(crate) mod format_compat;
 pub(crate) mod key_notation;
+mod migrations;
 mod mixxx_import;
 mod rekordbox_import;
 mod repair;
@@ -696,6 +697,9 @@ pub struct BackendService {
     /// files for a page the frontend will discard.
     pub(crate) usb_playlist_page_generation: Arc<std::sync::atomic::AtomicU64>,
     pub(crate) usb_history_page_generation: Arc<std::sync::atomic::AtomicU64>,
+    /// Set while background data migrations run (see `migrations.rs`), so
+    /// commands that write the analysis cache wait for them.
+    pub(crate) data_migration_running: Arc<AtomicBool>,
 }
 
 impl BackendService {
@@ -709,6 +713,7 @@ impl BackendService {
             usb_write_lock: Arc::new(std::sync::Mutex::new(())),
             usb_playlist_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             usb_history_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            data_migration_running: Arc::new(AtomicBool::new(false)),
         };
         // Deliberately NOT called here (see `usb_staging::init_cache_root`'s
         // doc comment): `BackendService::new`/`BackendCommands::new` are the
@@ -725,9 +730,8 @@ impl BackendService {
         // -- from `desktop/src-tauri/src/main.rs`, right after constructing
         // its one `BackendCommands`.
         svc.reset_mounted_usb_devices()?;
-        svc.backfill_usb_devices_from_legacy_settings()?;
-        svc.backfill_track_fingerprints()?;
-        svc.merge_orphaned_usb_placeholder_tracks()?;
+        // One-time upgrades of data older versions wrote; see `migrations.rs`.
+        svc.run_startup_data_migrations();
         Ok(svc)
     }
 
@@ -744,7 +748,7 @@ impl BackendService {
         Ok(())
     }
 
-    /// One-time migration: seed `usb_devices` from the legacy
+    /// One-time migration (`migrations.rs`): seed `usb_devices` from the legacy
     /// `ui_usb_root_v1`/`ui_usb_recent_roots_v1` app_settings entries so
     /// pre-existing databases get retroactive USB-vs-local protection with
     /// no per-track migration needed. `ui_usb_recent_roots_v1` is deleted

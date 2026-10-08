@@ -26,11 +26,11 @@ use super::BackendService;
 use super::SETTING_EXPORT_MASTER_DB_ID;
 use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
 use super::anlz::{
-    AnlzAnalysisEdits, AnlzBundlePaths, WaveformData, apply_analysis_edits_to_anlz,
-    atomic_write_bytes, beat_grid_from_pqtz, canonical_analysis_bundle_paths, ensure_ppth_chunk,
+    AnlzAnalysisEdits, AnlzBundlePaths, GridUpgrade, WaveformData, apply_analysis_edits_to_anlz,
+    atomic_write_bytes, canonical_analysis_bundle_paths, ensure_ppth_chunk,
     has_misplaced_pqtz_header, has_pvb2_chunk, pqt2_checksum_ok, pvbr_total_samples,
-    read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, with_beat_grid, with_seek_index,
-    write_generated_anlz_bundle,
+    read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, upgrade_bundle_beat_grid,
+    with_seek_index, write_generated_anlz_bundle,
 };
 use super::anlz_seek::seek_index_for_audio;
 use super::cues::collapse_anlz_cues;
@@ -3087,9 +3087,10 @@ fn apply_beat_grid_repair(
 ) -> BackendResult<usize> {
     let mut fixed = 0usize;
     for dat in detect_app_beat_grids(usb_root) {
-        let dat_bytes = std::fs::read(&dat)?;
-        let Some(grid) = beat_grid_from_pqtz(&dat_bytes) else {
-            warnings.push(logging::log(
+        match upgrade_bundle_beat_grid(&dat)? {
+            GridUpgrade::Rewritten => fixed += 1,
+            GridUpgrade::AlreadyCurrent => {}
+            GridUpgrade::NotRebuildable => warnings.push(logging::log(
                 Level::Warn,
                 "usb-repair",
                 "usb.repair.beat-grid.skipped",
@@ -3097,19 +3098,8 @@ fn apply_beat_grid_repair(
                     "beat grid not rewritten (not a constant-tempo grid): {}",
                     dat.display()
                 ),
-            ));
-            continue;
-        };
-        if let Some(patched) = with_beat_grid(&dat_bytes, &grid) {
-            atomic_write_bytes(&dat, &patched)?;
+            )),
         }
-        let ext = dat.with_extension("EXT");
-        if let Ok(ext_bytes) = std::fs::read(&ext)
-            && let Some(patched) = with_beat_grid(&ext_bytes, &grid)
-        {
-            atomic_write_bytes(&ext, &patched)?;
-        }
-        fixed += 1;
     }
     Ok(fixed)
 }

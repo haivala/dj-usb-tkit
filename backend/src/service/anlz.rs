@@ -410,6 +410,50 @@ pub(crate) fn beat_grid_from_pqtz(dat: &[u8]) -> Option<BeatGrid> {
     [Some(base), measured].into_iter().flatten().find(fits)
 }
 
+/// What [`upgrade_bundle_beat_grid`] did with a bundle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GridUpgrade {
+    Rewritten,
+    /// Already in rekordbox's format (or no beat grid at all).
+    AlreadyCurrent,
+    /// In the old format, but not one constant-tempo grid this app could have
+    /// written; left as it is.
+    NotRebuildable,
+}
+
+/// Rewrite a bundle's `PQTZ` (`.DAT`) and `PQT2` (sibling `.EXT`) in
+/// rekordbox's format when either is in the pre-0.3.7 one, from the grid the
+/// `.DAT` already holds. Safe to call again: a current bundle is left alone.
+/// Shared by the USB repair "Fix Beat Grid" and the cache migration.
+pub(crate) fn upgrade_bundle_beat_grid(dat_path: &Path) -> BackendResult<GridUpgrade> {
+    let dat = std::fs::read(dat_path)?;
+    let ext_path = dat_path.with_extension("EXT");
+    let ext = match std::fs::read(&ext_path) {
+        Ok(bytes) => Some(bytes),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err.into()),
+    };
+    let old_format = has_misplaced_pqtz_header(&dat)
+        || ext
+            .as_ref()
+            .is_some_and(|ext| pqt2_checksum_ok(&dat, ext) == Some(false));
+    if !old_format {
+        return Ok(GridUpgrade::AlreadyCurrent);
+    }
+    let Some(grid) = beat_grid_from_pqtz(&dat) else {
+        return Ok(GridUpgrade::NotRebuildable);
+    };
+    if let Some(patched) = with_beat_grid(&dat, &grid) {
+        atomic_write_bytes(dat_path, &patched)?;
+    }
+    if let Some(ext) = ext
+        && let Some(patched) = with_beat_grid(&ext, &grid)
+    {
+        atomic_write_bytes(&ext_path, &patched)?;
+    }
+    Ok(GridUpgrade::Rewritten)
+}
+
 /// `data` with its `PQTZ` and `PQT2` (whichever it has) rebuilt from `grid`;
 /// every other chunk is kept byte for byte. `None` when the file doesn't walk
 /// cleanly or has neither chunk.

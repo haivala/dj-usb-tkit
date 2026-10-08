@@ -786,6 +786,7 @@ impl BackendService {
         &self,
         req: SaveTrackAnalysisEditsRequest,
     ) -> BackendResult<SaveTrackAnalysisEditsData> {
+        self.ensure_no_data_migration()?;
         let track_id = req.track_id.trim().to_string();
         if track_id.is_empty() {
             return Err(BackendError::Validation("trackId is required".to_string()));

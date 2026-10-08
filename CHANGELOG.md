@@ -39,7 +39,19 @@
 
 ## Unreleased
 
-- **Feature:** USB diagnostics now flag tracks whose beat grid comes from an app version
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** Beat grids from earlier versions were refused by newer players such
+  as the XDJ-AZ ("please analyse this track in rekordbox", no Beat Sync). On the first
+  launch after updating, the app rewrites the beat grids in its own analysis cache in the
+  0.3.7 format, with progress shown in the footer. It happens once; analysis and
+  cue-editor saves wait until it's done. Re-export your playlists, or run USB repair →
+  **Fix Beat Grid**, to fix the ones already on a USB.
+- **Chore:** One-time data upgrades now go through a single registry
+  (`backend/src/service/migrations.rs`, see `docs/APP_DATA_MODEL.md` "Data migrations"),
+  recorded in a `data_migrations` table. The three existing startup backfills moved into it
+  and no longer run on every launch.
+- **New feature:** USB diagnostics now flag tracks whose beat grid comes from an app version
   before 0.3.7 (the format the XDJ-AZ refuses Beat Sync on) and point to **Fix Beat Grid**
   or a re-export. Only tracks this app exported can have it; the stick's export log, which
   now records the app version, says which ones to check, so the check reads only those

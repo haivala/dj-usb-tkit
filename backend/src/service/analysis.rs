@@ -597,6 +597,7 @@ impl BackendService {
     where
         F: FnMut(&AnalyzeTrackProgress),
     {
+        self.ensure_no_data_migration()?;
         let job_id = format!("job-analysis-{}", Uuid::now_v7());
         let conn = self.db.connect()?;
         let auto_mode = req.track_ids.is_empty();

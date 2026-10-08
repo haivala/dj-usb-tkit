@@ -170,6 +170,24 @@ export function showHelpOnFirstVisit(ctx) {
   } catch {}
 }
 
+// One-time upgrades of data older versions wrote (backend `migrations.rs`).
+// The backend runs them as a progress-bar job, or returns at once when
+// nothing is pending; a failure only gets logged, and they run again next
+// launch.
+export async function runDataMigrations(ctx) {
+  if (typeof ctx.command !== "function") return null;
+  try {
+    return await ctx.command("run_data_migrations");
+  } catch (error) {
+    ctx.pushEventLog?.({
+      level: "warn",
+      source: "startup",
+      message: `Data upgrade failed: ${error?.message || String(error)}`
+    });
+    return null;
+  }
+}
+
 export function runDeferredInitialLoad(ctx) {
   const { state } = ctx;
   (ctx.setTimeoutFn || setTimeout)(() => {
@@ -194,6 +212,7 @@ export function runDeferredInitialLoad(ctx) {
       ctx.renderWaveformsIn(ctx.document);
     }).then(() => {
       state.startupPhase = false;
+      return runDataMigrations(ctx);
     }).catch((error) => {
       state.startupPhase = false;
       ctx.logError(error);

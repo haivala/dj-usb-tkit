@@ -41,15 +41,15 @@ use crate::models::{
     ReorderPlaylistTracksRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
     RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
     ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    RunUsbParityReportData, RunUsbParityReportRequest, SaveTrackAnalysisEditsData,
-    SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
-    ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest,
-    SearchTracksData, SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest,
-    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
-    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail,
-    ValidateUsbRootData, ValidateUsbRootRequest,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
+    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
+    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
+    SaveUsbTrackAnalysisEditsRequest, ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest,
+    ScanRekordboxDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
+    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SetPlaybackMetronomeRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
+    TrackDetail, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
+    UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -1059,6 +1059,40 @@ pub fn merge_orphaned_usb_placeholder_tracks(
     state: State<'_, BackendCommands>,
 ) -> ApiResponse<MergeUsbPlaceholderTracksData> {
     state.merge_orphaned_usb_placeholder_tracks()
+}
+
+/// Runs the pending one-time background data migrations (`migrations.rs`)
+/// as a progress-bar job. Called by the frontend once after startup; with
+/// nothing pending it returns at once and emits no job events, so normal
+/// launches show nothing.
+#[tauri::command]
+pub async fn run_data_migrations(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+) -> Result<ApiResponse<RunDataMigrationsData>, String> {
+    let commands = state.inner().clone();
+    let pending = commands.pending_data_migrations();
+    match pending.data.as_ref() {
+        Some(ids) if !ids.is_empty() => {}
+        Some(_) => return Ok(ApiResponse::success(RunDataMigrationsData::default())),
+        None => {
+            return Ok(ApiResponse::failure(pending.error.unwrap_or_else(|| {
+                crate::error::BackendError::Internal("data migrations unavailable".to_string())
+                    .into()
+            })));
+        }
+    }
+    run_usb_job_with_progress(
+        &app,
+        "migration",
+        "migrate",
+        "Upgrading analysis data",
+        "Analysis data upgraded",
+        move |mut progress| {
+            commands.run_data_migrations_with_progress(move |c, t, m| progress(c, t, m))
+        },
+    )
+    .await
 }
 
 #[tauri::command]
