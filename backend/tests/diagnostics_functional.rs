@@ -3874,9 +3874,85 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
         data.applied_fixes,
         data.warnings
     );
+    // The outcome is in the Event Log too, not only in the repair dialog.
+    assert!(
+        data.warnings.iter().any(|w| w.code == "usb.repair.applied"
+            && w.level == "info"
+            && w.message == "repair applied: Fix Beat Grid: fixed 1 bundle(s)"),
+        "expected the applied fix in the log: {:#?}",
+        data.warnings
+    );
     assert_eq!(fs::read(&dat_path).expect("read DAT"), dat);
     assert_eq!(fs::read(&ext_path).expect("read EXT"), ext);
     assert_fix_not_proposed(&backend, &usb, "fix_beat_grid_header");
+}
+
+fn analysis_check(backend: &BackendCommands, usb: &Path, label: &str) -> Option<(String, String)> {
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
+    diagnostics
+        .data
+        .expect("diagnostics data")
+        .analysis_integrity
+        .checks
+        .into_iter()
+        .find(|c| c.label == label)
+        .map(|c| (format!("{:?}", c.status), c.detail))
+}
+
+#[test]
+fn diagnostics_flag_old_beat_grids_only_on_tracks_last_exported_before_0_3_7() {
+    use backend::service::anlz::build_anlz_dat_file;
+
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    let track_path = parsed.tracks[0].track_file_path.clone();
+    let dat_path = find_exported_anlz_dat(&usb);
+    let dat = build_anlz_dat_file(
+        &flat_waveform(400, 128),
+        &track_path,
+        Some(120.0),
+        200_000,
+        None,
+        &[],
+    );
+    let pqtz_at = dat.windows(4).position(|w| w == b"PQTZ").expect("PQTZ");
+    let mut old_dat = dat.clone();
+    old_dat[pqtz_at + 12..pqtz_at + 20].copy_from_slice(&[0, 0, 0, 8, 0, 0, 0, 0]);
+    fs::write(&dat_path, &old_dat).expect("write DAT");
+
+    // Exported by this version: the log says so, and the DAT isn't even read.
+    let log_path = usb
+        .join(".dj-usb-tkit")
+        .join("dj_usb_tkit_export_log.v1.json");
+    let log = fs::read_to_string(&log_path).expect("export log");
+    assert!(log.contains("\"appVersion\""), "{log}");
+    let (status, _) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
+    assert_eq!(status, "Pass");
+
+    // The same export as a pre-0.3.7 app logged it: no appVersion.
+    let mut value: serde_json::Value = serde_json::from_str(&log).expect("parse log");
+    for record in value["records"].as_array_mut().expect("records") {
+        record.as_object_mut().expect("record").remove("appVersion");
+    }
+    fs::write(&log_path, serde_json::to_string(&value).unwrap()).expect("write log");
+    let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
+    assert_eq!(status, "Warn");
+    assert!(
+        detail.starts_with("1 track(s)") && detail.contains(&track_path),
+        "{detail}"
+    );
+
+    // Once fixed, the old export record alone isn't enough to flag it.
+    fs::write(&dat_path, &dat).expect("write DAT");
+    let (status, _) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
+    assert_eq!(status, "Pass");
+
+    // No export log, no check.
+    fs::remove_file(&log_path).expect("remove log");
+    assert!(analysis_check(&backend, &usb, "Beat grid format").is_none());
 }
 
 // ── add_missing_seek_data ───────────────────────────────────────────────────

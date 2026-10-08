@@ -5429,6 +5429,26 @@ impl BackendService {
             unsupported_items.retain(|item| seen.insert(format!("{}|{}", item.issue, item.reason)));
         }
 
+        // The outcome of every fix also goes to the Event Log, so a log a user
+        // sends shows what the repair actually did.
+        if req.apply {
+            let outcomes = [
+                (Level::Info, "usb.repair.applied", "applied", &applied_fixes),
+                (Level::Info, "usb.repair.skipped", "skipped", &skipped_fixes),
+                (Level::Error, "usb.repair.failed", "failed", &failed_fixes),
+            ];
+            for (level, code, outcome, fixes) in outcomes {
+                for fix in fixes {
+                    warnings.push(logging::log(
+                        level,
+                        "usb-repair",
+                        code,
+                        format!("repair {outcome}: {fix}"),
+                    ));
+                }
+            }
+        }
+
         let diagnostics_after_apply = if req.apply {
             on_progress(95, 100, "USB: Re-running diagnostics after repair");
             match self.run_usb_diagnostics_with_progress(

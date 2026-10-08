@@ -902,6 +902,17 @@ impl BackendService {
                 detail,
                 link: None,
             });
+            if let Some(check) = diagnose_pre_0_3_7_beat_grids(&usb_root, parsed) {
+                if matches!(check.status, DiagStatus::Warn) {
+                    raw_warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-diagnostics",
+                        "usb.diagnostics.pre-0-3-7-beat-grids",
+                        check.detail.clone(),
+                    ));
+                }
+                analysis_integrity.checks.push(check);
+            }
             analysis_integrity.status = DiagStatus::worst_of(
                 &analysis_integrity
                     .checks
@@ -1949,6 +1960,67 @@ pub(crate) fn detect_bpm_key_mismatches(
         }
     }
     out
+}
+
+/// App versions before 0.3.7 wrote beat grids that some players (e.g. the
+/// XDJ-AZ) reject. Only tracks this app exported can have them, and the
+/// stick's export log says which were last exported by such a version (a
+/// record without `app_version`), so only those tracks' `.DAT` files are
+/// read, and only their first few KB. A stick without an export log gets no
+/// check. rekordbox-made bundles among them never match.
+fn diagnose_pre_0_3_7_beat_grids(
+    usb_root: &std::path::Path,
+    parsed: &crate::pdb_reader::ParsedPdb,
+) -> Option<DiagCheck> {
+    use std::io::Read;
+
+    let log = super::export_log::load_export_log(usb_root).ok()??;
+    let candidates = super::export_log::fingerprints_last_exported_before_versioning(&log);
+    let mut old_format = Vec::new();
+    for track in &parsed.tracks {
+        if !candidates.contains(&track_identity_key(&track.track_file_path, "", "", None)) {
+            continue;
+        }
+        let Some(dat) = super::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path) else {
+            continue;
+        };
+        let mut prefix = Vec::new();
+        let read = std::fs::File::open(&dat).and_then(|file| {
+            file.take(super::anlz::PQTZ_PROBE_BYTES)
+                .read_to_end(&mut prefix)
+        });
+        if read.is_ok() && super::anlz::has_misplaced_pqtz_header(&prefix) {
+            old_format.push(track.track_file_path.as_str());
+        }
+    }
+    let (status, detail) = if old_format.is_empty() {
+        (
+            DiagStatus::Pass,
+            "no track on this USB has a beat grid from an app version before 0.3.7".to_string(),
+        )
+    } else {
+        (
+            DiagStatus::Warn,
+            format!(
+                "{} track(s) have a beat grid from an app version before 0.3.7, which some \
+                 players (e.g. the XDJ-AZ) reject -- Beat Sync is unavailable on them; e.g. {}; \
+                 re-export them or run the repair (fix_beat_grid_header) to fix",
+                old_format.len(),
+                old_format
+                    .iter()
+                    .take(3)
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
+    };
+    Some(DiagCheck {
+        label: "Beat grid format".to_string(),
+        status,
+        detail,
+        link: None,
+    })
 }
 
 pub(crate) fn diagnose_analysis_integrity(

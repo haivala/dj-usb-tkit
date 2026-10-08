@@ -39,6 +39,14 @@
 
 ## Unreleased
 
+- **Feature:** USB diagnostics now flag tracks whose beat grid comes from an app version
+  before 0.3.7 (the format the XDJ-AZ refuses Beat Sync on) and point to **Fix Beat Grid**
+  or a re-export. Only tracks this app exported can have it; the stick's export log, which
+  now records the app version, says which ones to check, so the check reads only those
+  tracks' analysis files, and only their first 4 KB.
+- **Chore:** USB repair now writes the outcome of every fix (applied, skipped or failed)
+  to the Event Log, so a log shared for a bug report shows what the repair did.
+
 ## 0.3.7-rc.3
 
 Release candidate for testing Beat Sync on the XDJ-AZ. Use this one, not rc2.

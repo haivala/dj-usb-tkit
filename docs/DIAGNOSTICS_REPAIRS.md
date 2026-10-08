@@ -74,6 +74,7 @@ merging and rewriting both databases to match — see "Repair Flow" below.
 | eDB access | encrypted DB can be opened, required tables can be read, and history counts can be inspected |
 | Contents integrity | PDB and eDB indexed media-path sets agree at DB level |
 | Analysis integrity | PDB/eDB analysis-path references exist in database rows |
+| Beat grid format (under Analysis integrity) | tracks whose latest export on the stick was written by an app version before 0.3.7 (an export-log record without `appVersion`) and whose `.DAT` still has the old `PQTZ` header. Only those tracks' `.DAT` files are read, and only their first 4 KB; a stick without an export log gets no check. Points to `fix_beat_grid_header` or a re-export |
 | Playlist resolution | playlist rows resolve to tracks across PDB and eDB |
 | Player menu divergence | eDB visible menu categories are compared with PDB `t16` kinds |
 

@@ -868,16 +868,30 @@ const PQTZ_UNKNOWN2: u32 = 0x0008_0000;
 const PQTZ_HEADER_MISPLACED: [u8; 8] = [0, 0, 0, 0x08, 0, 0, 0, 0];
 
 /// Whether a `.DAT`'s `PQTZ` header has the pre-0.3.7 misplaced layout.
+/// Works on the start of the file too: `PQTZ` follows `PPTH` and `PVBR`,
+/// about 2 KB in, so diagnostics read only the first [`PQTZ_PROBE_BYTES`].
 pub(crate) fn has_misplaced_pqtz_header(dat: &[u8]) -> bool {
-    anlz_chunk_ranges(dat).is_some_and(|chunks| {
-        chunks.iter().any(|(tag, range)| {
-            tag == b"PQTZ"
-                && range.len() >= 24
-                && read_u32_be_at(dat, range.start + 4) == Some(24)
-                && dat[range.start + 12..range.start + 20] == PQTZ_HEADER_MISPLACED
-        })
-    })
+    if dat.get(0..4) != Some(b"PMAI") {
+        return false;
+    }
+    let mut pos = 28usize;
+    while let (Some(header_len), Some(total_len)) =
+        (read_u32_be_at(dat, pos + 4), read_u32_be_at(dat, pos + 8))
+    {
+        if header_len < 12 || total_len < header_len {
+            return false;
+        }
+        if &dat[pos..pos + 4] == b"PQTZ" {
+            return header_len == 24
+                && dat.get(pos + 12..pos + 20) == Some(&PQTZ_HEADER_MISPLACED[..]);
+        }
+        pos += total_len as usize;
+    }
+    false
 }
+
+/// How much of a `.DAT` [`has_misplaced_pqtz_header`] needs to see.
+pub(crate) const PQTZ_PROBE_BYTES: u64 = 4096;
 
 fn append_pqtz_chunk(file: &mut Vec<u8>, bpm: Option<f64>, duration_ms: u64, first_beat_ms: u32) {
     if let Some(grid) = BeatGrid::from_tempo(bpm, duration_ms, first_beat_ms) {
@@ -2142,6 +2156,21 @@ mod tests {
         assert_eq!(u32_at(&chunk, 24 + 4), 355);
         assert_eq!(u32_at(&chunk, 32 + 4), 238_555);
         assert_eq!(&chunk[24..26], &[0, 3]);
+    }
+
+    #[test]
+    fn misplaced_pqtz_header_is_found_in_the_first_4_kb() {
+        let (dat, _) = bundle_at(120.0, 437);
+        let pqtz = dat.windows(4).position(|w| w == b"PQTZ").unwrap();
+        let mut old = dat.clone();
+        old[pqtz + 12..pqtz + 20].copy_from_slice(&PQTZ_HEADER_MISPLACED);
+        let probe = PQTZ_PROBE_BYTES as usize;
+        assert!(has_misplaced_pqtz_header(&old[..probe]));
+        assert!(!has_misplaced_pqtz_header(&dat[..probe]));
+        assert!(
+            !has_misplaced_pqtz_header(&old[..pqtz + 16]),
+            "header cut off"
+        );
     }
 
     #[test]

@@ -33,6 +33,11 @@ pub(crate) struct UsbExportLogRecord {
     /// so logs written before this field existed still parse.
     #[serde(default = "default_export_mode")]
     pub mode: String,
+    /// The app version that wrote this record. Records from versions before
+    /// 0.3.7 have none (`#[serde(default)]` reads them as empty), which is
+    /// how diagnostics tell tracks last exported by those versions apart.
+    #[serde(default)]
+    pub app_version: String,
     /// Track identity fingerprints in actual playlist order (not sorted) --
     /// this is the manifest's own track sequence, i.e. what was actually
     /// written to the drive.
@@ -227,8 +232,39 @@ pub(crate) fn build_export_log_record(
         exported_at,
         export_date,
         mode,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
         track_fingerprints,
     }
+}
+
+/// Fingerprints of the tracks whose latest export on this stick was written
+/// by an app version before 0.3.7 (a record without `app_version`). Their
+/// analysis files may still be in a format those versions wrote.
+pub(crate) fn fingerprints_last_exported_before_versioning(
+    log: &UsbExportLog,
+) -> std::collections::HashSet<String> {
+    let mut latest = HashMap::<&str, (&str, bool)>::new();
+    for record in &log.records {
+        let sort_key = if record.exported_at.trim().is_empty() {
+            record.export_date.as_str()
+        } else {
+            record.exported_at.as_str()
+        };
+        let unversioned = record.app_version.trim().is_empty();
+        for fingerprint in &record.track_fingerprints {
+            let entry = latest
+                .entry(fingerprint.as_str())
+                .or_insert((sort_key, unversioned));
+            if sort_key >= entry.0 {
+                *entry = (sort_key, unversioned);
+            }
+        }
+    }
+    latest
+        .into_iter()
+        .filter(|(_, (_, unversioned))| *unversioned)
+        .map(|(fingerprint, _)| fingerprint.to_string())
+        .collect()
 }
 
 fn history_track_fingerprints(tracks: &[UsbTrack]) -> Vec<String> {
@@ -273,7 +309,7 @@ mod tests {
     use super::{
         UsbExportLog, UsbExportLogRecord, append_export_log_record,
         apply_history_dates_from_export_log, build_export_log_record, export_log_path,
-        legacy_export_log_path, load_export_log,
+        fingerprints_last_exported_before_versioning, legacy_export_log_path, load_export_log,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::service::export_helpers::{ExportManifest, ExportManifestTrack, ExportPlaylistData};
@@ -599,6 +635,7 @@ mod tests {
                     exported_at: "2026-04-03T09:00:00Z".to_string(),
                     export_date: "2026-04-03".to_string(),
                     mode: "additive".to_string(),
+                    app_version: String::new(),
                     track_fingerprints: build_export_log_record(
                         &ExportPlaylistData {
                             id: "pl".to_string(),
@@ -631,6 +668,7 @@ mod tests {
                     exported_at: "2026-04-04T11:00:00Z".to_string(),
                     export_date: "2026-04-04".to_string(),
                     mode: "additive".to_string(),
+                    app_version: String::new(),
                     track_fingerprints: build_export_log_record(
                         &ExportPlaylistData {
                             id: "pl".to_string(),
@@ -665,6 +703,51 @@ mod tests {
     }
 
     #[test]
+    fn new_records_carry_the_app_version_and_old_ones_parse_without_it() {
+        let record = build_export_log_record(
+            &ExportPlaylistData {
+                id: "pl".to_string(),
+                name: "Warmup".to_string(),
+                tracks: Vec::new(),
+            },
+            &manifest("2026-10-08T09:00:00Z", Vec::new()),
+        );
+        assert_eq!(record.app_version, env!("CARGO_PKG_VERSION"));
+
+        let old = r#"{"schemaVersion":1,"records":[{"playlistId":"p","playlistName":"P",
+            "exportedAt":"2026-04-03T10:00:00+00:00","exportDate":"2026-04-03",
+            "mode":"additive","trackFingerprints":["fp"]}]}"#;
+        let parsed: UsbExportLog = serde_json::from_str(old).unwrap();
+        assert_eq!(parsed.records[0].app_version, "");
+    }
+
+    #[test]
+    fn tracks_whose_latest_export_is_unversioned_are_found() {
+        let record = |at: &str, version: &str, fingerprints: &[&str]| UsbExportLogRecord {
+            playlist_id: "p".to_string(),
+            playlist_name: "P".to_string(),
+            exported_at: at.to_string(),
+            export_date: at[..10].to_string(),
+            mode: "additive".to_string(),
+            app_version: version.to_string(),
+            track_fingerprints: fingerprints.iter().map(|f| f.to_string()).collect(),
+        };
+        let log = UsbExportLog {
+            schema_version: 1,
+            records: vec![
+                record("2026-09-01T10:00:00+03:00", "", &["a", "b", "c"]),
+                // "b" was re-exported by 0.3.7, after the old export.
+                record("2026-10-09T10:00:00+03:00", "0.3.7", &["b", "d"]),
+            ],
+        };
+        let mut found: Vec<_> = fingerprints_last_exported_before_versioning(&log)
+            .into_iter()
+            .collect();
+        found.sort();
+        assert_eq!(found, ["a", "c"]);
+    }
+
+    #[test]
     fn load_export_log_migrates_legacy_path_forward() {
         let temp = tempdir().expect("tempdir");
         let legacy_path = legacy_export_log_path(temp.path());
@@ -677,6 +760,7 @@ mod tests {
                 exported_at: "2026-04-03T10:00:00+00:00".to_string(),
                 export_date: "2026-04-03".to_string(),
                 mode: "additive".to_string(),
+                app_version: String::new(),
                 track_fingerprints: vec!["fp-1".to_string()],
             }],
         };
