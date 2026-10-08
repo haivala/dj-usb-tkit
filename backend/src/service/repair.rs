@@ -27,9 +27,9 @@ use super::SETTING_EXPORT_MASTER_DB_ID;
 use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
 use super::anlz::{
     AnlzAnalysisEdits, AnlzBundlePaths, WaveformData, apply_analysis_edits_to_anlz,
-    atomic_write_bytes, canonical_analysis_bundle_paths, ensure_ppth_chunk,
-    has_misplaced_pqtz_header, has_pvb2_chunk, pvbr_total_samples, read_beatgrid_tempo_from_anlz,
-    read_first_beat_from_anlz, with_pqtz_header_fixed, with_seek_index,
+    atomic_write_bytes, beat_grid_from_pqtz, canonical_analysis_bundle_paths, ensure_ppth_chunk,
+    has_misplaced_pqtz_header, has_pvb2_chunk, pqt2_checksum_ok, pvbr_total_samples,
+    read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, with_beat_grid, with_seek_index,
     write_generated_anlz_bundle,
 };
 use super::anlz_seek::seek_index_for_audio;
@@ -3048,11 +3048,13 @@ fn apply_bpm_key_mismatch_repair(
     Ok((anlz_fixed, edb_fixed))
 }
 
-/// `.DAT` files under `USBANLZ` whose `PQTZ` header has the layout the app
-/// wrote before 0.3.7 (`fix_beat_grid_header`). rekordbox's own bundles never
-/// match. The files are found on disk, not through the PDB, so a bundle the
-/// database doesn't point at yet is still fixed.
-fn detect_misplaced_beat_grid_headers(usb_root: &Path) -> Vec<std::path::PathBuf> {
+/// `.DAT` files under `USBANLZ` whose beat grid is in the format the app
+/// wrote before 0.3.7 (`fix_beat_grid_header`): a `PQTZ` header with its
+/// value two bytes early, or an `.EXT` `PQT2` whose checksum doesn't match the
+/// `PQTZ` beats. rekordbox's own bundles never match. The files are found on
+/// disk, not through the PDB, so a bundle the database doesn't point at yet is
+/// still fixed.
+fn detect_app_beat_grids(usb_root: &Path) -> Vec<std::path::PathBuf> {
     walkdir::WalkDir::new(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_ANALYSIS_DIR))
         .into_iter()
         .filter_map(Result::ok)
@@ -3063,20 +3065,51 @@ fn detect_misplaced_beat_grid_headers(usb_root: &Path) -> Vec<std::path::PathBuf
                 .and_then(|value| value.to_str())
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("DAT"))
         })
-        .filter(|dat| std::fs::read(dat).is_ok_and(|bytes| has_misplaced_pqtz_header(&bytes)))
+        .filter(|dat| {
+            let Ok(dat_bytes) = std::fs::read(dat) else {
+                return false;
+            };
+            has_misplaced_pqtz_header(&dat_bytes)
+                || std::fs::read(dat.with_extension("EXT"))
+                    .is_ok_and(|ext| pqt2_checksum_ok(&dat_bytes, &ext) == Some(false))
+        })
         .collect()
 }
 
-/// Fix the headers found by [`detect_misplaced_beat_grid_headers`],
-/// re-detected so earlier fixes in the same pass are accounted for. Returns
-/// the number of `.DAT` files written.
-fn apply_beat_grid_header_repair(usb_root: &Path) -> BackendResult<usize> {
+/// Rewrite the grids found by [`detect_app_beat_grids`] in rekordbox's
+/// format: `PQTZ` in the `.DAT` and `PQT2` in the `.EXT`, both from the grid
+/// the `.DAT` already holds. Re-detected so earlier fixes in the same pass are
+/// accounted for. A grid that isn't one constant tempo is left alone with a
+/// warning. Returns the number of bundles written.
+fn apply_beat_grid_repair(
+    usb_root: &Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<usize> {
     let mut fixed = 0usize;
-    for dat in detect_misplaced_beat_grid_headers(usb_root) {
-        if let Some(patched) = with_pqtz_header_fixed(&std::fs::read(&dat)?) {
+    for dat in detect_app_beat_grids(usb_root) {
+        let dat_bytes = std::fs::read(&dat)?;
+        let Some(grid) = beat_grid_from_pqtz(&dat_bytes) else {
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-repair",
+                "usb.repair.beat-grid.skipped",
+                format!(
+                    "beat grid not rewritten (not a constant-tempo grid): {}",
+                    dat.display()
+                ),
+            ));
+            continue;
+        };
+        if let Some(patched) = with_beat_grid(&dat_bytes, &grid) {
             atomic_write_bytes(&dat, &patched)?;
-            fixed += 1;
         }
+        let ext = dat.with_extension("EXT");
+        if let Ok(ext_bytes) = std::fs::read(&ext)
+            && let Some(patched) = with_beat_grid(&ext_bytes, &grid)
+        {
+            atomic_write_bytes(&ext, &patched)?;
+        }
+        fixed += 1;
     }
     Ok(fixed)
 }
@@ -3894,24 +3927,25 @@ impl BackendService {
                 estimated_deletes: 0,
             });
         }
-        let misplaced_beat_grid_headers = detect_misplaced_beat_grid_headers(&usb_root);
-        if !misplaced_beat_grid_headers.is_empty() {
+        let app_beat_grids = detect_app_beat_grids(&usb_root);
+        if !app_beat_grids.is_empty() {
             detected_issues.push(format!(
-                "{} analysis file(s) with a beat-grid header in the pre-0.3.7 layout",
-                misplaced_beat_grid_headers.len()
+                "{} analysis bundle(s) with a beat grid in the pre-0.3.7 format",
+                app_beat_grids.len()
             ));
             proposed_fixes.push(RepairFixProposal {
                 id: BEAT_GRID_HEADER_FIX_ID.to_string(),
-                title: "Fix Beat Grid Header".to_string(),
-                description: "Move a value in the .DAT beat-grid header to where rekordbox \
-                              writes it. Analysis files from app versions before 0.3.7 have it \
-                              two bytes early, and some players (e.g. the XDJ-AZ) show no beat \
-                              grid for them. The beats themselves, cues and waveforms are kept."
+                title: "Fix Beat Grid".to_string(),
+                description: "Rewrite beat grids from app versions before 0.3.7 in rekordbox's \
+                              format: the .DAT header value two bytes off, and the .EXT extended \
+                              grid without its checksum and sub-millisecond beat times. Some \
+                              players (e.g. the XDJ-AZ) refuse Beat Sync on those. Beat positions \
+                              stay within 1 ms; cues and waveforms are kept."
                     .to_string(),
                 supported: true,
                 destructive: false,
                 always_applied: false,
-                estimated_writes: misplaced_beat_grid_headers.len(),
+                estimated_writes: app_beat_grids.len(),
                 estimated_deletes: 0,
             });
         }
@@ -5295,20 +5329,18 @@ impl BackendService {
             }
 
             if selected.contains(BEAT_GRID_HEADER_FIX_ID) {
-                if misplaced_beat_grid_headers.is_empty() {
-                    skipped_fixes.push("Fix Beat Grid Header: nothing to apply".to_string());
+                if app_beat_grids.is_empty() {
+                    skipped_fixes.push("Fix Beat Grid: nothing to apply".to_string());
                 } else {
-                    match apply_beat_grid_header_repair(&usb_root) {
-                        Ok(fixed) => applied_fixes.push(format!(
-                            "Fix Beat Grid Header: fixed {fixed} analysis file(s)"
-                        )),
-                        Err(err) => {
-                            failed_fixes.push(format!("Fix Beat Grid Header failed: {err}"))
+                    match apply_beat_grid_repair(&usb_root, &mut warnings) {
+                        Ok(fixed) => {
+                            applied_fixes.push(format!("Fix Beat Grid: fixed {fixed} bundle(s)"))
                         }
+                        Err(err) => failed_fixes.push(format!("Fix Beat Grid failed: {err}")),
                     }
                 }
-            } else if !misplaced_beat_grid_headers.is_empty() {
-                skipped_fixes.push("Fix Beat Grid Header: not selected".to_string());
+            } else if !app_beat_grids.is_empty() {
+                skipped_fixes.push("Fix Beat Grid: not selected".to_string());
             }
 
             if selected.contains(MISSING_SEEK_DATA_FIX_ID) {

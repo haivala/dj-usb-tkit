@@ -225,49 +225,213 @@ pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> BackendResult<()>
     Ok(())
 }
 
+// PQT2 — extended beat grid (`.EXT`), as rekordbox writes it (checked against
+// 1525 rekordbox bundles):
+//
+// len_header = 0x38 (56)
+// Offset 12-15: 0
+// Offset 16-19: 0x01000002
+// Offset 20-23: 0
+// Offset 24-31: first beat (beat_number u16, tempo u16, time_ms u32), as in PQTZ
+// Offset 32-39: last beat, same layout
+// Offset 40-43: beat count (= PQTZ's)
+// Offset 44-47: checksum: Σ of beat_number + tempo + time_ms over every PQTZ beat
+// Offset 48-55: 0
+// Offset 56+:   one u16 per beat: the beat time's microseconds (0-999); PQTZ
+//               holds the floored milliseconds of the same time.
+//
+// Before 0.3.7 the app wrote the checksum as 0 and `(i % 4, 0)` as the body.
+
 fn append_pqt2_chunk(file: &mut Vec<u8>, bpm: Option<f64>, duration_ms: u64, first_beat_ms: u32) {
-    // No known tempo, no beat grid: never bake in a made-up one.
-    let Some(bpm_val) = bpm.filter(|b| *b > 0.0) else {
+    if let Some(grid) = BeatGrid::from_tempo(bpm, duration_ms, first_beat_ms) {
+        append_pqt2_grid(file, &grid);
+    }
+}
+
+fn append_pqt2_grid(file: &mut Vec<u8>, grid: &BeatGrid) {
+    let beats: Vec<GridBeat> = grid.beats().collect();
+    let (Some(first), Some(last)) = (beats.first(), beats.last()) else {
         return;
     };
-    let dur_ms = duration_ms as f64;
-    let beat_interval_ms = 60_000.0 / bpm_val;
-    let num_beats = compute_num_beats(dur_ms, beat_interval_ms, first_beat_ms);
-    if num_beats == 0 {
-        return;
-    }
-    let tempo_centibpm = (bpm_val * 100.0).round() as u16;
-
     let mut header = Vec::<u8>::with_capacity(44);
     header.extend_from_slice(&0u32.to_be_bytes());
     header.extend_from_slice(&0x01000002u32.to_be_bytes());
     header.extend_from_slice(&0u32.to_be_bytes());
+    for beat in [first, last] {
+        header.extend_from_slice(&beat.entry());
+    }
+    header.extend_from_slice(&grid.num_beats.to_be_bytes());
+    header.extend_from_slice(&beat_grid_checksum(&beats).to_be_bytes());
+    header.extend_from_slice(&[0u8; 8]);
 
-    let first_beat_num = 1u16;
-    let first_time_ms = first_beat_ms;
-    let last_beat_index = num_beats.saturating_sub(1);
-    let last_beat_num = ((last_beat_index % 4) + 1) as u16;
-    let last_time_ms =
-        first_beat_ms.saturating_add((last_beat_index as f64 * beat_interval_ms).round() as u32);
-    header.extend_from_slice(&first_beat_num.to_be_bytes());
-    header.extend_from_slice(&tempo_centibpm.to_be_bytes());
-    header.extend_from_slice(&first_time_ms.to_be_bytes());
-    header.extend_from_slice(&last_beat_num.to_be_bytes());
-    header.extend_from_slice(&tempo_centibpm.to_be_bytes());
-    header.extend_from_slice(&last_time_ms.to_be_bytes());
+    let mut payload = Vec::<u8>::with_capacity(beats.len() * 2);
+    for beat in &beats {
+        payload.extend_from_slice(&beat.micros.to_be_bytes());
+    }
+    append_anlz_chunk(file, b"PQT2", &header, &payload);
+}
 
-    header.extend_from_slice(&num_beats.to_be_bytes());
-    header.extend_from_slice(&0u32.to_be_bytes());
-    header.extend_from_slice(&0u32.to_be_bytes());
-    header.extend_from_slice(&0u32.to_be_bytes());
+/// A constant-tempo beat grid: the one source of the `PQTZ` and `PQT2`
+/// chunks, so the two always describe the same beats.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct BeatGrid {
+    /// Position in the bar (1-4) of the first beat.
+    first_beat_number: u16,
+    tempo_x100: u16,
+    first_us: u64,
+    interval_us: f64,
+    num_beats: u32,
+}
 
-    let mut payload = Vec::<u8>::with_capacity((num_beats as usize) * 2);
-    for i in 0..num_beats {
-        payload.push((i % 4) as u8);
-        payload.push(0);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GridBeat {
+    number: u16,
+    tempo_x100: u16,
+    time_ms: u32,
+    /// The microseconds below `time_ms` (0-999).
+    micros: u16,
+}
+
+impl GridBeat {
+    /// The 8-byte `PQTZ` entry (also `PQT2`'s first/last beat).
+    fn entry(&self) -> [u8; 8] {
+        let mut entry = [0u8; 8];
+        entry[0..2].copy_from_slice(&self.number.to_be_bytes());
+        entry[2..4].copy_from_slice(&self.tempo_x100.to_be_bytes());
+        entry[4..8].copy_from_slice(&self.time_ms.to_be_bytes());
+        entry
+    }
+}
+
+impl BeatGrid {
+    /// The grid analysis and export write; `None` without a known tempo
+    /// (never a made-up grid).
+    fn from_tempo(bpm: Option<f64>, duration_ms: u64, first_beat_ms: u32) -> Option<Self> {
+        let bpm = bpm.filter(|b| *b > 0.0)?;
+        let interval_ms = 60_000.0 / bpm;
+        let num_beats = compute_num_beats(duration_ms as f64, interval_ms, first_beat_ms);
+        (num_beats > 0).then_some(Self {
+            first_beat_number: 1,
+            tempo_x100: (bpm * 100.0).round() as u16,
+            first_us: u64::from(first_beat_ms) * 1000,
+            interval_us: interval_ms * 1000.0,
+            num_beats,
+        })
     }
 
-    append_anlz_chunk(file, b"PQT2", &header, &payload);
+    fn beats(&self) -> impl Iterator<Item = GridBeat> + '_ {
+        (0..self.num_beats).map(move |i| {
+            let time_us = self.first_us + (f64::from(i) * self.interval_us).round() as u64;
+            GridBeat {
+                number: ((u32::from(self.first_beat_number) - 1 + i) % 4 + 1) as u16,
+                tempo_x100: self.tempo_x100,
+                time_ms: (time_us / 1000) as u32,
+                micros: (time_us % 1000) as u16,
+            }
+        })
+    }
+}
+
+fn beat_grid_checksum(beats: &[GridBeat]) -> u32 {
+    beats.iter().fold(0u32, |sum, beat| {
+        sum.wrapping_add(u32::from(beat.number))
+            .wrapping_add(u32::from(beat.tempo_x100))
+            .wrapping_add(beat.time_ms)
+    })
+}
+
+/// The `PQTZ` beats of a `.DAT` as (beat_number, tempo, time_ms).
+fn pqtz_beats(dat: &[u8]) -> Option<Vec<(u16, u16, u32)>> {
+    let (_, range) = anlz_chunk_ranges(dat)?
+        .into_iter()
+        .find(|(tag, range)| tag == b"PQTZ" && range.len() >= 24)?;
+    let header_len = read_u32_be_at(dat, range.start + 4)? as usize;
+    let body = dat.get(range.start + header_len..range.end)?;
+    Some(
+        body.chunks_exact(8)
+            .map(|e| {
+                (
+                    u16::from_be_bytes([e[0], e[1]]),
+                    u16::from_be_bytes([e[2], e[3]]),
+                    u32::from_be_bytes([e[4], e[5], e[6], e[7]]),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Whether an `.EXT`'s `PQT2` checksum matches its `.DAT`'s `PQTZ` beats;
+/// `None` when either chunk is missing or a file doesn't walk cleanly.
+/// rekordbox's own bundles always match.
+pub(crate) fn pqt2_checksum_ok(dat: &[u8], ext: &[u8]) -> Option<bool> {
+    let beats = pqtz_beats(dat)?;
+    let (_, range) = anlz_chunk_ranges(ext)?
+        .into_iter()
+        .find(|(tag, range)| tag == b"PQT2" && range.len() >= 56)?;
+    let sum = beats.iter().fold(0u32, |sum, (number, tempo, time)| {
+        sum.wrapping_add(u32::from(*number))
+            .wrapping_add(u32::from(*tempo))
+            .wrapping_add(*time)
+    });
+    Some(read_u32_be_at(ext, range.start + 44)? == sum)
+}
+
+/// The constant-tempo grid a `.DAT`'s `PQTZ` describes, to rewrite it (and
+/// `PQT2`) in rekordbox's format. `None` unless every beat has the same
+/// tempo, the beat numbers cycle through the bar, and every beat lies within
+/// 1 ms of the regenerated one -- a grid this app could have written.
+pub(crate) fn beat_grid_from_pqtz(dat: &[u8]) -> Option<BeatGrid> {
+    let beats = pqtz_beats(dat)?;
+    let &(first_number, tempo_x100, first_ms) = beats.first()?;
+    let &(_, _, last_ms) = beats.last()?;
+    if tempo_x100 == 0 || !(1..=4).contains(&first_number) {
+        return None;
+    }
+    let base = BeatGrid {
+        first_beat_number: first_number,
+        tempo_x100,
+        first_us: u64::from(first_ms) * 1000,
+        interval_us: 6_000_000_000.0 / f64::from(tempo_x100),
+        num_beats: u32::try_from(beats.len()).ok()?,
+    };
+    let fits = |grid: &BeatGrid| {
+        grid.beats()
+            .zip(&beats)
+            .all(|(new, &(number, tempo, time))| {
+                new.number == number && new.tempo_x100 == tempo && new.time_ms.abs_diff(time) <= 1
+            })
+    };
+    // The tempo field is rounded to 0.01 BPM; when the beats don't follow it
+    // exactly, keep their own spacing instead.
+    let measured = (beats.len() > 1).then(|| BeatGrid {
+        interval_us: f64::from(last_ms - first_ms) * 1000.0 / (beats.len() - 1) as f64,
+        ..base
+    });
+    [Some(base), measured].into_iter().flatten().find(fits)
+}
+
+/// `data` with its `PQTZ` and `PQT2` (whichever it has) rebuilt from `grid`;
+/// every other chunk is kept byte for byte. `None` when the file doesn't walk
+/// cleanly or has neither chunk.
+pub(crate) fn with_beat_grid(data: &[u8], grid: &BeatGrid) -> Option<Vec<u8>> {
+    let chunks = anlz_chunk_ranges(data)?;
+    if !chunks
+        .iter()
+        .any(|(tag, _)| tag == b"PQTZ" || tag == b"PQT2")
+    {
+        return None;
+    }
+    let mut out = data[..28].to_vec();
+    for (tag, range) in chunks {
+        match &tag {
+            b"PQTZ" => append_pqtz_grid(&mut out, grid),
+            b"PQT2" => append_pqt2_grid(&mut out, grid),
+            _ => out.extend_from_slice(&data[range]),
+        }
+    }
+    let file_len = out.len() as u32;
+    out[8..12].copy_from_slice(&file_len.to_be_bytes());
+    Some(out)
 }
 
 fn normalize_first_beat_ms(first_beat_ms: u32, bpm: Option<f64>) -> u32 {
@@ -689,9 +853,9 @@ pub(super) fn with_seek_index(data: &[u8], index: &SeekIndex) -> Option<Vec<u8>>
 // Offset 20-23: len_beats (4 bytes)
 // Offset 24+:   beat entries (8 bytes each)
 //
-// Before 0.3.7 the app wrote unknown2 two bytes early (offsets 14-17); the
-// XDJ-AZ rejects such a grid. The USB repair "Fix Beat Grid Header" moves it
-// in place on the stick ([`with_pqtz_header_fixed`]).
+// Before 0.3.7 the app wrote unknown2 two bytes early (offsets 14-17). The
+// USB repair "Fix Beat Grid" rewrites such grids on the stick
+// ([`with_beat_grid`]).
 //
 // Beat entry:
 //   0-1: beat_number (u16, 1-4 position in measure)
@@ -699,66 +863,38 @@ pub(super) fn with_seek_index(data: &[u8], index: &SeekIndex) -> Option<Vec<u8>>
 //   4-7: time        (u32, milliseconds)
 
 const PQTZ_UNKNOWN2: u32 = 0x0008_0000;
-/// Chunk bytes 12-19 as rekordbox writes them, and as the app wrote them
-/// before 0.3.7 (unknown2 two bytes early).
-const PQTZ_HEADER_REKORDBOX: [u8; 8] = [0, 0, 0, 0, 0, 0x08, 0, 0];
+/// Chunk bytes 12-19 as the app wrote them before 0.3.7 (unknown2 two bytes
+/// early).
 const PQTZ_HEADER_MISPLACED: [u8; 8] = [0, 0, 0, 0x08, 0, 0, 0, 0];
 
-/// The `PQTZ` chunk of a `.DAT` whose header has the pre-0.3.7 misplaced
-/// layout, as its byte offset; `None` when there is none or the file doesn't
-/// walk cleanly.
-fn misplaced_pqtz_header_at(dat: &[u8]) -> Option<usize> {
-    anlz_chunk_ranges(dat)?
-        .into_iter()
-        .find(|(tag, range)| {
+/// Whether a `.DAT`'s `PQTZ` header has the pre-0.3.7 misplaced layout.
+pub(crate) fn has_misplaced_pqtz_header(dat: &[u8]) -> bool {
+    anlz_chunk_ranges(dat).is_some_and(|chunks| {
+        chunks.iter().any(|(tag, range)| {
             tag == b"PQTZ"
                 && range.len() >= 24
                 && read_u32_be_at(dat, range.start + 4) == Some(24)
                 && dat[range.start + 12..range.start + 20] == PQTZ_HEADER_MISPLACED
         })
-        .map(|(_, range)| range.start)
-}
-
-pub(crate) fn has_misplaced_pqtz_header(dat: &[u8]) -> bool {
-    misplaced_pqtz_header_at(dat).is_some()
-}
-
-/// `dat` with a misplaced `PQTZ` header moved to rekordbox's layout; the
-/// beats and every other chunk are kept byte for byte. `None` when there is
-/// nothing to fix.
-pub(crate) fn with_pqtz_header_fixed(dat: &[u8]) -> Option<Vec<u8>> {
-    let start = misplaced_pqtz_header_at(dat)?;
-    let mut out = dat.to_vec();
-    out[start + 12..start + 20].copy_from_slice(&PQTZ_HEADER_REKORDBOX);
-    Some(out)
+    })
 }
 
 fn append_pqtz_chunk(file: &mut Vec<u8>, bpm: Option<f64>, duration_ms: u64, first_beat_ms: u32) {
-    // No known tempo, no beat grid: never bake in a made-up one.
-    let Some(bpm_val) = bpm.filter(|b| *b > 0.0) else {
-        return;
-    };
-    let dur_ms = duration_ms as f64;
-    let beat_interval_ms = 60_000.0 / bpm_val;
-    let num_beats = compute_num_beats(dur_ms, beat_interval_ms, first_beat_ms);
-    if num_beats == 0 {
-        return;
+    if let Some(grid) = BeatGrid::from_tempo(bpm, duration_ms, first_beat_ms) {
+        append_pqtz_grid(file, &grid);
     }
-    let tempo_centibpm = (bpm_val * 100.0).round() as u16;
+}
 
+fn append_pqtz_grid(file: &mut Vec<u8>, grid: &BeatGrid) {
     // Header content: 12 bytes (offsets 12-23 in chunk)
     let mut header = vec![0u8; 12];
     // [0..4] = unknown1 = 0
     header[4..8].copy_from_slice(&PQTZ_UNKNOWN2.to_be_bytes());
-    header[8..12].copy_from_slice(&num_beats.to_be_bytes());
+    header[8..12].copy_from_slice(&grid.num_beats.to_be_bytes());
 
-    let mut payload = Vec::with_capacity(num_beats as usize * 8);
-    for i in 0..num_beats {
-        let beat_num = ((i % 4) + 1) as u16;
-        let time_ms = first_beat_ms.saturating_add((i as f64 * beat_interval_ms).round() as u32);
-        payload.extend_from_slice(&beat_num.to_be_bytes());
-        payload.extend_from_slice(&tempo_centibpm.to_be_bytes());
-        payload.extend_from_slice(&time_ms.to_be_bytes());
+    let mut payload = Vec::with_capacity(grid.num_beats as usize * 8);
+    for beat in grid.beats() {
+        payload.extend_from_slice(&beat.entry());
     }
     append_anlz_chunk(file, b"PQTZ", &header, &payload);
 }
@@ -1940,22 +2076,108 @@ mod tests {
         assert!(!has_misplaced_pqtz_header(&dat));
     }
 
+    fn bundle_at(bpm: f64, first_beat_ms: u32) -> (Vec<u8>, Vec<u8>) {
+        let waveform = WaveformData::from_peaks(vec![128; 400]);
+        (
+            build_anlz_dat_file(&waveform, "", Some(bpm), 200_000, Some(first_beat_ms), &[]),
+            build_anlz_ext_file(&waveform, "", Some(bpm), 200_000, Some(first_beat_ms), &[]),
+        )
+    }
+
+    fn u32_at(data: &[u8], at: usize) -> u32 {
+        u32::from_be_bytes(data[at..at + 4].try_into().unwrap())
+    }
+
     #[test]
-    fn misplaced_pqtz_header_is_fixed_in_place() {
-        let dat = build_anlz_dat_file(
-            &WaveformData::from_peaks(vec![128; 100]),
-            "",
-            Some(120.0),
-            30_000,
-            None,
-            &[],
-        );
-        let pos = dat.windows(4).position(|w| w == b"PQTZ").unwrap();
-        let mut old = dat.clone();
-        old[pos + 12..pos + 20].copy_from_slice(&PQTZ_HEADER_MISPLACED);
-        assert!(has_misplaced_pqtz_header(&old));
-        assert_eq!(with_pqtz_header_fixed(&old), Some(dat.clone()));
-        assert_eq!(with_pqtz_header_fixed(&dat), None);
+    fn pqt2_matches_rekordbox_layout_and_checksum() {
+        let (dat, ext) = bundle_at(131.82, 295);
+        let beats = pqtz_beats(&dat).unwrap();
+        let pos = ext.windows(4).position(|w| w == b"PQT2").unwrap();
+        let header = &ext[pos..pos + 56];
+        assert_eq!(u32_at(header, 4), 56);
+        assert_eq!(u32_at(header, 16), 0x0100_0002);
+        let entry = |at: usize| {
+            (
+                u16::from_be_bytes([header[at], header[at + 1]]),
+                u16::from_be_bytes([header[at + 2], header[at + 3]]),
+                u32_at(header, at + 4),
+            )
+        };
+        assert_eq!(entry(24), beats[0]);
+        assert_eq!(entry(32), *beats.last().unwrap());
+        assert_eq!(u32_at(header, 40), beats.len() as u32);
+        let sum: u32 = beats
+            .iter()
+            .map(|(n, t, ms)| u32::from(*n) + u32::from(*t) + ms)
+            .sum();
+        assert_eq!(u32_at(header, 44), sum);
+        assert_eq!(&header[48..56], &[0; 8]);
+        assert_eq!(pqt2_checksum_ok(&dat, &ext), Some(true));
+
+        // The body is each beat's microseconds; PQTZ holds the floored ms.
+        let body = find_chunk_payload(&ext, "PQT2").unwrap();
+        let interval_us = 60_000_000.0 / 131.82;
+        for (i, (&(_, _, ms), us)) in beats.iter().zip(body.chunks_exact(2)).enumerate() {
+            let exact = 295_000 + (i as f64 * interval_us).round() as u64;
+            let us = u64::from(u16::from_be_bytes([us[0], us[1]]));
+            assert!(us < 1000);
+            assert_eq!(u64::from(ms) * 1000 + us, exact, "beat {i}");
+        }
+    }
+
+    #[test]
+    fn pqt2_body_reproduces_a_rekordbox_100_bpm_grid() {
+        // rekordbox: beats at 355.102 ms + n × 600 ms, every body entry 0x66.
+        let grid = BeatGrid {
+            first_beat_number: 3,
+            tempo_x100: 10_000,
+            first_us: 355_102,
+            interval_us: 600_000.0,
+            num_beats: 398,
+        };
+        let mut chunk = Vec::new();
+        append_pqt2_grid(&mut chunk, &grid);
+        let body = &chunk[56..];
+        assert!(body.chunks_exact(2).all(|e| e == [0x00, 0x66]));
+        assert_eq!(u32_at(&chunk, 24 + 4), 355);
+        assert_eq!(u32_at(&chunk, 32 + 4), 238_555);
+        assert_eq!(&chunk[24..26], &[0, 3]);
+    }
+
+    #[test]
+    fn pre_0_3_7_grids_are_rebuilt_from_their_own_beats() {
+        let (dat, ext) = bundle_at(120.0, 437);
+        // As a pre-0.3.7 app wrote them: PQTZ value two bytes early, PQT2
+        // without checksum and with the old `(i % 4, 0)` body.
+        let mut old_dat = dat.clone();
+        let pqtz = old_dat.windows(4).position(|w| w == b"PQTZ").unwrap();
+        old_dat[pqtz + 12..pqtz + 20].copy_from_slice(&PQTZ_HEADER_MISPLACED);
+        let mut old_ext = ext.clone();
+        let pqt2 = old_ext.windows(4).position(|w| w == b"PQT2").unwrap();
+        old_ext[pqt2 + 44..pqt2 + 48].fill(0);
+        let count = u32_at(&old_ext, pqt2 + 40) as usize;
+        for i in 0..count {
+            let at = pqt2 + 56 + i * 2;
+            old_ext[at..at + 2].copy_from_slice(&[(i % 4) as u8, 0]);
+        }
+        assert!(has_misplaced_pqtz_header(&old_dat));
+        assert_eq!(pqt2_checksum_ok(&old_dat, &old_ext), Some(false));
+
+        let grid = beat_grid_from_pqtz(&old_dat).expect("constant-tempo grid");
+        assert_eq!(with_beat_grid(&old_dat, &grid), Some(dat));
+        assert_eq!(with_beat_grid(&old_ext, &grid), Some(ext));
+    }
+
+    #[test]
+    fn grid_rebuild_keeps_beats_whose_tempo_field_is_rounded() {
+        // 127.996 BPM is stored as 128.00; following the field would drift
+        // by over 10 ms by the end, so the beats' own spacing is used.
+        let (dat, _) = bundle_at(127.996, 0);
+        let grid = beat_grid_from_pqtz(&dat).expect("grid");
+        let rebuilt = pqtz_beats(&with_beat_grid(&dat, &grid).unwrap()).unwrap();
+        for (old, new) in pqtz_beats(&dat).unwrap().iter().zip(&rebuilt) {
+            assert!(old.2.abs_diff(new.2) <= 1, "{old:?} vs {new:?}");
+        }
     }
 
     #[test]

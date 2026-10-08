@@ -110,22 +110,41 @@ drag-to-pan** shows the full ~150 entries/sec detail; it opens zoomed to the
 first 60 bars at the track's BPM. The magnifier button is disabled for tracks with no analysis
 (no `.EXT` ⇒ no PWV5). See `vanilla-ui/components/track-detail/waveform_detail.mjs`.
 
-## Beat-grid header layout
+## Beat-grid layout (`PQTZ`, `PQT2`)
 
-`PQTZ`'s 12 header bytes after the common 12 are `u32` 0, `u32` `0x00080000`, `u32` beat
-count. Every rekordbox `.DAT` checked (about 1,600 across four sticks) has exactly that.
-Before 0.3.7 the app wrote `0x00080000` two bytes early (`00000008 00000000` instead of
-`00000000 00080000`), which older CDJs ignore. It is the one fixed-value difference between
-the app's and rekordbox's `.DAT` beat grids, so it is the prime suspect for the XDJ-AZ
-rejecting them.
+The XDJ-AZ's manual says Beat Sync and Key Sync need tracks "analyzed by rekordbox", while
+quantize and beat-grid adjustment also accept its own analysis. On app-analysed tracks it
+refused Sync ("please analyse this track in rekordbox"), so it evidently discards analysis
+files that fail its checks. Before 0.3.7 the app's beat grids differed from rekordbox's in
+two ways, both now fixed. Every rekordbox bundle checked (about 1,530 across four sticks)
+matches the layouts below exactly.
 
-New bundles are written with rekordbox's layout, and export rebuilds the grid of every
-app-made bundle with a known tempo, so re-exporting fixes a stick. The USB repair **Fix
-Beat Grid Header** (`fix_beat_grid_header`) fixes the header in place without an export.
+`PQTZ` (`.DAT`): the 12 header bytes after the common 12 are `u32` 0, `u32` `0x00080000`,
+`u32` beat count. The app wrote `0x00080000` two bytes early (`00000008 00000000`).
 
-Still unexplained: rekordbox's `.EXT` `PQT2` header carries a non-zero `u32` at chunk
-offset 44 that the app writes as 0. It is not a CRC32, Adler-32 or plain sum of the beat
-data; it is about 5–14% above the sum of the `PQTZ` beat times.
+`PQT2` (`.EXT`, `len_header` 56), chunk offsets:
+
+| Offset | Value |
+|---|---|
+| 12 | `u32` 0 |
+| 16 | `u32` `0x01000002` |
+| 20 | `u32` 0 |
+| 24 | first beat: `u16` beat number, `u16` tempo × 100, `u32` time in ms (as in `PQTZ`) |
+| 32 | last beat, same layout |
+| 40 | `u32` beat count, equal to `PQTZ`'s |
+| 44 | `u32` checksum: the sum of beat number + tempo + time over every `PQTZ` beat |
+| 48 | 8 zero bytes |
+| 56+ | one `u16` per beat: the microseconds of the beat's time (0–999) |
+
+`PQTZ` holds the floored milliseconds of the same exact time. At exactly 100 BPM with the
+first beat at 355.102 ms, every body entry is `0x0066`. The app wrote the checksum as 0 and
+`(i % 4, 0)` as the body.
+
+Both chunks now come from one constant-tempo grid (`BeatGrid` in `anlz.rs`). Export rebuilds
+the grid of every app-made bundle with a known tempo, so re-exporting fixes a stick. The USB
+repair **Fix Beat Grid** (`fix_beat_grid_header`) rewrites both chunks on the stick without
+an export, from the grid the `.DAT` already holds: within 1 ms of the old beat times, and
+using the beats' own spacing when the tempo field is rounded.
 
 ## Seek-index chunks (`PVBR`, `PVB2`)
 
@@ -137,7 +156,7 @@ Tracks play correctly this way on a CDJ-2000NXS2, including FLACs.
 An XDJ-AZ, though, rejected the beat grid of app-analysed tracks ("please analyse this
 track in rekordbox") while accepting rekordbox's bundles for the same files. Filling in
 `PVBR` and `PVB2` (0.3.7-rc.1) did not change that, so seek data is not, or not alone, the
-cause; see "Beat-grid header layout" below for the next candidate.
+cause; see "Beat-grid layout" above.
 
 Until that is settled on hardware, analysis is unchanged and the seek data is added on the
 stick only, by the USB repair **Add Missing Seek Data** (`add_missing_seek_data`, see

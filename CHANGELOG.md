@@ -39,6 +39,18 @@
 
 ## Unreleased
 
+## 0.3.7-rc.3
+
+Release candidate for testing Beat Sync on the XDJ-AZ. Use this one, not rc2.
+
+- **Fix:** The app's extended beat grid (`PQT2` in the `.EXT` analysis file) now matches
+  rekordbox's exactly: it carries the checksum of the beat grid and each beat's time to the
+  microsecond. Before, the checksum was 0, which is the likely reason the XDJ-AZ treated
+  app-analysed tracks as not analysed by rekordbox and refused Beat Sync. Beat times are
+  now floored to the millisecond as rekordbox does (≤ 1 ms difference).
+- **Changed:** The USB repair from rc2 is now **Fix Beat Grid**. It rewrites both the
+  `.DAT` and `.EXT` beat grids of older app bundles on the stick; re-exporting does the same.
+
 ## 0.3.7-rc.2
 
 Release candidate for testing the beat grid on the XDJ-AZ.
