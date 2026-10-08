@@ -131,8 +131,9 @@ stay in `db.rs` `migrate()` and are versioned by `schema_version`.
   upgrade", so a fresh analysis file can't be overwritten. `0.3.7-cache-beat-grids`
   rewrites cached beat grids in the 0.3.7 format (`docs/WAVEFORMS.md`, "Beat-grid
   layout"), and `0.3.7-cache-mp3-seek-index` adds rekordbox's `PVBR` seek index to
-  cached MP3 bundles from their source files ("Seek-index chunks"; a missing source file
-  is skipped, and the track gets it when re-analysed).
+  cached MP3 bundles from their source files ("Seek-index chunks"). A track whose source
+  file is missing has its cached bundle deleted and is marked for analysis, so it is
+  rebuilt, seek data included, once the file is back.
 
 A migration that finishes is recorded and never runs again. One that reports
 `RetryLater` or fails is logged, isn't recorded, and runs again on the next launch; it

@@ -32,7 +32,7 @@ use super::anlz::{
     read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, upgrade_bundle_beat_grid,
     with_seek_index, write_generated_anlz_bundle,
 };
-use super::anlz_seek::seek_index_for_audio;
+use super::anlz_seek::{SEEK_SKIP_REPORT_HINT, seek_index_for_audio};
 use super::cues::collapse_anlz_cues;
 use super::export::{APP_CONTENT_LINK_ID, ContentFingerprint, content_fingerprint_key};
 use super::export_helpers::{
@@ -69,7 +69,8 @@ use super::diagnostics::{
 };
 
 const BPM_KEY_MISMATCH_FIX_ID: &str = "fix_bpm_key_mismatch";
-const MISSING_SEEK_DATA_FIX_ID: &str = "add_missing_seek_data";
+const MISSING_MP3_SEEK_DATA_FIX_ID: &str = "add_missing_mp3_seek_data";
+const MISSING_FLAC_SEEK_DATA_FIX_ID: &str = "add_missing_flac_seek_data";
 const BEAT_GRID_HEADER_FIX_ID: &str = "fix_beat_grid_header";
 const STRICT_PARITY_UPGRADE_FIX_ID: &str = "upgrade_export_data_to_strict_parity";
 const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
@@ -140,7 +141,8 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_HEADER_COMPATIBILITY_FIX_ID,
     BPM_KEY_MISMATCH_FIX_ID,
     BEAT_GRID_HEADER_FIX_ID,
-    MISSING_SEEK_DATA_FIX_ID,
+    MISSING_MP3_SEEK_DATA_FIX_ID,
+    MISSING_FLAC_SEEK_DATA_FIX_ID,
     RELINK_MOVED_AUDIO_FIX_ID,
     UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
     "remove_missing_audio_references",
@@ -3104,11 +3106,56 @@ fn apply_beat_grid_repair(
     Ok(fixed)
 }
 
+/// The two seek indexes rekordbox writes: `PVBR` in an MP3's `.DAT`, `PVB2`
+/// in a FLAC's `.EXT`. Each has its own fix, so the exactly reproduced MP3
+/// one (`add_missing_mp3_seek_data`) can be applied without the FLAC one
+/// (`add_missing_flac_seek_data`), whose long-track rule matches about 98% of
+/// rekordbox's entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SeekFormat {
+    Mp3,
+    Flac,
+}
+
+impl SeekFormat {
+    fn of(path: &str) -> Option<Self> {
+        let extension = Path::new(path).extension()?.to_str()?;
+        if extension.eq_ignore_ascii_case("mp3") {
+            Some(Self::Mp3)
+        } else if extension.eq_ignore_ascii_case("flac") {
+            Some(Self::Flac)
+        } else {
+            None
+        }
+    }
+
+    fn fix_id(self) -> &'static str {
+        match self {
+            Self::Mp3 => MISSING_MP3_SEEK_DATA_FIX_ID,
+            Self::Flac => MISSING_FLAC_SEEK_DATA_FIX_ID,
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Mp3 => "Add Missing MP3 Seek Data",
+            Self::Flac => "Add Missing FLAC Seek Data",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Mp3 => "MP3",
+            Self::Flac => "FLAC",
+        }
+    }
+}
+
 /// A track whose USB bundle lacks the seek index rekordbox writes for its
-/// format (`add_missing_seek_data`): an MP3 whose `.DAT` `PVBR` has a zero
-/// total, or a FLAC whose `.EXT` has no `PVB2`. rekordbox's own bundles
-/// always carry both, so they never match. Only the bundle is read here; the
-/// audio is parsed when the fix is applied.
+/// format: an MP3 whose `.DAT` `PVBR` has a zero total, or a FLAC whose `.EXT`
+/// has no `PVB2`. rekordbox's own bundles always carry both, so they never
+/// match. Only the bundle is read here; the audio is parsed when the fix is
+/// applied.
 #[derive(Debug, Clone)]
 struct MissingSeekData {
     track_path: String,
@@ -3120,19 +3167,14 @@ struct MissingSeekData {
 fn detect_missing_seek_data(
     usb_root: &Path,
     parsed: &crate::pdb_reader::ParsedPdb,
+    format: SeekFormat,
 ) -> Vec<MissingSeekData> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for track in &parsed.tracks {
-        let extension = Path::new(&track.track_file_path)
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(str::to_ascii_lowercase);
-        let is_mp3 = match extension.as_deref() {
-            Some("mp3") => true,
-            Some("flac") => false,
-            _ => continue,
-        };
+        if SeekFormat::of(&track.track_file_path) != Some(format) {
+            continue;
+        }
         let Some(dat) = resolve_usb_side_path(usb_root, &track.anlz_path) else {
             continue;
         };
@@ -3141,18 +3183,16 @@ fn detect_missing_seek_data(
         else {
             continue;
         };
-        let bundle_path = if is_mp3 {
-            dat
-        } else {
-            dat.with_extension("EXT")
+        let bundle_path = match format {
+            SeekFormat::Mp3 => dat,
+            SeekFormat::Flac => dat.with_extension("EXT"),
         };
         let Ok(bytes) = std::fs::read(&bundle_path) else {
             continue;
         };
-        let missing = if is_mp3 {
-            pvbr_total_samples(&bytes) == Some(0)
-        } else {
-            has_pvb2_chunk(&bytes) == Some(false)
+        let missing = match format {
+            SeekFormat::Mp3 => pvbr_total_samples(&bytes) == Some(0),
+            SeekFormat::Flac => has_pvb2_chunk(&bytes) == Some(false),
         };
         if missing && seen.insert(bundle_path.clone()) {
             out.push(MissingSeekData {
@@ -3165,18 +3205,20 @@ fn detect_missing_seek_data(
     out
 }
 
-/// Write the missing seek indexes found by [`detect_missing_seek_data`],
-/// re-detected so bundles regenerated earlier in the same pass are covered.
-/// A file that doesn't parse cleanly is skipped with its reason; nothing is
+/// Write the missing seek indexes of one format found by
+/// [`detect_missing_seek_data`], re-detected so bundles regenerated earlier in
+/// the same pass are covered. A file that doesn't parse cleanly is skipped and
+/// named in the Event Log with its reason, so it can be reported; nothing is
 /// ever approximated. Returns (bundles written, tracks skipped).
 fn apply_missing_seek_data_repair(
     usb_root: &Path,
+    format: SeekFormat,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(usize, usize)> {
     let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
     let mut fixed = 0usize;
     let mut skipped = 0usize;
-    for target in detect_missing_seek_data(usb_root, &parsed) {
+    for target in detect_missing_seek_data(usb_root, &parsed, format) {
         let reason = match seek_index_for_audio(&target.audio_path) {
             Ok(Some(index)) => {
                 let bytes = std::fs::read(&target.bundle_path)?;
@@ -3197,7 +3239,12 @@ fn apply_missing_seek_data_repair(
             Level::Warn,
             "usb-repair",
             "usb.repair.seek-data.skipped",
-            format!("seek data not added ({reason}): {}", target.track_path),
+            format!(
+                "{} seek data not added ({reason}): {}; {}",
+                format.name(),
+                target.track_path,
+                SEEK_SKIP_REPORT_HINT
+            ),
         ));
     }
     Ok((fixed, skipped))
@@ -3939,27 +3986,48 @@ impl BackendService {
                 estimated_deletes: 0,
             });
         }
-        let missing_seek_data: Vec<MissingSeekData> = parsed_pdb
-            .as_ref()
-            .map(|parsed| detect_missing_seek_data(&usb_root, parsed))
-            .unwrap_or_default();
-        if !missing_seek_data.is_empty() {
+        let missing_seek_data: Vec<(SeekFormat, Vec<MissingSeekData>)> =
+            [SeekFormat::Mp3, SeekFormat::Flac]
+                .into_iter()
+                .map(|format| {
+                    let missing = parsed_pdb
+                        .as_ref()
+                        .map(|parsed| detect_missing_seek_data(&usb_root, parsed, format))
+                        .unwrap_or_default();
+                    (format, missing)
+                })
+                .collect();
+        for (format, missing) in &missing_seek_data {
+            if missing.is_empty() {
+                continue;
+            }
             detected_issues.push(format!(
-                "{} MP3/FLAC track(s) without the seek data rekordbox writes",
-                missing_seek_data.len()
+                "{} {} track(s) without the seek data rekordbox writes",
+                missing.len(),
+                format.name()
             ));
+            let description = match format {
+                SeekFormat::Mp3 => {
+                    "Read each MP3 on the USB and write the seek index rekordbox writes for it \
+                     (PVBR in the .DAT), byte for byte as rekordbox does. Beat grids, cues and \
+                     waveforms are kept. Files whose index can't be reproduced exactly are \
+                     skipped and named in the Event Log."
+                }
+                SeekFormat::Flac => {
+                    "Read each FLAC on the USB and write a seek index (PVB2 in the .EXT). For \
+                     long tracks about 98% of its entries match rekordbox's; the rest are one \
+                     frame later. Beat grids, cues and waveforms are kept. Files that don't parse \
+                     cleanly are skipped and named in the Event Log."
+                }
+            };
             proposed_fixes.push(RepairFixProposal {
-                id: MISSING_SEEK_DATA_FIX_ID.to_string(),
-                title: "Add Missing Seek Data".to_string(),
-                description: "Read each MP3 and FLAC on the USB and write the seek index \
-                              rekordbox writes for it: PVBR in the .DAT for MP3s, PVB2 in the \
-                              .EXT for FLACs. Beat grids, cues and waveforms are kept. Files \
-                              that don't parse cleanly are skipped and named in the Event Log."
-                    .to_string(),
+                id: format.fix_id().to_string(),
+                title: format.title().to_string(),
+                description: description.to_string(),
                 supported: true,
                 destructive: false,
                 always_applied: false,
-                estimated_writes: missing_seek_data.len(),
+                estimated_writes: missing.len(),
                 estimated_deletes: 0,
             });
         }
@@ -5333,21 +5401,21 @@ impl BackendService {
                 skipped_fixes.push("Fix Beat Grid: not selected".to_string());
             }
 
-            if selected.contains(MISSING_SEEK_DATA_FIX_ID) {
-                if missing_seek_data.is_empty() {
-                    skipped_fixes.push("Add Missing Seek Data: nothing to apply".to_string());
-                } else {
-                    match apply_missing_seek_data_repair(&usb_root, &mut warnings) {
-                        Ok((fixed, skipped)) => applied_fixes.push(format!(
-                            "Add Missing Seek Data: fixed {fixed}, skipped {skipped}"
-                        )),
-                        Err(err) => {
-                            failed_fixes.push(format!("Add Missing Seek Data failed: {err}"))
+            for (format, missing) in &missing_seek_data {
+                let title = format.title();
+                if selected.contains(format.fix_id()) {
+                    if missing.is_empty() {
+                        skipped_fixes.push(format!("{title}: nothing to apply"));
+                    } else {
+                        match apply_missing_seek_data_repair(&usb_root, *format, &mut warnings) {
+                            Ok((fixed, skipped)) => applied_fixes
+                                .push(format!("{title}: fixed {fixed}, skipped {skipped}")),
+                            Err(err) => failed_fixes.push(format!("{title} failed: {err}")),
                         }
                     }
+                } else if !missing.is_empty() {
+                    skipped_fixes.push(format!("{title}: not selected"));
                 }
-            } else if !missing_seek_data.is_empty() {
-                skipped_fixes.push("Add Missing Seek Data: not selected".to_string());
             }
 
             if selected.contains(SYNC_EDB_HISTORY_FROM_PDB_FIX_ID) {

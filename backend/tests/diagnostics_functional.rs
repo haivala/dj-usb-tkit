@@ -3968,10 +3968,10 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
     assert!(detail.contains(&track_path), "{detail}");
 }
 
-// ── add_missing_seek_data ───────────────────────────────────────────────────
+// ── add_missing_mp3_seek_data / add_missing_flac_seek_data ───────────────────────────────────────────────────
 
 #[test]
-fn repair_add_missing_seek_data_fills_an_empty_mp3_pvbr_once() {
+fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
     use backend::service::anlz::{build_anlz_dat_file, build_anlz_ext_file};
 
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
@@ -3987,18 +3987,20 @@ fn repair_add_missing_seek_data_fills_an_empty_mp3_pvbr_once() {
     fs::write(&dat_path, &dat).expect("write DAT");
     fs::write(dat_path.with_extension("EXT"), &ext).expect("write EXT");
 
-    assert_fix_proposed(&backend, &usb, "add_missing_seek_data");
+    assert_fix_proposed(&backend, &usb, "add_missing_mp3_seek_data");
+    // The stick has no FLAC, so the FLAC fix has nothing to offer.
+    assert_fix_not_proposed(&backend, &usb, "add_missing_flac_seek_data");
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
-        selected_fix_ids: vec!["add_missing_seek_data".to_string()],
+        selected_fix_ids: vec!["add_missing_mp3_seek_data".to_string()],
     });
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
         data.applied_fixes
             .iter()
-            .any(|m| m == "Add Missing Seek Data: fixed 1, skipped 0"),
+            .any(|m| m == "Add Missing MP3 Seek Data: fixed 1, skipped 0"),
         "expected the seek data to be added: {:#?} {:#?}",
         data.applied_fixes,
         data.warnings
@@ -4025,7 +4027,7 @@ fn repair_add_missing_seek_data_fills_an_empty_mp3_pvbr_once() {
         "an MP3's .EXT is left alone"
     );
     // One pass is enough: nothing left to propose.
-    assert_fix_not_proposed(&backend, &usb, "add_missing_seek_data");
+    assert_fix_not_proposed(&backend, &usb, "add_missing_mp3_seek_data");
 }
 
 // ── remove_missing_audio_references ───────────────────────────────────────

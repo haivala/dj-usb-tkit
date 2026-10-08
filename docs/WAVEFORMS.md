@@ -164,10 +164,14 @@ Whatever the player needs, the app writes what rekordbox writes where that is kn
   (`fill_mp3_pvbr` in `anlz.rs`). CBR files get zero offsets and the counted sample total,
   byte for byte what rekordbox wrote for the CBR files checked; VBR files also get the
   offsets. Bundles analysed before 0.3.7 get it once through the `0.3.7-cache-mp3-seek-index`
-  data migration (`docs/APP_DATA_MODEL.md`, "Data migrations"), which needs each source file.
-  A file the rules below don't cover keeps the empty `PVBR`, never a guessed one.
-- **`PVB2` for FLACs** only through the USB repair **Add Missing Seek Data**
-  (`add_missing_seek_data`, see `docs/DIAGNOSTICS_REPAIRS.md`). Its long-track rule matches
+  data migration (`docs/APP_DATA_MODEL.md`, "Data migrations"), which needs each source file;
+  a track whose file isn't there has its cached bundle deleted and is marked for analysis.
+  On a stick, **Add Missing MP3 Seek Data** (`add_missing_mp3_seek_data`) does the same.
+  A file the rules below don't cover keeps the empty `PVBR`, never a guessed one, and is
+  named in the Event Log ("MP3 seek data not added (reason): …; please report this file")
+  so the layout can be supported.
+- **`PVB2` for FLACs** only through its own USB repair, **Add Missing FLAC Seek Data**
+  (`add_missing_flac_seek_data`, see `docs/DIAGNOSTICS_REPAIRS.md`). Its long-track rule matches
   about 98% of rekordbox's entries, so it isn't written at analysis time. Export copies the
   app's own bundle over the stick's, so a re-exported FLAC needs the repair again.
 

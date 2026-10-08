@@ -269,24 +269,30 @@ fn upgrade_cached_beat_grids(
 
 /// `0.3.7-cache-mp3-seek-index`: give cached MP3 bundles the `PVBR` seek
 /// index rekordbox writes (docs/WAVEFORMS.md "Seek-index chunks"), which
-/// analysis writes from 0.3.7 on. Needs each source file: one that's missing
-/// (e.g. on an unplugged drive) is skipped and gets it when re-analysed.
+/// analysis writes from 0.3.7 on. Needs each source file: when one is
+/// missing, the cached bundle is deleted and the track marked for analysis
+/// (as a stale cache is in `scan_library`), so it is rebuilt, seek data
+/// included, once the file is back.
 fn fill_cached_mp3_seek_indexes(
     svc: &BackendService,
     progress: Progress<'_>,
 ) -> BackendResult<Outcome> {
     let waveform_dir = svc.db.data_dir().join("analysis").join("waveforms");
-    let bundles: Vec<(std::path::PathBuf, std::path::PathBuf)> = {
-        let conn = svc.db.connect()?;
+    let conn = svc.db.connect()?;
+    let bundles: Vec<(String, std::path::PathBuf, std::path::PathBuf)> = {
         let mut stmt = conn.prepare(
-            "SELECT file_path, waveform_peaks_path FROM tracks
+            "SELECT id, file_path, waveform_peaks_path FROM tracks
              WHERE waveform_peaks_path IS NOT NULL AND waveform_peaks_path != ''",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         rows.filter_map(Result::ok)
-            .filter_map(|(audio, dat)| {
+            .filter_map(|(id, audio, dat)| {
                 let audio = std::path::PathBuf::from(audio.trim());
                 let is_mp3 = audio
                     .extension()
@@ -294,7 +300,7 @@ fn fill_cached_mp3_seek_indexes(
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("mp3"));
                 let dat =
                     super::local_cache_bundle_dat(&waveform_dir, std::path::Path::new(dat.trim()))?;
-                is_mp3.then_some((dat, audio))
+                is_mp3.then_some((id, dat, audio))
             })
             .collect()
     };
@@ -302,8 +308,20 @@ fn fill_cached_mp3_seek_indexes(
     let total = bundles.len();
     let (mut filled, mut missing) = (0usize, 0usize);
     let mut retry = false;
-    for (i, (dat, audio)) in bundles.iter().enumerate() {
+    for (i, (id, dat, audio)) in bundles.iter().enumerate() {
         if !audio.is_file() {
+            conn.execute(
+                "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",
+                params![id],
+            )?;
+            let still_used: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tracks WHERE waveform_peaks_path = ?1)",
+                params![dat.to_string_lossy()],
+                |row| row.get(0),
+            )?;
+            if !still_used {
+                super::remove_bundle_files(dat);
+            }
             missing += 1;
         } else if dat.is_file() {
             match fill_mp3_pvbr(dat, audio) {
@@ -317,7 +335,8 @@ fn fill_cached_mp3_seek_indexes(
     crate::backend_log!(
         Info,
         "migrations",
-        "added the MP3 seek index to {filled} cached bundle(s); {missing} source file(s) not found"
+        "added the MP3 seek index to {filled} cached bundle(s); {missing} track(s) whose \
+         file wasn't found are marked for analysis"
     );
     Ok(if retry {
         Outcome::RetryLater

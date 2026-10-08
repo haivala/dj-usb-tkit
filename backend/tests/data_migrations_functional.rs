@@ -192,7 +192,26 @@ fn cached_mp3_bundles_get_their_seek_index_once() {
     let filled = fs::read(&with_audio).unwrap();
     assert!(pvbr_total(&filled) > 0);
     assert_eq!(filled.len(), fresh.0.len(), "filled in place");
-    // A missing source file is skipped, not retried forever.
-    assert_eq!(pvbr_total(&fs::read(&without_audio).unwrap()), 0);
+    // A missing source file: the bundle is deleted and the track marked for
+    // analysis, so it is rebuilt with seek data once the file is back.
+    for ext in ["DAT", "EXT"] {
+        assert!(!without_audio.with_extension(ext).exists(), "{ext} deleted");
+    }
+    let path: Option<String> = conn
+        .query_row(
+            "SELECT waveform_peaks_path FROM tracks WHERE id = 't2'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(path, None);
+    let kept: Option<String> = conn
+        .query_row(
+            "SELECT waveform_peaks_path FROM tracks WHERE id = 't1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept.as_deref(), Some(with_audio.to_string_lossy().as_ref()));
     assert!(commands.pending_data_migrations().data.unwrap().is_empty());
 }

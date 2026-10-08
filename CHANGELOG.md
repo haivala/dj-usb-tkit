@@ -49,9 +49,13 @@
   **Fix Beat Grid**, to fix the ones already on a USB.
 - **Fix:** Analysed MP3s now get the seek index (`PVBR`) rekordbox writes: the sample total,
   and for VBR files the byte offsets, byte for byte as rekordbox writes them for the files
-  checked. MP3s analysed earlier get it once on the first launch, with the cached beat grids.
-  Files whose index can't be reproduced exactly keep the empty one. FLAC's `PVB2` stays
-  repair-only (**Add Missing Seek Data**).
+  checked. MP3s analysed earlier get it once on the first launch, with the cached beat grids;
+  a track whose file can't be found then is marked for analysis instead. Files whose index
+  can't be reproduced exactly keep the empty one and are named in the Event Log, so they can
+  be reported.
+- **Improvement:** The USB repair **Add Missing Seek Data** is now two fixes, **Add Missing
+  MP3 Seek Data** (exactly what rekordbox writes) and **Add Missing FLAC Seek Data** (about
+  98% of entries match rekordbox's on long tracks), so either can be applied alone.
 - **Chore:** One-time data upgrades now go through a single registry
   (`backend/src/service/migrations.rs`, see `docs/APP_DATA_MODEL.md` "Data migrations"),
   recorded in a `data_migrations` table. The three existing startup backfills moved into it

@@ -12,6 +12,11 @@ pub(super) const PVBR_PAYLOAD_LEN: usize = PVBR_ENTRIES * 4 + 4;
 const PVB2_ENTRIES: usize = 400;
 const MP3_SAMPLES_PER_FRAME: u32 = 1152;
 
+/// Appended to every "seek data not added" log line: each one is a file
+/// layout the parsers don't cover yet, worth a bug report.
+pub(super) const SEEK_SKIP_REPORT_HINT: &str = "please report this file (format details, not \
+     the audio) so its seek data can be supported";
+
 /// The seek index a source audio file gets.
 #[derive(Debug)]
 pub(super) enum SeekIndex {
