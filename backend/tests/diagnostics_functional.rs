@@ -3903,7 +3903,7 @@ fn analysis_check(backend: &BackendCommands, usb: &Path, label: &str) -> Option<
 }
 
 #[test]
-fn diagnostics_flag_old_beat_grids_only_on_tracks_last_exported_before_0_3_7() {
+fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_versions() {
     use backend::service::anlz::build_anlz_dat_file;
 
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
@@ -3929,8 +3929,9 @@ fn diagnostics_flag_old_beat_grids_only_on_tracks_last_exported_before_0_3_7() {
         .join("dj_usb_tkit_export_log.v1.json");
     let log = fs::read_to_string(&log_path).expect("export log");
     assert!(log.contains("\"appVersion\""), "{log}");
-    let (status, _) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
+    let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
     assert_eq!(status, "Pass");
+    assert!(detail.contains("current format"), "{detail}");
 
     // The same export as a pre-0.3.7 app logged it: no appVersion.
     let mut value: serde_json::Value = serde_json::from_str(&log).expect("parse log");
@@ -3941,7 +3942,8 @@ fn diagnostics_flag_old_beat_grids_only_on_tracks_last_exported_before_0_3_7() {
     let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
     assert_eq!(status, "Warn");
     assert!(
-        detail.starts_with("1 track(s)") && detail.contains(&track_path),
+        detail.starts_with("1 track(s) have a beat grid in an outdated format")
+            && detail.contains(&track_path),
         "{detail}"
     );
 
@@ -3950,9 +3952,20 @@ fn diagnostics_flag_old_beat_grids_only_on_tracks_last_exported_before_0_3_7() {
     let (status, _) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
     assert_eq!(status, "Pass");
 
-    // No export log, no check.
+    // No export log: nothing this app exported, still a line.
     fs::remove_file(&log_path).expect("remove log");
-    assert!(analysis_check(&backend, &usb, "Beat grid format").is_none());
+    let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
+    assert_eq!(status, "Pass");
+    assert_eq!(detail, "no tracks on this USB were exported by this app");
+
+    // An unreadable log: every track's .DAT is checked instead.
+    fs::write(&log_path, "not json").expect("write log");
+    let (status, _) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
+    assert_eq!(status, "Pass");
+    fs::write(&dat_path, &old_dat).expect("write DAT");
+    let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
+    assert_eq!(status, "Warn");
+    assert!(detail.contains(&track_path), "{detail}");
 }
 
 // ── add_missing_seek_data ───────────────────────────────────────────────────

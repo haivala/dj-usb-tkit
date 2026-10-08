@@ -51,13 +51,14 @@
   (`backend/src/service/migrations.rs`, see `docs/APP_DATA_MODEL.md` "Data migrations"),
   recorded in a `data_migrations` table. The three existing startup backfills moved into it
   and no longer run on every launch.
-- **New feature:** USB diagnostics now flag tracks whose beat grid comes from an app version
-  before 0.3.7 (the format the XDJ-AZ refuses Beat Sync on) and point to **Fix Beat Grid**
-  or a re-export. Only tracks this app exported can have it; the stick's export log, which
+- **New feature:** USB diagnostics have a **Beat grid format** line that flags tracks whose
+  beat grid is in the outdated format the XDJ-AZ refuses Beat Sync on, and points to **Fix
+  Beat Grid** or a re-export. Only tracks this app exported can have it; the stick's export log, which
   now records the app version, says which ones to check, so the check reads only those
   tracks' analysis files, and only their first 4 KB.
 - **Chore:** USB repair now writes the outcome of every fix (applied, skipped or failed)
-  to the Event Log, so a log shared for a bug report shows what the repair did.
+  to the Event Log, so a log shared for a bug report shows what the repair did. "Not
+  selected" is listed only for fixes that had something to do.
 
 ## 0.3.7-rc.3
 

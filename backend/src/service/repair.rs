@@ -4816,7 +4816,7 @@ impl BackendService {
                         failed_fixes.push(format!("Fix Empty Analysis Files failed: {err}"))
                     }
                 }
-            } else {
+            } else if !empty_analysis_paths.is_empty() {
                 skipped_fixes.push("Fix Empty Analysis Files: not selected".to_string());
             }
 
@@ -4937,7 +4937,7 @@ impl BackendService {
                         )),
                     }
                 }
-            } else {
+            } else if !strict_upgrade_targets.is_empty() {
                 skipped_fixes
                     .push("Upgrade Export Data To Strict Parity: not selected".to_string());
             }
@@ -5293,7 +5293,7 @@ impl BackendService {
                         failed_fixes.push(format!("Remove Missing Audio References failed: {err}"))
                     }
                 }
-            } else {
+            } else if !missing_audio_track_ids.is_empty() {
                 skipped_fixes.push("Remove Missing Audio References: not selected".to_string());
             }
 

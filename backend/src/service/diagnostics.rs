@@ -902,17 +902,16 @@ impl BackendService {
                 detail,
                 link: None,
             });
-            if let Some(check) = diagnose_pre_0_3_7_beat_grids(&usb_root, parsed) {
-                if matches!(check.status, DiagStatus::Warn) {
-                    raw_warnings.push(logging::log(
-                        Level::Warn,
-                        "usb-diagnostics",
-                        "usb.diagnostics.pre-0-3-7-beat-grids",
-                        check.detail.clone(),
-                    ));
-                }
-                analysis_integrity.checks.push(check);
+            let beat_grids = diagnose_beat_grid_format(&usb_root, parsed);
+            if matches!(beat_grids.status, DiagStatus::Warn) {
+                raw_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.beat-grid-format",
+                    beat_grids.detail.clone(),
+                ));
             }
+            analysis_integrity.checks.push(beat_grids);
             analysis_integrity.status = DiagStatus::worst_of(
                 &analysis_integrity
                     .checks
@@ -1962,23 +1961,42 @@ pub(crate) fn detect_bpm_key_mismatches(
     out
 }
 
-/// App versions before 0.3.7 wrote beat grids that some players (e.g. the
-/// XDJ-AZ) reject. Only tracks this app exported can have them, and the
-/// stick's export log says which were last exported by such a version (a
-/// record without `app_version`), so only those tracks' `.DAT` files are
-/// read, and only their first few KB. A stick without an export log gets no
-/// check. rekordbox-made bundles among them never match.
-fn diagnose_pre_0_3_7_beat_grids(
+/// Older app versions wrote beat grids in a format some players (e.g. the
+/// XDJ-AZ) reject. Only tracks this app exported can have one, and the stick's
+/// export log says which were last exported by such a version (a record
+/// without `app_version`), so only those tracks' `.DAT` files are read, and
+/// only their first few KB. When the log can't be read, every track's
+/// `.DAT` is checked instead. rekordbox-made bundles never match.
+fn diagnose_beat_grid_format(
     usb_root: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
-) -> Option<DiagCheck> {
+) -> DiagCheck {
     use std::io::Read;
 
-    let log = super::export_log::load_export_log(usb_root).ok()??;
-    let candidates = super::export_log::fingerprints_last_exported_before_versioning(&log);
-    let mut old_format = Vec::new();
+    let check = |status, detail: String| DiagCheck {
+        label: "Beat grid format".to_string(),
+        status,
+        detail,
+        link: None,
+    };
+    // `None`: the log can't be read, so every track is a candidate.
+    let candidates = match super::export_log::load_export_log(usb_root) {
+        Ok(Some(log)) => {
+            Some(super::export_log::fingerprints_last_exported_before_versioning(&log))
+        }
+        Ok(None) => {
+            return check(
+                DiagStatus::Pass,
+                "no tracks on this USB were exported by this app".to_string(),
+            );
+        }
+        Err(_) => None,
+    };
+    let mut outdated = Vec::new();
     for track in &parsed.tracks {
-        if !candidates.contains(&track_identity_key(&track.track_file_path, "", "", None)) {
+        if candidates.as_ref().is_some_and(|candidates| {
+            !candidates.contains(&track_identity_key(&track.track_file_path, "", "", None))
+        }) {
             continue;
         }
         let Some(dat) = super::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path) else {
@@ -1990,37 +2008,30 @@ fn diagnose_pre_0_3_7_beat_grids(
                 .read_to_end(&mut prefix)
         });
         if read.is_ok() && super::anlz::has_misplaced_pqtz_header(&prefix) {
-            old_format.push(track.track_file_path.as_str());
+            outdated.push(track.track_file_path.as_str());
         }
     }
-    let (status, detail) = if old_format.is_empty() {
-        (
+    if outdated.is_empty() {
+        return check(
             DiagStatus::Pass,
-            "no track on this USB has a beat grid from an app version before 0.3.7".to_string(),
-        )
-    } else {
-        (
-            DiagStatus::Warn,
-            format!(
-                "{} track(s) have a beat grid from an app version before 0.3.7, which some \
-                 players (e.g. the XDJ-AZ) reject -- Beat Sync is unavailable on them; e.g. {}; \
-                 re-export them or run the repair (fix_beat_grid_header) to fix",
-                old_format.len(),
-                old_format
-                    .iter()
-                    .take(3)
-                    .copied()
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        )
-    };
-    Some(DiagCheck {
-        label: "Beat grid format".to_string(),
-        status,
-        detail,
-        link: None,
-    })
+            "every beat grid this app wrote to this USB is in the current format".to_string(),
+        );
+    }
+    check(
+        DiagStatus::Warn,
+        format!(
+            "{} track(s) have a beat grid in an outdated format that some players (e.g. the \
+             XDJ-AZ) reject, so Beat Sync is unavailable on them; e.g. {}; re-export them or \
+             run the repair (fix_beat_grid_header) to fix",
+            outdated.len(),
+            outdated
+                .iter()
+                .take(3)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    )
 }
 
 pub(crate) fn diagnose_analysis_integrity(
