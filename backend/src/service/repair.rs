@@ -27,8 +27,9 @@ use super::SETTING_EXPORT_MASTER_DB_ID;
 use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
 use super::anlz::{
     AnlzAnalysisEdits, AnlzBundlePaths, WaveformData, apply_analysis_edits_to_anlz,
-    atomic_write_bytes, canonical_analysis_bundle_paths, ensure_ppth_chunk, has_pvb2_chunk,
-    pvbr_total_samples, read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, with_seek_index,
+    atomic_write_bytes, canonical_analysis_bundle_paths, ensure_ppth_chunk,
+    has_misplaced_pqtz_header, has_pvb2_chunk, pvbr_total_samples, read_beatgrid_tempo_from_anlz,
+    read_first_beat_from_anlz, with_pqtz_header_fixed, with_seek_index,
     write_generated_anlz_bundle,
 };
 use super::anlz_seek::seek_index_for_audio;
@@ -47,6 +48,7 @@ use super::usb_utils::{
 };
 #[cfg(test)]
 use super::usb_vendor_compat::vendor_pdb_path;
+use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 use crate::scanner::scan_audio_file;
 
 /// Player menu kinds that cannot be removed once present in the current menu.
@@ -68,6 +70,7 @@ use super::diagnostics::{
 
 const BPM_KEY_MISMATCH_FIX_ID: &str = "fix_bpm_key_mismatch";
 const MISSING_SEEK_DATA_FIX_ID: &str = "add_missing_seek_data";
+const BEAT_GRID_HEADER_FIX_ID: &str = "fix_beat_grid_header";
 const STRICT_PARITY_UPGRADE_FIX_ID: &str = "upgrade_export_data_to_strict_parity";
 const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
 const SYNC_EDB_HISTORY_FROM_PDB_FIX_ID: &str = "sync_edb_history_from_pdb";
@@ -136,6 +139,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_ALBUM_STRING_ALIGNMENT_FIX_ID,
     PDB_HEADER_COMPATIBILITY_FIX_ID,
     BPM_KEY_MISMATCH_FIX_ID,
+    BEAT_GRID_HEADER_FIX_ID,
     MISSING_SEEK_DATA_FIX_ID,
     RELINK_MOVED_AUDIO_FIX_ID,
     UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
@@ -3044,6 +3048,39 @@ fn apply_bpm_key_mismatch_repair(
     Ok((anlz_fixed, edb_fixed))
 }
 
+/// `.DAT` files under `USBANLZ` whose `PQTZ` header has the layout the app
+/// wrote before 0.3.7 (`fix_beat_grid_header`). rekordbox's own bundles never
+/// match. The files are found on disk, not through the PDB, so a bundle the
+/// database doesn't point at yet is still fixed.
+fn detect_misplaced_beat_grid_headers(usb_root: &Path) -> Vec<std::path::PathBuf> {
+    walkdir::WalkDir::new(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_ANALYSIS_DIR))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .map(walkdir::DirEntry::into_path)
+        .filter(|path| {
+            path.extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("DAT"))
+        })
+        .filter(|dat| std::fs::read(dat).is_ok_and(|bytes| has_misplaced_pqtz_header(&bytes)))
+        .collect()
+}
+
+/// Fix the headers found by [`detect_misplaced_beat_grid_headers`],
+/// re-detected so earlier fixes in the same pass are accounted for. Returns
+/// the number of `.DAT` files written.
+fn apply_beat_grid_header_repair(usb_root: &Path) -> BackendResult<usize> {
+    let mut fixed = 0usize;
+    for dat in detect_misplaced_beat_grid_headers(usb_root) {
+        if let Some(patched) = with_pqtz_header_fixed(&std::fs::read(&dat)?) {
+            atomic_write_bytes(&dat, &patched)?;
+            fixed += 1;
+        }
+    }
+    Ok(fixed)
+}
+
 /// A track whose USB bundle lacks the seek index rekordbox writes for its
 /// format (`add_missing_seek_data`): an MP3 whose `.DAT` `PVBR` has a zero
 /// total, or a FLAC whose `.EXT` has no `PVB2`. rekordbox's own bundles
@@ -3854,6 +3891,27 @@ impl BackendService {
                 destructive: false,
                 always_applied: false,
                 estimated_writes: anlz_writes + edb_writes,
+                estimated_deletes: 0,
+            });
+        }
+        let misplaced_beat_grid_headers = detect_misplaced_beat_grid_headers(&usb_root);
+        if !misplaced_beat_grid_headers.is_empty() {
+            detected_issues.push(format!(
+                "{} analysis file(s) with a beat-grid header in the pre-0.3.7 layout",
+                misplaced_beat_grid_headers.len()
+            ));
+            proposed_fixes.push(RepairFixProposal {
+                id: BEAT_GRID_HEADER_FIX_ID.to_string(),
+                title: "Fix Beat Grid Header".to_string(),
+                description: "Move a value in the .DAT beat-grid header to where rekordbox \
+                              writes it. Analysis files from app versions before 0.3.7 have it \
+                              two bytes early, and some players (e.g. the XDJ-AZ) show no beat \
+                              grid for them. The beats themselves, cues and waveforms are kept."
+                    .to_string(),
+                supported: true,
+                destructive: false,
+                always_applied: false,
+                estimated_writes: misplaced_beat_grid_headers.len(),
                 estimated_deletes: 0,
             });
         }
@@ -5234,6 +5292,23 @@ impl BackendService {
                 }
             } else if !bpm_key_mismatches.is_empty() {
                 skipped_fixes.push("Fix BPM/Key Mismatch: not selected".to_string());
+            }
+
+            if selected.contains(BEAT_GRID_HEADER_FIX_ID) {
+                if misplaced_beat_grid_headers.is_empty() {
+                    skipped_fixes.push("Fix Beat Grid Header: nothing to apply".to_string());
+                } else {
+                    match apply_beat_grid_header_repair(&usb_root) {
+                        Ok(fixed) => applied_fixes.push(format!(
+                            "Fix Beat Grid Header: fixed {fixed} analysis file(s)"
+                        )),
+                        Err(err) => {
+                            failed_fixes.push(format!("Fix Beat Grid Header failed: {err}"))
+                        }
+                    }
+                }
+            } else if !misplaced_beat_grid_headers.is_empty() {
+                skipped_fixes.push("Fix Beat Grid Header: not selected".to_string());
             }
 
             if selected.contains(MISSING_SEEK_DATA_FIX_ID) {

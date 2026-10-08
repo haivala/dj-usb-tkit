@@ -39,6 +39,16 @@
 
 ## Unreleased
 
+## 0.3.7-rc.2
+
+Release candidate for testing the beat grid on the XDJ-AZ.
+
+- **Fix:** The app wrote one fixed value in the beat-grid header of its `.DAT` analysis
+  files two bytes off from where rekordbox writes it. Older players ignore it; the XDJ-AZ
+  is suspected to reject the beat grid because of it ("please analyse this track in
+  rekordbox"). New analysis and every export now write rekordbox's layout, and the new USB
+  repair **Fix Beat Grid Header** fixes the files already on a stick without re-exporting.
+
 ## 0.3.7-rc.1
 
 Release candidate for testing seek data on the XDJ-AZ.

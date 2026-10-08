@@ -3824,6 +3824,57 @@ fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
     assert_fix_not_proposed(&backend, &usb, "fix_bpm_key_mismatch");
 }
 
+// ── fix_beat_grid_header ────────────────────────────────────────────────────
+
+#[test]
+fn repair_fix_beat_grid_header_moves_the_pre_0_3_7_value_once() {
+    use backend::service::anlz::build_anlz_dat_file;
+
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    let track_path = parsed.tracks[0].track_file_path.clone();
+
+    let dat_path = find_exported_anlz_dat(&usb);
+    let fixed = build_anlz_dat_file(
+        &flat_waveform(400, 128),
+        &track_path,
+        Some(120.0),
+        200_000,
+        None,
+        &[],
+    );
+    // The same bundle as a pre-0.3.7 app wrote it: 0x00080000 two bytes early.
+    let pqtz_at = fixed
+        .windows(4)
+        .position(|w| w == b"PQTZ")
+        .expect("PQTZ chunk");
+    assert_eq!(
+        &fixed[pqtz_at + 12..pqtz_at + 20],
+        &[0, 0, 0, 0, 0, 8, 0, 0]
+    );
+    let mut old = fixed.clone();
+    old[pqtz_at + 12..pqtz_at + 20].copy_from_slice(&[0, 0, 0, 8, 0, 0, 0, 0]);
+    fs::write(&dat_path, &old).expect("write DAT");
+
+    assert_fix_proposed(&backend, &usb, "fix_beat_grid_header");
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["fix_beat_grid_header".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m == "Fix Beat Grid Header: fixed 1 analysis file(s)"),
+        "expected the header to be fixed: {:#?}",
+        data.applied_fixes
+    );
+    assert_eq!(fs::read(&dat_path).expect("read DAT"), fixed);
+    assert_fix_not_proposed(&backend, &usb, "fix_beat_grid_header");
+}
+
 // ── add_missing_seek_data ───────────────────────────────────────────────────
 
 #[test]

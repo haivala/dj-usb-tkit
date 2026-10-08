@@ -110,6 +110,23 @@ drag-to-pan** shows the full ~150 entries/sec detail; it opens zoomed to the
 first 60 bars at the track's BPM. The magnifier button is disabled for tracks with no analysis
 (no `.EXT` ⇒ no PWV5). See `vanilla-ui/components/track-detail/waveform_detail.mjs`.
 
+## Beat-grid header layout
+
+`PQTZ`'s 12 header bytes after the common 12 are `u32` 0, `u32` `0x00080000`, `u32` beat
+count. Every rekordbox `.DAT` checked (about 1,600 across four sticks) has exactly that.
+Before 0.3.7 the app wrote `0x00080000` two bytes early (`00000008 00000000` instead of
+`00000000 00080000`), which older CDJs ignore. It is the one fixed-value difference between
+the app's and rekordbox's `.DAT` beat grids, so it is the prime suspect for the XDJ-AZ
+rejecting them.
+
+New bundles are written with rekordbox's layout, and export rebuilds the grid of every
+app-made bundle with a known tempo, so re-exporting fixes a stick. The USB repair **Fix
+Beat Grid Header** (`fix_beat_grid_header`) fixes the header in place without an export.
+
+Still unexplained: rekordbox's `.EXT` `PQT2` header carries a non-zero `u32` at chunk
+offset 44 that the app writes as 0. It is not a CRC32, Adler-32 or plain sum of the beat
+data; it is about 5–14% above the sum of the `PQTZ` beat times.
+
 ## Seek-index chunks (`PVBR`, `PVB2`)
 
 rekordbox writes two chunks that help a player find the byte position of a given time in
@@ -117,10 +134,10 @@ files whose bitrate varies. Bundles imported from rekordbox are exported with th
 intact. The bundles this app generates write `PVBR` as all zeros and never write `PVB2`.
 Tracks play correctly this way on a CDJ-2000NXS2, including FLACs.
 
-An XDJ-AZ, though, rejected the beat grid of an app-analysed CBR MP3 ("please analyse this
-track in rekordbox") while accepting the rekordbox bundle of the same file. The only
-seek-related difference is `PVBR`'s total, which rekordbox fills in for every MP3. Whether
-the XDJ-AZ also needs `PVB2` for FLACs is not known yet.
+An XDJ-AZ, though, rejected the beat grid of app-analysed tracks ("please analyse this
+track in rekordbox") while accepting rekordbox's bundles for the same files. Filling in
+`PVBR` and `PVB2` (0.3.7-rc.1) did not change that, so seek data is not, or not alone, the
+cause; see "Beat-grid header layout" below for the next candidate.
 
 Until that is settled on hardware, analysis is unchanged and the seek data is added on the
 stick only, by the USB repair **Add Missing Seek Data** (`add_missing_seek_data`, see

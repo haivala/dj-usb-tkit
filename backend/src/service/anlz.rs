@@ -684,16 +684,54 @@ pub(super) fn with_seek_index(data: &[u8], index: &SeekIndex) -> Option<Vec<u8>>
 // ===========================================================================
 //
 // len_header = 0x18 (24)
-// Offset 12-13: unknown1 (2 bytes)
-// Offset 14-17: unknown2 (4 bytes, observed 0x00080000)
-// Offset 18-19: unknown3 (2 bytes)
+// Offset 12-15: unknown1 (4 bytes, 0)
+// Offset 16-19: unknown2 (4 bytes, 0x00080000 in every rekordbox export)
 // Offset 20-23: len_beats (4 bytes)
 // Offset 24+:   beat entries (8 bytes each)
+//
+// Before 0.3.7 the app wrote unknown2 two bytes early (offsets 14-17); the
+// XDJ-AZ rejects such a grid. The USB repair "Fix Beat Grid Header" moves it
+// in place on the stick ([`with_pqtz_header_fixed`]).
 //
 // Beat entry:
 //   0-1: beat_number (u16, 1-4 position in measure)
 //   2-3: tempo       (u16, BPM × 100)
 //   4-7: time        (u32, milliseconds)
+
+const PQTZ_UNKNOWN2: u32 = 0x0008_0000;
+/// Chunk bytes 12-19 as rekordbox writes them, and as the app wrote them
+/// before 0.3.7 (unknown2 two bytes early).
+const PQTZ_HEADER_REKORDBOX: [u8; 8] = [0, 0, 0, 0, 0, 0x08, 0, 0];
+const PQTZ_HEADER_MISPLACED: [u8; 8] = [0, 0, 0, 0x08, 0, 0, 0, 0];
+
+/// The `PQTZ` chunk of a `.DAT` whose header has the pre-0.3.7 misplaced
+/// layout, as its byte offset; `None` when there is none or the file doesn't
+/// walk cleanly.
+fn misplaced_pqtz_header_at(dat: &[u8]) -> Option<usize> {
+    anlz_chunk_ranges(dat)?
+        .into_iter()
+        .find(|(tag, range)| {
+            tag == b"PQTZ"
+                && range.len() >= 24
+                && read_u32_be_at(dat, range.start + 4) == Some(24)
+                && dat[range.start + 12..range.start + 20] == PQTZ_HEADER_MISPLACED
+        })
+        .map(|(_, range)| range.start)
+}
+
+pub(crate) fn has_misplaced_pqtz_header(dat: &[u8]) -> bool {
+    misplaced_pqtz_header_at(dat).is_some()
+}
+
+/// `dat` with a misplaced `PQTZ` header moved to rekordbox's layout; the
+/// beats and every other chunk are kept byte for byte. `None` when there is
+/// nothing to fix.
+pub(crate) fn with_pqtz_header_fixed(dat: &[u8]) -> Option<Vec<u8>> {
+    let start = misplaced_pqtz_header_at(dat)?;
+    let mut out = dat.to_vec();
+    out[start + 12..start + 20].copy_from_slice(&PQTZ_HEADER_REKORDBOX);
+    Some(out)
+}
 
 fn append_pqtz_chunk(file: &mut Vec<u8>, bpm: Option<f64>, duration_ms: u64, first_beat_ms: u32) {
     // No known tempo, no beat grid: never bake in a made-up one.
@@ -710,11 +748,8 @@ fn append_pqtz_chunk(file: &mut Vec<u8>, bpm: Option<f64>, duration_ms: u64, fir
 
     // Header content: 12 bytes (offsets 12-23 in chunk)
     let mut header = vec![0u8; 12];
-    // [0..2] = unknown1 = 0x0000
-    // [2..6] = unknown2 = 0x00080000 in observed reference exports.
-    header[2..6].copy_from_slice(&0x00080000u32.to_be_bytes());
-    // [6..8] = unknown3 = 0x0000
-    // [8..12] = len_beats
+    // [0..4] = unknown1 = 0
+    header[4..8].copy_from_slice(&PQTZ_UNKNOWN2.to_be_bytes());
     header[8..12].copy_from_slice(&num_beats.to_be_bytes());
 
     let mut payload = Vec::with_capacity(num_beats as usize * 8);
@@ -1882,6 +1917,45 @@ mod tests {
         );
         let pqtz = find_chunk_payload(&dat, "PQTZ").expect("PQTZ chunk");
         assert_eq!(pqtz.len(), 61 * 8, "120 BPM × 30s = 61 beats × 8 bytes");
+    }
+
+    #[test]
+    fn dat_pqtz_header_matches_rekordbox_layout() {
+        // From a rekordbox export (USB_CUE_RB, "Bash Plate"): 649 beats.
+        let rekordbox = "000000000008000000000289";
+        let dat = build_anlz_dat_file(
+            &WaveformData::from_peaks(vec![128; 100]),
+            "",
+            Some(140.0),
+            277_820,
+            Some(53),
+            &[],
+        );
+        let pos = dat.windows(4).position(|w| w == b"PQTZ").unwrap();
+        let header: String = dat[pos + 12..pos + 24]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(&header[..16], &rekordbox[..16]);
+        assert!(!has_misplaced_pqtz_header(&dat));
+    }
+
+    #[test]
+    fn misplaced_pqtz_header_is_fixed_in_place() {
+        let dat = build_anlz_dat_file(
+            &WaveformData::from_peaks(vec![128; 100]),
+            "",
+            Some(120.0),
+            30_000,
+            None,
+            &[],
+        );
+        let pos = dat.windows(4).position(|w| w == b"PQTZ").unwrap();
+        let mut old = dat.clone();
+        old[pos + 12..pos + 20].copy_from_slice(&PQTZ_HEADER_MISPLACED);
+        assert!(has_misplaced_pqtz_header(&old));
+        assert_eq!(with_pqtz_header_fixed(&old), Some(dat.clone()));
+        assert_eq!(with_pqtz_header_fixed(&dat), None);
     }
 
     #[test]
