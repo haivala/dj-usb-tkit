@@ -105,7 +105,8 @@ so the grey shading before playback start ends there.
 
 "Playback starts at [First cue | First beat]" sets where a CDJ loads the track:
 
-- **First cue**: on cue A (the CDJ's default when a track has hot cues).
+- **First cue**: on the track's first cue: cue A, or a memory cue before it
+  (the CDJ loads on its earliest memory point).
 - **First beat**: adds a **▶ start marker**, a memory point only (no hot-cue pad,
   no colour, no name), on the first beat. It is listed first and drawn dashed.
   It follows the first beat while untouched. Once dragged elsewhere the choice
@@ -121,6 +122,17 @@ the track has any cue, hot or memory. With no cues both options are disabled
 and a note says the CDJ starts at the first audio.
 
 ![Choosing First beat adds the start marker; dragging it makes it a Start marker](assets/cue-editor-playback-start.gif)
+
+### Known limitations
+
+These happen only when a track's cues are edited and saved; a save that changes
+only the BPM, key or first beat leaves a USB's cues as they are.
+
+- **Hot-cue letters follow position.** Cue points are lettered A–H in time
+  order, so a cue from rekordbox on a pad out of that order comes back on a
+  different pad: one on pad C with A and B empty becomes A.
+- **Loops become cue points.** A rekordbox hot loop or memory loop keeps its
+  start as a cue (hot or memory) but loses its end.
 
 ### Keyboard shortcuts
 
