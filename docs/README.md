@@ -31,6 +31,7 @@ This is the documentation set for DJ USB Tkit.
 - `docs/APP_DATA_MODEL.md`
 - `docs/PDB.md`
 - `docs/eDB.md`
+- `docs/ENGINE_DJ.md` - writing the Engine DJ library (Denon/Numark) from a USB export
 - `docs/WAVEFORMS.md`
 - `docs/THIRD_PARTY_LICENSES.md`
 

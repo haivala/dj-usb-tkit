@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod db;
 pub mod edb;
+pub mod engine_db;
 pub mod error;
 pub mod logging;
 pub mod metadata;

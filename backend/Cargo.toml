@@ -7,7 +7,7 @@ autobins = false
 
 [features]
 default = []
-tauri = ["dep:tauri", "dep:tauri-plugin-updater", "dep:reqwest", "dep:flate2", "dep:tar", "dep:futures-util"]
+tauri = ["dep:tauri", "dep:tauri-plugin-updater", "dep:reqwest", "dep:tar", "dep:futures-util"]
 dev-tools = []
 
 [dependencies]
@@ -38,7 +38,7 @@ walkdir = "2"
 stratum-dsp = "1"
 tauri = { version = "2", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
-flate2 = { version = "1", optional = true }
+flate2 = "1"
 tar = { version = "0.4", optional = true }
 futures-util = { version = "0.3", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
@@ -214,3 +214,7 @@ required-features = ["dev-tools"]
 name = "remove_usb_playlist"
 path = "src/bin/remove_usb_playlist.rs"
 required-features = ["dev-tools"]
+
+[[bin]]
+name = "write_engine_db"
+path = "src/bin/write_engine_db.rs"

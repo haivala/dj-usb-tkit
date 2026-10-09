@@ -17,6 +17,13 @@ pub struct PdbTrackRow {
     pub artwork_id: u32,
     pub key_id: u32,
     pub genre_id: u32,
+    pub composer_id: u32,
+    pub label_id: u32,
+    pub remixer_id: u32,
+    /// Track colour (0 = none, 1..=8 the rekordbox palette).
+    pub color_id: u8,
+    /// Star rating 0..=5.
+    pub rating: u8,
     pub bitrate_kbps: Option<u32>,
     pub track_number: u32,
     pub tempo_x100: u32,
@@ -715,6 +722,11 @@ fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
     let artwork_id = read_u32_le(row, 28)?;
     let key_id = read_u32_le(row, 32)?;
     let genre_id = read_u32_le(row, 60).unwrap_or(0);
+    let composer_id = read_u32_le(row, 12).unwrap_or(0);
+    let label_id = read_u32_le(row, 40).unwrap_or(0);
+    let remixer_id = read_u32_le(row, 44).unwrap_or(0);
+    let color_id = row.get(88).copied().unwrap_or(0);
+    let rating = row.get(89).copied().unwrap_or(0);
     let id = read_u32_le(row, 72)?;
     let bitrate_kbps = read_u32_le(row, 48).filter(|v| *v > 0);
     let track_number = read_u32_le(row, 52)?;
@@ -757,6 +769,11 @@ fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
         artwork_id,
         key_id,
         genre_id,
+        composer_id,
+        label_id,
+        remixer_id,
+        color_id,
+        rating,
         bitrate_kbps,
         track_number,
         tempo_x100,

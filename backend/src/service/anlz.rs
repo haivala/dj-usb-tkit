@@ -343,7 +343,7 @@ fn beat_grid_checksum(beats: &[GridBeat]) -> u32 {
 }
 
 /// The `PQTZ` beats of a `.DAT` as (beat_number, tempo, time_ms).
-fn pqtz_beats(dat: &[u8]) -> Option<Vec<(u16, u16, u32)>> {
+pub(crate) fn pqtz_beats(dat: &[u8]) -> Option<Vec<(u16, u16, u32)>> {
     let (_, range) = anlz_chunk_ranges(dat)?
         .into_iter()
         .find(|(tag, range)| tag == b"PQTZ" && range.len() >= 24)?;

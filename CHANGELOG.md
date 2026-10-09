@@ -39,6 +39,12 @@
 
 ## Unreleased
 
+- **New feature:** Write the Engine DJ library for Denon Prime and Numark Mixstream players
+  from a USB's rekordbox export (command line only for now: `write_engine_db <usb root>`).
+  Players then use our beat grid, overview waveform, hot cues (with colours), main cue, key
+  and artwork instead of importing the rekordbox data and analyzing every track again. Play
+  history on the stick is kept across re-runs. See `docs/ENGINE_DJ.md`.
+
 ## 0.3.7
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

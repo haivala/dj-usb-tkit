@@ -8,6 +8,7 @@ pub(crate) mod bpm_key;
 mod bpm_reference_eval;
 pub mod cues;
 mod diagnostics;
+mod engine_export;
 mod export;
 pub mod export_helpers;
 mod export_log;
@@ -29,6 +30,7 @@ pub mod usb_vendor_compat;
 mod wine_paths;
 
 // Re-export functions used by commands.rs via crate::service::*
+pub use engine_export::{EngineLibrarySummary, rebuild_engine_library};
 pub use usb_utils::{detect_external_rekordbox_db, initialize_usb};
 use usb_utils::{
     detect_external_rekordbox_db as detect_external_rekordbox_db_util,
