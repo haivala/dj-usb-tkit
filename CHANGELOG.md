@@ -47,24 +47,6 @@
   0.3.7 format, with progress shown in the footer. It happens once; analysis and
   cue-editor saves wait until it's done. Re-export your playlists, or run USB repair →
   **Fix Beat Grid**, to fix the ones already on a USB.
-- **Fix:** Analysed MP3s now get the seek index (`PVBR`) rekordbox writes: the sample total,
-  and for VBR files the byte offsets, byte for byte as rekordbox writes them for the files
-  checked. MP3s analysed earlier get it once on the first launch, with the cached beat grids;
-  a track whose file can't be found then is marked for analysis instead. Files whose index
-  can't be reproduced exactly keep the empty one and are named in the Event Log, so they can
-  be reported.
-- **Improvement:** The USB repair **Add Missing Seek Data** is now two fixes, **Add Missing
-  MP3 Seek Data** (exactly what rekordbox writes) and **Add Missing FLAC Seek Data** (about
-  98% of entries match rekordbox's on long tracks), so either can be applied alone.
-- **Chore:** One-time data upgrades now go through a single registry
-  (`backend/src/service/migrations.rs`, see `docs/APP_DATA_MODEL.md` "Data migrations"),
-  recorded in a `data_migrations` table. The three existing startup backfills moved into it
-  and no longer run on every launch.
-- **New feature:** USB diagnostics have a **Beat grid format** line that flags tracks whose
-  beat grid is in the outdated format the XDJ-AZ refuses Beat Sync on, and points to **Fix
-  Beat Grid** or a re-export. Only tracks this app exported can have it; the stick's export log, which
-  now records the app version, says which ones to check, so the check reads only those
-  tracks' analysis files, and only their first 4 KB.
 - **New feature:** Memory cues in the cue editor. They show as ▼ flags on the waveform
   (grey, or in their colour) and are edited in one slot in the Cues header: ‹ › steps through
   them like a CDJ's CUE/LOOP CALL, with play, colour, name and delete; + or M adds one at the
@@ -72,23 +54,41 @@
   the ▶ playback-start marker on the first beat, which then stays as long as the track has any
   cue. The grey shading before playback start now ends on the earliest memory cue, where the
   CDJ loads the track.
+- **New feature:** **Cues follow grid** in the cue editor (next to Q, off by default).
+  When it's on, changing the BPM or the first beat moves every cue so it stays on its beat,
+  which fixes a grid under cues placed with Quantize. Off, cues keep their place in the
+  audio, as in rekordbox.
+- **New feature:** USB diagnostics have a **Beat grid format** line that flags tracks whose
+  beat grid is in the outdated format the XDJ-AZ refuses Beat Sync on, and points to **Fix
+  Beat Grid** or a re-export. Only tracks this app exported can have it; the stick's export log, which
+  now records the app version, says which ones to check, so the check reads only those
+  tracks' analysis files, and only their first 4 KB.
 - **Fix:** Memory cues are kept. rekordbox memory cues — on a USB prepared by rekordbox, or
   imported from rekordbox's library — were turned into hot cues on the next save or import,
   and any past the eighth were dropped. They are now their own kind: any number, with their
   name and colour, kept through import, saving and export as memory points without a pad.
   Tracks imported from rekordbox earlier get theirs back when imported again with "force
   update track data from rekordbox".
-- **New feature:** **Cues follow grid** in the cue editor (next to Q, off by default).
-  When it's on, changing the BPM or the first beat moves every cue so it stays on its beat,
-  which fixes a grid under cues placed with Quantize. Off, cues keep their place in the
-  audio, as in rekordbox.
 - **Fix:** Saving a BPM, key or first-beat edit from a USB playlist no longer rewrites the
   track's cues on the stick. Before, it turned rekordbox memory cues into hot cues and
   dropped any past the eighth, even though no cue was edited.
+- **Fix:** Analysed MP3s now get the seek index (`PVBR`) rekordbox writes: the sample total,
+  and for VBR files the byte offsets, byte for byte as rekordbox writes them for the files
+  checked. MP3s analysed earlier get it once on the first launch, with the cached beat grids;
+  a track whose file can't be found then is marked for analysis instead. Files whose index
+  can't be reproduced exactly keep the empty one and are named in the Event Log, so they can
+  be reported.
 - **Fix:** Relocating a moved media folder to a path that differs only in letter case (e.g.
   `~/music/Sets` → `~/Music/Sets`) was refused with "newRoot must be different from
   oldRoot", and the folder's chip then disappeared from the sources. On Linux those are
   different folders, so the relocation now goes through and the chip shows the new path.
+- **Improvement:** The USB repair **Add Missing Seek Data** is now two fixes, **Add Missing
+  MP3 Seek Data** (exactly what rekordbox writes) and **Add Missing FLAC Seek Data** (about
+  98% of entries match rekordbox's on long tracks), so either can be applied alone.
+- **Chore:** One-time data upgrades now go through a single registry
+  (`backend/src/service/migrations.rs`, see `docs/APP_DATA_MODEL.md` "Data migrations"),
+  recorded in a `data_migrations` table. The three existing startup backfills moved into it
+  and no longer run on every launch.
 - **Chore:** USB repair now writes the outcome of every fix (applied, skipped or failed)
   to the Event Log, so a log shared for a bug report shows what the repair did. "Not
   selected" is listed only for fixes that had something to do.
