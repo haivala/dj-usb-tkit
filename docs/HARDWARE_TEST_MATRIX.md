@@ -47,6 +47,9 @@ On 0.3.1 (2026-10-01), the same CDJ-2000NXS and CDJ-2000NXS2 passed
 confirming the fix for exported file names losing their extension: a track
 from a multi-script album now loads and plays. The other scenarios were not
 re-run on 0.3.1.
+XDJ-AZ (fw 1.30) was added on 0.3.7-rc.3 (2026-10-09): exports play, and the
+beat grid and Beat Sync work on app-analysed tracks. Up to 0.3.7-rc.1 it
+refused the app's beat grids; see Known Issues.
 
 Additive export — adding tracks to a USB that was initialized by rekordbox,
 without wiping the existing library — has worked on hardware since the first
@@ -59,6 +62,8 @@ release (0.1.0) and has stayed working through every version since.
 | CDJ-2000NXS | everything tested | pass | 0.2.4 | 2026-09-25 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4. |
 | CDJ-2000NXS2 | everything tested | pass | 0.2.4 | 2026-09-25 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4. `more-than-16-tracks-fresh-usb-init` was `fail` at <=0.1.30; fixed in 0.1.31. |
 | XDJ-1000MK2 | everything tested | pass | 0.2.6 | 2026-09-29 | First validation on this device (fw 1.44). |
+| XDJ-AZ | `normal-export` | pass | 0.3.7-rc.3 | 2026-10-09 | First validation on this device (fw 1.30). |
+| XDJ-AZ | `beat-grid-and-beat-sync` | pass | 0.3.7-rc.3 | 2026-10-09 | `fail` at <=0.3.7-rc.1; fixed in 0.3.7-rc.3. |
 | CDJ-3000 | `normal-export` | pass | 0.1.36 | 2026-09-02 | |
 | CDJ-3000 | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | |
 | CDJ-3000 | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First direct test of this scenario on CDJ-3000. |
@@ -119,6 +124,12 @@ tested` row.
 | XDJ-1000MK2 | 1.44 | 0.2.6 | everything tested | pass | 2026-09-29 | nack | First validation on XDJ-1000MK2. |
 | CDJ-2000NXS | 1.44 | 0.3.1 | `normal-export` | pass | 2026-10-01 | maintainer | Run to check the 0.3.1 fix, covering every `normal-export` operation: exported a playlist with the multi-script album "–5", USB insert, database mount, playlist browse, track load and playback all work. Track 6, re-exported from the original file, now keeps its `.mp3` extension and plays (previously unplayable). Other scenarios not re-run. |
 | CDJ-2000NXS2 | 1.82 | 0.3.1 | `normal-export` | pass | 2026-10-01 | maintainer | Run to check the 0.3.1 fix, covering every `normal-export` operation: exported a playlist with the multi-script album "–5", USB insert, database mount, playlist browse, track load and playback all work. Track 6, re-exported from the original file, now keeps its `.mp3` extension and plays (previously unplayable). Other scenarios not re-run. |
+
+| XDJ-AZ | 1.30 | <=0.3.6 | `beat-grid-and-beat-sync` | fail | 2026-10-07 | mrantillies | Run stopped at: beat grid. App-analysed tracks load and play with cues, key and BPM, but show no beat grid and refuse Beat Sync. See Known Issues: "0.3.7-rc.1 and earlier — `beat-grid-and-beat-sync`". |
+| XDJ-AZ | 1.30 | 0.3.7-rc.1 | `beat-grid-and-beat-sync` | fail | 2026-10-07 | mrantillies | Run stopped at: beat grid. Same as the <=0.3.6 row after applying **Add Missing Seek Data**, on MP3s and FLACs. Needle search, hot cues and loops on FLACs worked. See Known Issues: "0.3.7-rc.1 and earlier — `beat-grid-and-beat-sync`". |
+| XDJ-AZ | 1.30 | 0.3.7-rc.3 | `beat-grid-and-beat-sync` | pass | 2026-10-08 | mrantillies | Old export fixed with USB repair **Fix Beat Grid** only. Beat grid shown and placed as in the app. |
+| XDJ-AZ | 1.30 | 0.3.7-rc.3 | `normal-export` | pass | 2026-10-09 | mrantillies | First validation on XDJ-AZ. Playlist exported to an empty USB, no repair afterwards. |
+| XDJ-AZ | 1.30 | 0.3.7-rc.3 | `beat-grid-and-beat-sync` | pass | 2026-10-09 | mrantillies | Same fresh export as the `normal-export` row, no repair: beat grid and Beat Sync work. The bundles had rc3's empty MP3 seek index (`PVBR`) and no FLAC one (`PVB2`), so the XDJ-AZ does not need seek data. |
 
 ## Known Issues
 
@@ -187,6 +198,36 @@ Validation questions:
   0.1.36 on the CDJ-2000NXS2 (fw 1.82) that originally showed the fault, plus
   CDJ-3000 (fw 3.20) and CDJ-3000X (fw 1.31).
 
+### 0.3.7-rc.1 and earlier — `beat-grid-and-beat-sync` (fixed in 0.3.7-rc.3)
+
+**Devices:** XDJ-AZ (fw 1.30)
+
+Symptoms:
+- App-analysed tracks load and play with cues, key and BPM, but show no beat
+  grid; Beat Sync answers "please analyse this track in rekordbox".
+
+Reproduction:
+1. Analyse a track in the app (0.3.6 or earlier).
+2. Export it and load it on an XDJ-AZ.
+3. No beat grid; Beat Sync is refused.
+
+Context:
+- Older players (CDJ-2000NXS2, CDJ-3000, XDJ-1000MK2) accept the same bundles.
+- The app's beat grids differed from rekordbox's: the `PQTZ` header value was
+  two bytes off, and `PQT2` had a zero checksum and no microsecond body (see
+  `docs/WAVEFORMS.md`, "Beat-grid layout"). Seek data was ruled out: filling
+  it in (0.3.7-rc.1) changed nothing, and rc3 exports work without it.
+- Tracks imported from rekordbox showed the same symptom until 0.3.6's fix for
+  imported bundles, applied with "force update track data from rekordbox".
+
+Artifacts:
+- Event Log of the rc3 **Fix Beat Grid** repair, attached to
+  https://github.com/haivala/dj-usb-tkit/issues/6.
+
+Validation questions:
+- None outstanding — hardware-confirmed `pass` on 0.3.7-rc.3, both after
+  **Fix Beat Grid** and on a fresh export.
+
 ## Required Operations
 
 Each passing row must cover every operation listed for its scenario in the table
@@ -210,6 +251,7 @@ the repaired database files are written.
 | `non-ascii-track-string-alignment` | USB insert, database mount, Albums browse into a track whose title/filename require UTF-16 encoding, track listing, track load, playback start |
 | `more-than-16-tracks-fresh-usb-init` | Initialize a fresh USB, export a playlist with more than 16 tracks, insert USB, database mount, playlist browse, track load, playback start |
 | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue |
+| `beat-grid-and-beat-sync` | USB insert, database mount, load an app-analysed track, beat grid shown, Beat Sync engages |
 | `playback-start-position` | Set "Playback starts at" in the cue editor, export, USB insert, database mount, track load, check the load position |
 
 ## Recording Warn Or Fail Results
