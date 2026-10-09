@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.3.7
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** Beat grids from earlier versions were refused by newer players such
