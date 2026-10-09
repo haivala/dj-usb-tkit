@@ -2075,13 +2075,18 @@ pub struct ImportExternalPlaylistData {
 // ── track cues + beat-grid editing ────────────────────────
 
 /// A cue point on a track. This app targets CDJ playback directly, so a cue is
-/// just a position + optional name + colour; on export each cue is written as
-/// both a memory point and a hot-cue pad (A–H). The list is capped at 8.
+/// just a position + optional name + colour. A *hot cue* (the default) is
+/// written on export as both a memory point and a hot-cue pad (A–H); a track
+/// has at most 8.
+///
+/// `memory` marks a *memory cue*: a memory point only (no pad), with an
+/// optional name and colour, as rekordbox writes them to mark a track's
+/// structure. A track can have any number; they don't count toward the 8.
 ///
 /// `playback_start` marks the one optional *playback-start* cue: a memory
 /// point only (no hot-cue pad, no colour, no name), never later than any hot cue, so a
 /// CDJ's auto-cue loads there instead of on the first hot cue. It does not
-/// count toward the 8.
+/// count toward the 8. A cue is never both `memory` and `playback_start`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackCue {
@@ -2093,6 +2098,15 @@ pub struct TrackCue {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub playback_start: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub memory: bool,
+}
+
+impl TrackCue {
+    /// A cue with a hot-cue pad: neither a memory cue nor the playback start.
+    pub fn is_hot(&self) -> bool {
+        !self.playback_start && !self.memory
+    }
 }
 
 /// One cue in a `save_track_analysis_edits` request (no id — the save fully
@@ -2108,6 +2122,9 @@ pub struct TrackCueInput {
     /// The memory-only playback-start cue (see [`TrackCue::playback_start`]).
     #[serde(default)]
     pub playback_start: bool,
+    /// A memory cue (see [`TrackCue::memory`]).
+    #[serde(default)]
+    pub memory: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

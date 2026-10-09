@@ -221,21 +221,24 @@ If playlist tracks are missing required analysis, export is blocked and UI instr
 Analysis bundle handling is copy-only during export. Export requires the track to already have a `DAT` + `EXT` bundle (plus `2EX` when one exists; rekordbox bundles from older analyses have none) and copies/reuses it even if the bundle is older or low-detail. Export does not decode source audio or regenerate ANLZ files; missing bundle files block export before media copy starts. See `docs/WAVEFORMS.md`.
 
 **Cue points and edited beat grids** are the one exception to copy-only: when a
-track has rows in `track_cues` (max 8) or a user-set `first_beat_ms`, the copied
+track has rows in `track_cues` or a user-set `first_beat_ms`, the copied
 `.DAT` / `.EXT` are passed through `apply_analysis_edits_to_anlz` (after the
 `PPTH` injection) so the exported bundle carries the current cue list and beat
 grid — including on the "reuse an on-USB bundle" retain path
-(`ensure_analysis_bundle_ppth`). **Each cue point is written twice**: a memory
+(`ensure_analysis_bundle_ppth`). **Each hot cue is written twice**: a memory
 point (`PCPT`/`PCP2` with `hot_cue = 0`) and a hot-cue pad (`hot_cue = 1..8` by
 position order), so a CDJ surfaces it both in the CALL/memory list and on a pad.
 The optional **playback-start cue** (`is_playback_start`) is the exception: it
 is written once, as a memory point only, before the hot cues, so the CDJ loads
 the track there instead of on cue A. It is dropped when it coincides with a hot
-cue (see `docs/CUE_EDITOR.md`).
+cue (see `docs/CUE_EDITOR.md`). Each **memory cue** (`is_memory`) is also written
+once, as a memory point with its own name and colour (`hot_cue = 0`).
 In the eDB, `write_edb_cues_for_content` replaces the `cue` rows for the track's
-`content_id` with **two rows per cue point** (`kind = 0` memory /
-`kind = 1` hot; one `kind = 0` row for the playback-start cue; `inUsec = position_ms × 1000`, `colorTableIndex` = palette index
-for the hot row / `-1` for memory; MPEG/decoder seek fields left `0` — the
+`content_id` with **two rows per hot cue** (`kind = 0` memory /
+`kind = 1` hot; one `kind = 0` row for the playback-start cue and for each
+memory cue; `inUsec = position_ms × 1000`, `colorTableIndex` = palette index
+for the hot row and a memory cue's row (`-1` when uncoloured) / `-1` for a hot
+cue's memory row and the start cue's; MPEG/decoder seek fields left `0` — the
 player recomputes them), bumps `content.cueUpdateCount`, and sets
 `isHotCueAutoLoadOn`. `hotCueBankList` is intentionally left empty. In the PDB
 the `autoload_hotcues` flag is already written `ON` for every exported track.

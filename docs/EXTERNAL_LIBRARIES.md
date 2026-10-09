@@ -31,7 +31,8 @@ turns the chip on:
 | Cover image | yes (rekordbox's artwork file) | only a cover image *file* next to the track; embedded covers come from the app's own analysis |
 | First beat (beat-grid anchor) | yes, from rekordbox's beat grid | yes, the first beat of Mixxx's beat grid (`BeatGrid-2.0` / `BeatMap-1.0`) |
 | Waveform | rekordbox's own analysis files are used in place | no; the app's analysis makes one |
-| Hot cues | yes: hot cues (and hot loops) on pads A–H, with colour and name, then memory cues (see below) | yes: hot cues and saved loops on pads 1–8, with colour and label; the main cue becomes the playback-start cue |
+| Hot cues | yes: hot cues (and hot loops) on pads A–H, with colour and name | yes: hot cues and saved loops on pads 1–8, with colour and label; the main cue becomes the playback-start cue |
+| Memory cues | yes, every one, with colour and name (see below) | no (Mixxx has none) |
 
 Mixxx stores its waveforms in its own format, so Mixxx tracks need the app's
 analysis before export, like any folder track. Only the first beat of a Mixxx
@@ -65,19 +66,19 @@ cue points take pads A–H in position order. So an imported hot cue can land on
 a different pad letter than in rekordbox or Mixxx if the pads weren't in
 position order there.
 
-rekordbox cues are imported hot cues first:
+rekordbox cues are imported like this:
 
-- every hot cue becomes a cue point
+- every hot cue becomes a hot cue
 - the earliest memory cue becomes the playback-start cue (where a CDJ's
-  auto-cue loads the track) when it comes before the first hot cue
-- the other memory cues fill the cue points still free, in position order;
-  each one is exported as both a memory point and a hot cue
-- a memory cue that is a track's only cue becomes a cue point
+  auto-cue loads the track) when it comes before the first hot cue and has
+  no name or colour
+- every other memory cue stays a memory cue, with its name and colour, however
+  many there are; one at a hot cue's position is left out, since the hot cue
+  already has a memory point there
 
-So a track with only memory cues, as set up for older players, gets its first
-memory cue as the playback start and the next 8 as cue points. Memory cues
-that don't fit aren't imported; the Event Log counts them. Importing again
-brings them in once the app supports more cues.
+Tracks imported before memory cues were supported had them turned into cue
+points or left out. Importing again with "force update track data from
+rekordbox" brings them back as memory cues.
 
 Some tracks are skipped, with the reason in the Event Log:
 
@@ -218,13 +219,14 @@ mixxxDbSource)`.
   and `djmdSongPlaylist` (`PlaylistID`, `ContentID`, ordered by `TrackNo`).
 - Cues: `djmdCue` (`ContentID`, `InMsec` in milliseconds, `Comment`,
   `ColorTableIndex`). `Kind` 0 is a memory cue and hot-cue pads A–H are
-  `Kind` 1, 2, 3, 5, 6, 7, 8, 9 (rekordbox skips 4). Hot cues become cue
-  points; the earliest memory cue becomes the playback-start cue when it lies
-  before the first hot cue (with no hot cues, when another memory cue
-  follows); the other memory cues fill the free cue points by position, and
-  one at a hot cue's position merges into it. `ColorTableIndex` is read with the same codes the
+  `Kind` 1, 2, 3, 5, 6, 7, 8, 9 (rekordbox skips 4). Hot cues become hot
+  cues; the earliest memory cue becomes the playback-start cue when it lies
+  before the first hot cue and has no name or colour; the other memory cues
+  become memory cues, and one at a hot cue's position is dropped
+  (`rekordbox_cues_to_track_cues`). `ColorTableIndex` is read with the same codes the
   app writes to the USB eDB's `cue.colorTableIndex` (its palette ids 1–8);
-  unset or other values get the default colour. Colours set in rekordbox are
+  for a hot cue, unset or other values get the default colour; a memory cue
+  stays uncoloured. Colours set in rekordbox are
   not yet validated against real data.
 - History: `djmdHistory` (sessions are `Attribute` 0 under year / month
   folders; newest first by `DateCreated`) and `djmdSongHistory`

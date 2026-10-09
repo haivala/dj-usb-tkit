@@ -105,6 +105,7 @@ impl Db {
               name TEXT,
               sort_order INTEGER NOT NULL DEFAULT 0,
               is_playback_start INTEGER NOT NULL DEFAULT 0,
+              is_memory INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL,
               FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
@@ -239,6 +240,7 @@ impl Db {
         ensure_playlists_column(&conn, "last_exported_track_count", "INTEGER")?;
         ensure_playlists_column(&conn, "import_source", "TEXT")?;
         ensure_track_cues_column(&conn, "is_playback_start", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_track_cues_column(&conn, "is_memory", "INTEGER NOT NULL DEFAULT 0")?;
         conn.execute_batch(
             r#"
             CREATE INDEX IF NOT EXISTS idx_tracks_match_fingerprint
@@ -289,7 +291,7 @@ const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[
     "import_source",
 ];
 
-const ALLOWED_TRACK_CUES_COLUMNS: &[&str] = &["is_playback_start"];
+const ALLOWED_TRACK_CUES_COLUMNS: &[&str] = &["is_playback_start", "is_memory"];
 
 fn ensure_tracks_column(
     conn: &Connection,
@@ -495,6 +497,7 @@ mod tests {
             "name",
             "sort_order",
             "is_playback_start",
+            "is_memory",
         ] {
             assert!(
                 cue_cols.iter().any(|c| c == expected),

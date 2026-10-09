@@ -257,7 +257,7 @@ pub(crate) struct MixxxCue {
 /// position order, capped at [`MAX_HOT_CUES`]. Mixxx allows more pads than
 /// that: the lowest-numbered pads win (pads 1-8 are the ones an 8-pad
 /// controller plays). The main cue becomes the playback-start cue when it
-/// lies before the first hot cue (the same rule `split_playback_start`
+/// lies before the first hot cue (the same rule `split_cues`
 /// applies on export).
 pub(crate) fn mixxx_cues_to_track_cues(cues: &[MixxxCue], sample_rate: u32) -> Vec<TrackCue> {
     let mut on_pads: Vec<(i64, TrackCue)> = cues
@@ -282,6 +282,7 @@ pub(crate) fn mixxx_cues_to_track_cues(cues: &[MixxxCue], sample_rate: u32) -> V
                         .and_then(non_empty_db_value)
                         .map(str::to_string),
                     playback_start: false,
+                    memory: false,
                 },
             ))
         })
@@ -312,6 +313,7 @@ pub(crate) fn mixxx_cues_to_track_cues(cues: &[MixxxCue], sample_rate: u32) -> V
             color_id: None,
             name: None,
             playback_start: true,
+            memory: false,
         });
     }
     out.extend(hot);

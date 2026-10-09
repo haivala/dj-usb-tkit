@@ -805,12 +805,14 @@ fn save_track_analysis_edits_bakes_cues_and_first_beat_into_cached_anlz() {
                 color_id: None,
                 name: Some("Intro".to_string()),
                 playback_start: false,
+                memory: false,
             },
             TrackCueInput {
                 position_ms: 4_000,
                 color_id: Some(2),
                 name: Some("Drop".to_string()),
                 playback_start: false,
+                memory: false,
             },
         ]),
     });
@@ -914,12 +916,14 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
                 color_id: None,
                 name: Some("Verse".to_string()),
                 playback_start: false,
+                memory: false,
             },
             TrackCueInput {
                 position_ms: 6_000,
                 color_id: Some(3),
                 name: Some("Drop".to_string()),
                 playback_start: false,
+                memory: false,
             },
         ]),
     });
@@ -1119,12 +1123,14 @@ fn add_never_viewed_usb_track_materializes_row_and_imports_anlz_cues() {
                 color_id: None,
                 name: Some("Verse".into()),
                 playback_start: false,
+                memory: false,
             },
             TrackCueInput {
                 position_ms: 6_000,
                 color_id: Some(3),
                 name: Some("Drop".into()),
                 playback_start: false,
+                memory: false,
             },
         ],
     );
@@ -1339,12 +1345,14 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
                 color_id: None,
                 name: Some("A".into()),
                 playback_start: false,
+                memory: false,
             },
             TrackCueInput {
                 position_ms: 6_000,
                 color_id: Some(3),
                 name: Some("B".into()),
                 playback_start: false,
+                memory: false,
             },
         ],
     );
@@ -1390,6 +1398,7 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
                 color_id: Some(5),
                 name: Some("Moved".into()),
                 playback_start: false,
+                memory: false,
             }]),
             local_track_id: usb_track.local_track_id.clone(),
             title: Some(usb_track.title.clone()),
@@ -1739,6 +1748,250 @@ fn usb_save_without_cue_edit_leaves_device_cues_untouched() {
     assert_eq!(edb_cue_rows(&usb, &media_raw), rows_before);
 }
 
+/// Each cue as (position, 'S' start / 'H' hot / 'M' memory, colour, name).
+fn cue_summary(cues: &[backend::models::TrackCue]) -> Vec<(u32, char, Option<u8>, Option<String>)> {
+    cues.iter()
+        .map(|c| {
+            let kind = if c.playback_start {
+                'S'
+            } else if c.memory {
+                'M'
+            } else {
+                'H'
+            };
+            (c.position_ms, kind, c.color_id, c.name.clone())
+        })
+        .collect()
+}
+
+/// The memory-only entries of an ANLZ file (no hot entry at their position),
+/// as (position, colour id, comment).
+fn lone_memory_points(bytes: &[u8]) -> Vec<(u32, u8, String)> {
+    let cues = read_cues_from_anlz(bytes);
+    let hot: std::collections::HashSet<u32> = cues
+        .iter()
+        .filter(|c| c.hot_cue != 0)
+        .map(|c| c.position_ms)
+        .collect();
+    let mut out: Vec<_> = cues
+        .iter()
+        .filter(|c| c.hot_cue == 0 && !hot.contains(&c.position_ms))
+        .map(|c| (c.position_ms, c.color_id, c.comment.clone()))
+        .collect();
+    out.sort();
+    out
+}
+
+/// rekordbox memory cues on a stick come back from it as memory cues, with
+/// their names and colours, not as hot cues.
+#[test]
+fn usb_track_detail_reads_rekordbox_memory_cues_as_memory_cues() {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, _playlist_id) =
+        export_one_track_with_cues(root.path(), Vec::new());
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
+    add_rekordbox_style_cues(&usb, &media_raw);
+
+    let detail = backend
+        .get_usb_track_detail(GetUsbTrackDetailRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().expect("raw"),
+        })
+        .data
+        .expect("usb detail");
+    let some = |s: &str| Some(s.to_string());
+    assert_eq!(
+        cue_summary(&detail.cues),
+        vec![
+            // The leading unnamed, uncoloured memory point is the start cue.
+            (1_000, 'S', None, None),
+            (2_000, 'M', Some(3), some("Section 1")),
+            (3_000, 'M', None, some("Note 2")),
+            (4_000, 'M', None, None),
+            (5_000, 'M', Some(3), some("Section 4")),
+            (6_000, 'M', None, some("Note 5")),
+            (7_000, 'M', None, None),
+            (8_000, 'M', Some(3), some("Section 7")),
+            (9_000, 'M', None, some("Note 8")),
+            (10_000, 'M', None, None),
+            // The memory point on the hot cue is the hot cue's own.
+            (12_500, 'H', Some(5), some("Drop")),
+        ]
+    );
+}
+
+/// Editing memory cues from a USB row: the stick, the eDB and the library all
+/// get them, and a re-export to a fresh stick carries them over.
+#[test]
+fn usb_memory_cue_edits_reach_the_stick_the_library_and_a_re_export() {
+    let root = tempdir().expect("temp root");
+    let (backend, data_dir, usb, track_id, playlist_id) =
+        export_one_track_with_cues(root.path(), Vec::new());
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
+    let analysis_raw = usb_track.usb_analysis_path_raw.clone().expect("raw");
+    add_rekordbox_style_cues(&usb, &media_raw);
+
+    let detail = backend
+        .get_usb_track_detail(GetUsbTrackDetailRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: analysis_raw.clone(),
+        })
+        .data
+        .expect("usb detail");
+    // Rename 2 s, recolour 3 s, delete 4 s, add 14 s (the track is 16 s);
+    // keep the rest.
+    let mut cues: Vec<TrackCueInput> = detail
+        .cues
+        .iter()
+        .filter(|c| c.position_ms != 4_000)
+        .map(|c| TrackCueInput {
+            position_ms: c.position_ms,
+            color_id: match c.position_ms {
+                3_000 => Some(6),
+                _ => c.color_id,
+            },
+            name: match c.position_ms {
+                2_000 => Some("Intro".to_string()),
+                _ => c.name.clone(),
+            },
+            playback_start: c.playback_start,
+            memory: c.memory,
+        })
+        .collect();
+    cues.push(TrackCueInput {
+        position_ms: 14_000,
+        color_id: None,
+        name: Some("Outro".to_string()),
+        playback_start: false,
+        memory: true,
+    });
+    let saved = backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+        usb_analysis_path_raw: analysis_raw,
+        usb_media_path_raw: media_raw.clone(),
+        bpm: None,
+        key: None,
+        duration_ms: usb_track.duration_ms,
+        first_beat_ms: None,
+        cues: Some(cues),
+        local_track_id: None,
+        title: Some(usb_track.title.clone()),
+        artist: Some(usb_track.artist.clone()),
+        album: usb_track.album.clone(),
+    });
+    assert!(saved.ok, "usb save failed: {saved:?}");
+    let saved = saved.data.expect("save data");
+    assert_eq!(saved.local_track_id.as_deref(), Some(track_id.as_str()));
+
+    let s = |v: &str| v.to_string();
+    let expected_memory = vec![
+        (1_000, 0, s("")), // the start cue
+        (2_000, 3, s("Intro")),
+        (3_000, 6, s("Note 2")),
+        (5_000, 3, s("Section 4")),
+        (6_000, 0, s("Note 5")),
+        (7_000, 0, s("")),
+        (8_000, 3, s("Section 7")),
+        (9_000, 0, s("Note 8")),
+        (10_000, 0, s("")),
+        (14_000, 0, s("Outro")),
+    ];
+    // Both analysis files on the stick: lone memory points with their colour
+    // and name (the .DAT's PCOB has neither, only positions).
+    let ext = only_exported_ext(&usb);
+    assert_eq!(
+        lone_memory_points(&fs::read(&ext).unwrap()),
+        expected_memory
+    );
+    assert_eq!(
+        lone_memory_points(&fs::read(ext.with_extension("DAT")).unwrap())
+            .into_iter()
+            .map(|(p, _, _)| p)
+            .collect::<Vec<_>>(),
+        expected_memory
+            .iter()
+            .map(|(p, _, _)| *p)
+            .collect::<Vec<_>>()
+    );
+
+    // eDB: one kind-0 row per memory cue with its colour (or -1) and name,
+    // plus the start cue's and the hot cue's memory point, and its pad.
+    let edb_rows: Vec<(i64, i64, i64, String)> = open_usb_edb(&usb)
+        .prepare(
+            "SELECT cue.inUsec / 1000, cue.kind, cue.colorTableIndex, cue.cueComment
+             FROM cue JOIN content ON content.content_id = cue.content_id
+             WHERE content.path = ?1 ORDER BY cue.inUsec, cue.kind",
+        )
+        .unwrap()
+        .query_map([&media_raw], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let mut expected_rows: Vec<(i64, i64, i64, String)> = expected_memory
+        .iter()
+        .map(|(p, c, n)| {
+            (
+                i64::from(*p),
+                0,
+                if *c == 0 { -1 } else { i64::from(*c) },
+                n.clone(),
+            )
+        })
+        .collect();
+    expected_rows.push((12_500, 0, -1, s("Drop")));
+    expected_rows.push((12_500, 1, 5, s("Drop")));
+    expected_rows.sort();
+    assert_eq!(edb_rows, expected_rows);
+
+    // The library has the same cues.
+    // (position, is_playback_start, is_memory, color_id, name)
+    type LocalCue = (i64, bool, bool, Option<i64>, Option<String>);
+    let local: Vec<LocalCue> = rusqlite::Connection::open(data_dir.join("backend.db"))
+        .unwrap()
+        .prepare(
+            "SELECT position_ms, is_playback_start, is_memory, color_id, name
+                 FROM track_cues WHERE track_id = ?1 ORDER BY position_ms",
+        )
+        .unwrap()
+        .query_map([&track_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(local.len(), 11);
+    assert_eq!(local[0], (1_000, true, false, None, None));
+    assert_eq!(local[1], (2_000, false, true, Some(3), Some(s("Intro"))));
+    assert_eq!(local[9], (12_500, false, false, Some(5), Some(s("Drop"))));
+    assert_eq!(local[10], (14_000, false, true, None, Some(s("Outro"))));
+
+    // A re-export to a fresh stick carries them over.
+    let usb2 = root.path().join("usb2");
+    fs::create_dir_all(&usb2).expect("create usb2");
+    backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb2.to_string_lossy().to_string(),
+    });
+    let export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb2.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(export.ok, "re-export failed: {export:?}");
+    assert_eq!(
+        lone_memory_points(&fs::read(only_exported_ext(&usb2)).unwrap()),
+        expected_memory
+    );
+}
+
 /// Saves run as background jobs, so two can overlap. Each read-modify-writes
 /// the same staged `export.pdb`; without serialization one edit would be lost.
 #[test]
@@ -1804,6 +2057,7 @@ fn save_usb_track_analysis_edits_blocks_when_usb_not_connected() {
             color_id: None,
             name: None,
             playback_start: false,
+            memory: false,
         }],
     );
     let usb_track = first_usb_playlist_track(&backend, &usb);
@@ -1825,6 +2079,7 @@ fn save_usb_track_analysis_edits_blocks_when_usb_not_connected() {
             color_id: None,
             name: None,
             playback_start: false,
+            memory: false,
         }]),
         local_track_id: usb_track.local_track_id.clone(),
         title: None,
@@ -1848,12 +2103,14 @@ fn save_usb_track_analysis_edits_empty_list_clears_device_and_local() {
                 color_id: None,
                 name: None,
                 playback_start: false,
+                memory: false,
             },
             TrackCueInput {
                 position_ms: 6_000,
                 color_id: Some(3),
                 name: None,
                 playback_start: false,
+                memory: false,
             },
         ],
     );
@@ -1912,12 +2169,14 @@ fn playback_start_cue_is_a_memory_point_only_and_round_trips_local_and_usb() {
                 color_id: Some(3),
                 name: None,
                 playback_start: false,
+                memory: false,
             },
             TrackCueInput {
                 position_ms: 200,
                 color_id: None,
                 name: None,
                 playback_start: true,
+                memory: false,
             },
         ],
     );
@@ -1991,12 +2250,14 @@ fn playback_start_cue_is_a_memory_point_only_and_round_trips_local_and_usb() {
                     color_id: None,
                     name: None,
                     playback_start: true,
+                    memory: false,
                 },
                 TrackCueInput {
                     position_ms: 4_000,
                     color_id: Some(3),
                     name: None,
                     playback_start: false,
+                    memory: false,
                 },
             ]),
             local_track_id: usb_track.local_track_id.clone(),
@@ -2054,12 +2315,14 @@ fn re_export_reconciles_on_usb_bundle_to_edited_local_master() {
                 color_id: None,
                 name: None,
                 playback_start: false,
+                memory: false,
             },
             TrackCueInput {
                 position_ms: 6_000,
                 color_id: Some(3),
                 name: None,
                 playback_start: false,
+                memory: false,
             },
         ],
     );
@@ -2089,6 +2352,7 @@ fn re_export_reconciles_on_usb_bundle_to_edited_local_master() {
             color_id: None,
             name: None,
             playback_start: false,
+            memory: false,
         }]),
     });
     re_export(&backend);

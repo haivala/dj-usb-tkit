@@ -184,11 +184,23 @@ backend enforces the same rules as the editor (`normalize_cues`): at most one,
 never named or coloured, dropped when the track has no hot cues, and pulled
 back to the earliest hot cue when it lies after it.
 
-On export `split_playback_start` writes it as a single memory point before the
+On export `split_cues` writes it as a single memory point before the
 hot cues, in both the ANLZ cue chunks and the eDB `cue` table. It is dropped
 when it coincides with a hot cue's position, since that hot cue's own memory
-point already sits there. On import (`collapse_anlz_cues`), a memory-only entry
-that precedes every hot-cue pad is read back as the playback-start cue.
+point already sits there. On import (`collapse_anlz_cues`), an unnamed,
+uncoloured memory-only entry that precedes every hot-cue pad is read back as
+the playback-start cue.
+
+### Memory cues
+
+Memory cues are memory points without a hot-cue pad, as rekordbox writes them
+to mark a track's structure: a `track_cues` row with `is_memory = 1`
+(`TrackCue.memory`), with an optional name and colour and no limit on how many.
+They come from rekordbox's library and from USB sticks prepared by rekordbox
+(`collapse_anlz_cues` reads every memory-only entry other than the start cue as
+one, keeping its name and colour), and are exported as lone memory points with
+their name and colour. The editor doesn't show them yet: it keeps them as they
+are, and a save sends them back unchanged.
 
 ### Metronome
 

@@ -1,8 +1,10 @@
 //! Track cue points and beat-grid ("first beat") editing.
 //!
 //! This app targets CDJ playback directly (not Rekordbox), so a cue is just a
-//! position + optional name + colour. The list is capped at 8; on save/export
-//! each cue is written as BOTH a memory point and a hot-cue pad (A–H).
+//! position + optional name + colour. A hot cue is written on save/export as
+//! BOTH a memory point and a hot-cue pad (A–H); a track has at most 8.
+//! Memory cues (`TrackCue::memory`) are memory points only, any number of
+//! them, as rekordbox writes them to mark a track's structure.
 //! On top of those, a track may carry one memory-only *playback-start* cue
 //! (`TrackCue::playback_start`) at or before the first hot cue, so a CDJ's
 //! auto-cue loads there (typically the first beat) rather than on cue A.
@@ -13,7 +15,7 @@
 //! grid, and export/import plumb the same data onto the USB Rekordbox database
 //! (see `service::anlz`, `service::export`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
@@ -47,7 +49,7 @@ use super::{
     row_to_track,
 };
 
-/// Highest number of cue points a track can carry (one per CDJ hot-cue pad A–H).
+/// Highest number of hot cues a track can carry (one per CDJ hot-cue pad A–H).
 pub const MAX_HOT_CUES: u8 = 8;
 
 /// Import cue points + beat-grid anchor from an on-USB ANLZ bundle into the
@@ -119,8 +121,8 @@ pub fn insert_track_cues(
         conn.execute(
             "INSERT INTO track_cues
                (id, track_id, position_ms, color_id, name, sort_order, is_playback_start,
-                created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                is_memory, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
             params![
                 cue.id,
                 track_id,
@@ -129,6 +131,7 @@ pub fn insert_track_cues(
                 cue.name,
                 index as i64,
                 cue.playback_start,
+                cue.memory,
                 now,
             ],
         )?;
@@ -137,13 +140,17 @@ pub fn insert_track_cues(
 }
 
 /// Collapse the memory + hot-cue entries in an ANLZ bundle into one dedup-by-
-/// position `TrackCue` list (capped at [`MAX_HOT_CUES`], ordered by position),
-/// preferring a non-empty comment / a valid palette colour. Each returned cue
-/// gets a fresh synthetic id — callers that persist it assign their own.
+/// position `TrackCue` list ordered by position, preferring a non-empty
+/// comment / a valid palette colour. A position with a hot-cue pad is a hot
+/// cue (its memory point is the pad's own; at most [`MAX_HOT_CUES`]); a
+/// position with only a memory point is a memory cue, keeping its name and
+/// colour, with no limit. Each returned cue gets a fresh synthetic id —
+/// callers that persist it assign their own.
 ///
-/// A memory-only entry that precedes every hot-cue pad is the playback-start
-/// cue this app writes; it comes back first, flagged `playback_start`, outside
-/// the cap, and unnamed (the start cue carries no name). Any other memory-only entry is read as a regular cue.
+/// An unnamed, uncoloured memory-only entry that precedes every hot-cue pad is
+/// the playback-start cue this app writes; it comes back first, flagged
+/// `playback_start`. A named or coloured one is a memory cue, so nothing the
+/// player shows is lost.
 pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
     #[derive(Default)]
     struct Collapsed {
@@ -169,7 +176,11 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
     let any_hot = by_position.values().any(|c| c.has_hot);
     let mut entries = by_position.into_iter().peekable();
     let mut out = Vec::new();
-    if any_hot && entries.peek().is_some_and(|(_, c)| !c.has_hot) {
+    if any_hot
+        && entries
+            .peek()
+            .is_some_and(|(_, c)| !c.has_hot && c.name.is_none() && c.color_id.is_none())
+    {
         let (position_ms, _) = entries.next().expect("peeked");
         out.push(TrackCue {
             id: Uuid::now_v7().to_string(),
@@ -177,19 +188,26 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
             color_id: None,
             name: None,
             playback_start: true,
+            memory: false,
         });
     }
-    out.extend(
-        entries
-            .take(MAX_HOT_CUES as usize)
-            .map(|(position_ms, c)| TrackCue {
-                id: Uuid::now_v7().to_string(),
-                position_ms,
-                color_id: c.color_id,
-                name: c.name,
-                playback_start: false,
-            }),
-    );
+    let mut hot_count = 0usize;
+    for (position_ms, c) in entries {
+        if c.has_hot {
+            if hot_count == MAX_HOT_CUES as usize {
+                continue;
+            }
+            hot_count += 1;
+        }
+        out.push(TrackCue {
+            id: Uuid::now_v7().to_string(),
+            position_ms,
+            color_id: c.color_id,
+            name: c.name,
+            playback_start: false,
+            memory: !c.has_hot,
+        });
+    }
     out
 }
 
@@ -380,9 +398,10 @@ pub fn nearest_palette_color_id(rgb: u32) -> u8 {
 }
 
 /// A cue list as the cue editor gets it: every hot cue carries a colour (the
-/// default when the ANLZ had none), exactly as a save would store it.
+/// default when the ANLZ had none), exactly as a save would store it. Memory
+/// cues keep theirs, or none.
 fn cues_for_editor(mut cues: Vec<TrackCue>) -> Vec<TrackCue> {
-    for cue in cues.iter_mut().filter(|c| !c.playback_start) {
+    for cue in cues.iter_mut().filter(|c| c.is_hot()) {
         cue.color_id.get_or_insert(DEFAULT_HOTCUE_COLOR_ID);
     }
     cues
@@ -395,13 +414,14 @@ fn row_to_track_cue(row: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<Tr
         color_id: row.get::<_, Option<i64>>(base + 2)?.map(|v| v as u8),
         name: row.get(base + 3)?,
         playback_start: row.get::<_, i64>(base + 4)? != 0,
+        memory: row.get::<_, i64>(base + 5)? != 0,
     })
 }
 
 /// Read a track's cue list in stable render order.
 pub fn load_track_cues(conn: &Connection, track_id: &str) -> BackendResult<Vec<TrackCue>> {
     let mut stmt = conn.prepare(
-        "SELECT id, position_ms, color_id, name, is_playback_start
+        "SELECT id, position_ms, color_id, name, is_playback_start, is_memory
            FROM track_cues WHERE track_id = ?1
           ORDER BY sort_order, position_ms",
     )?;
@@ -422,7 +442,7 @@ pub fn load_track_cues_bulk(
     }
     let placeholders = vec!["?"; track_ids.len()].join(", ");
     let sql = format!(
-        "SELECT track_id, id, position_ms, color_id, name, is_playback_start
+        "SELECT track_id, id, position_ms, color_id, name, is_playback_start, is_memory
            FROM track_cues WHERE track_id IN ({placeholders})
           ORDER BY track_id, sort_order, position_ms"
     );
@@ -442,54 +462,75 @@ pub fn anlz_cues_for_track(conn: &Connection, track_id: &str) -> BackendResult<V
     Ok(anlz_cues_from_track_cues(&load_track_cues(conn, track_id)?))
 }
 
-/// The cue list split into its hot cues (position order, capped at
-/// [`MAX_HOT_CUES`]) and the memory-only playback-start cue. The start cue is
-/// dropped when there are no hot cues or when it coincides with a hot cue's
-/// position (that hot cue's own memory point already sits there).
-pub fn split_playback_start(cues: &[TrackCue]) -> (Vec<&TrackCue>, Option<&TrackCue>) {
-    let mut hot: Vec<&TrackCue> = cues.iter().filter(|c| !c.playback_start).collect();
+/// A cue list split by what each cue becomes on the device (see [`split_cues`]).
+pub struct SplitCues<'a> {
+    /// The memory-only playback-start cue, when it lies before the first hot cue.
+    pub start: Option<&'a TrackCue>,
+    /// Hot cues in position order, capped at [`MAX_HOT_CUES`].
+    pub hot: Vec<&'a TrackCue>,
+    /// Memory cues in position order, one per position.
+    pub memory: Vec<&'a TrackCue>,
+}
+
+/// Split a cue list into the playback-start cue, the hot cues and the memory
+/// cues. The start cue is dropped when there are no hot cues or when it
+/// coincides with a hot cue's position (that hot cue's own memory point
+/// already sits there); a memory cue is dropped at a hot cue's or the start
+/// cue's position for the same reason.
+pub fn split_cues(cues: &[TrackCue]) -> SplitCues<'_> {
+    let mut hot: Vec<&TrackCue> = cues.iter().filter(|c| c.is_hot()).collect();
     hot.sort_by_key(|c| c.position_ms);
     hot.truncate(MAX_HOT_CUES as usize);
     let start = cues.iter().find(|c| c.playback_start).filter(|s| {
         hot.first()
             .is_some_and(|first| s.position_ms < first.position_ms)
     });
-    (hot, start)
+    let taken: HashSet<u32> = hot
+        .iter()
+        .chain(start.iter())
+        .map(|c| c.position_ms)
+        .collect();
+    let mut memory: Vec<&TrackCue> = cues
+        .iter()
+        .filter(|c| c.memory && !taken.contains(&c.position_ms))
+        .collect();
+    memory.sort_by_key(|c| c.position_ms);
+    memory.dedup_by_key(|c| c.position_ms);
+    SplitCues { start, hot, memory }
 }
 
-/// Expand each cue point into a memory `AnlzCue` **and** a hot `AnlzCue`
-/// (slot 1..=8 by position order); the playback-start cue becomes a lone
-/// memory `AnlzCue`. The `PCOB`/`PCO2` encoders split on `is_hot()`.
+/// Expand each hot cue into a memory `AnlzCue` **and** a hot `AnlzCue`
+/// (slot 1..=8 by position order); a memory cue becomes a lone memory
+/// `AnlzCue` with its colour and name, and the playback-start cue a lone,
+/// unnamed and uncoloured one. The `PCOB`/`PCO2` encoders split on `is_hot()`.
 pub fn anlz_cues_from_track_cues(cues: &[TrackCue]) -> Vec<AnlzCue> {
-    let (sorted, start) = split_playback_start(cues);
-
-    let mut out = Vec::with_capacity(sorted.len() * 2 + 1);
-    if let Some(start) = start {
-        out.push(AnlzCue {
-            position_ms: start.position_ms,
-            hot_cue: 0,
-            color_id: 0,
-            color_rgb: (0, 0, 0),
-            color_code: 0,
-            comment: String::new(),
-        });
-    }
-    for (i, cue) in sorted.iter().enumerate() {
-        let (color_id, rgb, code) = match cue.color_id.and_then(palette_entry) {
+    let split = split_cues(cues);
+    let point = |cue: &TrackCue, hot_cue: u32| {
+        let (color_id, color_rgb, color_code) = match cue.color_id.and_then(palette_entry) {
             Some(entry) => (entry.id, entry.rgb, entry.color_code),
             None => (0, (0, 0, 0), 0),
         };
-        let comment = cue.name.clone().unwrap_or_default();
-        let make = |hot_cue: u32| AnlzCue {
+        AnlzCue {
             position_ms: cue.position_ms,
             hot_cue,
             color_id,
-            color_rgb: rgb,
-            color_code: code,
-            comment: comment.clone(),
-        };
-        out.push(make(0)); // memory point
-        out.push(make((i + 1) as u32)); // hot-cue pad A..H
+            color_rgb,
+            color_code,
+            comment: cue.name.clone().unwrap_or_default(),
+        }
+    };
+
+    let mut out = Vec::with_capacity(split.hot.len() * 2 + split.memory.len() + 1);
+    if let Some(start) = split.start {
+        out.push(AnlzCue {
+            position_ms: start.position_ms,
+            ..AnlzCue::default()
+        });
+    }
+    out.extend(split.memory.iter().map(|cue| point(cue, 0)));
+    for (i, cue) in split.hot.iter().enumerate() {
+        out.push(point(cue, 0)); // memory point
+        out.push(point(cue, (i + 1) as u32)); // hot-cue pad A..H
     }
     out
 }
@@ -549,23 +590,34 @@ struct NormalizedCue {
     color_id: Option<u8>,
     name: Option<String>,
     playback_start: bool,
+    memory: bool,
 }
 
-/// Validate a cue-list edit. Hot cues are capped at [`MAX_HOT_CUES`]; at most
-/// one playback-start cue is allowed, it carries no name or colour, it is
-/// dropped when there are no hot cues, pulled back to the earliest hot cue when it lies after it, and is
-/// returned first.
+/// Validate a cue-list edit. Hot cues are capped at [`MAX_HOT_CUES`]; memory
+/// cues have no limit and an optional colour (no default). At most one
+/// playback-start cue is allowed, it carries no name or colour, it is dropped
+/// when there are no hot cues, pulled back to the earliest hot cue when it
+/// lies after it, and is returned first. A memory cue at a hot cue's or the
+/// start cue's position is dropped: that cue's memory point already sits there.
 fn normalize_cues(
     inputs: &[TrackCueInput],
     duration_ms: Option<u64>,
 ) -> BackendResult<Vec<NormalizedCue>> {
-    let hot_count = inputs.iter().filter(|c| !c.playback_start).count();
+    if inputs.iter().any(|c| c.playback_start && c.memory) {
+        return Err(BackendError::Validation(
+            "a cue can't be both a memory cue and the playback start".to_string(),
+        ));
+    }
+    let hot_count = inputs
+        .iter()
+        .filter(|c| !c.playback_start && !c.memory)
+        .count();
     if hot_count > MAX_HOT_CUES as usize {
         return Err(BackendError::Validation(format!(
             "at most {MAX_HOT_CUES} cue points are allowed"
         )));
     }
-    if inputs.len() - hot_count > 1 {
+    if inputs.iter().filter(|c| c.playback_start).count() > 1 {
         return Err(BackendError::Validation(
             "at most one playback-start cue is allowed".to_string(),
         ));
@@ -589,6 +641,7 @@ fn normalize_cues(
                 color_id: None,
                 name: None,
                 playback_start: true,
+                memory: false,
             });
             continue;
         }
@@ -599,6 +652,7 @@ fn normalize_cues(
                     "unknown cue colorId {id}"
                 )));
             }
+            None if input.memory => None,
             None => Some(DEFAULT_HOTCUE_COLOR_ID),
         };
         out.push(NormalizedCue {
@@ -606,12 +660,13 @@ fn normalize_cues(
             color_id,
             name,
             playback_start: false,
+            memory: input.memory,
         });
     }
 
     let earliest_hot = out
         .iter()
-        .filter(|c| !c.playback_start)
+        .filter(|c| !c.playback_start && !c.memory)
         .map(|c| c.position_ms)
         .min();
     if let Some(index) = out.iter().position(|c| c.playback_start) {
@@ -621,6 +676,15 @@ fn normalize_cues(
             out.insert(0, start);
         }
     }
+
+    // One memory point per position: a memory cue never sits on a hot cue's
+    // or the start cue's own, nor on another memory cue's.
+    let mut taken: HashSet<u32> = out
+        .iter()
+        .filter(|c| !c.memory)
+        .map(|c| c.position_ms)
+        .collect();
+    out.retain(|c| !c.memory || taken.insert(c.position_ms));
     Ok(out)
 }
 
@@ -632,6 +696,7 @@ impl NormalizedCue {
             color_id: self.color_id,
             name: self.name.clone(),
             playback_start: self.playback_start,
+            memory: self.memory,
         }
     }
 }
@@ -685,8 +750,8 @@ fn apply_local_analysis_edits_tx(
             tx.execute(
                 "INSERT INTO track_cues
                    (id, track_id, position_ms, color_id, name, sort_order, is_playback_start,
-                    created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                    is_memory, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
                 params![
                     Uuid::now_v7().to_string(),
                     track_id,
@@ -695,6 +760,7 @@ fn apply_local_analysis_edits_tx(
                     cue.name,
                     index as i64,
                     cue.playback_start,
+                    cue.memory,
                     now,
                 ],
             )?;
@@ -1285,6 +1351,7 @@ mod tests {
             color_id: color,
             name: None,
             playback_start: false,
+            memory: false,
         }
     }
 
@@ -1294,6 +1361,7 @@ mod tests {
             color_id: color,
             name: name.map(str::to_string),
             playback_start: false,
+            memory: false,
         }
     }
 
@@ -1304,6 +1372,7 @@ mod tests {
             color_id: color,
             name: None,
             playback_start: false,
+            memory: false,
         }
     }
 
@@ -1329,6 +1398,7 @@ mod tests {
               name TEXT,
               sort_order INTEGER NOT NULL DEFAULT 0,
               is_playback_start INTEGER NOT NULL DEFAULT 0,
+              is_memory INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
@@ -1390,17 +1460,24 @@ mod tests {
 
     #[test]
     fn cues_for_editor_gives_uncoloured_hot_cues_the_default_colour_only() {
-        let cue = |color_id, playback_start| TrackCue {
+        let cue = |color_id, playback_start, memory| TrackCue {
             id: String::new(),
             position_ms: 0,
             color_id,
             name: None,
             playback_start,
+            memory,
         };
-        let out = cues_for_editor(vec![cue(None, true), cue(None, false), cue(Some(2), false)]);
+        let out = cues_for_editor(vec![
+            cue(None, true, false),
+            cue(None, false, false),
+            cue(Some(2), false, false),
+            cue(None, false, true),
+            cue(Some(3), false, true),
+        ]);
         assert_eq!(
             out.iter().map(|c| c.color_id).collect::<Vec<_>>(),
-            [None, Some(DEFAULT_HOTCUE_COLOR_ID), Some(2)]
+            [None, Some(DEFAULT_HOTCUE_COLOR_ID), Some(2), None, Some(3)]
         );
     }
 
@@ -1507,12 +1584,14 @@ mod tests {
             color_id: Some(3),
             name: Some("Start".to_string()),
             playback_start: true,
+            memory: false,
         }
     }
 
     fn start_cue(pos: u32) -> TrackCue {
         TrackCue {
             playback_start: true,
+            memory: false,
             ..cue("start", pos, None)
         }
     }
@@ -1585,6 +1664,173 @@ mod tests {
             "the hot cue's memory point already sits there"
         );
         assert!(anlz_cues_from_track_cues(&[start_cue(1000)]).is_empty());
+    }
+
+    fn memory_input(pos: u32, color: Option<u8>, name: Option<&str>) -> TrackCueInput {
+        TrackCueInput {
+            memory: true,
+            ..named_input(pos, color, name)
+        }
+    }
+
+    fn memory_cue(pos: u32, color: Option<u8>, name: Option<&str>) -> TrackCue {
+        TrackCue {
+            name: name.map(str::to_string),
+            memory: true,
+            ..cue(&format!("m{pos}"), pos, color)
+        }
+    }
+
+    /// ANLZ `.EXT` bytes carrying `cues`, as an export writes them.
+    fn ext_with_cues(cues: &[AnlzCue]) -> Vec<u8> {
+        let plain = super::super::anlz::build_anlz_ext_file(
+            &super::super::anlz::WaveformData::from_peaks(vec![128; 400]),
+            "/Contents/x.mp3",
+            Some(120.0),
+            120_000,
+            None,
+            &[],
+        );
+        apply_analysis_edits_to_anlz(
+            &plain,
+            &AnlzAnalysisEdits {
+                bpm: Some(120.0),
+                duration_ms: Some(120_000),
+                first_beat_ms: None,
+                cues: Some(cues),
+            },
+        )
+    }
+
+    #[test]
+    fn normalize_caps_hot_cues_only_and_keeps_memory_cues_uncoloured() {
+        let mut inputs: Vec<TrackCueInput> = (0..8).map(|i| input(1_000 * (i + 1), None)).collect();
+        inputs.extend((0..20).map(|i| memory_input(20_000 + i * 100, None, None)));
+        inputs.push(memory_input(50_000, Some(3), Some(" Outro ")));
+        let out = normalize_cues(&inputs, None).expect("8 hot + 21 memory is allowed");
+        assert_eq!(out.iter().filter(|c| c.memory).count(), 21);
+        assert!(
+            out.iter()
+                .filter(|c| !c.memory)
+                .all(|c| c.color_id == Some(DEFAULT_HOTCUE_COLOR_ID))
+        );
+        assert!(
+            out.iter()
+                .filter(|c| c.memory)
+                .take(20)
+                .all(|c| c.color_id.is_none())
+        );
+        let outro = out.last().unwrap();
+        assert_eq!(
+            (outro.color_id, outro.name.as_deref()),
+            (Some(3), Some("Outro"))
+        );
+
+        inputs.push(input(90_000, None));
+        assert!(
+            normalize_cues(&inputs, None).is_err(),
+            "a 9th hot cue is rejected"
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_bad_memory_cues_and_drops_one_on_another_cue() {
+        assert!(normalize_cues(&[memory_input(1_000, Some(200), None)], None).is_err());
+        let both = TrackCueInput {
+            playback_start: true,
+            ..memory_input(1_000, None, None)
+        };
+        assert!(normalize_cues(&[both], None).is_err());
+
+        let out = normalize_cues(
+            &[
+                memory_input(5_000, Some(2), Some("On the hot cue")),
+                input(5_000, None),
+                start_input(1_000),
+                memory_input(1_000, None, None),
+                memory_input(9_000, None, Some("First")),
+                memory_input(9_000, None, Some("Second")),
+            ],
+            None,
+        )
+        .expect("valid");
+        let kept: Vec<_> = out
+            .iter()
+            .map(|c| (c.position_ms, c.playback_start, c.memory, c.name.as_deref()))
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                (1_000, true, false, None),
+                (5_000, false, false, None),
+                (9_000, false, true, Some("First")),
+            ]
+        );
+    }
+
+    #[test]
+    fn anlz_cues_write_memory_cues_as_lone_memory_points_outside_the_hot_slots() {
+        let anlz = anlz_cues_from_track_cues(&[
+            memory_cue(2_000, Some(3), Some("Intro")),
+            cue("c1", 3_000, Some(2)),
+            memory_cue(3_000, None, None), // on a hot cue: dropped
+            memory_cue(4_000, None, None),
+            cue("c2", 5_000, Some(5)),
+        ]);
+        let summary: Vec<_> = anlz
+            .iter()
+            .map(|c| (c.position_ms, c.hot_cue, c.color_id, c.comment.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                (2_000, 0, 3, "Intro"),
+                (4_000, 0, 0, ""),
+                (3_000, 0, 2, ""),
+                (3_000, 1, 2, ""),
+                (5_000, 0, 5, ""),
+                (5_000, 2, 5, ""),
+            ]
+        );
+    }
+
+    #[test]
+    fn collapse_keeps_memory_cues_with_name_and_colour_and_no_limit() {
+        // 8 hot cues and 12 memory cues, the earliest of them named: no start
+        // cue is made from it, nothing is capped, nothing is merged.
+        let mut cues: Vec<TrackCue> = (0..8)
+            .map(|i| cue(&format!("h{i}"), 10_000 + i * 1_000, Some(2)))
+            .collect();
+        cues.push(memory_cue(1_000, None, Some("Intro")));
+        cues.extend((0..11).map(|i| {
+            memory_cue(
+                30_000 + i * 1_000,
+                if i % 2 == 0 { Some(4) } else { None },
+                None,
+            )
+        }));
+        let collapsed = collapse_anlz_cues(&ext_with_cues(&anlz_cues_from_track_cues(&cues)));
+
+        assert_eq!(collapsed.len(), 20);
+        assert!(collapsed.iter().all(|c| !c.playback_start));
+        assert_eq!(collapsed.iter().filter(|c| c.is_hot()).count(), 8);
+        assert_eq!(
+            (
+                collapsed[0].position_ms,
+                collapsed[0].memory,
+                collapsed[0].name.as_deref()
+            ),
+            (1_000, true, Some("Intro"))
+        );
+        let memory: Vec<_> = collapsed
+            .iter()
+            .filter(|c| c.memory)
+            .skip(1)
+            .map(|c| c.color_id)
+            .collect();
+        assert_eq!(memory.len(), 11);
+        assert!(memory.iter().step_by(2).all(|c| *c == Some(4)));
+        assert!(memory.iter().skip(1).step_by(2).all(Option::is_none));
     }
 
     #[test]

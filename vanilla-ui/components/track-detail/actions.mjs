@@ -307,7 +307,13 @@ export function createTrackDetailController(el, prefs = {}) {
     Promise.resolve(setPlaybackMetronome(request)).catch(() => {});
   }
 
+  /// Cues with a hot-cue pad: neither the playback start nor a memory cue.
   function hotCues() {
+    return working.cues.filter((c) => !c.playbackStart && !c.memory);
+  }
+
+  /// Every cue except the playback-start cue (which `withoutStartCue` drops).
+  function withoutStartCue() {
     return working.cues.filter((c) => !c.playbackStart);
   }
 
@@ -319,6 +325,12 @@ export function createTrackDetailController(el, prefs = {}) {
     return working.cues.slice().sort(byPosition);
   }
 
+  /// The cues the editor shows: memory cues (e.g. from rekordbox) are kept
+  /// and saved as they are, but not shown or edited here yet.
+  function shownCues() {
+    return orderedCues().filter((c) => !c.memory);
+  }
+
   /// The playback-start cue never lies after a hot cue, and never exists
   /// without one.
   function enforceStartOrder() {
@@ -326,7 +338,7 @@ export function createTrackDetailController(el, prefs = {}) {
     if (!start) return;
     const hot = hotCues();
     if (!hot.length) {
-      working.cues = hot;
+      working.cues = withoutStartCue();
       return;
     }
     const earliest = Math.min(...hot.map((c) => c.positionMs));
@@ -510,7 +522,7 @@ export function createTrackDetailController(el, prefs = {}) {
     if (!cuesHost) return;
     cuesHost.textContent = "";
     if (!dur) return;
-    for (const cue of orderedCues()) {
+    for (const cue of shownCues()) {
       const tick = cloneTemplate(cuesHost.ownerDocument, "tplOverviewCue");
       if (cue.playbackStart) tick.classList.add("is-playback-start");
       tick.style.left = `${(cue.positionMs / dur) * 100}%`;
@@ -531,7 +543,7 @@ export function createTrackDetailController(el, prefs = {}) {
     if (!host) return;
     host.textContent = "";
     const labels = cueLabels();
-    for (const cue of orderedCues()) {
+    for (const cue of shownCues()) {
       const pct = msToPct(cue.positionMs);
       const marker = cloneTemplate(host.ownerDocument, "tplCueMarker");
       marker.classList.toggle("is-playback-start", !!cue.playbackStart);
@@ -557,7 +569,7 @@ export function createTrackDetailController(el, prefs = {}) {
   function renderPreStart() {
     const shade = el.trackDetailPreStart;
     if (!shade) return;
-    const first = orderedCues()[0];
+    const first = shownCues()[0];
     const pct = first ? Math.max(0, Math.min(100, msToPct(first.positionMs))) : 0;
     shade.hidden = pct <= 0;
     shade.style.width = `${pct}%`;
@@ -635,7 +647,7 @@ export function createTrackDetailController(el, prefs = {}) {
   function cueLabels() {
     const labels = new Map();
     let hotIndex = 0;
-    for (const cue of orderedCues()) {
+    for (const cue of shownCues()) {
       labels.set(cue.tempId, cue.playbackStart ? "▶" : String.fromCharCode(65 + hotIndex++));
     }
     return labels;
@@ -999,7 +1011,7 @@ export function createTrackDetailController(el, prefs = {}) {
 
     /// Hot cue by letter order (0 = A); null when there is no such cue.
     hotCueAt(index) {
-      return orderedCues().filter((c) => !c.playbackStart)[index] || null;
+      return shownCues().filter((c) => !c.playbackStart)[index] || null;
     },
 
     /// ←/→: move the selected cue one beat (onto the next grid line with
@@ -1087,7 +1099,7 @@ export function createTrackDetailController(el, prefs = {}) {
       if (remember) setStartOnFirstBeatPref(!!on);
       mutate(null, () => {
         if (on) addStartCue();
-        else working.cues = hotCues();
+        else working.cues = withoutStartCue();
       });
       render();
     },
@@ -1210,6 +1222,7 @@ export function createTrackDetailController(el, prefs = {}) {
         colorId: c.colorId ?? null,
         name: c.name || "",
         playbackStart: !!c.playbackStart,
+        memory: !!c.memory,
       }));
       const start = startCue();
       if (start) start.followsFirstBeat = start.positionMs === working.firstBeatMs;
@@ -1272,6 +1285,7 @@ export function createTrackDetailController(el, prefs = {}) {
           colorId: c.colorId,
           name: c.name || null,
           playbackStart: !!c.playbackStart,
+          memory: !!c.memory,
         })),
       };
     },

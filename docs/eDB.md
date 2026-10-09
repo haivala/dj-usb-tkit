@@ -298,13 +298,15 @@ to keep report commands read-only.
 
 `write_edb_cues_for_content` (in `export_helpers/mod.rs`) rewrites the `cue`
 rows for each exported track's `content_id` from the app's `track_cues`
-(max 8 cue points):
+(max 8 hot cues, any number of memory cues):
 
-- `DELETE FROM cue WHERE content_id = ?` then **two `INSERT`s per cue point** —
-  a memory row and a hot row (columns probed against the USB's actual `cue`
-  schema);
-- `kind` = `0` for the memory row / `1` for the hot row; `colorTableIndex` =
-  the palette index on the hot row / `-1` on the memory row;
+- `DELETE FROM cue WHERE content_id = ?` then **two `INSERT`s per hot cue** —
+  a memory row and a hot row — and **one per memory cue** and for the
+  playback-start cue (columns probed against the USB's actual `cue` schema);
+- `kind` = `0` for a memory row / `1` for the hot row; `colorTableIndex` =
+  the palette index on the hot row / `-1` on a hot cue's memory row and the
+  start cue's / a memory cue's own colour, or `-1`; `cueComment` = the cue's
+  name;
 - `inUsec = position_ms × 1000`, `in150FramePerSec = round(position_ms × 0.15)`,
   `outUsec`/`out150FramePerSec` = `-1`;
 - MPEG-frame / block-offset / decoding-start columns are written `0` — the

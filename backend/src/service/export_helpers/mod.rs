@@ -57,7 +57,7 @@ use serde::Serialize;
 use crate::error::{BackendError, BackendResult};
 use crate::models::{ExportToUsbOptions, TrackCue, WarningEntry};
 use crate::pdb_reader::parse_pdb;
-use crate::service::cues::split_playback_start;
+use crate::service::cues::split_cues;
 use crate::utils::{collect_chain as collect_chain_pages, page_offset, table_ptr_fields};
 
 use super::usb_utils::{canonicalize_playlist_name, repair_utf8_mojibake};
@@ -646,8 +646,9 @@ pub fn load_table_columns_tx(
 /// Rewrite the eDB `cue` rows for a `content_id` from the app's cue list.
 ///
 /// The app owns cue rows for tracks it exports: existing rows for this content
-/// are dropped and replaced. Hot cues carry `colorTableIndex`; memory points
-/// use `-1`. Precise decoder seek anchors (`inMpegFrameNumber`, block offsets,
+/// are dropped and replaced. Hot cues carry `colorTableIndex`; a hot cue's
+/// memory point and the playback-start cue use `-1`; a memory cue carries its
+/// colour or `-1`, and its name like a hot cue. Precise decoder seek anchors (`inMpegFrameNumber`, block offsets,
 /// …) are left at 0 — the CDJ recomputes them from `inUsec` + the analysis
 /// file. `content.cueUpdateCount` is bumped when any cue is written.
 pub fn write_edb_cues_for_content(
@@ -667,18 +668,32 @@ pub fn write_edb_cues_for_content(
     let cue_columns = load_table_columns_tx(tx, "cue")?;
     let mut cue_id = next_numeric_id(tx, "cue", "cue_id")?;
 
-    let (sorted, start) = split_playback_start(cues);
+    let split = split_cues(cues);
 
-    // Each cue point is written twice: a memory point (kind 0) and, for the
+    // Each hot cue is written twice: a memory point (kind 0) and, for the
     // first 8 by position, a hot-cue pad (kind 1) carrying the colour. Hot-slot
     // ordering is implicit in insert order. The playback-start cue is a lone
-    // memory point, written first.
+    // memory point, written first; each memory cue is a lone memory point
+    // with its own colour, in position order among the hot cues.
     const MEMORY: (i64, i64) = (0, -1);
-    let rows = start.map(|cue| (cue, vec![MEMORY])).into_iter().chain(
-        sorted
-            .into_iter()
-            .map(|cue| (cue, vec![MEMORY, (1, i64::from(cue.color_id.unwrap_or(0)))])),
-    );
+    let color_index = |cue: &TrackCue| cue.color_id.map_or(-1, i64::from);
+    let mut points: Vec<(&TrackCue, Vec<(i64, i64)>)> = split
+        .memory
+        .into_iter()
+        .map(|cue| (cue, vec![(0, color_index(cue))]))
+        .chain(
+            split
+                .hot
+                .into_iter()
+                .map(|cue| (cue, vec![MEMORY, (1, i64::from(cue.color_id.unwrap_or(0)))])),
+        )
+        .collect();
+    points.sort_by_key(|(cue, _)| cue.position_ms);
+    let rows = split
+        .start
+        .map(|cue| (cue, vec![MEMORY]))
+        .into_iter()
+        .chain(points);
     for (cue, kinds) in rows {
         let in_usec = i64::from(cue.position_ms) * 1000;
         let in_frames_150 = ((f64::from(cue.position_ms) * 150.0) / 1000.0).round() as i64;

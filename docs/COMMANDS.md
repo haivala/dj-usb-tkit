@@ -85,8 +85,11 @@ drive selection from being rendered against a newer selected drive.
   and/or updates the beat-grid anchor (`firstBeatMs: Some(ms)`), BPM and key,
   rewrites the cached local ANLZ bundle, and clears `last_exported_*` on every
   playlist containing the track. A `null` field is left unchanged. `cues[]`
-  entries are `{ positionMs, colorId?, name?, playbackStart? }`; each hot cue
-  becomes a memory point + a hot-cue pad on export. At most one entry may have
+  entries are `{ positionMs, colorId?, name?, playbackStart?, memory? }`; each
+  hot cue becomes a memory point + a hot-cue pad on export. `memory: true`
+  marks a memory cue: a memory point only, with an optional name and colour
+  (no default colour), any number of them, outside the 8; one at a hot cue's
+  or the start cue's position is dropped. At most one entry may have
   `playbackStart: true`: the memory-only playback-start cue (no pad, colour or
   name, never after the first hot cue, dropped without hot cues; outside the 8).
 - `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw }` → reads

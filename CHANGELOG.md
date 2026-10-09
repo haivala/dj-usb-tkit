@@ -65,6 +65,13 @@
   Beat Grid** or a re-export. Only tracks this app exported can have it; the stick's export log, which
   now records the app version, says which ones to check, so the check reads only those
   tracks' analysis files, and only their first 4 KB.
+- **Fix:** Memory cues are kept. rekordbox memory cues — on a USB prepared by rekordbox, or
+  imported from rekordbox's library — were turned into hot cues on the next save or import,
+  and any past the eighth were dropped. They are now their own kind: any number, with their
+  name and colour, kept through import, saving and export as memory points without a pad.
+  The cue editor doesn't show them yet; it keeps them as they are. Tracks imported from
+  rekordbox earlier get theirs back when imported again with "force update track data from
+  rekordbox".
 - **New feature:** **Cues follow grid** in the cue editor (next to Q, off by default).
   When it's on, changing the BPM or the first beat moves every cue so it stays on its beat,
   which fixes a grid under cues placed with Quantize. Off, cues keep their place in the

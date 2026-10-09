@@ -80,6 +80,7 @@ function installTrackDetailMock(page, opts = {}) {
                 cues: [
                   ...(opts.seedStart != null ? [{ positionMs: opts.seedStart, playbackStart: true }] : []),
                   ...(opts.seedCues || []).map((positionMs) => ({ positionMs, colorId: 5, name: "" })),
+                  ...(opts.seedMemory || []).map((c) => ({ ...c, memory: true })),
                 ],
                 detailWaveform: detailWaveformB64,
                 keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: keyLabel(k) })) })),
@@ -188,6 +189,7 @@ test("track-detail modal adds a cue at the playhead and saves it", async ({ page
   expect(saveCall.request.cues).toHaveLength(1);
   expect(Object.keys(saveCall.request.cues[0]).sort()).toEqual([
     "colorId",
+    "memory",
     "name",
     "playbackStart",
     "positionMs",
@@ -280,6 +282,7 @@ test("playback-start choice: informational with no cues, then applies the rememb
     colorId: null,
     name: null,
     playbackStart: true,
+    memory: false,
   });
   expect(saveCall.request.cues[1].playbackStart).toBe(false);
 });
@@ -1119,6 +1122,39 @@ test("cues follow grid is remembered and leaves a hand-moved cue's new spot alon
   // Back to 128 BPM: the moved cue keeps its new beat (64.02), the other its old one.
   await setBpmInput(page, "128");
   expect(await savedCuePositions(page)).toEqual({ bpm: 128, firstBeatMs: 120, positions: [120, 30129, 60000] });
+});
+
+test("memory cues (e.g. from rekordbox) aren't shown yet but are kept and saved as they are", async ({ page }) => {
+  const seedMemory = [
+    { positionMs: 2000, colorId: 3, name: "Intro" },
+    { positionMs: 40000 },
+    { positionMs: 90000, name: "Outro" },
+  ];
+  await openCueEditor(page, { seedCues: [30000], seedStart: 120, seedMemory });
+
+  // Only the hot cue and the start cue show; all 8 pads stay available.
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveCount(2);
+  await expect(page.locator("#trackDetailCueList .cue-row:not(.is-playback-start)")).toHaveCount(1);
+  for (let i = 0; i < 7; i += 1) await page.locator("#trackDetailAddCue").click();
+  await expect(page.locator("#trackDetailAddCue")).toBeDisabled();
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)")).toHaveCount(8);
+
+  // Removing the start cue ("First cue") and every hot cue keeps the memory cues.
+  await page.locator("#trackDetailStartFirstCue").click();
+  for (let i = 0; i < 8; i += 1) {
+    await page.locator("#trackDetailCueList .cue-row .cue-row-delete").first().click();
+  }
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveCount(0);
+
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saveCall.request.cues).toEqual([
+    { positionMs: 2000, colorId: 3, name: "Intro", playbackStart: false, memory: true },
+    { positionMs: 40000, colorId: null, name: null, playbackStart: false, memory: true },
+    { positionMs: 90000, colorId: null, name: "Outro", playbackStart: false, memory: true },
+  ]);
 });
 
 test("double-click the waveform adds a cue at that position without starting playback", async ({ page }) => {

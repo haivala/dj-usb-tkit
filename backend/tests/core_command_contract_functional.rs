@@ -969,6 +969,7 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
             color_id: color,
             name: name.map(str::to_string),
             playback_start: false,
+            memory: false,
         }
     }
 
@@ -1037,6 +1038,30 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
         cues: Some((0..9).map(|i| cue(i * 1000, None, None)).collect()),
     });
     assert!(!too_many.ok, "9 cue points should be rejected");
+
+    // Memory cues don't count toward the 8: 8 hot cues + 20 memory cues saves.
+    let with_memory = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+        track_id: track_id.clone(),
+        first_beat_ms: None,
+        bpm: None,
+        key: None,
+        cues: Some(
+            (0..8)
+                .map(|i| cue(i * 1000, None, None))
+                .chain((0..20).map(|i| TrackCueInput {
+                    memory: true,
+                    ..cue(10_000 + i * 100, None, Some("Mark"))
+                }))
+                .collect(),
+        ),
+    });
+    assert!(
+        with_memory.ok,
+        "8 hot + 20 memory cues failed: {with_memory:?}"
+    );
+    let saved = with_memory.data.expect("data").cues;
+    assert_eq!(saved.iter().filter(|c| c.memory).count(), 20);
+    assert_eq!(saved.iter().filter(|c| c.is_hot()).count(), 8);
 
     // Unknown colour is rejected.
     let bad_color = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {

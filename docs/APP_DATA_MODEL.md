@@ -26,9 +26,10 @@ A playlist imported from rekordbox or Mixxx stores its source in `playlists.impo
 
 The `track_cues` table holds user-editable cue points, one row per cue,
 `ON DELETE CASCADE` from `tracks`. This app targets CDJ playback directly, so a
-cue is just a position + colour + name — there is no user-facing
-memory-vs-hot distinction. **At most 8 cues** per track; on export each cue is
-written as *both* a memory point and a hot-cue pad (A–H by position order).
+cue is just a position + colour + name. A **hot cue** (the default) is written
+on export as *both* a memory point and a hot-cue pad (A–H by position order);
+**at most 8** per track. A **memory cue** (`is_memory`) is a memory point only,
+any number of them.
 
 | column | notes |
 | --- | --- |
@@ -37,6 +38,7 @@ written as *both* a memory point and a hot-cue pad (A–H by position order).
 | `name` | optional comment/label |
 | `sort_order` | insert order |
 | `is_playback_start` | `1` for the track's optional playback-start cue: a memory point only (no pad, colour or name), never after the first hot cue, not counted in the 8. `TrackCue.playbackStart` on the wire. See `docs/CUE_EDITOR.md`. |
+| `is_memory` | `1` for a memory cue: a memory point only (no pad), optional name and colour (`color_id` NULL when uncoloured), not counted in the 8, never on a hot cue's or the start cue's position. `TrackCue.memory` on the wire. See `docs/CUE_EDITOR.md`. |
 
 The beat-grid anchor is `tracks.first_beat_ms` (already present). A companion
 `tracks.first_beat_ms_source` column (`'estimated'` default, `'user'` once
