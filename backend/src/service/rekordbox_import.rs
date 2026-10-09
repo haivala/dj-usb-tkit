@@ -404,8 +404,9 @@ fn rb_is_hot_cue(kind: i64) -> bool {
 /// - Every hot cue (and hot loop, at its start) becomes a hot cue, up to
 ///   [`MAX_HOT_CUES`].
 /// - The earliest memory cue becomes the playback-start cue -- where a CDJ's
-///   auto-cue loads the track -- when it lies before the first hot cue and
-///   has no name or colour (the start cue carries neither).
+///   auto-cue loads the track -- when it lies before the first hot cue (with
+///   no hot cues, when another memory cue follows) and has no name or colour
+///   (the start cue carries neither).
 /// - Every other memory cue becomes a memory cue with its name and colour;
 ///   one at a hot cue's position is dropped (that hot cue keeps its memory
 ///   point on export).
@@ -455,9 +456,11 @@ pub(crate) fn rekordbox_cues_to_track_cues(cues: &[RbCue]) -> Vec<TrackCue> {
     hot.truncate(MAX_HOT_CUES as usize);
     let mut memory = sorted(true);
 
+    // The start cue needs another cue after it: a hot cue, or with none,
+    // another memory cue (the same rule `split_cues` applies on export).
     let first_hot = hot.first().map(|c| c.position_ms);
     let has_start = memory.first().is_some_and(|first| {
-        first_hot.is_some_and(|hot| first.position_ms < hot)
+        first_hot.map_or(memory.len() > 1, |hot| first.position_ms < hot)
             && first.name.is_none()
             && first.color_id.is_none()
     });
@@ -1261,12 +1264,18 @@ mod tests {
     }
 
     #[test]
-    fn rekordbox_memory_only_track_gets_memory_cues_and_no_start() {
-        // A start cue needs a hot cue after it, so none is made here.
+    fn rekordbox_memory_only_track_gets_a_start_and_memory_cues() {
+        // The first unnamed, uncoloured memory cue is the start; a lone one
+        // has nothing after it, so it stays a memory cue.
         let cues: Vec<RbCue> = (0..12).map(|i| rb_cue(0, 1_000 + i * 1_000)).collect();
         let out = rekordbox_cues_to_track_cues(&cues);
         assert_eq!(out.len(), 12);
-        assert!(out.iter().all(|c| c.memory));
+        assert!(out[0].playback_start);
+        assert!(out[1..].iter().all(|c| c.memory));
+        assert_eq!(
+            summary(&rekordbox_cues_to_track_cues(&[rb_cue(0, 1_000)])),
+            vec![(1_000, 'M')]
+        );
     }
 
     #[test]

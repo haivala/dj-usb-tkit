@@ -91,7 +91,8 @@ drive selection from being rendered against a newer selected drive.
   (no default colour), any number of them, outside the 8; one at a hot cue's
   or the start cue's position is dropped. At most one entry may have
   `playbackStart: true`: the memory-only playback-start cue (no pad, colour or
-  name, never after the first hot cue, dropped without hot cues; outside the 8).
+  name, never after the first hot cue, dropped without another cue, hot or
+  memory; outside the 8).
 - `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw }` → reads
   `{ firstBeatMs, cues, detailWaveform }` straight off an **on-USB** ANLZ bundle
   for the cue editor opened from a USB playlist / history row (no local `tracks`

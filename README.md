@@ -98,9 +98,10 @@ full-detail colour waveform with the beat grid over it.
 - **Editing**: undo/redo, keyboard shortcuts, and zoom, pan and a whole-track
   overview strip.
 
-Each hot cue is exported as both a memory point and a hot-cue pad. Memory cues
-from rekordbox (memory points without a pad, any number, with name and colour)
-are kept through import, editing and export. Saving from
+Each hot cue is exported as both a memory point and a hot-cue pad. **Memory
+cues** (memory points without a pad, any number, with name and colour, as
+rekordbox makes them) are shown as ▼ flags, edited in one compact slot, added
+with M, and kept through import, editing and export. Saving from
 a USB row writes the change straight onto the USB (no re-export needed) and
 into the local library. Full details, shortcuts and the storage format are in
 [`docs/CUE_EDITOR.md`](docs/CUE_EDITOR.md).

@@ -720,17 +720,17 @@
           <button type="button" class="track-detail-playpause" id="trackDetailPlayPause" aria-label="Play" data-tooltip="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button>
           <div class="track-detail-hint" id="trackDetailHint">
             <span><b>Waveform</b> click to play · double-click to add a cue · scroll to zoom · drag to pan</span>
-            <span><b>Cue markers</b> drag to move · <kbd>Q</kbd> on: snaps to beats, <kbd>Shift</kbd> places freely · click to play from the cue</span>
+            <span><b>Cue markers</b> drag to move · <kbd>Q</kbd> on: snaps to beats, <kbd>Shift</kbd> places freely · click to play from the cue · <kbd>M</kbd> adds a memory cue (▼)</span>
           </div>
-          <span class="track-detail-hint-btn" id="trackDetailHintBtn" tabindex="0" role="note" aria-label="How to use the waveform" data-tooltip="Waveform: click to play, double-click to add a cue, scroll to zoom, drag to pan. Cue markers: drag to move, click to play from the cue. With Q on, cues snap to beats; hold Shift to place freely. Keys: Space play/pause · C add cue · 1–8 jump to cue · ←/→ move the selected cue a beat (Shift: 10 ms) · Ctrl+Z undo · Ctrl+Shift+Z redo." hidden>?</span>
+          <span class="track-detail-hint-btn" id="trackDetailHintBtn" tabindex="0" role="note" aria-label="How to use the waveform" data-tooltip="Waveform: click to play, double-click to add a cue, scroll to zoom, drag to pan. Cue markers: drag to move, click to play from the cue. With Q on, cues snap to beats; hold Shift to place freely. Keys: Space play/pause · C add cue · M add memory cue · 1–8 jump to cue · ←/→ move the selected cue a beat (Shift: 10 ms) · Ctrl+Z undo · Ctrl+Shift+Z redo." hidden>?</span>
           <button type="button" class="track-detail-tool" id="trackDetailQuantize" aria-pressed="true" data-tooltip="Quantize: new and dragged cues snap to the nearest beat (hold Shift to place freely)">Q</button>
           <button type="button" class="track-detail-tool" id="trackDetailFollowGrid" aria-pressed="false" aria-label="Cues follow grid" data-tooltip="Cues follow grid: changing BPM or the first beat moves every cue so it stays on its beat. Off, cues keep their place in the audio, as in rekordbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.55"></path><path d="M12 4h6l-2 2.5 2 2.5h-6z" fill="currentColor"></path><path d="M3 15h6M7 13l2 2-2 2M21 15h-6M17 13l-2 2 2 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
           <button type="button" class="track-detail-tool" id="trackDetailMetronome" aria-pressed="false" aria-label="Metronome" data-tooltip="Metronome: click on every beat while playing, to hear whether the grid lines up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l4 18H5zM12 17l5-10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
           <label class="track-detail-grid-level track-detail-metronome-mix" hidden data-tooltip="Metronome mix: left favours the music, right the clicks; in the middle both play at full level">Mix <input type="range" id="trackDetailMetronomeMix" min="0" max="100" step="1" /></label>
           <label class="track-detail-grid-level" data-tooltip="How strongly the beat grid shows over the waveform">Beat grid <input type="range" id="trackDetailGridLevel" min="0" max="100" step="1" /></label>
           <div class="track-detail-zoom-btns">
-            <button type="button" id="trackDetailZoomOut" data-tooltip="Zoom out">&minus;</button>
-            <button type="button" id="trackDetailZoomIn" data-tooltip="Zoom in">+</button>
+            <button type="button" class="track-detail-zoom-icon" id="trackDetailZoomOut" aria-label="Zoom out" data-tooltip="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21M7.5 10.5h6"></path></svg></button>
+            <button type="button" class="track-detail-zoom-icon" id="trackDetailZoomIn" aria-label="Zoom in" data-tooltip="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button>
             <button type="button" id="trackDetailZoomFit" data-tooltip="Fit whole track">Fit</button>
           </div>
         </div>
@@ -757,6 +757,7 @@
         <div class="track-detail-cues-head">
           <span>Cues</span>
           <div class="track-detail-start-cue" id="trackDetailStartCue" hidden></div>
+          <div class="track-detail-memory-cue" id="trackDetailMemoryCue"></div>
           <button type="button" id="trackDetailAddCue">+ Cue</button>
         </div>
         <div class="track-detail-cue-list" id="trackDetailCueList"></div>
@@ -928,6 +929,13 @@
     <div class="cue-slot-empty" aria-hidden="true"><button type="button" class="cue-row-play" disabled tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos">–</span><span class="cue-row-color"></span><input type="text" class="cue-row-name" placeholder="Name" disabled tabindex="-1" /></div>
   </template>
   <template id="tplCueColorSwatch"><button type="button" class="cue-color-swatch"></button></template>
+  <template id="tplCueColorSwatchNone"><button type="button" class="cue-color-swatch is-none" aria-label="No colour" data-tooltip="No colour"></button></template>
+  <template id="tplMemorySlot">
+    <div class="cue-row memory-slot"><button type="button" class="memory-step" data-action="memory-prev" aria-label="Previous memory cue" data-tooltip="Previous memory cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button><button type="button" class="memory-step" data-action="memory-next" aria-label="Next memory cue" data-tooltip="Next memory cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button><button type="button" class="cue-row-play" data-action="cue-play" aria-label="Play from this memory cue" data-tooltip="Play from here"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><button type="button" class="cue-row-color" data-action="cue-color" aria-label="Memory cue colour">&#9660;</button><input type="text" class="cue-row-name" data-action="cue-name" placeholder="Name" /><button type="button" class="cue-row-delete" data-action="cue-delete" aria-label="Delete memory cue">×</button><span class="memory-slot-count"></span><button type="button" class="memory-add" data-action="memory-add" aria-label="Add a memory cue" data-tooltip="Add a memory cue at the playhead (M)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></div>
+  </template>
+  <template id="tplMemorySlotEmpty">
+    <div class="memory-slot is-empty"><span class="memory-slot-label">Memory cues: <b class="memory-slot-count"></b></span><button type="button" class="memory-step" data-action="memory-prev" aria-label="Previous memory cue" data-tooltip="Previous memory cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button><button type="button" class="memory-step" data-action="memory-next" aria-label="Next memory cue" data-tooltip="Next memory cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button><button type="button" class="memory-add" data-action="memory-add" aria-label="Add a memory cue" data-tooltip="Add a memory cue at the playhead (M)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></div>
+  </template>
   <template id="tplOptgroup"><optgroup></optgroup></template>
 
   <!-- Help overlay -->

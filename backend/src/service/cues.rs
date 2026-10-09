@@ -147,9 +147,9 @@ pub fn insert_track_cues(
 /// colour, with no limit. Each returned cue gets a fresh synthetic id —
 /// callers that persist it assign their own.
 ///
-/// An unnamed, uncoloured memory-only entry that precedes every hot-cue pad is
-/// the playback-start cue this app writes; it comes back first, flagged
-/// `playback_start`. A named or coloured one is a memory cue, so nothing the
+/// An unnamed, uncoloured memory-only entry that comes first, with any other
+/// entry after it, is the playback-start cue this app writes; it comes back
+/// first, flagged `playback_start`. A named or coloured one is a memory cue, so nothing the
 /// player shows is lost.
 pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
     #[derive(Default)]
@@ -173,10 +173,11 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
         }
     }
 
-    let any_hot = by_position.values().any(|c| c.has_hot);
+    // The start cue needs another cue after it (`split_cues`).
+    let more_than_one = by_position.len() > 1;
     let mut entries = by_position.into_iter().peekable();
     let mut out = Vec::new();
-    if any_hot
+    if more_than_one
         && entries
             .peek()
             .is_some_and(|(_, c)| !c.has_hot && c.name.is_none() && c.color_id.is_none())
@@ -473,18 +474,23 @@ pub struct SplitCues<'a> {
 }
 
 /// Split a cue list into the playback-start cue, the hot cues and the memory
-/// cues. The start cue is dropped when there are no hot cues or when it
-/// coincides with a hot cue's position (that hot cue's own memory point
-/// already sits there); a memory cue is dropped at a hot cue's or the start
-/// cue's position for the same reason.
+/// cues. The start cue is dropped when there is no other cue (hot or memory)
+/// or when it isn't before the first hot cue (at a hot cue's position, that
+/// hot cue's own memory point already sits there); a memory cue is dropped at
+/// a hot cue's or the start cue's position for the same reason.
 pub fn split_cues(cues: &[TrackCue]) -> SplitCues<'_> {
     let mut hot: Vec<&TrackCue> = cues.iter().filter(|c| c.is_hot()).collect();
     hot.sort_by_key(|c| c.position_ms);
     hot.truncate(MAX_HOT_CUES as usize);
-    let start = cues.iter().find(|c| c.playback_start).filter(|s| {
-        hot.first()
-            .is_some_and(|first| s.position_ms < first.position_ms)
-    });
+    let start = cues
+        .iter()
+        .find(|c| c.playback_start)
+        .filter(|s| match hot.first() {
+            Some(first) => s.position_ms < first.position_ms,
+            None => cues
+                .iter()
+                .any(|c| c.memory && c.position_ms != s.position_ms),
+        });
     let taken: HashSet<u32> = hot
         .iter()
         .chain(start.iter())
@@ -596,8 +602,8 @@ struct NormalizedCue {
 /// Validate a cue-list edit. Hot cues are capped at [`MAX_HOT_CUES`]; memory
 /// cues have no limit and an optional colour (no default). At most one
 /// playback-start cue is allowed, it carries no name or colour, it is dropped
-/// when there are no hot cues, pulled back to the earliest hot cue when it
-/// lies after it, and is returned first. A memory cue at a hot cue's or the
+/// when there is no other cue (hot or memory), pulled back to the earliest hot
+/// cue when it lies after it, and is returned first. A memory cue at a hot cue's or the
 /// start cue's position is dropped: that cue's memory point already sits there.
 fn normalize_cues(
     inputs: &[TrackCueInput],
@@ -673,6 +679,14 @@ fn normalize_cues(
         let mut start = out.remove(index);
         if let Some(earliest_hot) = earliest_hot {
             start.position_ms = start.position_ms.min(earliest_hot);
+        }
+        // Kept while any other cue remains: a hot cue, or a memory cue that
+        // isn't on the start cue's own spot (that one is dropped below).
+        let keep = earliest_hot.is_some()
+            || out
+                .iter()
+                .any(|c| c.memory && c.position_ms != start.position_ms);
+        if keep {
             out.insert(0, start);
         }
     }
@@ -1627,6 +1641,32 @@ mod tests {
     }
 
     #[test]
+    fn normalize_keeps_playback_start_with_only_memory_cues() {
+        // Before or after the memory cue alike: only hot cues pull it back.
+        let out = normalize_cues(
+            &[start_input(5_000), memory_input(2_000, None, Some("Intro"))],
+            None,
+        )
+        .expect("ok");
+        assert_eq!(
+            out.iter()
+                .map(|c| (c.position_ms, c.playback_start, c.memory))
+                .collect::<Vec<_>>(),
+            [(5_000, true, false), (2_000, false, true)]
+        );
+        // On the same spot as a memory cue (and nothing else), the start
+        // cue is the redundant one: the memory cue stays, the start goes.
+        let out = normalize_cues(&[start_input(1_000), memory_input(1_000, None, None)], None)
+            .expect("ok");
+        assert_eq!(
+            out.iter()
+                .map(|c| (c.position_ms, c.playback_start, c.memory))
+                .collect::<Vec<_>>(),
+            [(1_000, false, true)]
+        );
+    }
+
+    #[test]
     fn normalize_rejects_two_playback_start_cues() {
         let err = normalize_cues(&[input(4000, None), start_input(0), start_input(10)], None)
             .expect_err("two start cues");
@@ -1664,6 +1704,29 @@ mod tests {
             "the hot cue's memory point already sits there"
         );
         assert!(anlz_cues_from_track_cues(&[start_cue(1000)]).is_empty());
+    }
+
+    #[test]
+    fn start_cue_with_only_memory_cues_is_written_and_read_back() {
+        let anlz =
+            anlz_cues_from_track_cues(&[start_cue(500), memory_cue(2_000, None, Some("Intro"))]);
+        assert_eq!(
+            anlz.iter()
+                .map(|c| (c.position_ms, c.hot_cue, c.comment.as_str()))
+                .collect::<Vec<_>>(),
+            [(500, 0, ""), (2_000, 0, "Intro")]
+        );
+        let collapsed = collapse_anlz_cues(&ext_with_cues(&anlz));
+        assert_eq!(
+            collapsed
+                .iter()
+                .map(|c| (c.position_ms, c.playback_start, c.memory))
+                .collect::<Vec<_>>(),
+            [(500, true, false), (2_000, false, true)]
+        );
+        // A lone unnamed memory point is a memory cue, not a start cue.
+        let lone = collapse_anlz_cues(&ext_with_cues(&anlz[..1]));
+        assert!(lone[0].memory && !lone[0].playback_start);
     }
 
     fn memory_input(pos: u32, color: Option<u8>, name: Option<&str>) -> TrackCueInput {

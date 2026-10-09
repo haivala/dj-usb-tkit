@@ -74,6 +74,13 @@ export function colorCssForId(colorId) {
   return HOTCUE_PALETTE.find((c) => c.id === colorId)?.css || "#8892a0";
 }
 
+/// Whether a cue is drawn in its own colour: a hot cue always (the default
+/// when unset), the playback-start cue never, a memory cue only when it has
+/// one (otherwise it stays grey).
+function hasOwnColor(cue) {
+  return !cue.playbackStart && (!cue.memory || cue.colorId != null);
+}
+
 function formatMs(ms) {
   const total = Math.max(0, Math.round(ms));
   const m = Math.floor(total / 60000);
@@ -263,10 +270,10 @@ export function createTrackDetailController(el, prefs = {}) {
       cue.positionMs = Math.max(0, Math.min(maxMs, Math.round(working.firstBeatMs + beat * interval)));
       cue.gridPin = { beat, positionMs: cue.positionMs, grid: key };
     }
-    // Rounding or the track's ends can put two hot cues on the same ms; the
+    // Rounding or the track's ends can put two cues on the same ms; the
     // later one steps 1 ms on.
     let previous = -1;
-    for (const cue of hotCues().sort(byPosition)) {
+    for (const cue of withoutStartCue().sort(byPosition)) {
       if (cue.positionMs <= previous) {
         cue.positionMs = previous + 1;
         cue.gridPin.positionMs = cue.positionMs;
@@ -325,36 +332,49 @@ export function createTrackDetailController(el, prefs = {}) {
     return working.cues.slice().sort(byPosition);
   }
 
-  /// The cues the editor shows: memory cues (e.g. from rekordbox) are kept
-  /// and saved as they are, but not shown or edited here yet.
-  function shownCues() {
-    return orderedCues().filter((c) => !c.memory);
+  /// Memory cues (memory points without a pad) in position order.
+  function memoryCues() {
+    return working.cues.filter((c) => c.memory).sort(byPosition);
+  }
+
+  /// Whether `cue` may sit at `ms`: a memory cue never shares a position with
+  /// another cue, since each position has one memory point on the device (a
+  /// hot cue's own, the start cue's, or the memory cue's).
+  function positionFree(cue, ms) {
+    return !working.cues.some(
+      (c) => c !== cue && c.positionMs === ms && (c.memory || cue.memory)
+    );
   }
 
   /// The playback-start cue never lies after a hot cue, and never exists
-  /// without one.
+  /// without another cue (hot or memory).
   function enforceStartOrder() {
     const start = startCue();
     if (!start) return;
     const hot = hotCues();
     if (!hot.length) {
-      working.cues = withoutStartCue();
+      if (!memoryCues().length) working.cues = withoutStartCue();
       return;
     }
     const earliest = Math.min(...hot.map((c) => c.positionMs));
     if (start.positionMs > earliest) start.positionMs = earliest;
   }
 
+  /// Add the playback-start cue on the first beat. Not when a memory cue
+  /// already sits there: the CDJ loads on that one, and the two can't share
+  /// a spot.
   function addStartCue() {
     if (startCue()) return;
-    working.cues.push({
+    const start = {
       tempId: `c${(tempIdSeq += 1)}`,
       positionMs: working.firstBeatMs == null ? 0 : working.firstBeatMs,
       colorId: null,
       name: "",
       playbackStart: true,
       followsFirstBeat: true,
-    });
+    };
+    if (!positionFree(start, start.positionMs)) return;
+    working.cues.push(start);
     enforceStartOrder();
   }
 
@@ -522,11 +542,12 @@ export function createTrackDetailController(el, prefs = {}) {
     if (!cuesHost) return;
     cuesHost.textContent = "";
     if (!dur) return;
-    for (const cue of shownCues()) {
+    for (const cue of orderedCues()) {
       const tick = cloneTemplate(cuesHost.ownerDocument, "tplOverviewCue");
       if (cue.playbackStart) tick.classList.add("is-playback-start");
+      if (cue.memory) tick.classList.add("is-memory");
       tick.style.left = `${(cue.positionMs / dur) * 100}%`;
-      if (!cue.playbackStart) tick.style.setProperty("--cue-color", colorCssForId(cue.colorId));
+      if (hasOwnColor(cue)) tick.style.setProperty("--cue-color", colorCssForId(cue.colorId));
       cuesHost.appendChild(tick);
     }
   }
@@ -543,33 +564,41 @@ export function createTrackDetailController(el, prefs = {}) {
     if (!host) return;
     host.textContent = "";
     const labels = cueLabels();
-    for (const cue of shownCues()) {
+    for (const cue of orderedCues()) {
       const pct = msToPct(cue.positionMs);
       const marker = cloneTemplate(host.ownerDocument, "tplCueMarker");
       marker.classList.toggle("is-playback-start", !!cue.playbackStart);
+      marker.classList.toggle("is-memory", !!cue.memory);
       marker.classList.toggle("off-view", pct < -2 || pct > 102);
       marker.classList.toggle("is-dragging", cue.tempId === working.draggingTempId);
       marker.classList.toggle("is-selected", cue.tempId === working.selectedTempId);
       marker.style.left = `${pct}%`;
-      if (!cue.playbackStart) marker.style.setProperty("--cue-color", colorCssForId(cue.colorId));
+      if (hasOwnColor(cue)) marker.style.setProperty("--cue-color", colorCssForId(cue.colorId));
       marker.dataset.tempId = cue.tempId;
-      marker.textContent = labels.get(cue.tempId);
-      marker.dataset.tooltip = cue.playbackStart
-        ? `Playback start · ${formatMs(cue.positionMs)}`
-        : `${marker.textContent} · ${formatMs(cue.positionMs)}`;
+      marker.textContent = labels.get(cue.tempId) || "";
+      if (cue.playbackStart) {
+        marker.dataset.tooltip = `Playback start · ${formatMs(cue.positionMs)}`;
+      } else if (cue.memory) {
+        marker.dataset.tooltip = ["Memory cue", cue.name, formatMs(cue.positionMs)]
+          .filter(Boolean)
+          .join(" · ");
+      } else {
+        marker.dataset.tooltip = `${marker.textContent} · ${formatMs(cue.positionMs)}`;
+      }
       host.appendChild(marker);
     }
     renderPreStart();
     renderOverview();
   }
 
-  /// Grey out the waveform before where the CDJ starts playback: the
-  /// playback-start cue, else the first hot cue (the start cue is never later).
-  /// With no cues the CDJ starts at the first audio, so nothing is greyed.
+  /// Grey out the waveform before where the CDJ starts playback: its earliest
+  /// memory point, whether the playback-start cue's, a memory cue's or a hot
+  /// cue's own. With no cues the CDJ starts at the first audio, so nothing is
+  /// greyed.
   function renderPreStart() {
     const shade = el.trackDetailPreStart;
     if (!shade) return;
-    const first = shownCues()[0];
+    const first = orderedCues()[0];
     const pct = first ? Math.max(0, Math.min(100, msToPct(first.positionMs))) : 0;
     shade.hidden = pct <= 0;
     shade.style.width = `${pct}%`;
@@ -643,14 +672,43 @@ export function createTrackDetailController(el, prefs = {}) {
   }
 
   /// Hot cues are lettered A–H by position, the same on the waveform markers
-  /// and in the cue list; the playback-start cue is "▶".
+  /// and in the cue list; the playback-start cue is "▶"; memory cues have none.
   function cueLabels() {
     const labels = new Map();
     let hotIndex = 0;
-    for (const cue of shownCues()) {
+    for (const cue of orderedCues()) {
+      if (cue.memory) continue;
       labels.set(cue.tempId, cue.playbackStart ? "▶" : String.fromCharCode(65 + hotIndex++));
     }
     return labels;
+  }
+
+  /// The memory-cue slot in the cues header: the selected memory cue (step,
+  /// play, time, colour, name, delete, n/N, add), or with none selected the
+  /// count with step and add.
+  function renderMemorySlot() {
+    const host = el.trackDetailMemoryCue;
+    if (!host) return;
+    const doc = host.ownerDocument;
+    const memory = memoryCues();
+    const index = memory.findIndex((c) => c.tempId === working.selectedTempId);
+    host.textContent = "";
+    if (index < 0) {
+      const slot = cloneTemplate(doc, "tplMemorySlotEmpty");
+      slot.querySelector(".memory-slot-count").textContent = String(memory.length);
+      host.appendChild(slot);
+      return;
+    }
+    const cue = memory[index];
+    const slot = cloneTemplate(doc, "tplMemorySlot");
+    slot.dataset.tempId = cue.tempId;
+    slot.querySelector(".cue-row-pos").textContent = formatMs(cue.positionMs);
+    const swatch = slot.querySelector(".cue-row-color");
+    swatch.classList.toggle("is-uncoloured", !hasOwnColor(cue));
+    if (hasOwnColor(cue)) swatch.style.background = colorCssForId(cue.colorId);
+    slot.querySelector(".cue-row-name").value = cue.name || "";
+    slot.querySelector(".memory-slot-count").textContent = `${index + 1}/${memory.length}`;
+    host.appendChild(slot);
   }
 
   function cueRow(cue, letter) {
@@ -702,6 +760,7 @@ export function createTrackDetailController(el, prefs = {}) {
       startHost.hidden = !start;
     }
     if (el.trackDetailAddCue) el.trackDetailAddCue.disabled = hot.length >= MAX_CUES;
+    renderMemorySlot();
   }
 
   /// "Playback starts at [First cue | First beat]". The second choice reads
@@ -712,7 +771,7 @@ export function createTrackDetailController(el, prefs = {}) {
     const cueBtn = el.trackDetailStartFirstCue;
     const beatBtn = el.trackDetailStartFirstBeat;
     if (!cueBtn || !beatBtn) return;
-    const hasCues = hotCues().length > 0;
+    const hasCues = withoutStartCue().length > 0;
     const start = startCue();
     const firstBeat = working.firstBeatMs == null ? 0 : working.firstBeatMs;
     const moved = !!start && start.positionMs !== firstBeat;
@@ -878,9 +937,10 @@ export function createTrackDetailController(el, prefs = {}) {
         // Before the start-cue rule below: an untouched start cue sits on
         // the first beat either way, and must not move twice.
         moveCuesWithGrid(before);
-        // An untouched playback-start cue follows the first beat.
+        // An untouched playback-start cue follows the first beat (not onto
+        // a memory cue: then it stays put until the first beat moves on).
         const start = startCue();
-        if (start?.followsFirstBeat) {
+        if (start?.followsFirstBeat && positionFree(start, working.firstBeatMs)) {
           start.positionMs = working.firstBeatMs;
           enforceStartOrder();
         }
@@ -967,6 +1027,7 @@ export function createTrackDetailController(el, prefs = {}) {
         colorId: HOTCUE_PALETTE[ordinal % HOTCUE_PALETTE.length].id,
         name: `Cue ${ordinal + 1}`,
       };
+      if (!positionFree(cue, cue.positionMs)) return null;
       mutate(null, () => {
         working.cues.push(cue);
         if (ordinal === 0 && getStartOnFirstBeatPref()) addStartCue();
@@ -976,6 +1037,55 @@ export function createTrackDetailController(el, prefs = {}) {
       render();
       return cue;
     },
+
+    /// Add a memory cue at `positionMs`, or at the playhead ("+" or M),
+    /// unnamed and uncoloured, and select it. The first one also adds the
+    /// playback-start cue on the first beat. With Quantize on it lands on the
+    /// nearest beat; `free` (Shift) inverts that. Null when another cue already
+    /// sits exactly there.
+    addMemoryCue(positionMs, { free = false } = {}) {
+      const dur = working.durationMs || 0;
+      let ms = Number.isFinite(positionMs) ? positionMs : currentPositionMs();
+      if (snaps(free)) ms = snapToBeat(ms);
+      const cue = {
+        tempId: `c${(tempIdSeq += 1)}`,
+        positionMs: Math.max(0, Math.min(dur, Math.round(ms))),
+        colorId: null,
+        name: "",
+        playbackStart: false,
+        memory: true,
+      };
+      if (!positionFree(cue, cue.positionMs)) return null;
+      const first = !memoryCues().length;
+      mutate(null, () => {
+        working.cues.push(cue);
+        // The first memory cue always brings the playback-start cue: with
+        // memory cues the CDJ loads on the earliest memory point, so the
+        // start is set explicitly (on the first beat).
+        if (first) addStartCue();
+      });
+      working.selectedTempId = cue.tempId;
+      render();
+      return cue;
+    },
+
+    /// ◀ ▶: select the previous / next memory cue, like a CDJ's CUE/LOOP
+    /// CALL. From the selected memory cue, or with none selected from the
+    /// playhead. Returns the cue (the caller plays from it), or null.
+    stepMemoryCue(direction) {
+      const memory = memoryCues();
+      const selected = memory.find((c) => c.tempId === working.selectedTempId);
+      const from = selected ? selected.positionMs : currentPositionMs();
+      // From the playhead, one exactly there counts as the next.
+      const cue = direction > 0
+        ? memory.find((c) => (selected ? c.positionMs > from : c.positionMs >= from))
+        : memory.filter((c) => c.positionMs < from).pop();
+      if (!cue) return null;
+      api.selectCue(cue.tempId);
+      return cue;
+    },
+
+    hotCueCount: () => hotCues().length,
 
     /// The "Q" toggle (remembered): snap new and dragged cues to the grid.
     toggleQuantize() {
@@ -999,19 +1109,24 @@ export function createTrackDetailController(el, prefs = {}) {
 
     /// Only toggles classes: re-rendering the list would destroy a name
     /// input being focused, or the swatch a colour popover is anchored to.
+    /// The memory-cue slot shows the selected memory cue, so it re-renders
+    /// when the selection changes (never while its own name is being typed:
+    /// that keeps the same selection).
     selectCue(tempId) {
       if (!working.cues.some((c) => c.tempId === tempId)) return;
+      const changed = working.selectedTempId !== tempId;
       working.selectedTempId = tempId;
       for (const host of [el.trackDetailCueMarkers, el.trackDetailCueList, el.trackDetailStartCue]) {
         for (const node of host?.querySelectorAll("[data-temp-id]") || []) {
           node.classList.toggle("is-selected", node.dataset.tempId === tempId);
         }
       }
+      if (changed) renderMemorySlot();
     },
 
     /// Hot cue by letter order (0 = A); null when there is no such cue.
     hotCueAt(index) {
-      return shownCues().filter((c) => !c.playbackStart)[index] || null;
+      return hotCues().sort(byPosition)[index] || null;
     },
 
     /// ←/→: move the selected cue one beat (onto the next grid line with
@@ -1039,8 +1154,10 @@ export function createTrackDetailController(el, prefs = {}) {
         ms = cue.positionMs + direction * interval;
       }
       const dur = working.durationMs || 0;
+      const target = Math.max(0, Math.min(dur, Math.round(ms)));
+      if (!positionFree(cue, target)) return true;
       mutate(`nudge:${nudgeSeq}`, () => {
-        cue.positionMs = Math.max(0, Math.min(dur, Math.round(ms)));
+        cue.positionMs = target;
         if (cue.playbackStart) cue.followsFirstBeat = false;
         enforceStartOrder();
       });
@@ -1092,7 +1209,7 @@ export function createTrackDetailController(el, prefs = {}) {
     /// cue, First cue removes it (only while the track has cues). `remember`
     /// makes it the setting applied to the next track's first cue.
     setStartOnFirstBeat(on, { remember = false } = {}) {
-      if (!hotCues().length) {
+      if (!withoutStartCue().length) {
         render();
         return;
       }
@@ -1139,8 +1256,11 @@ export function createTrackDetailController(el, prefs = {}) {
       const dur = working.durationMs || 0;
       let ms = working.view.startMs + Math.max(0, Math.min(1, ratio)) * viewSpanMs();
       if (snaps(free)) ms = snapToBeat(ms);
+      const target = Math.max(0, Math.min(dur, Math.round(ms)));
+      // Onto another cue's spot it isn't allowed: stay at the last allowed one.
+      if (!positionFree(cue, target)) return;
       mutate(`drag:${dragSeq}`, () => {
-        cue.positionMs = Math.max(0, Math.min(dur, Math.round(ms)));
+        cue.positionMs = target;
         // Dragging the start cue pins it (no more following the first beat);
         // it stops at the first hot cue, and a hot cue dragged before it pushes it.
         if (cue.playbackStart) cue.followsFirstBeat = false;

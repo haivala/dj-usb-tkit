@@ -79,6 +79,28 @@ point **and** a hot-cue pad (see `docs/USB_EXPORT.md`).
 
 ![Dragging cues: A snaps beat to beat with Q on, B moves freely with Shift](assets/cue-editor-drag-cues.gif)
 
+### Memory cues
+
+Memory cues mark a track's structure, as in rekordbox: a memory point with no
+hot-cue pad, reached on the CDJ with CUE/LOOP CALL. A track can have any
+number, and they don't use up the 8 pads. Each has an optional name and colour.
+
+- **On the waveform**: a **▼** flag with no letter, grey unless coloured; a
+  short tick on the overview strip. Drag it to move it (Q and Shift work as
+  for cue points); click it to select it and play from it.
+- **The memory-cue slot** in the Cues header shows the selected memory cue:
+  ‹ › to step to the previous / next one (selecting it and playing from it),
+  play, its time, colour (or none), name, × to delete, its place ("2/5") and
+  + to add one. With none selected it shows how many there are, with ‹ ›
+  stepping from the playhead.
+- **Add**: + in the slot, or **M**, at the playhead.
+- A memory cue never shares a spot with another cue (the CDJ has one memory
+  point per position): a drag stops short of one, and adding one there, or a
+  cue point on a memory cue, does nothing.
+
+The CDJ loads the track on its earliest memory point, a memory cue's included,
+so the grey shading before playback start ends there.
+
 ### Playback start
 
 "Playback starts at [First cue | First beat]" sets where a CDJ loads the track:
@@ -91,8 +113,12 @@ point **and** a hot-cue pad (see `docs/USB_EXPORT.md`).
   stops it there, and dragging cue A before it pushes it back.
 
 The choice is remembered and applied when a track gets its first cue (default:
-First cue). With no cues both options are disabled and a note says the CDJ
-starts at the first audio.
+First cue). Adding a track's first **memory cue** always adds the start marker
+on the first beat, whatever the choice: with memory cues the CDJ loads on the
+earliest one, so the start is set explicitly (unless that memory cue sits on
+the first beat itself, where the CDJ then loads). The start marker stays while
+the track has any cue, hot or memory. With no cues both options are disabled
+and a note says the CDJ starts at the first audio.
 
 ![Choosing First beat adds the start marker; dragging it makes it a Start marker](assets/cue-editor-playback-start.gif)
 
@@ -102,6 +128,7 @@ starts at the first audio.
 | --- | --- |
 | Space | Play / pause |
 | C | Add a cue at the playhead (Shift: free placement with Q on) |
+| M | Add a memory cue at the playhead (Shift: free placement with Q on) |
 | 1–8 | Jump to cue A–H (plays from it and selects it) |
 | ← / → | Move the selected cue one beat (with Q on: onto the previous/next beat line) |
 | Shift + ← / → | Move the selected cue 10 ms |
@@ -181,26 +208,26 @@ nothing. "Unsaved" compares the save payload with the payload as opened.
 Stored as a `track_cues` row with `is_playback_start = 1` (`TrackCue.playbackStart`
 on the wire; see `docs/APP_DATA_MODEL.md`). It does not count toward the 8. The
 backend enforces the same rules as the editor (`normalize_cues`): at most one,
-never named or coloured, dropped when the track has no hot cues, and pulled
-back to the earliest hot cue when it lies after it.
+never named or coloured, dropped when the track has no other cue (hot or
+memory), and pulled back to the earliest hot cue when it lies after it.
 
 On export `split_cues` writes it as a single memory point before the
 hot cues, in both the ANLZ cue chunks and the eDB `cue` table. It is dropped
 when it coincides with a hot cue's position, since that hot cue's own memory
 point already sits there. On import (`collapse_anlz_cues`), an unnamed,
-uncoloured memory-only entry that precedes every hot-cue pad is read back as
-the playback-start cue.
+uncoloured memory-only entry that comes first, with another cue after it, is
+read back as the playback-start cue.
 
 ### Memory cues
 
-Memory cues are memory points without a hot-cue pad, as rekordbox writes them
-to mark a track's structure: a `track_cues` row with `is_memory = 1`
-(`TrackCue.memory`), with an optional name and colour and no limit on how many.
-They come from rekordbox's library and from USB sticks prepared by rekordbox
-(`collapse_anlz_cues` reads every memory-only entry other than the start cue as
-one, keeping its name and colour), and are exported as lone memory points with
-their name and colour. The editor doesn't show them yet: it keeps them as they
-are, and a save sends them back unchanged.
+Stored as a `track_cues` row with `is_memory = 1` (`TrackCue.memory` on the
+wire), with an optional name and colour (`color_id` NULL when uncoloured) and
+no limit on how many. They come from rekordbox's library and from USB sticks
+prepared by rekordbox (`collapse_anlz_cues` reads every memory-only entry other
+than the start cue as one, keeping its name and colour), from the editor, and
+are exported as lone memory points with their name and colour (`split_cues`).
+`normalize_cues` drops one on a hot cue's or the start cue's position; the
+editor never lets one get there (`positionFree` in the controller).
 
 ### Metronome
 

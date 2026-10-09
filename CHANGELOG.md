@@ -65,13 +65,19 @@
   Beat Grid** or a re-export. Only tracks this app exported can have it; the stick's export log, which
   now records the app version, says which ones to check, so the check reads only those
   tracks' analysis files, and only their first 4 KB.
+- **New feature:** Memory cues in the cue editor. They show as ▼ flags on the waveform
+  (grey, or in their colour) and are edited in one slot in the Cues header: ‹ › steps through
+  them like a CDJ's CUE/LOOP CALL, with play, colour, name and delete; + or M adds one at the
+  playhead. Any number per track, without using up the 8 pads. The first memory cue also adds
+  the ▶ playback-start marker on the first beat, which then stays as long as the track has any
+  cue. The grey shading before playback start now ends on the earliest memory cue, where the
+  CDJ loads the track.
 - **Fix:** Memory cues are kept. rekordbox memory cues — on a USB prepared by rekordbox, or
   imported from rekordbox's library — were turned into hot cues on the next save or import,
   and any past the eighth were dropped. They are now their own kind: any number, with their
   name and colour, kept through import, saving and export as memory points without a pad.
-  The cue editor doesn't show them yet; it keeps them as they are. Tracks imported from
-  rekordbox earlier get theirs back when imported again with "force update track data from
-  rekordbox".
+  Tracks imported from rekordbox earlier get theirs back when imported again with "force
+  update track data from rekordbox".
 - **New feature:** **Cues follow grid** in the cue editor (next to Q, off by default).
   When it's on, changing the BPM or the first beat moves every cue so it stays on its beat,
   which fixes a grid under cues placed with Quantize. Off, cues keep their place in the

@@ -70,8 +70,9 @@ rekordbox cues are imported like this:
 
 - every hot cue becomes a hot cue
 - the earliest memory cue becomes the playback-start cue (where a CDJ's
-  auto-cue loads the track) when it comes before the first hot cue and has
-  no name or colour
+  auto-cue loads the track) when it comes before the first hot cue (on a
+  track without hot cues, when another memory cue follows) and has no name
+  or colour
 - every other memory cue stays a memory cue, with its name and colour, however
   many there are; one at a hot cue's position is left out, since the hot cue
   already has a memory point there
@@ -221,7 +222,8 @@ mixxxDbSource)`.
   `ColorTableIndex`). `Kind` 0 is a memory cue and hot-cue pads A–H are
   `Kind` 1, 2, 3, 5, 6, 7, 8, 9 (rekordbox skips 4). Hot cues become hot
   cues; the earliest memory cue becomes the playback-start cue when it lies
-  before the first hot cue and has no name or colour; the other memory cues
+  before the first hot cue (with no hot cues, when another memory cue
+  follows) and has no name or colour; the other memory cues
   become memory cues, and one at a hot cue's position is dropped
   (`rekordbox_cues_to_track_cues`). `ColorTableIndex` is read with the same codes the
   app writes to the USB eDB's `cue.colorTableIndex` (its palette ids 1–8);

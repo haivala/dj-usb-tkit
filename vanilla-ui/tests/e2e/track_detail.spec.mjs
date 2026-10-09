@@ -1124,27 +1124,37 @@ test("cues follow grid is remembered and leaves a hand-moved cue's new spot alon
   expect(await savedCuePositions(page)).toEqual({ bpm: 128, firstBeatMs: 120, positions: [120, 30129, 60000] });
 });
 
-test("memory cues (e.g. from rekordbox) aren't shown yet but are kept and saved as they are", async ({ page }) => {
-  const seedMemory = [
-    { positionMs: 2000, colorId: 3, name: "Intro" },
-    { positionMs: 40000 },
-    { positionMs: 90000, name: "Outro" },
-  ];
-  await openCueEditor(page, { seedCues: [30000], seedStart: 120, seedMemory });
+const MEMORY_SEED = [
+  { positionMs: 2000, colorId: 3, name: "Intro" },
+  { positionMs: 40000 },
+  { positionMs: 90000, name: "Outro" },
+];
 
-  // Only the hot cue and the start cue show; all 8 pads stay available.
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveCount(2);
-  await expect(page.locator("#trackDetailCueList .cue-row:not(.is-playback-start)")).toHaveCount(1);
+test("memory cues show as ▼ flags without a letter, outside the 8 pads, and are saved as they are", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30000], seedMemory: MEMORY_SEED });
+
+  const memoryMarkers = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
+  await expect(memoryMarkers).toHaveCount(3);
+  await expect(memoryMarkers.first()).toHaveText("");
+  await expect(memoryMarkers.first()).toHaveAttribute("data-tooltip", "Memory cue · Intro · 0:02.00");
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveText(["A"]);
+  await expect(page.locator("#trackDetailOverviewCues .overview-cue.is-memory")).toHaveCount(3);
+  await expect(page.locator("#trackDetailMemoryCue")).toContainText("Memory cues: 3");
+
+  // The CDJ loads on the earliest memory point: here the 2 s memory cue.
+  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+  const introBox = await memoryMarkers.first().boundingBox();
+  expect(Math.abs((await preStartEdge(page)) - (introBox.x - wfBox.x))).toBeLessThan(3);
+
+  // All 8 pads stay available.
   for (let i = 0; i < 7; i += 1) await page.locator("#trackDetailAddCue").click();
   await expect(page.locator("#trackDetailAddCue")).toBeDisabled();
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)")).toHaveCount(8);
 
-  // Removing the start cue ("First cue") and every hot cue keeps the memory cues.
-  await page.locator("#trackDetailStartFirstCue").click();
+  // Deleting every hot cue keeps the memory cues.
   for (let i = 0; i < 8; i += 1) {
     await page.locator("#trackDetailCueList .cue-row .cue-row-delete").first().click();
   }
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveCount(0);
+  await expect(memoryMarkers).toHaveCount(3);
 
   await page.locator("#trackDetailSaveBtn").click();
   const saveCall = await page.evaluate(() =>
@@ -1155,6 +1165,127 @@ test("memory cues (e.g. from rekordbox) aren't shown yet but are kept and saved 
     { positionMs: 40000, colorId: null, name: null, playbackStart: false, memory: true },
     { positionMs: 90000, colorId: null, name: "Outro", playbackStart: false, memory: true },
   ]);
+});
+
+test("the memory-cue slot: M and + add one, ◀ ▶ step through them, rename, colour and delete", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30000], seedMemory: MEMORY_SEED, quantize: false });
+  const slot = page.locator("#trackDetailMemoryCue");
+
+  // M adds one at the (stopped) playhead and selects it; a second one there
+  // isn't possible.
+  await page.keyboard.press("m");
+  await expect(slot.locator(".cue-row-pos")).toHaveText("0:00.00");
+  await expect(slot.locator(".memory-slot-count")).toHaveText("1/4");
+  await slot.locator("[data-action='memory-add']").click();
+  await expect(slot.locator(".memory-slot-count")).toHaveText("1/4");
+  await expect(page.locator("#statusText")).toContainText("A cue is already there.");
+
+  // ▶ steps to the next memory cue and plays from it.
+  await slot.locator("[data-action='memory-next']").click();
+  await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.00");
+  await expect(slot.locator(".cue-row-name")).toHaveValue("Intro");
+  await expect(slot.locator(".memory-slot-count")).toHaveText("2/4");
+  const played = await page.evaluate(() =>
+    window.__calls.filter((c) => c.command === "play_resolved_track").at(-1)?.request?.startRatio
+  );
+  expect(played).toBeCloseTo(2000 / 180000, 5);
+  await slot.locator("[data-action='memory-next']").click();
+  await expect(slot.locator(".cue-row-pos")).toHaveText("0:40.00");
+
+  // Rename and colour the 40 s one.
+  await slot.locator(".cue-row-name").fill("Break");
+  await slot.locator(".cue-row-color").click();
+  await page.locator("#trackDetailColorPopover .cue-color-swatch").nth(5).click(); // id 6
+  await expect(slot.locator(".cue-row-name")).toHaveValue("Break");
+  await expect(slot.locator(".cue-row-color")).not.toHaveClass(/is-uncoloured/);
+
+  // ◀ back to the 2 s one; × deletes it.
+  await slot.locator("[data-action='memory-prev']").click();
+  await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.00");
+  await slot.locator(".cue-row-delete").click();
+  await expect(slot).toContainText("Memory cues: 3");
+
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saveCall.request.cues.filter((c) => c.memory)).toEqual([
+    { positionMs: 0, colorId: null, name: null, playbackStart: false, memory: true },
+    { positionMs: 40000, colorId: 6, name: "Break", playbackStart: false, memory: true },
+    { positionMs: 90000, colorId: null, name: "Outro", playbackStart: false, memory: true },
+  ]);
+});
+
+test("the first memory cue adds the playback-start cue, which stays while any cue remains", async ({ page }) => {
+  // "First cue" is the remembered choice, yet the first memory cue adds the
+  // start cue on the first beat (120 ms).
+  await openCueEditor(page, { seedCues: [30000], quantize: false });
+  const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
+  await expect(page.locator("#trackDetailStartFirstCue")).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("m"); // at the stopped playhead: 0 ms
+  await expect(startPos).toHaveText("0:00.12");
+  // The start cue has its own place: the ▶ marker and the start row, never
+  // the memory-cue slot or a ▼ flag.
+  await expect(page.locator("#trackDetailMemoryCue .memory-slot-count")).toHaveText("1/1");
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-memory")).toHaveCount(1);
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start")).toHaveText("▶");
+  await expect(page.locator("#trackDetailStartFirstBeat")).toHaveAttribute("aria-checked", "true");
+
+  // A second memory cue changes nothing; one undo removes both.
+  await page.locator("#trackDetailUndo").click();
+  await expect(page.locator("#trackDetailStartCue")).toBeHidden();
+  await page.locator("#trackDetailRedo").click();
+  await expect(startPos).toHaveText("0:00.12");
+
+  // Without hot cues the start cue stays for the memory cue; with no cue
+  // left it goes.
+  await page.locator("#trackDetailCueList .cue-row .cue-row-delete").first().click();
+  await expect(startPos).toHaveText("0:00.12");
+  // Redo leaves nothing selected; › from the stopped playhead (0) reaches it.
+  await page.locator("#trackDetailMemoryCue [data-action='memory-next']").click();
+  await page.locator("#trackDetailMemoryCue .cue-row-delete").click();
+  await expect(page.locator("#trackDetailStartCue")).toBeHidden();
+});
+
+test("a first memory cue on the first beat is where the CDJ loads: no start cue is added", async ({ page }) => {
+  // Q on: M at the stopped playhead snaps to the first beat.
+  await openCueEditor(page, { seedCues: [30000] });
+  await page.keyboard.press("m");
+  await expect(page.locator("#trackDetailMemoryCue .cue-row-pos")).toHaveText("0:00.12");
+  await expect(page.locator("#trackDetailStartCue")).toBeHidden();
+});
+
+test("a memory cue never lands on another cue: a drag stops short, and no cue is added on one", async ({ page }) => {
+  // Quantize on: the hot cue sits on beat 64 (30120 ms), the memory cue on
+  // the first beat (120 ms).
+  await openCueEditor(page, { seedCues: [30120], seedMemory: [{ positionMs: 120 }] });
+
+  // C at the stopped playhead snaps to the first beat, where the memory cue is.
+  await page.keyboard.press("c");
+  await expect(page.locator("#statusText")).toContainText("A memory cue is already there.");
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveCount(1);
+
+  // Drag the memory cue onto the hot cue: it stops on the beat before.
+  const memory = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
+  const hot = page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)");
+  const from = await memory.boundingBox();
+  const to = await hot.boundingBox();
+  const y = from.y + 5;
+  await page.mouse.move(from.x, y);
+  await page.mouse.down();
+  await page.mouse.move(to.x - 20, y, { steps: 8 });
+  await page.mouse.move(to.x + 1, y, { steps: 4 });
+  await page.mouse.up();
+
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  const positions = saveCall.request.cues.map((c) => [c.positionMs, c.memory]);
+  expect(positions).toContainEqual([30120, false]);
+  const moved = positions.find(([, m]) => m)[0];
+  expect(moved).toBeGreaterThan(120);
+  expect(moved).toBeLessThan(30120);
 });
 
 test("double-click the waveform adds a cue at that position without starting playback", async ({ page }) => {

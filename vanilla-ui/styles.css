@@ -56,6 +56,8 @@
   --accent-hover: hsl(var(--accent-h), var(--accent-s), 63%);
   --accent-glow:  hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.15);
   --accent-hot:   hsl(calc(var(--accent-h) + 30), 75%, 55%);
+  /* An uncoloured memory cue on the waveform (reads on both themes). */
+  --memory-cue-color: #9aa3b2;
 }
 
 /* ── Light theme (default) ─────────────────────────── */
@@ -4151,6 +4153,12 @@ td button[data-action]:disabled,
   background: var(--cue-color, #cfd6e2);
 }
 .overview-cue.is-playback-start { background: #cfd6e2; }
+/* Memory cues: a short tick from the top, grey unless coloured. */
+.overview-cue.is-memory {
+  bottom: auto;
+  height: 45%;
+  background: var(--cue-color, var(--memory-cue-color));
+}
 .track-detail-overview-window {
   position: absolute;
   top: 0;
@@ -4188,6 +4196,21 @@ td button[data-action]:disabled,
 .track-detail-zoom-range.is-zoomed { color: var(--accent); font-weight: 600; }
 .track-detail-zoom-range[hidden] { display: none; }
 .track-detail-zoom-btns { display: flex; gap: 4px; flex: none; }
+/* Zoom in / out: a magnifier with + / −, as tall as the Fit button beside them. */
+.track-detail-zoom .track-detail-zoom-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+}
+.track-detail-zoom-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
 .track-detail-zoom button {
   padding: 2px 10px;
   font-size: 12px;
@@ -4418,6 +4441,25 @@ td button[data-action]:disabled,
   background: linear-gradient(var(--cue-color, #4EB648), var(--cue-color, #4EB648)) top left / 16px 15px no-repeat;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
 }
+/* A memory cue: a ▼ flag on a thin line, no letter; grey unless coloured. */
+.cue-marker.is-memory {
+  width: 1px;
+  border-left-width: 1px;
+  border-left-color: var(--cue-color, var(--memory-cue-color));
+  background: none;
+}
+.cue-marker.is-memory::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -7px;
+  width: 13px;
+  height: 11px;
+  background: var(--cue-color, var(--memory-cue-color));
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.cue-marker.is-memory.is-selected { outline: none; box-shadow: none; }
+.cue-marker.is-memory.is-selected::before { background: var(--accent); }
 .cue-marker.is-playback-start {
   --cue-color: #cfd6e2;
   border-left-style: dashed;
@@ -4430,12 +4472,50 @@ td button[data-action]:disabled,
 }
 .track-detail-cues-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
 }
+/* The memory-cue slot: the selected memory cue, or the count. */
+.memory-slot,
+.cue-row.memory-slot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.memory-slot.is-empty { color: var(--muted); font-size: 12px; }
+.memory-slot-label b { color: var(--ink); font-weight: 600; }
+.memory-slot .cue-row-name { width: 120px; }
+.memory-slot .cue-row-color { color: #fff; font-size: 10px; }
+.memory-slot .cue-row-color.is-uncoloured { background: var(--memory-cue-color); color: #1b1f27; text-shadow: none; }
+.memory-slot-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.memory-step,
+.memory-add {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+}
+.memory-step svg,
+.memory-add svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .track-detail-cues-head > span { font-weight: 600; margin-right: 8px; }
-.track-detail-cues-head #trackDetailAddCue { margin-left: auto; }
+/* The memory-cue slot and "+ Cue" sit together at the right. */
+.track-detail-memory-cue { margin-left: auto; }
 #trackDetailAddCue:disabled { opacity: .4; cursor: default; }
 /* While a cue-editor drag is held (pan, cue marker, overview), nothing on the
    page is selectable, even where the pointer passes over text. */
@@ -4545,6 +4625,10 @@ html.is-ui-dragging * {
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
+}
+.cue-color-swatch.is-none {
+  background: var(--memory-cue-color);
+  background-image: linear-gradient(135deg, transparent 45%, #e12424 45%, #e12424 55%, transparent 55%);
 }
 .track-detail-color-popover {
   position: absolute;

@@ -1,7 +1,7 @@
 // DOM event wiring for the track-detail (cues + beat grid) modal.
 
 import { scrubRatioFromPointer } from "../playback/actions.mjs";
-import { HOTCUE_PALETTE } from "./actions.mjs";
+import { HOTCUE_PALETTE, MAX_CUES } from "./actions.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 
 export function bindTrackDetailEvents(ctx) {
@@ -136,6 +136,13 @@ export function bindTrackDetailEvents(ctx) {
       .then(() => trackDetailDialog.notePlaybackStarted())
       .catch(() => {});
   };
+  // Adding a hot cue failed: all 8 pads are taken, or a memory cue sits
+  // exactly there.
+  const emitCueBlocked = () => {
+    ctx.emitStatus(
+      trackDetailDialog.hotCueCount() >= MAX_CUES ? "Maximum 8 cue points." : "A memory cue is already there."
+    );
+  };
   const playFromCue = (cue) => {
     const dur = trackDetailDialog.getWorking().durationMs;
     if (cue && dur) playFromRatio(cue.positionMs / dur);
@@ -239,7 +246,7 @@ export function bindTrackDetailEvents(ctx) {
       scrubRatioFromPointer(event, wf)
     );
     if (!trackDetailDialog.addCueAtRatio(trackRatio, { free: event.shiftKey })) {
-      ctx.emitStatus("Maximum 8 cue points.");
+      emitCueBlocked();
     }
   });
 
@@ -303,11 +310,28 @@ export function bindTrackDetailEvents(ctx) {
   });
 
   const addCueAtPlayhead = (free) => {
-    if (!trackDetailDialog.addCue(undefined, { free })) {
-      ctx.emitStatus("Maximum 8 cue points.");
-    }
+    if (!trackDetailDialog.addCue(undefined, { free })) emitCueBlocked();
   };
   el.trackDetailAddCue?.addEventListener("click", (event) => addCueAtPlayhead(event.shiftKey));
+  const addMemoryCueAtPlayhead = (free) => {
+    if (!trackDetailDialog.addMemoryCue(undefined, { free })) {
+      ctx.emitStatus("A cue is already there.");
+    }
+  };
+
+  // The memory-cue slot: ◀ ▶ step through the memory cues (and play from
+  // the one reached), + adds one at the playhead. Play, colour, name and ×
+  // work as in the cue rows (bindCueRows below). These re-render the slot,
+  // so the cue-row handler mustn't then select the old slot's cue again.
+  el.trackDetailMemoryCue?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (action?.startsWith("memory-")) event.stopImmediatePropagation();
+    if (action === "memory-prev" || action === "memory-next") {
+      playFromCue(trackDetailDialog.stepMemoryCue(action === "memory-next" ? 1 : -1));
+    } else if (action === "memory-add") {
+      addMemoryCueAtPlayhead(event.shiftKey);
+    }
+  });
 
   el.trackDetailQuantize?.addEventListener("click", () => trackDetailDialog.toggleQuantize());
   el.trackDetailFollowGrid?.addEventListener("click", () => trackDetailDialog.toggleFollowGrid());
@@ -347,6 +371,8 @@ export function bindTrackDetailEvents(ctx) {
       if (!event.repeat) el.trackDetailPlayPause?.click();
     } else if (key === "c" || key === "C") {
       if (!event.repeat) addCueAtPlayhead(event.shiftKey);
+    } else if (key === "m" || key === "M") {
+      if (!event.repeat) addMemoryCueAtPlayhead(event.shiftKey);
     } else if (/^[1-8]$/.test(key)) {
       if (!event.repeat) jumpToCue(Number(key) - 1);
     } else if (key === "ArrowLeft" || key === "ArrowRight") {
@@ -414,8 +440,9 @@ export function bindTrackDetailEvents(ctx) {
   });
 
   // Cue rows: play / name / colour / delete (event-delegated). The hot cues
-  // live in the list, the playback-start cue in the "Playback starts at" row.
-  for (const host of [el.trackDetailCueList, el.trackDetailStartCue]) {
+  // live in the list, the playback-start cue in the "Playback starts at" row,
+  // the selected memory cue in the memory-cue slot.
+  for (const host of [el.trackDetailCueList, el.trackDetailStartCue, el.trackDetailMemoryCue]) {
     bindCueRows(host, ctx, playFromCue);
   }
 }
@@ -505,6 +532,16 @@ function openColorPopover(ctx, anchor, tempId) {
       pop.hidden = true;
     });
     pop.appendChild(swatch);
+  }
+  // A memory cue can also go back to none (grey); a hot cue always has one.
+  const cue = trackDetailDialog.getWorking().cues.find((c) => c.tempId === tempId);
+  if (cue?.memory) {
+    const none = cloneTemplate(pop.ownerDocument, "tplCueColorSwatchNone");
+    none.addEventListener("click", () => {
+      trackDetailDialog.updateCue(tempId, { colorId: null });
+      pop.hidden = true;
+    });
+    pop.appendChild(none);
   }
   const overlayRect = el.trackDetailOverlay.getBoundingClientRect();
   const rect = anchor.getBoundingClientRect();
