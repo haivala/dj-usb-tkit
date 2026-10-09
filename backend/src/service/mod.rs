@@ -101,6 +101,7 @@ pub(crate) const SETTING_UI_CUE_START_ON_FIRST_BEAT: &str = "ui_cue_start_on_fir
 pub(crate) const SETTING_UI_CUE_BEATGRID_LEVEL: &str = "ui_cue_beatgrid_level_v1";
 pub(crate) const SETTING_UI_CUE_QUANTIZE: &str = "ui_cue_quantize_v1";
 pub(crate) const SETTING_UI_CUE_METRONOME_MIX: &str = "ui_cue_metronome_mix_v1";
+pub(crate) const SETTING_UI_CUE_FOLLOW_GRID: &str = "ui_cue_follow_grid_v1";
 const WAVEFORM_PREVIEW_BINS: usize = 2400;
 
 const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
@@ -3088,6 +3089,7 @@ fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_CUE_BEATGRID_LEVEL,
         SETTING_UI_CUE_QUANTIZE,
         SETTING_UI_CUE_METRONOME_MIX,
+        SETTING_UI_CUE_FOLLOW_GRID,
     ]
 }
 

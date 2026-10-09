@@ -26,6 +26,8 @@ import {
   FRONTEND_DB_KEY_CUE_QUANTIZE,
   STORAGE_KEY_CUE_METRONOME_MIX,
   FRONTEND_DB_KEY_CUE_METRONOME_MIX,
+  STORAGE_KEY_CUE_FOLLOW_GRID,
+  FRONTEND_DB_KEY_CUE_FOLLOW_GRID,
 } from "../../settings_keys.mjs";
 
 export const MAX_CUES = 8;
@@ -105,6 +107,8 @@ export function createTrackDetailController(el, prefs = {}) {
     setBeatgridLevelPref = () => {},
     getQuantizePref = () => true,
     setQuantizePref = () => {},
+    getFollowGridPref = () => false,
+    setFollowGridPref = () => {},
     // The native engine mixes the clicks into the track (`set_playback_metronome`).
     setPlaybackMetronome = () => Promise.resolve(),
     getMetronomeMixPref = () => 50,
@@ -227,8 +231,54 @@ export function createTrackDetailController(el, prefs = {}) {
     return working.firstBeatMs + idx * interval;
   }
 
+  // --- Cues follow grid ---------------------------------------------------
+
+  /// The grid a BPM / first-beat edit starts from, for `moveCuesWithGrid`.
+  function gridBefore() {
+    return {
+      firstBeatMs: working.firstBeatMs,
+      intervalMs: beatIntervalMs(),
+      key: `${working.firstBeatMs}|${working.bpm}`,
+    };
+  }
+
+  /// With "cues follow grid" on, move every cue from the `before` grid to the
+  /// current one so it keeps its beat (fractional beats too: an off-grid cue
+  /// keeps its offset). Off, cues keep their time in the audio, as in
+  /// rekordbox. Each cue remembers the exact beat it was put on (`gridPin`:
+  /// the beat, the position it gave and the grid it gave it on), so many small
+  /// edits in a row don't drift from rounding. A pin only counts while both
+  /// still match: any other move or grid edit drops it.
+  function moveCuesWithGrid(before) {
+    if (!getFollowGridPref()) return;
+    if (before.firstBeatMs == null || !(before.intervalMs > 0) || !hasGrid()) return;
+    const interval = beatIntervalMs();
+    const maxMs = working.durationMs ? working.durationMs - 1 : Infinity;
+    const key = `${working.firstBeatMs}|${working.bpm}`;
+    for (const cue of working.cues) {
+      const pin = cue.gridPin;
+      const beat = pin && pin.positionMs === cue.positionMs && pin.grid === before.key
+        ? pin.beat
+        : (cue.positionMs - before.firstBeatMs) / before.intervalMs;
+      cue.positionMs = Math.max(0, Math.min(maxMs, Math.round(working.firstBeatMs + beat * interval)));
+      cue.gridPin = { beat, positionMs: cue.positionMs, grid: key };
+    }
+    // Rounding or the track's ends can put two hot cues on the same ms; the
+    // later one steps 1 ms on.
+    let previous = -1;
+    for (const cue of hotCues().sort(byPosition)) {
+      if (cue.positionMs <= previous) {
+        cue.positionMs = previous + 1;
+        cue.gridPin.positionMs = cue.positionMs;
+      }
+      previous = cue.positionMs;
+    }
+    enforceStartOrder();
+  }
+
   function renderTools() {
     el.trackDetailQuantize?.setAttribute("aria-pressed", String(getQuantizePref()));
+    el.trackDetailFollowGrid?.setAttribute("aria-pressed", String(getFollowGridPref()));
     el.trackDetailMetronome?.setAttribute("aria-pressed", String(metronome.on));
     const mix = el.trackDetailMetronomeMix;
     if (mix) {
@@ -808,10 +858,14 @@ export function createTrackDetailController(el, prefs = {}) {
 
     setFirstBeatMs(ms) {
       mutate(null, () => {
+        const before = gridBefore();
         const clamped = Math.max(0, Math.round(Number(ms) || 0));
         working.firstBeatMs = working.durationMs
           ? Math.min(clamped, working.durationMs - 1)
           : clamped;
+        // Before the start-cue rule below: an untouched start cue sits on
+        // the first beat either way, and must not move twice.
+        moveCuesWithGrid(before);
         // An untouched playback-start cue follows the first beat.
         const start = startCue();
         if (start?.followsFirstBeat) {
@@ -840,7 +894,9 @@ export function createTrackDetailController(el, prefs = {}) {
       const parsed = Number.parseFloat(bpm);
       if (!Number.isFinite(parsed) || parsed <= 0) return;
       mutate(null, () => {
+        const before = gridBefore();
         working.bpm = Math.max(0.01, Math.round(Math.min(999, parsed) * 100) / 100);
+        moveCuesWithGrid(before);
       });
       render();
     },
@@ -912,6 +968,13 @@ export function createTrackDetailController(el, prefs = {}) {
     /// The "Q" toggle (remembered): snap new and dragged cues to the grid.
     toggleQuantize() {
       setQuantizePref(!getQuantizePref());
+      renderTools();
+    },
+
+    /// The "cues follow grid" toggle (remembered): BPM and first-beat edits
+    /// move every cue with the grid instead of leaving it in place.
+    toggleFollowGrid() {
+      setFollowGridPref(!getFollowGridPref());
       renderTools();
     },
 
@@ -1231,6 +1294,11 @@ export function createAppTrackDetailController(ctx) {
     setQuantizePref: (on) => {
       ctx.state.cueQuantize = !!on;
       ctx.persistSetting(STORAGE_KEY_CUE_QUANTIZE, FRONTEND_DB_KEY_CUE_QUANTIZE, on ? "1" : "0");
+    },
+    getFollowGridPref: () => !!ctx.state.cueFollowGrid,
+    setFollowGridPref: (on) => {
+      ctx.state.cueFollowGrid = !!on;
+      ctx.persistSetting(STORAGE_KEY_CUE_FOLLOW_GRID, FRONTEND_DB_KEY_CUE_FOLLOW_GRID, on ? "1" : "0");
     },
     getBeatgridLevelPref: () => ctx.state.cueBeatgridLevel,
     setBeatgridLevelPref: (level, { remember = false } = {}) => {

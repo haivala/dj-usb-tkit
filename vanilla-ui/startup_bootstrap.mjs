@@ -14,6 +14,7 @@ import {
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
   STORAGE_KEY_CUE_BEATGRID_LEVEL,
   STORAGE_KEY_CUE_QUANTIZE,
+  STORAGE_KEY_CUE_FOLLOW_GRID,
   STORAGE_KEY_CUE_METRONOME_MIX,
 } from "./settings_keys.mjs";
 
@@ -125,6 +126,13 @@ export function restoreStoredUiPrefs(ctx) {
       localStorage?.getItem?.(STORAGE_KEY_CUE_QUANTIZE) !== "0";
   } catch {
     state.cueQuantize = true;
+  }
+
+  try {
+    state.cueFollowGrid =
+      localStorage?.getItem?.(STORAGE_KEY_CUE_FOLLOW_GRID) === "1";
+  } catch {
+    state.cueFollowGrid = false;
   }
 
   state.cueBeatgridLevel = 35;

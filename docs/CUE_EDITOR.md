@@ -28,6 +28,12 @@ them, and ± moves the bar starts one beat.
 
 ![Beat grid following BPM and first-beat edits](assets/cue-editor-beatgrid.gif)
 
+Cues keep their place in the audio when the grid changes, as in rekordbox. To
+fix a grid under cues that were placed on it, turn on **Cues follow grid** (the
+button next to Q): BPM and first-beat edits then move every cue, the playback
+start included, so it stays on its beat, and a cue placed between beats keeps
+its offset. One undo puts the grid and the cues back.
+
 ### Waveform
 
 The editor shows the full-detail colour waveform, zoomed to the first 60 bars at the track's BPM
@@ -139,6 +145,7 @@ undo). Space never presses the focused button (Save has focus on open).
 | Setting | Default | Storage key / settings key |
 | --- | --- | --- |
 | Quantize (Q) | on | `djusbtkit.cueQuantize` / `ui_cue_quantize_v1` |
+| Cues follow grid | off | `djusbtkit.cueFollowGrid` / `ui_cue_follow_grid_v1` |
 | Beat grid slider | 35 | `djusbtkit.cueBeatgridLevel` / `ui_cue_beatgrid_level_v1` |
 | Playback start choice for a track's first cue | First cue | `djusbtkit.cueStartOnFirstBeat` / `ui_cue_start_on_first_beat_v1` |
 | Metronome Mix slider | 50 (both at full level) | `djusbtkit.cueMetronomeMix` / `ui_cue_metronome_mix_v1` |
@@ -202,6 +209,20 @@ toggle or grid edit takes effect while the track plays.
 Mixing in the engine also means the metronome needs no webview audio:
 WebKitGTK plays web audio through GStreamer's `autoaudiosink`, which may not be
 installed.
+
+### Cues follow grid
+
+`moveCuesWithGrid` (in the controller) runs inside the same `mutate` as the BPM
+or first-beat edit, so it is one undo step. Each cue's beat is
+`(positionMs − firstBeat) / beatInterval` on the grid before the edit, and its
+new position is `firstBeat + beat × beatInterval` on the new grid, rounded to
+the ms and kept inside the track. The cue remembers the exact beat with the
+position and grid it gave (`gridPin`, editor-only, never saved), so many 0.01
+BPM steps up and back down land on the same ms. A pin only counts while both
+still match, so a cue moved by hand, or a grid edit made with the option off,
+starts from the cue's current position. Two hot cues that round onto the same
+ms are kept 1 ms apart, and the playback start stays at or before the first hot
+cue.
 
 ### Drags and text selection
 

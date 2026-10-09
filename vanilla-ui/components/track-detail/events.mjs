@@ -310,6 +310,7 @@ export function bindTrackDetailEvents(ctx) {
   el.trackDetailAddCue?.addEventListener("click", (event) => addCueAtPlayhead(event.shiftKey));
 
   el.trackDetailQuantize?.addEventListener("click", () => trackDetailDialog.toggleQuantize());
+  el.trackDetailFollowGrid?.addEventListener("click", () => trackDetailDialog.toggleFollowGrid());
   el.trackDetailMetronome?.addEventListener("click", () => trackDetailDialog.toggleMetronome());
   el.trackDetailUndo?.addEventListener("click", () => trackDetailDialog.undo());
   el.trackDetailRedo?.addEventListener("click", () => trackDetailDialog.redo());

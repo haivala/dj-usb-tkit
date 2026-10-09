@@ -7,6 +7,7 @@ function installTrackDetailMock(page, opts = {}) {
     if (opts.startOnFirstBeat) window.localStorage.setItem("djusbtkit.cueStartOnFirstBeat", "1");
     // Quantize defaults on; tests that place cues at exact spots turn it off.
     if (opts.quantize === false) window.localStorage.setItem("djusbtkit.cueQuantize", "0");
+    if (opts.followGrid) window.localStorage.setItem("djusbtkit.cueFollowGrid", "1");
     window.__calls = [];
 
     const tracks = [
@@ -1021,6 +1022,103 @@ test("BPM stepper nudges by 0.01 and clamps to a positive value", async ({ page 
   await page.locator("#trackDetailBpmMinus").click();
   await page.locator("#trackDetailBpmMinus").click();
   await expect(page.locator("#trackDetailBpm")).toHaveValue("127.99");
+});
+
+// Grid as opened: first beat 120 ms at 128 BPM (468.75 ms a beat). One cue on
+// beat 64 (30120 ms), one off the grid (60000 ms = beat 127.744), and the
+// start cue on the first beat.
+const FOLLOW_GRID_SEED = { seedCues: [30120, 60000], seedStart: 120, quantize: false };
+
+async function setBpmInput(page, value) {
+  await page.locator("#trackDetailBpm").fill(value);
+  await page.locator("#trackDetailBpm").dispatchEvent("change");
+}
+
+async function savedCuePositions(page) {
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  return {
+    bpm: saveCall.request.bpm,
+    firstBeatMs: saveCall.request.firstBeatMs,
+    positions: saveCall.request.cues.map((c) => c.positionMs),
+  };
+}
+
+test("cues follow grid is off by default: BPM and first-beat edits leave cues where they are", async ({ page }) => {
+  await openCueEditor(page, FOLLOW_GRID_SEED);
+  await expect(page.locator("#trackDetailFollowGrid")).toHaveAttribute("aria-pressed", "false");
+
+  await setBpmInput(page, "120");
+  await page.locator("#trackDetailFirstBeatPlus").click();
+
+  // The untouched start cue still follows the first beat, as before.
+  expect(await savedCuePositions(page)).toEqual({ bpm: 120, firstBeatMs: 620, positions: [620, 30120, 60000] });
+});
+
+test("cues follow grid: BPM and first-beat edits keep every cue on its beat, undoably, without drift", async ({ page }) => {
+  await openCueEditor(page, FOLLOW_GRID_SEED);
+  const toggle = page.locator("#trackDetailFollowGrid");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  const persisted = await page.evaluate(() => ({
+    local: window.localStorage.getItem("djusbtkit.cueFollowGrid"),
+    db: window.__calls
+      .filter((c) => c.command === "set_frontend_setting")
+      .map((c) => c.request)
+      .filter((r) => r?.key === "ui_cue_follow_grid_v1")
+      .map((r) => r.value),
+  }));
+  expect(persisted).toEqual({ local: "1", db: ["1"] });
+
+  const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
+  const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
+
+  // 128 -> 120 BPM (500 ms a beat): beat 64 is now 32120 ms, beat 127.744 63992 ms.
+  await setBpmInput(page, "120");
+  await expect(hotPos).toHaveText(["0:32.12", "1:03.99"]);
+  await expect(startPos).toHaveText("0:00.12");
+
+  // One undo puts the grid and the cues back; redo moves them again.
+  await page.locator("#trackDetailUndo").click();
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
+  await expect(hotPos).toHaveText(["0:30.12", "1:00.00"]);
+  await page.locator("#trackDetailRedo").click();
+  await expect(hotPos).toHaveText(["0:32.12", "1:03.99"]);
+
+  // A first-beat nudge moves every cue by one beat (500 ms), the start cue once.
+  await page.locator("#trackDetailFirstBeatPlus").click();
+  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("620");
+  await expect(hotPos).toHaveText(["0:32.62", "1:04.49"]);
+  await expect(startPos).toHaveText("0:00.62");
+
+  // Many 0.01 BPM steps up and back down land on the exact same ms.
+  for (let i = 0; i < 40; i += 1) await page.locator("#trackDetailBpmPlus").click();
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("120.40");
+  for (let i = 0; i < 40; i += 1) await page.locator("#trackDetailBpmMinus").click();
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("120.00");
+
+  expect(await savedCuePositions(page)).toEqual({ bpm: 120, firstBeatMs: 620, positions: [620, 32620, 64492] });
+});
+
+test("cues follow grid is remembered and leaves a hand-moved cue's new spot alone", async ({ page }) => {
+  await openCueEditor(page, { ...FOLLOW_GRID_SEED, followGrid: true });
+  await expect(page.locator("#trackDetailFollowGrid")).toHaveAttribute("aria-pressed", "true");
+
+  await setBpmInput(page, "120");
+  // Move the first hot cue by hand: 1 selects it, Shift+→ moves it 10 ms.
+  // (Shortcuts stay out of the BPM field, so leave it first.)
+  await page.locator("#trackDetailBpm").blur();
+  await page.keyboard.press("1");
+  await page.keyboard.press("Shift+ArrowRight");
+  const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
+  await expect(hotPos).toHaveText(["0:32.13", "1:03.99"]);
+
+  // Back to 128 BPM: the moved cue keeps its new beat (64.02), the other its old one.
+  await setBpmInput(page, "128");
+  expect(await savedCuePositions(page)).toEqual({ bpm: 128, firstBeatMs: 120, positions: [120, 30129, 60000] });
 });
 
 test("double-click the waveform adds a cue at that position without starting playback", async ({ page }) => {
