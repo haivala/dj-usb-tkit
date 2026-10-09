@@ -47,6 +47,10 @@ On 0.3.1 (2026-10-01), the same CDJ-2000NXS and CDJ-2000NXS2 passed
 confirming the fix for exported file names losing their extension: a track
 from a multi-script album now loads and plays. The other scenarios were not
 re-run on 0.3.1.
+On 0.3.7 (2026-10-09), CDJ-2000NXS and CDJ-2000NXS2 re-ran
+`cue-points-and-edited-beatgrid` with the new memory cues: memory cues and hot
+cues both work. No eDB player (CDJ-3000, CDJ-3000X, XDJ-AZ) has run memory cues
+yet.
 XDJ-AZ (fw 1.30) was added on 0.3.7-rc.3 (2026-10-09): exports play, and the
 beat grid and Beat Sync work on app-analysed tracks. Up to 0.3.7-rc.1 it
 refused the app's beat grids; see Known Issues.
@@ -59,8 +63,8 @@ release (0.1.0) and has stayed working through every version since.
 |---|---|---|---|---|---|
 | CDJ-2000 | everything tested | pass | 0.2.0 | 2026-09-11 | First validation on this device (fw 4.33); covers every scenario available in 0.2.0. |
 | CDJ-2000 | `playback-start-position` | untested | — | — | Added in 0.2.4; not yet run on this device. |
-| CDJ-2000NXS | everything tested | pass | 0.2.4 | 2026-09-25 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4. |
-| CDJ-2000NXS2 | everything tested | pass | 0.2.4 | 2026-09-25 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4. `more-than-16-tracks-fresh-usb-init` was `fail` at <=0.1.30; fixed in 0.1.31. |
+| CDJ-2000NXS | everything tested | pass | 0.3.7 | 2026-10-09 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. |
+| CDJ-2000NXS2 | everything tested | pass | 0.3.7 | 2026-10-09 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `more-than-16-tracks-fresh-usb-init` was `fail` at <=0.1.30; fixed in 0.1.31. |
 | XDJ-1000MK2 | everything tested | pass | 0.2.6 | 2026-09-29 | First validation on this device (fw 1.44). |
 | XDJ-AZ | `normal-export` | pass | 0.3.7-rc.3 | 2026-10-09 | First validation on this device (fw 1.30). |
 | XDJ-AZ | `beat-grid-and-beat-sync` | pass | 0.3.7-rc.3 | 2026-10-09 | `fail` at <=0.3.7-rc.1; fixed in 0.3.7-rc.3. |
@@ -130,6 +134,8 @@ tested` row.
 | XDJ-AZ | 1.30 | 0.3.7-rc.3 | `beat-grid-and-beat-sync` | pass | 2026-10-08 | mrantillies | Old export fixed with USB repair **Fix Beat Grid** only. Beat grid shown and placed as in the app. |
 | XDJ-AZ | 1.30 | 0.3.7-rc.3 | `normal-export` | pass | 2026-10-09 | mrantillies | First validation on XDJ-AZ. Playlist exported to an empty USB, no repair afterwards. |
 | XDJ-AZ | 1.30 | 0.3.7-rc.3 | `beat-grid-and-beat-sync` | pass | 2026-10-09 | mrantillies | Same fresh export as the `normal-export` row, no repair: beat grid and Beat Sync work. The bundles had rc3's empty MP3 seek index (`PVBR`) and no FLAC one (`PVB2`), so the XDJ-AZ does not need seek data. |
+| CDJ-2000NXS | 1.44 | 0.3.7 | `cue-points-and-edited-beatgrid` | pass | 2026-10-09 | maintainer | First hardware validation of memory cues from the cue editor. Memory cues and hot cues work as expected. |
+| CDJ-2000NXS2 | 1.82 | 0.3.7 | `cue-points-and-edited-beatgrid` | pass | 2026-10-09 | maintainer | First validation of memory cues on a player reading `PCO2`. Memory cues and hot cues work as expected; hot cue pads light in their colours. Cue names not checked. |
 
 ## Known Issues
 
