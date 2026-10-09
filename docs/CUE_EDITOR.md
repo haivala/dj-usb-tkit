@@ -157,7 +157,11 @@ Save, which sends the whole state in one `save_track_analysis_edits` /
 `save_usb_track_analysis_edits` call: `firstBeatMs`, `bpm`, `key`, and the full
 `cues` list (`{ positionMs, colorId, name, playbackStart }`, playback-start cue
 first). The backend replaces the track's cues atomically and rewrites the
-cached ANLZ bundle (`backend/src/service/cues.rs`).
+cached ANLZ bundle (`backend/src/service/cues.rs`). A USB save sends `cues` only
+when they differ from what was opened (`cuesEdited` in the controller); otherwise
+it sends `null` and the cues on the stick are left as they are, so a BPM, key or
+first-beat edit can't change cues the editor can't represent, such as rekordbox
+memory cues.
 
 Undo/redo is editor-local: each edit records a JSON snapshot of the editable
 state (`bpm`, `key`, `firstBeatMs`, `cues`) taken before it (`mutate` in the

@@ -1025,28 +1025,23 @@ impl BackendService {
         let pdb_patch =
             build_pdb_track_patch(&usb_root, &req.usb_media_path_raw, req.bpm, key.as_deref())?;
 
-        // The cue list to reconcile onto the device: the new list when this is
-        // a cue edit (empty list clears), otherwise the bundle's current list
-        // (a first-beat-only edit must not drop existing cues).
-        let effective_cues: Vec<TrackCue> = match &normalized {
-            Some(n) => normalized_to_track_cues(n),
-            None => collapse_anlz_cues(
-                &std::fs::read(dat_path.with_extension("EXT"))
-                    .or_else(|_| std::fs::read(dat_path))
-                    .unwrap_or_default(),
-            ),
-        };
+        // The cue list to write onto the device, only when this is a cue edit
+        // (an empty list clears). A BPM/key/first-beat-only save leaves the
+        // device's cue chunks and eDB `cue` rows exactly as they are: reading
+        // them back through the app's cue model would change cues it can't
+        // represent (e.g. rekordbox memory cues).
+        let new_cues: Option<Vec<TrackCue>> = normalized.as_deref().map(normalized_to_track_cues);
 
         // 5. ANLZ write, in place on the device.
         on_progress(1, USB_SAVE_STEPS, "USB: Writing analysis files");
-        let anlz_cues = anlz_cues_from_track_cues(&effective_cues);
+        let anlz_cues = new_cues.as_deref().map(anlz_cues_from_track_cues);
         rewrite_anlz_bundle_files(
             dat_path,
             &AnlzAnalysisEdits {
                 bpm: req.bpm,
                 duration_ms: req.duration_ms,
                 first_beat_ms: req.first_beat_ms,
-                cues: Some(&anlz_cues),
+                cues: anlz_cues.as_deref(),
             },
         )?;
 
@@ -1101,7 +1096,9 @@ impl BackendService {
         on_progress(4, USB_SAVE_STEPS, "USB: Writing exportLibrary.db");
         let tx = edb_conn.transaction()?;
         let content_columns = load_table_columns_tx(&tx, "content")?;
-        write_edb_cues_for_content(&tx, content_id, &effective_cues, &content_columns)?;
+        if let Some(cues) = new_cues.as_deref() {
+            write_edb_cues_for_content(&tx, content_id, cues, &content_columns)?;
+        }
         if let Some(bpm) = req.bpm
             && content_columns.contains("bpmx100")
         {

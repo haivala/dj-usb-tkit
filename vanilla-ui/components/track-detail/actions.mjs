@@ -143,6 +143,9 @@ export function createTrackDetailController(el, prefs = {}) {
   const openListeners = [];
   // The save payload as opened; anything else is an unsaved edit.
   let openedPayloadJson = "";
+  // Its cue list alone: a save that didn't edit cues leaves a USB's cues as
+  // they are (see `cuesEdited`).
+  let openedCuesJson = "";
   // Undo/redo: snapshots of the editable state (see `mutate`).
   let undoStack = [];
   let redoStack = [];
@@ -1172,7 +1175,9 @@ export function createTrackDetailController(el, prefs = {}) {
       }
 
       el.trackDetailSaveBtn?.focus();
-      openedPayloadJson = JSON.stringify(api.toSavePayload());
+      const opened = api.toSavePayload();
+      openedPayloadJson = JSON.stringify(opened);
+      openedCuesJson = JSON.stringify(opened.cues);
       for (const listener of openListeners) listener();
 
       return new Promise((resolve) => {
@@ -1184,6 +1189,13 @@ export function createTrackDetailController(el, prefs = {}) {
     /// (view state like zoom or the beat-grid slider doesn't count).
     hasUnsavedChanges() {
       return open && JSON.stringify(api.toSavePayload()) !== openedPayloadJson;
+    },
+
+    /// True once the cue list differs from what was opened. A USB save sends
+    /// no cues otherwise, so a BPM/key/first-beat edit can't rewrite cues the
+    /// editor can't represent (e.g. rekordbox memory cues).
+    cuesEdited() {
+      return JSON.stringify(api.toSavePayload().cues) !== openedCuesJson;
     },
 
     toSavePayload() {
@@ -1304,7 +1316,7 @@ async function openUsbTrackDetail(ctx, track) {
       key: payload.key,
       durationMs: track.durationMs,
       firstBeatMs: payload.firstBeatMs,
-      cues: payload.cues,
+      cues: payload.cuesEdited ? payload.cues : null,
       localTrackId: track.localTrackId || null,
     });
     const n = saved.cues.length;

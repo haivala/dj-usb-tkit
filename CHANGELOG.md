@@ -65,6 +65,13 @@
   Beat Grid** or a re-export. Only tracks this app exported can have it; the stick's export log, which
   now records the app version, says which ones to check, so the check reads only those
   tracks' analysis files, and only their first 4 KB.
+- **Fix:** Saving a BPM, key or first-beat edit from a USB playlist no longer rewrites the
+  track's cues on the stick. Before, it turned rekordbox memory cues into hot cues and
+  dropped any past the eighth, even though no cue was edited.
+- **Fix:** Relocating a moved media folder to a path that differs only in letter case (e.g.
+  `~/music/Sets` → `~/Music/Sets`) was refused with "newRoot must be different from
+  oldRoot", and the folder's chip then disappeared from the sources. On Linux those are
+  different folders, so the relocation now goes through and the chip shows the new path.
 - **Chore:** USB repair now writes the outcome of every fix (applied, skipped or failed)
   to the Event Log, so a log shared for a bug report shows what the repair did. "Not
   selected" is listed only for fixes that had something to do.

@@ -112,7 +112,10 @@ drive selection from being rendered against a newer selected drive.
   `BackendService::usb_write_lock` (each one read-modify-writes the staged
   `export.pdb`), and the UI waits for any running USB job (export,
   diagnostics, another save) to finish before starting one. No backup is taken
-  per save.
+  per save. Without `cues` (null), the on-device cue chunks (`PCOB`/`PCO2`)
+  and eDB `cue` rows are left exactly as they are; the editor sends `cues` only
+  when they were edited, so a BPM, key or first-beat edit never rewrites cues
+  (such as rekordbox memory cues) the app's cue model can't represent.
 
 ### Settings
 

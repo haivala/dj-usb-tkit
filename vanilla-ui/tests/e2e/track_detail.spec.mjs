@@ -1723,6 +1723,8 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
   expect(saveCall.request.bpm).toBe(128.5);
   expect(saveCall.request.localTrackId).toBeNull();
+  // Cues weren't edited: none are sent, so the stick's cues stay as they are.
+  expect(saveCall.request.cues).toBeNull();
 
   // The USB row redraws with the new BPM, and so does the library track.
   await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.50");

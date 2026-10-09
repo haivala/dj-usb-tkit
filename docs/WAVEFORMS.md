@@ -156,7 +156,9 @@ Tracks play correctly this way on a CDJ-2000NXS2, including FLACs.
 An XDJ-AZ, though, rejected the beat grid of app-analysed tracks ("please analyse this
 track in rekordbox") while accepting rekordbox's bundles for the same files. Filling in
 `PVBR` and `PVB2` (0.3.7-rc.1) did not change that, so seek data is not, or not alone, the
-cause; see "Beat-grid layout" above.
+cause; see "Beat-grid layout" above. A fresh 0.3.7-rc.3 export, with the beat-grid fix but
+the empty `PVBR` and no `PVB2`, shows the beat grid and allows Beat Sync on the XDJ-AZ
+(fw 1.30), so that player does not need seek data either.
 
 Whatever the player needs, the app writes what rekordbox writes where that is known exactly:
 

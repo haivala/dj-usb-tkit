@@ -13,7 +13,10 @@ use backend::models::{
     SearchTracksRequest, SetFrontendSettingRequest, TrackCueInput,
 };
 use backend::pdb_reader::parse_pdb;
-use backend::service::anlz::{read_beatgrid_tempo_from_anlz, read_cues_from_anlz};
+use backend::service::anlz::{
+    AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, read_beatgrid_tempo_from_anlz,
+    read_cues_from_anlz, read_first_beat_from_anlz,
+};
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 
 fn find_files_named(dir: &Path, name: &str, out: &mut Vec<PathBuf>) {
@@ -1562,6 +1565,178 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
     assert_eq!(anlz_tempo, Some(13_725));
     assert_eq!(local_bpm, 137.25);
     assert_eq!(local_key, "G#m");
+}
+
+/// Turn the app-exported bundle on `usb` into one shaped like a rekordbox
+/// export the app's cue model can't represent: more than 8 memory-only cues
+/// (some named and coloured), one sharing a hot cue's position, and a lone
+/// hot cue on pad C. The eDB gets matching `cue` rows.
+fn add_rekordbox_style_cues(usb: &Path, media_raw: &str) {
+    let memory = |position_ms: u32, color_id: u8, comment: &str| AnlzCue {
+        position_ms,
+        hot_cue: 0,
+        color_id,
+        comment: comment.to_string(),
+        ..Default::default()
+    };
+    let mut cues: Vec<AnlzCue> = (0..10u32)
+        .map(|i| match i % 3 {
+            0 => memory(1_000 + i * 1_000, 0, ""),
+            1 => memory(1_000 + i * 1_000, 3, &format!("Section {i}")),
+            _ => memory(1_000 + i * 1_000, 0, &format!("Note {i}")),
+        })
+        .collect();
+    cues.push(memory(12_500, 0, ""));
+    cues.push(AnlzCue {
+        position_ms: 12_500,
+        hot_cue: 3,
+        color_id: 5,
+        comment: "Drop".to_string(),
+        ..Default::default()
+    });
+    let edits = AnlzAnalysisEdits {
+        bpm: None,
+        duration_ms: None,
+        first_beat_ms: None,
+        cues: Some(&cues),
+    };
+    let ext = only_exported_ext(usb);
+    for path in [ext.with_extension("DAT"), ext] {
+        let bytes = fs::read(&path).expect("read bundle");
+        fs::write(&path, apply_analysis_edits_to_anlz(&bytes, &edits)).expect("write bundle");
+    }
+
+    let edb = open_usb_edb(usb);
+    let content_id: i64 = edb
+        .query_row(
+            "SELECT content_id FROM content WHERE path = ?1",
+            [media_raw],
+            |r| r.get(0),
+        )
+        .expect("content row");
+    edb.execute("DELETE FROM cue WHERE content_id = ?1", [content_id])
+        .expect("clear cue rows");
+    for (i, cue) in cues.iter().enumerate() {
+        let (kind, color) = if cue.hot_cue == 0 {
+            (
+                0,
+                if cue.color_id == 0 {
+                    -1
+                } else {
+                    i64::from(cue.color_id)
+                },
+            )
+        } else {
+            (3, i64::from(cue.color_id))
+        };
+        edb.execute(
+            "INSERT INTO cue (cue_id, content_id, kind, colorTableIndex, cueComment, inUsec, outUsec)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, -1)",
+            rusqlite::params![
+                9_000 + i as i64,
+                content_id,
+                kind,
+                color,
+                cue.comment,
+                i64::from(cue.position_ms) * 1000
+            ],
+        )
+        .expect("insert cue row");
+    }
+}
+
+/// Every `PCOB`/`PCO2` chunk of an ANLZ file, raw and in file order.
+fn cue_chunks(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let be32 = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+    let mut out = Vec::new();
+    let mut pos = be32(4);
+    while pos + 12 <= bytes.len() {
+        let len = be32(pos + 8);
+        if matches!(&bytes[pos..pos + 4], b"PCOB" | b"PCO2") {
+            out.push(bytes[pos..pos + len].to_vec());
+        }
+        pos += len.max(12);
+    }
+    out
+}
+
+fn edb_cue_rows(usb: &Path, media_raw: &str) -> Vec<Vec<rusqlite::types::Value>> {
+    let edb = open_usb_edb(usb);
+    let mut stmt = edb
+        .prepare(
+            "SELECT cue.* FROM cue JOIN content ON content.content_id = cue.content_id
+             WHERE content.path = ?1 ORDER BY cue.cue_id",
+        )
+        .expect("prepare");
+    let columns = stmt.column_count();
+    stmt.query_map([media_raw], |r| {
+        (0..columns)
+            .map(|i| r.get(i))
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .expect("query")
+    .collect::<Result<_, _>>()
+    .expect("rows")
+}
+
+/// A save that changes only BPM, key or first beat must not touch the cues on
+/// the stick: rekordbox memory cues the app can't represent stay exactly as
+/// rekordbox wrote them, in both analysis files and the eDB.
+#[test]
+fn usb_save_without_cue_edit_leaves_device_cues_untouched() {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, _playlist_id) =
+        export_one_track_with_cues(root.path(), Vec::new());
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
+    add_rekordbox_style_cues(&usb, &media_raw);
+
+    let ext = only_exported_ext(&usb);
+    let dat = ext.with_extension("DAT");
+    let dat_before = cue_chunks(&fs::read(&dat).unwrap());
+    let ext_before = cue_chunks(&fs::read(&ext).unwrap());
+    let rows_before = edb_cue_rows(&usb, &media_raw);
+    assert!(!dat_before.is_empty() && !ext_before.is_empty());
+    assert_eq!(rows_before.len(), 12);
+    assert_eq!(
+        read_cues_from_anlz(&fs::read(&ext).unwrap())
+            .iter()
+            .filter(|c| c.hot_cue == 0)
+            .count(),
+        11,
+        "the stick starts with 11 memory-only entries"
+    );
+    assert_ne!(usb_track.bpm, Some(131.5), "pick a BPM that differs");
+
+    let saved = backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+        usb_analysis_path_raw: usb_track
+            .usb_analysis_path_raw
+            .clone()
+            .expect("usb analysis path raw"),
+        usb_media_path_raw: media_raw.clone(),
+        bpm: Some(131.5),
+        key: Some("Am".to_string()),
+        duration_ms: usb_track.duration_ms,
+        first_beat_ms: Some(300),
+        cues: None,
+        local_track_id: None,
+        title: Some(usb_track.title.clone()),
+        artist: Some(usb_track.artist.clone()),
+        album: usb_track.album.clone(),
+    });
+    assert!(saved.ok, "usb save failed: {saved:?}");
+
+    let ext_bytes = fs::read(&ext).unwrap();
+    let dat_bytes = fs::read(&dat).unwrap();
+    // The grid did change...
+    assert_eq!(read_beatgrid_tempo_from_anlz(&ext_bytes), Some(13_150));
+    assert_eq!(read_beatgrid_tempo_from_anlz(&dat_bytes), Some(13_150));
+    assert_eq!(read_first_beat_from_anlz(&ext_bytes), Some(300));
+    // ...and the cues did not.
+    assert_eq!(cue_chunks(&dat_bytes), dat_before);
+    assert_eq!(cue_chunks(&ext_bytes), ext_before);
+    assert_eq!(edb_cue_rows(&usb, &media_raw), rows_before);
 }
 
 /// Saves run as background jobs, so two can overlap. Each read-modify-writes

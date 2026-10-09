@@ -1819,9 +1819,10 @@ impl BackendService {
                 "oldRoot and newRoot must not be empty".to_string(),
             ));
         }
-        if normalize_source_root_for_matching(&old_root)
-            == normalize_source_root_for_matching(&new_root)
-        {
+        // Compared as paths (component-wise, so a trailing separator doesn't
+        // count) and case-sensitively: on Linux `music` and `Music` are
+        // different folders, and a root renamed to a new case is a real move.
+        if Path::new(&old_root) == Path::new(&new_root) {
             return Err(BackendError::Validation(
                 "newRoot must be different from oldRoot".to_string(),
             ));
@@ -6124,10 +6125,49 @@ mod tests {
         let err = service
             .relocate_source_root(RelocateSourceRootRequest {
                 old_root: "/music".to_string(),
-                new_root: "/music".to_string(),
+                new_root: "/music/".to_string(),
             })
             .unwrap_err();
         assert!(matches!(err, BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn relocate_source_root_accepts_a_case_only_rename() {
+        let (_dir, service) = test_service();
+        let base = tempfile::tempdir().expect("base");
+        let old_root = base.path().join("music").join("Sets");
+        let new_root = base.path().join("Music").join("Sets");
+        std::fs::create_dir_all(&new_root).expect("create new root");
+        std::fs::write(new_root.join("song.mp3"), b"data").expect("write new file");
+
+        let conn = service.db.connect().expect("connect");
+        insert_full_track(
+            &conn,
+            "t1",
+            "Song",
+            "Artist",
+            old_root.join("song.mp3").to_str().unwrap(),
+            None,
+            None,
+            false,
+        );
+        drop(conn);
+
+        let result = service
+            .relocate_source_root(RelocateSourceRootRequest {
+                old_root: old_root.to_string_lossy().to_string(),
+                new_root: new_root.to_string_lossy().to_string(),
+            })
+            .expect("a case-only rename is a real move on Linux");
+        assert_eq!(result.updated, 1);
+
+        let conn = service.db.connect().expect("connect");
+        let new_path: String = conn
+            .query_row("SELECT file_path FROM tracks WHERE id = 't1'", [], |r| {
+                r.get(0)
+            })
+            .expect("read updated path");
+        assert_eq!(new_path, new_root.join("song.mp3").to_string_lossy());
     }
 
     #[test]

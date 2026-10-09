@@ -333,7 +333,11 @@ export async function relocateSourceRoot(ctx, oldRoot) {
   });
 
   const oldIndex = state.sourceRoots.findIndex((root) => normalizePath(root) === normalizePath(sourceRoot));
-  const alreadyHasNewRoot = state.sourceRoots.some((root) => normalizePath(root) === normalizePath(newRoot));
+  // Not the old root itself: `normalizePath` ignores case, and a case-only
+  // rename (`music` → `Music`) is a real move on Linux.
+  const alreadyHasNewRoot = state.sourceRoots.some(
+    (root, index) => index !== oldIndex && normalizePath(root) === normalizePath(newRoot)
+  );
   const unresolved = Number(result?.missingAtNewRoot || 0) + Number(result?.conflicts || 0);
   if (!state.sourceRootEnabled || typeof state.sourceRootEnabled !== "object") {
     state.sourceRootEnabled = {};

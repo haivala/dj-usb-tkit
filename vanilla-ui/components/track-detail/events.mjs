@@ -87,7 +87,10 @@ export function bindTrackDetailEvents(ctx) {
 
   el.trackDetailSaveBtn?.addEventListener("click", () => {
     stopIfOwned();
-    trackDetailDialog.close(trackDetailDialog.toSavePayload());
+    trackDetailDialog.close({
+      ...trackDetailDialog.toSavePayload(),
+      cuesEdited: trackDetailDialog.cuesEdited(),
+    });
   });
 
   // A drag (pan, cue marker, overview) must never select text, whichever

@@ -167,6 +167,29 @@ test("relocateSourceRoot replaces source and preserves playlist track identity s
   assert.ok(statuses.at(-1).includes("2 track path(s) updated"));
 });
 
+test("relocateSourceRoot keeps the chip when the new root differs only in case", async () => {
+  let persistedRoots = null;
+  const ctx = makeTestCtx({
+    pickSourceFolders: async () => ["/home/dj/Music/Sets"],
+    command: async (name, payload) => {
+      if (name === "check_source_roots") return { missing: [] };
+      if (name !== "relocate_source_root") return {};
+      return { ...payload, matched: 87, updated: 87, unchanged: 0, missingAtNewRoot: 0, conflicts: 0 };
+    },
+    persistSourceRoots: (roots) => { persistedRoots = [...roots]; },
+  });
+  const { state } = ctx;
+  state.sourceRoots = ["/home/dj/music/Sets"];
+  state.sourceRootEnabled = { "/home/dj/music/Sets": true };
+
+  await relocateSourceRoot(ctx, "/home/dj/music/Sets");
+
+  assert.deepEqual(state.sourceRoots, ["/home/dj/Music/Sets"]);
+  assert.deepEqual(persistedRoots, ["/home/dj/Music/Sets"]);
+  assert.deepEqual(state.sourceRootEnabled, { "/home/dj/Music/Sets": true });
+  assert.equal(ctx.el.sourceChipsContainer.querySelector(".source-chip-path").textContent, "/home/dj/Music/Sets");
+});
+
 test("scanRekordboxDb reports success, failure, and structured warnings", async () => {
   const success = await runScanRekordboxDb(async () => ({
     indexed: 3,
