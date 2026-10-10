@@ -236,16 +236,17 @@
                 <div id="diagReportView">
                   <div id="diagSections"></div>
                   <details class="diag-details hidden" id="diagPlaylistDetails">
-                    <summary class="muted">Playlist Resolution Details</summary>
+                    <summary class="muted">Strict Parity Playlist Details</summary>
                     <div class="table-wrap">
                       <table>
                         <thead>
                           <tr>
                             <th>Status</th>
                             <th>Playlist</th>
-                            <th>Resolved</th>
-                            <th>Total</th>
-                            <th>Rate</th>
+                            <th class="num">PDB</th>
+                            <th class="num">eDB</th>
+                            <th class="num">Matched</th>
+                            <th>Issues</th>
                           </tr>
                         </thead>
                         <tbody id="diagPlaylistTableBody"></tbody>
@@ -862,6 +863,15 @@
   <template id="tplUsbRecentItem">
     <span class="usb-cfg-recent-item"><button type="button" class="usb-cfg-recent-btn" style="direction: rtl; text-align: left;"></button><button type="button" class="usb-cfg-recent-prune-btn" data-tooltip="Forget this USB device">×</button></span>
   </template>
+  <template id="tplDiagOverviewItem">
+    <div class="diag-overview-item"><span class="diag-indicator"></span><div><div class="diag-overview-title"></div><div class="diag-overview-detail"></div></div></div>
+  </template>
+  <template id="tplDiagTechnical">
+    <details class="diag-details diag-technical"><summary class="muted">Technical details</summary><div class="diag-technical-body"></div></details>
+  </template>
+  <template id="tplDiagGroup">
+    <div class="diag-group"><div class="diag-group-title usb-cfg-section-label"></div><div class="diag-group-sections"></div></div>
+  </template>
   <template id="tplDiagSection">
     <div class="diag-section"><h3><span class="diag-dot"></span> <span class="diag-section-title"></span></h3></div>
   </template>
@@ -869,15 +879,6 @@
     <div class="diag-check"><span class="diag-indicator"></span> <strong></strong>: <span class="diag-check-detail"></span></div>
   </template>
   <template id="tplDiagLogLink"><button class="diag-log-link">→ event log</button></template>
-  <template id="tplDiagResolutionHead">
-    <tr><th>Status</th><th>Playlist</th><th>Resolved</th><th>Total</th><th>Rate</th></tr>
-  </template>
-  <template id="tplDiagResolutionRow">
-    <tr><td><span class="diag-dot"></span></td><td></td><td></td><td></td><td></td></tr>
-  </template>
-  <template id="tplDiagParityHead">
-    <tr><th>Status</th><th>Playlist</th><th class="num">PDB</th><th class="num">eDB</th><th class="num">Matched</th><th>Issues</th></tr>
-  </template>
   <template id="tplDiagParityRow">
     <tr><td><span class="diag-dot"></span></td><td></td><td class="num"></td><td class="num"></td><td class="num"></td><td><span class="muted"></span></td></tr>
   </template>

@@ -327,11 +327,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               data: {
                 overallStatus: "PASS",
                 durationMs: 1,
-                pdbIntegrity: { title: "PDB Integrity", status: "PASS", checks: [], counts: null },
-                edbAccess: { title: "Database Access", status: "PASS", checks: [], counts: null },
-                contentsIntegrity: { title: "Contents Integrity", status: "PASS", checks: [], counts: null },
-                analysisIntegrity: { title: "Analysis Files", status: "PASS", checks: [], counts: null },
-                playlistResolution: { title: "Playlist Resolution", status: "PASS", checks: [], counts: null },
+                sectionGroups: [],
                 playlistDetails: [],
                 warnings: []
               }
@@ -472,11 +468,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
               data: {
                 overallStatus: "PASS",
                 durationMs: 1,
-                pdbIntegrity: { title: "PDB Integrity", status: "PASS", checks: [], counts: null },
-                edbAccess: { title: "Database Access", status: "PASS", checks: [], counts: null },
-                contentsIntegrity: { title: "Contents Integrity", status: "PASS", checks: [], counts: null },
-                analysisIntegrity: { title: "Analysis Files", status: "PASS", checks: [], counts: null },
-                playlistResolution: { title: "Playlist Resolution", status: "PASS", checks: [], counts: null },
+                sectionGroups: [],
                 playlistDetails: [],
                 warnings: []
               }
@@ -859,11 +851,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               data: {
                 overallStatus: "PASS",
                 durationMs: 1,
-                pdbIntegrity: { title: "PDB Integrity", status: "PASS", checks: [], counts: null },
-                edbAccess: { title: "Database Access", status: "PASS", checks: [], counts: null },
-                contentsIntegrity: { title: "Contents Integrity", status: "PASS", checks: [], counts: null },
-                analysisIntegrity: { title: "Analysis Files", status: "PASS", checks: [], counts: null },
-                playlistResolution: { title: "Playlist Resolution", status: "PASS", checks: [], counts: null },
+                sectionGroups: [],
                 playlistDetails: [],
                 warnings: [],
                 playlistUsbExportStatus: []

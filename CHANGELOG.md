@@ -48,11 +48,19 @@
 - **New feature:** Settings → Export → "Write Engine DJ library" (off by default) keeps the
   Engine DJ library up to date whenever the app changes a USB: export, playlist reorder or
   removal, cue edits, backup restore, repairs.
-- **New feature:** USB diagnostics have an Engine DJ Library section. It warns when a USB
+- **New feature:** USB diagnostics check the Engine DJ library. They warn when a USB
   has an Engine library that the app isn't keeping up to date, or that is behind
   `export.pdb`, and Preview Fixes offers "Keep Engine DJ Library Up to Date" to turn the
   setting on and rebuild it. A USB without one gets a note to turn the setting on before
   using it in an Engine player.
+- **Improvement:** USB Health & Diagnostics opens with a plain-language summary: one line
+  each for older Pioneer players, newer Pioneer players, playlists, waveforms & beat grids,
+  and Denon / Numark players, saying what a problem means and pointing to Preview Fixes. The
+  detailed checks moved under a collapsed **Technical details**, regrouped into Databases
+  (PDB, eDB, Engine DJ side by side), Library (playlists, analysis) and Low-level boxes.
+  The per-playlist resolution table, which repeated the summary, is gone.
+- **Improvement:** Every collapsible heading shows the pointer cursor and no longer selects
+  text when clicked.
 
 ## 0.3.7
 

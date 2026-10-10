@@ -123,18 +123,6 @@ function diagSection(doc, status, title) {
   return section;
 }
 
-// Swap the playlist-details table to `headTemplate`'s columns and return its
-// emptied body.
-function resetDiagPlaylistTable(el, summaryText, headTemplate) {
-  el.diagPlaylistDetails.classList.remove("hidden");
-  const summary = el.diagPlaylistDetails.querySelector("summary");
-  if (summary) summary.textContent = summaryText;
-  el.diagPlaylistDetails.querySelector("thead tr")
-    ?.replaceWith(cloneTemplate(el.diagPlaylistDetails.ownerDocument, headTemplate));
-  el.diagPlaylistTableBody.replaceChildren();
-  return el.diagPlaylistTableBody;
-}
-
 // Fill a row's cells in order; the first cell holds the status dot.
 function fillDiagRow(tr, status, values) {
   tr.querySelector(".diag-dot").classList.add(`diag-${String(status || "PASS").toLowerCase()}`);
@@ -164,39 +152,37 @@ export function renderDiagnosticsReport(ctx, data) {
   el.diagOverallStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
   el.diagDuration.textContent = `Completed in ${data.durationMs}ms`;
 
-  const sections = [
-    data.pdbIntegrity,
-    data.edbAccess,
-    data.contentsIntegrity,
-    data.analysisIntegrity,
-    data.playlistResolution,
-    // Backend-assembled (service::diagnostics::player_counter_snapshot_section).
-    data.cdjCounterSection,
-    data.engineLibrarySection,
-  ].filter(Boolean);
-
   el.diagSections.replaceChildren();
-  for (const sec of sections) {
-    const div = diagSection(document, sec.status, sec.title);
-    for (const check of (sec.checks || [])) {
-      renderDiagCheckRow(ctx, div, check, { withLogLink: true });
-    }
-    el.diagSections.appendChild(div);
+  // Backend-owned plain-language summary (service::diagnostics::diagnostics_overview).
+  for (const entry of data.overview || []) {
+    const row = cloneTemplate(document, "tplDiagOverviewItem");
+    const status = entry.status ? entry.status.toLowerCase() : "na";
+    row.classList.add(`diag-check-${status}`);
+    row.querySelector(".diag-indicator").textContent = entry.status ? diagStatusIcon(entry.status) : "–";
+    row.querySelector(".diag-overview-title").textContent = entry.title;
+    row.querySelector(".diag-overview-detail").textContent = entry.detail;
+    el.diagSections.appendChild(row);
   }
 
-  if (data.playlistDetails?.length) {
-    const tbody = resetDiagPlaylistTable(el, "Playlist Resolution Details", "tplDiagResolutionHead");
-    for (const pd of data.playlistDetails) {
-      tbody.appendChild(fillDiagRow(cloneTemplate(document, "tplDiagResolutionRow"), pd.status, [
-        pd.name,
-        pd.resolvedEntries,
-        pd.totalEntries,
-        `${(pd.resolutionRate * 100).toFixed(1)}%`,
-      ]));
+  // Backend-owned grouping and order (service::diagnostics::diagnostics_display_sections).
+  const technical = cloneTemplate(document, "tplDiagTechnical");
+  const technicalBody = technical.querySelector(".diag-technical-body");
+  el.diagSections.appendChild(technical);
+  for (const group of data.sectionGroups || []) {
+    const box = cloneTemplate(document, "tplDiagGroup");
+    box.querySelector(".diag-group-title").textContent = group.title;
+    technicalBody.appendChild(box);
+    const parent = box.querySelector(".diag-group-sections");
+    for (const sec of group.sections || []) {
+      const div = diagSection(document, sec.status, sec.title);
+      for (const check of (sec.checks || [])) {
+        renderDiagCheckRow(ctx, div, check, { withLogLink: true });
+      }
+      parent.appendChild(div);
     }
-  } else {
-    el.diagPlaylistDetails.classList.add("hidden");
   }
+
+  el.diagPlaylistDetails.classList.add("hidden");
 }
 
 export function renderParityReport(ctx, data) {
@@ -232,7 +218,9 @@ export function renderParityReport(ctx, data) {
   el.diagSections.appendChild(div);
 
   if (data.playlistDetails?.length) {
-    const tbody = resetDiagPlaylistTable(el, "Strict Parity Playlist Details", "tplDiagParityHead");
+    el.diagPlaylistDetails.classList.remove("hidden");
+    const tbody = el.diagPlaylistTableBody;
+    tbody.replaceChildren();
     for (const pd of data.playlistDetails) {
       // Backend-owned: `issueLabels` is built in Rust
       // (service::diagnostics::parity_issue_labels). The frontend renders them.

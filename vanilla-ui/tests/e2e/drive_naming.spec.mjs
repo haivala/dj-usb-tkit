@@ -100,11 +100,7 @@ function installTauriMock(page, { deviceName = null, suggestedName = null, getNa
               ok: true,
               data: {
                 overallStatus: "PASS",
-                pdbIntegrity: { title: "PDB Integrity", status: "PASS", checks: [] },
-                edbAccess: { title: "Database Access", status: "PASS", checks: [] },
-                contentsIntegrity: { title: "Contents Integrity", status: "PASS", checks: [] },
-                analysisIntegrity: { title: "Analysis Files", status: "PASS", checks: [] },
-                playlistResolution: { title: "Playlist Resolution", status: "PASS", checks: [] },
+                sectionGroups: [],
                 playlistDetails: [],
                 warnings: [],
                 durationMs: 1

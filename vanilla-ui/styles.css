@@ -1385,6 +1385,13 @@ select:focus {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+/* Every accordion heading: clickable, not text. */
+summary {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 button {
   background: var(--card);
   color: var(--ink);
@@ -3017,6 +3024,49 @@ td button[data-action]:disabled,
   border-left: 3px solid var(--line);
   border-radius: 0 4px 4px 0;
   background: var(--bg-raised);
+}
+.diag-overview-item {
+  display: flex;
+  gap: 2px;
+  padding: 6px 0;
+  max-width: 80ch;
+}
+.diag-overview-item .diag-indicator {
+  flex: 0 0 1.4em;
+  font-size: 0.95em;
+}
+.diag-check-na .diag-indicator { color: var(--muted); }
+.diag-overview-title {
+  font-weight: 600;
+  font-size: 0.95em;
+}
+.diag-overview-detail {
+  font-size: 0.85em;
+  color: var(--ink-secondary);
+}
+/* A group is one box; its sections sit side by side as equal columns and
+   wrap to fewer columns when the panel is narrow. */
+.diag-group {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: var(--bg-raised);
+}
+.diag-group-title {
+  margin-bottom: 8px;
+}
+.diag-group-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.diag-group .diag-section {
+  margin: 0;
+  padding: 2px 0 2px 12px;
+  border-radius: 0;
+  background: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .diag-section h3 {
   margin: 0 0 6px 0;

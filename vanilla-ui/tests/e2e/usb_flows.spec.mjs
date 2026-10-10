@@ -36,24 +36,39 @@ function installTauriMock(page, mode) {
 
     const diagnosticsPayload = {
       overallStatus: "WARN",
-      pdbIntegrity: { title: "PDB Integrity", status: "PASS", checks: [] },
-      edbAccess: { title: "Database Access", status: "PASS", checks: [] },
-      contentsIntegrity: { title: "Contents Integrity", status: "PASS", checks: [] },
-      analysisIntegrity: { title: "Analysis Files", status: "WARN", checks: [] },
-      playlistResolution: {
-        title: "Playlist Resolution",
-        status: "PASS",
-        checks: [
-          { label: "Overall resolution", status: "PASS", detail: "3/3 entries resolve (100.0%) across 1 playlists" }
-        ]
-      },
-      engineLibrarySection: {
-        title: "Engine DJ Library",
-        status: "WARN",
-        checks: [
-          { label: "Kept up to date", status: "WARN", detail: "\"Write Engine DJ library\" is off" }
-        ]
-      },
+      overview: [
+        { title: "Older Pioneer players", status: "PASS", detail: "Ready: 1 playlists, 3 tracks." },
+        { title: "Waveforms & beat grids", status: "WARN", detail: "Some tracks' waveform or beat grid data is missing or outdated." },
+        { title: "Denon / Numark players", status: null, detail: "Not set up." }
+      ],
+      sectionGroups: [
+        {
+          title: "Databases",
+          sections: [
+            { title: "PDB", status: "PASS", checks: [] },
+            {
+              title: "Engine DJ",
+              status: "WARN",
+              checks: [
+                { label: "Kept up to date", status: "WARN", detail: "\"Write Engine DJ library\" is off" }
+              ]
+            }
+          ]
+        },
+        {
+          title: "Library",
+          sections: [
+            {
+              title: "Playlists",
+              status: "PASS",
+              checks: [
+                { label: "Overall resolution", status: "PASS", detail: "3/3 entries resolve (100.0%) across 1 playlists" }
+              ]
+            },
+            { title: "Analysis", status: "WARN", checks: [] }
+          ]
+        }
+      ],
       playlistDetails: [
         {
           name: "Warmup",
@@ -711,14 +726,20 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
     node.open = true;
   });
   await page.locator("#reDiagnoseBtn").click();
-  await expect(page.locator("#diagSections")).toContainText("PDB Integrity");
-  await expect(page.locator("#diagSections")).toContainText("Playlist Resolution");
+  await expect(page.locator("#diagSections .diag-overview-title")).toHaveText([
+    "Older Pioneer players",
+    "Waveforms & beat grids",
+    "Denon / Numark players"
+  ]);
+  await expect(page.locator("#diagSections .diag-overview-item.diag-check-na .diag-indicator")).toHaveText("–");
+  const technical = page.locator("#diagSections .diag-technical");
+  await expect(technical).not.toHaveAttribute("open");
+  await technical.locator("summary").click();
+  await expect(page.locator("#diagSections .diag-group-title")).toHaveText(["Databases", "Library"]);
+  await expect(page.locator("#diagSections .diag-group").first().locator(".diag-section-title")).toHaveText(["PDB", "Engine DJ"]);
   await expect(page.locator("#diagSections")).toContainText("Overall resolution");
-  await expect(page.locator("#diagSections")).toContainText("Engine DJ Library");
   await expect(page.locator("#diagSections")).toContainText("Kept up to date");
-  await expect(page.locator("#diagPlaylistDetails")).toContainText("Playlist Resolution Details");
-  await expect(page.locator("#diagPlaylistDetails")).not.toContainText("Strict Parity Playlist Details");
-  await expect(page.locator("#diagPlaylistTableBody")).toContainText("Warmup");
+  await expect(page.locator("#diagPlaylistDetails")).toBeHidden();
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
 
   await page.locator("#runUsbParityBtn").click();
@@ -738,8 +759,8 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagSections")).not.toContainText("Track key overlap");
   await expect(page.locator("#diagSections")).not.toContainText("Pro playlist coverage mode");
   // Diagnostics section should not leak into parity
-  await expect(page.locator("#diagSections")).not.toContainText("Playlist Resolution");
-  await expect(page.locator("#diagSections")).not.toContainText("PDB Integrity");
+  await expect(page.locator("#diagSections")).not.toContainText("Databases");
+  await expect(page.locator("#diagSections .diag-overview-item")).toHaveCount(0);
   // Strict parity playlist details table
   await expect(page.locator("#diagPlaylistDetails")).toContainText("Strict Parity Playlist Details");
   await expect(page.locator("#diagPlaylistTableBody")).toContainText("Warmup");

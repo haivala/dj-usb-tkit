@@ -1631,6 +1631,24 @@ pub struct DiagSection {
     pub counts: Option<DiagCountsSummary>,
 }
 
+/// One plain-language row of the diagnostics overview. `status: None` means
+/// not applicable (e.g. Engine DJ library not set up).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagOverviewItem {
+    pub title: String,
+    pub status: Option<DiagStatus>,
+    pub detail: String,
+}
+
+/// Diagnostics sections shown side by side under one heading.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagSectionGroup {
+    pub title: String,
+    pub sections: Vec<DiagSection>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistDiagEntry {
@@ -1655,23 +1673,34 @@ pub struct PlaylistDiagEntry {
 #[serde(rename_all = "camelCase")]
 pub struct RunUsbDiagnosticsData {
     pub overall_status: DiagStatus,
+    /// Plain-language summary the desktop UI shows first
+    /// (`service::diagnostics::diagnostics_overview`).
+    pub overview: Vec<DiagOverviewItem>,
+    /// The technical report: the stage sections below regrouped into display
+    /// order (`service::diagnostics::diagnostics_display_sections`).
+    pub section_groups: Vec<DiagSectionGroup>,
+    // Per-stage sections, as computed. Backend-only (CLI tool, tests); the UI
+    // gets the same checks through `sections`.
+    #[serde(skip_serializing)]
     pub pdb_integrity: DiagSection,
+    #[serde(skip_serializing)]
     pub edb_access: DiagSection,
+    #[serde(skip_serializing)]
     pub contents_integrity: DiagSection,
+    #[serde(skip_serializing)]
     pub analysis_integrity: DiagSection,
+    #[serde(skip_serializing)]
     pub playlist_resolution: DiagSection,
     pub playlist_details: Vec<PlaylistDiagEntry>,
     /// Raw player-counter table signals -- consumed by the `run_usb_diagnostics`
-    /// CLI debug tool. The desktop UI renders `cdj_counter_section` instead.
+    /// CLI debug tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cdj_counter_snapshot: Option<PlayerCounterSnapshot>,
-    /// The player-counter snapshot rendered as a `DiagSection` (built
-    /// backend-side from `cdj_counter_snapshot` so the frontend just appends it
-    /// alongside the other sections).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The player-counter snapshot rendered as a `DiagSection`.
+    #[serde(default, skip_serializing)]
     pub cdj_counter_section: Option<DiagSection>,
     /// Present when the USB has an Engine DJ library (`Engine Library/Database2`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing)]
     pub engine_library_section: Option<DiagSection>,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
