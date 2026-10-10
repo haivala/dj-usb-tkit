@@ -1473,6 +1473,8 @@ pub(crate) fn track_row_data_from_reader_row(
         file_name: row.file_name.clone(),
         publish_track_info_on: Some(row.publish_track_info.as_deref() == Some("ON")),
         autoload_hotcues_on: Some(row.autoload_hotcues.as_deref() == Some("ON")),
+        color_id: Some(row.color_id),
+        rating: Some(row.rating),
         title: row.title.clone(),
         anlz_path: row.anlz_path.clone(),
         file_path: row.track_file_path.clone(),
@@ -3222,7 +3224,7 @@ fn apply_missing_seek_data_repair(
     let mut fixed = 0usize;
     let mut skipped = 0usize;
     for target in detect_missing_seek_data(usb_root, &parsed, format) {
-        let reason = match seek_index_for_audio(&target.audio_path) {
+        let (reason, advice) = match seek_index_for_audio(&target.audio_path) {
             Ok(Some(index)) => {
                 let bytes = std::fs::read(&target.bundle_path)?;
                 match with_seek_index(&bytes, &index) {
@@ -3231,11 +3233,11 @@ fn apply_missing_seek_data_repair(
                         fixed += 1;
                         continue;
                     }
-                    None => "analysis file could not be parsed",
+                    None => ("analysis file could not be parsed", SEEK_SKIP_REPORT_HINT),
                 }
             }
             Ok(None) => continue,
-            Err(skip) => skip.describe(),
+            Err(skip) => (skip.describe(), skip.advice()),
         };
         skipped += 1;
         warnings.push(logging::log(
@@ -3243,10 +3245,9 @@ fn apply_missing_seek_data_repair(
             "usb-repair",
             "usb.repair.seek-data.skipped",
             format!(
-                "{} seek data not added ({reason}): {}; {}",
+                "{} seek data not added ({reason}): {}; {advice}",
                 format.name(),
                 target.track_path,
-                SEEK_SKIP_REPORT_HINT
             ),
         ));
     }
@@ -3325,8 +3326,8 @@ fn build_manifest_for_merged_playlist(
             title_for_search: None,
             kuvo_delivery_comment: None,
             dj_play_count: None,
-            rating: None,
-            color_id: None,
+            rating: mt.pdb_row.rating.map(u32::from),
+            color_id: mt.pdb_row.color_id.map(u32::from),
             artist_id_lyricist: None,
             artist_id_original_artist: None,
             artist_id_remixer: None,
@@ -3380,6 +3381,8 @@ struct MergedTrackFields<'a> {
     duration_ms: Option<u64>,
     media_path: &'a str,
     analysis_path: &'a str,
+    /// The eDB's rating and colour for this track, when it has a row there.
+    edb_rating_colour: Option<crate::edb::EdbRatingColour>,
 }
 
 /// Build a PDB track row from merged metadata.
@@ -3400,6 +3403,7 @@ fn build_merged_pdb_track_row(
         duration_ms,
         media_path,
         analysis_path,
+        edb_rating_colour,
     } = fields;
     // Find or create dictionary IDs for artist/album/key
     let artist_id = if !artist.is_empty() {
@@ -3476,6 +3480,12 @@ fn build_merged_pdb_track_row(
                 .as_deref()
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("on"))
         }),
+        color_id: edb_rating_colour
+            .map(|v| v.color_id)
+            .or_else(|| existing_pdb.map(|t| t.color_id)),
+        rating: edb_rating_colour
+            .map(|v| v.rating)
+            .or_else(|| existing_pdb.map(|t| t.rating)),
     }
 }
 
@@ -5630,6 +5640,27 @@ impl BackendService {
             }
             None => try_read_playlists_with_metadata_from_edb(usb_root, warnings),
         };
+        // Each track's rating and colour as the eDB has them; the merged PDB
+        // rows take these over their own (see `build_merged_pdb_track_row`).
+        let owned_edb_conn = if edb_conn.is_some() {
+            None
+        } else {
+            open_edb_from_usb_root(usb_root, warnings)
+        };
+        let edb_rating_colour_by_path: HashMap<String, crate::edb::EdbRatingColour> = edb_conn
+            .as_deref()
+            .or(owned_edb_conn.as_ref())
+            .map(crate::edb::read_rating_colour_by_path)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(path, value)| (normalize_pdb_path_for_edb_lookup(&path), value))
+            .collect();
+        drop(owned_edb_conn);
+        let edb_rating_colour = |media_path: &str| {
+            edb_rating_colour_by_path
+                .get(&normalize_pdb_path_for_edb_lookup(media_path))
+                .copied()
+        };
 
         // Build PDB track index: identity_key → PdbTrackRow
         let pdb_track_by_key: HashMap<String, &crate::pdb_reader::PdbTrackRow> = parsed
@@ -6009,6 +6040,7 @@ impl BackendService {
                             duration_ms,
                             media_path: &media_path,
                             analysis_path: &analysis_path,
+                            edb_rating_colour: edb_rating_colour(&media_path),
                         },
                         &parsed,
                     );
@@ -6098,6 +6130,7 @@ impl BackendService {
                                 duration_ms: duration_ms_val,
                                 media_path: &pdb_track.track_file_path,
                                 analysis_path: &pdb_track.anlz_path,
+                                edb_rating_colour: edb_rating_colour(&pdb_track.track_file_path),
                             },
                             &parsed,
                         );
@@ -6165,6 +6198,7 @@ impl BackendService {
                             duration_ms: duration_ms_val,
                             media_path: &pdb_track.track_file_path,
                             analysis_path: &pdb_track.anlz_path,
+                            edb_rating_colour: edb_rating_colour(&pdb_track.track_file_path),
                         },
                         &parsed,
                     );
@@ -7980,6 +8014,8 @@ mod tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         });
         data.colors = crate::pdb_writer::standard_colors();
         data.columns_raw_rows = crate::pdb_writer::standard_columns_raw();

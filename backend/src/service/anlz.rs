@@ -12,9 +12,7 @@ use uuid::Uuid;
 
 use crate::error::BackendResult;
 
-use super::anlz_seek::{
-    PVBR_PAYLOAD_LEN, SEEK_SKIP_REPORT_HINT, SeekIndex, SeekIndexSkip, seek_index_for_audio,
-};
+use super::anlz_seek::{PVBR_PAYLOAD_LEN, SeekIndex, SeekIndexSkip, seek_index_for_audio};
 use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 
 /// Waveform data with both amplitude peaks (0-100) and frequency bands (0-5) per bin.
@@ -851,9 +849,10 @@ pub(super) fn fill_mp3_pvbr(dat_path: &Path, audio_path: &Path) -> BackendResult
         Ok(PvbrFill::Skipped(skip)) => crate::backend_log!(
             Warn,
             "anlz",
-            "MP3 seek data not added ({}): {}; {SEEK_SKIP_REPORT_HINT}",
+            "MP3 seek data not added ({}): {}; {}",
             skip.describe(),
-            audio_path.display()
+            audio_path.display(),
+            skip.advice()
         ),
         Err(err) => crate::backend_log!(
             Warn,

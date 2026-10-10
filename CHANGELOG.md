@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+## 0.4.0
+
+**Severity:** feature
+
 - **New feature:** Write the Engine DJ library for Denon Prime and Numark Mixstream players
   from a USB's rekordbox export (`write_engine_db <usb root>`). Players then use our beat
   grid, overview waveform, hot cues (with colours), main cue, key and artwork instead of
@@ -53,6 +57,10 @@
   `export.pdb`, and Preview Fixes offers "Keep Engine DJ Library Up to Date" to turn the
   setting on and rebuild it. A USB without one gets a note to turn the setting on before
   using it in an Engine player.
+- **Fix:** Exporting to a USB that rekordbox had exported to no longer resets the star
+  rating and colour of rekordbox's tracks. Newer Pioneer players lost them on every track
+  the app exported again; older players could lose them on all tracks whenever an export
+  rewrote the whole database.
 - **Improvement:** USB Health & Diagnostics opens with a plain-language summary: one line
   each for older Pioneer players, newer Pioneer players, playlists, waveforms & beat grids,
   and Denon / Numark players, saying what a problem means and pointing to Preview Fixes. The
@@ -65,6 +73,17 @@
   **Technical details**. The parity summary table, which repeated the checks, is gone. Its
   result shows as its own "Parity" badge next to the health badge instead of replacing it,
   so the badge and the USB health dot no longer disagree.
+- **Improvement:** The Parity Report no longer warns about tracks that have a composer,
+  lyricist, original artist, remixer or label set ("Reference-documented field coverage").
+  Players don't need those fields. It now compares each track's star rating and colour
+  between the two databases instead, as a minor note in the technical details that doesn't
+  change the result, and **Upgrade Export Data To Strict Parity** copies the newer players'
+  rating and colour to older players.
+- **Improvement:** MP3 seek data (analysis, and the **Add Missing MP3 Seek Data** repair)
+  now also covers files with APE or Lyrics3 tags, CBR files whose first frame was wiped to
+  zeros, and CBR files with a cut-off last frame, matching what rekordbox writes for them.
+  A file with a large zeroed-out stretch of audio is logged as "audio corrupted", with a
+  hint to replace it, instead of asking for a report.
 - **Improvement:** Every collapsible heading shows the pointer cursor and no longer selects
   text when clicked.
 - **Improvement:** Clicking the cue editor's waveform moves the playhead there instead of

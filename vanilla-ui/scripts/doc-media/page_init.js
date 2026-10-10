@@ -269,11 +269,13 @@
               firstBeatMs: opts.firstBeatMs ?? detail.firstBeatMs,
               track: { ...detail.track, bpm: opts.bpm ?? detail.track.bpm },
             });
-          case "play_resolved_track":
+          case "play_resolved_track": {
+            const paused = !!r.startPaused;
             clock.offsetMs = Math.round((r.startRatio || 0) * durationMs);
-            clock.startedAt = Date.now();
+            clock.startedAt = paused ? null : Date.now();
             clock.loaded = true;
-            return ok({ started: true, positionMs: clock.offsetMs, durationMs });
+            return ok({ playing: !paused, paused, positionMs: clock.offsetMs, durationMs });
+          }
           case "pause_playback_native":
             if (clock.loaded && clock.startedAt != null) {
               clock.offsetMs = positionMs();

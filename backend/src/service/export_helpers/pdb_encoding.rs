@@ -321,6 +321,8 @@ pub fn encode_track_row_with_profile(
     let duration_seconds = track.duration_seconds.unwrap_or(0).min(u16::MAX as u32) as u16;
     row[84..86].copy_from_slice(&duration_seconds.to_le_bytes());
     row[86..90].copy_from_slice(&pre_86_89);
+    row[88] = track.color_id.unwrap_or(0);
+    row[89] = track.rating.unwrap_or(0).min(5);
     row[90..92].copy_from_slice(&track.file_type.unwrap_or(0).to_le_bytes());
     row[92..94].copy_from_slice(&pre_92_93);
 
@@ -456,6 +458,8 @@ mod tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
             title: title.to_owned(),
             anlz_path: "/PIONEER/USBANLZ/01/000001.DAT".to_owned(),
             file_path: file_path.to_owned(),

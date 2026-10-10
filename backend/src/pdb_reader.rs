@@ -1878,6 +1878,8 @@ mod tests {
                 file_name: Some("Demo Artist - DEMO001 - Sample - 01 Sample Track.mp3".to_string()),
                 publish_track_info_on: Some(true),
                 autoload_hotcues_on: Some(true),
+                color_id: None,
+                rating: None,
                 title: "Sample Track".to_string(),
                 anlz_path: "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT".to_string(),
                 file_path: "/Contents/Demo Artist/DEMO001 - Sample/Demo Artist - DEMO001 - Sample - 01 Sample Track.mp3"
@@ -1952,6 +1954,8 @@ mod tests {
                 file_name: Some("default.mp3".to_string()),
                 publish_track_info_on: None,
                 autoload_hotcues_on: None,
+                color_id: None,
+                rating: None,
                 title: "Default".to_string(),
                 anlz_path: String::new(),
                 file_path: "/Contents/Default/default.mp3".to_string(),

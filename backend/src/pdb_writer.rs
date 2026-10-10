@@ -2105,6 +2105,8 @@ pub(crate) mod writer_tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         };
         let row = encode_track_row_with_profile(&track, PdbLayoutProfile::Current).unwrap();
         let mut seq = 100u32;
@@ -2143,6 +2145,8 @@ pub(crate) mod writer_tests {
             file_name: Some(file_name.into()),
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         }
     }
 
@@ -2308,6 +2312,8 @@ pub(crate) mod writer_tests {
             dj_comment: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         });
 
         let bytes = write_pdb(&data).unwrap();
@@ -2508,6 +2514,8 @@ pub(crate) mod writer_tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         });
         data.artists.push(PdbArtistRow {
             id: 1,
@@ -2660,6 +2668,8 @@ pub(crate) mod writer_tests {
                 file_name: None,
                 publish_track_info_on: None,
                 autoload_hotcues_on: None,
+                color_id: None,
+                rating: None,
                 title: format!("Track {id}"),
                 anlz_path: format!("/PIONEER/USBANLZ/P{id:08}/ANLZ0000.DAT"),
                 file_path: format!("/Contents/Artist/Album/T{id}.mp3"),
@@ -3113,6 +3123,8 @@ pub(crate) mod writer_tests {
             dj_comment: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         });
 
         let bytes = write_pdb(&data).unwrap();
@@ -3167,6 +3179,8 @@ pub(crate) mod writer_tests {
                 file_name: None,
                 publish_track_info_on: None,
                 autoload_hotcues_on: None,
+                color_id: None,
+                rating: None,
             });
         }
 
@@ -4277,6 +4291,12 @@ pub(crate) fn compute_additive_diff(
             if existing.file_type.unwrap_or(0) != new_row.file_type.unwrap_or(0) {
                 changed_fields.push("file_type");
             }
+            if existing.color_id != new_row.color_id.unwrap_or(0) {
+                changed_fields.push("color_id");
+            }
+            if existing.rating != new_row.rating.unwrap_or(0).min(5) {
+                changed_fields.push("rating");
+            }
             let new_title = sanitize_metadata(&new_row.title);
             if existing.title != new_title.as_ref() {
                 changed_fields.push("title");
@@ -4838,6 +4858,12 @@ fn build_same_size_track_row_patch(
     }
     if field_changed(&fields, "file_type") {
         patched[90..92].copy_from_slice(&desired.file_type.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(&fields, "color_id") {
+        patched[88] = desired.color_id.unwrap_or(0);
+    }
+    if field_changed(&fields, "rating") {
+        patched[89] = desired.rating.unwrap_or(0).min(5);
     }
 
     use crate::service::export_helpers::pdb_encoding::{
@@ -6538,6 +6564,8 @@ mod additive_tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         };
         // Seed an existing track so the t00 chain has at least one
         // populated data page to grow.
@@ -6649,6 +6677,8 @@ mod additive_tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         };
 
         let mut existing = PdbData::empty();
@@ -6859,6 +6889,8 @@ mod additive_tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         });
         data.colors = standard_colors();
         data.columns_raw_rows = standard_columns_raw();
@@ -6942,6 +6974,8 @@ mod additive_tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         };
         let mut seed = build_seed_pdb_data();
         seed.tracks.push(mk_track());
@@ -7481,6 +7515,8 @@ mod additive_tests {
             file_name: Some("track.mp3".into()),
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         };
         let encoded = encode_track_row_with_profile(&base, PdbLayoutProfile::DEFAULT)
             .expect("encode base track");
@@ -7551,6 +7587,8 @@ mod additive_tests {
             file_name: None,
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
         };
         let mut data = PdbData::empty();
         data.artists.push(PdbArtistRow {
@@ -7702,6 +7740,8 @@ mod additive_tests {
             file_name: Some("first.flac".into()),
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
             title: "First Track".into(),
             anlz_path: "/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into(),
             file_path: "/Contents/first.flac".into(),
@@ -7751,6 +7791,8 @@ mod additive_tests {
             file_name: Some(format!("t{id:03}.flac")),
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
             title: format!("Track {id:03}"),
             anlz_path: String::new(),
             file_path: format!("/Contents/t{id:03}.flac"),
@@ -7895,6 +7937,8 @@ mod additive_tests {
                 file_name: Some(format!("track{id}.flac")),
                 publish_track_info_on: None,
                 autoload_hotcues_on: None,
+                color_id: None,
+                rating: None,
                 title: format!("Track {id}"),
                 anlz_path: format!("/PIONEER/USBANLZ/P000/{id:08}/ANLZ0000.DAT"),
                 file_path: format!("/Contents/track{id}.flac"),
@@ -7973,6 +8017,8 @@ mod additive_tests {
             file_name: Some("first.flac".into()),
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
             title: "First Track".into(),
             anlz_path: "/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into(),
             file_path: "/Contents/first.flac".into(),
@@ -8076,6 +8122,8 @@ mod additive_tests {
                 file_name: Some(format!("first-export-growth-{id}.flac")),
                 publish_track_info_on: None,
                 autoload_hotcues_on: None,
+                color_id: None,
+                rating: None,
                 title: format!("First Export Growth Track {id} {}", "x".repeat(240)),
                 anlz_path: format!("/PIONEER/USBANLZ/P000/{id:08X}/ANLZ0000.DAT"),
                 file_path: format!(
@@ -8154,6 +8202,8 @@ mod additive_tests {
             file_name: Some(format!("reposition-track-{id}.flac")),
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
             title: format!("Reposition Track {id}"),
             anlz_path: format!("/PIONEER/USBANLZ/P000/{id:08X}/ANLZ0000.DAT"),
             file_path: format!("/Contents/reposition-track-{id}.flac"),

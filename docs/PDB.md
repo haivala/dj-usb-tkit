@@ -513,6 +513,9 @@ Track rows live in `t00`. Known fixed fields written by the current encoder:
 | `0x50` | release year |
 | `0x52` | bit depth |
 | `0x54` | duration seconds |
+| `0x56` | constant `0x29` (u16) |
+| `0x58` | colour: 0 (none) or a `t06` colour id 1–8, the eDB's `content.color_id` |
+| `0x59` | star rating 0–5, the eDB's `content.rating` |
 | `0x5a` | file type |
 | `0x5e..` | 21 string offsets |
 

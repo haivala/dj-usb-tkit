@@ -404,6 +404,10 @@ pub struct PdbTrackRowData {
     pub file_name: Option<String>,
     pub publish_track_info_on: Option<bool>,
     pub autoload_hotcues_on: Option<bool>,
+    /// Track colour (row byte 88; 1–8, the `colors` table ids). None/0 = no colour.
+    pub color_id: Option<u8>,
+    /// Star rating (row byte 89; 0–5).
+    pub rating: Option<u8>,
     pub title: String,
     pub anlz_path: String,
     pub file_path: String,
@@ -1011,10 +1015,14 @@ pub fn update_existing_content_row(
             params![content_id],
         )?;
     }
-    if content_columns.contains("rating") {
+    // Rating and colour only when the library has one: the app doesn't set
+    // them, so a rekordbox row's own values stay (and match its PDB row).
+    if content_columns.contains("rating")
+        && let Some(rating) = track.rating
+    {
         tx.execute(
             "UPDATE content SET rating = ?1 WHERE content_id = ?2",
-            params![track.rating.unwrap_or(0), content_id],
+            params![rating, content_id],
         )?;
     }
     if content_columns.contains("djPlayCount") {
@@ -1023,10 +1031,12 @@ pub fn update_existing_content_row(
             params![track.dj_play_count.unwrap_or(0), content_id],
         )?;
     }
-    if content_columns.contains("color_id") {
+    if content_columns.contains("color_id")
+        && let Some(color_id) = track.color_id
+    {
         tx.execute(
             "UPDATE content SET color_id = ?1 WHERE content_id = ?2",
-            params![track.color_id.unwrap_or(0), content_id],
+            params![color_id, content_id],
         )?;
     }
     if content_columns.contains("artist_id_lyricist") {
@@ -1421,6 +1431,8 @@ fn write_pdb_fresh_with_overrides(
                     .autoload_hotcues
                     .as_deref()
                     .map(|v| v == "1" || v.eq_ignore_ascii_case("on")),
+                color_id: Some(track.color_id),
+                rating: Some(track.rating),
                 title: track.title.clone(),
                 anlz_path: track.anlz_path.clone(),
                 file_path: track.track_file_path.clone(),
@@ -1809,6 +1821,13 @@ fn write_pdb_fresh_with_overrides(
                 if let Some(tn) = track.track_number {
                     existing_track.track_number = Some(tn);
                 }
+                // Same rule as the eDB row (`update_existing_content_row`).
+                if let Some(color_id) = track.color_id.and_then(|v| u8::try_from(v).ok()) {
+                    existing_track.color_id = Some(color_id);
+                }
+                if let Some(rating) = track.rating.and_then(|v| u8::try_from(v).ok()) {
+                    existing_track.rating = Some(rating);
+                }
                 // These were previously never refreshed on an update, so a
                 // re-exported track that got re-encoded/replaced (different
                 // size, bitrate, sample rate) at the same path kept the
@@ -2003,6 +2022,8 @@ fn write_pdb_fresh_with_overrides(
                 file_name: Some(content_file_name(&track.exported_path)),
                 publish_track_info_on: Some(true),
                 autoload_hotcues_on: Some(true),
+                color_id: track.color_id.and_then(|v| u8::try_from(v).ok()),
+                rating: track.rating.and_then(|v| u8::try_from(v).ok()),
                 title: track.title.clone(),
                 anlz_path,
                 file_path: file_path.clone(),
@@ -4571,6 +4592,8 @@ mod tests {
             file_name: Some("track.mp3".to_string()),
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
             title: "History Shared".to_string(),
             anlz_path: "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT".to_string(),
             file_path: "/Contents/Artist/Album/track.mp3".to_string(),
@@ -5306,6 +5329,123 @@ mod tests {
             "the existing row's numeric PDB track id must be reused, not replaced"
         );
         assert_eq!(second_parsed.tracks[0].track_file_path, foreign_path);
+    }
+
+    #[test]
+    fn write_pdb_writes_rating_and_colour_and_keeps_them_when_the_library_has_none() {
+        let dir = tempdir().unwrap();
+        let usb_root = dir.path();
+        std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
+            .unwrap();
+        crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+        let pdb_path = usb_root
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb");
+        let playlist = ExportPlaylistData {
+            id: "pl-rating".to_string(),
+            name: "Rating".to_string(),
+            tracks: Vec::new(),
+        };
+        let manifest_with = |rating: Option<u32>, color_id: Option<u32>| {
+            let mut track = mapping_test_track();
+            track.rating = rating;
+            track.color_id = color_id;
+            ExportManifest {
+                version: 1,
+                generated_at: "2024-01-01".to_string(),
+                playlist_id: playlist.id.clone(),
+                playlist_name: playlist.name.clone(),
+                usb_root: usb_root.to_string_lossy().to_string(),
+                options: crate::models::ExportToUsbOptions {
+                    include_artwork: false,
+                    include_analysis: false,
+                    prune_stale: false,
+                    ..Default::default()
+                },
+                exported_tracks: 1,
+                skipped_tracks: 0,
+                warnings: Vec::new(),
+                tracks: vec![track],
+            }
+        };
+        let rating_colour = || {
+            let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse pdb");
+            assert_eq!(parsed.tracks.len(), 1);
+            (parsed.tracks[0].rating, parsed.tracks[0].color_id)
+        };
+
+        // A new row carries them (bytes 89/88, as rekordbox writes them).
+        write_pdb(
+            usb_root,
+            &playlist,
+            &manifest_with(Some(4), Some(3)),
+            true,
+            None,
+            None,
+        )
+        .expect("first export");
+        assert_eq!(rating_colour(), (4, 3));
+
+        // Re-exported from a library without them (the app never sets them):
+        // the row keeps what it has, e.g. rekordbox's own values.
+        write_pdb(
+            usb_root,
+            &playlist,
+            &manifest_with(None, None),
+            true,
+            None,
+            None,
+        )
+        .expect("re-export without rating/colour");
+        assert_eq!(rating_colour(), (4, 3));
+
+        // A value from the library replaces it.
+        write_pdb(
+            usb_root,
+            &playlist,
+            &manifest_with(Some(1), Some(8)),
+            true,
+            None,
+            None,
+        )
+        .expect("re-export with new rating/colour");
+        assert_eq!(rating_colour(), (1, 8));
+    }
+
+    #[test]
+    fn update_existing_content_row_keeps_rating_and_colour_the_library_lacks() {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("open memory db");
+        create_content_mapping_schema(&conn);
+        conn.execute_batch(
+            "INSERT INTO content (content_id, title, path, rating, color_id)
+               VALUES (10, 'old', '/Contents/existing.mp3', 5, 6);",
+        )
+        .expect("seed content row");
+        let rating_colour = |conn: &rusqlite::Connection| {
+            conn.query_row(
+                "SELECT rating, color_id FROM content WHERE content_id = 10",
+                [],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+            )
+            .expect("load row")
+        };
+        let mut track = mapping_test_track();
+
+        for (rating, color_id, expected) in [(None, None, (5, 6)), (Some(2), Some(1), (2, 1))] {
+            track.rating = rating;
+            track.color_id = color_id;
+            let tx = conn.transaction().expect("start tx");
+            let columns = load_table_columns_tx(&tx, "content").expect("content columns");
+            update_existing_content_row(&tx, 10, &track, &columns, Some("2024-07-09"))
+                .expect("update content");
+            tx.commit().expect("commit tx");
+            assert_eq!(
+                rating_colour(&conn),
+                expected,
+                "library {rating:?}/{color_id:?}"
+            );
+        }
     }
 
     #[test]

@@ -95,7 +95,7 @@ run an explicit ANLZ scan when looking for empty or malformed analysis bundles.
 | Artwork | artwork presence on both sides |
 | PDB dictionaries | artist, album, key, and artwork ids resolve when linked metadata exists |
 | Raw audio coverage | indexed files under `Contents/` exist and extra audio files are reported |
-| Reference-only eDB fields | populated documented eDB fields that are reported for reference but outside strict PDB/parity scope |
+| Rating and colour | a playlist track's star rating and colour match between the eDB and its PDB row (bytes 89/88). Minor: a mismatch warns in the technical details only and doesn't change the overall status. "Upgrade Export Data To Strict Parity" carries the eDB's values into the PDB |
 
 Strict parity can match tracks by normalized media path, analysis path, metadata
 fallback, or id fallback depending on which data is available.

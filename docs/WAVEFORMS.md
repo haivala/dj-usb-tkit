@@ -197,7 +197,8 @@ What rekordbox writes:
 - **VBR entries:** `entry[i]` is the byte offset of counted frame
   `max(floor((i + 1) · N / 400) − 8, 0)`. `N` is the number of counted frames, and the
   offset is measured from the first counted frame, not from the start of the file.
-- **Counted frames** are the MPEG frames between any ID3v2 tag and an ID3v1 tag. Whether
+- **Counted frames** are the MPEG frames between any ID3v2 tag and the tags at the end (APEv2,
+  Lyrics3v2, ID3v1, in any combination; each is taken off by its own size). Whether
   the first frame (a `Xing`/`Info` header) counts depends on the encoder string in that
   header:
   - `LAME…` or `iTunes…` → counted
@@ -205,22 +206,33 @@ What rekordbox writes:
     frame
   - no header → every frame counts
 - **CBR vs VBR** is decided by whether the audio frames' bitrates vary.
+- **Two damaged layouts**, seen only on CBR files without a `Xing`/`Info` header:
+  - a run of zero bytes exactly one frame long before the first frame (a wiped header
+    frame) is skipped: it isn't counted, and the frames after it are;
+  - a truncated last frame isn't counted.
 
-Checked byte for byte against three rekordbox exports: a fresh export of a purpose-built
-test set (encoders, bitrate modes, header types, tags, short clips, other formats) and two
-real libraries built up over years. Every MP3 these rules cover matched, except one CBR
-file that got a filled index for no reason we could find in the file.
+Checked byte for byte against four rekordbox exports: a fresh export of a purpose-built
+test set (encoders, bitrate modes, header types, tags, short clips, other formats), two
+real libraries built up over years, and an export of files the earlier rules refused
+(APE and Lyrics3 tags on VBR and CBR files, the two damaged layouts above). Every MP3 these
+rules cover matched, except one CBR file that got a filled index for no reason we could
+find in the file.
 
-rekordbox's behaviour is not predictable in these cases, so the repair keeps `PVBR`
-at zeros for them:
+rekordbox's behaviour is not known or not predictable in these cases, so the repair keeps
+`PVBR` at zeros for them:
 
-- **APE or Lyrics3 tags:** rekordbox appears to count those bytes as about one more frame
-  in CBR files.
 - **VBRI headers:** rekordbox skipped the header frame in some files and counted it in
   others.
-- **Anything that doesn't parse cleanly:** lost sync, a truncated last frame, a
-  `Xing` frame count that disagrees with the file, or an unknown encoder string.
+- **The damaged layouts on VBR files or with a `Xing`/`Info` header,** and a zero run of
+  any other length: not seen in a rekordbox export yet.
+- **Anything else that doesn't parse cleanly:** lost sync, a `Xing` frame count that
+  disagrees with the file, an unknown encoder string, or an APE/Lyrics3 tag whose size
+  doesn't fit.
 - **MPEG-2 / 2.5:** one example used frames × 576.
+
+A file with a zero-filled region of 64 KiB or more inside the audio is damaged rather than
+an unusual layout. Its Event Log line says "audio corrupted" and suggests replacing the file
+instead of reporting it. Zeros at the very end are encoder tail fill and are fine.
 
 ### `PVB2` (`.EXT`, FLAC seek index)
 

@@ -1645,6 +1645,63 @@ fn strict_repair_pdb_primary_repopulates_thin_edb_and_restores_strict_parity() {
 }
 
 #[test]
+fn strict_repair_carries_the_edb_rating_and_colour_into_the_pdb() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
+
+    // rekordbox-style values in the eDB only (as an older app version left
+    // them: its PDB rows had no rating or colour), and a playlist that needs
+    // the strict repair: its eDB membership is gone, the track row stays.
+    let conn = open_edb(&vendor_db);
+    let playlist_id: i64 = conn
+        .query_row(
+            "SELECT playlist_id FROM playlist WHERE name = ?1 ORDER BY playlist_id ASC LIMIT 1",
+            [&playlist_name],
+            |row| row.get(0),
+        )
+        .expect("playlist id");
+    conn.execute("UPDATE content SET rating = 3, color_id = 5", [])
+        .expect("set eDB rating and colour");
+    conn.execute(
+        "DELETE FROM playlist_content WHERE playlist_id = ?1",
+        [playlist_id],
+    )
+    .expect("delete playlist_content rows");
+    drop(conn);
+    let pdb_rating_colour = || {
+        let parsed = backend::pdb_reader::parse_pdb(&pdb_path).expect("parse pdb");
+        assert_eq!(parsed.tracks.len(), 1);
+        (parsed.tracks[0].rating, parsed.tracks[0].color_id)
+    };
+    assert_eq!(pdb_rating_colour(), (0, 0));
+
+    let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let repair_data = repair.data.expect("repair data");
+    assert!(
+        repair_data
+            .applied_fixes
+            .iter()
+            .any(|line| line.contains("merged 1 playlist(s)")),
+        "strict repair should run: {repair_data:?}"
+    );
+
+    assert_eq!(pdb_rating_colour(), (3, 5));
+    let conn = open_edb(&vendor_db);
+    let edb: (i64, i64) = conn
+        .query_row("SELECT rating, color_id FROM content", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .expect("eDB rating and colour");
+    assert_eq!(edb, (3, 5), "the eDB keeps its values");
+}
+
+#[test]
 fn strict_repair_avoids_playlist_id_collisions_with_existing_pdb_folders() {
     let (_root, backend, usb, _target_playlist, control_playlist) =
         setup_two_playlist_strict_parity_fixture();

@@ -12,10 +12,14 @@ pub(super) const PVBR_PAYLOAD_LEN: usize = PVBR_ENTRIES * 4 + 4;
 const PVB2_ENTRIES: usize = 400;
 const MP3_SAMPLES_PER_FRAME: u32 = 1152;
 
-/// Appended to every "seek data not added" log line: each one is a file
-/// layout the parsers don't cover yet, worth a bug report.
+/// Appended to a "seek data not added" log line for a file layout the
+/// parsers don't cover yet, worth a bug report.
 pub(super) const SEEK_SKIP_REPORT_HINT: &str = "please report this file (format details, not \
      the audio) so its seek data can be supported";
+
+/// A zero-filled run this long inside the audio is damage, not an encoder
+/// layout: far more than any frame (at most 1441 bytes) or padding.
+const CORRUPT_ZERO_RUN: usize = 64 * 1024;
 
 /// The seek index a source audio file gets.
 #[derive(Debug)]
@@ -51,6 +55,8 @@ pub(super) enum SeekIndexSkip {
     UnknownTotalSamples,
     FlacFrameSequence,
     TooLarge,
+    /// A large zero-filled region inside the audio (a damaged file).
+    CorruptedAudio,
 }
 
 impl SeekIndexSkip {
@@ -61,9 +67,9 @@ impl SeekIndexSkip {
             Self::NoAudioFrames => "no MPEG audio frames",
             Self::UnsupportedMpegVersion => "MPEG-2/2.5 or not Layer III",
             Self::LostSync => "unexplained bytes between MPEG frames",
-            Self::TruncatedFrame => "truncated last MPEG frame",
+            Self::TruncatedFrame => "truncated last MPEG frame in a VBR or Xing/Info file",
             Self::MixedSampleRate => "sample rate changes mid-file",
-            Self::ApeOrLyrics3Tag => "APE or Lyrics3 tag",
+            Self::ApeOrLyrics3Tag => "malformed APE or Lyrics3 tag",
             Self::VbriHeader => "VBRI header",
             Self::UnknownEncoder => "unknown encoder in Xing/Info header",
             Self::XingCountMismatch => "Xing/Info frame count disagrees with the file",
@@ -72,6 +78,16 @@ impl SeekIndexSkip {
             Self::UnknownTotalSamples => "FLAC STREAMINFO has no sample count",
             Self::FlacFrameSequence => "FLAC frames are not a continuous sequence",
             Self::TooLarge => "file too large for the index",
+            Self::CorruptedAudio => "audio corrupted (a large zero-filled region)",
+        }
+    }
+
+    /// What the log line suggests: a damaged file is the user's to replace,
+    /// anything else is a layout worth reporting.
+    pub(super) fn advice(self) -> &'static str {
+        match self {
+            Self::CorruptedAudio => "replace it with an intact copy",
+            _ => SEEK_SKIP_REPORT_HINT,
         }
     }
 }
@@ -96,22 +112,38 @@ pub(super) fn seek_index_for_audio(path: &Path) -> Result<Option<SeekIndex>, See
 struct Mp3Frame {
     offset: usize,
     length: usize,
+    padding: usize,
     bitrate_kbps: u16,
     sample_rate: u32,
 }
 
 fn parse_mp3_pvbr(bytes: &[u8]) -> Result<Vec<u8>, SeekIndexSkip> {
     let start = id3v2_end(bytes)?;
-    let end = id3v1_start(bytes);
+    // rekordbox ignores APE and Lyrics3 tags: the frames end where they start.
+    let end = strip_ape_and_lyrics3_tags(bytes, id3v1_start(bytes))?;
     if start >= end {
         return Err(SeekIndexSkip::NoAudioFrames);
-    }
-    if has_ape_or_lyrics3_tag(&bytes[..end]) {
-        return Err(SeekIndexSkip::ApeOrLyrics3Tag);
     }
 
     let mut frames = Vec::new();
     let mut offset = start;
+    // Two damaged layouts rekordbox was seen to handle, both only on CBR
+    // files without a Xing/Info header (checked below): a zero run exactly
+    // one frame long before the first frame (a wiped header frame) is
+    // skipped, and a truncated last frame isn't counted.
+    let mut leading_gap = false;
+    let mut truncated_tail = false;
+    if let Some(after_zeros) = bytes[start..end]
+        .iter()
+        .position(|byte| *byte != 0)
+        .map(|run| start + run)
+        .filter(|after| *after > start)
+        && let Some(first) = parse_mpeg1_layer3_frame(bytes, after_zeros)
+        && after_zeros - start == first.length - first.padding
+    {
+        leading_gap = true;
+        offset = after_zeros;
+    }
     while offset < end {
         let Some(frame) = parse_mpeg1_layer3_frame(bytes, offset) else {
             // Encoders pad the tail with zeros or 0xaa; anything else is a
@@ -122,14 +154,21 @@ fn parse_mp3_pvbr(bytes: &[u8]) -> Result<Vec<u8>, SeekIndexSkip> {
             {
                 break;
             }
-            return Err(if is_other_mpeg_frame(bytes, offset) {
+            let zero_run = bytes[offset..end]
+                .iter()
+                .take_while(|byte| **byte == 0)
+                .count();
+            return Err(if zero_run >= CORRUPT_ZERO_RUN {
+                SeekIndexSkip::CorruptedAudio
+            } else if is_other_mpeg_frame(bytes, offset) {
                 SeekIndexSkip::UnsupportedMpegVersion
             } else {
                 SeekIndexSkip::LostSync
             });
         };
         if offset + frame.length > end {
-            return Err(SeekIndexSkip::TruncatedFrame);
+            truncated_tail = true;
+            break;
         }
         frames.push(frame);
         offset += frame.length;
@@ -172,6 +211,13 @@ fn parse_mp3_pvbr(bytes: &[u8]) -> Result<Vec<u8>, SeekIndexSkip> {
     let is_vbr = audio
         .iter()
         .any(|frame| frame.bitrate_kbps != audio[0].bitrate_kbps);
+    let plain_cbr = header.is_none() && !is_vbr;
+    if leading_gap && !plain_cbr {
+        return Err(SeekIndexSkip::LostSync);
+    }
+    if truncated_tail && !plain_cbr {
+        return Err(SeekIndexSkip::TruncatedFrame);
+    }
 
     let total_samples = u32::try_from(counted.len())
         .ok()
@@ -218,12 +264,43 @@ fn id3v1_start(bytes: &[u8]) -> usize {
     }
 }
 
-/// An APEv2 footer or a Lyrics3v2 end marker right before ID3v1 (or the end).
-fn has_ape_or_lyrics3_tag(bytes: &[u8]) -> bool {
-    let ends_with_at = |marker: &[u8], from_end: usize| {
-        bytes.len() >= from_end && bytes[bytes.len() - from_end..].starts_with(marker)
-    };
-    ends_with_at(b"APETAGEX", 32) || ends_with_at(b"LYRICS200", 9)
+/// Where the audio ends once any APEv2 and Lyrics3v2 tags before `end` (the
+/// ID3v1 tag, or the end of the file) are taken off, by their own sizes. A
+/// tag whose size doesn't fit is `ApeOrLyrics3Tag`.
+fn strip_ape_and_lyrics3_tags(bytes: &[u8], mut end: usize) -> Result<usize, SeekIndexSkip> {
+    let malformed = SeekIndexSkip::ApeOrLyrics3Tag;
+    loop {
+        if end >= 32 && &bytes[end - 32..end - 24] == b"APETAGEX" {
+            // Footer: size (items + footer) at +12, flags at +20; bit 31 = a
+            // 32-byte header precedes the items.
+            let read_le = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+            let size = read_le(end - 20) as usize;
+            let header = if read_le(end - 12) & 0x8000_0000 != 0 {
+                32
+            } else {
+                0
+            };
+            end = end
+                .checked_sub(size + header)
+                .filter(|_| size >= 32)
+                .ok_or(malformed)?;
+            continue;
+        }
+        if end >= 15 && &bytes[end - 9..end] == b"LYRICS200" {
+            // Lyrics3v2: a 6-digit size (from LYRICSBEGIN) before the marker.
+            let size = std::str::from_utf8(&bytes[end - 15..end - 9])
+                .ok()
+                .and_then(|digits| digits.parse::<usize>().ok())
+                .ok_or(malformed)?;
+            let tag_start = end.checked_sub(15 + size).ok_or(malformed)?;
+            if !bytes[tag_start..].starts_with(b"LYRICSBEGIN") {
+                return Err(malformed);
+            }
+            end = tag_start;
+            continue;
+        }
+        return Ok(end);
+    }
 }
 
 /// An MPEG audio frame sync that isn't MPEG-1 Layer III.
@@ -255,6 +332,7 @@ fn parse_mpeg1_layer3_frame(bytes: &[u8], offset: usize) -> Option<Mp3Frame> {
     Some(Mp3Frame {
         offset,
         length,
+        padding,
         bitrate_kbps,
         sample_rate,
     })
@@ -635,17 +713,124 @@ mod tests {
         assert_eq!(total(&parse_mp3_pvbr(&bytes).unwrap()), 2 * 1152);
     }
 
+    fn vbr_frames(count: usize) -> Vec<Vec<u8>> {
+        (0..count)
+            .map(|i| mp3_frame(if i % 3 == 0 { KBPS_128 } else { KBPS_320 }))
+            .collect()
+    }
+
+    fn lyrics3_tag(fields: &[u8]) -> Vec<u8> {
+        let mut tag = b"LYRICSBEGIN".to_vec();
+        tag.extend_from_slice(fields);
+        let size = tag.len();
+        tag.extend_from_slice(format!("{size:06}").as_bytes());
+        tag.extend_from_slice(b"LYRICS200");
+        tag
+    }
+
+    /// An APEv2 tag with a header, one item and a footer.
+    fn ape_tag() -> Vec<u8> {
+        let item = b"\x07\x00\x00\x00\x00\x00\x00\x00MP3GAIN\x00137,190";
+        let size = (item.len() + 32) as u32;
+        let block = |flags: u32| {
+            let mut block = b"APETAGEX".to_vec();
+            block.extend_from_slice(&2000u32.to_le_bytes());
+            block.extend_from_slice(&size.to_le_bytes());
+            block.extend_from_slice(&1u32.to_le_bytes());
+            block.extend_from_slice(&flags.to_le_bytes());
+            block.extend_from_slice(&[0; 8]);
+            block
+        };
+        [block(0xa000_0000), item.to_vec(), block(0x8000_0000)].concat()
+    }
+
+    fn id3v1() -> Vec<u8> {
+        let mut tag = vec![0u8; 128];
+        tag[..3].copy_from_slice(b"TAG");
+        tag
+    }
+
+    // The layouts below were checked against a rekordbox export of real
+    // files: Lyrics3 and APE tags (VBR with a LAME header, and CBR), a zero
+    // run in place of the first frame, and a truncated last frame (CBR).
+
+    #[test]
+    fn ape_and_lyrics3_tags_are_left_out_of_the_frames() {
+        let cbr = file(&vec![mp3_frame(KBPS_320); 3]);
+        let bytes = [cbr.clone(), lyrics3_tag(b"IND0000200"), id3v1()].concat();
+        assert_eq!(parse_mp3_pvbr(&bytes), parse_mp3_pvbr(&cbr));
+        assert_eq!(total(&parse_mp3_pvbr(&bytes).unwrap()), 3 * 1152);
+
+        let mut lame_vbr = vec![xing_frame(b"Xing", 999, b"LAME3.97 ")];
+        lame_vbr.extend(vbr_frames(999));
+        let lame_vbr = file(&lame_vbr);
+        let tagged = [lame_vbr.clone(), ape_tag(), id3v1()].concat();
+        assert_eq!(parse_mp3_pvbr(&tagged), parse_mp3_pvbr(&lame_vbr));
+        let both = [lame_vbr.clone(), ape_tag(), lyrics3_tag(b"IND0000200")].concat();
+        assert_eq!(parse_mp3_pvbr(&both), parse_mp3_pvbr(&lame_vbr));
+    }
+
+    #[test]
+    fn a_zero_run_one_frame_long_before_cbr_audio_is_skipped() {
+        let frames = vec![mp3_frame(KBPS_320); 3];
+        let gap = vec![0u8; frames[0].len()];
+        let mut bytes = b"ID3\x04\x00\x00\x00\x00\x00\x00".to_vec();
+        bytes.extend([gap.clone(), file(&frames)].concat());
+        let payload = parse_mp3_pvbr(&bytes).unwrap();
+        assert_eq!(&payload[..PVBR_ENTRIES * 4], &[0; PVBR_ENTRIES * 4]);
+        assert_eq!(total(&payload), 3 * 1152);
+
+        // Not proven: VBR audio, a Xing header, or a run of another length.
+        let vbr = [gap.clone(), file(&vbr_frames(30))].concat();
+        assert_eq!(parse_mp3_pvbr(&vbr), Err(SeekIndexSkip::LostSync));
+        let mut lame = vec![xing_frame(b"Info", 3, b"LAME3.100")];
+        lame.extend(frames.clone());
+        let lame = [gap.clone(), file(&lame)].concat();
+        assert_eq!(parse_mp3_pvbr(&lame), Err(SeekIndexSkip::LostSync));
+        let short = [vec![0u8; 100], file(&frames)].concat();
+        assert_eq!(parse_mp3_pvbr(&short), Err(SeekIndexSkip::LostSync));
+    }
+
+    #[test]
+    fn a_large_zero_filled_region_is_corrupted_audio_not_a_layout_to_report() {
+        let frames = file(&vec![mp3_frame(KBPS_320); 3]);
+        let zeros = vec![0u8; CORRUPT_ZERO_RUN];
+        for bytes in [
+            [zeros.clone(), frames.clone()].concat(),
+            [frames.clone(), zeros.clone(), frames.clone()].concat(),
+        ] {
+            assert_eq!(parse_mp3_pvbr(&bytes), Err(SeekIndexSkip::CorruptedAudio));
+        }
+        assert_ne!(
+            SeekIndexSkip::CorruptedAudio.advice(),
+            SEEK_SKIP_REPORT_HINT
+        );
+        // Zeros at the very end are tail fill, not damage.
+        let tail = [frames.clone(), zeros].concat();
+        assert_eq!(total(&parse_mp3_pvbr(&tail).unwrap()), 3 * 1152);
+    }
+
+    #[test]
+    fn a_truncated_last_cbr_frame_is_not_counted() {
+        let mut bytes = file(&vec![mp3_frame(KBPS_320); 3]);
+        bytes.truncate(bytes.len() - 10);
+        bytes.extend(id3v1());
+        assert_eq!(total(&parse_mp3_pvbr(&bytes).unwrap()), 2 * 1152);
+
+        // Not proven: VBR audio or a Xing header.
+        let mut vbr = file(&vbr_frames(30));
+        vbr.truncate(vbr.len() - 10);
+        assert_eq!(parse_mp3_pvbr(&vbr), Err(SeekIndexSkip::TruncatedFrame));
+        let mut lame = vec![xing_frame(b"Info", 3, b"LAME3.100")];
+        lame.extend(vec![mp3_frame(KBPS_320); 3]);
+        let mut lame = file(&lame);
+        lame.truncate(lame.len() - 10);
+        assert_eq!(parse_mp3_pvbr(&lame), Err(SeekIndexSkip::TruncatedFrame));
+    }
+
     #[test]
     fn unreproducible_mp3_layouts_are_skipped_with_a_reason() {
         let cbr = || vec![mp3_frame(KBPS_320); 3];
-
-        let mut truncated = file(&cbr());
-        truncated.truncate(truncated.len() - 10);
-        truncated.extend_from_slice(&[0xff; 4]);
-        assert_eq!(
-            parse_mp3_pvbr(&truncated),
-            Err(SeekIndexSkip::TruncatedFrame)
-        );
 
         let mut junk = cbr();
         junk.insert(1, vec![0x12]);
@@ -676,11 +861,15 @@ mod tests {
         vbri[0][36..40].copy_from_slice(b"VBRI");
         assert_eq!(parse_mp3_pvbr(&file(&vbri)), Err(SeekIndexSkip::VbriHeader));
 
+        // A tag whose own size doesn't fit.
         let mut ape = file(&cbr());
         let mut footer = vec![0u8; 32];
         footer[..8].copy_from_slice(b"APETAGEX");
         ape.extend(footer);
         assert_eq!(parse_mp3_pvbr(&ape), Err(SeekIndexSkip::ApeOrLyrics3Tag));
+        let mut lyrics = file(&cbr());
+        lyrics.extend_from_slice(b"999999LYRICS200");
+        assert_eq!(parse_mp3_pvbr(&lyrics), Err(SeekIndexSkip::ApeOrLyrics3Tag));
     }
 
     fn flac_fixture() -> Vec<u8> {

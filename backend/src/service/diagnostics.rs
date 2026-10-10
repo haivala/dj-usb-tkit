@@ -617,7 +617,7 @@ const PARITY_LAYOUT: [DisplaySection; 3] = [
             "eDB source completeness",
             "PDB dictionary id resolution",
             "Artwork presence parity",
-            "Reference-documented field coverage",
+            "Rating and colour parity",
         ],
     },
     DisplaySection {
@@ -722,8 +722,8 @@ fn parity_overview(
             "tracks are listed twice in a playlist on older Pioneer players.",
         ),
     ];
-    // Reference-field coverage is about what this app compares, not about
-    // the USB, so it stays in the technical details only.
+    // A rating or colour that differs is minor (nothing to repair), so it
+    // stays in the technical details only.
     let track_problems = [
         problem(
             totals.total_pdb_missing_core_metadata,
@@ -780,7 +780,7 @@ fn parity_overview(
         ),
         row(
             "Track details",
-            status_of(PARITY_TRACK_INFO, &["Reference-documented field coverage"]),
+            status_of(PARITY_TRACK_INFO, &["Rating and colour parity"]),
             track_problems.into_iter().flatten().collect(),
             "Every playlist track has complete details and the same artwork in both databases."
                 .to_string(),
@@ -1040,60 +1040,51 @@ pub(crate) fn collect_strict_indexed_paths(
         .collect()
 }
 
-const REFERENCE_ONLY_EDB_FIELDS: &[&str] = &[
-    "artist_id_lyricist",
-    "artist_id_originalArtist",
-    "artist_id_remixer",
-    "artist_id_composer",
-    "label_id",
-    "rating",
-    "color_id",
-];
-
+/// Playlist tracks whose star rating or colour differs between the eDB and
+/// their PDB row (bytes 89/88), counted once per track.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct ReferenceOnlyEdbFieldUsage {
-    playlist_linked_tracks: usize,
-    populated_fields: Vec<String>,
+pub(crate) struct RatingColourParity {
+    mismatched_tracks: usize,
+    rating_mismatches: usize,
+    colour_mismatches: usize,
 }
 
-fn scan_reference_only_edb_field_usage(conn: &rusqlite::Connection) -> ReferenceOnlyEdbFieldUsage {
-    if !table_exists(conn, "content") || !table_exists(conn, "playlist_content") {
-        return ReferenceOnlyEdbFieldUsage::default();
-    }
-    let Ok(columns) = load_table_columns(conn, "content") else {
-        return ReferenceOnlyEdbFieldUsage::default();
-    };
-
-    let mut populated_fields = Vec::<String>::new();
-    let mut max_playlist_linked_tracks = 0usize;
-    for field in REFERENCE_ONLY_EDB_FIELDS {
-        if !columns.iter().any(|column| column == field) {
+fn compare_rating_colour(
+    conn: &rusqlite::Connection,
+    parsed: &crate::pdb_reader::ParsedPdb,
+    edb_playlists: &HashMap<String, ExportDbPlaylist>,
+) -> RatingColourParity {
+    let pdb_by_path = parsed
+        .tracks
+        .iter()
+        .map(|t| {
+            (
+                normalize_pdb_path_for_edb_lookup(&t.track_file_path),
+                (t.rating, t.color_id),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let playlist_paths = edb_playlists
+        .values()
+        .flat_map(|playlist| playlist.tracks.iter())
+        .map(|track| normalize_pdb_path_for_edb_lookup(track.identity_path()))
+        .collect::<HashSet<_>>();
+    let mut out = RatingColourParity::default();
+    for (path, edb) in crate::edb::read_rating_colour_by_path(conn) {
+        let key = normalize_pdb_path_for_edb_lookup(&path);
+        if !playlist_paths.contains(&key) {
             continue;
         }
-        let sql = format!(
-            "SELECT COUNT(DISTINCT pc.content_id)
-             FROM playlist_content pc
-             JOIN content c ON c.content_id = pc.content_id
-             WHERE c.{field} IS NOT NULL
-               AND trim(CAST(c.{field} AS TEXT)) <> ''
-               AND CAST(c.{field} AS TEXT) <> '0'"
-        );
-        let count = conn
-            .query_row(&sql, [], |row| row.get::<_, i64>(0))
-            .ok()
-            .unwrap_or(0)
-            .max(0) as usize;
-        if count > 0 {
-            populated_fields.push((*field).to_string());
-            max_playlist_linked_tracks = max_playlist_linked_tracks.max(count);
-        }
+        let Some(&(pdb_rating, pdb_colour)) = pdb_by_path.get(&key) else {
+            continue; // a track missing from the PDB is the membership check's
+        };
+        let rating_differs = edb.rating != pdb_rating;
+        let colour_differs = edb.color_id != pdb_colour;
+        out.rating_mismatches += usize::from(rating_differs);
+        out.colour_mismatches += usize::from(colour_differs);
+        out.mismatched_tracks += usize::from(rating_differs || colour_differs);
     }
-    populated_fields.sort();
-    populated_fields.dedup();
-    ReferenceOnlyEdbFieldUsage {
-        playlist_linked_tracks: max_playlist_linked_tracks,
-        populated_fields,
-    }
+    out
 }
 
 /// Count PDB history playlists/entries that look like real rekordbox-recorded
@@ -1705,7 +1696,7 @@ impl BackendService {
                         "parity report requires readable eDB playlist data".to_string(),
                     )
                 })?;
-        let reference_only_edb_fields = scan_reference_only_edb_field_usage(conn);
+        let rating_colour = compare_rating_colour(conn, parsed, &edb_playlists);
         note_stage("read eDB", &mut raw_warnings);
 
         on_progress(58, 100, "USB: Checking indexed audio file presence");
@@ -1763,7 +1754,7 @@ impl BackendService {
         let (checks, summary_rows, playlist_details, overall_status) = build_usb_parity_comparison(
             parsed,
             &edb_playlists,
-            &reference_only_edb_fields,
+            &rating_colour,
             Some(strict_raw_coverage.clone()),
         );
         let section_groups = parity_section_groups(&checks);
@@ -3136,7 +3127,7 @@ impl ParityTotals {
 pub(crate) fn build_usb_parity_comparison(
     parsed: &crate::pdb_reader::ParsedPdb,
     edb_playlists: &HashMap<String, ExportDbPlaylist>,
-    reference_only_edb_fields: &ReferenceOnlyEdbFieldUsage,
+    rating_colour: &RatingColourParity,
     strict_raw_coverage: Option<StrictRawCoverageParity>,
 ) -> (
     Vec<DiagCheck>,
@@ -3976,12 +3967,6 @@ pub(crate) fn build_usb_parity_comparison(
         total_dictionary_id_issues,
         playlist_id_mismatches,
     } = ParityTotals::from_details(&details);
-    let reference_only_field_tracks = reference_only_edb_fields.playlist_linked_tracks;
-    let reference_only_field_list = if reference_only_edb_fields.populated_fields.is_empty() {
-        "none".to_string()
-    } else {
-        reference_only_edb_fields.populated_fields.join(", ")
-    };
 
     let warn_playlists = details
         .iter()
@@ -4108,13 +4093,13 @@ pub(crate) fn build_usb_parity_comparison(
             count: total_dictionary_id_issues,
         },
         DiagSummaryRow {
-            label: "Reference-only eDB fields".to_string(),
-            status: if reference_only_field_tracks == 0 {
+            label: "Rating/colour mismatches".to_string(),
+            status: if rating_colour.mismatched_tracks == 0 {
                 DiagStatus::Pass
             } else {
                 DiagStatus::Warn
             },
-            count: reference_only_field_tracks,
+            count: rating_colour.mismatched_tracks,
         },
     ];
     if let Some(raw_coverage) = strict_raw_coverage.as_ref() {
@@ -4251,25 +4236,25 @@ pub(crate) fn build_usb_parity_comparison(
         ),
         link: None,
     });
+    // Minor (a rating or colour differs), so it doesn't count toward the overall status.
+    let overall = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     checks.push(DiagCheck {
-        label: "Reference-documented field coverage".to_string(),
-        status: if reference_only_field_tracks == 0 {
+        label: "Rating and colour parity".to_string(),
+        status: if rating_colour.mismatched_tracks == 0 {
             DiagStatus::Pass
         } else {
             DiagStatus::Warn
         },
-        detail: if reference_only_field_tracks == 0 {
-            "No playlist-linked eDB rows use documented reference fields outside current PDB/parity coverage.".to_string()
-        } else {
-            format!(
-                "{} playlist-linked eDB track(s) use documented reference fields not yet verified in PDB/parity: {}",
-                reference_only_field_tracks, reference_only_field_list
-            )
-        },
+        detail: format!(
+            "{} playlist-linked track(s) have a different rating or colour in the PDB than in \
+             the eDB (rating differs: {}, colour differs: {})",
+            rating_colour.mismatched_tracks,
+            rating_colour.rating_mismatches,
+            rating_colour.colour_mismatches
+        ),
         link: None,
     });
 
-    let overall = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     (checks, summary_rows, details, overall)
 }
 
@@ -4474,12 +4459,12 @@ mod tests {
     use super::{
         DISPLAY_ANALYSIS, DISPLAY_EDB, DISPLAY_ENGINE, DISPLAY_LAYOUT, DISPLAY_LOW_LEVEL,
         DISPLAY_PDB, DISPLAY_PLAYLISTS, ExportDbPlaylist, OverviewFacts, ParityTotals,
-        ReferenceOnlyEdbFieldUsage, build_usb_parity_comparison, count_named_history_rows,
-        diagnose_contents_integrity, diagnose_playlist_resolution_with_db,
-        diagnose_playlist_resolution_with_edb_internal, diagnostics_overview,
-        evaluate_strict_raw_coverage_parity, normalize_pdb_path_for_edb_lookup,
-        normalize_track_path_for_identity, parity_issue_labels, parity_overview,
-        parity_section_groups, regroup_sections, track_identity_key,
+        RatingColourParity, build_usb_parity_comparison, compare_rating_colour,
+        count_named_history_rows, diagnose_contents_integrity,
+        diagnose_playlist_resolution_with_db, diagnose_playlist_resolution_with_edb_internal,
+        diagnostics_overview, evaluate_strict_raw_coverage_parity,
+        normalize_pdb_path_for_edb_lookup, normalize_track_path_for_identity, parity_issue_labels,
+        parity_overview, parity_section_groups, regroup_sections, track_identity_key,
     };
     use crate::models::UsbParityPlaylistDetail;
 
@@ -4785,8 +4770,8 @@ mod tests {
             check("Overall player parity status", DiagStatus::Fail),
             check("Playlist membership parity", DiagStatus::Fail),
             check("PDB metadata completeness", DiagStatus::Pass),
-            // Not about the USB: shows in the technical details only.
-            check("Reference-documented field coverage", DiagStatus::Warn),
+            // Minor: shows in the technical details only.
+            check("Rating and colour parity", DiagStatus::Warn),
             check("Indexed audio file presence", DiagStatus::Pass),
         ];
         let groups = parity_section_groups(&checks);
@@ -5109,53 +5094,90 @@ mod tests {
             .collect()
     }
 
+    /// An eDB at a temp USB root with one track at `/Contents/Artist/Track.mp3`,
+    /// optionally in a playlist.
+    fn edb_with_rating_colour(
+        root: &std::path::Path,
+        rating: u8,
+        color_id: u8,
+        in_playlist: bool,
+    ) -> rusqlite::Connection {
+        let export_db_dir = root.join("PIONEER").join("rekordbox");
+        fs::create_dir_all(&export_db_dir).expect("create export db dir");
+        let conn = rusqlite::Connection::open(export_db_dir.join("exportLibrary.db"))
+            .expect("open export db");
+        conn.execute_batch(&format!(
+            r#"
+            CREATE TABLE content (
+              content_id INTEGER PRIMARY KEY, title TEXT, path TEXT,
+              rating INTEGER, color_id INTEGER
+            );
+            CREATE TABLE playlist_content (
+              playlist_id INTEGER, content_id INTEGER, sequenceNo INTEGER
+            );
+            INSERT INTO content VALUES (1, 'Track', '/Contents/Artist/Track.mp3', {rating}, {color_id});
+            {}
+            "#,
+            if in_playlist {
+                "INSERT INTO playlist_content VALUES (1, 1, 0);"
+            } else {
+                ""
+            }
+        ))
+        .expect("seed export db");
+        drop(conn);
+        let mut warnings = Vec::new();
+        crate::edb::open_edb_from_usb_root(root, &mut warnings).expect("reopen export db")
+    }
+
     #[test]
-    fn scan_reference_only_edb_field_usage_handles_documented_and_ignored_fields() {
-        for (column, value, expected_tracks, expected_fields) in [
-            ("rating", "5", 1, vec!["rating".to_string()]),
-            ("djPlayCount", "12", 0, Vec::new()),
+    fn rating_colour_parity_counts_playlist_tracks_whose_pdb_row_differs() {
+        let edb_playlists = |in_playlist: bool| {
+            edb_playlists_from_tracks(HashMap::from([(
+                "Test".to_string(),
+                if in_playlist {
+                    vec![make_usb_track(
+                        "usb-track-1",
+                        "Track",
+                        "Artist",
+                        "/Contents/Artist/Track.mp3",
+                    )]
+                } else {
+                    Vec::new()
+                },
+            )]))
+        };
+        // (eDB rating, colour), (PDB rating, colour), in a playlist → (tracks, rating, colour)
+        for (edb, pdb, in_playlist, expected) in [
+            ((3, 2), (3, 2), true, (0, 0, 0)),
+            ((3, 2), (0, 0), true, (1, 1, 1)),
+            ((0, 5), (0, 0), true, (1, 0, 1)),
+            ((4, 0), (0, 0), true, (1, 1, 0)),
+            // Not in any playlist: not compared.
+            ((3, 2), (0, 0), false, (0, 0, 0)),
         ] {
             let root = tempdir().expect("tempdir");
-            let export_db_dir = root.path().join("PIONEER").join("rekordbox");
-            fs::create_dir_all(&export_db_dir).expect("create export db dir");
-            let edb_path = export_db_dir.join("exportLibrary.db");
-            let conn = rusqlite::Connection::open(&edb_path).expect("open export db");
-            conn.execute_batch(&format!(
-                r#"
-                CREATE TABLE content (
-                  content_id INTEGER PRIMARY KEY,
-                  title TEXT,
-                  {column} INTEGER
-                );
-                CREATE TABLE playlist_content (
-                  playlist_id INTEGER,
-                  content_id INTEGER,
-                  sequenceNo INTEGER
-                );
-                INSERT INTO content (content_id, title, {column}) VALUES (1, 'A', {value});
-                INSERT INTO playlist_content (playlist_id, content_id, sequenceNo) VALUES (1, 1, 0);
-                "#
-            ))
-            .expect("seed export db");
-            drop(conn);
+            let conn = edb_with_rating_colour(root.path(), edb.0, edb.1, in_playlist);
+            let mut parsed = make_single_playlist_parsed("Test", 1, 1);
+            parsed.tracks[0].rating = pdb.0;
+            parsed.tracks[0].color_id = pdb.1;
 
-            let mut warnings = Vec::new();
-            let conn = crate::edb::open_edb_from_usb_root(root.path(), &mut warnings)
-                .expect("reopen export db");
-            let usage = super::scan_reference_only_edb_field_usage(&conn);
+            let result = compare_rating_colour(&conn, &parsed, &edb_playlists(in_playlist));
             assert_eq!(
-                usage.playlist_linked_tracks, expected_tracks,
-                "column {column}"
+                (
+                    result.mismatched_tracks,
+                    result.rating_mismatches,
+                    result.colour_mismatches
+                ),
+                expected,
+                "eDB {edb:?}, PDB {pdb:?}, in playlist {in_playlist}"
             );
-            assert_eq!(usage.populated_fields, expected_fields, "column {column}");
         }
     }
 
     #[test]
-    fn parity_comparison_warns_when_reference_only_edb_fields_are_present() {
+    fn parity_comparison_notes_a_rating_or_colour_difference_without_failing() {
         let mut parsed = make_single_playlist_parsed("Test", 1, 1);
-        // Clear tempo/duration/anlz so those fields don't produce additional parity failures,
-        // leaving only the reference-only check as the sole non-Pass result.
         for track in &mut parsed.tracks {
             track.tempo_x100 = 0;
             track.duration_seconds = None;
@@ -5170,32 +5192,44 @@ mod tests {
                 "/Contents/Artist/Track.mp3",
             )],
         )]);
-        let reference_only = ReferenceOnlyEdbFieldUsage {
-            playlist_linked_tracks: 1,
-            populated_fields: vec!["titleForSearch".to_string()],
+        let rating_colour = RatingColourParity {
+            mismatched_tracks: 1,
+            rating_mismatches: 1,
+            colour_mismatches: 0,
         };
 
         let (checks, summary_rows, _details, overall) = build_usb_parity_comparison(
             &parsed,
-            &edb_playlists_from_tracks(edb_tracks),
-            &reference_only,
+            &edb_playlists_from_tracks(edb_tracks.clone()),
+            &rating_colour,
             None,
         );
 
-        let coverage = checks
+        let check = checks
             .iter()
-            .find(|check| check.label == "Reference-documented field coverage")
-            .expect("reference-documented field coverage check");
-        assert!(matches!(coverage.status, DiagStatus::Warn));
-        assert!(coverage.detail.contains("titleForSearch"));
+            .find(|check| check.label == "Rating and colour parity")
+            .expect("rating and colour parity check");
+        assert!(matches!(check.status, DiagStatus::Warn));
+        assert!(
+            check
+                .detail
+                .contains("rating differs: 1, colour differs: 0")
+        );
 
         let summary = summary_rows
             .iter()
-            .find(|row| row.label == "Reference-only eDB fields")
-            .expect("reference-only summary row");
+            .find(|row| row.label == "Rating/colour mismatches")
+            .expect("rating/colour summary row");
         assert!(matches!(summary.status, DiagStatus::Warn));
         assert_eq!(summary.count, 1);
-        assert!(matches!(overall, DiagStatus::Warn));
+        // Minor: it doesn't change the report's overall status.
+        let (_, _, _, overall_without) = build_usb_parity_comparison(
+            &parsed,
+            &edb_playlists_from_tracks(edb_tracks),
+            &RatingColourParity::default(),
+            None,
+        );
+        assert_eq!(format!("{overall:?}"), format!("{overall_without:?}"));
     }
 
     #[test]
@@ -5263,7 +5297,7 @@ mod tests {
         let (_, _, details, _) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
         let test = details
@@ -5510,7 +5544,7 @@ mod tests {
         let (checks, summary_rows, _details, overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             Some(raw_coverage),
         );
 
@@ -5560,7 +5594,7 @@ mod tests {
             let (checks, _, details, overall) = build_usb_parity_comparison(
                 &parsed,
                 &edb_playlists_from_tracks(edb_tracks),
-                &ReferenceOnlyEdbFieldUsage::default(),
+                &RatingColourParity::default(),
                 None,
             );
             let playlist = details
@@ -5650,7 +5684,7 @@ mod tests {
         let (checks, _, details, overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
         let playlist = details
@@ -5723,7 +5757,7 @@ mod tests {
         let (checks, _, details, overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists,
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
 
@@ -5805,7 +5839,7 @@ mod tests {
         let (_checks, _rows, details, _overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists,
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
 
@@ -5844,7 +5878,7 @@ mod tests {
             let (checks, _, details, overall) = build_usb_parity_comparison(
                 &parsed,
                 &edb_playlists_from_tracks(edb_tracks),
-                &ReferenceOnlyEdbFieldUsage::default(),
+                &RatingColourParity::default(),
                 None,
             );
             let playlist = details
@@ -5892,7 +5926,7 @@ mod tests {
         let (checks, _, details, overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
         let playlist = details
@@ -5932,7 +5966,7 @@ mod tests {
         let (checks, _, details, _overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
         let playlist = details
@@ -5964,7 +5998,7 @@ mod tests {
         let (checks, _, details, overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
         let playlist = details
@@ -6006,7 +6040,7 @@ mod tests {
         let (checks, _, details, overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
         let playlist = details
@@ -6054,7 +6088,7 @@ mod tests {
         let (_, _, details, overall) = build_usb_parity_comparison(
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
-            &ReferenceOnlyEdbFieldUsage::default(),
+            &RatingColourParity::default(),
             None,
         );
         let playlist = details

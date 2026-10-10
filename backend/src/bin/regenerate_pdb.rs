@@ -97,6 +97,8 @@ fn main() {
             file_name: t.file_name.clone(),
             publish_track_info_on: None,
             autoload_hotcues_on: None,
+            color_id: Some(t.color_id),
+            rating: Some(t.rating),
         });
     }
 

@@ -892,6 +892,50 @@ pub fn load_table_columns(conn: &rusqlite::Connection, table: &str) -> BackendRe
     Ok(out)
 }
 
+/// One eDB track's star rating and colour, as the PDB track row carries them
+/// (bytes 89 and 88): rating 0–5, colour 0 (none) or a `color` row id 1–8.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EdbRatingColour {
+    pub rating: u8,
+    pub color_id: u8,
+}
+
+/// `content.path` → rating and colour for every eDB track with a path. A
+/// schema without either column reads as 0 for it.
+pub fn read_rating_colour_by_path(conn: &rusqlite::Connection) -> HashMap<String, EdbRatingColour> {
+    if !table_exists(conn, "content") {
+        return HashMap::new();
+    }
+    let columns = load_table_columns(conn, "content").unwrap_or_default();
+    let column_or_zero = |name: &str| {
+        if columns.iter().any(|c| c == name) {
+            format!("COALESCE({name}, 0)")
+        } else {
+            "0".to_string()
+        }
+    };
+    let sql = format!(
+        "SELECT path, {}, {} FROM content WHERE path IS NOT NULL AND trim(path) <> ''",
+        column_or_zero("rating"),
+        column_or_zero("color_id"),
+    );
+    let Ok(mut stmt) = conn.prepare(&sql) else {
+        return HashMap::new();
+    };
+    let byte = |v: i64| u8::try_from(v).unwrap_or(0);
+    stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            EdbRatingColour {
+                rating: byte(row.get::<_, i64>(1)?),
+                color_id: byte(row.get::<_, i64>(2)?),
+            },
+        ))
+    })
+    .map(|rows| rows.flatten().collect())
+    .unwrap_or_default()
+}
+
 pub fn load_table_row_template(
     conn: &rusqlite::Connection,
     table: &str,
