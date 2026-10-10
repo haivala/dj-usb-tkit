@@ -11,6 +11,12 @@ do not write to the USB.
 
 ![Health & Diagnostics: the USB's databases checked area by area](assets/usb-diagnostics.png)
 
+The report opens with one plain-language line per player family and area. The
+individual checks sit under a collapsed **Technical details**, grouped into
+Databases (PDB, eDB and Engine DJ side by side), Library and Low-level:
+
+![Health & Diagnostics: a summary per player, and the checks under Technical details](assets/usb-diagnostics-details.png)
+
 Repairs are separate explicit actions. A repair request can run in preview mode
 or apply mode. Preview mode reports proposed fixes, unsupported issues,
 estimated writes, and estimated deletes. Apply mode writes only selected fixes,

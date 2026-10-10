@@ -721,6 +721,20 @@ function shots(fixture) {
       },
     },
     {
+      // The diagnostics report of the damaged copy (see usb-repair-preview):
+      // warnings in the summary, Technical details open.
+      name: "usb-diagnostics-details",
+      caption: "Health & Diagnostics: a summary per player, and the checks under Technical details",
+      opts: { brokenUsb: true },
+      async run(page) {
+        await openHealthCard(page);
+        await waitProgressHidden(page);
+        await page.locator("#usbHealthCard .diag-technical").evaluate((details) => { details.open = true; });
+        await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
+    },
+    {
       // docs/DIAGNOSTICS_REPAIRS.md: the fixes proposed for a copy of that
       // USB with a renamed audio file, an emptied analysis file and a
       // playlist entry missing from the eDB.

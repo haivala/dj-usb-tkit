@@ -220,7 +220,8 @@ fn dump_usb(svc: &BackendService, spec: &Value, id_of: impl Fn(&str) -> String) 
 
 /// Copies the USB to `broken`, then renames its first audio file (as if
 /// renamed by hand), empties the analysis file of another track, and drops
-/// one playlist entry from the eDB but not the PDB (so they disagree).
+/// one playlist entry and its track from the eDB but not the PDB (so they
+/// disagree).
 fn break_usb_copy(usb: &Path, broken: &Path) {
     let files = |root: &Path, ext: &str| {
         let mut found = walkdir::WalkDir::new(root)
@@ -263,6 +264,13 @@ fn break_usb_copy(usb: &Path, broken: &Path) {
     let conn = rusqlite::Connection::open(&edb).unwrap_or_else(|e| fail("open eDB", e));
     conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
         .unwrap_or_else(|e| fail("unlock eDB", e));
+    let content_id: i64 = conn
+        .query_row(
+            "SELECT content_id FROM playlist_content WHERE rowid = (SELECT MAX(rowid) FROM playlist_content)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|e| fail("find eDB playlist entry", e));
     let dropped = conn
         .execute(
             "DELETE FROM playlist_content WHERE rowid = (SELECT MAX(rowid) FROM playlist_content)",
@@ -271,5 +279,13 @@ fn break_usb_copy(usb: &Path, broken: &Path) {
         .unwrap_or_else(|e| fail("drop eDB playlist entry", e));
     if dropped != 1 {
         fail("drop eDB playlist entry", format!("{dropped} rows deleted"));
+    }
+    // ...and that track's own row, so the PDB has a track the eDB lacks
+    // (the diagnostics summary warns for newer players).
+    let dropped = conn
+        .execute("DELETE FROM content WHERE content_id = ?1", [content_id])
+        .unwrap_or_else(|e| fail("drop eDB track", e));
+    if dropped != 1 {
+        fail("drop eDB track", format!("{dropped} rows deleted"));
     }
 }
