@@ -122,8 +122,6 @@ function makeDiagnosticsEl() {
     diagSections: container("<div>stale</div>"),
     diagOverallStatus: { textContent: "WARN", className: "diag-badge diag-warn" },
     diagDuration: { textContent: "Completed in 1ms" },
-    diagPlaylistDetails: { classList: makeClassList() },
-    diagPlaylistTableBody: container("<tr></tr>"),
     diagRepairSummary: { textContent: "stale summary", className: "diag-repair-summary is-bad" },
     diagRepairFixes: container("<div>stale fix</div>"),
     previewRepairsBtn: { disabled: false },
@@ -137,7 +135,7 @@ function makeDiagnosticsEl() {
 }
 
 function assertDiagnosticsContentCleared(el) {
-  for (const key of ["diagSections", "diagPlaylistTableBody", "diagRepairFixes"]) {
+  for (const key of ["diagSections", "diagRepairFixes"]) {
     assert.equal(el[key].innerHTML, "");
   }
   for (const key of ["diagOverallStatus", "diagDuration", "diagRepairSummary"]) {
@@ -145,7 +143,6 @@ function assertDiagnosticsContentCleared(el) {
   }
   assert.equal(el.previewRepairsBtn.disabled, true);
   assert.equal(el.applyRepairsBtn.disabled, true);
-  assert.equal(el.diagPlaylistDetails.classList.contains("hidden"), true);
   assert.equal(el.diagReportView.classList.contains("hidden"), false);
   assert.equal(el.diagRepairPanel.classList.contains("hidden"), true);
   assert.equal(el.usbHealthDot.classList.contains("health-warn"), false);

@@ -330,22 +330,26 @@ const DISPLAY_LAYOUT: [DisplaySection; 7] = [
     },
 ];
 
-/// Regroups the per-stage diagnostic sections into `DISPLAY_LAYOUT` order.
+/// Regroups report sections into `layout` order (`layout`,
+/// `PARITY_LAYOUT`).
 /// `sources` pairs each stage section with the display section that receives
-/// its checks whose label is not in `DISPLAY_LAYOUT` (e.g. the per-playlist
+/// its checks whose label is not in `layout` (e.g. the per-playlist
 /// resolution rows). Within a display section, listed labels come first in
 /// layout order, unlisted ones after in arrival order. A display section's
 /// status is the worst of its checks, plus the stage status of every source
 /// whose checks all landed in it (keeps e.g. the player-counter confidence
 /// warning, which no single check carries). Empty sections are dropped;
 /// consecutive sections sharing a `group` come out as one group.
-fn diagnostics_display_sections(sources: &[(&DiagSection, usize)]) -> Vec<DiagSectionGroup> {
-    let mut grouped: Vec<Vec<(usize, DiagCheck)>> = vec![Vec::new(); DISPLAY_LAYOUT.len()];
-    let mut statuses: Vec<Vec<DiagStatus>> = vec![Vec::new(); DISPLAY_LAYOUT.len()];
+fn regroup_sections(
+    layout: &[DisplaySection],
+    sources: &[(&DiagSection, usize)],
+) -> Vec<DiagSectionGroup> {
+    let mut grouped: Vec<Vec<(usize, DiagCheck)>> = vec![Vec::new(); layout.len()];
+    let mut statuses: Vec<Vec<DiagStatus>> = vec![Vec::new(); layout.len()];
     for (section, default_target) in sources {
         let mut targets = HashSet::new();
         for check in &section.checks {
-            let (target, rank) = DISPLAY_LAYOUT
+            let (target, rank) = layout
                 .iter()
                 .enumerate()
                 .find_map(|(i, display)| {
@@ -366,9 +370,7 @@ fn diagnostics_display_sections(sources: &[(&DiagSection, usize)]) -> Vec<DiagSe
         }
     }
     let mut groups: Vec<DiagSectionGroup> = Vec::new();
-    for (display, (mut checks, statuses)) in
-        DISPLAY_LAYOUT.iter().zip(grouped.into_iter().zip(statuses))
-    {
+    for (display, (mut checks, statuses)) in layout.iter().zip(grouped.into_iter().zip(statuses)) {
         if checks.is_empty() {
             continue;
         }
@@ -405,6 +407,12 @@ struct OverviewFacts {
 }
 
 const PREVIEW_FIXES_HINT: &str = "Preview Fixes shows what can be repaired.";
+
+/// `count` followed by the singular or plural phrase, for overview text
+/// ("1 track is …" / "3 tracks are …").
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
+}
 
 /// The short "what does this mean for me" summary shown above the technical
 /// sections: one row per thing a DJ cares about, in everyday words. Built from
@@ -447,8 +455,9 @@ fn diagnostics_overview(
     } else {
         match pdb_status {
             DiagStatus::Pass => format!(
-                "Ready: {} playlists, {} tracks.",
-                facts.playlists, facts.pdb_tracks
+                "Ready: {}, {}.",
+                counted(facts.playlists, "playlist", "playlists"),
+                counted(facts.pdb_tracks, "track", "tracks")
             ),
             DiagStatus::Warn => with_hint(vec![
                 "Readable, but parts of the player database are irregular and desktop DJ software may complain."
@@ -473,15 +482,17 @@ fn diagnostics_overview(
     } else {
         let mut problems = Vec::new();
         if facts.pdb_only_tracks > 0 {
-            problems.push(format!(
-                "{} tracks are missing from the database newer players read, so they may not show up there.",
-                facts.pdb_only_tracks
+            problems.push(counted(
+                facts.pdb_only_tracks,
+                "track is missing from the database newer players read, so it may not show up there.",
+                "tracks are missing from the database newer players read, so they may not show up there.",
             ));
         }
         if facts.edb_only_tracks > 0 {
-            problems.push(format!(
-                "{} tracks are only in the newer players' database, so older Pioneer players won't show them.",
-                facts.edb_only_tracks
+            problems.push(counted(
+                facts.edb_only_tracks,
+                "track is only in the newer players' database, so older Pioneer players won't show it.",
+                "tracks are only in the newer players' database, so older Pioneer players won't show them.",
             ));
         }
         if !check_status(edb, "BPM/key consistency").is_none_or(|s| is_pass(&s)) {
@@ -499,7 +510,7 @@ fn diagnostics_overview(
             problems.push("Parts of the newer players' database are irregular.".to_string());
         }
         if problems.is_empty() {
-            format!("Ready: {} tracks.", facts.edb_tracks)
+            format!("Ready: {}.", counted(facts.edb_tracks, "track", "tracks"))
         } else {
             with_hint(problems)
         }
@@ -513,12 +524,14 @@ fn diagnostics_overview(
         .saturating_sub(facts.resolved_playlist_entries);
     let playlists_detail = if is_pass(&playlists_status) {
         format!(
-            "Every track in your {} playlists is found.",
-            facts.playlists
+            "Every track in your {} is found.",
+            counted(facts.playlists, "playlist", "playlists")
         )
     } else if missing_entries > 0 {
-        with_hint(vec![format!(
-            "{missing_entries} tracks in your playlists can't be found."
+        with_hint(vec![counted(
+            missing_entries,
+            "track in your playlists can't be found.",
+            "tracks in your playlists can't be found.",
         )])
     } else {
         with_hint(vec![
@@ -578,6 +591,209 @@ fn diagnostics_overview(
     };
     items.push(engine_item);
     items
+}
+
+const PARITY_PLAYLISTS: usize = 0;
+const PARITY_TRACK_INFO: usize = 1;
+const PARITY_FILES: usize = 2;
+
+/// Strict-parity checks grouped by what they compare. `PARITY_*` index into it.
+const PARITY_LAYOUT: [DisplaySection; 3] = [
+    DisplaySection {
+        group: "Comparison",
+        title: "Playlists",
+        labels: &[
+            "Playlist identity parity",
+            "Playlist membership parity",
+            "Playlist ordering parity",
+            "Duplicate PDB entries",
+        ],
+    },
+    DisplaySection {
+        group: "Comparison",
+        title: "Track details",
+        labels: &[
+            "PDB metadata completeness",
+            "eDB source completeness",
+            "PDB dictionary id resolution",
+            "Artwork presence parity",
+            "Reference-documented field coverage",
+        ],
+    },
+    DisplaySection {
+        group: "Comparison",
+        title: "Music files",
+        labels: &[
+            "Indexed audio file presence",
+            "Media and analysis path parity",
+        ],
+    },
+];
+
+/// Report-level rows the badge and the overview already cover.
+const PARITY_HEADLINE_CHECKS: [&str; 2] = [
+    "Overall player parity status",
+    "Parity-report section (required)",
+];
+
+/// The strict-parity checks regrouped into `PARITY_LAYOUT` columns.
+fn parity_section_groups(checks: &[DiagCheck]) -> Vec<DiagSectionGroup> {
+    let source = DiagSection {
+        title: "Strict parity".to_string(),
+        status: DiagStatus::Pass,
+        checks: checks
+            .iter()
+            .filter(|c| !PARITY_HEADLINE_CHECKS.contains(&c.label.as_str()))
+            .cloned()
+            .collect(),
+        counts: None,
+    };
+    regroup_sections(&PARITY_LAYOUT, &[(&source, PARITY_TRACK_INFO)])
+}
+
+/// Plain-language summary of the strict-parity report: whether older and
+/// newer Pioneer players see the same playlists, track details and files.
+fn parity_overview(
+    groups: &[DiagSectionGroup],
+    totals: &ParityTotals,
+    playlists: usize,
+    raw_coverage: Option<&StrictRawCoverageParity>,
+) -> Vec<DiagOverviewItem> {
+    let section = |index: usize| {
+        groups
+            .iter()
+            .flat_map(|g| &g.sections)
+            .find(|s| s.title == PARITY_LAYOUT[index].title)
+    };
+    let status_of = |index: usize, skip: &[&str]| {
+        DiagStatus::worst_of(
+            &section(index)
+                .map(|s| {
+                    s.checks
+                        .iter()
+                        .filter(|c| !skip.contains(&c.label.as_str()))
+                        .map(|c| &c.status)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        )
+    };
+    let row = |title: &str, status: DiagStatus, problems: Vec<String>, ready: String| {
+        let detail = if problems.is_empty() {
+            ready
+        } else {
+            let mut sentences = problems;
+            sentences.push(PREVIEW_FIXES_HINT.to_string());
+            sentences.join(" ")
+        };
+        DiagOverviewItem {
+            title: title.to_string(),
+            status: Some(status),
+            detail,
+        }
+    };
+    let problem =
+        |count: usize, one: &str, many: &str| (count > 0).then(|| counted(count, one, many));
+
+    let playlist_problems = [
+        problem(
+            totals.playlist_id_mismatches,
+            "playlist doesn't line up between the two databases.",
+            "playlists don't line up between the two databases.",
+        ),
+        problem(
+            totals.total_only_in_pdb,
+            "playlist track is only in the database older Pioneer players read.",
+            "playlist tracks are only in the database older Pioneer players read.",
+        ),
+        problem(
+            totals.total_only_in_edb,
+            "playlist track is only in the database newer Pioneer players read.",
+            "playlist tracks are only in the database newer Pioneer players read.",
+        ),
+        problem(
+            totals.order_mismatches,
+            "playlist is in a different order depending on the player.",
+            "playlists are in a different order depending on the player.",
+        ),
+        problem(
+            totals.total_duplicate_entries,
+            "track is listed twice in a playlist on older Pioneer players.",
+            "tracks are listed twice in a playlist on older Pioneer players.",
+        ),
+    ];
+    // Reference-field coverage is about what this app compares, not about
+    // the USB, so it stays in the technical details only.
+    let track_problems = [
+        problem(
+            totals.total_pdb_missing_core_metadata,
+            "track is missing track details on older Pioneer players.",
+            "tracks are missing track details on older Pioneer players.",
+        ),
+        problem(
+            totals.total_edb_missing_core_metadata,
+            "track is missing track details in the database newer Pioneer players read.",
+            "tracks are missing track details in the database newer Pioneer players read.",
+        ),
+        problem(
+            totals.total_dictionary_id_issues,
+            "track refers to an artist, album or key that's missing on older Pioneer players.",
+            "tracks refer to an artist, album or key that's missing on older Pioneer players.",
+        ),
+        problem(
+            totals.total_artwork_mismatches,
+            "track has artwork on one kind of Pioneer player but not the other.",
+            "tracks have artwork on one kind of Pioneer player but not the other.",
+        ),
+    ];
+    let file_problems = [
+        raw_coverage.and_then(|r| {
+            problem(
+                r.missing_count,
+                "audio file is missing from the USB, so that track won't play.",
+                "audio files are missing from the USB, so those tracks won't play.",
+            )
+        }),
+        raw_coverage.and_then(|r| {
+            problem(
+                r.extra_count,
+                "audio file on the USB isn't in any playlist.",
+                "audio files on the USB aren't in any playlist.",
+            )
+        }),
+        problem(
+            totals.total_path_mismatches,
+            "track points to a different audio or waveform file depending on the player.",
+            "tracks point to a different audio or waveform file depending on the player.",
+        ),
+    ];
+
+    vec![
+        row(
+            "Playlists",
+            status_of(PARITY_PLAYLISTS, &[]),
+            playlist_problems.into_iter().flatten().collect(),
+            format!(
+                "Both databases have the same {}, with the same tracks in the same order.",
+                counted(playlists, "playlist", "playlists")
+            ),
+        ),
+        row(
+            "Track details",
+            status_of(PARITY_TRACK_INFO, &["Reference-documented field coverage"]),
+            track_problems.into_iter().flatten().collect(),
+            "Every playlist track has complete details and the same artwork in both databases."
+                .to_string(),
+        ),
+        row(
+            "Music files",
+            status_of(PARITY_FILES, &[]),
+            file_problems.into_iter().flatten().collect(),
+            "Every playlist track's audio file is on the USB, and both databases point to the \
+             same files."
+                .to_string(),
+        ),
+    ]
 }
 
 /// Short "Issues" badges for a strict-parity playlist row (previously
@@ -1345,7 +1561,7 @@ impl BackendService {
         ];
         display_sources.extend(engine_library_section.iter().map(|s| (s, DISPLAY_ENGINE)));
         display_sources.extend(cdj_counter_section.iter().map(|s| (s, DISPLAY_LOW_LEVEL)));
-        let section_groups = diagnostics_display_sections(&display_sources);
+        let section_groups = regroup_sections(&DISPLAY_LAYOUT, &display_sources);
         let overview = diagnostics_overview(
             &section_groups,
             &OverviewFacts {
@@ -1548,7 +1764,14 @@ impl BackendService {
             parsed,
             &edb_playlists,
             &reference_only_edb_fields,
-            Some(strict_raw_coverage),
+            Some(strict_raw_coverage.clone()),
+        );
+        let section_groups = parity_section_groups(&checks);
+        let overview = parity_overview(
+            &section_groups,
+            &ParityTotals::from_details(&playlist_details),
+            playlist_details.len(),
+            Some(&strict_raw_coverage),
         );
         note_stage("compare playlist sources", &mut raw_warnings);
 
@@ -1556,6 +1779,8 @@ impl BackendService {
         note_stage("finalize", &mut raw_warnings);
         Ok(RunUsbParityReportData {
             overall_status,
+            overview,
+            section_groups,
             checks,
             summary_rows,
             playlist_details,
@@ -2847,6 +3072,67 @@ where
     )
 }
 
+/// Report-wide counts summed over the per-playlist parity details.
+struct ParityTotals {
+    fail_playlists: usize,
+    total_only_in_pdb: usize,
+    total_only_in_edb: usize,
+    entry_order_mismatches: usize,
+    sort_order_mismatches: usize,
+    order_mismatches: usize,
+    total_duplicate_entries: usize,
+    total_pdb_missing_core_metadata: usize,
+    total_edb_missing_core_metadata: usize,
+    total_artwork_mismatches: usize,
+    total_path_mismatches: usize,
+    total_dictionary_id_issues: usize,
+    playlist_id_mismatches: usize,
+}
+
+impl ParityTotals {
+    fn from_details(details: &[UsbParityPlaylistDetail]) -> Self {
+        let fail_playlists = details
+            .iter()
+            .filter(|d| matches!(d.status, DiagStatus::Fail))
+            .count();
+        let total_only_in_pdb: usize = details.iter().map(|d| d.only_in_pdb).sum();
+        let total_only_in_edb: usize = details.iter().map(|d| d.only_in_edb).sum();
+        let entry_order_mismatches = details.iter().filter(|d| d.order_mismatch).count();
+        let sort_order_mismatches = details
+            .iter()
+            .filter(|d| d.pdb_sort_order.is_some() && d.edb_sort_order.is_some())
+            .filter(|d| !d.sort_order_match)
+            .count();
+        let order_mismatches = entry_order_mismatches + sort_order_mismatches;
+        let total_duplicate_entries: usize = details.iter().map(|d| d.pdb_duplicate_entries).sum();
+        let total_pdb_missing_core_metadata: usize =
+            details.iter().map(|d| d.pdb_missing_core_metadata).sum();
+        let total_edb_missing_core_metadata: usize =
+            details.iter().map(|d| d.edb_missing_core_metadata).sum();
+        let total_artwork_mismatches: usize =
+            details.iter().map(|d| d.artwork_mismatch_tracks).sum();
+        let total_path_mismatches: usize = details.iter().map(|d| d.path_mismatch_tracks).sum();
+        let total_dictionary_id_issues: usize =
+            details.iter().map(|d| d.dictionary_id_issue_tracks).sum();
+        let playlist_id_mismatches = details.iter().filter(|d| !d.playlist_id_match).count();
+        Self {
+            fail_playlists,
+            total_only_in_pdb,
+            total_only_in_edb,
+            entry_order_mismatches,
+            sort_order_mismatches,
+            order_mismatches,
+            total_duplicate_entries,
+            total_pdb_missing_core_metadata,
+            total_edb_missing_core_metadata,
+            total_artwork_mismatches,
+            total_path_mismatches,
+            total_dictionary_id_issues,
+            playlist_id_mismatches,
+        }
+    }
+}
+
 pub(crate) fn build_usb_parity_comparison(
     parsed: &crate::pdb_reader::ParsedPdb,
     edb_playlists: &HashMap<String, ExportDbPlaylist>,
@@ -3675,29 +3961,21 @@ pub(crate) fn build_usb_parity_comparison(
             .then_with(|| a.name.cmp(&b.name))
     });
 
-    let fail_playlists = details
-        .iter()
-        .filter(|d| matches!(d.status, DiagStatus::Fail))
-        .count();
-    let total_only_in_pdb: usize = details.iter().map(|d| d.only_in_pdb).sum();
-    let total_only_in_edb: usize = details.iter().map(|d| d.only_in_edb).sum();
-    let entry_order_mismatches = details.iter().filter(|d| d.order_mismatch).count();
-    let sort_order_mismatches = details
-        .iter()
-        .filter(|d| d.pdb_sort_order.is_some() && d.edb_sort_order.is_some())
-        .filter(|d| !d.sort_order_match)
-        .count();
-    let order_mismatches = entry_order_mismatches + sort_order_mismatches;
-    let total_duplicate_entries: usize = details.iter().map(|d| d.pdb_duplicate_entries).sum();
-    let total_pdb_missing_core_metadata: usize =
-        details.iter().map(|d| d.pdb_missing_core_metadata).sum();
-    let total_edb_missing_core_metadata: usize =
-        details.iter().map(|d| d.edb_missing_core_metadata).sum();
-    let total_artwork_mismatches: usize = details.iter().map(|d| d.artwork_mismatch_tracks).sum();
-    let total_path_mismatches: usize = details.iter().map(|d| d.path_mismatch_tracks).sum();
-    let total_dictionary_id_issues: usize =
-        details.iter().map(|d| d.dictionary_id_issue_tracks).sum();
-    let playlist_id_mismatches = details.iter().filter(|d| !d.playlist_id_match).count();
+    let ParityTotals {
+        fail_playlists,
+        total_only_in_pdb,
+        total_only_in_edb,
+        entry_order_mismatches,
+        sort_order_mismatches,
+        order_mismatches,
+        total_duplicate_entries,
+        total_pdb_missing_core_metadata,
+        total_edb_missing_core_metadata,
+        total_artwork_mismatches,
+        total_path_mismatches,
+        total_dictionary_id_issues,
+        playlist_id_mismatches,
+    } = ParityTotals::from_details(&details);
     let reference_only_field_tracks = reference_only_edb_fields.playlist_linked_tracks;
     let reference_only_field_list = if reference_only_edb_fields.populated_fields.is_empty() {
         "none".to_string()
@@ -4194,13 +4472,14 @@ mod tests {
     use std::fs;
 
     use super::{
-        DISPLAY_ANALYSIS, DISPLAY_EDB, DISPLAY_ENGINE, DISPLAY_LOW_LEVEL, DISPLAY_PDB,
-        DISPLAY_PLAYLISTS, ExportDbPlaylist, OverviewFacts, ReferenceOnlyEdbFieldUsage,
-        build_usb_parity_comparison, count_named_history_rows, diagnose_contents_integrity,
-        diagnose_playlist_resolution_with_db, diagnose_playlist_resolution_with_edb_internal,
-        diagnostics_display_sections, diagnostics_overview, evaluate_strict_raw_coverage_parity,
-        normalize_pdb_path_for_edb_lookup, normalize_track_path_for_identity, parity_issue_labels,
-        track_identity_key,
+        DISPLAY_ANALYSIS, DISPLAY_EDB, DISPLAY_ENGINE, DISPLAY_LAYOUT, DISPLAY_LOW_LEVEL,
+        DISPLAY_PDB, DISPLAY_PLAYLISTS, ExportDbPlaylist, OverviewFacts, ParityTotals,
+        ReferenceOnlyEdbFieldUsage, build_usb_parity_comparison, count_named_history_rows,
+        diagnose_contents_integrity, diagnose_playlist_resolution_with_db,
+        diagnose_playlist_resolution_with_edb_internal, diagnostics_overview,
+        evaluate_strict_raw_coverage_parity, normalize_pdb_path_for_edb_lookup,
+        normalize_track_path_for_identity, parity_issue_labels, parity_overview,
+        parity_section_groups, regroup_sections, track_identity_key,
     };
     use crate::models::UsbParityPlaylistDetail;
 
@@ -4260,13 +4539,16 @@ mod tests {
         let edb = diag_section("Database Access", "PASS", &[("eDB", "PASS")]);
         // Status carried by the stage, not by any check (player-counter confidence).
         let cdj = diag_section("Player Counter Snapshot", "WARN", &[("Shape mode", "PASS")]);
-        let groups = diagnostics_display_sections(&[
-            (&pdb, DISPLAY_PDB),
-            (&playlists, DISPLAY_PLAYLISTS),
-            (&edb, DISPLAY_EDB),
-            (&contents, DISPLAY_EDB),
-            (&cdj, DISPLAY_LOW_LEVEL),
-        ]);
+        let groups = regroup_sections(
+            &DISPLAY_LAYOUT,
+            &[
+                (&pdb, DISPLAY_PDB),
+                (&playlists, DISPLAY_PLAYLISTS),
+                (&edb, DISPLAY_EDB),
+                (&contents, DISPLAY_EDB),
+                (&cdj, DISPLAY_LOW_LEVEL),
+            ],
+        );
         type SectionLayout<'a> = (&'a str, Vec<&'a str>);
         let layout: Vec<(&str, Vec<SectionLayout>)> = groups
             .iter()
@@ -4346,14 +4628,17 @@ mod tests {
         );
         let analysis = diag_section("Analysis Files", "PASS", &[("PDB analysis refs", "PASS")]);
         let engine = diag_section("Engine DJ Library", "PASS", &[("Not on this USB", "PASS")]);
-        let groups = diagnostics_display_sections(&[
-            (&pdb, DISPLAY_PDB),
-            (&playlists, DISPLAY_PLAYLISTS),
-            (&analysis, DISPLAY_ANALYSIS),
-            (&edb, DISPLAY_EDB),
-            (&contents, DISPLAY_EDB),
-            (&engine, DISPLAY_ENGINE),
-        ]);
+        let groups = regroup_sections(
+            &DISPLAY_LAYOUT,
+            &[
+                (&pdb, DISPLAY_PDB),
+                (&playlists, DISPLAY_PLAYLISTS),
+                (&analysis, DISPLAY_ANALYSIS),
+                (&edb, DISPLAY_EDB),
+                (&contents, DISPLAY_EDB),
+                (&engine, DISPLAY_ENGINE),
+            ],
+        );
         let overview = diagnostics_overview(
             &groups,
             &OverviewFacts {
@@ -4445,6 +4730,121 @@ mod tests {
             status: DiagStatus::Pass,
             issue_labels: Vec::new(),
         }
+    }
+
+    #[test]
+    fn overview_uses_singular_wording_for_one() {
+        let pdb = diag_section(
+            "PDB Integrity",
+            "PASS",
+            &[("PDB exists", "PASS"), ("PDB parseable", "PASS")],
+        );
+        let edb = diag_section("Database Access", "PASS", &[("eDB", "PASS")]);
+        let contents = diag_section(
+            "Contents Integrity",
+            "WARN",
+            &[("PDB/eDB path agreement", "WARN")],
+        );
+        let groups = regroup_sections(
+            &DISPLAY_LAYOUT,
+            &[
+                (&pdb, DISPLAY_PDB),
+                (&edb, DISPLAY_EDB),
+                (&contents, DISPLAY_EDB),
+            ],
+        );
+        let overview = diagnostics_overview(
+            &groups,
+            &OverviewFacts {
+                edb_file_present: true,
+                pdb_tracks: 1,
+                edb_tracks: 0,
+                pdb_only_tracks: 1,
+                edb_only_tracks: 0,
+                playlists: 1,
+                playlist_entries: 1,
+                resolved_playlist_entries: 1,
+            },
+        );
+        assert_eq!(overview[0].detail, "Ready: 1 playlist, 1 track.");
+        assert!(overview[1].detail.starts_with(
+            "1 track is missing from the database newer players read, so it may not show up there."
+        ));
+    }
+
+    #[test]
+    fn parity_overview_explains_mismatches_in_plain_words() {
+        use crate::models::{DiagCheck, DiagStatus};
+        let check = |label: &str, status: DiagStatus| DiagCheck {
+            label: label.to_string(),
+            status,
+            detail: String::new(),
+            link: None,
+        };
+        let checks = vec![
+            check("Overall player parity status", DiagStatus::Fail),
+            check("Playlist membership parity", DiagStatus::Fail),
+            check("PDB metadata completeness", DiagStatus::Pass),
+            // Not about the USB: shows in the technical details only.
+            check("Reference-documented field coverage", DiagStatus::Warn),
+            check("Indexed audio file presence", DiagStatus::Pass),
+        ];
+        let groups = parity_section_groups(&checks);
+        let titles: Vec<&str> = groups[0]
+            .sections
+            .iter()
+            .map(|s| s.title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["Playlists", "Track details", "Music files"]);
+        assert!(
+            groups[0]
+                .sections
+                .iter()
+                .flat_map(|s| &s.checks)
+                .all(|c| c.label != "Overall player parity status")
+        );
+
+        let mut detail = parity_detail();
+        detail.only_in_pdb = 2;
+        let overview = parity_overview(
+            &groups,
+            &ParityTotals::from_details(&[detail, parity_detail()]),
+            2,
+            Some(&evaluate_strict_raw_coverage_parity(0, 0, 20)),
+        );
+        let rows: Vec<(&str, bool, &str)> = overview
+            .iter()
+            .map(|i| {
+                (
+                    i.title.as_str(),
+                    matches!(i.status, Some(DiagStatus::Pass)),
+                    i.detail.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "Playlists",
+                    false,
+                    "2 playlist tracks are only in the database older Pioneer players read. \
+                     Preview Fixes shows what can be repaired."
+                ),
+                (
+                    "Track details",
+                    true,
+                    "Every playlist track has complete details and the same artwork in both \
+                     databases."
+                ),
+                (
+                    "Music files",
+                    true,
+                    "Every playlist track's audio file is on the USB, and both databases point \
+                     to the same files."
+                ),
+            ]
+        );
     }
 
     #[test]

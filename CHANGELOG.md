@@ -59,6 +59,12 @@
   detailed checks moved under a collapsed **Technical details**, regrouped into Databases
   (PDB, eDB, Engine DJ side by side), Library (playlists, analysis) and Low-level boxes.
   The per-playlist resolution table, which repeated the summary, is gone.
+- **Improvement:** The Parity Report gets the same treatment: three plain-language lines
+  (playlists, track details, music files) saying whether older and newer Pioneer players see
+  the same thing, with the checks and the per-playlist comparison under a collapsed
+  **Technical details**. The parity summary table, which repeated the checks, is gone. Its
+  result shows as its own "Parity" badge next to the health badge instead of replacing it,
+  so the badge and the USB health dot no longer disagree.
 - **Improvement:** Every collapsible heading shows the pointer cursor and no longer selects
   text when clicked.
 

@@ -228,6 +228,7 @@
             <summary class="usb-health-summary">
               <span class="usb-cfg-section-label">Health &amp; Diagnostics</span>
               <span id="diagOverallStatus" class="diag-badge"></span>
+              <span id="diagParityStatus" class="diag-badge"></span>
               <span class="muted" id="diagDuration"></span>
             </summary>
             <div class="usb-health-content">
@@ -235,24 +236,6 @@
                 <!-- Diagnostics report view (default) -->
                 <div id="diagReportView">
                   <div id="diagSections"></div>
-                  <details class="diag-details hidden" id="diagPlaylistDetails">
-                    <summary class="muted">Strict Parity Playlist Details</summary>
-                    <div class="table-wrap">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Status</th>
-                            <th>Playlist</th>
-                            <th class="num">PDB</th>
-                            <th class="num">eDB</th>
-                            <th class="num">Matched</th>
-                            <th>Issues</th>
-                          </tr>
-                        </thead>
-                        <tbody id="diagPlaylistTableBody"></tbody>
-                      </table>
-                    </div>
-                  </details>
                 </div>
 
                 <!-- Repair preview view (replaces report when active) -->
@@ -883,13 +866,10 @@
     <tr><td><span class="diag-dot"></span></td><td></td><td class="num"></td><td class="num"></td><td class="num"></td><td><span class="muted"></span></td></tr>
   </template>
   <template id="tplDiagParityIntro">
-    <p class="muted diag-intro">Compares the two databases on the USB: the legacy database (PDB) and the new database (eDB). On a healthy USB both hold the same playlists, tracks, track order and metadata. <strong>A FAIL means players may show different playlists or tracks depending on which database they read.</strong> Use Preview Fixes to see what can be repaired.</p>
+    <div class="diag-intro"><h3>Parity Report</h3><p class="muted">Checks that older and newer Pioneer players see the same playlists and tracks on this USB.</p></div>
   </template>
-  <template id="tplDiagParitySummary">
-    <div><h4>Parity Summary</h4><table class="diag-table"><thead><tr><th>Status</th><th>Metric</th><th>Count</th></tr></thead><tbody></tbody></table></div>
-  </template>
-  <template id="tplDiagParitySummaryRow">
-    <tr><td><span class="diag-dot"></span> <span class="diag-summary-status"></span></td><td></td><td></td></tr>
+  <template id="tplDiagParityPlaylists">
+    <div class="diag-group"><div class="diag-group-title usb-cfg-section-label">Playlists compared</div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Playlist</th><th class="num">PDB</th><th class="num">eDB</th><th class="num">Matched</th><th>Issues</th></tr></thead><tbody></tbody></table></div></div>
   </template>
   <template id="tplRepairFix">
     <li><input type="checkbox" class="diag-repair-fix-check" /><div class="diag-repair-fix-content"><div class="diag-repair-fix-title"><strong></strong></div><span class="diag-repair-fix-desc"></span><span class="diag-repair-fix-meta"></span></div></li>

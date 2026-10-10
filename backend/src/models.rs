@@ -1677,7 +1677,7 @@ pub struct RunUsbDiagnosticsData {
     /// (`service::diagnostics::diagnostics_overview`).
     pub overview: Vec<DiagOverviewItem>,
     /// The technical report: the stage sections below regrouped into display
-    /// order (`service::diagnostics::diagnostics_display_sections`).
+    /// order (`service::diagnostics::regroup_sections`).
     pub section_groups: Vec<DiagSectionGroup>,
     // Per-stage sections, as computed. Backend-only (CLI tool, tests); the UI
     // gets the same checks through `sections`.
@@ -1809,8 +1809,17 @@ pub struct UsbParityPlaylistDetail {
 #[serde(rename_all = "camelCase")]
 pub struct RunUsbParityReportData {
     pub overall_status: DiagStatus,
+    /// Plain-language summary the desktop UI shows first
+    /// (`service::diagnostics::parity_overview`).
+    pub overview: Vec<DiagOverviewItem>,
+    /// The technical report: `checks` regrouped into columns
+    /// (`service::diagnostics::parity_section_groups`).
+    pub section_groups: Vec<DiagSectionGroup>,
+    // Flat check list and per-category counts. Backend-only (CLI tools,
+    // tests); the UI gets the same checks through `section_groups`.
+    #[serde(skip_serializing)]
     pub checks: Vec<DiagCheck>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub summary_rows: Vec<DiagSummaryRow>,
     pub playlist_details: Vec<UsbParityPlaylistDetail>,
     pub warnings: Vec<WarningEntry>,

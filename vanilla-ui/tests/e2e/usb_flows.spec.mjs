@@ -134,44 +134,39 @@ function installTauriMock(page, mode) {
               ok: true,
               data: {
                 overallStatus: "FAIL",
-                checks: [
-                  {
-                    label: "Overall player parity status",
-                    status: "FAIL",
-                    detail: "playlists checked: 1, fail: 1"
-                  },
-                  {
-                    label: "PDB metadata completeness",
-                    status: "FAIL",
-                    detail: "1 playlist-linked PDB track(s) are missing required player metadata"
-                  },
-                  {
-                    label: "Media and analysis path parity",
-                    status: "FAIL",
-                    detail: "1 playlist-linked track(s) have media/analysis path mismatches"
-                  },
-                  {
-                    label: "Artwork presence parity",
-                    status: "WARN",
-                    detail: "1 playlist-linked track(s) have artwork in one DB but not the other"
-                  },
-                  {
-                    label: "PDB dictionary id resolution",
-                    status: "FAIL",
-                    detail: "1 playlist-linked track(s) have unresolved required PDB dictionary ids"
-                  }
+                overview: [
+                  { title: "Playlists", status: "PASS", detail: "Both databases have the same 1 playlists, with the same tracks in the same order." },
+                  { title: "Track details", status: "FAIL", detail: "1 tracks are missing track details on older Pioneer players." },
+                  { title: "Music files", status: "FAIL", detail: "1 tracks point to a different audio or waveform file depending on the player." }
                 ],
-                summaryRows: [
-                  { label: "Failing playlists", status: "FAIL", count: 1 },
-                  { label: "Membership only-in-PDB", status: "PASS", count: 0 },
-                  { label: "Membership only-in-eDB", status: "PASS", count: 0 },
-                  { label: "Order mismatches", status: "PASS", count: 0 },
-                  { label: "Duplicate PDB entries", status: "PASS", count: 0 },
-                  { label: "PDB metadata gaps", status: "FAIL", count: 1 },
-                  { label: "eDB source gaps", status: "PASS", count: 0 },
-                  { label: "Path mismatches", status: "FAIL", count: 1 },
-                  { label: "Artwork presence mismatches", status: "WARN", count: 1 },
-                  { label: "Unresolved PDB dictionary ids", status: "FAIL", count: 1 }
+                sectionGroups: [
+                  {
+                    title: "Comparison",
+                    sections: [
+                      {
+                        title: "Track details",
+                        status: "FAIL",
+                        checks: [
+                          {
+                            label: "PDB metadata completeness",
+                            status: "FAIL",
+                            detail: "1 playlist-linked PDB track(s) are missing required player metadata"
+                          }
+                        ]
+                      },
+                      {
+                        title: "Music files",
+                        status: "FAIL",
+                        checks: [
+                          {
+                            label: "Media and analysis path parity",
+                            status: "FAIL",
+                            detail: "1 playlist-linked track(s) have media/analysis path mismatches"
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 ],
                 playlistDetails: [
                   {
@@ -707,7 +702,7 @@ test("Rediagnose USB and Parity Report open Health & Diagnostics whatever the re
   await usbHealthCard.evaluate((node) => { node.open = false; });
   await page.locator("#runUsbParityBtn").click();
   await expect(usbHealthCard).toHaveAttribute("open");
-  await expect(page.locator("#diagSections")).toContainText("USB Strict Parity Report");
+  await expect(page.locator("#diagSections .diag-intro h3")).toHaveText("Parity Report");
 
   await usbHealthCard.evaluate((node) => { node.open = false; });
   await page.evaluate(() => { window.__failParity = true; });
@@ -739,34 +734,39 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagSections .diag-group").first().locator(".diag-section-title")).toHaveText(["PDB", "Engine DJ"]);
   await expect(page.locator("#diagSections")).toContainText("Overall resolution");
   await expect(page.locator("#diagSections")).toContainText("Kept up to date");
-  await expect(page.locator("#diagPlaylistDetails")).toBeHidden();
+  await expect(page.locator("#diagSections")).not.toContainText("Playlists compared");
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
 
   await page.locator("#runUsbParityBtn").click();
-  // Strict parity section header
-  await expect(page.locator("#diagSections")).toContainText("USB Strict Parity Report");
-  await expect(page.locator("#diagSections")).toContainText("Overall player parity status");
-  await expect(page.locator("#diagSections")).toContainText("PDB metadata completeness");
-  // Parity summary table renders structured rows, not a dense sentence
-  await expect(page.locator("#diagSections")).toContainText("Parity Summary");
-  await expect(page.locator("#diagSections")).toContainText("Failing playlists");
-  await expect(page.locator("#diagSections")).toContainText("PDB metadata gaps");
-  await expect(page.locator("#diagSections")).toContainText("Path mismatches");
-  await expect(page.locator("#diagSections")).toContainText("Artwork presence mismatches");
-  await expect(page.locator("#diagSections")).toContainText("Unresolved PDB dictionary ids");
-  // Legacy dense summary sentence is absent
-  await expect(page.locator("#diagSections")).not.toContainText("failing playlists=1, membership only-in-PDB");
-  await expect(page.locator("#diagSections")).not.toContainText("Track key overlap");
-  await expect(page.locator("#diagSections")).not.toContainText("Pro playlist coverage mode");
-  // Diagnostics section should not leak into parity
+  // Parity report: heading, plain-language rows, then the collapsed technical details
+  await expect(page.locator("#diagSections .diag-intro h3")).toHaveText("Parity Report");
+  // The parity result gets its own badge; the health badge stays as diagnostics left it.
+  await expect(page.locator("#diagParityStatus")).toHaveText("Parity FAIL");
+  await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
+  await expect(page.locator("#diagSections .diag-overview-title")).toHaveText([
+    "Playlists",
+    "Track details",
+    "Music files"
+  ]);
+  await expect(page.locator("#diagSections .diag-overview-item.diag-check-fail")).toHaveCount(2);
+  const parityTechnical = page.locator("#diagSections .diag-technical");
+  await expect(parityTechnical).not.toHaveAttribute("open");
+  await parityTechnical.locator("summary").click();
+  await expect(page.locator("#diagSections .diag-group-title")).toHaveText(["Comparison", "Playlists compared"]);
+  await expect(parityTechnical).toContainText("PDB metadata completeness");
+  // Diagnostics content should not leak into parity
   await expect(page.locator("#diagSections")).not.toContainText("Databases");
-  await expect(page.locator("#diagSections .diag-overview-item")).toHaveCount(0);
-  // Strict parity playlist details table
-  await expect(page.locator("#diagPlaylistDetails")).toContainText("Strict Parity Playlist Details");
-  await expect(page.locator("#diagPlaylistTableBody")).toContainText("Warmup");
-  await expect(page.locator("#diagPlaylistTableBody")).toContainText("path mismatch 1");
-  await expect(page.locator("#diagPlaylistTableBody")).toContainText("dict issues 1");
-  await expect(page.locator("#diagPlaylistTableBody")).toContainText("PDB gaps 1");
+  await expect(page.locator("#diagSections")).not.toContainText("Older Pioneer players");
+  // Per-playlist comparison table
+  const playlistRows = parityTechnical.locator("tbody");
+  await expect(playlistRows).toContainText("Warmup");
+  await expect(playlistRows).toContainText("path mismatch 1");
+  await expect(playlistRows).toContainText("dict issues 1");
+  await expect(playlistRows).toContainText("PDB gaps 1");
+  // Back to diagnostics: the parity badge goes away with the parity report.
+  await page.locator("#reDiagnoseBtn").click();
+  await expect(page.locator("#diagSections .diag-intro")).toHaveCount(0);
+  await expect(page.locator("#diagParityStatus")).toBeEmpty();
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
 });
 

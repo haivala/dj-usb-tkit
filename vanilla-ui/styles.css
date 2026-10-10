@@ -3075,14 +3075,17 @@ td button[data-action]:disabled,
 }
 
 .diag-intro {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   max-width: 80ch;
-  font-size: 0.9em;
-  line-height: 1.45;
 }
-
-.diag-intro strong {
-  color: var(--ink);
+.diag-intro h3 {
+  margin: 0;
+  font-size: 0.95em;
+  font-weight: 600;
+}
+.diag-intro p {
+  margin: 2px 0 0;
+  font-size: 0.85em;
 }
 
 .diag-dot {

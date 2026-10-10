@@ -150,10 +150,19 @@ export function renderDiagnosticsReport(ctx, data) {
 
   el.diagOverallStatus.textContent = data.overallStatus;
   el.diagOverallStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
+  clearParityBadge(el);
   el.diagDuration.textContent = `Completed in ${data.durationMs}ms`;
 
   el.diagSections.replaceChildren();
-  // Backend-owned plain-language summary (service::diagnostics::diagnostics_overview).
+  renderReportBody(ctx, data);
+}
+
+// Plain-language summary rows, then the checks grouped into boxes under a
+// collapsed "Technical details". Both are backend-owned
+// (service::diagnostics::{diagnostics_overview, parity_overview, regroup_sections}).
+// Returns the technical body so a report can append its own extras.
+function renderReportBody(ctx, data) {
+  const { el, document } = ctx;
   for (const entry of data.overview || []) {
     const row = cloneTemplate(document, "tplDiagOverviewItem");
     const status = entry.status ? entry.status.toLowerCase() : "na";
@@ -164,7 +173,6 @@ export function renderDiagnosticsReport(ctx, data) {
     el.diagSections.appendChild(row);
   }
 
-  // Backend-owned grouping and order (service::diagnostics::diagnostics_display_sections).
   const technical = cloneTemplate(document, "tplDiagTechnical");
   const technicalBody = technical.querySelector(".diag-technical-body");
   el.diagSections.appendChild(technical);
@@ -181,8 +189,7 @@ export function renderDiagnosticsReport(ctx, data) {
       parent.appendChild(div);
     }
   }
-
-  el.diagPlaylistDetails.classList.add("hidden");
+  return technicalBody;
 }
 
 export function renderParityReport(ctx, data) {
@@ -190,37 +197,20 @@ export function renderParityReport(ctx, data) {
   el.usbDiagnosticsCard.classList.remove("hidden");
   showDiagReportView(ctx);
   el.previewRepairsBtn.disabled = false;
-  el.diagOverallStatus.textContent = data.overallStatus;
-  el.diagOverallStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
+  // Its own badge next to the health one: the health badge keeps matching
+  // the USB health dot.
+  if (el.diagParityStatus) {
+    el.diagParityStatus.textContent = `Parity ${data.overallStatus}`;
+    el.diagParityStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
+  }
   el.diagDuration.textContent = `Completed in ${data.durationMs}ms`;
 
-  const section = {
-    title: "USB Strict Parity Report",
-    status: data.overallStatus,
-    checks: data.checks || []
-  };
-  el.diagSections.replaceChildren();
-  const div = diagSection(document, section.status, section.title);
-  div.appendChild(cloneTemplate(document, "tplDiagParityIntro"));
-  if (Array.isArray(data.summaryRows) && data.summaryRows.length) {
-    const summary = cloneTemplate(document, "tplDiagParitySummary");
-    const tbody = summary.querySelector("tbody");
-    for (const row of data.summaryRows) {
-      const tr = cloneTemplate(document, "tplDiagParitySummaryRow");
-      tr.querySelector(".diag-summary-status").textContent = String(row.status || "PASS");
-      tbody.appendChild(fillDiagRow(tr, row.status, [row.label || "", Number(row.count || 0)]));
-    }
-    div.append(...summary.children);
-  }
-  for (const check of section.checks) {
-    renderDiagCheckRow(ctx, div, check, { withLogLink: true });
-  }
-  el.diagSections.appendChild(div);
+  el.diagSections.replaceChildren(cloneTemplate(document, "tplDiagParityIntro"));
+  const technicalBody = renderReportBody(ctx, data);
 
   if (data.playlistDetails?.length) {
-    el.diagPlaylistDetails.classList.remove("hidden");
-    const tbody = el.diagPlaylistTableBody;
-    tbody.replaceChildren();
+    const box = cloneTemplate(document, "tplDiagParityPlaylists");
+    const tbody = box.querySelector("tbody");
     for (const pd of data.playlistDetails) {
       // Backend-owned: `issueLabels` is built in Rust
       // (service::diagnostics::parity_issue_labels). The frontend renders them.
@@ -233,8 +223,14 @@ export function renderParityReport(ctx, data) {
         issues.join(", "),
       ]));
     }
-  } else {
-    el.diagPlaylistDetails.classList.add("hidden");
+    technicalBody.appendChild(box);
+  }
+}
+
+function clearParityBadge(el) {
+  if (el.diagParityStatus) {
+    el.diagParityStatus.textContent = "";
+    el.diagParityStatus.className = "diag-badge";
   }
 }
 
@@ -267,14 +263,9 @@ function resetDiagnosticsContent(ctx) {
     el.diagOverallStatus.textContent = "";
     el.diagOverallStatus.className = "diag-badge";
   }
+  clearParityBadge(el);
   if (el.diagDuration) {
     el.diagDuration.textContent = "";
-  }
-  if (el.diagPlaylistDetails) {
-    el.diagPlaylistDetails.classList.add("hidden");
-  }
-  if (el.diagPlaylistTableBody) {
-    el.diagPlaylistTableBody.replaceChildren();
   }
   if (el.diagRepairSummary) {
     el.diagRepairSummary.textContent = "";
