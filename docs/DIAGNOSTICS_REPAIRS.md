@@ -77,6 +77,7 @@ merging and rewriting both databases to match — see "Repair Flow" below.
 | Beat grid format (under Analysis integrity) | Always shown. Warns about tracks whose latest export on the stick was written by an app version before 0.3.7 (an export-log record without `appVersion`) and whose `.DAT` still has the old `PQTZ` header. Only those tracks' `.DAT` files are read, and only their first 4 KB. Passes with "no tracks on this USB were exported by this app" when the stick has no export log. When the log can't be read, every track's `.DAT` is checked (first 4 KB each) instead. Points to `fix_beat_grid_header` or a re-export |
 | Playlist resolution | playlist rows resolve to tracks across PDB and eDB |
 | Player menu divergence | eDB visible menu categories are compared with PDB `t16` kinds |
+| Engine DJ library | Without `Engine Library/Database2/m.db`: a passing "Not on this USB" note while "Write Engine DJ library" is off, saying to turn it on before using the USB in an Engine player; nothing while it's on. With one: warns when "Write Engine DJ library" is off, and when `m.db`'s `lastRekordBoxLibraryImportReadCounter` differs from the `export.pdb` header sequence (e.g. after an export from rekordbox itself). Points to `keep_engine_library_up_to_date` |
 
 Operational diagnostics are deliberately DB-focused. They do not walk every
 file in `PIONEER/USBANLZ` or validate every analysis file. Repair preview may
@@ -113,7 +114,7 @@ When `apply=true`:
 - database backups are created before repair writes;
 - selected fixes are applied if `selectedFixIds` is non-empty;
 - if `selectedFixIds` is empty, all supported non-optional fixes are selected;
-- `sync_edb_history_from_pdb` is optional and is not selected by default;
+- `sync_edb_history_from_pdb` and `keep_engine_library_up_to_date` are optional and are not selected by default;
 - `repair_pdb_truncated_table_chain` and `repair_pdb_torn_growth_pages` both run
   *before* strict parity upgrade — `repair_pdb_truncated_table_chain` because
   additive track appends hard-fail while a table's chain is unreachable, and
@@ -158,6 +159,7 @@ The current code can propose these repair IDs:
 | `add_unindexed_audio_playlist` | audio files under `Contents/` not indexed by PDB/eDB (e.g. databases restored from an older backup) | Additive export of a USB-only playlist `Unindexed`: tags read from each file, BPM/first beat/cues from the file's canonical ANLZ bundle (bundle reused, not rewritten; files without one are added without analysis). Nothing is copied or deleted |
 | `remove_missing_audio_references` | DB references to audio files missing from USB | Removes eDB content/playlist links and PDB playlist entries for references with no candidate file (paired ones are relinked instead) |
 | `sync_edb_history_from_pdb` | eDB history counts differ from PDB-derived history payload | Replaces eDB `history` and `history_content` rows from current PDB history data |
+| `keep_engine_library_up_to_date` | the USB has an Engine DJ library and "Write Engine DJ library" is off, or the library is behind `export.pdb` | Turns the setting on and rebuilds `m.db` from the PDB, after every other fix and the write-back. Play history (`hm.db`) is kept; changes made on the player in `m.db` (cues, loops, playlists) are replaced. Marked destructive for that reason. Not in the default set when no `selectedFixIds` are given (see `docs/ENGINE_DJ.md`) |
 
 ## Unsupported and Manual Cases
 

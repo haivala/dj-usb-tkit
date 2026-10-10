@@ -6,7 +6,18 @@ Engine OS players (Denon Prime, Numark Mixstream) read their own library at
 import has no beat grid or waveform, so the player analyzes every track again
 when it loads it, using its own grid.
 
-`write_engine_db` writes that library from what is already on the stick:
+With Settings → Export → "Write Engine DJ library" on, the app rebuilds that
+library whenever it changes the stick's rekordbox data: export, playlist
+reorder or removal, cue edits, backup restore, repairs and player-menu changes.
+The setting is off by default. Health & Diagnostics shows an "Engine DJ Library"
+section. While the setting is off, a stick without a library gets a passing
+note to turn it on before using the stick in an Engine player. A stick that
+already has one gets a warning when the setting is off or the library is
+behind `export.pdb`. The `keep_engine_library_up_to_date` fix
+turns the setting on and rebuilds it. A stick's first library therefore comes
+from the player's own (slow) import unless the setting was already on.
+`write_engine_db` does the same rebuild from the command line. Both build it
+from what is already on the stick:
 tracks and playlists from `export.pdb`, and beat grid, cues and waveform from each
 track's ANLZ bundle, plus artwork from `PIONEER/Artwork`. The player then
 uses our grid and skips analysis.

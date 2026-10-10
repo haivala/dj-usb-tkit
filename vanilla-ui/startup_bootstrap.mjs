@@ -5,6 +5,7 @@ import { normalizeAnalysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE } from "./compone
 import {
   STORAGE_KEY_EXPORT_PRUNE_STALE,
   STORAGE_KEY_EXPORT_BACKUP,
+  STORAGE_KEY_EXPORT_ENGINE_LIBRARY,
   STORAGE_KEY_BACKUP_RETENTION_COUNT,
   STORAGE_KEY_ANALYSIS_BPM_RANGE,
   STORAGE_KEY_ANALYSIS_ENGINE,
@@ -66,6 +67,15 @@ export function restoreStoredUiPrefs(ctx) {
   }
   if (el.exportBackupCheckbox) {
     el.exportBackupCheckbox.checked = !!state.exportBackup;
+  }
+
+  try {
+    state.exportEngineLibrary = localStorage?.getItem?.(STORAGE_KEY_EXPORT_ENGINE_LIBRARY) === "1";
+  } catch {
+    state.exportEngineLibrary = false;
+  }
+  if (el.exportEngineLibraryCheckbox) {
+    el.exportEngineLibraryCheckbox.checked = !!state.exportEngineLibrary;
   }
 
   try {

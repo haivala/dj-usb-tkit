@@ -469,6 +469,9 @@ impl BackendService {
             }
         }
 
+        // The response has no warnings; the log has them.
+        self.refresh_engine_library(&usb_root);
+
         Ok(RestoreUsbBackupData { restored: true })
     }
 

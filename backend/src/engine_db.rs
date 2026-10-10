@@ -330,6 +330,23 @@ pub fn read_previous_library(m_db: &Path) -> Option<PreviousLibrary> {
     Some(previous)
 }
 
+/// The `export.pdb` sequence an existing `m.db` was written for (or the player
+/// last imported); `None` when there is no readable library or no import yet.
+pub fn read_pdb_import_counter(m_db: &Path) -> Option<i64> {
+    if !m_db.is_file() {
+        return None;
+    }
+    let conn =
+        Connection::open_with_flags(m_db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    conn.query_row(
+        "SELECT lastRekordBoxLibraryImportReadCounter FROM Information LIMIT 1",
+        [],
+        |row| row.get::<_, Option<i64>>(0),
+    )
+    .ok()
+    .flatten()
+}
+
 /// Write `library` as `<dir>/m.db`, replacing any existing one. The database
 /// is built next to it and renamed into place, so a failed write leaves the old
 /// library intact.

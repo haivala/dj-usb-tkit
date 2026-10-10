@@ -7,14 +7,16 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use rusqlite::{OptionalExtension, params};
+
 use crate::engine_db::{
     EngineAlbumArt, EngineCue, EngineLibrary, EnginePlaylist, EngineTrack, GridMarker,
     HOT_CUE_SLOTS, OVERVIEW_ENTRIES, engine_db_dir, engine_key_from_camelot, ensure_aux_dbs,
-    read_previous_library, write_engine_m_db,
+    read_pdb_import_counter, read_previous_library, write_engine_m_db,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
-use crate::models::{TrackCue, WarningEntry};
+use crate::models::{DiagCheck, DiagSection, DiagStatus, TrackCue, WarningEntry};
 use crate::pdb_reader::{ParsedPdb, PdbTrackRow, parse_pdb_bytes};
 
 use super::anlz::pqtz_beats;
@@ -22,6 +24,7 @@ use super::cues::{DEFAULT_HOTCUE_COLOR_ID, HOTCUE_PALETTE, collapse_anlz_cues};
 use super::key_notation::camelot_position;
 use super::usb_staging;
 use super::usb_utils::{find_anlz_chunk_payload, resolve_usb_side_path};
+use super::{BackendService, SETTING_UI_EXPORT_ENGINE_LIBRARY, now};
 
 /// `AlbumArt` row for tracks without artwork (every track points at a row,
 /// as on a device-written library).
@@ -38,14 +41,187 @@ pub struct EngineLibrarySummary {
     pub warnings: Vec<WarningEntry>,
 }
 
+impl BackendService {
+    /// Rebuild the Engine DJ library after anything rewrote `export.pdb` or an
+    /// ANLZ bundle, unless the setting is off. Every PDB write bumps its
+    /// sequence, and a library left on the old one is stale or re-imported by
+    /// the player. The rekordbox side is already written by then, so a failure
+    /// only warns.
+    pub(crate) fn refresh_engine_library(&self, usb_root: &Path) -> Vec<WarningEntry> {
+        if !self.engine_library_enabled() {
+            return Vec::new();
+        }
+        match rebuild_engine_library(usb_root) {
+            Ok(summary) => {
+                let mut warnings = summary.warnings;
+                warnings.push(logging::log(
+                    Level::Info,
+                    "engine-export",
+                    "engine.library-written",
+                    format!(
+                        "Engine DJ library written (tracks: {}, analyzed: {}, playlists: {})",
+                        summary.tracks, summary.analyzed_tracks, summary.playlists
+                    ),
+                ));
+                warnings
+            }
+            Err(err) => vec![logging::log(
+                Level::Warn,
+                "engine-export",
+                "engine.library-skipped",
+                format!("Engine DJ library not written: {err}"),
+            )],
+        }
+    }
+
+    /// Off until the user turns it on (in Settings, or with the diagnostics
+    /// fix offered when a USB already has an Engine library).
+    pub(crate) fn engine_library_enabled(&self) -> bool {
+        let Ok(conn) = self.db.connect() else {
+            return false;
+        };
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![SETTING_UI_EXPORT_ENGINE_LIBRARY],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .is_some_and(|value| value.trim() == "1")
+    }
+
+    pub(crate) fn enable_engine_library(&self) -> BackendResult<()> {
+        self.db.connect()?.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, '1', ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![SETTING_UI_EXPORT_ENGINE_LIBRARY, now()],
+        )?;
+        Ok(())
+    }
+
+    /// Whether the USB has an Engine library this app should take over: the
+    /// setting is off, or the library is behind `export.pdb`.
+    pub(crate) fn engine_library_needs_fix(&self, usb_root: &Path) -> bool {
+        engine_library_status(usb_root)
+            .is_some_and(|status| !self.engine_library_enabled() || !status.in_sync())
+    }
+
+    /// Health & Diagnostics section. Without a library on the USB it's a
+    /// passing note while the setting is off (so Pioneer-only users aren't
+    /// warned), and `None` while it's on (the next change writes one).
+    pub(crate) fn engine_library_section(&self, usb_root: &Path) -> Option<DiagSection> {
+        let enabled = self.engine_library_enabled();
+        let Some(status) = engine_library_status(usb_root) else {
+            return (!enabled).then(|| DiagSection {
+                title: "Engine DJ Library".into(),
+                status: DiagStatus::Pass,
+                checks: vec![DiagCheck {
+                    label: "Not on this USB".into(),
+                    status: DiagStatus::Pass,
+                    detail: "Only needed for Denon Prime / Numark Mixstream players. Turn on \
+                             Settings → Export → \"Write Engine DJ library\" before using this USB \
+                             in one; otherwise the player imports export.pdb itself and analyzes \
+                             every track again"
+                        .into(),
+                    link: None,
+                }],
+                counts: None,
+            });
+        };
+        let upkeep = if enabled {
+            DiagCheck {
+                label: "Kept up to date".into(),
+                status: DiagStatus::Pass,
+                detail: "Rebuilt whenever this app changes the USB".into(),
+                link: None,
+            }
+        } else {
+            DiagCheck {
+                label: "Kept up to date".into(),
+                status: DiagStatus::Warn,
+                detail: "\"Write Engine DJ library\" is off, so changes this app makes to the USB \
+                         don't reach Denon Prime / Numark Mixstream players. Preview Fixes can turn it on"
+                    .into(),
+                link: None,
+            }
+        };
+        let sync = match (status.library_counter, status.pdb_sequence) {
+            (Some(library), Some(pdb)) if library == i64::from(pdb) => DiagCheck {
+                label: "Matches export.pdb".into(),
+                status: DiagStatus::Pass,
+                detail: format!("Written for export.pdb #{pdb}"),
+                link: None,
+            },
+            (library, pdb) => DiagCheck {
+                label: "Matches export.pdb".into(),
+                status: DiagStatus::Warn,
+                detail: format!(
+                    "Written for export.pdb #{}, the USB has #{}. The player may import \
+                     export.pdb again and analyze the tracks itself. Preview Fixes can rebuild it",
+                    library.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                    pdb.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                ),
+                link: None,
+            },
+        };
+        let checks = vec![upkeep, sync];
+        let worst = checks.iter().fold(DiagStatus::Pass, |acc, c| {
+            DiagStatus::worst(&acc, &c.status)
+        });
+        Some(DiagSection {
+            title: "Engine DJ Library".into(),
+            status: worst,
+            checks,
+            counts: None,
+        })
+    }
+}
+
+/// An Engine library on a USB, against the `export.pdb` next to it.
+pub(crate) struct EngineLibraryStatus {
+    pub library_counter: Option<i64>,
+    pub pdb_sequence: Option<u32>,
+}
+
+impl EngineLibraryStatus {
+    pub fn in_sync(&self) -> bool {
+        matches!(
+            (self.library_counter, self.pdb_sequence),
+            (Some(library), Some(pdb)) if library == i64::from(pdb)
+        )
+    }
+}
+
+/// `None` when the USB has no Engine library (`Database2/m.db`).
+pub(crate) fn engine_library_status(usb_root: &Path) -> Option<EngineLibraryStatus> {
+    let m_db = engine_db_dir(usb_root).join("m.db");
+    if !m_db.is_file() {
+        return None;
+    }
+    let pdb_sequence = usb_staging::stage_pdb(usb_root)
+        .ok()
+        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| pdb_sequence(&bytes));
+    Some(EngineLibraryStatus {
+        library_counter: read_pdb_import_counter(&m_db),
+        pdb_sequence,
+    })
+}
+
+/// The `export.pdb` header sequence (u32 LE at offset 20), which every write
+/// bumps and the player compares with `m.db`.
+fn pdb_sequence(pdb: &[u8]) -> Option<u32> {
+    pdb.get(20..24)
+        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
 /// Regenerate `Engine Library/Database2/m.db` (and any missing companion
 /// databases) from the USB's rekordbox export.
 pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySummary> {
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let pdb_bytes = std::fs::read(&pdb_path)?;
-    let pdb_sequence = pdb_bytes
-        .get(20..24)
-        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    let pdb_sequence = pdb_sequence(&pdb_bytes)
         .ok_or_else(|| BackendError::Validation("export.pdb is too short".into()))?;
     let pdb = parse_pdb_bytes(&pdb_bytes)?;
 
@@ -312,7 +488,7 @@ fn overview_from_ext(ext: &[u8]) -> Option<Vec<[u8; 3]>> {
     }
     let container = find_anlz_chunk_payload(ext, "PMAI").unwrap_or(ext);
     let payload = find_anlz_chunk_payload(container, "PWV4")?;
-    let entries: Vec<&[u8]> = payload.chunks_exact(6).collect();
+    let (entries, _) = payload.as_chunks::<6>();
     if entries.len() < OVERVIEW_ENTRIES / 4 {
         return None;
     }

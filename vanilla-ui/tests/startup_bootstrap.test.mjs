@@ -14,6 +14,7 @@ import { withSilencedConsole } from "./test_helpers.mjs";
 import {
   STORAGE_KEY_EXPORT_PRUNE_STALE,
   STORAGE_KEY_EXPORT_BACKUP,
+  STORAGE_KEY_EXPORT_ENGINE_LIBRARY,
   STORAGE_KEY_ANALYSIS_BPM_RANGE,
   STORAGE_KEY_SIDEBAR_COLLAPSED
 } from "../settings_keys.mjs";
@@ -23,6 +24,7 @@ function prefEls() {
     exportSyncModeMirror: { checked: false },
     exportSyncModeAdditive: { checked: false },
     exportBackupCheckbox: { checked: false },
+    exportEngineLibraryCheckbox: { checked: false },
     analysisBpmRangeSelect: { value: "" }
   };
 }
@@ -65,12 +67,13 @@ test("hydrateAppVersionLabel uses fallback and tauri override", async () => {
   }
 });
 
-test("restoreStoredUiPrefs reads stored controls and defaults backup to true", () => {
+test("restoreStoredUiPrefs reads stored controls and defaults backup on and Engine library off", () => {
   const storedState = { exportPruneStale: true, exportBackup: true, analysisBpmRange: "", sidebarCollapsed: false };
   const storedEl = prefEls();
   restorePrefs(storedState, storedEl, {
     [STORAGE_KEY_EXPORT_PRUNE_STALE]: "0",
     [STORAGE_KEY_EXPORT_BACKUP]: "0",
+    [STORAGE_KEY_EXPORT_ENGINE_LIBRARY]: "1",
     [STORAGE_KEY_ANALYSIS_BPM_RANGE]: "90-160",
     [STORAGE_KEY_SIDEBAR_COLLAPSED]: "1"
   });
@@ -81,12 +84,16 @@ test("restoreStoredUiPrefs reads stored controls and defaults backup to true", (
   assert.equal(storedEl.exportSyncModeMirror.checked, false);
   assert.equal(storedEl.exportSyncModeAdditive.checked, true);
   assert.equal(storedEl.exportBackupCheckbox.checked, false);
+  assert.equal(storedState.exportEngineLibrary, true);
+  assert.equal(storedEl.exportEngineLibraryCheckbox.checked, true);
 
   const defaultState = { exportPruneStale: true, exportBackup: false, analysisBpmRange: "", sidebarCollapsed: false };
   const defaultEl = prefEls();
   restorePrefs(defaultState, defaultEl, {});
   assert.equal(defaultState.exportBackup, true);
   assert.equal(defaultEl.exportBackupCheckbox.checked, true);
+  assert.equal(defaultState.exportEngineLibrary, false);
+  assert.equal(defaultEl.exportEngineLibraryCheckbox.checked, false);
 });
 
 test("applySidebarCollapsedUi and showHelpOnFirstVisit update DOM", () => {

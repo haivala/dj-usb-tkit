@@ -196,6 +196,14 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
 - `backupBeforeExport = true` (default) -> copies PDB and eDB to a backups folder next to them with a timestamp before each export; no-op if the files do not yet exist
 - `backupBeforeExport = false` -> skips backup step
 
+Every command that changes the USB's rekordbox data (`export_to_usb`, `reorder_usb_playlists`,
+`remove_usb_playlist`, `save_usb_track_analysis_edits`, `restore_usb_backup`,
+`repair_usb_diagnostics` with `apply`, and the player-menu updates) then rebuilds the Engine DJ
+library (`Engine Library/Database2`), keeping the player's play history. The
+`ui_export_engine_library_v1` setting (`"1"` = on; off by default) controls it. A failure only
+adds a warning (see `docs/ENGINE_DJ.md`). `repair_usb_diagnostics` returns the setting as
+`engineLibraryEnabled`, since its `keep_engine_library_up_to_date` fix turns it on.
+
 `get_usb_device_name`/`set_usb_device_name` read/write the user-assigned drive identity (see
 `docs/USB_EXPORT.md`'s "USB drive naming" section); `get_usb_device_name` also returns a
 best-effort `suggestedName` drawn from the OS filesystem label when the drive is unnamed.

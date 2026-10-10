@@ -962,12 +962,16 @@ impl BackendService {
             note_stage("player menu divergence", &mut raw_warnings);
         }
 
+        let engine_library_section = self.engine_library_section(&usb_root);
         let overall_status = DiagStatus::worst_of(&[
             &pdb_integrity.status,
             &edb_access.status,
             &contents_integrity.status,
             &analysis_integrity.status,
             &playlist_resolution.status,
+            engine_library_section
+                .as_ref()
+                .map_or(&DiagStatus::Pass, |section| &section.status),
         ]);
 
         let cdj_counter_snapshot = parsed_opt
@@ -1002,6 +1006,7 @@ impl BackendService {
             playlist_details,
             cdj_counter_snapshot,
             cdj_counter_section,
+            engine_library_section,
             warnings: raw_warnings,
             duration_ms: start.elapsed().as_millis() as u64,
             playlist_usb_export_status,

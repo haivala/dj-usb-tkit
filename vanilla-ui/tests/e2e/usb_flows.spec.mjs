@@ -47,6 +47,13 @@ function installTauriMock(page, mode) {
           { label: "Overall resolution", status: "PASS", detail: "3/3 entries resolve (100.0%) across 1 playlists" }
         ]
       },
+      engineLibrarySection: {
+        title: "Engine DJ Library",
+        status: "WARN",
+        checks: [
+          { label: "Kept up to date", status: "WARN", detail: "\"Write Engine DJ library\" is off" }
+        ]
+      },
       playlistDetails: [
         {
           name: "Warmup",
@@ -190,7 +197,8 @@ function installTauriMock(page, mode) {
                   failedFixes: [],
                   warnings: [],
                   durationMs: 1,
-                  diagnostics: diagnosticsPayload
+                  diagnostics: diagnosticsPayload,
+                  engineLibraryEnabled: (payload.request.selectedFixIds || []).includes("keep_engine_library_up_to_date")
                 }
               };
             }
@@ -229,6 +237,15 @@ function installTauriMock(page, mode) {
                     description: "Ordinary structural fix, not a prerequisite.",
                     supported: true,
                     destructive: false,
+                    estimatedWrites: 1,
+                    estimatedDeletes: 0
+                  },
+                  {
+                    id: "keep_engine_library_up_to_date",
+                    title: "Keep Engine DJ Library Up to Date",
+                    description: "Turns on \"Write Engine DJ library\" and rebuilds it now.",
+                    supported: true,
+                    destructive: true,
                     estimatedWrites: 1,
                     estimatedDeletes: 0
                   }
@@ -697,6 +714,8 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagSections")).toContainText("PDB Integrity");
   await expect(page.locator("#diagSections")).toContainText("Playlist Resolution");
   await expect(page.locator("#diagSections")).toContainText("Overall resolution");
+  await expect(page.locator("#diagSections")).toContainText("Engine DJ Library");
+  await expect(page.locator("#diagSections")).toContainText("Kept up to date");
   await expect(page.locator("#diagPlaylistDetails")).toContainText("Playlist Resolution Details");
   await expect(page.locator("#diagPlaylistDetails")).not.toContainText("Strict Parity Playlist Details");
   await expect(page.locator("#diagPlaylistTableBody")).toContainText("Warmup");
@@ -730,7 +749,7 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
 });
 
-test("Repair preview locks structural-prerequisite fix checkboxes", async ({ page }) => {
+test("Repair preview locks structural-prerequisite fix checkboxes; the Engine fix turns the setting on", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
 
@@ -772,9 +791,15 @@ test("Repair preview locks structural-prerequisite fix checkboxes", async ({ pag
   await controlCheckbox.uncheck();
   await expect(controlCheckbox).not.toBeChecked();
 
+  await expect(page.locator("#exportEngineLibraryCheckbox")).not.toBeChecked();
+  const engineFix = page.locator("#diagRepairFixes li", { hasText: "Keep Engine DJ Library Up to Date" });
+  await expect(engineFix.locator(".diag-repair-fix-check")).toBeChecked();
+  await expect(engineFix.locator(".diag-repair-fix-meta")).toContainText("destructive");
+
   // The repair response carries fresh diagnostics; assert on the settled state
   // (playlists cleared) rather than the transient status text.
   await page.locator("#applyRepairsBtn").click();
+  await expect(page.locator("#exportEngineLibraryCheckbox")).toBeChecked();
 
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await expect(page.locator("#usbPlaylists")).toContainText("No playlists imported yet");

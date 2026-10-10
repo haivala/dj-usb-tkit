@@ -89,6 +89,7 @@ pub(crate) const SETTING_UI_SOURCE_ROOT_ENABLED: &str = "ui_source_root_enabled_
 pub(crate) const SETTING_UI_USB_ROOT: &str = "ui_usb_root_v1";
 pub(crate) const SETTING_UI_EXPORT_PRUNE_STALE: &str = "ui_export_prune_stale_v1";
 pub(crate) const SETTING_UI_EXPORT_BACKUP: &str = "ui_export_backup_v1";
+pub(crate) const SETTING_UI_EXPORT_ENGINE_LIBRARY: &str = "ui_export_engine_library_v1";
 pub(crate) const SETTING_UI_BACKUP_RETENTION_COUNT: &str = "ui_backup_retention_count_v1";
 pub(crate) const DEFAULT_BACKUP_RETENTION_COUNT: u32 = 10;
 pub(crate) const SETTING_UI_ANALYSIS_BPM_RANGE: &str = "ui_analysis_bpm_range_v1";
@@ -3078,6 +3079,7 @@ fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_USB_ROOT,
         SETTING_UI_EXPORT_PRUNE_STALE,
         SETTING_UI_EXPORT_BACKUP,
+        SETTING_UI_EXPORT_ENGINE_LIBRARY,
         SETTING_UI_BACKUP_RETENTION_COUNT,
         SETTING_UI_ANALYSIS_BPM_RANGE,
         SETTING_UI_ANALYSIS_ENGINE,

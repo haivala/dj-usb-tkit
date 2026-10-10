@@ -1670,6 +1670,9 @@ pub struct RunUsbDiagnosticsData {
     /// alongside the other sections).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cdj_counter_section: Option<DiagSection>,
+    /// Present when the USB has an Engine DJ library (`Engine Library/Database2`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_library_section: Option<DiagSection>,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
@@ -1958,6 +1961,10 @@ pub struct RepairUsbDiagnosticsData {
     pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostics: Option<Box<RunUsbDiagnosticsData>>,
+    /// The "Write Engine DJ library" setting after this call; the
+    /// `keep_engine_library_up_to_date` fix turns it on.
+    #[serde(default)]
+    pub engine_library_enabled: bool,
 }
 
 // ── detect_external_rekordbox_db ──────────────────────────────

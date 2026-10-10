@@ -40,10 +40,19 @@
 ## Unreleased
 
 - **New feature:** Write the Engine DJ library for Denon Prime and Numark Mixstream players
-  from a USB's rekordbox export (command line only for now: `write_engine_db <usb root>`).
-  Players then use our beat grid, overview waveform, hot cues (with colours), main cue, key
-  and artwork instead of importing the rekordbox data and analyzing every track again. Play
-  history on the stick is kept across re-runs. See `docs/ENGINE_DJ.md`.
+  from a USB's rekordbox export (`write_engine_db <usb root>`). Players then use our beat
+  grid, overview waveform, hot cues (with colours), main cue, key and artwork instead of
+  importing the rekordbox data and analyzing every track again. Play history on the stick is
+  kept across re-runs; changes made on the player itself are replaced. See
+  `docs/ENGINE_DJ.md`.
+- **New feature:** Settings → Export → "Write Engine DJ library" (off by default) keeps the
+  Engine DJ library up to date whenever the app changes a USB: export, playlist reorder or
+  removal, cue edits, backup restore, repairs.
+- **New feature:** USB diagnostics have an Engine DJ Library section. It warns when a USB
+  has an Engine library that the app isn't keeping up to date, or that is behind
+  `export.pdb`, and Preview Fixes offers "Keep Engine DJ Library Up to Date" to turn the
+  setting on and rebuild it. A USB without one gets a note to turn the setting on before
+  using it in an Engine player.
 
 ## 0.3.7
 

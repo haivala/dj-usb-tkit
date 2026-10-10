@@ -1200,6 +1200,9 @@ impl BackendService {
         tx.commit()?;
         drop(edb_conn);
         super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)?;
+        // Cues and grid live in the ANLZ bundle, so this runs even when the
+        // PDB was left alone. The response has no warnings; the log has them.
+        self.refresh_engine_library(&usb_root);
 
         self.invalidate_usb_parse_cache();
 

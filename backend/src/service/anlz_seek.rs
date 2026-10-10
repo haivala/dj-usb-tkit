@@ -707,16 +707,17 @@ mod tests {
             8_286u64, 9_531, 10_783, 12_047, 13_303, 14_566, 15_839, 17_109, 18_359, 19_613,
             20_868, 22_129, 23_384, 24_640, 25_903, 27_157, 28_423, 29_680, 30_921,
         ];
-        for (entry, expected_absolute) in chunk.payload.chunks_exact(20).zip(absolute_offsets) {
+        for (entry, expected_absolute) in chunk
+            .payload
+            .as_chunks::<20>()
+            .0
+            .iter()
+            .zip(absolute_offsets)
+        {
             let relative = u64::from_be_bytes(entry[8..16].try_into().unwrap());
             assert_eq!(relative, expected_absolute - absolute_offsets[0]);
         }
-        for pair in chunk
-            .payload
-            .chunks_exact(20)
-            .collect::<Vec<_>>()
-            .windows(2)
-        {
+        for pair in chunk.payload.as_chunks::<20>().0.windows(2) {
             let first_sample = u64::from_be_bytes(pair[0][0..8].try_into().unwrap());
             let next_sample = u64::from_be_bytes(pair[1][0..8].try_into().unwrap());
             let block_size = u32::from_be_bytes(pair[0][16..20].try_into().unwrap());

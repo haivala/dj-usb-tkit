@@ -103,6 +103,7 @@ fn fix_always_applied(fix_id: &str) -> bool {
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
 const RELINK_MOVED_AUDIO_FIX_ID: &str = "relink_moved_audio";
 const UNINDEXED_AUDIO_PLAYLIST_FIX_ID: &str = "add_unindexed_audio_playlist";
+const ENGINE_LIBRARY_FIX_ID: &str = "keep_engine_library_up_to_date";
 /// USB playlist the unindexed-audio fix collects its files into.
 const UNINDEXED_AUDIO_PLAYLIST_NAME: &str = "Unindexed";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
@@ -147,6 +148,8 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
     "remove_missing_audio_references",
     SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
+    // Last: it rebuilds from the PDB the fixes above leave behind.
+    ENGINE_LIBRARY_FIX_ID,
 ];
 
 /// A track whose PDB path points at a missing file, paired with the
@@ -3589,6 +3592,7 @@ impl BackendService {
                 format!("PDB write-back to USB failed: {err}"),
             ));
         }
+        warnings.extend(self.refresh_engine_library(&usb_root));
 
         let (current_items, available_items, divergence) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
@@ -3774,6 +3778,7 @@ impl BackendService {
                     format!("PDB write-back to USB failed: {err}"),
                 ));
             }
+            warnings.extend(self.refresh_engine_library(&usb_root));
         }
 
         Ok(UpdateUsbPlayerMenuConfigData {
@@ -4814,6 +4819,25 @@ impl BackendService {
             }
         }
 
+        let engine_library_fix_needed = self.engine_library_needs_fix(&usb_root);
+        if engine_library_fix_needed {
+            proposed_fixes.push(RepairFixProposal {
+                id: ENGINE_LIBRARY_FIX_ID.to_string(),
+                title: "Keep Engine DJ Library Up to Date".to_string(),
+                description: "This USB has an Engine DJ library (Denon Prime, Numark Mixstream). \
+                     Turns on \"Write Engine DJ library\" and rebuilds it now from this USB's \
+                     rekordbox data; from then on it's rebuilt whenever this app changes a USB. \
+                     Play history is kept, but changes made on the player itself (cues, loops, \
+                     playlists created there) are replaced every time."
+                    .to_string(),
+                supported: true,
+                destructive: true,
+                always_applied: false,
+                estimated_writes: 1,
+                estimated_deletes: 0,
+            });
+        }
+
         // Display order should match the actual apply order below (see
         // REPAIR_FIX_DISPLAY_ORDER), not the incidental order each fix
         // happened to be detected in.
@@ -4830,7 +4854,12 @@ impl BackendService {
         let selected = if req.selected_fix_ids.is_empty() {
             proposed_fixes
                 .iter()
-                .filter(|f| f.supported && f.id != SYNC_EDB_HISTORY_FROM_PDB_FIX_ID)
+                // Both change more than the USB's rekordbox data, so only on request.
+                .filter(|f| {
+                    f.supported
+                        && f.id != SYNC_EDB_HISTORY_FROM_PDB_FIX_ID
+                        && f.id != ENGINE_LIBRARY_FIX_ID
+                })
                 .map(|f| f.id.clone())
                 .collect::<std::collections::HashSet<_>>()
         } else {
@@ -5478,6 +5507,30 @@ impl BackendService {
                     format!("eDB write-back to USB failed: {err}"),
                 ));
             }
+
+            // After the write-back, so it reads the repaired PDB.
+            if selected.contains(ENGINE_LIBRARY_FIX_ID) && engine_library_fix_needed {
+                match self
+                    .enable_engine_library()
+                    .and_then(|()| super::rebuild_engine_library(&usb_root))
+                {
+                    Ok(summary) => {
+                        warnings.extend(summary.warnings);
+                        applied_fixes.push(format!(
+                            "Keep Engine DJ Library Up to Date: setting on, rebuilt ({} tracks, {} playlists)",
+                            summary.tracks, summary.playlists
+                        ));
+                    }
+                    Err(err) => failed_fixes
+                        .push(format!("Keep Engine DJ Library Up to Date failed: {err}")),
+                }
+            } else {
+                if engine_library_fix_needed {
+                    skipped_fixes
+                        .push("Keep Engine DJ Library Up to Date: not selected".to_string());
+                }
+                warnings.extend(self.refresh_engine_library(&usb_root));
+            }
         }
 
         detected_issues.sort();
@@ -5554,6 +5607,7 @@ impl BackendService {
             warnings,
             duration_ms: start.elapsed().as_millis() as u64,
             diagnostics: diagnostics_after_apply,
+            engine_library_enabled: self.engine_library_enabled(),
         })
     }
 

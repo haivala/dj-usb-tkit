@@ -1457,6 +1457,8 @@ impl BackendService {
                 // set isn't advanced on a run that ended up inconsistent.
                 validate_export_manifest_after_prune(&usb_root, &manifest)?;
             }
+            // After the prune, which can still drop PDB rows.
+            warnings.extend(self.refresh_engine_library(&usb_root));
             self.save_export_owned_files(&owned_setting_key, &current_owned)?;
             {
                 let profile = crate::service::export_helpers::PdbLayoutProfile::from_env();

@@ -1,7 +1,7 @@
 import { warningEntryText, patchUsbRowsInContainer } from "../library/actions.mjs";
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
-import { STORAGE_KEY_USB_ROOT } from "../../settings_keys.mjs";
+import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   formatDurationMs,
   renderTrackListDurationSummary,
@@ -172,6 +172,7 @@ export function renderDiagnosticsReport(ctx, data) {
     data.playlistResolution,
     // Backend-assembled (service::diagnostics::player_counter_snapshot_section).
     data.cdjCounterSection,
+    data.engineLibrarySection,
   ].filter(Boolean);
 
   el.diagSections.replaceChildren();
@@ -977,6 +978,8 @@ export async function applyUsbRepairs(ctx) {
   // potentially invalidating whatever's loaded, same coarse-grained
   // "DB changed, clear it" reasoning diagnostics-clearing already uses.
   if (applied > 0) resetUsbStateViews(ctx, { hideDiagnostics: false });
+  // The Engine library fix turns the setting on backend-side.
+  syncEngineLibrarySetting(ctx, data.engineLibraryEnabled === true);
   ctx.logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
   if (data.diagnostics) {
     state.playlistUsbExportStatusById = playlistUsbExportStatusById(
@@ -988,6 +991,15 @@ export async function applyUsbRepairs(ctx) {
     ctx.logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
   }
   emitStatus(`Repair apply complete: ${applied} applied, ${failed} failed (${data.durationMs}ms)${data.diagnostics ? ". Diagnostics refreshed." : ""}`);
+}
+
+// The backend already saved it; this only brings the open UI in line.
+function syncEngineLibrarySetting(ctx, enabled) {
+  ctx.state.exportEngineLibrary = enabled;
+  if (ctx.el.exportEngineLibraryCheckbox) ctx.el.exportEngineLibraryCheckbox.checked = enabled;
+  try {
+    ctx.localStorage?.setItem(STORAGE_KEY_EXPORT_ENGINE_LIBRARY, enabled ? "1" : "0");
+  } catch {}
 }
 
 export async function refreshHistory(ctx) {

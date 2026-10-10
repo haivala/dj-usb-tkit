@@ -1412,6 +1412,7 @@ impl BackendService {
                 format!("eDB write-back to USB failed: {err}"),
             ));
         }
+        warnings.extend(self.refresh_engine_library(&usb_root));
 
         on_progress(100, 100, "USB: Playlist order saved");
         self.invalidate_usb_parse_cache();
@@ -1631,6 +1632,7 @@ impl BackendService {
 
         // Stage 6: Finalize (95-100%)
         on_progress(95, 100, "USB: Finalizing");
+        warnings.extend(self.refresh_engine_library(&usb_root));
         push_usb_stage_timing(
             &mut warnings,
             "finalize playlist removal",

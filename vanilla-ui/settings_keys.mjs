@@ -8,6 +8,7 @@ export const STORAGE_KEY_SOURCE_ROOT_ENABLED = "djusbtkit.sourceRootEnabled";
 export const STORAGE_KEY_USB_ROOT = "djusbtkit.usbRoot";
 export const STORAGE_KEY_EXPORT_PRUNE_STALE = "djusbtkit.exportPruneStale";
 export const STORAGE_KEY_EXPORT_BACKUP = "djusbtkit.exportBackup";
+export const STORAGE_KEY_EXPORT_ENGINE_LIBRARY = "djusbtkit.exportEngineLibrary";
 export const STORAGE_KEY_BACKUP_RETENTION_COUNT = "djusbtkit.backupRetentionCount";
 export const STORAGE_KEY_ANALYSIS_BPM_RANGE = "djusbtkit.analysisBpmRange";
 export const STORAGE_KEY_ANALYSIS_ENGINE = "djusbtkit.analysisEngine";
@@ -31,6 +32,7 @@ export const FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED = "ui_source_root_enabled_v1";
 export const FRONTEND_DB_KEY_USB_ROOT = "ui_usb_root_v1";
 export const FRONTEND_DB_KEY_EXPORT_PRUNE_STALE = "ui_export_prune_stale_v1";
 export const FRONTEND_DB_KEY_EXPORT_BACKUP = "ui_export_backup_v1";
+export const FRONTEND_DB_KEY_EXPORT_ENGINE_LIBRARY = "ui_export_engine_library_v1";
 export const FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT = "ui_backup_retention_count_v1";
 export const FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE = "ui_analysis_bpm_range_v1";
 export const FRONTEND_DB_KEY_ANALYSIS_ENGINE = "ui_analysis_engine_v1";
@@ -54,6 +56,7 @@ export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_USB_ROOT, dbKey: FRONTEND_DB_KEY_USB_ROOT },
   { storageKey: STORAGE_KEY_EXPORT_PRUNE_STALE, dbKey: FRONTEND_DB_KEY_EXPORT_PRUNE_STALE },
   { storageKey: STORAGE_KEY_EXPORT_BACKUP, dbKey: FRONTEND_DB_KEY_EXPORT_BACKUP },
+  { storageKey: STORAGE_KEY_EXPORT_ENGINE_LIBRARY, dbKey: FRONTEND_DB_KEY_EXPORT_ENGINE_LIBRARY },
   { storageKey: STORAGE_KEY_BACKUP_RETENTION_COUNT, dbKey: FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT },
   { storageKey: STORAGE_KEY_ANALYSIS_BPM_RANGE, dbKey: FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE },
   { storageKey: STORAGE_KEY_ANALYSIS_ENGINE, dbKey: FRONTEND_DB_KEY_ANALYSIS_ENGINE },

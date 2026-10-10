@@ -8,6 +8,8 @@ import {
   FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
   STORAGE_KEY_EXPORT_BACKUP,
   FRONTEND_DB_KEY_EXPORT_BACKUP,
+  STORAGE_KEY_EXPORT_ENGINE_LIBRARY,
+  FRONTEND_DB_KEY_EXPORT_ENGINE_LIBRARY,
   STORAGE_KEY_BACKUP_RETENTION_COUNT,
   FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT,
   STORAGE_KEY_ANALYSIS_BPM_RANGE,
@@ -195,6 +197,18 @@ export function bindSettingsEvents(ctx) {
       state.exportBackup ? "1" : "0"
     );
     emitStatus(state.exportBackup ? "Export backup: enabled" : "Export backup: disabled");
+  });
+
+  el.exportEngineLibraryCheckbox?.addEventListener("change", (event) => {
+    state.exportEngineLibrary = !!event?.target?.checked;
+    persistSetting(
+      STORAGE_KEY_EXPORT_ENGINE_LIBRARY,
+      FRONTEND_DB_KEY_EXPORT_ENGINE_LIBRARY,
+      state.exportEngineLibrary ? "1" : "0"
+    );
+    emitStatus(
+      state.exportEngineLibrary ? "Engine DJ library on export: enabled" : "Engine DJ library on export: disabled"
+    );
   });
 
   el.backupRetentionCountInput?.addEventListener("change", (event) => {

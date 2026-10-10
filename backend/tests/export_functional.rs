@@ -5,11 +5,12 @@ use std::path::Path;
 use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
-    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
+    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, DiagStatus, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest, GetPlaylistTracksRequest,
     InitializeUsbRequest, MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest,
-    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, RunUsbParityReportRequest,
-    ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest,
+    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsRequest,
+    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest, SearchTracksRequest,
+    SetFrontendSettingRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -3200,6 +3201,207 @@ fn seed_edb_for_export(db_path: &std::path::Path) {
         ),
     )
     .expect("seed export db");
+}
+
+#[test]
+fn export_writes_engine_library_and_keeps_history_on_re_export() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+
+    copy_audio_fixture(&media, "formats/track_format_flac.flac", "Engine Test.flac");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    let tracks = backend
+        .search_tracks(SearchTracksRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+        })
+        .data
+        .expect("search data")
+        .items;
+    let track_ids: Vec<_> = tracks.iter().map(|t| t.id.clone()).collect();
+    seed_tracks_as_analyzed(&data_dir, &track_ids);
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: "Engine Test".to_string(),
+        })
+        .data
+        .expect("playlist data")
+        .playlist_id;
+    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids,
+        dedupe: DedupeMode::Skip,
+    });
+
+    let export = || {
+        let result = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: playlist_id.clone(),
+            options: Some(ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: false,
+                backup_before_export: false,
+            }),
+        });
+        assert!(result.ok, "export failed: {result:?}");
+    };
+    let pdb_sequence = || {
+        let pdb = fs::read(
+            usb.join(USB_VENDOR_ROOT_DIR)
+                .join(USB_VENDOR_DB_DIR)
+                .join("export.pdb"),
+        )
+        .expect("read PDB");
+        i64::from(u32::from_le_bytes(pdb[20..24].try_into().unwrap()))
+    };
+    let db_dir = usb.join("Engine Library").join("Database2");
+    let library_state = || {
+        let conn = rusqlite::Connection::open(db_dir.join("m.db")).expect("open m.db");
+        let counter: i64 = conn
+            .query_row(
+                "SELECT lastRekordBoxLibraryImportReadCounter FROM Information",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let track: (i64, String) = conn
+            .query_row("SELECT id, path FROM Track", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        let playlists: Vec<String> = conn
+            .prepare("SELECT title FROM Playlist")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        (counter, track, playlists)
+    };
+
+    let set_engine_library = |on: bool| {
+        let saved = backend.set_frontend_setting(SetFrontendSettingRequest {
+            key: "ui_export_engine_library_v1".to_string(),
+            value: Some(if on { "1" } else { "0" }.to_string()),
+        });
+        assert!(saved.ok, "save setting failed: {saved:?}");
+    };
+
+    set_engine_library(false);
+    export();
+    assert!(
+        !usb.join("Engine Library").exists(),
+        "setting off must leave the Engine library alone"
+    );
+    let usb_root = Some(usb.to_string_lossy().to_string());
+    let engine_section = || {
+        backend
+            .run_usb_diagnostics(RunUsbDiagnosticsRequest {
+                usb_root: usb_root.clone(),
+            })
+            .data
+            .expect("diagnostics data")
+            .engine_library_section
+    };
+    let section = engine_section().expect("note while the setting is off");
+    assert!(matches!(section.status, DiagStatus::Pass), "{section:?}");
+    assert_eq!(section.checks[0].label, "Not on this USB");
+
+    // Stand in for the player importing the PDB itself, and for a later PDB
+    // write this app didn't follow up: the library is behind and not maintained.
+    backend::service::rebuild_engine_library(&usb).expect("player-made library");
+    rusqlite::Connection::open(db_dir.join("m.db"))
+        .unwrap()
+        .execute(
+            "UPDATE Information SET lastRekordBoxLibraryImportReadCounter = ?1",
+            [pdb_sequence() - 1],
+        )
+        .unwrap();
+    let section = engine_section().expect("Engine library section");
+    let statuses: Vec<_> = section.checks.iter().map(|c| c.status.clone()).collect();
+    assert!(
+        matches!(statuses.as_slice(), [DiagStatus::Warn, DiagStatus::Warn]),
+        "{section:?}"
+    );
+
+    let preview = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: usb_root.clone(),
+            apply: false,
+            selected_fix_ids: Vec::new(),
+        })
+        .data
+        .expect("repair preview");
+    let fix = preview
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "keep_engine_library_up_to_date")
+        .expect("Engine library fix proposed");
+    assert!(fix.description.contains("changes made on the player"));
+    assert!(!preview.engine_library_enabled);
+
+    let applied = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: usb_root.clone(),
+            apply: true,
+            selected_fix_ids: vec!["keep_engine_library_up_to_date".to_string()],
+        })
+        .data
+        .expect("repair apply");
+    assert!(applied.engine_library_enabled, "{applied:?}");
+    assert!(
+        applied.failed_fixes.is_empty(),
+        "{:?}",
+        applied.failed_fixes
+    );
+    let section = engine_section().expect("Engine library section");
+    assert!(
+        matches!(section.status, DiagStatus::Pass),
+        "one apply must leave nothing to fix: {section:?}"
+    );
+
+    // The fix turned the setting on, so exports keep the library up to date.
+    export();
+    let (counter, track, playlists) = library_state();
+    assert_eq!(counter, pdb_sequence());
+    assert!(track.1.starts_with("../Contents/"), "path: {}", track.1);
+    assert_eq!(playlists, vec!["Engine Test".to_string()]);
+
+    // Stand in for the player logging a play.
+    rusqlite::Connection::open(db_dir.join("hm.db"))
+        .unwrap()
+        .execute(
+            "INSERT INTO Historylist (sessionId, title, startTime, timezone, isDeleted)
+             VALUES (1, 'set', 1, 'UTC', 0)",
+            [],
+        )
+        .unwrap();
+    let history = fs::read(db_dir.join("hm.db")).unwrap();
+
+    export();
+    let (counter_after, track_after, _) = library_state();
+    assert_eq!(
+        counter_after,
+        pdb_sequence(),
+        "re-export must resync the counter"
+    );
+    assert_eq!(track_after, track, "track id must stay stable for history");
+    assert_eq!(fs::read(db_dir.join("hm.db")).unwrap(), history);
 }
 
 #[test]

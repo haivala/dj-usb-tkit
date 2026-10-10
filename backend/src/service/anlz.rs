@@ -350,7 +350,9 @@ pub(crate) fn pqtz_beats(dat: &[u8]) -> Option<Vec<(u16, u16, u32)>> {
     let header_len = read_u32_be_at(dat, range.start + 4)? as usize;
     let body = dat.get(range.start + header_len..range.end)?;
     Some(
-        body.chunks_exact(8)
+        body.as_chunks::<8>()
+            .0
+            .iter()
             .map(|e| {
                 (
                     u16::from_be_bytes([e[0], e[1]]),
@@ -2243,7 +2245,7 @@ mod tests {
         // The body is each beat's microseconds; PQTZ holds the floored ms.
         let body = find_chunk_payload(&ext, "PQT2").unwrap();
         let interval_us = 60_000_000.0 / 131.82;
-        for (i, (&(_, _, ms), us)) in beats.iter().zip(body.chunks_exact(2)).enumerate() {
+        for (i, (&(_, _, ms), us)) in beats.iter().zip(body.as_chunks::<2>().0).enumerate() {
             let exact = 295_000 + (i as f64 * interval_us).round() as u64;
             let us = u64::from(u16::from_be_bytes([us[0], us[1]]));
             assert!(us < 1000);
@@ -2264,7 +2266,7 @@ mod tests {
         let mut chunk = Vec::new();
         append_pqt2_grid(&mut chunk, &grid);
         let body = &chunk[56..];
-        assert!(body.chunks_exact(2).all(|e| e == [0x00, 0x66]));
+        assert!(body.as_chunks::<2>().0.iter().all(|e| e == &[0x00, 0x66]));
         assert_eq!(u32_at(&chunk, 24 + 4), 355);
         assert_eq!(u32_at(&chunk, 32 + 4), 238_555);
         assert_eq!(&chunk[24..26], &[0, 3]);
