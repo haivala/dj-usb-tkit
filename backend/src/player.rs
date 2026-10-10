@@ -56,17 +56,21 @@ impl PlaybackController {
         self.metronome.set(enabled, first_beat_ms, bpm, mix)
     }
 
+    /// `start_paused`: load (or seek) the track and hold it there, paused,
+    /// instead of starting the audio -- the cue editor parking its playhead.
     pub fn play_path(
         &self,
         path: &str,
         start_offset_ms: Option<u64>,
         start_ratio: Option<f64>,
+        start_paused: bool,
     ) -> BackendResult<PlaybackStatusData> {
         self.send_command(
             |reply_tx| PlaybackCommand::Play {
                 path: path.to_string(),
                 start_offset_ms,
                 start_ratio,
+                start_paused,
                 reply_tx,
             },
             "starting playback",
@@ -130,6 +134,7 @@ enum PlaybackCommand {
         path: String,
         start_offset_ms: Option<u64>,
         start_ratio: Option<f64>,
+        start_paused: bool,
         reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
     },
     Stop {
@@ -155,6 +160,7 @@ enum PlaybackCommand {
         normalized_path: String,
         start_offset_ms: Option<u64>,
         start_ratio: Option<f64>,
+        start_paused: bool,
         result: Result<
             crate::symphonia_decoder::SeekableSymphoniaSource,
             crate::symphonia_decoder::DecoderError,
@@ -216,6 +222,7 @@ fn playback_worker(
                 path,
                 start_offset_ms,
                 start_ratio,
+                start_paused,
                 reply_tx,
             } => {
                 begin_play_in_worker(
@@ -224,6 +231,7 @@ fn playback_worker(
                     path,
                     start_offset_ms,
                     start_ratio,
+                    start_paused,
                     reply_tx,
                 );
             }
@@ -248,6 +256,7 @@ fn playback_worker(
                 normalized_path,
                 start_offset_ms,
                 start_ratio,
+                start_paused,
                 result,
             } => {
                 finish_play_in_worker(
@@ -256,6 +265,7 @@ fn playback_worker(
                     normalized_path,
                     start_offset_ms,
                     start_ratio,
+                    start_paused,
                     result,
                 );
             }
@@ -299,6 +309,7 @@ fn begin_play_in_worker(
     path: String,
     start_offset_ms: Option<u64>,
     start_ratio: Option<f64>,
+    start_paused: bool,
     reply_tx: mpsc::Sender<BackendResult<PlaybackStatusData>>,
 ) {
     let normalized = match normalize_and_validate_path(&path) {
@@ -319,9 +330,16 @@ fn begin_play_in_worker(
         && !sink.empty()
     {
         let offset_ms = compute_target_offset_ms(start_offset_ms, start_ratio, state.duration_ms);
+        // A paused sink is still pulled (it plays silence), so the seek lands
+        // either way.
         if sink.try_seek(Duration::from_millis(offset_ms)).is_ok() {
-            sink.play();
-            state.started_at = Some(Instant::now());
+            if start_paused {
+                sink.pause();
+                state.started_at = None;
+            } else {
+                sink.play();
+                state.started_at = Some(Instant::now());
+            }
             state.start_offset_ms = offset_ms;
             let _ = reply_tx.send(Ok(snapshot(state)));
             return;
@@ -357,6 +375,7 @@ fn begin_play_in_worker(
             normalized_path: normalized,
             start_offset_ms,
             start_ratio,
+            start_paused,
             result,
         });
     });
@@ -371,6 +390,7 @@ fn finish_play_in_worker(
     normalized_path: String,
     start_offset_ms: Option<u64>,
     start_ratio: Option<f64>,
+    start_paused: bool,
     result: Result<
         crate::symphonia_decoder::SeekableSymphoniaSource,
         crate::symphonia_decoder::DecoderError,
@@ -416,6 +436,10 @@ fn finish_play_in_worker(
         .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64);
     let offset_ms = compute_target_offset_ms(start_offset_ms, start_ratio, duration_ms);
     let metronome = state.metronome.clone();
+    // Paused before the source goes in: the sink applies it from the first sample.
+    if start_paused {
+        sink.pause();
+    }
     if offset_ms > 0 && decoder.try_seek(Duration::from_millis(offset_ms)).is_err() {
         // Falls back only for a source whose format genuinely has no seek table.
         let skipped = decoder.skip_duration(Duration::from_millis(offset_ms));
@@ -423,7 +447,9 @@ fn finish_play_in_worker(
     } else {
         sink.append(MetronomeSource::new(decoder, metronome, offset_ms));
     }
-    sink.play();
+    if !start_paused {
+        sink.play();
+    }
     let status = load_playback_state(state, sink, normalized_path, offset_ms, duration_ms);
     let _ = pending.reply_tx.send(Ok(status));
 }
@@ -1160,7 +1186,7 @@ mod tests {
     fn playback_controller_play_path_rejects_missing_file() {
         let (controller, _transitions) = PlaybackController::new();
         let err = controller
-            .play_path("/nonexistent/path/to/track.mp3", None, None)
+            .play_path("/nonexistent/path/to/track.mp3", None, None, false)
             .expect_err("missing file should be rejected before touching audio hardware");
         assert!(matches!(err, BackendError::NotFound(_)));
     }
@@ -1242,6 +1268,7 @@ mod tests {
             "fake/stale.mp3".to_string(),
             None,
             None,
+            false,
             Err(crate::symphonia_decoder::DecoderError(
                 "should never be applied".to_string(),
             )),
@@ -1272,6 +1299,7 @@ mod tests {
             "fake/track.mp3".to_string(),
             None,
             None,
+            false,
             Err(crate::symphonia_decoder::DecoderError("boom".to_string())),
         );
 

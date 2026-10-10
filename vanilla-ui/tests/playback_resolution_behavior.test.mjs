@@ -90,6 +90,7 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
     usbRootValid: true,
     startOffsetMs: null,
     startRatio: 0.25,
+    startPaused: false,
   });
   assert.equal(state.playbackActive, true);
   assert.equal(state.playbackTrackId, "t-local");

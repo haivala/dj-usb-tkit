@@ -361,7 +361,8 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
         usbRoot: state.usbRoot || null,
         usbRootValid: !!state.usbRootValid,
         startOffsetMs,
-        startRatio
+        startRatio,
+        startPaused: !!options.startPaused
       });
       if (!isGenerationCurrent(state, generation)) return;
       if (waveformEl) {
@@ -369,7 +370,11 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
         state.activeWaveform = waveformEl;
         const duration = Number(playback?.durationMs || 0);
         const position = Number(playback?.positionMs || 0);
-        if (duration > 0) {
+        if (playback?.paused) {
+          // A `startPaused` load/seek: parked at the position, no audio.
+          stopPlayheadInterpolation(ctx);
+          setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : startRatio, false, true);
+        } else if (duration > 0) {
           startPlayheadInterpolation(ctx, {
             waveformEl,
             initialPositionMs: position,
@@ -385,13 +390,13 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
       // re-deriving a label the frontend can't always reproduce.
       const sourceLabel = playback?.sourceLabel || "";
       state.playbackActive = true;
-      state.playbackPaused = false;
+      state.playbackPaused = !!playback?.paused;
       state.playbackTrackId = playback?.trackId || track?.id || null;
       state.playbackPath = playback?.path || trackPath;
       state.playbackRowKey = options.rowKey || null;
       state.playbackLabelContext = { sourceLabel, title };
       updateTransportButtonsInDom(ctx);
-      emitStatus(`Playing from ${sourceLabel}: ${title}`);
+      emitStatus(playback?.paused ? "Paused" : `Playing from ${sourceLabel}: ${title}`);
     } catch (err) {
       if (!isGenerationCurrent(state, generation)) return;
       const message = err?.message || String(err);

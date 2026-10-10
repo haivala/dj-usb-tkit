@@ -118,21 +118,25 @@ export function bindTrackDetailEvents(ctx) {
     if (dragNoSelect) event.preventDefault();
   });
 
-  // --- Waveform: click to play, double-click to add a cue, wheel to zoom, drag to pan,
-  // drag a cue marker to move it (Shift inverts Quantize: free with Q on, snapped with Q off) ---
+  // --- Waveform: click to move the playhead there (playing on if it was
+  // playing, parked paused otherwise), drag the playhead to hear it follow the
+  // pointer, double-click to add a cue, wheel to zoom, drag to pan, drag a cue
+  // marker to move it (Shift inverts Quantize: free with Q on, snapped with Q off) ---
   const wf = el.trackDetailWaveform;
   const PAN_THRESHOLD_PX = 4;
   let pan = null; // { startX, startViewMs, moved }
   let cueDrag = null; // { tempId, startX, moved }
+  let scrub = null; // the playhead drag in progress (see onScrubMove)
   let suppressMarkerClick = false;
-  let pendingPlay = null;
+  let pendingPlace = null;
 
-  const playFromRatio = (startRatio) => {
+  // `paused`: load/seek there and hold, without starting the audio.
+  const playFromRatio = (startRatio, { paused = false } = {}) => {
     const track = trackDetailDialog.getWorking().track;
-    if (!track) return;
+    if (!track) return Promise.resolve();
     if (!adopted) playbackStartedHere = true;
-    ctx
-      .playTrackFromOrigin(track, "local", { startRatio, waveformEl: wf })
+    return ctx
+      .playTrackFromOrigin(track, "local", { startRatio, startPaused: paused, waveformEl: wf })
       .then(() => trackDetailDialog.notePlaybackStarted())
       .catch(() => {});
   };
@@ -147,10 +151,10 @@ export function bindTrackDetailEvents(ctx) {
     const dur = trackDetailDialog.getWorking().durationMs;
     if (cue && dur) playFromRatio(cue.positionMs / dur);
   };
-  const playFromPointer = (clientX) =>
-    playFromRatio(
-      trackDetailDialog.viewRatioToTrackRatio(scrubRatioFromPointer({ clientX }, wf))
-    );
+  const trackRatioAt = (clientX) =>
+    trackDetailDialog.viewRatioToTrackRatio(scrubRatioFromPointer({ clientX }, wf));
+  const placePlayhead = (clientX) =>
+    playFromRatio(trackRatioAt(clientX), { paused: !trackDetailDialog.isPlaying() });
 
   wf?.addEventListener("wheel", (event) => {
     event.preventDefault();
@@ -190,10 +194,80 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.setDraggingCue(null);
   };
 
+  // Playhead drag: the audio follows the pointer (one seek in flight at a
+  // time, always to the latest spot) and is held paused under it while the
+  // pointer rests, so the sound never runs ahead of the line. On release the
+  // track goes back to how it was -- playing on from the drop point, or parked
+  // there paused.
+  const SCRUB_REST_MS = 100;
+  const flushScrub = (s) => {
+    if (s.inFlight) return;
+    const { target } = s;
+    if (s.sent?.ratio === target.ratio && s.sent?.paused === target.paused) {
+      if (s.done && !scrub) trackDetailDialog.setPlayheadDrag(null);
+      return;
+    }
+    s.inFlight = playFromRatio(target.ratio, { paused: target.paused }).finally(() => {
+      s.inFlight = null;
+      s.sent = target;
+      flushScrub(s);
+    });
+  };
+  const onScrubMove = (event) => {
+    if (!scrub.moved && Math.abs(event.clientX - scrub.startX) < PAN_THRESHOLD_PX) return;
+    if (!scrub.moved) {
+      scrub.moved = true;
+      wf.classList.add("is-scrubbing");
+    }
+    const ratio = trackRatioAt(event.clientX);
+    trackDetailDialog.setPlayheadDrag(ratio);
+    scrub.target = { ratio, paused: false };
+    flushScrub(scrub);
+    const s = scrub;
+    clearTimeout(s.restTimer);
+    s.restTimer = setTimeout(() => {
+      if (scrub !== s) return;
+      s.target = { ratio, paused: true };
+      flushScrub(s);
+    }, SCRUB_REST_MS);
+  };
+  const endScrub = () => {
+    if (!scrub) return;
+    const s = scrub;
+    scrub = null;
+    clearTimeout(s.restTimer);
+    window.removeEventListener("pointermove", onScrubMove);
+    window.removeEventListener("pointerup", endScrub);
+    window.removeEventListener("pointercancel", endScrub);
+    if (!s.moved) return;
+    wf.classList.remove("is-scrubbing");
+    s.done = true;
+    s.target = { ratio: s.target.ratio, paused: !s.resumeAfter };
+    flushScrub(s);
+  };
+
   wf?.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     beginDragNoSelect();
     suppressMarkerClick = false;
+    if (event.target.closest(".track-detail-playhead")) {
+      clearTimeout(pendingPlace);
+      pendingPlace = null;
+      scrub = {
+        startX: event.clientX,
+        moved: false,
+        resumeAfter: trackDetailDialog.isPlaying(),
+        target: null,
+        sent: null,
+        inFlight: null,
+        restTimer: 0,
+        done: false,
+      };
+      window.addEventListener("pointermove", onScrubMove);
+      window.addEventListener("pointerup", endScrub);
+      window.addEventListener("pointercancel", endScrub);
+      return;
+    }
     const marker = event.target.closest(".cue-marker");
     if (marker) {
       cueDrag = { tempId: marker.dataset.tempId, startX: event.clientX, moved: false };
@@ -225,12 +299,13 @@ export function bindTrackDetailEvents(ctx) {
     pan = null;
     wf.classList.remove("is-panning");
     if (wasMove || event.target.closest(".cue-marker")) return;
-    // Defer the play so a following double-click can cancel it and add a cue instead.
+    // Defer the move so a following double-click can cancel it and add a cue
+    // instead, leaving the playhead where it was.
     const { clientX } = event;
-    clearTimeout(pendingPlay);
-    pendingPlay = setTimeout(() => {
-      pendingPlay = null;
-      playFromPointer(clientX);
+    clearTimeout(pendingPlace);
+    pendingPlace = setTimeout(() => {
+      pendingPlace = null;
+      placePlayhead(clientX);
     }, 230);
   };
   wf?.addEventListener("pointerup", endPan);
@@ -240,8 +315,8 @@ export function bindTrackDetailEvents(ctx) {
   });
   wf?.addEventListener("dblclick", (event) => {
     if (event.target.closest(".cue-marker")) return;
-    clearTimeout(pendingPlay);
-    pendingPlay = null;
+    clearTimeout(pendingPlace);
+    pendingPlace = null;
     const trackRatio = trackDetailDialog.viewRatioToTrackRatio(
       scrubRatioFromPointer(event, wf)
     );
@@ -251,8 +326,8 @@ export function bindTrackDetailEvents(ctx) {
   });
 
   el.trackDetailPlayPause?.addEventListener("click", () => {
-    clearTimeout(pendingPlay);
-    pendingPlay = null;
+    clearTimeout(pendingPlace);
+    pendingPlace = null;
     if (trackDetailDialog.isPlaying()) {
       ctx.pausePlaybackFromUi().catch(() => {});
     } else if (trackDetailDialog.isPaused()) {

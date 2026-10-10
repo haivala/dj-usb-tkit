@@ -179,15 +179,16 @@ fn play_native_with_recovery(
     path: &str,
     start_offset_ms: Option<u64>,
     start_ratio: Option<f64>,
+    start_paused: bool,
 ) -> BackendResult<PlaybackStatusData> {
-    match playback.play_path(path, start_offset_ms, start_ratio) {
+    match playback.play_path(path, start_offset_ms, start_ratio, start_paused) {
         Ok(status) => Ok(status),
         Err(err) => {
             if !is_recoverable_playback_error(&err.to_string()) {
                 return Err(err);
             }
             let _ = playback.stop();
-            playback.play_path(path, start_offset_ms, start_ratio)
+            playback.play_path(path, start_offset_ms, start_ratio, start_paused)
         }
     }
 }
@@ -207,6 +208,7 @@ fn play_resolved_track_data(
     PlayResolvedTrackData {
         path: status.path.unwrap_or_else(|| requested_path.to_string()),
         playing: status.playing,
+        paused: status.paused,
         position_ms: status.position_ms,
         duration_ms: status.duration_ms,
         track_id,
@@ -845,7 +847,7 @@ impl BackendService {
         playback: &PlaybackController,
         req: PlayTrackRequest,
     ) -> BackendResult<PlayTrackData> {
-        let status = playback.play_path(&req.path, req.start_offset_ms, req.start_ratio)?;
+        let status = playback.play_path(&req.path, req.start_offset_ms, req.start_ratio, false)?;
         Ok(PlayTrackData {
             path: status.path.unwrap_or(req.path),
             playing: status.playing,
@@ -900,7 +902,13 @@ impl BackendService {
         }
 
         if let Some(path) = library_path.as_deref() {
-            match play_native_with_recovery(playback, path, req.start_offset_ms, req.start_ratio) {
+            match play_native_with_recovery(
+                playback,
+                path,
+                req.start_offset_ms,
+                req.start_ratio,
+                req.start_paused,
+            ) {
                 Ok(status) => {
                     return Ok(play_resolved_track_data(
                         status,
@@ -927,6 +935,7 @@ impl BackendService {
                             usb_fallback,
                             req.start_offset_ms,
                             req.start_ratio,
+                            req.start_paused,
                         )?;
                         return Ok(play_resolved_track_data(
                             status,
@@ -944,8 +953,13 @@ impl BackendService {
         }
 
         if let Some(path) = usb_path.as_deref() {
-            let status =
-                play_native_with_recovery(playback, path, req.start_offset_ms, req.start_ratio)?;
+            let status = play_native_with_recovery(
+                playback,
+                path,
+                req.start_offset_ms,
+                req.start_ratio,
+                req.start_paused,
+            )?;
             return Ok(play_resolved_track_data(
                 status,
                 path,

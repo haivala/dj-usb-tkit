@@ -1305,8 +1305,17 @@ pub async fn play_resolved_track(
         Err(r) => return Ok(r),
     };
     if let Some(data) = response.data.as_ref() {
-        emit_playback_event(
-            &app,
+        // A `start_paused` load/seek is a pause change, not a start: a
+        // `playback.started` with `playing: false` would read as stopped.
+        let event = if data.paused {
+            PlaybackEvent::PauseChanged(PlaybackStatusData {
+                path: Some(data.path.clone()),
+                playing: false,
+                paused: true,
+                position_ms: data.position_ms,
+                duration_ms: data.duration_ms,
+            })
+        } else {
             PlaybackEvent::Started {
                 is_seek,
                 path: data.path.clone(),
@@ -1314,8 +1323,9 @@ pub async fn play_resolved_track(
                 position_ms: data.position_ms,
                 duration_ms: data.duration_ms,
                 track_id: data.track_id.clone(),
-            },
-        );
+            }
+        };
+        emit_playback_event(&app, event);
     } else {
         emit_playback_event(
             &app,

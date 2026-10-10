@@ -4414,10 +4414,20 @@ td button[data-action]:disabled,
   margin-left: -1px;
   background: var(--accent, #b06cff);
   box-shadow: 0 0 6px var(--accent-glow, rgba(176, 108, 255, 0.6));
-  pointer-events: none;
+  cursor: ew-resize;
   z-index: 1;
 }
+/* Grab area: a few px either side of the 1px line. */
+.track-detail-playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  right: -5px;
+}
 .track-detail-playhead[hidden] { display: none; }
+.track-detail-canvas.is-scrubbing { cursor: ew-resize; }
 .track-detail-beatgrid,
 .track-detail-cue-markers {
   position: absolute;

@@ -125,6 +125,9 @@ export function createTrackDetailController(el, prefs = {}) {
   let open = false;
   let resizeObserver = null;
   let playheadRafHandle = 0;
+  // While the playhead is dragged it sits under the pointer (whole-track ms),
+  // ahead of the backend's seeks catching up; null otherwise.
+  let playheadDragMs = null;
   let renderViewRafHandle = 0;
   let waveformRetryHandle = 0;
   let waveformRetries = 0;
@@ -616,6 +619,7 @@ export function createTrackDetailController(el, prefs = {}) {
 
   /// Where "now" is: the live playhead, or the backend's paused position.
   function currentPositionMs() {
+    if (playheadDragMs != null) return playheadDragMs;
     return isPlaying() || isPaused() ? playheadFullRatio() * working.durationMs : 0;
   }
 
@@ -635,7 +639,7 @@ export function createTrackDetailController(el, prefs = {}) {
     const ph = el.trackDetailPlayhead;
     if (!ph) return;
     const posMs = currentPositionMs();
-    if (posMs <= 0) {
+    if (posMs <= 0 && playheadDragMs == null) {
       ph.hidden = true;
       return;
     }
@@ -658,6 +662,7 @@ export function createTrackDetailController(el, prefs = {}) {
     // panned/zoomed manually.
     if (
       posMs > 0 &&
+      playheadDragMs == null &&
       viewSpanMs() < working.durationMs &&
       nowMs() > working.followSuspendUntil
     ) {
@@ -925,6 +930,13 @@ export function createTrackDetailController(el, prefs = {}) {
 
     notePlaybackStarted() {
       if (!playheadRafHandle) playheadRafHandle = raf(playheadTick);
+    },
+
+    /// Pin the playhead at a whole-track ratio while it is dragged; null hands
+    /// it back to playback.
+    setPlayheadDrag(trackRatio) {
+      playheadDragMs = trackRatio == null ? null : trackRatio * working.durationMs;
+      positionModalPlayhead();
     },
 
     setFirstBeatMs(ms) {
@@ -1294,6 +1306,7 @@ export function createTrackDetailController(el, prefs = {}) {
     close(result) {
       if (!open) return;
       open = false;
+      playheadDragMs = null;
       metronome.on = false;
       syncMetronome();
       el.trackDetailOverlay.hidden = true;

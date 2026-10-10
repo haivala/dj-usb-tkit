@@ -100,10 +100,11 @@ function installTrackDetailMock(page, opts = {}) {
             durationMs: 180000,
           });
           if (command === "play_resolved_track") {
+            const paused = !!payload?.request?.startPaused;
             clock.offsetMs = Math.round((payload?.request?.startRatio || 0) * 180000);
-            clock.startedAt = Date.now();
+            clock.startedAt = paused ? null : Date.now();
             clock.loaded = true;
-            return { ok: true, data: { started: true, positionMs: clock.offsetMs, durationMs: 180000 } };
+            return { ok: true, data: { playing: !paused, paused, positionMs: clock.offsetMs, durationMs: 180000 } };
           }
           if (command === "pause_playback_native") {
             if (clock.loaded && clock.startedAt != null) {
@@ -162,11 +163,12 @@ test("track-detail modal adds a cue at the playhead and saves it", async ({ page
   await expect(page.locator("#trackDetailOverlay")).toBeVisible();
   await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("120");
 
-  // Clicking the waveform starts playback.
+  // Clicking the waveform parks the playhead there.
   await page.locator("#trackDetailWaveform").click({ position: { x: 40, y: 20 } });
   await expect
     .poll(() => page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track")))
     .toBe(true);
+  await expect(page.locator("#trackDetailPlayhead")).toBeVisible();
 
   // All eight A–H slots are always there, so adding a cue doesn't change the height.
   const cells = page.locator("#trackDetailCueList > *");
@@ -1542,6 +1544,74 @@ test("play/pause resumes in the backend from where it was paused", async ({ page
   // The playhead carries on from the paused spot.
   await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(pausedMs);
   expect(await modalPlayheadMs(page)).toBeLessThan(pausedMs + 2000);
+});
+
+test("a waveform click parks the playhead without playing; dragging the playhead plays along", async ({ page }) => {
+  await installTrackDetailMock(page, { quantize: false });
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  const wf = page.locator("#trackDetailWaveform");
+  const btn = page.locator("#trackDetailPlayPause");
+  const playhead = page.locator("#trackDetailPlayhead");
+  const playCalls = () =>
+    page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "play_resolved_track").map((c) => c.request)
+    );
+  const wfBox = await wf.boundingBox();
+  const viewMs = 112500; // the default 60-bar view starts at 0
+
+  // A click loads the track paused at that spot: playhead there, no audio.
+  await wf.click({ position: { x: wfBox.width * 0.4, y: 100 } });
+  await expect.poll(async () => (await playCalls()).length).toBe(1);
+  const [placed] = await playCalls();
+  expect(placed.startPaused).toBe(true);
+  expect(Math.abs(placed.startRatio * 180000 - 0.4 * viewMs)).toBeLessThan(500);
+  await expect(wf).toHaveClass(/is-paused/);
+  await expect(btn).toHaveAttribute("aria-label", "Play");
+  await expect(playhead).toBeVisible();
+
+  // Play carries on from there (a resume, not a new load).
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Pause");
+  expect(await playCalls()).toHaveLength(1);
+
+  // A click while playing jumps there and keeps playing.
+  await wf.click({ position: { x: wfBox.width * 0.2, y: 100 } });
+  await expect.poll(async () => (await playCalls()).length).toBe(2);
+  expect((await playCalls())[1].startPaused).toBe(false);
+  await expect(btn).toHaveAttribute("aria-label", "Pause");
+
+  // Paused, drag the playhead: it plays while moving, holds paused under the
+  // resting pointer, and parks at the drop point.
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Play");
+  const ph = await playhead.boundingBox();
+  const y = wfBox.y + 100;
+  const before = (await playCalls()).length;
+  await page.mouse.move(ph.x + ph.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(wfBox.x + wfBox.width * 0.5, y, { steps: 8 });
+  await expect.poll(async () => (await playCalls()).length).toBeGreaterThan(before);
+  expect((await playCalls()).slice(before)[0].startPaused).toBe(false);
+  // Resting: paused right under the pointer, the line still there.
+  await expect.poll(async () => (await playCalls()).at(-1).startPaused).toBe(true);
+  expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - 0.5 * viewMs)).toBeLessThan(500);
+  await expect(wf).toHaveClass(/is-paused/);
+  const resting = await playhead.boundingBox();
+  expect(Math.abs(resting.x - (wfBox.x + wfBox.width * 0.5))).toBeLessThan(4);
+  // Moving again plays again.
+  const beforeMove = (await playCalls()).length;
+  await page.mouse.move(wfBox.x + wfBox.width * 0.7, y, { steps: 4 });
+  await expect.poll(async () => (await playCalls()).length).toBeGreaterThan(beforeMove);
+  expect((await playCalls())[beforeMove].startPaused).toBe(false);
+  await page.mouse.up();
+  await expect.poll(async () => (await playCalls()).at(-1).startPaused).toBe(true);
+  expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - 0.7 * viewMs)).toBeLessThan(500);
+  await expect(wf).toHaveClass(/is-paused/);
+  await expect(btn).toHaveAttribute("aria-label", "Play");
+  const dropped = await playhead.boundingBox();
+  expect(Math.abs(dropped.x - (wfBox.x + wfBox.width * 0.7))).toBeLessThan(4);
 });
 
 test("opening the editor on the track already playing from its row shows it playing, and hands it back on close", async ({ page }) => {

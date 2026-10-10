@@ -67,6 +67,11 @@
   so the badge and the USB health dot no longer disagree.
 - **Improvement:** Every collapsible heading shows the pointer cursor and no longer selects
   text when clicked.
+- **Improvement:** Clicking the cue editor's waveform moves the playhead there instead of
+  starting playback. If the track was playing it plays on from the new spot; otherwise it
+  stays paused there and Play starts from it. Drag the playhead to hear the track follow the
+  pointer; it goes quiet while the pointer rests. On release the track goes back to how it
+  was: still playing, or paused at the drop point.
 
 ## 0.3.7
 

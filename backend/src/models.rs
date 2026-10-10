@@ -1260,6 +1260,9 @@ pub struct PlayResolvedTrackRequest {
     pub start_offset_ms: Option<u64>,
     #[serde(default)]
     pub start_ratio: Option<f64>,
+    /// Load (or seek) and hold there, paused, without starting the audio.
+    #[serde(default)]
+    pub start_paused: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1267,6 +1270,8 @@ pub struct PlayResolvedTrackRequest {
 pub struct PlayResolvedTrackData {
     pub path: String,
     pub playing: bool,
+    /// Loaded but held at `position_ms` (a `start_paused` request).
+    pub paused: bool,
     pub position_ms: u64,
     pub duration_ms: Option<u64>,
     pub track_id: Option<String>,

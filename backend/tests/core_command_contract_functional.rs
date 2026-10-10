@@ -820,6 +820,7 @@ fn play_resolved_track_reports_not_found_without_library_or_usb_path() {
         usb_root_valid: true,
         start_offset_ms: None,
         start_ratio: None,
+        start_paused: false,
     });
 
     assert!(!response.ok, "unresolved track should fail");

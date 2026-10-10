@@ -39,8 +39,12 @@ its offset. One undo puts the grid and the cues back.
 The editor shows the full-detail colour waveform, zoomed to the first 60 bars at the track's BPM
 on open.
 
-- Scroll to zoom, drag to pan, click to play from that point, double-click to
-  add a cue.
+- Scroll to zoom, drag to pan, double-click to add a cue.
+- Click to move the playhead there: playback carries on from that spot, or, when
+  nothing is playing, the track waits there paused and Play starts from it.
+- Drag the playhead to hear the track follow the pointer. It goes quiet while the
+  pointer rests, so the sound never runs ahead of the line. On release it goes back to
+  how it was: still playing, or paused at the drop point.
 - **Beat grid**: a line on every beat. Bar starts (every 4th beat from the first
   beat) are wider and brighter. The lines run into a thin strip above and below
   the waveform, so the beats stay readable where the waveform is loud, and bar
