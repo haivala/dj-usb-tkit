@@ -216,12 +216,12 @@ membership that exists on only one side.
 
 | Area | File |
 | --- | --- |
-| operational diagnostics | `backend/src/service/diagnostics.rs` |
-| strict parity report | `backend/src/service/diagnostics.rs` |
+| operational diagnostics | `backend/src/service/diagnostics/` (`run.rs` holds the entry points) |
+| strict parity report | `backend/src/service/diagnostics/parity.rs` |
 | repair catalog and apply flow | `backend/src/service/repair/` (`run.rs` drives one pass) |
 | PDB/eDB field context | `docs/PDB.md`, `docs/eDB.md` |
 
-`diagnostics.rs`'s PDB reads (integrity checks, parity report) go through the local HDD staging
+The `diagnostics` module's PDB reads (integrity checks, parity report) go through the local HDD staging
 layer described in `docs/USB_EXPORT.md`'s "Local HDD staging" section, same as export. eDB access
 is always staged transparently regardless of caller (`edb::open_edb_from_usb_root`/`open_edb_rw`).
 
@@ -239,7 +239,7 @@ Relevant test areas:
 
 - `backend/tests/diagnostics_functional.rs`
 - `backend/tests/export_shape_parity_functional.rs`
-- `backend/src/service/diagnostics.rs` unit tests
+- `backend/src/service/diagnostics/tests.rs` unit tests
 - `backend/src/service/repair/tests.rs` unit tests
 - `backend/src/edb.rs` unit tests
 - `vanilla-ui/tests/diagnostics_ui_behavior.test.mjs`

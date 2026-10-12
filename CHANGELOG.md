@@ -47,6 +47,8 @@
 - **Chore:** USB repairs are split into files by area (PDB page fixes, audio fixes, player
   menu, history sync, strict parity, the repair run itself), and the repair run's detect and
   apply phases are separate functions. Repairs offer and apply the same fixes as before.
+- **Chore:** USB diagnostics are split into files by area (PDB integrity, content and
+  analysis checks, parity comparison, overview layout, path helpers) instead of one large file.
 
 ## 0.4.1
 
