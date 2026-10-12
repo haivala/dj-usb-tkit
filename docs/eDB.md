@@ -296,7 +296,7 @@ to keep report commands read-only.
 
 ### `cue` table on export
 
-`write_edb_cues_for_content` (in `export_helpers/mod.rs`) rewrites the `cue`
+`write_edb_cues_for_content` (in `export_helpers/edb_export.rs`) rewrites the `cue`
 rows for each exported track's `content_id` from the app's `track_cues`
 (max 8 hot cues, any number of memory cues):
 

@@ -292,7 +292,7 @@ Implementation anchors:
 - pointer, keyboard and button wiring: `vanilla-ui/components/track-detail/events.mjs`
 - waveform drawing: `vanilla-ui/components/track-detail/waveform_detail.mjs`
 - cue storage, normalization, ANLZ encoding: `backend/src/service/cues.rs`
-- eDB cue rows on export: `backend/src/service/export_helpers/mod.rs`
+- eDB cue rows on export: `backend/src/service/export_helpers/edb_export.rs`
 - metronome mixing: `backend/src/metronome.rs`, `backend/src/player.rs`
 
 ## Verification links

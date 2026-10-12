@@ -51,6 +51,7 @@
   analysis checks, parity comparison, overview layout, path helpers) instead of one large file.
 - **Chore:** The backend service's core file is split into files by area (track library,
   playback, playlists, source roots, settings) instead of one large file.
+- **Chore:** The export helpers' eDB writers and PDB writers each have their own file.
 
 ## 0.4.1
 
