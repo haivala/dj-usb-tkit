@@ -5369,7 +5369,7 @@ mod tests {
         // Regression: a PDB track row can retain a trailing-space alias
         // variant of a filename (e.g. "Track - .mp3") that the rest of this
         // codebase already treats as identical to "Track -.mp3" (write-time
-        // alias matching, repair.rs's unindexed-audio detector). Before this
+        // alias matching, the repair module's unindexed-audio detector). Before this
         // fix, `collect_strict_indexed_paths` compared the raw indexed path
         // against `collect_contents_audio_files`'s alias-stripped on-disk
         // set, so the single real file was double-counted: once as

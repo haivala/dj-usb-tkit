@@ -275,7 +275,7 @@ with `UNIQUE constraint failed: playlist.playlist_id`. This surfaced on a
 real corrupted export (`USB_ANOTHER_FIX`) where several playlists that only
 existed in eDB (needing a fresh PDB-side id allocated via the
 `allocate_unique_playlist_id` closure in `apply_strict_parity_upgrade`,
-`backend/src/service/repair.rs:4587`, which only avoids collisions against
+`backend/src/service/repair/strict_parity.rs`, which only avoids collisions against
 PDB-side folder ids) landed on ids already occupied by an eDB-side folder
 row. Regression test: `replace_export_playlist_row_with_identity_relocates_folder_collider`
 in `backend/src/edb.rs`'s own test module.

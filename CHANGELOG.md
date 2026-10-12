@@ -44,6 +44,9 @@
   reader, repairs and dump tools. Exports and repairs produce the same bytes as before.
 - **Chore:** The PDB writer is split into files by job (data model, whole-file writer,
   in-place repairs, additive writer, shared row helpers) instead of one large file.
+- **Chore:** USB repairs are split into files by area (PDB page fixes, audio fixes, player
+  menu, history sync, strict parity, the repair run itself), and the repair run's detect and
+  apply phases are separate functions. Repairs offer and apply the same fixes as before.
 
 ## 0.4.1
 

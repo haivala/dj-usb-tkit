@@ -218,18 +218,18 @@ membership that exists on only one side.
 | --- | --- |
 | operational diagnostics | `backend/src/service/diagnostics.rs` |
 | strict parity report | `backend/src/service/diagnostics.rs` |
-| repair catalog and apply flow | `backend/src/service/repair.rs` |
+| repair catalog and apply flow | `backend/src/service/repair/` (`run.rs` drives one pass) |
 | PDB/eDB field context | `docs/PDB.md`, `docs/eDB.md` |
 
 `diagnostics.rs`'s PDB reads (integrity checks, parity report) go through the local HDD staging
 layer described in `docs/USB_EXPORT.md`'s "Local HDD staging" section, same as export. eDB access
 is always staged transparently regardless of caller (`edb::open_edb_from_usb_root`/`open_edb_rw`).
 
-`repair.rs`'s PDB/eDB reads and writes go through the same staging layer: its diagnostic scanners
+The `repair` module's PDB/eDB reads and writes go through the same staging layer: its diagnostic scanners
 (`detect_pdb_*`) share one staged read per diagnostics pass, and every `apply_*`/`apply_fix_*`
 writer selected in a `repair_usb_diagnostics` apply request writes to the local staged copy only —
-`repair_usb_diagnostics_with_progress` flushes both databases back to the real USB drive exactly
-once, at the end of the whole apply block, after every selected fix has run (not once per fix).
+`apply_selected_fixes` flushes both databases back to the real USB drive exactly
+once, at its end, after every selected fix has run (not once per fix).
 `update_usb_player_menu_config` and `sync_usb_player_menu_edb_to_pdb` are staged the same way but
 are standalone operations outside the apply-batch flow, so each backs up and flushes on its own.
 
@@ -240,7 +240,7 @@ Relevant test areas:
 - `backend/tests/diagnostics_functional.rs`
 - `backend/tests/export_shape_parity_functional.rs`
 - `backend/src/service/diagnostics.rs` unit tests
-- `backend/src/service/repair.rs` unit tests
+- `backend/src/service/repair/tests.rs` unit tests
 - `backend/src/edb.rs` unit tests
 - `vanilla-ui/tests/diagnostics_ui_behavior.test.mjs`
 - `vanilla-ui/tests/usb_parity_detail.test.mjs`

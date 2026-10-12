@@ -270,7 +270,7 @@ most common case of a freshly exported or never-played drive. Any reader that
 surfaces history rows as user-facing history (import, diagnostics, or repair
 payload derivation) must filter on the `"HISTORY "` name prefix first. This
 is the same rule applied by `is_named_history_playlist` (`usb_helpers.rs`)
-and `derive_history_sync_payload` (`repair.rs`).
+and `derive_history_sync_payload` (`repair/history.rs`).
 
 ## Page Header
 
@@ -442,7 +442,7 @@ fallback. Call sites that switched from the old heuristic to this decode:
 `pdb_writer`'s `page_has_transaction_tombstones`, `read_page_footer_state`,
 `parse_t08_entries_from_page`, and `parse_page_row_slots`; `pdb_reader.rs`'s
 `parse_page_rows` (the row parser behind the main public `parse_pdb_bytes`
-entry point); and `repair.rs`'s `detect_pdb_zero_tranrf_pages_for_tables`,
+entry point); and `repair/pdb_fixes.rs`'s `detect_pdb_zero_tranrf_pages_for_tables`,
 where the old heuristic could silently skip inspecting a large playlist
 page's true last footer group (257 rows is the smallest case that both wraps
 and crosses a 16-row group boundary), letting real transaction-footer

@@ -1207,7 +1207,7 @@ export async function syncUsbPlayerMenusEdbToPdb(ctx) {
 
 // Whether the currently-selected `current` menu item may be removed is a
 // backend-owned fact (`UsbPlayerMenuItem.removable`, see
-// backend/src/service/repair.rs). The frontend just reads it.
+// backend/src/service/repair/player_menu.rs). The frontend just reads it.
 function currentPlayerMenuItemByKind(state, kind) {
   return (state.usbPlayerMenuCurrent || []).find((item) => Number(item.kind) === kind) || null;
 }

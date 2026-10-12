@@ -142,7 +142,7 @@ pub(crate) fn sanitize_history_name(value: &str) -> String {
 /// Fresh/never-played exports ship `t17`/`t18` with a fixed block of blank
 /// template/seed rows (no name, no track link) alongside this real data;
 /// this predicate is the same rule `derive_history_sync_payload` in
-/// `repair.rs` already uses to exclude them.
+/// `repair/history.rs` already uses to exclude them.
 pub(crate) fn is_named_history_playlist(name: &str) -> bool {
     name.starts_with("HISTORY ")
 }
