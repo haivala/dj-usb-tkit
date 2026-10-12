@@ -631,7 +631,7 @@ impl BackendService {
                 return Ok(AddTrackCandidateResolution {
                     previous_id,
                     track_id: Some(track_id),
-                    resolved_by: "usbMaterialized".to_string(),
+                    resolved_by: ResolvedBy::UsbMaterialized,
                     materialized: true,
                 });
             }
@@ -646,7 +646,7 @@ impl BackendService {
             return Ok(AddTrackCandidateResolution {
                 previous_id,
                 track_id: Some(local_track_id),
-                resolved_by: "localTrackId".to_string(),
+                resolved_by: ResolvedBy::LocalTrackId,
                 materialized: false,
             });
         }
@@ -660,7 +660,7 @@ impl BackendService {
             return Ok(AddTrackCandidateResolution {
                 previous_id: previous_id.clone(),
                 track_id: Some(track_id.to_string()),
-                resolved_by: "self".to_string(),
+                resolved_by: ResolvedBy::SelfId,
                 materialized: false,
             });
         }
@@ -669,7 +669,7 @@ impl BackendService {
             return Ok(AddTrackCandidateResolution {
                 previous_id,
                 track_id: None,
-                resolved_by: "usbOrigin".to_string(),
+                resolved_by: ResolvedBy::UsbOrigin,
                 materialized: false,
             });
         }

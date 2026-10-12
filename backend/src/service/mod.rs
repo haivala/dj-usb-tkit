@@ -83,15 +83,15 @@ use crate::models::{
     InitializeUsbRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData,
     ListTracksData, ListTracksRequest, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
     PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest,
-    PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
-    Playlist, RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackSource,
+    PlaybackStatusData, Playlist, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
     ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ResolvePlaybackSourceData,
     ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    ScanLibraryData, ScanLibraryRequest, SearchTracksData, SearchTracksRequest,
+    ResolvedBy, ScanLibraryData, ScanLibraryRequest, SearchTracksData, SearchTracksRequest,
     SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
-    SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track, WarningEntry,
+    SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track, TrackMatch, WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};

@@ -2046,7 +2046,8 @@ fn resolve_playback_source_prefers_local_track_by_fingerprint() {
     assert!(resolved.ok, "resolve failed: {resolved:?}");
     let data = resolved.data.expect("resolve data");
     assert!(
-        data.matched_by == "hash" || data.matched_by == "metadata",
+        data.matched_by == backend::models::TrackMatch::Hash
+            || data.matched_by == backend::models::TrackMatch::Metadata,
         "unexpected resolver mode: {}",
         data.matched_by
     );

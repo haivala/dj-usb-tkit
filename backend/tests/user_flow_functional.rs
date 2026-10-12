@@ -1183,7 +1183,10 @@ fn add_never_viewed_usb_track_materializes_row_and_imports_anlz_cues() {
         added.added, 1,
         "never-viewed usb track should still be added"
     );
-    assert_eq!(added.resolutions[0].resolved_by, "usbMaterialized");
+    assert_eq!(
+        added.resolutions[0].resolved_by,
+        backend::models::ResolvedBy::UsbMaterialized
+    );
     let materialized_id = added.resolutions[0]
         .track_id
         .clone()

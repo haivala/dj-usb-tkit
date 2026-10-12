@@ -20,7 +20,7 @@ fn fix_proposal(id: &str, title: &str, description: impl Into<String>) -> Repair
 
 /// What the detect phase found, handed to the apply phase.
 struct DetectedRepairs {
-    empty_analysis_paths: Vec<String>,
+    empty_analysis_paths: Vec<std::path::PathBuf>,
     parsed_pdb: Option<ParsedPdb>,
     bpm_key_mismatches: Vec<BpmKeyMismatch>,
     app_beat_grids: Vec<std::path::PathBuf>,
@@ -157,36 +157,10 @@ impl BackendService {
         let mut sync_edb_history_supported = false;
         let mut sync_edb_history_needed = false;
 
-        let anlz_scan_warnings = scan_anlz_warnings(&usb_root);
-        warnings.extend(anlz_scan_warnings.iter().cloned());
-        let mut empty_analysis_paths = diagnostics
-            .warnings
-            .iter()
-            .map(|w| w.message.as_str())
-            .filter_map(|line| line.strip_prefix("analysis file appears empty: "))
-            .map(|s| s.trim().to_string())
-            .collect::<Vec<_>>();
-        let mut malformed_analysis_entries = diagnostics
-            .warnings
-            .iter()
-            .map(|w| w.message.as_str())
-            .filter_map(|line| line.strip_prefix("analysis malformed entry is empty: "))
-            .map(|s| s.trim().to_string())
-            .collect::<Vec<_>>();
-        empty_analysis_paths.extend(anlz_scan_warnings.iter().filter_map(|w| {
-            w.message
-                .strip_prefix("analysis file appears empty: ")
-                .map(str::to_string)
-        }));
-        malformed_analysis_entries.extend(anlz_scan_warnings.iter().filter_map(|w| {
-            w.message
-                .strip_prefix("analysis malformed entry is empty: ")
-                .map(str::to_string)
-        }));
-        empty_analysis_paths.sort();
-        empty_analysis_paths.dedup();
-        malformed_analysis_entries.sort();
-        malformed_analysis_entries.dedup();
+        let anlz_scan = scan_anlz(&usb_root);
+        warnings.extend(anlz_scan.warnings);
+        let empty_analysis_paths = anlz_scan.empty_files;
+        let malformed_analysis_entries = anlz_scan.empty_malformed_entries;
         if !empty_analysis_paths.is_empty() {
             detected_issues.push(format!(
                 "{} empty USB analysis file(s) detected",

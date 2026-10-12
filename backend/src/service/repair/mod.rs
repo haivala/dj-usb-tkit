@@ -48,7 +48,7 @@ use super::export_helpers::{
 use super::usb_staging;
 use super::usb_utils::{
     canonicalize_playlist_name, collect_contents_audio_files, resolve_usb_root,
-    resolve_usb_side_path, scan_anlz_warnings,
+    resolve_usb_side_path, sanitize_warning_path, scan_anlz,
 };
 #[cfg(test)]
 use super::usb_vendor_compat::vendor_pdb_path;

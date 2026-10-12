@@ -59,7 +59,12 @@
 - **Fix:** The "empty analysis files" repair matches each empty file to its track by the
   file's full path. Before, it compared only the letters and digits of the path, so two
   analysis folders whose names differ only in where the `/` falls could be mixed up, and the
-  other track's analysis would be rebuilt instead.
+  other track's analysis would be rebuilt instead. The repair also gets the empty files
+  straight from the USB scan instead of reading them back out of the scan's warning text,
+  so a file whose name has a control character in it is repaired too.
+- **Chore:** How a track was matched (`matchedBy`, `resolvedBy`) and where it plays from
+  (`source`) are enums in the backend instead of free text. The app sends the same values
+  as before. The audio player keeps the loaded track's path as a `Path`.
 
 ## 0.4.1
 

@@ -1630,9 +1630,7 @@ fn apply_fix_empty_analysis_files_bakes_real_pdb_tempo_not_120_default() {
 
     let empty_path =
         resolve_usb_side_path(&usb_root, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT")
-            .expect("resolve anlz path")
-            .to_string_lossy()
-            .into_owned();
+            .expect("resolve anlz path");
 
     let mut warnings = Vec::new();
     let (fixed, skipped, failed, _writes) = service
@@ -1712,9 +1710,7 @@ fn apply_fix_empty_analysis_files_keeps_folders_with_the_same_letters_apart() {
     std::fs::write(&dat_path, b"").unwrap();
     let empty_path =
         resolve_usb_side_path(&usb_root, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT")
-            .expect("resolve anlz path")
-            .to_string_lossy()
-            .into_owned();
+            .expect("resolve anlz path");
 
     let mut warnings = Vec::new();
     let (fixed, skipped, failed, _writes) = service
@@ -1798,9 +1794,7 @@ fn apply_fix_empty_analysis_files_fails_when_source_audio_cannot_be_decoded() {
 
     let empty_path =
         resolve_usb_side_path(&usb_root, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT")
-            .expect("resolve anlz path")
-            .to_string_lossy()
-            .into_owned();
+            .expect("resolve anlz path");
 
     let mut warnings = Vec::new();
     let (fixed, skipped, failed, _writes) = service

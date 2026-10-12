@@ -306,7 +306,7 @@ fn resolve_playback_source_excludes_usb_placeholder_rows_even_when_no_local_copy
     req.file_path = Some("/mnt/usb1/Contents/a.mp3".to_string());
     let resolved = svc.resolve_playback_source(req).expect("resolve");
     assert_eq!(resolved.resolved_path, None);
-    assert_eq!(resolved.matched_by, "none");
+    assert_eq!(resolved.matched_by, backend::models::TrackMatch::NoMatch);
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn resolve_playback_source_treats_path_as_local_once_it_is_a_configured_source_r
         .resolve_playback_source(resolve_req("Reused Path", "Artist", None))
         .expect("resolve");
     assert_eq!(resolved.resolved_path.as_deref(), Some("/mnt/data/a.mp3"));
-    assert_eq!(resolved.matched_by, "hash");
+    assert_eq!(resolved.matched_by, backend::models::TrackMatch::Hash);
 }
 
 #[test]
@@ -418,7 +418,7 @@ fn resolve_playback_source_fast_path_returns_own_path_for_non_usb_track_id() {
     let resolved = svc
         .resolve_playback_source(resolve_req("Totally Different", "Nobody", Some("local-1")))
         .expect("resolve");
-    assert_eq!(resolved.matched_by, "self");
+    assert_eq!(resolved.matched_by, backend::models::TrackMatch::SelfId);
     assert_eq!(resolved.resolved_path.as_deref(), Some("/music/a.mp3"));
 }
 
@@ -480,7 +480,7 @@ fn resolve_playback_source_fast_path_handles_missing_track_id() {
             Some("does-not-exist"),
         ))
         .expect("resolve");
-    assert_eq!(resolved.matched_by, "hash");
+    assert_eq!(resolved.matched_by, backend::models::TrackMatch::Hash);
     assert_eq!(resolved.resolved_path.as_deref(), Some("/music/a.mp3"));
 }
 

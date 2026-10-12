@@ -376,7 +376,7 @@ impl BackendService {
     pub(super) fn apply_fix_empty_analysis_files(
         &self,
         usb_root: &std::path::Path,
-        empty_analysis_paths: &[String],
+        empty_analysis_paths: &[std::path::PathBuf],
         edb_conn: Option<&mut rusqlite::Connection>,
         parsed_pdb: Option<&crate::pdb_reader::ParsedPdb>,
         warnings: &mut Vec<WarningEntry>,
@@ -490,9 +490,9 @@ impl BackendService {
         let mut writes = 0usize;
 
         for empty_path in empty_analysis_paths {
-            let empty_path_buf = std::path::Path::new(empty_path);
-            let key_file = analysis_path_key(empty_path_buf);
-            let key_dir = empty_path_buf
+            let empty_path_text = sanitize_warning_path(empty_path);
+            let key_file = analysis_path_key(empty_path);
+            let key_dir = empty_path
                 .parent()
                 .map(analysis_path_key)
                 .unwrap_or_default();
@@ -506,7 +506,7 @@ impl BackendService {
                     Level::Warn,
                     "usb-repair",
                     "usb.repair.empty-analysis.no-mapping",
-                    format!("repair skipped (empty analysis): source audio mapping not found for {empty_path}"),
+                    format!("repair skipped (empty analysis): source audio mapping not found for {empty_path_text}"),
                 ));
                 continue;
             };
@@ -517,7 +517,7 @@ impl BackendService {
                     Level::Warn,
                     "usb-repair",
                     "usb.repair.empty-analysis.source-missing",
-                    format!("repair skipped (empty analysis): source audio missing for {empty_path} -> {}", source_audio.display()),
+                    format!("repair skipped (empty analysis): source audio missing for {empty_path_text} -> {}", source_audio.display()),
                 ));
                 continue;
             }
@@ -574,7 +574,7 @@ impl BackendService {
                     Level::Error,
                     "usb-repair",
                     "usb.repair.empty-analysis.write-failed",
-                    format!("repair failed (empty analysis): {empty_path}: {err}"),
+                    format!("repair failed (empty analysis): {empty_path_text}: {err}"),
                 ));
                 continue;
             }

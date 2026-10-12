@@ -926,10 +926,10 @@ impl BackendService {
         };
 
         let resolved = self.resolve_playback_source(resolve_request())?;
-        if resolved.matched_by == "self" {
+        if resolved.matched_by == TrackMatch::SelfId {
             return Ok(ResolveTrackIdentityData {
                 track_id: resolved.track_id,
-                resolved_by: resolved.matched_by,
+                resolved_by: resolved.matched_by.into(),
                 materialized: false,
             });
         }
@@ -952,14 +952,14 @@ impl BackendService {
         {
             return Ok(ResolveTrackIdentityData {
                 track_id: Some(data.track_id),
-                resolved_by: "materialized".to_string(),
+                resolved_by: ResolvedBy::Materialized,
                 materialized: true,
             });
         }
 
         Ok(ResolveTrackIdentityData {
             track_id: resolved.track_id,
-            resolved_by: resolved.matched_by,
+            resolved_by: resolved.matched_by.into(),
             materialized: false,
         })
     }

@@ -141,7 +141,7 @@ fn command_surface_covers_usb_name_backup_identity_refresh_and_preflight_wrapper
     assert!(identity.ok, "identity wrapper failed: {identity:?}");
     let identity = identity.data.expect("identity data");
     assert_eq!(identity.track_id, None);
-    assert_eq!(identity.resolved_by, "none");
+    assert_eq!(identity.resolved_by, backend::models::ResolvedBy::NoMatch);
     assert!(!identity.materialized);
 
     let refreshed = backend

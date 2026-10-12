@@ -45,12 +45,12 @@ pub(super) fn play_resolved_track_data(
     status: PlaybackStatusData,
     requested_path: &str,
     track_id: Option<String>,
-    matched_by: &str,
-    source: &str,
+    matched_by: TrackMatch,
+    source: PlaybackSource,
     source_label: String,
     has_usb_context: bool,
 ) -> PlayResolvedTrackData {
-    let library_resolved = source == "library";
+    let library_resolved = source == PlaybackSource::Library;
     PlayResolvedTrackData {
         path: status.path.unwrap_or_else(|| requested_path.to_string()),
         playing: status.playing,
@@ -58,8 +58,8 @@ pub(super) fn play_resolved_track_data(
         position_ms: status.position_ms,
         duration_ms: status.duration_ms,
         track_id,
-        matched_by: matched_by.to_string(),
-        source: source.to_string(),
+        matched_by,
+        source,
         source_label,
         library_resolved,
         has_usb_context,
@@ -95,12 +95,12 @@ impl BackendService {
             file_size_bytes: req.file_size_bytes,
             track_id: req.track_id.clone(),
         })?;
-        let matched_by = resolved.matched_by.clone();
+        let matched_by = resolved.matched_by;
         let library_path = resolved
             .resolved_path
             .as_deref()
             .filter(|path| !path.trim().is_empty())
-            .filter(|_| matches!(matched_by.as_str(), "self" | "hash" | "metadata"))
+            .filter(|_| matched_by.is_match())
             .map(|path| path.trim().to_string());
         let has_usb_context = req.usb_root_valid
             && req
@@ -139,8 +139,8 @@ impl BackendService {
                         status,
                         path,
                         resolved.track_id.or(req.track_id),
-                        &matched_by,
-                        "library",
+                        matched_by,
+                        PlaybackSource::Library,
                         playback_source_label(true),
                         has_usb_context,
                     ));
@@ -166,8 +166,8 @@ impl BackendService {
                             status,
                             usb_fallback,
                             req.track_id,
-                            &matched_by,
-                            "usb",
+                            matched_by,
+                            PlaybackSource::Usb,
                             playback_source_label(false),
                             has_usb_context,
                         ));
@@ -189,8 +189,8 @@ impl BackendService {
                 status,
                 path,
                 req.track_id,
-                &matched_by,
-                "usb",
+                matched_by,
+                PlaybackSource::Usb,
                 playback_source_label(false),
                 has_usb_context,
             ));
@@ -288,7 +288,7 @@ impl BackendService {
             {
                 let data = ResolvePlaybackSourceData {
                     resolved_path: Some(track.file_path.clone()),
-                    matched_by: "self".to_string(),
+                    matched_by: TrackMatch::SelfId,
                     track_id: Some(track.id),
                 };
                 if stored_file_path(&track.file_path).is_file() {
@@ -301,9 +301,9 @@ impl BackendService {
         let title = req.title.trim();
         let artist = req.artist.trim();
         if title.is_empty() || artist.is_empty() {
-            return Ok(weak_self.unwrap_or_else(|| ResolvePlaybackSourceData {
+            return Ok(weak_self.unwrap_or(ResolvePlaybackSourceData {
                 resolved_path: None,
-                matched_by: "none".to_string(),
+                matched_by: TrackMatch::NoMatch,
                 track_id: None,
             }));
         }
@@ -322,7 +322,7 @@ impl BackendService {
         if let Some(track) = best_candidate(candidates, &req) {
             return Ok(ResolvePlaybackSourceData {
                 resolved_path: Some(track.file_path.clone()),
-                matched_by: "hash".to_string(),
+                matched_by: TrackMatch::Hash,
                 track_id: Some(track.id),
             });
         }
@@ -340,14 +340,14 @@ impl BackendService {
         if let Some(track) = best_candidate(candidates, &req) {
             return Ok(ResolvePlaybackSourceData {
                 resolved_path: Some(track.file_path.clone()),
-                matched_by: "metadata".to_string(),
+                matched_by: TrackMatch::Metadata,
                 track_id: Some(track.id),
             });
         }
 
-        Ok(weak_self.unwrap_or_else(|| ResolvePlaybackSourceData {
+        Ok(weak_self.unwrap_or(ResolvePlaybackSourceData {
             resolved_path: None,
-            matched_by: "none".to_string(),
+            matched_by: TrackMatch::NoMatch,
             track_id: None,
         }))
     }

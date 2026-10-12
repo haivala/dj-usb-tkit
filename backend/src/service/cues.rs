@@ -1301,7 +1301,9 @@ impl BackendService {
                 track_id: None,
             })
             .ok()?;
-        matches!(resolved.matched_by.as_str(), "self" | "hash" | "metadata")
+        resolved
+            .matched_by
+            .is_match()
             .then_some(resolved.track_id)
             .flatten()
     }

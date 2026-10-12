@@ -545,13 +545,25 @@ pub(crate) fn downsample_waveform_payload(payload: &[u8], bins: usize) -> Vec<u8
     peaks
 }
 
-pub(crate) fn scan_anlz_warnings(usb_root: &Path) -> Vec<WarningEntry> {
+/// What [`scan_anlz`] found under USBANLZ: warnings for the event log, and
+/// the empty files themselves for the repair to act on.
+#[derive(Default)]
+pub(crate) struct AnlzScan {
+    pub(crate) warnings: Vec<WarningEntry>,
+    /// Empty `.DAT`/`.EXT`/`.2EX` bundle members.
+    pub(crate) empty_files: Vec<PathBuf>,
+    /// Empty files that aren't bundle members at all.
+    pub(crate) empty_malformed_entries: Vec<PathBuf>,
+}
+
+pub(crate) fn scan_anlz(usb_root: &Path) -> AnlzScan {
     let anlz_root = usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_ANALYSIS_DIR);
     if !anlz_root.exists() {
-        return Vec::new();
+        return AnlzScan::default();
     }
 
-    let mut warnings = Vec::new();
+    let mut scan = AnlzScan::default();
+    let warnings = &mut scan.warnings;
     for entry in WalkDir::new(&anlz_root) {
         match entry {
             Ok(e) => {
@@ -586,6 +598,7 @@ pub(crate) fn scan_anlz_warnings(usb_root: &Path) -> Vec<WarningEntry> {
                     if let Ok(md) = e.metadata()
                         && md.len() == 0
                     {
+                        scan.empty_malformed_entries.push(e.path().to_path_buf());
                         warnings.push(logging::log(
                             Level::Warn,
                             "usb-analysis",
@@ -610,6 +623,7 @@ pub(crate) fn scan_anlz_warnings(usb_root: &Path) -> Vec<WarningEntry> {
                 match e.metadata() {
                     Ok(md) => {
                         if md.len() == 0 {
+                            scan.empty_files.push(e.path().to_path_buf());
                             warnings.push(logging::log(
                                 Level::Warn,
                                 "usb-analysis",
@@ -640,7 +654,7 @@ pub(crate) fn scan_anlz_warnings(usb_root: &Path) -> Vec<WarningEntry> {
             )),
         }
     }
-    warnings
+    scan
 }
 
 fn is_known_anlz_metadata_file(path: &Path) -> bool {
@@ -1690,20 +1704,49 @@ mod diag_tests {
     }
 
     #[test]
-    fn scan_anlz_warnings_ignores_usbmng_dat() {
+    fn scan_anlz_ignores_usbmng_dat() {
         let temp = tempfile::tempdir().expect("tempdir");
         let anlz_root = temp.path().join(USB_VENDOR_ROOT_DIR).join(USB_ANALYSIS_DIR);
         std::fs::create_dir_all(&anlz_root).expect("create USBANLZ");
         std::fs::write(anlz_root.join("USBMNG.DAT"), b"stub").expect("write USBMNG.DAT");
 
-        let warnings = scan_anlz_warnings(temp.path());
+        let warnings = scan_anlz(temp.path()).warnings;
 
         assert!(warnings.iter().all(|w| !w.message.contains("USBMNG.DAT")
             && !w.message.contains("analysis entry malformed")));
     }
 
     #[test]
-    fn scan_anlz_warnings_accepts_numbered_anlz_bundle_members() {
+    fn scan_anlz_returns_empty_files_as_real_paths() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        // The control character is escaped in the warning text, so only the
+        // returned path still names the file on disk.
+        let anlz_dir = temp
+            .path()
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_ANALYSIS_DIR)
+            .join("P001")
+            .join("0000\u{7}001");
+        std::fs::create_dir_all(&anlz_dir).expect("create ANLZ dir");
+        let empty = anlz_dir.join("ANLZ0000.DAT");
+        std::fs::write(&empty, b"").expect("write empty DAT");
+        std::fs::write(anlz_dir.join("ANLZ0000.EXT"), b"stub").expect("write EXT");
+
+        let scan = scan_anlz(temp.path());
+
+        assert_eq!(scan.empty_files, vec![empty.clone()]);
+        assert!(scan.empty_malformed_entries.is_empty());
+        assert!(
+            scan.warnings
+                .iter()
+                .any(|w| w.code == "usb.analysis.file-empty" && w.message.contains("\\x07")),
+            "the warning still shows the escaped name: {:?}",
+            scan.warnings
+        );
+    }
+
+    #[test]
+    fn scan_anlz_accepts_numbered_anlz_bundle_members() {
         let temp = tempfile::tempdir().expect("tempdir");
         let anlz_dir = temp
             .path()
@@ -1714,7 +1757,7 @@ mod diag_tests {
         std::fs::create_dir_all(&anlz_dir).expect("create ANLZ dir");
         std::fs::write(anlz_dir.join("ANLZ0001.2EX"), b"stub").expect("write numbered 2EX");
 
-        let warnings = scan_anlz_warnings(temp.path());
+        let warnings = scan_anlz(temp.path()).warnings;
 
         assert!(
             warnings.iter().all(|w| !w.message.contains("ANLZ0001.2EX")

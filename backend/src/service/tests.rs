@@ -1017,7 +1017,10 @@ fn add_track_candidates_to_playlist_materializes_local_source_rows() {
     assert_eq!(result.added, 1);
     assert_eq!(result.skipped, 0);
     assert!(result.resolutions[0].materialized);
-    assert_eq!(result.resolutions[0].resolved_by, "materialized");
+    assert_eq!(
+        result.resolutions[0].resolved_by,
+        crate::models::ResolvedBy::Materialized
+    );
 
     let tracks = service
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -1074,7 +1077,10 @@ fn add_track_candidates_to_playlist_does_not_fuzzy_resolve_usb_origin_rows() {
     assert_eq!(result.unresolved, 1);
     assert_eq!(result.added, 0);
     assert_eq!(result.skipped, 0);
-    assert_eq!(result.resolutions[0].resolved_by, "usbOrigin");
+    assert_eq!(
+        result.resolutions[0].resolved_by,
+        crate::models::ResolvedBy::UsbOrigin
+    );
 
     let tracks = service
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -2434,7 +2440,7 @@ fn resolve_track_identity_materializes_safe_local_source_path() {
         .expect("resolve identity");
 
     assert!(result.materialized);
-    assert_eq!(result.resolved_by, "materialized");
+    assert_eq!(result.resolved_by, crate::models::ResolvedBy::Materialized);
     assert!(result.track_id.is_some());
 }
 
@@ -2476,7 +2482,7 @@ fn resolve_track_identity_skips_usb_materialization_and_resolves_local_match() {
         .expect("resolve identity");
 
     assert!(!result.materialized);
-    assert_eq!(result.resolved_by, "hash");
+    assert_eq!(result.resolved_by, crate::models::ResolvedBy::Hash);
     assert_eq!(result.track_id.as_deref(), Some("local-1"));
 }
 
@@ -2616,7 +2622,7 @@ fn resolve_playback_source_fast_path_by_track_id() {
             track_id: Some("t1".to_string()),
         })
         .expect("resolve playback source");
-    assert_eq!(result.matched_by, "self");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::SelfId);
     assert_eq!(result.resolved_path.as_deref(), Some("/music/a.mp3"));
     assert_eq!(result.track_id.as_deref(), Some("t1"));
 }
@@ -2648,7 +2654,7 @@ fn resolve_playback_source_falls_back_to_fingerprint_hash_match() {
             track_id: None,
         })
         .expect("resolve playback source");
-    assert_eq!(result.matched_by, "hash");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::Hash);
     assert_eq!(result.track_id.as_deref(), Some("t1"));
 }
 
@@ -2757,7 +2763,7 @@ fn resolve_playback_source_falls_back_to_missing_file_row_when_nothing_on_disk()
             track_id: None,
         })
         .expect("resolve playback source");
-    assert_eq!(result.matched_by, "hash");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::Hash);
     assert_eq!(result.resolved_path.as_deref(), Some("/music/gone.mp3"));
 }
 
@@ -2790,7 +2796,7 @@ fn resolve_playback_source_keeps_missing_self_row_as_last_resort() {
             track_id: Some("stale".to_string()),
         })
         .expect("resolve playback source");
-    assert_eq!(result.matched_by, "self");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::SelfId);
     assert_eq!(result.resolved_path.as_deref(), Some("/music/gone.mp3"));
 }
 
@@ -2808,6 +2814,6 @@ fn resolve_playback_source_returns_none_for_blank_title_or_artist() {
             track_id: None,
         })
         .expect("resolve playback source");
-    assert_eq!(result.matched_by, "none");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::NoMatch);
     assert!(result.resolved_path.is_none());
 }

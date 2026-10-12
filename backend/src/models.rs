@@ -256,11 +256,90 @@ pub struct ResolvePlaybackSourceRequest {
     pub track_id: Option<String>,
 }
 
+/// How a track from elsewhere (a USB, an import) was matched to a library
+/// track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrackMatch {
+    /// The track's own id is a library track.
+    #[serde(rename = "self")]
+    SelfId,
+    /// Same file content.
+    Hash,
+    /// Same title, artist and length.
+    Metadata,
+    /// No library track.
+    #[serde(rename = "none")]
+    NoMatch,
+}
+
+impl TrackMatch {
+    /// A library track was found.
+    pub fn is_match(self) -> bool {
+        self != Self::NoMatch
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SelfId => "self",
+            Self::Hash => "hash",
+            Self::Metadata => "metadata",
+            Self::NoMatch => "none",
+        }
+    }
+}
+
+impl std::fmt::Display for TrackMatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// How a candidate track got its library track id: a [`TrackMatch`], or one
+/// of the ways a playlist add resolves it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ResolvedBy {
+    #[serde(rename = "self")]
+    SelfId,
+    Hash,
+    Metadata,
+    #[serde(rename = "none")]
+    NoMatch,
+    /// A new library track was made for it.
+    Materialized,
+    /// A new library track was made for a USB track and linked to the USB.
+    UsbMaterialized,
+    /// The candidate carried the id of its library copy.
+    LocalTrackId,
+    /// A USB track that stays USB-only.
+    UsbOrigin,
+}
+
+impl From<TrackMatch> for ResolvedBy {
+    fn from(matched: TrackMatch) -> Self {
+        match matched {
+            TrackMatch::SelfId => Self::SelfId,
+            TrackMatch::Hash => Self::Hash,
+            TrackMatch::Metadata => Self::Metadata,
+            TrackMatch::NoMatch => Self::NoMatch,
+        }
+    }
+}
+
+/// Where a resolved track is played from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlaybackSource {
+    Library,
+    Usb,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvePlaybackSourceData {
     pub resolved_path: Option<String>,
-    pub matched_by: String,
+    pub matched_by: TrackMatch,
     pub track_id: Option<String>,
 }
 
@@ -452,7 +531,7 @@ pub struct ResolveTrackIdentityRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ResolveTrackIdentityData {
     pub track_id: Option<String>,
-    pub resolved_by: String,
+    pub resolved_by: ResolvedBy,
     pub materialized: bool,
 }
 
@@ -703,7 +782,7 @@ pub struct AddTrackCandidateResolution {
     pub previous_id: Option<String>,
     #[serde(default)]
     pub track_id: Option<String>,
-    pub resolved_by: String,
+    pub resolved_by: ResolvedBy,
     pub materialized: bool,
 }
 
@@ -1275,8 +1354,8 @@ pub struct PlayResolvedTrackData {
     pub position_ms: u64,
     pub duration_ms: Option<u64>,
     pub track_id: Option<String>,
-    pub matched_by: String,
-    pub source: String,
+    pub matched_by: TrackMatch,
+    pub source: PlaybackSource,
     pub source_label: String,
     pub library_resolved: bool,
     pub has_usb_context: bool,
@@ -2345,4 +2424,41 @@ pub struct SaveUsbTrackAnalysisEditsData {
     /// and the app playlists that contain it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_track_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wire<T: Serialize>(value: T) -> String {
+        serde_json::to_value(value)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn match_and_source_enums_keep_their_wire_strings() {
+        for (matched, text) in [
+            (TrackMatch::SelfId, "self"),
+            (TrackMatch::Hash, "hash"),
+            (TrackMatch::Metadata, "metadata"),
+            (TrackMatch::NoMatch, "none"),
+        ] {
+            assert_eq!(wire(matched), text);
+            assert_eq!(matched.to_string(), text);
+            assert_eq!(wire(ResolvedBy::from(matched)), text);
+        }
+        for (resolved, text) in [
+            (ResolvedBy::Materialized, "materialized"),
+            (ResolvedBy::UsbMaterialized, "usbMaterialized"),
+            (ResolvedBy::LocalTrackId, "localTrackId"),
+            (ResolvedBy::UsbOrigin, "usbOrigin"),
+        ] {
+            assert_eq!(wire(resolved), text);
+        }
+        assert_eq!(wire(PlaybackSource::Library), "library");
+        assert_eq!(wire(PlaybackSource::Usb), "usb");
+    }
 }

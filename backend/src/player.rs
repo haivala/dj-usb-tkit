@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -157,7 +157,7 @@ enum PlaybackCommand {
     /// command, without the worker thread ever blocking on the disk I/O itself.
     DecoderReady {
         generation: u64,
-        normalized_path: String,
+        normalized_path: PathBuf,
         start_offset_ms: Option<u64>,
         start_ratio: Option<f64>,
         start_paused: bool,
@@ -180,7 +180,7 @@ struct WorkerState {
     stream: Option<OutputStream>,
     stream_handle: Option<rodio::OutputStreamHandle>,
     sink: Option<Sink>,
-    path: Option<String>,
+    path: Option<PathBuf>,
     started_at: Option<Instant>,
     start_offset_ms: u64,
     duration_ms: Option<u64>,
@@ -291,7 +291,7 @@ fn check_natural_stop(state: &mut WorkerState, transitions: &mpsc::Sender<Playba
     if !sink_emptied {
         return;
     }
-    let path = state.path.clone();
+    let path = path_text(state.path.as_deref());
     let duration_ms = state.duration_ms;
     stop_in_worker(state);
     let _ = transitions.send(PlaybackTransition { path, duration_ms });
@@ -324,7 +324,7 @@ fn begin_play_in_worker(
     // regardless of how this new one ends up resolving below.
     supersede_pending_play(state);
 
-    let same_track_loaded = state.path.as_deref() == Some(normalized.as_str());
+    let same_track_loaded = state.path.as_deref() == Some(normalized.as_path());
     if same_track_loaded
         && let Some(sink) = state.sink.as_ref()
         && !sink.empty()
@@ -368,8 +368,7 @@ fn begin_play_in_worker(
 
     let decode_tx = tx.clone();
     thread::spawn(move || {
-        let result =
-            crate::symphonia_decoder::SeekableSymphoniaSource::open(Path::new(&normalized));
+        let result = crate::symphonia_decoder::SeekableSymphoniaSource::open(&normalized);
         let _ = decode_tx.send(PlaybackCommand::DecoderReady {
             generation,
             normalized_path: normalized,
@@ -387,7 +386,7 @@ fn begin_play_in_worker(
 fn finish_play_in_worker(
     state: &mut WorkerState,
     generation: u64,
-    normalized_path: String,
+    normalized_path: PathBuf,
     start_offset_ms: Option<u64>,
     start_ratio: Option<f64>,
     start_paused: bool,
@@ -457,7 +456,7 @@ fn finish_play_in_worker(
 fn load_playback_state(
     state: &mut WorkerState,
     sink: Sink,
-    normalized_path: String,
+    normalized_path: PathBuf,
     offset_ms: u64,
     duration_ms: Option<u64>,
 ) -> PlaybackStatusData {
@@ -490,10 +489,10 @@ fn compute_target_offset_ms(
 
 pub fn run_playback_preflight(path: &str) -> BackendResult<PlaybackPreflightData> {
     let normalized = normalize_and_validate_path(path)?;
-    let file_exists = Path::new(&normalized).exists();
+    let file_exists = normalized.exists();
     let file_readable = File::open(&normalized).is_ok();
     let file_decodable = if file_readable {
-        crate::symphonia_decoder::SeekableSymphoniaSource::open(Path::new(&normalized)).is_ok()
+        crate::symphonia_decoder::SeekableSymphoniaSource::open(&normalized).is_ok()
     } else {
         false
     };
@@ -517,7 +516,7 @@ pub fn run_playback_preflight(path: &str) -> BackendResult<PlaybackPreflightData
     };
 
     Ok(PlaybackPreflightData {
-        path: normalized,
+        path: normalized.to_string_lossy().into_owned(),
         file_exists,
         file_readable,
         safe_output_devices,
@@ -776,7 +775,7 @@ fn snapshot(state: &mut WorkerState) -> PlaybackStatusData {
     }
 
     PlaybackStatusData {
-        path: state.path.clone(),
+        path: path_text(state.path.as_deref()),
         playing,
         paused,
         position_ms: position_ms(state),
@@ -784,7 +783,13 @@ fn snapshot(state: &mut WorkerState) -> PlaybackStatusData {
     }
 }
 
-fn normalize_and_validate_path(path: &str) -> BackendResult<String> {
+/// The loaded track's path as API text. It was API text to begin with (see
+/// `normalize_and_validate_path`), so nothing is lost.
+fn path_text(path: Option<&Path>) -> Option<String> {
+    path.map(|path| path.to_string_lossy().into_owned())
+}
+
+fn normalize_and_validate_path(path: &str) -> BackendResult<PathBuf> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err(BackendError::Validation(
@@ -804,7 +809,7 @@ fn normalize_and_validate_path(path: &str) -> BackendResult<String> {
         )));
     }
 
-    Ok(as_path.to_string_lossy().to_string())
+    Ok(as_path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -883,7 +888,7 @@ mod tests {
         // sink.empty() == true immediately — nothing was ever appended.
         let mut state = WorkerState {
             sink: Some(sink),
-            path: Some("fake/track.mp3".to_string()),
+            path: Some(PathBuf::from("fake/track.mp3")),
             duration_ms: Some(1234),
             started_at: Some(Instant::now()),
             ..Default::default()
@@ -1003,7 +1008,7 @@ mod tests {
         sink.append(rodio::source::Zero::<f32>::new(1, 44_100));
         let mut state = WorkerState {
             sink: Some(sink),
-            path: Some("fake/track.mp3".to_string()),
+            path: Some(PathBuf::from("fake/track.mp3")),
             duration_ms: Some(10),
             // Comfortably larger than any scheduling jitter, so elapsed time will
             // exceed duration_ms without risking Instant subtraction underflow.
@@ -1027,7 +1032,7 @@ mod tests {
         sink.append(rodio::source::Zero::<f32>::new(1, 44_100));
         WorkerState {
             sink: Some(sink),
-            path: Some("fake/track.mp3".to_string()),
+            path: Some(PathBuf::from("fake/track.mp3")),
             duration_ms: Some(10_000),
             start_offset_ms: 2_000,
             started_at: Some(Instant::now() - Duration::from_millis(1_000)),
@@ -1265,7 +1270,7 @@ mod tests {
         finish_play_in_worker(
             &mut state,
             3,
-            "fake/stale.mp3".to_string(),
+            PathBuf::from("fake/stale.mp3"),
             None,
             None,
             false,
@@ -1296,7 +1301,7 @@ mod tests {
         finish_play_in_worker(
             &mut state,
             7,
-            "fake/track.mp3".to_string(),
+            PathBuf::from("fake/track.mp3"),
             None,
             None,
             false,
