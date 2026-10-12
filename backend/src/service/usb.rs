@@ -348,7 +348,7 @@ fn usb_track_matches_query(track: &UsbTrack, query_lower: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// Stable in-place sort mirroring `sort_tracks` (`service::mod`) and the
+/// Stable in-place sort mirroring `sort_tracks` (`service::library`) and the
 /// frontend `sortTracks`, for `UsbTrack`. Unknown/absent `sort_by` leaves the
 /// caller's order (PDB entry order) untouched.
 fn sort_usb_tracks(items: &mut [UsbTrack], sort_by: Option<&str>, sort_dir: Option<&str>) {

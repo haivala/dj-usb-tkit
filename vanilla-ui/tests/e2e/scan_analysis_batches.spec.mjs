@@ -130,7 +130,7 @@ function installScanAnalysisMock(page, opts = {}) {
     }
 
     // Mirrors track_has_core_analysis_for_source_status
-    // (backend/src/service/mod.rs): a track counts toward the library
+    // (backend/src/service/source_roots.rs): a track counts toward the library
     // duration total only once it has all three of bpm/waveform/duration.
     const isCountable = (track) => Number.isFinite(track.bpm) && track.bpm > 0
       && !!track.waveformPeaksPath
@@ -540,7 +540,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
     };
 
     // Mirrors track_has_core_analysis_for_source_status
-    // (backend/src/service/mod.rs): a track counts toward the library
+    // (backend/src/service/source_roots.rs): a track counts toward the library
     // duration total only once it has all three of bpm/waveform/duration.
     const isCountable = (track) => Number.isFinite(track.bpm) && track.bpm > 0
       && !!track.waveformPeaksPath

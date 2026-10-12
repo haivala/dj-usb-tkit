@@ -330,7 +330,8 @@ test("source chips show analyzed green on startup and adding a source indexes it
   await page.locator("#addSourceBtn").click();
   // Newly added folders must be indexed immediately (scan_library, metadata-only
   // insert) so tracks are playable right away without a manual "Scan Library"
-  // click -- see backend/src/service/mod.rs scan_library / resolve_playback_source.
+  // click -- see backend/src/service/library.rs scan_library /
+  // playback.rs resolve_playback_source.
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
   await expect.poll(async () => page.evaluate(() => window.__lastScanPayload)).toEqual({
     sourceRoots: ["/music2"],
@@ -433,7 +434,7 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
 
 // Regression coverage for: searching the library used to make a fully
 // -analyzed folder's chip lose its green state whenever the search term
-// didn't match any track in that folder (backend/src/service/mod.rs's
+// didn't match any track in that folder (backend/src/service/library.rs's
 // browse_source_files computed source_root_analysis from the search
 // -filtered track list instead of each folder's full contents, so a
 // zero-match folder's `total` collapsed to 0 and `fully_analyzed` -- which

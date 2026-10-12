@@ -114,7 +114,7 @@ These are intentionally app-owned and persisted locally rather than copied from 
 
 Settings are stored as key/value records in backend storage, with frontend persistence mirroring selected keys for UX continuity.
 
-`set_frontend_setting` only accepts keys listed in `frontend_ui_setting_keys` (`backend/src/service/mod.rs`); any other key fails with "unsupported frontend setting key". A new `FRONTEND_DB_KEY_*` in `vanilla-ui/settings_keys.mjs` must be added there too; the backend test `frontend_ui_setting_keys_cover_every_frontend_db_key` fails when one is missing.
+`set_frontend_setting` only accepts keys listed in `frontend_ui_setting_keys` (`backend/src/service/settings.rs`); any other key fails with "unsupported frontend setting key". A new `FRONTEND_DB_KEY_*` in `vanilla-ui/settings_keys.mjs` must be added there too; the backend test `frontend_ui_setting_keys_cover_every_frontend_db_key` fails when one is missing.
 
 ## Data migrations
 

@@ -198,7 +198,7 @@ test("after removing source A, reloading tracks still filters by remaining roots
 // clicked "Scan Library". The fix indexes newly (re-)added folders
 // immediately as part of "Add Source" -- see
 // vanilla-ui/components/library/events.mjs addSourceBtn handler and
-// backend/src/service/mod.rs scan_library.
+// backend/src/service/library.rs scan_library.
 test("re-adding a removed source folder indexes it via scan_library so tracks are usable again", async ({ page }) => {
   await installSourceRemovalMock(page);
   await page.goto("/");
