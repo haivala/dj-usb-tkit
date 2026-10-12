@@ -313,10 +313,9 @@ fn engine_track(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
     };
-    let filename = row
-        .file_name
-        .clone()
-        .unwrap_or_else(|| path.rsplit('/').next().unwrap_or_default().to_string());
+    // The device's own import names the file after the path, not the PDB filename slot, which
+    // `sanitize_metadata` may have shortened (dropping characters of a far-off script).
+    let filename = path.rsplit('/').next().unwrap_or_default().to_string();
     let sample_rate = row.sample_rate_hz.map(f64::from);
     let sample_count = sample_rate
         .zip(row.duration_seconds)

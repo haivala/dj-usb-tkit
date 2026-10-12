@@ -39,6 +39,17 @@
 
 ## Unreleased
 
+## 0.4.1
+
+- **Fix:** Denon Prime and Numark Mixstream players that import `export.pdb`
+  themselves showed many tracks without an artist. The export now writes artist names the
+  way rekordbox does. USB diagnostics flag USBs exported with earlier versions, and
+  Preview Fixes offers "Repair Artist Name Layout" to fix them in one pass.
+- **Fix:** The Engine DJ library gave files whose names mix many writing systems a
+  shortened file name (e.g. ending in `.3` instead of `.mp3`). It now uses the real file name.
+- **Chore:** `docs/ENGINE_DJ.md` lists how the library differs from the player's own
+  import and what the player changes when a track is played.
+
 ## 0.4.0
 
 **Severity:** feature

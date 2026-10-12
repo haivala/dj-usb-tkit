@@ -35,11 +35,12 @@ use super::anlz::{
 use super::anlz_seek::{SEEK_SKIP_REPORT_HINT, seek_index_for_audio};
 use super::cues::collapse_anlz_cues;
 use super::export::{APP_CONTENT_LINK_ID, ContentFingerprint, content_fingerprint_key};
+use super::export_helpers::pdb_encoding::ARTIST_SHORT_ASCII_NAME_OFFSET;
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRowData,
-    encode_album_row, load_table_columns, remove_track_ids_from_pdb_playlist_entries,
-    replace_export_playlist_row_with_identity, table_exists, to_usb_relative_path,
-    write_edb_playlist_with_conn, write_pdb,
+    encode_album_row, encode_artist_row, load_table_columns,
+    remove_track_ids_from_pdb_playlist_entries, replace_export_playlist_row_with_identity,
+    table_exists, to_usb_relative_path, write_edb_playlist_with_conn, write_pdb,
 };
 use super::usb_staging;
 use super::usb_utils::{
@@ -107,6 +108,7 @@ const ENGINE_LIBRARY_FIX_ID: &str = "keep_engine_library_up_to_date";
 /// USB playlist the unindexed-audio fix collects its files into.
 const UNINDEXED_AUDIO_PLAYLIST_NAME: &str = "Unindexed";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
+const PDB_ARTIST_NAME_LAYOUT_FIX_ID: &str = "repair_pdb_artist_name_layout";
 
 /// The order proposed fixes are shown in (and, for the first four entries,
 /// the order they're actually applied in — see the apply block below). Must
@@ -139,6 +141,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_EC_CONFLICT_FIX_ID,
     PDB_TRACK_STRING_ALIGNMENT_FIX_ID,
     PDB_ALBUM_STRING_ALIGNMENT_FIX_ID,
+    PDB_ARTIST_NAME_LAYOUT_FIX_ID,
     PDB_HEADER_COMPATIBILITY_FIX_ID,
     BPM_KEY_MISMATCH_FIX_ID,
     BEAT_GRID_HEADER_FIX_ID,
@@ -724,10 +727,9 @@ const TRACK_STRING_SLOT_LABELS: [&str; 21] = [
 /// alignment can produce it. `dump_pdb_anomalies`-style checks only look at page/table shape,
 /// not per-row string alignment.
 ///
-/// Artist near-variant rows (`encode_artist_row`) hardcode a 4-byte-aligned name offset (12), so
-/// the current writer can never produce a misaligned artist row — table 2 is still checked
-/// here for diagnostic completeness (e.g. a foreign-origin PDB), but `repair_usb_diagnostics`
-/// offers no automated fix for it, only tracks (t00) and albums (t03).
+/// Artist near-variant rows are also flagged when a short ASCII name isn't at offset 10, where
+/// rekordbox puts it: Engine DJ's `export.pdb` import reads it only there and leaves the artist
+/// empty otherwise. This app's writer used to put every artist name at 12.
 pub(super) fn detect_pdb_string_misalignment(pdb_path: &Path) -> Vec<MisalignedStringSlot> {
     use crate::pdb_writer::parse_page_row_slots;
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
@@ -830,6 +832,15 @@ pub(super) fn detect_pdb_string_misalignment(pdb_path: &Path) -> Vec<MisalignedS
                             table_type,
                             id,
                             slot_label: "name",
+                        });
+                    } else if typ == 0x60
+                        && row.get(name_offset).is_some_and(|b| b & 1 == 1)
+                        && name_offset != ARTIST_SHORT_ASCII_NAME_OFFSET
+                    {
+                        out.push(MisalignedStringSlot {
+                            table_type,
+                            id,
+                            slot_label: "ascii_name_offset",
                         });
                     }
                 }
@@ -1540,11 +1551,51 @@ fn apply_pdb_track_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
 
 /// Fix album rows whose UTF-16 name slot isn't 4-byte aligned (see
 /// `detect_pdb_string_misalignment`). Reads each affected row's existing `artist_id`/name
-/// directly off the raw bytes (nothing semantic changes, only the encoding), re-encodes via
-/// `encode_album_row` (already alignment-fixed), and relocates via
-/// `realign_dictionary_rows_in_place`.
+/// directly off the raw bytes (nothing semantic changes, only the encoding) and re-encodes it via
+/// `encode_album_row` (already alignment-fixed).
 fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> BackendResult<usize> {
-    use crate::utils::{page_offset, read_u8_at, read_u32_le_at};
+    use crate::utils::{read_u8_at, read_u32_le_at};
+    reencode_pdb_dictionary_rows(usb_root, ids, 3, 12, "Album string alignment", |row, id| {
+        if row.len() < 16 {
+            return None;
+        }
+        let artist_id = read_u32_le_at(row, 8)?;
+        let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
+        let name = crate::pdb_reader::get_string_from_pdb(row, name_offset).unwrap_or_default();
+        Some(encode_album_row(id, &name, artist_id))
+    })
+}
+
+/// Fix artist rows whose name isn't where rekordbox puts it (see
+/// `detect_pdb_string_misalignment`): re-encodes each via `encode_artist_row`, name unchanged.
+fn apply_pdb_artist_name_layout_repair(usb_root: &Path, ids: &[u32]) -> BackendResult<usize> {
+    use crate::utils::{read_u8_at, read_u16_le_at};
+    reencode_pdb_dictionary_rows(usb_root, ids, 2, 4, "Artist name layout", |row, id| {
+        if row.len() < 10 {
+            return None;
+        }
+        let name_offset = if read_u16_le_at(row, 0)? == 0x64 {
+            read_u16_le_at(row, 10)? as usize
+        } else {
+            read_u8_at(row, 9)? as usize
+        };
+        let name = crate::pdb_reader::get_string_from_pdb(row, name_offset)?;
+        Some(encode_artist_row(id, &name))
+    })
+}
+
+/// Re-encode the dictionary rows (`table_type` 2 or 3, id at `id_offset`) named by `ids` and
+/// relocate them via `realign_dictionary_rows_in_place`. `encode` builds the replacement from the
+/// existing row's bytes.
+fn reencode_pdb_dictionary_rows(
+    usb_root: &Path,
+    ids: &[u32],
+    table_type: u32,
+    id_offset: usize,
+    label: &str,
+    encode: impl Fn(&[u8], u32) -> Option<Vec<u8>>,
+) -> BackendResult<usize> {
+    use crate::utils::{page_offset, read_u32_le_at};
     if ids.is_empty() {
         return Ok(0);
     }
@@ -1560,17 +1611,20 @@ fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
         ));
     };
     let target_ids: HashSet<u32> = ids.iter().copied().collect();
-    let (_ec, first, last) = crate::utils::table_ptr_fields(&bytes, 3).ok_or_else(|| {
-        BackendError::Validation(
-            "Album string alignment repair blocked: t03 pointer missing".into(),
-        )
-    })?;
+    let (_ec, first, last) =
+        crate::utils::table_ptr_fields(&bytes, table_type).ok_or_else(|| {
+            BackendError::Validation(format!(
+                "{label} repair blocked: t{table_type:02} pointer missing"
+            ))
+        })?;
     crate::utils::collect_chain(&bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation("Album string alignment repair blocked: t03 chain invalid".into())
+        BackendError::Validation(format!(
+            "{label} repair blocked: t{table_type:02} chain invalid"
+        ))
     })?;
 
-    // Scan every physical page stamped table_type=3, not just pages reachable by walking the
-    // first/last chain pointers -- matching `detect_pdb_string_misalignment`'s scope exactly.
+    // Scan every physical page stamped with this table type, not just pages reachable by walking
+    // the first/last chain pointers -- matching `detect_pdb_string_misalignment`'s scope exactly.
     // `ids` came from that same raw scan, so a chain-only walk here could silently fail to find
     // (and thus never fix) a row `ids` named: e.g. a stale row left present on a page that an
     // earlier rewrite orphaned from the live chain without touching its content.
@@ -1586,7 +1640,7 @@ fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
         if read_u32_le_at(page, 4).unwrap_or(0) == 0 {
             continue;
         }
-        if read_u32_le_at(page, 8) != Some(3) {
+        if read_u32_le_at(page, 8) != Some(table_type) {
             continue;
         }
         for slot in crate::pdb_writer::parse_page_row_slots(page, page_size) {
@@ -1598,28 +1652,23 @@ fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
             let Some(row) = bytes.get(row_abs..row_abs + row_len) else {
                 continue;
             };
-            if row_len < 16 {
-                continue;
-            }
-            let Some(id) = read_u32_le_at(row, 12) else {
+            let Some(id) = read_u32_le_at(row, id_offset) else {
                 continue;
             };
             if !target_ids.contains(&id) {
                 continue;
             }
-            let Some(artist_id) = read_u32_le_at(row, 8) else {
-                continue;
-            };
-            let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
-            let name = crate::pdb_reader::get_string_from_pdb(row, name_offset).unwrap_or_default();
-            rows.push((id, encode_album_row(id, &name, artist_id)));
+            if let Some(replacement) = encode(row, id) {
+                rows.push((id, replacement));
+            }
         }
     }
     if rows.is_empty() {
         return Ok(0);
     }
-    let patched =
-        crate::pdb_writer::realign_dictionary_rows_in_place(&mut bytes, 3, 12, &rows, page_size)?;
+    let patched = crate::pdb_writer::realign_dictionary_rows_in_place(
+        &mut bytes, table_type, id_offset, &rows, page_size,
+    )?;
     let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
     if !mismatches.is_empty() {
         let detail = mismatches
@@ -1629,7 +1678,7 @@ fn apply_pdb_album_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> Back
             .collect::<Vec<_>>()
             .join(" | ");
         return Err(BackendError::Validation(format!(
-            "Album string alignment repair blocked: page-header convention mismatches ({detail})"
+            "{label} repair blocked: page-header convention mismatches ({detail})"
         )));
     }
     std::fs::write(&pdb_path, &bytes)?;
@@ -4435,18 +4484,27 @@ impl BackendService {
         }
         if !pdb_misaligned_artist_ids.is_empty() {
             detected_issues.push(format!(
-                "{} artist row(s) with a misaligned UTF-16 name slot",
+                "{} artist row(s) with the name at a different offset than rekordbox uses \
+                 (Engine DJ players show these tracks without an artist; a misaligned UTF-16 \
+                 name also freezes CDJ hardware while browsing)",
                 pdb_misaligned_artist_ids.len()
             ));
-            unsupported_items.push(RepairUnsupportedItem {
-                issue: format!(
-                    "{} artist row(s) with a misaligned UTF-16 name slot",
+            estimated_file_writes += 1;
+            proposed_fixes.push(RepairFixProposal {
+                id: PDB_ARTIST_NAME_LAYOUT_FIX_ID.to_string(),
+                title: "Repair Artist Name Layout".to_string(),
+                description: format!(
+                    "Re-encode {} artist row(s) the way rekordbox writes them: a plain ASCII \
+                     name at offset 10, a UTF-16 name at the 4-byte aligned offset 12. Older \
+                     versions of this app put every artist name at 12, which an Engine DJ \
+                     player's own import of export.pdb reads as no artist.",
                     pdb_misaligned_artist_ids.len()
                 ),
-                reason: "This app's own writer always places the artist name at a 4-byte aligned \
-                         offset, so this indicates a foreign-origin PDB. No automated repair is \
-                         offered; re-export the affected playlists to regenerate clean artist rows."
-                    .to_string(),
+                supported: true,
+                destructive: false,
+                always_applied: false,
+                estimated_writes: 1,
+                estimated_deletes: 0,
             });
         }
         let pdb_header_compatibility_repair =
@@ -5297,6 +5355,23 @@ impl BackendService {
                 }
             } else if !pdb_misaligned_album_ids.is_empty() {
                 skipped_fixes.push("Repair Album String Alignment: not selected".to_string());
+            }
+
+            if selected.contains(PDB_ARTIST_NAME_LAYOUT_FIX_ID) {
+                if pdb_misaligned_artist_ids.is_empty() {
+                    skipped_fixes.push("Repair Artist Name Layout: nothing to apply".to_string());
+                } else {
+                    match apply_pdb_artist_name_layout_repair(&usb_root, &pdb_misaligned_artist_ids)
+                    {
+                        Ok(n) => applied_fixes
+                            .push(format!("Repair Artist Name Layout: fixed {n} row(s)")),
+                        Err(err) => {
+                            failed_fixes.push(format!("Repair Artist Name Layout failed: {err}"))
+                        }
+                    }
+                }
+            } else if !pdb_misaligned_artist_ids.is_empty() {
+                skipped_fixes.push("Repair Artist Name Layout: not selected".to_string());
             }
 
             if selected.contains(PDB_HEADER_COMPATIBILITY_FIX_ID) {
@@ -8182,6 +8257,71 @@ mod tests {
     /// `detect_pdb_string_misalignment` still finds it (it scans every physical page, not just
     /// the live chain) and CDJ hardware can still choke on it, but the repair used to walk only
     /// the live chain and would silently report success without ever touching the orphaned row.
+    /// Older writers put a short ASCII artist name at offset 12; Engine DJ's own `export.pdb`
+    /// import reads it only at 10 (where rekordbox puts it) and shows no artist. The diagnostics
+    /// flag such rows and the repair moves the name to 10 without changing it.
+    #[test]
+    fn artist_name_layout_repair_moves_ascii_name_to_rekordbox_offset() {
+        use crate::pdb_writer::{read_present_page_rows, rewrite_variable_page_rows_in_place};
+        use crate::utils::{collect_chain, read_u32_le_at, table_ptr_fields};
+        const PAGE_SIZE: usize = 4096;
+        let mut bytes = build_seed_pdb_bytes_for_alignment_test();
+        assert!(
+            detect_pdb_string_misalignment_bytes(&bytes).is_empty(),
+            "current writer must put an ASCII artist name at 10"
+        );
+
+        // Rewrite the artist row (id 1) the old way: 2 zero bytes before the name, offset 12.
+        let (_ec, first, last) = table_ptr_fields(&bytes, 2).expect("t02 pointer present");
+        let chain = collect_chain(&bytes, PAGE_SIZE, first, last).expect("t02 chain");
+        for page_idx in chain.into_iter().skip(1) {
+            let off = page_idx as usize * PAGE_SIZE;
+            let page = bytes[off..off + PAGE_SIZE].to_vec();
+            let mut rows = read_present_page_rows(&page, PAGE_SIZE);
+            let mut changed = false;
+            for row in rows.iter_mut() {
+                if read_u32_le_at(row, 4) == Some(1) {
+                    assert_eq!(row[9], 10);
+                    row.splice(10..10, [0u8, 0u8]);
+                    row[9] = 12;
+                    changed = true;
+                }
+            }
+            if changed {
+                assert!(rewrite_variable_page_rows_in_place(
+                    &mut bytes, page_idx, &rows, PAGE_SIZE
+                ));
+            }
+        }
+
+        let td = tempdir().expect("tempdir");
+        let usb_root = td.path().to_path_buf();
+        let pdb_path = vendor_pdb_path(&usb_root);
+        std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
+        std::fs::write(&pdb_path, &bytes).expect("write old-layout pdb");
+
+        let found = detect_pdb_string_misalignment(&pdb_path);
+        assert!(
+            found
+                .iter()
+                .any(|m| m.table_type == 2 && m.id == 1 && m.slot_label == "ascii_name_offset"),
+            "must flag the ASCII artist name at 12, got {found:?}"
+        );
+
+        let patched =
+            apply_pdb_artist_name_layout_repair(&usb_root, &[1]).expect("apply artist repair");
+        assert_eq!(patched, 1);
+        assert!(
+            detect_pdb_string_misalignment(&pdb_path).is_empty(),
+            "no artist row should be flagged after one repair pass"
+        );
+        let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse repaired pdb");
+        assert_eq!(
+            parsed.artists.get(&1).map(String::as_str),
+            Some("Existing Artist")
+        );
+    }
+
     #[test]
     fn album_string_alignment_repair_fixes_row_orphaned_from_live_t03_chain() {
         let mut bytes = build_seed_pdb_bytes_for_alignment_test();

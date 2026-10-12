@@ -1348,7 +1348,10 @@ impl BackendService {
         // for the full MIPS-alignment explanation). `dump_pdb_anomalies`-style checks only look
         // at page/table shape, so this is otherwise invisible on read.
         {
-            let misaligned = super::repair::detect_pdb_string_misalignment(&pdb_path);
+            let (artist_layout, misaligned): (Vec<_>, Vec<_>) =
+                super::repair::detect_pdb_string_misalignment(&pdb_path)
+                    .into_iter()
+                    .partition(|m| m.slot_label == "ascii_name_offset");
             let status = if misaligned.is_empty() {
                 DiagStatus::Pass
             } else {
@@ -1373,7 +1376,7 @@ impl BackendService {
                 format!(
                     "{} row(s) with a misaligned UTF-16 string slot — freezes/comm-errors CDJ \
                      hardware while browsing; e.g. {examples}; run repair_pdb_track_string_alignment \
-                     / repair_pdb_album_string_alignment to fix",
+                     / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout to fix",
                     misaligned.len()
                 )
             };
@@ -1387,6 +1390,35 @@ impl BackendService {
             }
             contents_integrity.checks.push(DiagCheck {
                 label: "Track/album string alignment".to_string(),
+                status,
+                detail,
+                link: None,
+            });
+
+            // Artist rows with a short ASCII name at 12 instead of rekordbox's 10: CDJs read
+            // them fine, but an Engine DJ player's own import of export.pdb shows no artist.
+            let (status, detail) = if artist_layout.is_empty() {
+                (
+                    DiagStatus::Pass,
+                    "All artist names are where rekordbox puts them".to_string(),
+                )
+            } else {
+                let detail = format!(
+                    "{} artist row(s) with the name at a different offset than rekordbox uses; \
+                     an Engine DJ player importing export.pdb shows these tracks without an \
+                     artist; run repair_pdb_artist_name_layout to fix",
+                    artist_layout.len()
+                );
+                raw_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.pdb-artist-name-layout",
+                    detail.clone(),
+                ));
+                (DiagStatus::Warn, detail)
+            };
+            contents_integrity.checks.push(DiagCheck {
+                label: "Artist name layout".to_string(),
                 status,
                 detail,
                 link: None,

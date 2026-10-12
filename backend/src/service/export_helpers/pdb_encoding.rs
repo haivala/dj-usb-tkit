@@ -126,21 +126,30 @@ pub fn encode_artwork_row(id: u32, path: &str) -> Vec<u8> {
     row
 }
 
+/// Where rekordbox puts a short-ASCII name in a near-variant (0x0060) artist row.
+pub(crate) const ARTIST_SHORT_ASCII_NAME_OFFSET: usize = 10;
+
 pub fn encode_artist_row(id: u32, name: &str) -> Vec<u8> {
     let name_bytes = encode_pdb_string(&sanitize_metadata(name));
     // Near variant (subtype 0x0060):
-    // subtype(2) + index_shift(2) + id(4) + const_3(1) + ofs_name_near(1) + padding(2) + name
-    // Reference layout: ofs_name_near = 12 (0x0c), 2 zero bytes at 10-11, name at 12.
-    // MIPS-based player hardware freezes when ofs_name_near = 10 and a UTF-16 name is at byte 10 —
-    // the player likely hardcodes the name at offset 12 for the near-variant artist row.
-    let name_start = 12usize;
+    // subtype(2) + index_shift(2) + id(4) + const_3(1) + ofs_name_near(1) + [padding(2)] + name
+    // rekordbox puts a short ASCII name right after the header, at 10, and a UTF-16 name at
+    // the next 4-byte aligned offset, 12 (2 zero bytes at 10-11) — the same rule as album rows.
+    // MIPS-based player hardware freezes on a UTF-16 name at 10 (unaligned 4-byte header load).
+    // Engine DJ's own `export.pdb` import reads a short ASCII name only at 10: at 12 the artist
+    // comes out empty. A long ASCII name (4-byte header, never seen in reference exports) keeps
+    // the aligned 12.
+    let name_start = if name_bytes.first().is_some_and(|b| b & 1 == 1) {
+        ARTIST_SHORT_ASCII_NAME_OFFSET
+    } else {
+        12usize
+    };
     let mut row = vec![0u8; name_start + name_bytes.len()];
     row[0..2].copy_from_slice(&0x0060u16.to_le_bytes()); // subtype = near
     // bytes 2-3: page-local index_shift; assigned by the page writer.
     row[4..8].copy_from_slice(&id.to_le_bytes());
     row[8] = 3; // const 3
-    row[9] = name_start as u8; // ofs_name_near = 12 = 0x0c
-    // bytes 10-11: zero padding (part of fixed layout)
+    row[9] = name_start as u8; // ofs_name_near
     row[name_start..name_start + name_bytes.len()].copy_from_slice(&name_bytes);
     row
 }
@@ -416,7 +425,7 @@ mod tests {
     fn encode_artist_row_sanitizes_null_in_name() {
         let row = encode_artist_row(1, "Bad\0Name");
         // The encoded string should not contain a null in the name payload
-        let encoded_str: String = row[12..]
+        let encoded_str: String = row[10..]
             .iter()
             .filter(|&&b| b != 0)
             .map(|&b| b as char)

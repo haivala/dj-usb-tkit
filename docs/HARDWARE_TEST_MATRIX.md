@@ -29,9 +29,11 @@ A device that has passed every scenario gets a single `everything tested` row
 instead of one row per scenario. A scenario added in a later app version gets
 its own row for that device (`untested` until it has run on hardware).
 
-Overall status: everything is working. There are no open `warn`/`fail` outcomes
-on any device, and all previously known issues are fixed and hardware-confirmed
-on the hardware that originally showed them. The latest run (app 0.1.36,
+Overall status: everything is working on CDJ/XDJ hardware. There are no open
+`warn`/`fail` outcomes on those devices, and all their previously known issues
+are fixed and hardware-confirmed on the hardware that originally showed them. The
+one Engine DJ issue (`engine-pdb-import-artists`) is fixed in 0.4.1 but not yet
+confirmed on the player. The latest run (app 0.1.36,
 2026-09-02) re-validated every scenario on CDJ-2000NXS2, CDJ-3000, and the newly
 added CDJ-3000X. On 0.2.0 (2026-09-11), CDJ-2000, CDJ-2000NXS and CDJ-2000NXS2
 each ran every scenario available in that version. `cue-points-and-edited-beatgrid` is hardware-confirmed
@@ -54,6 +56,11 @@ yet.
 XDJ-AZ (fw 1.30) was added on 0.3.7-rc.3 (2026-10-09): exports play, and the
 beat grid and Beat Sync work on app-analysed tracks. Up to 0.3.7-rc.1 it
 refused the app's beat grids; see Known Issues.
+Numark Mixstream Pro, the first Engine DJ player, was added on 0.4.0
+(2026-10-09): it uses the app-written Engine DJ library with the app's beat grid
+and hot cues, and keeps its play history across a rebuild. Its own import of
+`export.pdb` (Engine DJ library not written) showed tracks without an artist; the
+fix is not yet hardware-confirmed. See Known Issues.
 
 Additive export — adding tracks to a USB that was initialized by rekordbox,
 without wiping the existing library — has worked on hardware since the first
@@ -67,6 +74,8 @@ release (0.1.0) and has stayed working through every version since.
 | XDJ-1000MK2 | everything tested | pass | 0.2.6 | 2026-09-29 | First validation on this device (fw 1.44). |
 | XDJ-AZ | `normal-export` | pass | 0.3.7-rc.3 | 2026-10-09 | First validation on this device (fw 1.30). |
 | XDJ-AZ | `beat-grid-and-beat-sync` | pass | 0.3.7-rc.3 | 2026-10-09 | `fail` at <=0.3.7-rc.1; fixed in 0.3.7-rc.3. |
+| Mixstream Pro | `engine-library` | pass | 0.4.0 | 2026-10-09 | First validation on this device and the first Engine DJ player. |
+| Mixstream Pro | `engine-pdb-import-artists` | untested | 0.4.1 | | `fail` at <=0.4.0; fix in 0.4.1 not yet run on hardware. |
 | CDJ-3000 | `normal-export` | pass | 0.1.36 | 2026-09-02 | |
 | CDJ-3000 | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | |
 | CDJ-3000 | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First direct test of this scenario on CDJ-3000. |
@@ -135,6 +144,8 @@ tested` row.
 | CDJ-2000NXS | 1.44 | 0.3.7 | `cue-points-and-edited-beatgrid` | pass | 2026-10-09 | maintainer | First hardware validation of memory cues from the cue editor. Memory cues and hot cues work as expected. |
 | CDJ-2000NXS2 | 1.82 | 0.3.7 | `cue-points-and-edited-beatgrid` | pass | 2026-10-09 | maintainer | First validation of memory cues on a player reading `PCO2`. Memory cues and hot cues work as expected; hot cue pads light in their colours. Cue names not checked. |
 | CDJ-2000 | 4.33 | 0.3.7 | `playback-start-position` | pass | 2026-10-09 | maintainer | First validation of the playback-start editor on CDJ-2000. Track loads at the chosen start position. |
+| Mixstream Pro | not recorded | <=0.4.0 | `engine-pdb-import-artists` | fail | 2026-10-09 | maintainer | Run stopped at: artist shown. With no Engine DJ library on the USB, the player's own import of `export.pdb` showed some tracks without an artist. See Known Issues: "0.4.0 and earlier — `engine-pdb-import-artists`". |
+| Mixstream Pro | not recorded | 0.4.0 | `engine-library` | pass | 2026-10-09 | maintainer | First validation on Mixstream Pro. The player used the app's beat grid without analysing again, and hot cues work. A play recorded on the player was still in `hm.db`, with the track's id and play state, after the library was rebuilt following a later export (checked on the USB afterwards, not on the player). |
 
 ## Known Issues
 
@@ -233,6 +244,35 @@ Validation questions:
 - None outstanding — hardware-confirmed `pass` on 0.3.7-rc.3, both after
   **Fix Beat Grid** and on a fresh export.
 
+### 0.4.0 and earlier — `engine-pdb-import-artists` (fix in 0.4.1, not yet hardware-confirmed)
+
+**Devices:** Numark Mixstream Pro (firmware not recorded)
+
+Symptoms:
+- Some tracks show no artist after the player imports `export.pdb` itself.
+  Every track of an affected artist is affected; other metadata is fine.
+
+Reproduction:
+1. Export a playlist with this app (0.4.0 or earlier) to a USB that has no
+   `Engine Library` folder ("Write Engine DJ library" off).
+2. Insert the USB into the player and let it import the rekordbox library.
+3. Browse the imported tracks.
+
+Context:
+- The artists missing are exactly those whose `t02` row this app wrote: it put
+  every artist name at offset 12. rekordbox puts a short ASCII name at 10 and
+  only a UTF-16 name at 12, and the player read only those two forms. CDJs follow
+  the row's own offset field and show these artists. With "Write Engine DJ library"
+  on, the player uses the app's library, which has every artist.
+
+Artifacts:
+- The player-built `Engine Library/Database2/m.db` from that USB, compared with
+  the app's rebuild of the same USB.
+
+Validation questions:
+- After 0.4.1's export (or **Repair Artist Name Layout** on an older USB), does the
+  player's own import show every artist?
+
 ## Required Operations
 
 Each passing row must cover every operation listed for its scenario in the table
@@ -258,6 +298,8 @@ the repaired database files are written.
 | `cue-points-and-edited-beatgrid` | USB insert, database mount, track load, trigger each saved memory/hot cue |
 | `beat-grid-and-beat-sync` | USB insert, database mount, load an app-analysed track, beat grid shown, Beat Sync engages |
 | `playback-start-position` | Set "Playback starts at" in the cue editor, export, USB insert, database mount, track load, check the load position |
+| `engine-library` | Export with "Write Engine DJ library" on, USB insert on an Engine DJ player, library loads without importing again, track load without analysing again, app beat grid shown, hot cues trigger, play history kept after the library is rebuilt |
+| `engine-pdb-import-artists` | Export with "Write Engine DJ library" off (no `Engine Library` folder), USB insert on an Engine DJ player, player imports `export.pdb`, browse tracks, artist shown on every track that has one |
 
 ## Recording Warn Or Fail Results
 

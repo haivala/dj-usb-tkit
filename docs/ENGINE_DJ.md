@@ -103,8 +103,41 @@ Mapping from the USB:
 - **Artwork:** the `_m` JPEG (else the small one) as stored, one `AlbumArt`
   row per PDB artwork. Row 1 is an empty placeholder for tracks without art.
 
+- **Filename:** the last component of the path, as the device's import does. The PDB's
+  filename slot isn't used: the export shortens names that mix many scripts there (to keep
+  CDJ text rendering from hanging), so it can differ from the real file name.
+
 A track with no ANLZ bundle, or with an empty `PQTZ`, gets `isAnalyzed = 0` and
 no `trackData`/`beatData`/overview. The player analyzes it itself.
+
+## Differences from the device's own import
+
+Compared with the library a Mixstream Pro builds from the same `export.pdb`:
+
+- **BPM:** the device's import keeps whole BPM only (`bpm` and `bpmAnalyzed` both
+  rounded down). We write the PDB tempo with its decimals in `bpmAnalyzed` and rounded in `bpm`.
+- **Year:** the device writes `0` when the PDB has none; we leave it NULL. The player shows
+  both the same.
+- **Main cue:** see above; the device's import has none.
+- **Analysis:** the device's import has no `trackData`, `beatData` or overview; the player
+  analyzes each track on first load.
+- **Artist:** the device's import reads a short ASCII artist name only at offset 10 of the
+  PDB artist row, where rekordbox puts it, and shows no artist when it is elsewhere.
+  Exports made with older versions of this app put it at 12; USB diagnostics flag those
+  rows and "Repair Artist Name Layout" moves them. Our own library reads the name wherever
+  the row points, so it has the artist either way.
+- Ids (`Track.id`, `AlbumArt.id`, `Information.uuid`) differ and don't need to match.
+
+## What the player changes
+
+Playing a track on the player rewrites some of its data, and the next rebuild replaces
+those changes (`hm.db` history and the play state are kept):
+
+- **Main cue set on the player** is replaced by ours.
+- **`trackData`** is rewritten in a longer layout with what look like three per-band
+  loudness values; its sample count is one MPEG frame (1152 samples) more than ours on
+  LAME-tagged MP3s, so the player counts the Xing/Info frame. `beatData` (our grid) is
+  left as we wrote it.
 
 ## Not written
 
@@ -117,4 +150,9 @@ Works on a Numark Mixstream Pro (2026-10-09), with `isMetadataImported = 1`
 and `pdbImportKey` = PDB sequence (the device's own import writes 0 and the
 sequence).
 
-Still to check: history in `hm.db` surviving a re-run after another export.
+The player used our beat grid without analyzing again, and hot cues worked. A play recorded
+on the player survived a re-run after another export: `hm.db` byte for byte, the track's id
+and its play state in `m.db`.
+
+Still to check: whether the grid lines up by ear on LAME MP3s, given the player's one-frame
+longer sample count (see above).

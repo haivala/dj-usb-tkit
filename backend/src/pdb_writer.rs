@@ -2200,17 +2200,26 @@ pub(crate) mod writer_tests {
     #[test]
     fn test_artist_row_near_variant() {
         let row = encode_artist_row(1, "Abc");
-        // Near variant: subtype=0x0060, id at 4, const 3 at 8, ofs at 9, 2 padding bytes at 10-11, name at 12
-        // Reference layout confirmed; MIPS-based player hardware freezes with ofs=10 on UTF-16 names.
+        // Near variant: subtype=0x0060, id at 4, const 3 at 8, ofs at 9. rekordbox puts a short
+        // ASCII name at 10 (Engine DJ's PDB import reads it only there).
         assert_eq!(read_u16_le(&row, 0), 0x0060);
         assert_eq!(read_u32_le(&row, 4), 1);
         assert_eq!(row[8], 3);
-        assert_eq!(row[9], 12); // ofs_name_near = 12 (0x0c)
-        assert_eq!(row[10], 0); // padding
-        assert_eq!(row[11], 0); // padding
+        assert_eq!(row[9], 10); // ofs_name_near
         // Short string "Abc": lk=3*2+3=9, then 'A','b','c'
-        assert_eq!(row[12], 9);
-        assert_eq!(&row[13..16], b"Abc");
+        assert_eq!(row[10], 9);
+        assert_eq!(&row[11..14], b"Abc");
+        assert_eq!(row.len(), 14);
+    }
+
+    #[test]
+    fn test_artist_row_near_variant_utf16_name_is_aligned() {
+        // A UTF-16 name goes at the 4-byte aligned 12 (2 zero bytes at 10-11), as rekordbox
+        // writes it; MIPS-based player hardware freezes on one at 10.
+        let row = encode_artist_row(1, "Test Ärtist");
+        assert_eq!(row[9], 12);
+        assert_eq!(&row[10..12], &[0, 0]);
+        assert_eq!(row[12], 0x90);
     }
 
     #[test]
