@@ -14,6 +14,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use backend::pdb_page;
 use backend::utils::{read_u8_at as ru8, read_u16_le_at as ru16, read_u32_le_at as ru32};
 
 fn table_name(tt: u32) -> &'static str {
@@ -191,32 +192,12 @@ fn main() {
             } else {
                 (nrs as usize).max(num_rl as usize)
             };
-            let groups = row_slots.div_ceil(16);
             let mut rowpf_active = 0u32;
             let mut tranrf_bits = 0u32;
-            if groups > 0 && page_size >= groups * 4 + groups * 2 {
-                let mut cursor = page_size;
-                'footer: for g in 0..groups {
-                    if cursor < 4 {
-                        break 'footer;
-                    }
-                    cursor -= 4;
-                    let rp =
-                        ru16(bytes.get(off..off + page_size).unwrap_or(&[]), cursor).unwrap_or(0);
-                    let tr = ru16(bytes.get(off..off + page_size).unwrap_or(&[]), cursor + 2)
-                        .unwrap_or(0);
-                    let glen = (row_slots - g * 16).min(16);
-                    let mask = if glen == 16 {
-                        u16::MAX
-                    } else {
-                        ((1u32 << glen) - 1) as u16
-                    };
-                    rowpf_active += (rp & mask).count_ones();
-                    tranrf_bits += (tr & mask).count_ones();
-                    if cursor < glen * 2 {
-                        break 'footer;
-                    }
-                    cursor -= glen * 2;
+            if let Some(page) = bytes.get(off..off + page_size) {
+                for group in pdb_page::footer_groups(page_size, row_slots) {
+                    rowpf_active += (group.rowpf(page) & group.mask()).count_ones();
+                    tranrf_bits += (group.tranrf(page) & group.mask()).count_ones();
                 }
             }
             println!(

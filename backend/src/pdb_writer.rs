@@ -1,24 +1,36 @@
-//! Ground-up PDB (PDB) writer.
+//! PDB writer.
 //!
-//! Produces a structurally correct USB PDB file from an in-memory
-//! representation, with no template file dependency. Every byte is intentional
-//! and follows the Deep Symmetry specification.
+//! Two ways of producing a USB `export.pdb`:
+//!
+//! - [`write_pdb`] builds a complete file from an in-memory [`PdbData`] with no
+//!   template dependency, following the Deep Symmetry specification.
+//! - The additive path ([`try_write_pdb_additive_in_place`] and friends)
+//!   edits an existing file in place — appending rows, patching or
+//!   tombstoning existing ones — so pages rekordbox or a player already wrote
+//!   (menu templates, history, transaction state) are kept as they are.
+//!
+//! Page footer byte layout lives in [`crate::pdb_page`]; this module decides
+//! which per-table conventions to stamp into it.
 
 #[cfg(test)]
 use std::path::Path;
 
-use crate::error::BackendResult;
+use crate::error::{BackendError, BackendResult};
+use crate::pdb_page::{self, HEAP_START, footer_size};
 use crate::service::export_helpers::pdb_encoding::apply_page_local_index_shift;
 use crate::service::export_helpers::{
     PdbLayoutProfile, PdbTrackRowData, encode_album_row, encode_artist_row, encode_artwork_row,
     encode_key_row, encode_pdb_string, encode_playlist_entry_row, encode_playlist_tree_row,
     encode_track_row_with_profile, sanitize_metadata,
 };
+use crate::utils::{
+    collect_chain as collect_chain_pages, packed_page_row_slot_count, page_offset, read_u8_at,
+    read_u16_le_at, read_u32_le_at, set_table_ptr_fields, table_ptr_fields, write_u32_le_at,
+};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE: usize = 4096;
-const HEAP_START: usize = 0x28; // 40 bytes: 32 common header + 8 extended header
 const NUM_TABLES: u32 = 20;
 // `nrs` (the page-local row-slot count at offset 0x18) is a single byte and
 // wraps silently past 255. Our own reader tolerates that wraparound (see
@@ -370,15 +382,6 @@ fn encode_all_tables(data: &PdbData) -> BackendResult<[Vec<Vec<u8>>; 20]> {
 
 // ── Page Building ────────────────────────────────────────────────────────────
 
-/// Calculate row index footer size for a given number of rows.
-fn footer_size(row_count: usize) -> usize {
-    if row_count == 0 {
-        return 0;
-    }
-    let groups = row_count.div_ceil(16);
-    groups * 4 + row_count * 2
-}
-
 /// Round up to 4-byte alignment.
 fn align4(n: usize) -> usize {
     (n + 3) & !3
@@ -591,10 +594,7 @@ fn build_data_page(table_type: u32, pf: u8, seq: u32, rows: &[&[u8]], sealed: bo
         page[0x1a] = 0;
     } else {
         // Standard packed form: bits 0-12 = num_row_offsets, bits 13-23 = num_rows
-        let packed = (n & 0x1FFF) | ((n & 0x7FF) << 13);
-        page[0x18] = (packed & 0xFF) as u8;
-        page[0x19] = ((packed >> 8) & 0xFF) as u8;
-        page[0x1a] = ((packed >> 16) & 0xFF) as u8;
+        pdb_page::write_slot_counts(&mut page, rows.len(), rows.len());
     }
     page[0x1b] = pf;
 
@@ -648,13 +648,11 @@ fn build_data_page(table_type: u32, pf: u8, seq: u32, rows: &[&[u8]], sealed: bo
     let free = PAGE_SIZE.saturating_sub(HEAP_START + heap_offset + ft_size);
     page[0x1c..0x1e].copy_from_slice(&(free as u16).to_le_bytes());
 
-    // Row index footer: grows backward from page end
-    // Layout: [ofs_N-1] ... [ofs_0] [rowpf] [tranrf]
-    //         tranrf is at the very LAST 2 bytes of the page
-    write_row_index_footer(&mut page, &row_offsets);
+    // Row index footer: grows backward from page end (see `pdb_page`).
+    pdb_page::write_footer_all_present(&mut page, &row_offsets);
 
     // Re-stamp u5/num_rl/tranrf to the per-table convention.
-    // `write_row_index_footer` above left every group's rowpf/tranrf at
+    // `write_footer_all_present` above left every group's rowpf/tranrf at
     // "all rows active", which is only correct for `(trc, 0)`-family tables.
     // A sealed page already forced `(u5, num_rl) = (1, trc-1)` above
     // regardless of table type, so pass table 0's convention (also `(1,
@@ -670,15 +668,15 @@ fn build_data_page(table_type: u32, pf: u8, seq: u32, rows: &[&[u8]], sealed: bo
 /// Single source of truth for a data page's footer-convention fields: `u5`
 /// (0x20), `num_rl` (0x22), and the per-16-row-group `tranrf` bitmasks.
 ///
-/// `write_row_index_footer` and `rewrite_variable_page_rows_in_place` both
-/// leave a page with all-bits `rowpf`/`tranrf` in every group — correct only
+/// `pdb_page::write_footer_all_present` and
+/// `rewrite_variable_page_rows_in_place` both leave a page with all-bits `rowpf`/`tranrf` in every group — correct only
 /// for `(trc, 0)`-convention tables (t06/t07/t16/t17/t18). Every other
 /// in-place rewrite must call this afterward so the page's shape matches
 /// what [`build_data_page`] (the from-scratch writer) would emit for the
 /// same row set. See docs/PDB.md "Page Footer Conventions" and "Row Footer".
 ///
 /// `row_count` is the page's active row-slot count (`trc`). `page` must be a
-/// full `PAGE_SIZE` page slice. For `tt=19` this assumes the page holds the
+/// full page slice. For `tt=19` this assumes the page holds the
 /// table's one live history row (see [`write_t19_runtime_footer_groups`]).
 fn apply_page_footer_convention(page: &mut [u8], table_type: u32, row_count: usize) {
     if page.len() < 0x24 {
@@ -710,27 +708,12 @@ fn apply_page_footer_convention(page: &mut [u8], table_type: u32, row_count: usi
 
     // `u5 == 1` tables: `tranrf` carries a single bit — the page's last row
     // slot (`num_rl`), in the group that holds it. Every other group's
-    // `tranrf` is 0. Formula: bit N = row N within a 16-row group, group 0
-    // at the page's very end.
-    let n = row_count;
-    let last_group = num_rl as usize / 16;
-    let last_bit = num_rl as usize % 16;
-    let mut cursor = PAGE_SIZE;
-    for group_start in (0..n).step_by(16) {
-        let group_len = (n - group_start).min(16);
-        let tranrf: u16 = if group_start / 16 == last_group {
-            1u16 << last_bit
-        } else {
-            0
-        };
-        cursor -= 2;
-        page[cursor..cursor + 2].copy_from_slice(&tranrf.to_le_bytes());
-        cursor -= 2 + group_len * 2;
-    }
+    // `tranrf` is 0.
+    pdb_page::write_single_slot_tranrf(page, row_count, num_rl as usize);
 }
 
 /// Write the tt=19 (history_runtime) "runtime profile" rowpf/tranrf footer
-/// for a page holding `row_count` rows, into a full `PAGE_SIZE` page buffer.
+/// for a page holding `row_count` rows, into a full page buffer.
 ///
 /// Only the most recently added row (and, when it shares a footer group
 /// with it, the row immediately before it) is "active"/current — every
@@ -738,7 +721,7 @@ fn apply_page_footer_convention(page: &mut [u8], table_type: u32, row_count: usi
 /// groups, not just the first: verified against real rekordbox's own
 /// multi-group tt=19 output (a reference export of 88 rows across 6 groups
 /// of 16), which has exactly one rowpf bit and two tranrf bits set globally,
-/// both in the group holding the final row. `write_row_index_footer`
+/// both in the group holding the final row. `write_footer_all_present`
 /// defaults every group's rowpf/tranrf to "all rows active", which is
 /// correct for ordinary tables but wrong here for any group — this
 /// overwrites every group's rowpf/tranrf accordingly.
@@ -753,14 +736,10 @@ fn write_t19_runtime_footer_groups(page: &mut [u8], row_count: usize) {
     if row_count == 0 {
         return;
     }
-    let n = row_count;
-    let last_idx = n - 1;
-    let last_group_start = last_idx / 16 * 16;
-    let last_bit = last_idx % 16;
-    let mut cursor = PAGE_SIZE;
-    for group_start in (0..n).step_by(16) {
-        let group_len = (n - group_start).min(16);
-        let (rowpf, tranrf) = if group_start == last_group_start {
+    let last_slot = row_count - 1;
+    for group in pdb_page::footer_groups(page.len(), row_count) {
+        let (rowpf, tranrf) = if group.contains_slot(last_slot) {
+            let last_bit = last_slot - group.first_slot;
             let rowpf = 1u16 << last_bit;
             let tranrf = if last_bit >= 1 {
                 rowpf | (1u16 << (last_bit - 1))
@@ -771,40 +750,8 @@ fn write_t19_runtime_footer_groups(page: &mut [u8], row_count: usize) {
         } else {
             (0u16, 0u16)
         };
-        cursor -= 2;
-        page[cursor..cursor + 2].copy_from_slice(&tranrf.to_le_bytes());
-        cursor -= 2;
-        page[cursor..cursor + 2].copy_from_slice(&rowpf.to_le_bytes());
-        cursor -= group_len * 2;
-    }
-}
-
-/// Write the row index footer into a page buffer.
-/// Layout per group of 16: [ofs_N..ofs_0] [rowpf] [tranrf]
-/// Group 0's tranrf is at the very end of the page.
-fn write_row_index_footer(page: &mut [u8], row_offsets: &[u16]) {
-    let n = row_offsets.len();
-    if n == 0 {
-        return;
-    }
-
-    let mut cursor = PAGE_SIZE;
-    for group_start in (0..n).step_by(16) {
-        let group_len = (n - group_start).min(16);
-        let bits = ((1u32 << group_len) - 1) as u16;
-
-        // tranrf at end of group (highest address)
-        cursor -= 2;
-        page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
-        // rowpf before tranrf
-        cursor -= 2;
-        page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
-        // row offsets: ofs[0] closest to rowpf (highest address),
-        // ofs[N-1] at lowest address — matches parser read order
-        for j in 0..group_len {
-            cursor -= 2;
-            page[cursor..cursor + 2].copy_from_slice(&row_offsets[group_start + j].to_le_bytes());
-        }
+        group.set_rowpf(page, rowpf);
+        group.set_tranrf(page, tranrf);
     }
 }
 
@@ -1092,11 +1039,6 @@ pub(crate) fn write_pdb_with_warnings(data: &PdbData) -> BackendResult<(Vec<u8>,
     Ok((file, warnings))
 }
 
-/// Write a PDB file to disk.
-pub(crate) fn write_pdb_to_bytes(data: &PdbData) -> BackendResult<Vec<u8>> {
-    write_pdb(data)
-}
-
 #[cfg(test)]
 pub(crate) fn write_pdb_to_file(path: &Path, data: &PdbData) -> BackendResult<()> {
     let bytes = write_pdb(data)?;
@@ -1106,14 +1048,6 @@ pub(crate) fn write_pdb_to_file(path: &Path, data: &PdbData) -> BackendResult<()
 
 // ── In-place row deletion ───────────────────────────────────────────────────
 
-/// Remove rows from a PDB file in-place, preserving page layout.
-///
-/// For each page of the given `table_type`, rows whose ID (extracted by
-/// `extract_row_id`) is in `ids_to_remove` have their `rowpf` bit cleared.
-/// Page headers are updated (num_rows decremented, D flag set) but the heap
-/// data and page count are left unchanged.
-///
-/// Returns the number of rows actually removed.
 /// Tables whose freshly written page footer uses the `(1, trc - 1)`
 /// tombstone-style convention (see docs/PDB.md "Page Footer Conventions").
 /// `t06`, `t07`, `t16`, `t17`, `t18` use `(trc, 0)` instead, and `trc` (the
@@ -1123,200 +1057,155 @@ fn table_uses_tombstone_footer_convention(table_type: u32) -> bool {
     matches!(table_type, 0 | 1 | 2 | 3 | 4 | 5 | 8 | 13)
 }
 
+/// A data page that the in-place row passes below may edit: of the wanted
+/// table, not an index page, with at least one row slot and a payload that
+/// ends inside the page.
+struct InplaceDataPage {
+    idx: usize,
+    start: usize,
+    num_row_offsets: usize,
+    num_rows: usize,
+    /// End of the row payload, relative to the page start.
+    payload_end: usize,
+}
+
+/// Page size of a PDB the in-place passes can work on: the header's page
+/// size must be [`PAGE_SIZE`] and the file must hold at least two pages.
+fn inplace_page_size(bytes: &[u8]) -> Option<usize> {
+    let len_page = read_u32_le_at(bytes, 4)? as usize;
+    (len_page == PAGE_SIZE && bytes.len() >= len_page * 2).then_some(len_page)
+}
+
+fn inplace_data_pages(bytes: &[u8], len_page: usize, table_type: u32) -> Vec<InplaceDataPage> {
+    let mut out = Vec::new();
+    for idx in 1..bytes.len() / len_page {
+        let start = idx * len_page;
+        let page = &bytes[start..start + len_page];
+        if read_u32_le_at(page, 0x08) != Some(table_type) {
+            continue;
+        }
+        // Skip index/sentinel pages (bit 6 set in page_flags)
+        if page[0x1b] & 0x40 != 0 {
+            continue;
+        }
+        let Some((num_row_offsets, num_rows)) = pdb_page::read_slot_counts(page) else {
+            continue;
+        };
+        if num_row_offsets == 0 {
+            continue;
+        }
+        let Some(used_size) = read_u16_le_at(page, 0x1e) else {
+            continue;
+        };
+        let payload_end = HEAP_START + used_size as usize;
+        if payload_end > len_page {
+            continue;
+        }
+        out.push(InplaceDataPage {
+            idx,
+            start,
+            num_row_offsets,
+            num_rows,
+            payload_end,
+        });
+    }
+    out
+}
+
+/// Tombstone `slots` (all live, all on `page`): clear their `rowpf` bits and
+/// drop them from `num_rows`, keeping `num_row_offsets`.
+///
+/// Tombstone state is tracked only in the row footer bitmasks (rowpf/tranrf).
+/// Page_flags must not be modified — setting 0x10 on a sealed (0x24)
+/// overflow page would produce 0x34 which DJ players reject as corrupted on
+/// non-tail pages.
+///
+/// With `restamp_convention`, also rewrite `u5=1`, `num_rl=trc-1` and the
+/// matching single-bit `tranrf`. Only tables in the `(1, trc - 1)`
+/// convention group use this shape; `(trc, 0)`-convention tables keep their
+/// existing u5/num_rl/tranrf untouched (see
+/// `table_uses_tombstone_footer_convention`).
+///
+/// num_rl must be trc-1 unconditionally, NOT the tombstoned row's own slot
+/// index -- num_row_offsets never shrinks on a tombstone, so the page's last
+/// slot stays num_row_offsets-1 regardless of which row got removed. Using
+/// the removed slot here only looked correct in exports where the removed
+/// row happened to be the page's last one; a mid-page removal left num_rl
+/// short of trc-1, which strict player validation (and
+/// `validate_pdb_page_conventions`) rejects.
+fn tombstone_slots(
+    page: &mut [u8],
+    data_page: &InplaceDataPage,
+    slots: &[pdb_page::FooterSlot],
+    restamp_convention: bool,
+) {
+    if slots.is_empty() {
+        return;
+    }
+    for slot in slots {
+        let rowpf = slot.group.rowpf(page);
+        slot.group.set_rowpf(page, rowpf & !slot.bit);
+    }
+    pdb_page::write_slot_counts(
+        page,
+        data_page.num_row_offsets,
+        data_page.num_rows.saturating_sub(slots.len()),
+    );
+    if restamp_convention {
+        let last_slot = data_page.num_row_offsets.saturating_sub(1);
+        page[0x20..0x22].copy_from_slice(&1u16.to_le_bytes());
+        page[0x22..0x24].copy_from_slice(&(last_slot as u16).to_le_bytes());
+        pdb_page::write_single_slot_tranrf(page, data_page.num_row_offsets, last_slot);
+    }
+}
+
+/// Remove rows from a PDB file in-place, preserving page layout.
+///
+/// For each page of the given `table_type`, rows whose ID (extracted by
+/// `extract_row_id`) is in `ids_to_remove` are tombstoned (see
+/// [`tombstone_slots`]). The heap data and page count are left unchanged.
+///
+/// Returns the number of rows actually removed.
 pub(crate) fn remove_rows_inplace(
     bytes: &mut [u8],
     table_type: u32,
     ids_to_remove: &std::collections::HashSet<u32>,
     extract_row_id: fn(&[u8]) -> Option<u32>,
 ) -> usize {
-    if ids_to_remove.is_empty() || bytes.len() < PAGE_SIZE * 2 {
+    if ids_to_remove.is_empty() {
         return 0;
     }
-    let Some(len_page) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
+    let Some(len_page) = inplace_page_size(bytes) else {
         return 0;
     };
-    if len_page != PAGE_SIZE || bytes.len() < len_page * 2 {
-        return 0;
-    }
 
-    let total_pages = bytes.len() / len_page;
     let mut removed = 0usize;
-
-    for page_idx in 1..total_pages {
-        let page_start = page_idx * len_page;
-        let page_end = page_start + len_page;
-        if page_end > bytes.len() {
-            break;
-        }
-
-        // Check table type
-        let Some(pt) = read_u32_le_at(bytes, page_start + 0x08) else {
-            continue;
-        };
-        if pt != table_type {
-            continue;
-        }
-
-        // Skip index/sentinel pages (bit 6 set in page_flags)
-        let page_flags = bytes[page_start + 0x1b];
-        if page_flags & 0x40 != 0 {
-            continue;
-        }
-
-        // Read packed row counts
-        let packed = u32::from(bytes[page_start + 0x18])
-            | (u32::from(bytes[page_start + 0x19]) << 8)
-            | (u32::from(bytes[page_start + 0x1a]) << 16);
-        let num_row_offsets = (packed & 0x1FFF) as usize;
-        let num_rows = ((packed >> 13) & 0x7FF) as usize;
-
-        if num_row_offsets == 0 {
-            continue;
-        }
-
-        let Some(used_size) = read_u16_le_at(bytes, page_start + 0x1e).map(|v| v as usize) else {
-            continue;
-        };
-        let payload_start = page_start + HEAP_START;
-        let payload_end = payload_start + used_size;
-        if payload_end > page_end {
-            continue;
-        }
-
-        // Walk footer groups backwards from page end.
-        // Collect (tranrf_off, rowpf_off, changed_mask) so we can do a second
-        // pass to write the formula-derived tranrf after knowing the highest removed slot.
-        let mut cursor = page_end;
-        let mut page_removed = 0usize;
-        let mut highest_removed_slot: Option<usize> = None;
-        // (tranrf_off, group_start_row) for every group on this page
-        let mut group_offsets: Vec<(usize, usize)> = Vec::new();
-
-        for group_start_row in (0..num_row_offsets).step_by(16) {
-            let group_len = (num_row_offsets - group_start_row).min(16);
-            if cursor < page_start + 4 + group_len * 2 {
-                break;
-            }
-
-            // Read tranrf and rowpf
-            cursor -= 2;
-            let tranrf_off = cursor;
-            cursor -= 2;
-            let rowpf_off = cursor;
-            let Some(rowpf) = read_u16_le_at(bytes, rowpf_off) else {
-                continue;
-            };
-
-            group_offsets.push((tranrf_off, group_start_row));
-
-            // Read row offsets for this group
-            let mut offsets = Vec::with_capacity(group_len);
-            for _ in 0..group_len {
-                cursor -= 2;
-                let Some(off) = read_u16_le_at(bytes, cursor).map(|v| v as usize) else {
-                    offsets.clear();
-                    break;
-                };
-                offsets.push(off);
-            }
-            if offsets.len() != group_len {
-                continue;
-            }
-
-            // Check each row in this group
-            let mut new_rowpf = rowpf;
-            for (j, &heap_off) in offsets.iter().enumerate() {
-                let bit = 1u16 << (j as u16);
-                if rowpf & bit == 0 {
-                    continue; // already deleted
-                }
-                let row_abs = payload_start + heap_off;
-                if row_abs >= payload_end {
-                    continue;
-                }
-                let row_data = &bytes[row_abs..payload_end.min(page_end)];
-                if let Some(id) = extract_row_id(row_data)
-                    && ids_to_remove.contains(&id)
-                {
-                    new_rowpf &= !bit;
-                    page_removed += 1;
-                    // Track the absolute slot index of the highest removed row.
-                    let abs_slot = group_start_row + j;
-                    highest_removed_slot =
-                        Some(highest_removed_slot.map_or(abs_slot, |prev| prev.max(abs_slot)));
-                }
-            }
-
-            if new_rowpf != rowpf {
-                bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&new_rowpf.to_le_bytes());
-                // tranrf is rewritten in the second pass below
-            }
-        }
-
-        if page_removed > 0 {
-            removed += page_removed;
-
-            // Update num_rows (bits 13-23), keep num_row_offsets (bits 0-12)
-            let new_num_rows = num_rows.saturating_sub(page_removed);
-            let new_packed =
-                (num_row_offsets as u32 & 0x1FFF) | ((new_num_rows as u32 & 0x7FF) << 13);
-            bytes[page_start + 0x18] = (new_packed & 0xFF) as u8;
-            bytes[page_start + 0x19] = ((new_packed >> 8) & 0xFF) as u8;
-            bytes[page_start + 0x1a] = ((new_packed >> 16) & 0xFF) as u8;
-
-            // Tombstone state is tracked only in the row footer bitmasks
-            // (rowpf/tranrf). Page_flags must not be modified — setting 0x10
-            // on a sealed (0x24) overflow page would produce 0x34 which DJ
-            // players reject as corrupted on non-tail pages.
-
-            // Update u5=1, num_rl=trc-1 (the page's last row slot). Only
-            // tables in the `(1, trc - 1)` convention group use this shape;
-            // `(trc, 0)`-convention tables (t06/t07/t16/t17/t18) keep their
-            // existing u5/num_rl/tranrf untouched, since trc doesn't change
-            // when a row is merely tombstoned (see
-            // `table_uses_tombstone_footer_convention`).
-            //
-            // num_rl must be trc-1 unconditionally, NOT the tombstoned row's
-            // own slot index -- num_row_offsets never shrinks on a tombstone,
-            // so the page's last slot stays num_row_offsets-1 regardless of
-            // which row got removed. Using the removed slot here only looked
-            // correct in exports where the removed row happened to be the
-            // page's last one; a mid-page removal left num_rl short of
-            // trc-1, which strict player validation (and
-            // `validate_pdb_page_conventions`) rejects.
-            if table_uses_tombstone_footer_convention(table_type) && highest_removed_slot.is_some()
-            {
-                let last_slot = num_row_offsets.saturating_sub(1);
-                bytes[page_start + 0x20..page_start + 0x22].copy_from_slice(&1u16.to_le_bytes());
-                bytes[page_start + 0x22..page_start + 0x24]
-                    .copy_from_slice(&(last_slot as u16).to_le_bytes());
-
-                // Rewrite tranrf for ALL groups: only the group containing
-                // the page's last slot gets 1<<(last_slot%16); all other
-                // groups get 0.
-                let last_group = last_slot / 16;
-                let last_bit = (last_slot % 16) as u32;
-                for &(tranrf_off, group_start) in &group_offsets {
-                    let tranrf_val: u16 = if group_start / 16 == last_group {
-                        1u16 << last_bit
-                    } else {
-                        0
-                    };
-                    bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&tranrf_val.to_le_bytes());
-                }
-            }
-        }
+    for data_page in inplace_data_pages(bytes, len_page, table_type) {
+        let page = &mut bytes[data_page.start..data_page.start + len_page];
+        let doomed: Vec<_> = pdb_page::footer_slots(page, data_page.num_row_offsets)
+            .filter(|slot| {
+                let row_start = HEAP_START + slot.heap_off;
+                slot.present
+                    && row_start < data_page.payload_end
+                    && extract_row_id(&page[row_start..data_page.payload_end])
+                        .is_some_and(|id| ids_to_remove.contains(&id))
+            })
+            .collect();
+        removed += doomed.len();
+        tombstone_slots(
+            page,
+            &data_page,
+            &doomed,
+            table_uses_tombstone_footer_convention(table_type),
+        );
     }
-
     removed
 }
 
-/// Location of one active `tt=8` (playlist_entries) row within a page's
-/// backward-growing footer index.
+/// Location of one active `tt=8` (playlist_entries) row.
 struct PlaylistEntryLocation {
     page_idx: usize,
-    group_start_row: usize,
-    bit: usize,
+    slot: usize,
     entry_index: u32,
 }
 
@@ -1334,112 +1223,42 @@ struct PlaylistEntryLocation {
 /// `num_rl` footer field — see docs/PDB.md).
 ///
 /// For each `(playlist_id, track_id)` pair with more than one active row,
-/// keeps the row with the lowest `entry_index` and tombstones the rest using
-/// the same footer-bitmap convention as `remove_rows_inplace` (clear the
-/// `rowpf` bit, decrement `num_rows`, and rewrite `tranrf` by OR-ing in the
-/// highest tombstoned slot for the affected group only — never touching
-/// groups it didn't remove from).
+/// keeps the row with the highest `entry_index` and tombstones the rest the
+/// same way as `remove_rows_inplace`.
 ///
 /// Returns the number of rows tombstoned.
 pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usize {
-    if bytes.len() < PAGE_SIZE * 2 {
-        return 0;
-    }
-    let Some(len_page) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
+    let Some(len_page) = inplace_page_size(bytes) else {
         return 0;
     };
-    if len_page != PAGE_SIZE || bytes.len() < len_page * 2 {
-        return 0;
-    }
-    let total_pages = bytes.len() / len_page;
+    let data_pages = inplace_data_pages(bytes, len_page, 8);
 
     // ── Pass 1: locate every active row, grouped by (playlist_id, track_id) ──
     let mut locations: std::collections::HashMap<(u32, u32), Vec<PlaylistEntryLocation>> =
         std::collections::HashMap::new();
-
-    for page_idx in 1..total_pages {
-        let page_start = page_idx * len_page;
-        let page_end = page_start + len_page;
-        if page_end > bytes.len() {
-            break;
-        }
-        let Some(pt) = read_u32_le_at(bytes, page_start + 0x08) else {
-            continue;
-        };
-        if pt != 8 {
-            continue;
-        }
-        let page_flags = bytes[page_start + 0x1b];
-        if page_flags & 0x40 != 0 {
-            continue;
-        }
-        let packed = u32::from(bytes[page_start + 0x18])
-            | (u32::from(bytes[page_start + 0x19]) << 8)
-            | (u32::from(bytes[page_start + 0x1a]) << 16);
-        let num_row_offsets = (packed & 0x1FFF) as usize;
-        if num_row_offsets == 0 {
-            continue;
-        }
-        let Some(used_size) = read_u16_le_at(bytes, page_start + 0x1e).map(|v| v as usize) else {
-            continue;
-        };
-        let payload_start = page_start + HEAP_START;
-        let payload_end = payload_start + used_size;
-        if payload_end > page_end {
-            continue;
-        }
-
-        let mut cursor = page_end;
-        for group_start_row in (0..num_row_offsets).step_by(16) {
-            let group_len = (num_row_offsets - group_start_row).min(16);
-            if cursor < page_start + 4 + group_len * 2 {
-                break;
+    for data_page in &data_pages {
+        let page = &bytes[data_page.start..data_page.start + len_page];
+        for slot in pdb_page::footer_slots(page, data_page.num_row_offsets) {
+            let row_start = HEAP_START + slot.heap_off;
+            if !slot.present || row_start >= data_page.payload_end {
+                continue;
             }
-            cursor -= 2; // tranrf (unused here)
-            cursor -= 2;
-            let rowpf_off = cursor;
-            let Some(rowpf) = read_u16_le_at(bytes, rowpf_off) else {
+            let row_data = &page[row_start..data_page.payload_end];
+            let (Some(entry_index), Some(track_id), Some(playlist_id)) = (
+                extract_u32_at(row_data, 0x00),
+                extract_playlist_entry_track_id(row_data),
+                extract_playlist_entry_playlist_id(row_data),
+            ) else {
                 continue;
             };
-            let mut offsets = Vec::with_capacity(group_len);
-            for _ in 0..group_len {
-                cursor -= 2;
-                let Some(off) = read_u16_le_at(bytes, cursor).map(|v| v as usize) else {
-                    offsets.clear();
-                    break;
-                };
-                offsets.push(off);
-            }
-            if offsets.len() != group_len {
-                continue;
-            }
-            for (j, &heap_off) in offsets.iter().enumerate() {
-                let bit = 1u16 << (j as u16);
-                if rowpf & bit == 0 {
-                    continue;
-                }
-                let row_abs = payload_start + heap_off;
-                if row_abs >= payload_end {
-                    continue;
-                }
-                let row_data = &bytes[row_abs..payload_end.min(page_end)];
-                let (Some(entry_index), Some(track_id), Some(playlist_id)) = (
-                    extract_u32_at(row_data, 0x00),
-                    extract_playlist_entry_track_id(row_data),
-                    extract_playlist_entry_playlist_id(row_data),
-                ) else {
-                    continue;
-                };
-                locations
-                    .entry((playlist_id, track_id))
-                    .or_default()
-                    .push(PlaylistEntryLocation {
-                        page_idx,
-                        group_start_row,
-                        bit: j,
-                        entry_index,
-                    });
-            }
+            locations
+                .entry((playlist_id, track_id))
+                .or_default()
+                .push(PlaylistEntryLocation {
+                    page_idx: data_page.idx,
+                    slot: slot.index,
+                    entry_index,
+                });
         }
     }
 
@@ -1451,16 +1270,15 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
     // written (correct, current) position; the lower one(s) are the stale
     // pre-reposition copies that were never cleaned up. Keeping the lowest (the
     // prior behavior) would silently keep the stale position instead.
-    let mut to_remove: std::collections::HashSet<(usize, usize, usize)> =
-        std::collections::HashSet::new();
+    let mut to_remove: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
     for locs in locations.values() {
         if locs.len() < 2 {
             continue;
         }
         let mut sorted: Vec<&PlaylistEntryLocation> = locs.iter().collect();
-        sorted.sort_by_key(|l| (l.entry_index, l.page_idx, l.group_start_row, l.bit));
+        sorted.sort_by_key(|l| (l.entry_index, l.page_idx, l.slot));
         for loc in sorted.into_iter().rev().skip(1) {
-            to_remove.insert((loc.page_idx, loc.group_start_row, loc.bit));
+            to_remove.insert((loc.page_idx, loc.slot));
         }
     }
     if to_remove.is_empty() {
@@ -1469,106 +1287,14 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
 
     // ── Pass 2: tombstone the selected rows, page by page ───────────────────
     let mut removed = 0usize;
-    for page_idx in 1..total_pages {
-        let page_start = page_idx * len_page;
-        let page_end = page_start + len_page;
-        if page_end > bytes.len() {
-            break;
-        }
-        let Some(pt) = read_u32_le_at(bytes, page_start + 0x08) else {
-            continue;
-        };
-        if pt != 8 {
-            continue;
-        }
-        let page_flags = bytes[page_start + 0x1b];
-        if page_flags & 0x40 != 0 {
-            continue;
-        }
-        let packed = u32::from(bytes[page_start + 0x18])
-            | (u32::from(bytes[page_start + 0x19]) << 8)
-            | (u32::from(bytes[page_start + 0x1a]) << 16);
-        let num_row_offsets = (packed & 0x1FFF) as usize;
-        let num_rows = ((packed >> 13) & 0x7FF) as usize;
-        if num_row_offsets == 0 {
-            continue;
-        }
-
-        let mut cursor = page_end;
-        let mut page_removed = 0usize;
-        let mut highest_removed_slot: Option<usize> = None;
-        let mut group_offsets: Vec<(usize, usize)> = Vec::new();
-
-        for group_start_row in (0..num_row_offsets).step_by(16) {
-            let group_len = (num_row_offsets - group_start_row).min(16);
-            if cursor < page_start + 4 + group_len * 2 {
-                break;
-            }
-            cursor -= 2;
-            let tranrf_off = cursor;
-            cursor -= 2;
-            let rowpf_off = cursor;
-            let Some(rowpf) = read_u16_le_at(bytes, rowpf_off) else {
-                continue;
-            };
-            group_offsets.push((tranrf_off, group_start_row));
-            cursor = cursor.saturating_sub(group_len * 2);
-
-            let mut new_rowpf = rowpf;
-            for j in 0..group_len {
-                if !to_remove.contains(&(page_idx, group_start_row, j)) {
-                    continue;
-                }
-                let bit = 1u16 << (j as u16);
-                if rowpf & bit == 0 {
-                    continue;
-                }
-                new_rowpf &= !bit;
-                page_removed += 1;
-                let abs_slot = group_start_row + j;
-                highest_removed_slot =
-                    Some(highest_removed_slot.map_or(abs_slot, |prev| prev.max(abs_slot)));
-            }
-            if new_rowpf != rowpf {
-                bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&new_rowpf.to_le_bytes());
-            }
-        }
-
-        if page_removed > 0 {
-            removed += page_removed;
-
-            let new_num_rows = num_rows.saturating_sub(page_removed);
-            let new_packed =
-                (num_row_offsets as u32 & 0x1FFF) | ((new_num_rows as u32 & 0x7FF) << 13);
-            bytes[page_start + 0x18] = (new_packed & 0xFF) as u8;
-            bytes[page_start + 0x19] = ((new_packed >> 8) & 0xFF) as u8;
-            bytes[page_start + 0x1a] = ((new_packed >> 16) & 0xFF) as u8;
-
-            if highest_removed_slot.is_some() {
-                // num_rl is always trc-1 (the page's last row slot), never the
-                // tombstoned slot itself -- num_row_offsets doesn't shrink on a
-                // tombstone, so the last slot stays num_row_offsets-1 even when
-                // the removed duplicate wasn't the page's last row. See the
-                // matching fix in `remove_rows_inplace`.
-                let last_slot = num_row_offsets.saturating_sub(1);
-                bytes[page_start + 0x20..page_start + 0x22].copy_from_slice(&1u16.to_le_bytes());
-                bytes[page_start + 0x22..page_start + 0x24]
-                    .copy_from_slice(&(last_slot as u16).to_le_bytes());
-
-                let last_group = last_slot / 16;
-                let last_bit = (last_slot % 16) as u32;
-                for &(tranrf_off, group_start) in &group_offsets {
-                    let tranrf_val: u16 = if group_start / 16 == last_group {
-                        1u16 << last_bit
-                    } else {
-                        0
-                    };
-                    bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&tranrf_val.to_le_bytes());
-                }
-            }
-        }
+    for data_page in &data_pages {
+        let page = &mut bytes[data_page.start..data_page.start + len_page];
+        let doomed: Vec<_> = pdb_page::footer_slots(page, data_page.num_row_offsets)
+            .filter(|slot| slot.present && to_remove.contains(&(data_page.idx, slot.index)))
+            .collect();
+        removed += doomed.len();
+        tombstone_slots(page, data_page, &doomed, true);
     }
-
     removed
 }
 
@@ -1601,94 +1327,34 @@ pub(crate) fn patch_t08_entry_indices_in_place(
         .map(|&(playlist_id, track_id, new_entry_index)| ((playlist_id, track_id), new_entry_index))
         .collect();
 
-    let total_pages = bytes.len() / page_size;
     let mut touched_pages = std::collections::HashSet::<usize>::new();
     let mut patched = 0usize;
 
-    for page_idx in 1..total_pages {
-        let page_start = page_idx * page_size;
-        let page_end = page_start + page_size;
-        if page_end > bytes.len() {
-            break;
-        }
-        let Some(pt) = read_u32_le_at(bytes, page_start + 0x08) else {
-            continue;
-        };
-        if pt != 8 {
-            continue;
-        }
-        let page_flags = bytes[page_start + 0x1b];
-        if page_flags & 0x40 != 0 {
-            continue; // tombstoned page
-        }
-        let packed = u32::from(bytes[page_start + 0x18])
-            | (u32::from(bytes[page_start + 0x19]) << 8)
-            | (u32::from(bytes[page_start + 0x1a]) << 16);
-        let num_row_offsets = (packed & 0x1FFF) as usize;
-        if num_row_offsets == 0 {
-            continue;
-        }
-        let Some(used_size) = read_u16_le_at(bytes, page_start + 0x1e).map(|v| v as usize) else {
-            continue;
-        };
-        let payload_start = page_start + HEAP_START;
-        let payload_end = payload_start + used_size;
-        if payload_end > page_end {
-            continue;
-        }
-
-        let mut cursor = page_end;
-        for group_start_row in (0..num_row_offsets).step_by(16) {
-            let group_len = (num_row_offsets - group_start_row).min(16);
-            if cursor < page_start + 4 + group_len * 2 {
-                break;
-            }
-            cursor -= 2; // tranrf (unused here)
-            cursor -= 2;
-            let rowpf_off = cursor;
-            let Some(rowpf) = read_u16_le_at(bytes, rowpf_off) else {
+    for data_page in inplace_data_pages(bytes, page_size, 8) {
+        let page = &mut bytes[data_page.start..data_page.start + page_size];
+        let row_starts: Vec<usize> = pdb_page::footer_slots(page, data_page.num_row_offsets)
+            .filter(|slot| slot.present)
+            .map(|slot| HEAP_START + slot.heap_off)
+            .filter(|&row_start| row_start + 12 <= data_page.payload_end)
+            .collect();
+        for row_start in row_starts {
+            let row_data = &page[row_start..row_start + 12];
+            let (Some(track_id), Some(playlist_id)) = (
+                extract_playlist_entry_track_id(row_data),
+                extract_playlist_entry_playlist_id(row_data),
+            ) else {
                 continue;
             };
-            let mut offsets = Vec::with_capacity(group_len);
-            for _ in 0..group_len {
-                cursor -= 2;
-                let Some(off) = read_u16_le_at(bytes, cursor).map(|v| v as usize) else {
-                    offsets.clear();
-                    break;
-                };
-                offsets.push(off);
-            }
-            if offsets.len() != group_len {
+            let Some(&new_entry_index) = desired_by_identity.get(&(playlist_id, track_id)) else {
+                continue;
+            };
+            let current_entry_index = extract_u32_at(row_data, 0x00).unwrap_or(0);
+            if current_entry_index == new_entry_index {
                 continue;
             }
-            for (j, &heap_off) in offsets.iter().enumerate() {
-                let bit = 1u16 << (j as u16);
-                if rowpf & bit == 0 {
-                    continue;
-                }
-                let row_abs = payload_start + heap_off;
-                if row_abs + 12 > payload_end.min(page_end) {
-                    continue;
-                }
-                let row_data = &bytes[row_abs..row_abs + 12];
-                let (Some(track_id), Some(playlist_id)) = (
-                    extract_playlist_entry_track_id(row_data),
-                    extract_playlist_entry_playlist_id(row_data),
-                ) else {
-                    continue;
-                };
-                let Some(&new_entry_index) = desired_by_identity.get(&(playlist_id, track_id))
-                else {
-                    continue;
-                };
-                let current_entry_index = extract_u32_at(row_data, 0x00).unwrap_or(0);
-                if current_entry_index == new_entry_index {
-                    continue;
-                }
-                bytes[row_abs..row_abs + 4].copy_from_slice(&new_entry_index.to_le_bytes());
-                touched_pages.insert(page_idx);
-                patched += 1;
-            }
+            page[row_start..row_start + 4].copy_from_slice(&new_entry_index.to_le_bytes());
+            touched_pages.insert(data_page.idx);
+            patched += 1;
         }
     }
 
@@ -1720,7 +1386,6 @@ pub(crate) fn patch_t08_entry_indices_in_place(
 /// validation. This pass corrects those pages before the post-write convention
 /// check so the writer's output is always conformant.
 pub(crate) fn fix_tt8_num_rl_conventions_inplace(bytes: &mut [u8]) {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
     let len_page = match read_u32_le_at(bytes, 4) {
         Some(v) if v > 0 => v as usize,
         _ => return,
@@ -1783,7 +1448,7 @@ pub(crate) fn fix_tt8_num_rl_conventions_inplace(bytes: &mut [u8]) {
 /// For tt=0 and tt=19: the B-tree indexes all pages with flags=0x34.
 /// Single-page chains have one 0x34 page (the sole data page); multi-page
 /// chains have no 0x34 pages (all pages are 0x24), so the sentinel is left
-/// as-is (preserving the SENTINEL_EMPTY entry written by the original exporter).
+/// as-is (preserving the SENTINEL_EMPTY_ENTRY entry written by the original exporter).
 pub(crate) fn rebuild_sentinel_btrees_inplace(bytes: &mut [u8]) {
     let Some(page_size) = bytes
         .get(4..8)
@@ -1795,8 +1460,6 @@ pub(crate) fn rebuild_sentinel_btrees_inplace(bytes: &mut [u8]) {
     if page_size == 0 || bytes.len() < page_size * 2 {
         return;
     }
-    const SENTINEL_EMPTY: u32 = 0x1fff_fff8;
-    const TAIL_RESERVE: usize = 20;
     let total = bytes.len() / page_size;
 
     for sent_idx in 1..total {
@@ -1879,7 +1542,7 @@ pub(crate) fn rebuild_sentinel_btrees_inplace(bytes: &mut [u8]) {
         let sentinel_seq = max_seq.saturating_add(1);
         bytes[sent_off + 0x10..sent_off + 0x14].copy_from_slice(&sentinel_seq.to_le_bytes());
 
-        let fill_end = sent_off + page_size.saturating_sub(TAIL_RESERVE);
+        let fill_end = sent_off + page_size.saturating_sub(SENTINEL_TAIL_ZERO_BYTES);
         let mut cursor = sent_off + 0x3c;
         for &pi in &active {
             if cursor + 4 > fill_end {
@@ -1889,23 +1552,13 @@ pub(crate) fn rebuild_sentinel_btrees_inplace(bytes: &mut [u8]) {
             cursor += 4;
         }
         while cursor + 4 <= fill_end {
-            bytes[cursor..cursor + 4].copy_from_slice(&SENTINEL_EMPTY.to_le_bytes());
+            bytes[cursor..cursor + 4].copy_from_slice(&SENTINEL_EMPTY_ENTRY.to_le_bytes());
             cursor += 4;
         }
         bytes[sent_off + 0x38..sent_off + 0x3a].copy_from_slice(&ne.to_le_bytes());
         bytes[sent_off + 0x3a..sent_off + 0x3c].copy_from_slice(&0x1fffu16.to_le_bytes());
         bytes[sent_off + 0x26..sent_off + 0x28].copy_from_slice(&ne.to_le_bytes());
     }
-}
-
-fn read_u16_le_at(bytes: &[u8], offset: usize) -> Option<u16> {
-    let slice = bytes.get(offset..offset + 2)?;
-    Some(u16::from_le_bytes([slice[0], slice[1]]))
-}
-
-fn read_u32_le_at(bytes: &[u8], offset: usize) -> Option<u32> {
-    let slice = bytes.get(offset..offset + 4)?;
-    Some(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
 
 fn extract_u32_at(row: &[u8], offset: usize) -> Option<u32> {
@@ -3288,18 +2941,11 @@ pub(crate) mod writer_tests {
 // Topology-locked additive writer (merged from pdb_additive.rs)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-use crate::error::BackendError;
-use crate::utils::{
-    collect_chain as collect_chain_pages, packed_page_row_slot_count, page_offset, read_u8_at,
-    set_table_ptr_fields, table_ptr_fields, write_u32_le_at,
-};
-
-const PAGE_HEADER_SIZE: usize = 40;
 /// Maximum encoded row length that can fit on any single page after 4-byte heap
 /// alignment, the 40-byte page header, and the minimum 6-byte single-row footer
 /// (`[ofs0][rowpf][tranrf]`). Rows larger than this cannot be placed anywhere
 /// (existing or fresh) and must be rejected up-front.
-pub(crate) const MAX_ROW_LEN: usize = (PAGE_SIZE - PAGE_HEADER_SIZE - 6) & !3;
+pub(crate) const MAX_ROW_LEN: usize = (PAGE_SIZE - HEAP_START - 6) & !3;
 
 /// Outcome of appending a batch of rows to a single table's chain.
 #[derive(Debug, Clone, Default)]
@@ -3317,7 +2963,7 @@ pub(crate) struct AppendOutcome {
 }
 
 fn page_has_transaction_tombstones(page: &[u8], page_size: usize) -> bool {
-    if page.len() < page_size || page_size < PAGE_HEADER_SIZE {
+    if page.len() < page_size || page_size < HEAP_START {
         return false;
     }
     let used_s = read_u16_le_at(page, 0x1e).unwrap_or(0);
@@ -3325,34 +2971,8 @@ fn page_has_transaction_tombstones(page: &[u8], page_size: usize) -> bool {
         return false;
     }
     let row_slots = packed_page_row_slot_count(page).unwrap_or(0);
-    if row_slots == 0 {
-        return false;
-    }
-
-    let mut cursor = page_size;
-    for group_start in (0..row_slots).step_by(16) {
-        if cursor < 4 {
-            return false;
-        }
-        cursor -= 4;
-        let rowpf = read_u16_le_at(page, cursor).unwrap_or(0);
-        let tranrf = read_u16_le_at(page, cursor + 2).unwrap_or(0);
-        let group_len = (row_slots - group_start).min(16);
-        let mask = if group_len == 16 {
-            u16::MAX
-        } else {
-            ((1u32 << group_len) - 1) as u16
-        };
-        if (tranrf & !rowpf & mask) != 0 {
-            return true;
-        }
-        let footer_offsets = group_len.saturating_mul(2);
-        if cursor < footer_offsets {
-            return false;
-        }
-        cursor -= footer_offsets;
-    }
-    false
+    pdb_page::footer_groups(page_size, row_slots)
+        .any(|group| group.tranrf(page) & !group.rowpf(page) & group.mask() != 0)
 }
 
 struct PageFooterState {
@@ -3362,7 +2982,7 @@ struct PageFooterState {
 }
 
 fn read_page_footer_state(page: &[u8], page_size: usize) -> Option<PageFooterState> {
-    if page.len() < page_size || page_size < PAGE_HEADER_SIZE {
+    if page.len() < page_size || page_size < HEAP_START {
         return None;
     }
     let used_s = read_u16_le_at(page, 0x1e).unwrap_or(0) as usize;
@@ -3370,30 +2990,18 @@ fn read_page_footer_state(page: &[u8], page_size: usize) -> Option<PageFooterSta
         return None;
     }
     let row_slots = packed_page_row_slot_count(page).unwrap_or(0);
-    if row_slots == 0 {
+    if row_slots == 0 || !pdb_page::footer_fits(page_size, row_slots) {
         return None;
     }
 
-    let mut cursor = page_size;
+    let page = &page[..page_size];
     let mut offsets = Vec::<usize>::with_capacity(row_slots);
-    let mut rowpf_by_group = Vec::<u16>::with_capacity(row_slots.div_ceil(16));
-    let mut tranrf_by_group = Vec::<u16>::with_capacity(row_slots.div_ceil(16));
-    for group_start in (0..row_slots).step_by(16) {
-        if cursor < 4 {
-            return None;
-        }
-        cursor -= 4;
-        rowpf_by_group.push(read_u16_le_at(page, cursor).unwrap_or(0));
-        tranrf_by_group.push(read_u16_le_at(page, cursor + 2).unwrap_or(0));
-
-        let group_len = (row_slots - group_start).min(16);
-        for _ in 0..group_len {
-            if cursor < 2 {
-                return None;
-            }
-            cursor -= 2;
-            offsets.push(read_u16_le_at(page, cursor).unwrap_or(0) as usize);
-        }
+    let mut rowpf_by_group = Vec::<u16>::with_capacity(row_slots.div_ceil(pdb_page::GROUP_SLOTS));
+    let mut tranrf_by_group = Vec::<u16>::with_capacity(row_slots.div_ceil(pdb_page::GROUP_SLOTS));
+    for group in pdb_page::footer_groups(page_size, row_slots) {
+        rowpf_by_group.push(group.rowpf(page));
+        tranrf_by_group.push(group.tranrf(page));
+        offsets.extend((0..group.len).map(|j| group.row_offset(page, j)));
     }
 
     if offsets.iter().any(|offset| *offset > used_s) {
@@ -3430,6 +3038,11 @@ fn append_rows_to_existing_page_preserving_footer_state(
         table_type, 19,
         "tt=19 must not grow through the generic append path"
     );
+    if !page_size_fits_u16_fields(page_size) {
+        return Err(BackendError::Validation(format!(
+            "additive append: page size {page_size} too large for u16 page header fields"
+        )));
+    }
     let off = page_offset(page_idx, page_size).ok_or_else(|| {
         BackendError::Validation(format!(
             "additive append: page {page_idx} for table {table_type} out of bounds"
@@ -3462,10 +3075,8 @@ fn append_rows_to_existing_page_preserving_footer_state(
             .len()
             .saturating_add(absorbed)
             .saturating_add(1);
-        let new_footer = footer_size_for_rows(new_row_count);
-        if PAGE_HEADER_SIZE + aligned_end + new_footer > page_size
-            || new_row_count > MAX_ROWS_PER_PAGE
-        {
+        let new_footer = footer_size(new_row_count);
+        if HEAP_START + aligned_end + new_footer > page_size || new_row_count > MAX_ROWS_PER_PAGE {
             break;
         }
         new_used_s = aligned_end;
@@ -3484,21 +3095,21 @@ fn append_rows_to_existing_page_preserving_footer_state(
     for row in rows.iter().take(absorbed) {
         let start = align4(used_s);
         if start > used_s {
-            page[PAGE_HEADER_SIZE + used_s..PAGE_HEADER_SIZE + start].fill(0);
+            page[HEAP_START + used_s..HEAP_START + start].fill(0);
         }
         let slot = footer.offsets.len();
         let mut row_bytes = row.clone();
         apply_page_local_index_shift(table_type, &mut row_bytes, slot);
         let end = start + row_bytes.len();
-        page[PAGE_HEADER_SIZE + start..PAGE_HEADER_SIZE + end].copy_from_slice(&row_bytes);
+        page[HEAP_START + start..HEAP_START + end].copy_from_slice(&row_bytes);
         let aligned_end = align4(end);
         if aligned_end > end {
-            page[PAGE_HEADER_SIZE + end..PAGE_HEADER_SIZE + aligned_end].fill(0);
+            page[HEAP_START + end..HEAP_START + aligned_end].fill(0);
         }
 
         footer.offsets.push(start);
-        let group = slot / 16;
-        let bit = slot % 16;
+        let group = slot / pdb_page::GROUP_SLOTS;
+        let bit = slot % pdb_page::GROUP_SLOTS;
         while footer.rowpf_by_group.len() <= group {
             footer.rowpf_by_group.push(0);
             footer.tranrf_by_group.push(0);
@@ -3510,25 +3121,10 @@ fn append_rows_to_existing_page_preserving_footer_state(
     }
 
     let row_count = footer.offsets.len();
-    let active_count: u32 = footer
-        .rowpf_by_group
-        .iter()
-        .enumerate()
-        .map(|(group, bits)| {
-            let remaining = row_count.saturating_sub(group * 16);
-            let group_len = remaining.min(16);
-            let mask = if group_len == 16 {
-                u16::MAX
-            } else {
-                ((1u32 << group_len) - 1) as u16
-            };
-            (bits & mask).count_ones()
-        })
+    let active_count: usize = pdb_page::footer_groups(page_size, row_count)
+        .map(|group| (footer.rowpf_by_group[group.index] & group.mask()).count_ones() as usize)
         .sum();
-    let packed = ((row_count as u32) & 0x1fff) | ((active_count & 0x7ff) << 13);
-    page[0x18] = (packed & 0xff) as u8;
-    page[0x19] = ((packed >> 8) & 0xff) as u8;
-    page[0x1a] = ((packed >> 16) & 0xff) as u8;
+    pdb_page::write_slot_counts(page, row_count, active_count);
     page[0x1e..0x20].copy_from_slice(&(used_s as u16).to_le_bytes());
 
     let (u5, num_rl) = if table_type == 7 {
@@ -3559,32 +3155,23 @@ fn append_rows_to_existing_page_preserving_footer_state(
     // Keep existing page_flags. Pages must not be resealed or normalized
     // during additive export.
 
-    let footer_size = footer_size_for_rows(row_count);
+    let footer_size = footer_size(row_count);
     let footer_start = page_size - footer_size;
-    if PAGE_HEADER_SIZE + used_s <= footer_start {
-        page[PAGE_HEADER_SIZE + used_s..footer_start].fill(0);
+    if HEAP_START + used_s <= footer_start {
+        page[HEAP_START + used_s..footer_start].fill(0);
     }
-    let free_s = page_size.saturating_sub(PAGE_HEADER_SIZE + used_s + footer_size);
+    let free_s = page_size.saturating_sub(HEAP_START + used_s + footer_size);
     page[0x1c..0x1e].copy_from_slice(&(free_s as u16).to_le_bytes());
 
     // Existing tranrf groups are validated transaction history on player hardware
     // family players. Preserve them and OR in only the appended row bits.
-    let mut footer_cursor = page_size;
-    for group_start in (0..row_count).step_by(16) {
-        let group = group_start / 16;
-        let group_len = (row_count - group_start).min(16);
-        footer_cursor -= 2;
-        page[footer_cursor..footer_cursor + 2]
-            .copy_from_slice(&footer.tranrf_by_group[group].to_le_bytes());
-        footer_cursor -= 2;
-        page[footer_cursor..footer_cursor + 2]
-            .copy_from_slice(&footer.rowpf_by_group[group].to_le_bytes());
-        for j in 0..group_len {
-            footer_cursor -= 2;
-            let offset = footer.offsets[group_start + j] as u16;
-            page[footer_cursor..footer_cursor + 2].copy_from_slice(&offset.to_le_bytes());
-        }
-    }
+    let offsets: Vec<u16> = footer.offsets.iter().map(|&offset| offset as u16).collect();
+    pdb_page::write_footer(page, &offsets, |group| {
+        (
+            footer.rowpf_by_group[group.index],
+            footer.tranrf_by_group[group.index],
+        )
+    });
 
     Ok(absorbed)
 }
@@ -3801,9 +3388,8 @@ pub(crate) fn append_rows_to_chain_in_place(
             let aligned = align4(candidate.len());
             let new_count = fitted.len() + 1;
             let new_used = local_used + aligned;
-            let new_footer = footer_size_for_rows(new_count);
-            if PAGE_HEADER_SIZE + new_used + new_footer > page_size || new_count > MAX_ROWS_PER_PAGE
-            {
+            let new_footer = footer_size(new_count);
+            if HEAP_START + new_used + new_footer > page_size || new_count > MAX_ROWS_PER_PAGE {
                 break;
             }
             fitted.push(candidate.clone());
@@ -3860,30 +3446,17 @@ pub(crate) fn append_rows_to_chain_in_place(
                  fresh page {new_idx} for table {table_type}"
             )));
         }
-        // Apply the per-table footer convention.
-        let trc = fitted.len() as u16;
-        let (u5, num_rl) = data_page_footer_fields(table_type, trc);
-        bytes[new_off + 0x20..new_off + 0x22].copy_from_slice(&u5.to_le_bytes());
-        bytes[new_off + 0x22..new_off + 0x24].copy_from_slice(&num_rl.to_le_bytes());
-        // Fix tranrf: rewrite_variable_page_rows_in_place wrote all-bits; for u5=1
-        // tables the writer uses exactly one bit: tranrf[group] = 1<<(num_rl%16) in the
-        // group containing num_rl, 0 elsewhere.
-        if u5 == 1 && table_type != 19 {
-            let last_group = num_rl as usize / 16;
-            let last_bit = num_rl as usize % 16;
-            let nrows = fitted.len();
-            let mut footer_pos = page_size;
-            for group_start in (0..nrows).step_by(16) {
-                let group_len = (nrows - group_start).min(16);
-                let tranrf_val: u16 = if group_start / 16 == last_group {
-                    1u16 << last_bit
-                } else {
-                    0
-                };
-                bytes[new_off + footer_pos - 2..new_off + footer_pos]
-                    .copy_from_slice(&tranrf_val.to_le_bytes());
-                footer_pos = footer_pos.saturating_sub(2 + 2 + group_len * 2);
-            }
+        // Apply the per-table footer convention over the all-bits footer
+        // `rewrite_variable_page_rows_in_place` wrote. tt=19 never grows
+        // through here (see `synthesize_t19_runtime_rows_in_place`), so only
+        // its u5/num_rl are stamped, not the runtime-profile bits.
+        let page = &mut bytes[new_off..new_off + page_size];
+        if table_type == 19 {
+            let (u5, num_rl) = data_page_footer_fields(19, fitted.len() as u16);
+            page[0x20..0x22].copy_from_slice(&u5.to_le_bytes());
+            page[0x22..0x24].copy_from_slice(&num_rl.to_le_bytes());
+        } else {
+            apply_page_footer_convention(page, table_type, fitted.len());
         }
 
         // Link the previous tail to this fresh page.
@@ -3982,8 +3555,6 @@ pub(crate) fn append_rows_to_chain_in_place(
     // Chain pointers in old pages may be stale (pointing to pages repurposed for a
     // different table), so scanning by tt gives the definitive set of live pages.
     {
-        const SENTINEL_EMPTY_ENTRY: u32 = 0x1fff_fff8;
-        const SENTINEL_TAIL_ZERO_BYTES: usize = 20;
         if let Some(sent_off) = page_offset(first, page_size) {
             let total_phys = bytes.len() / page_size;
             let sentinel_tt = read_u32_le_at(bytes, sent_off + 8).unwrap_or(9999);
@@ -4736,11 +4307,8 @@ fn synthesize_t19_runtime_rows_in_place(
     bytes[off + 0x19] = 0x20;
     bytes[off + 0x1a] = 0;
     bytes[off + 0x1b] = page_flags_for_table(19);
-    let (u5, num_rl) = data_page_footer_fields(19, row_count as u16);
-    bytes[off + 0x20..off + 0x22].copy_from_slice(&u5.to_le_bytes());
-    bytes[off + 0x22..off + 0x24].copy_from_slice(&num_rl.to_le_bytes());
     if let Some(page) = bytes.get_mut(off..off + page_size) {
-        write_t19_runtime_footer_groups(page, row_count);
+        apply_page_footer_convention(page, 19, row_count);
     }
 
     let seqdb = read_u32_le_at(bytes, 0x14)
@@ -5006,23 +4574,17 @@ fn mark_row_slot_inactive(
     // `detect_pdb_tombstoned_playlist_tree_ids`/the "Repair Tombstoned Row
     // IDs" fix in service::repair exists to clean up after the fact. Zero it
     // at the source instead of relying on that separate repair pass.
-    let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+    let row_abs = off + HEAP_START + slot.start;
     if let Some(id_off) = row_abs.checked_add(id_field_offset)
         && id_off + 4 <= bytes.len()
     {
         bytes[id_off..id_off + 4].copy_from_slice(&0u32.to_le_bytes());
     }
 
-    let packed = u32::from(bytes[off + 0x18])
-        | (u32::from(bytes[off + 0x19]) << 8)
-        | (u32::from(bytes[off + 0x1a]) << 16);
-    let num_row_offsets = packed & 0x1fff;
-    let num_rows = (packed >> 13) & 0x7ff;
-    let new_num_rows = num_rows.saturating_sub(1);
-    let new_packed = (num_row_offsets & 0x1fff) | ((new_num_rows & 0x7ff) << 13);
-    bytes[off + 0x18] = (new_packed & 0xff) as u8;
-    bytes[off + 0x19] = ((new_packed >> 8) & 0xff) as u8;
-    bytes[off + 0x1a] = ((new_packed >> 16) & 0xff) as u8;
+    let page = &mut bytes[off..];
+    if let Some((num_row_offsets, num_rows)) = pdb_page::read_slot_counts(page) {
+        pdb_page::write_slot_counts(page, num_row_offsets, num_rows.saturating_sub(1));
+    }
     // Tombstone state is tracked only in the row footer bitmasks; page_flags
     // must not be changed here (see tombstone policy in remove_ids_from_pdb).
     Ok(())
@@ -5068,13 +4630,13 @@ pub(crate) fn patch_playlist_tree_sort_orders_in_place(
         if used_s == 0 {
             continue;
         }
-        let payload_len = used_s.min(page_size.saturating_sub(PAGE_HEADER_SIZE));
+        let payload_len = used_s.min(page_size.saturating_sub(HEAP_START));
         let slots = parse_page_row_slots(page, page_size);
         for slot in slots {
             if !slot.present || slot.end > payload_len || slot.start >= slot.end {
                 continue;
             }
-            let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+            let row_abs = off + HEAP_START + slot.start;
             let row_len = slot.end - slot.start;
             if row_len < 20 {
                 continue;
@@ -5312,13 +4874,13 @@ pub(crate) fn realign_dictionary_rows_in_place(
         if used_s == 0 {
             continue;
         }
-        let payload_len = used_s.min(page_size.saturating_sub(PAGE_HEADER_SIZE));
+        let payload_len = used_s.min(page_size.saturating_sub(HEAP_START));
         let slots = parse_page_row_slots(page, page_size);
         for slot in slots {
             if !slot.present || slot.end > payload_len || slot.start >= slot.end {
                 continue;
             }
-            let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+            let row_abs = off + HEAP_START + slot.start;
             let row_len = slot.end - slot.start;
             if row_len < id_offset + 4 {
                 continue;
@@ -5844,8 +5406,8 @@ mod additive_tests {
             let off = page_offset(page_idx, PAGE_SIZE)?;
             let page = bytes.get(off..off + PAGE_SIZE)?;
             let used_s = read_u16_le_at(page, 0x1e)? as usize;
-            let payload_len = used_s.min(PAGE_SIZE.saturating_sub(PAGE_HEADER_SIZE));
-            let payload = page.get(PAGE_HEADER_SIZE..PAGE_HEADER_SIZE + payload_len)?;
+            let payload_len = used_s.min(PAGE_SIZE.saturating_sub(HEAP_START));
+            let payload = page.get(HEAP_START..HEAP_START + payload_len)?;
             for (row_idx, slot) in parse_page_row_slots(page, PAGE_SIZE)
                 .into_iter()
                 .enumerate()
@@ -5872,12 +5434,12 @@ mod additive_tests {
             let off = page_offset(page_idx, PAGE_SIZE)?;
             let page = bytes.get(off..off + PAGE_SIZE)?;
             let used_s = read_u16_le_at(page, 0x1e)? as usize;
-            let payload_len = used_s.min(PAGE_SIZE.saturating_sub(PAGE_HEADER_SIZE));
+            let payload_len = used_s.min(PAGE_SIZE.saturating_sub(HEAP_START));
             for slot in parse_page_row_slots(page, PAGE_SIZE) {
                 if slot.end > payload_len || slot.start >= slot.end {
                     continue;
                 }
-                let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+                let row_abs = off + HEAP_START + slot.start;
                 let row_len = slot.end - slot.start;
                 if row_len >= 20 && read_u32_le_at(bytes, row_abs + 12) == Some(id) {
                     return Some((page_idx, row_abs, row_len, slot));
@@ -5928,7 +5490,7 @@ mod additive_tests {
             u16::from_le_bytes(bytes[last_off + 0x1e..last_off + 0x20].try_into().unwrap())
                 as usize;
         let payload_before =
-            bytes[last_off + PAGE_HEADER_SIZE..last_off + PAGE_HEADER_SIZE + used_before].to_vec();
+            bytes[last_off + HEAP_START..last_off + HEAP_START + used_before].to_vec();
         let u5_before =
             u16::from_le_bytes(bytes[last_off + 0x20..last_off + 0x22].try_into().unwrap());
 
@@ -5961,7 +5523,7 @@ mod additive_tests {
             "empty_candidate stays byte-stable when no chain growth happens"
         );
         assert_eq!(
-            &bytes[last_off + PAGE_HEADER_SIZE..last_off + PAGE_HEADER_SIZE + used_before],
+            &bytes[last_off + HEAP_START..last_off + HEAP_START + used_before],
             payload_before.as_slice(),
             "existing row payload bytes must stay stable on reused-page append"
         );
@@ -6791,9 +6353,8 @@ mod additive_tests {
                 .try_into()
                 .unwrap(),
         ) as usize;
-        let old_payload = bytes
-            [old_last_off + PAGE_HEADER_SIZE..old_last_off + PAGE_HEADER_SIZE + old_used_s]
-            .to_vec();
+        let old_payload =
+            bytes[old_last_off + HEAP_START..old_last_off + HEAP_START + old_used_s].to_vec();
 
         // Simulate a preserved delete tombstone: row data remains in the page,
         // rowpf marks it inactive, tranrf records the transaction bit.
@@ -6819,7 +6380,7 @@ mod additive_tests {
         assert_eq!(outcome.new_last_page, old_last);
         assert_eq!(table_ptr_fields(&bytes, 7).unwrap().2, old_last);
         assert_eq!(
-            &bytes[old_last_off + PAGE_HEADER_SIZE..old_last_off + PAGE_HEADER_SIZE + old_used_s],
+            &bytes[old_last_off + HEAP_START..old_last_off + HEAP_START + old_used_s],
             old_payload.as_slice(),
             "inactive playlist-tree row payload must stay byte-stable"
         );
@@ -7191,12 +6752,12 @@ mod additive_tests {
             let off = page_offset(page_idx, PAGE_SIZE)?;
             let page = bytes.get(off..off + PAGE_SIZE)?;
             let used_s = read_u16_le_at(page, 0x1e)? as usize;
-            let payload_len = used_s.min(PAGE_SIZE.saturating_sub(PAGE_HEADER_SIZE));
+            let payload_len = used_s.min(PAGE_SIZE.saturating_sub(HEAP_START));
             for slot in parse_page_row_slots(page, PAGE_SIZE) {
                 if slot.end > payload_len || slot.start >= slot.end {
                     continue;
                 }
-                let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+                let row_abs = off + HEAP_START + slot.start;
                 let row_len = slot.end - slot.start;
                 if slot.present
                     && row_len >= 136
@@ -7427,12 +6988,12 @@ mod additive_tests {
                 let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
                 let page = bytes.get(off..off + PAGE_SIZE).expect("page bytes");
                 let used_s = read_u16_le_at(page, 30).unwrap_or(0) as usize;
-                let payload_len = used_s.min(PAGE_SIZE.saturating_sub(PAGE_HEADER_SIZE));
+                let payload_len = used_s.min(PAGE_SIZE.saturating_sub(HEAP_START));
                 for slot in parse_page_row_slots(page, PAGE_SIZE) {
                     if !slot.present || slot.end > payload_len || slot.start >= slot.end {
                         continue;
                     }
-                    let row_abs = off + PAGE_HEADER_SIZE + slot.start;
+                    let row_abs = off + HEAP_START + slot.start;
                     let row_len = slot.end - slot.start;
                     if read_u32_le_at(bytes, row_abs + 12) == Some(1) {
                         return (page_idx, row_abs, row_len);
@@ -8484,14 +8045,6 @@ struct T08EntryLoc {
     raw: [u8; 12],
 }
 
-pub(crate) fn footer_size_for_rows(row_count: usize) -> usize {
-    if row_count == 0 {
-        return 0;
-    }
-    let groups = row_count.div_ceil(16);
-    groups * 4 + row_count * 2
-}
-
 pub(crate) fn encode_t08_row(key: T08EntryKey) -> [u8; 12] {
     let mut out = [0u8; 12];
     out[0..4].copy_from_slice(&key.entry_index.to_le_bytes());
@@ -8517,96 +8070,14 @@ fn parse_t08_entries_from_page(page: &[u8], page_index: u32, len_page: usize) ->
         return Vec::new();
     }
     let payload = &page[payload_start..payload_end];
-    let n_header = packed_page_row_slot_count(page).unwrap_or(0);
-
-    // Compute the maximum number of rows the index space can hold, to detect
-    // nrs u8 wrapping on pages with >255 rows.
-    let index_space = len_page.saturating_sub(payload_end);
-    let full_groups = index_space / 36; // 4 presence bytes + 16×2 offset bytes
-    let leftover = index_space % 36;
-    let partial_rows = if leftover >= 6 { (leftover - 4) / 2 } else { 0 };
-    let n_max = full_groups * 16 + partial_rows;
-
-    if n_header == 0 && n_max == 0 {
-        return Vec::new();
-    }
-
-    let mut m = len_page;
-    let mut row_offsets = Vec::<usize>::with_capacity(n_max + 1);
-    let mut row_presence = Vec::<u16>::with_capacity((n_max / 16) + 2);
-
-    // Phase 1: trust the page header count.
-    for i in 0..n_header {
-        if i % 16 == 0 {
-            if m < 4 {
-                break;
-            }
-            m -= 4;
-            let Some(bits) = read_u16_le_at(page, m) else {
-                break;
-            };
-            row_presence.push(bits);
-        }
-        if m < 2 {
-            break;
-        }
-        m -= 2;
-        let Some(off) = read_u16_le_at(page, m) else {
-            break;
-        };
-        row_offsets.push(off as usize);
-    }
-
-    // Phase 2: if the index space can hold more rows than n_header (nrs likely
-    // wrapped at 256), extend the scan with strict validation.
-    let gap = n_max.saturating_sub(n_header);
-    if gap > 0 && gap <= 512 && row_offsets.len() == n_header {
-        let mut prev_off = row_offsets.last().copied();
-        for i in n_header..n_max {
-            if i % 16 == 0 {
-                if m < 4 || m.saturating_sub(4) < payload_end {
-                    break;
-                }
-                m -= 4;
-                let Some(bits) = read_u16_le_at(page, m) else {
-                    break;
-                };
-                row_presence.push(bits);
-            }
-            if m < 2 || m.saturating_sub(2) < payload_end {
-                break;
-            }
-            m -= 2;
-            let Some(off) = read_u16_le_at(page, m) else {
-                break;
-            };
-            let off = off as usize;
-            if off >= payload.len() {
-                break;
-            }
-            if let Some(prev) = prev_off
-                && off < prev
-            {
-                break; // offsets must be non-decreasing
-            }
-            prev_off = Some(off);
-            row_offsets.push(off);
-        }
-    }
+    let footer = pdb_page::scan_footer_tolerant(page, len_page, payload_end);
 
     let mut out = Vec::<T08EntryLoc>::new();
-    for i in 0..row_offsets.len() {
-        let group_idx = i / 16;
-        let bit = i % 16;
-        let present = row_presence
-            .get(group_idx)
-            .map(|bits| ((bits >> bit) & 1) == 1)
-            .unwrap_or(false);
-        if !present {
+    for i in 0..footer.offsets.len() {
+        if !footer.is_present(i) {
             continue;
         }
-        let start = row_offsets[i];
-        let end = row_offsets.get(i + 1).copied().unwrap_or(payload.len());
+        let (start, end) = footer.row_bounds(i, payload.len());
         if end <= start || end > payload.len() || start + 12 > payload.len() {
             continue;
         }
@@ -8678,46 +8149,22 @@ pub(crate) fn parse_page_row_slots(page: &[u8], len_page: usize) -> Vec<PageRowS
     }
     let payload_len = used_s.min(len_page.saturating_sub(40));
     let n_header = packed_page_row_slot_count(page).unwrap_or(0);
-    if n_header == 0 {
-        return Vec::new();
-    }
-
-    let mut m = len_page;
-    let mut row_offsets = Vec::<usize>::with_capacity(n_header);
-    let mut row_bits = Vec::<(u16, usize)>::with_capacity(n_header.div_ceil(16));
-    for i in 0..n_header {
-        if i % 16 == 0 {
-            if m < 4 {
-                break;
-            }
-            m -= 4;
-            let bits = read_u16_le_at(page, m).unwrap_or(0);
-            row_bits.push((bits, m));
-        }
-        if m < 2 {
-            break;
-        }
-        m -= 2;
-        row_offsets.push(read_u16_le_at(page, m).unwrap_or(0) as usize);
-    }
+    let footer: Vec<pdb_page::FooterSlot> =
+        pdb_page::footer_slots(&page[..len_page], n_header).collect();
 
     let mut slots = Vec::<PageRowSlot>::new();
-    for i in 0..row_offsets.len() {
-        let start = row_offsets[i];
-        let end = row_offsets.get(i + 1).copied().unwrap_or(payload_len);
+    for (i, footer_slot) in footer.iter().enumerate() {
+        let start = footer_slot.heap_off;
+        let end = footer.get(i + 1).map_or(payload_len, |next| next.heap_off);
         if end <= start || end > payload_len {
             continue;
         }
-        let group_idx = i / 16;
-        let bit = i % 16;
-        let (bits, bits_off) = row_bits.get(group_idx).copied().unwrap_or((0, 0));
-        let bit_mask = 1u16 << bit;
         slots.push(PageRowSlot {
             start,
             end,
-            present: (bits & bit_mask) != 0,
-            bits_off,
-            bit_mask,
+            present: footer_slot.present,
+            bits_off: footer_slot.group.rowpf_off,
+            bit_mask: footer_slot.bit,
         });
     }
     slots
@@ -8740,12 +8187,22 @@ pub(crate) fn read_present_page_rows(page: &[u8], len_page: usize) -> Vec<Vec<u8
     rows
 }
 
+/// Whether every heap offset, `used_s` and `free_s` on a page of `page_size`
+/// bytes fits the u16 fields that hold them. The in-place writers take the
+/// page size from the file header, so they check this before casting.
+fn page_size_fits_u16_fields(page_size: usize) -> bool {
+    page_size <= usize::from(u16::MAX)
+}
+
 pub(crate) fn rewrite_variable_page_rows_in_place(
     bytes: &mut [u8],
     page_index: u32,
     rows: &[Vec<u8>],
     page_size: usize,
 ) -> bool {
+    if !page_size_fits_u16_fields(page_size) {
+        return false;
+    }
     let Some(off) = page_offset(page_index, page_size) else {
         return false;
     };
@@ -8766,51 +8223,30 @@ pub(crate) fn rewrite_variable_page_rows_in_place(
         payload.resize(align4(payload.len()), 0);
     }
     let used_s = payload.len();
-    let footer_size = footer_size_for_rows(row_offsets.len());
-    if 40 + used_s + footer_size > page_size {
+    let footer_size = footer_size(row_offsets.len());
+    if HEAP_START + used_s + footer_size > page_size {
         return false;
     }
 
-    let n = row_offsets.len() as u32;
-    page[24] = (n & 0xff) as u8;
-    let packed = (n & 0x1fff) | ((n & 0x7ff) << 13);
-    page[0x18] = (packed & 0xff) as u8;
-    page[0x19] = ((packed >> 8) & 0xff) as u8;
-    page[0x1a] = ((packed >> 16) & 0xff) as u8;
+    pdb_page::write_slot_counts(page, row_offsets.len(), row_offsets.len());
     page[0x20..0x22].copy_from_slice(&(row_offsets.len() as u16).to_le_bytes());
-    page[30..32].copy_from_slice(&(used_s as u16).to_le_bytes());
-    let free_s = page_size.saturating_sub(40 + used_s + footer_size);
-    page[28..30].copy_from_slice(&(free_s as u16).to_le_bytes());
+    page[0x1e..0x20].copy_from_slice(&(used_s as u16).to_le_bytes());
+    let free_s = page_size.saturating_sub(HEAP_START + used_s + footer_size);
+    page[0x1c..0x1e].copy_from_slice(&(free_s as u16).to_le_bytes());
     let num_rl = if row_offsets.is_empty() {
         0u16
     } else {
         (row_offsets.len() - 1) as u16
     };
-    page[34..36].copy_from_slice(&num_rl.to_le_bytes());
+    page[0x22..0x24].copy_from_slice(&num_rl.to_le_bytes());
 
-    if page_size > 40 {
-        page[40..].fill(0u8);
+    if page_size > HEAP_START {
+        page[HEAP_START..].fill(0u8);
     }
     if !payload.is_empty() {
-        page[40..40 + payload.len()].copy_from_slice(&payload);
+        page[HEAP_START..HEAP_START + payload.len()].copy_from_slice(&payload);
     }
-
-    if !row_offsets.is_empty() {
-        let mut cursor = page_size;
-        for group_start in (0..row_offsets.len()).step_by(16) {
-            let group_len = (row_offsets.len() - group_start).min(16);
-            let bits = ((1u32 << group_len) - 1) as u16;
-            cursor -= 2;
-            page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
-            cursor -= 2;
-            page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
-            for j in 0..group_len {
-                cursor -= 2;
-                page[cursor..cursor + 2]
-                    .copy_from_slice(&row_offsets[group_start + j].to_le_bytes());
-            }
-        }
-    }
+    pdb_page::write_footer_all_present(page, &row_offsets);
     true
 }
 

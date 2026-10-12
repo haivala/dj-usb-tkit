@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use backend::pdb_page;
 use backend::utils::{
     collect_chain as collect_chain_pages, packed_page_row_slot_count, read_u16_le_at,
     read_u32_le_at, table_ptr_fields,
@@ -28,44 +29,15 @@ fn parse_t08_rows_with_pages(pdb: &[u8]) -> Vec<(u32, u32, u32, u32)> {
         }
         let payload = &page[payload_start..payload_end];
         let n_header = packed_page_row_slot_count(page).unwrap_or(0);
-        if n_header == 0 {
-            continue;
-        }
-        let mut m = page_size;
-        let mut row_offsets = Vec::<usize>::with_capacity(n_header + 1);
-        let mut row_presence = Vec::<u16>::with_capacity((n_header / 16) + 1);
-        for i in 0..n_header {
-            if i % 16 == 0 {
-                if m < 4 {
-                    break;
-                }
-                m -= 4;
-                let Some(bits) = read_u16_le_at(page, m) else {
-                    break;
-                };
-                row_presence.push(bits);
-            }
-            if m < 2 {
-                break;
-            }
-            m -= 2;
-            let Some(off) = read_u16_le_at(page, m) else {
-                break;
-            };
-            row_offsets.push(off as usize);
-        }
-        for i in 0..row_offsets.len() {
-            let group_idx = i / 16;
-            let bit = i % 16;
-            let present = row_presence
-                .get(group_idx)
-                .map(|bits| ((bits >> bit) & 1) == 1)
-                .unwrap_or(false);
-            if !present {
+        let footer: Vec<_> = pdb_page::footer_slots(page, n_header).collect();
+        for (i, slot) in footer.iter().enumerate() {
+            if !slot.present {
                 continue;
             }
-            let start = row_offsets[i];
-            let end = row_offsets.get(i + 1).copied().unwrap_or(payload.len());
+            let start = slot.heap_off;
+            let end = footer
+                .get(i + 1)
+                .map_or(payload.len(), |next| next.heap_off);
             if end <= start || start + 12 > payload.len() || end > payload.len() {
                 continue;
             }

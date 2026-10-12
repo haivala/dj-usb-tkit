@@ -16,6 +16,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use backend::pdb_page;
 use backend::utils::{
     packed_page_row_slot_count, read_u8_at as ru8, read_u16_le_at as ru16, read_u32_le_at as ru32,
 };
@@ -411,30 +412,13 @@ fn main() {
             continue;
         }
 
-        let groups = row_slots.div_ceil(16);
-        let mut cursor = page_size;
-        let mut rowpf_groups = Vec::with_capacity(groups);
-        let mut tranrf_groups = Vec::with_capacity(groups);
-        let mut parse_ok = true;
-        for g in 0..groups {
-            if cursor < 4 {
-                parse_ok = false;
-                break;
-            }
-            cursor -= 4;
-            rowpf_groups.push(ru16(page, cursor).unwrap_or(0));
-            tranrf_groups.push(ru16(page, cursor + 2).unwrap_or(0));
-            let glen = (row_slots - g * 16).min(16);
-            if cursor < glen * 2 {
-                parse_ok = false;
-                break;
-            }
-            cursor -= glen * 2;
-        }
-        if !parse_ok {
+        if !pdb_page::footer_fits(page_size, row_slots) {
             println!("  page[{i}] nrs={nrs} row_slots={row_slots}  footer parse failed");
             continue;
         }
+        let groups: Vec<_> = pdb_page::footer_groups(page_size, row_slots).collect();
+        let rowpf_groups: Vec<u16> = groups.iter().map(|group| group.rowpf(page)).collect();
+        let tranrf_groups: Vec<u16> = groups.iter().map(|group| group.tranrf(page)).collect();
 
         let rowpf_str: Vec<String> = rowpf_groups.iter().map(|v| format!("{v:#06x}")).collect();
         let tranrf_str: Vec<String> = tranrf_groups.iter().map(|v| format!("{v:#06x}")).collect();

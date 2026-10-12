@@ -1,6 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
+use backend::pdb_page;
 use backend::utils::{
     packed_page_row_slot_count, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
 };
@@ -9,12 +10,9 @@ const PAGE_SIZE: usize = 4096;
 
 #[derive(Clone, Copy, Debug)]
 struct Slot {
-    row_index: usize,
+    footer: pdb_page::FooterSlot,
     start: usize,
     end: usize,
-    present: bool,
-    bits_off: usize,
-    bit_mask: u16,
 }
 
 fn parse_slots(page: &[u8]) -> Vec<Slot> {
@@ -25,50 +23,21 @@ fn parse_slots(page: &[u8]) -> Vec<Slot> {
     if used_s == 0 {
         return Vec::new();
     }
-    let payload_len = used_s.min(PAGE_SIZE.saturating_sub(40));
+    let payload_len = used_s.min(PAGE_SIZE.saturating_sub(pdb_page::HEAP_START));
     let n_header = packed_page_row_slot_count(page).unwrap_or(0);
-    if n_header == 0 {
-        return Vec::new();
-    }
-
-    let mut m = PAGE_SIZE;
-    let mut row_offsets = Vec::<usize>::with_capacity(n_header);
-    let mut row_bits = Vec::<(u16, u16, usize)>::with_capacity(n_header.div_ceil(16));
-    for i in 0..n_header {
-        if i % 16 == 0 {
-            if m < 4 {
-                break;
-            }
-            m -= 4;
-            let rowpf = read_u16_le(page, m).unwrap_or(0);
-            let tranrf = read_u16_le(page, m + 2).unwrap_or(0);
-            row_bits.push((rowpf, tranrf, m));
-        }
-        if m < 2 {
-            break;
-        }
-        m -= 2;
-        row_offsets.push(read_u16_le(page, m).unwrap_or(0) as usize);
-    }
+    let footer: Vec<_> = pdb_page::footer_slots(&page[..PAGE_SIZE], n_header).collect();
 
     let mut out = Vec::<Slot>::new();
-    for i in 0..row_offsets.len() {
-        let start = row_offsets[i];
-        let end = row_offsets.get(i + 1).copied().unwrap_or(payload_len);
+    for (i, slot) in footer.iter().enumerate() {
+        let start = slot.heap_off;
+        let end = footer.get(i + 1).map_or(payload_len, |next| next.heap_off);
         if end <= start || end > payload_len {
             continue;
         }
-        let group_idx = i / 16;
-        let bit = i % 16;
-        let (rowpf, _tranrf, bits_off) = row_bits.get(group_idx).copied().unwrap_or((0, 0, 0));
-        let bit_mask = 1u16 << bit;
         out.push(Slot {
-            row_index: i,
+            footer: *slot,
             start,
             end,
-            present: (rowpf & bit_mask) != 0,
-            bits_off,
-            bit_mask,
         });
     }
     out
@@ -131,17 +100,17 @@ fn main() {
     for s in parse_slots(page) {
         let row = &payload[s.start..s.end];
         let track_id = read_u32_le(row, 72).unwrap_or(0);
-        let rowpf = read_u16_le(page, s.bits_off).unwrap_or(0);
-        let tranrf = read_u16_le(page, s.bits_off + 2).unwrap_or(0);
+        let rowpf = s.footer.group.rowpf(page);
+        let tranrf = s.footer.group.tranrf(page);
         println!(
             "row={} present={} len={} track_id={} rowpf=0x{:04x} tranrf=0x{:04x} bit=0x{:04x}",
-            s.row_index,
-            s.present,
+            s.footer.index,
+            s.footer.present,
             row.len(),
             track_id,
             rowpf,
             tranrf,
-            s.bit_mask
+            s.footer.bit
         );
     }
 }

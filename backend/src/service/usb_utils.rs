@@ -11,6 +11,7 @@ use crate::edb::open_edb_from_usb_root;
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::WarningEntry;
+use crate::pdb_page;
 use crate::pdb_reader::parse_pdb;
 
 use super::WAVEFORM_PREVIEW_BINS;
@@ -1181,13 +1182,13 @@ fn seed_edb_defaults(conn: &rusqlite::Connection) -> BackendResult<()> {
 }
 
 fn build_fullshape_pdb_bytes() -> Vec<u8> {
-    use crate::pdb_writer::{PdbData, standard_colors, standard_columns_raw, write_pdb_to_bytes};
+    use crate::pdb_writer::{PdbData, standard_colors, standard_columns_raw, write_pdb};
     let data = PdbData {
         colors: standard_colors(),
         columns_raw_rows: standard_columns_raw(),
         ..PdbData::empty()
     };
-    let mut bytes = write_pdb_to_bytes(&data).expect("build empty PDB");
+    let mut bytes = write_pdb(&data).expect("build empty PDB");
     seed_rb_initialized_history_shape(&mut bytes);
     // The fresh writer starts seq_counter at 100, leaving seqdb=102 in the template.
     // Reset seqdb to 34 — template max_seqpage is now 31 (from tt=19 seq=31, matching
@@ -1242,12 +1243,11 @@ fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
             payload.extend_from_slice(row);
         }
         let used_s = payload.len();
-        let groups = nrs.div_ceil(16);
-        let footer_size = groups * 4 + nrs * 2;
+        let groups = nrs.div_ceil(pdb_page::GROUP_SLOTS);
         let free_s = PAGE_SIZE
-            .saturating_sub(40)
+            .saturating_sub(pdb_page::HEAP_START)
             .saturating_sub(used_s)
-            .saturating_sub(footer_size);
+            .saturating_sub(pdb_page::footer_size(nrs));
 
         write_u32_le_at(page, 0x04, page_idx);
         write_u32_le_at(page, 0x08, table_type);
@@ -1263,20 +1263,14 @@ fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
         write_u16_le_at(page, 0x20, nrs as u16);
         write_u16_le_at(page, 0x22, 0);
 
-        page[40..40 + used_s].copy_from_slice(&payload);
+        page[pdb_page::HEAP_START..pdb_page::HEAP_START + used_s].copy_from_slice(&payload);
 
-        let mut m = PAGE_SIZE;
-        for (i, &off) in offsets.iter().enumerate() {
-            if i % 16 == 0 {
-                let group = i / 16;
-                m -= 2;
-                write_u16_le_at(page, m, *tranrf_words.get(group).unwrap_or(&0));
-                m -= 2;
-                write_u16_le_at(page, m, *rowpf_words.get(group).unwrap_or(&0));
-            }
-            m -= 2;
-            write_u16_le_at(page, m, off);
-        }
+        pdb_page::write_footer(page, &offsets, |group| {
+            (
+                rowpf_words.get(group.index).copied().unwrap_or(0),
+                tranrf_words.get(group.index).copied().unwrap_or(0),
+            )
+        });
     }
 
     // Row order and u4 values match reference exporter history_playlist_rows constants.

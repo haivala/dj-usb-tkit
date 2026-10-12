@@ -20,6 +20,7 @@ use crate::models::{
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
     UsbPlayerMenuDivergence, UsbPlayerMenuItem, UsbPlayerMenuItemOrigin, WarningEntry,
 };
+use crate::pdb_page;
 use crate::pdb_reader::parse_pdb;
 
 use super::BackendService;
@@ -1750,7 +1751,7 @@ const TOMBSTONE_ID_TABLES: &[(u32, usize)] = &[(0, 72), (7, 12)];
 /// deletions (the DJ software leaves IDs in place when deleting rows) and are
 /// not flagged.
 pub(super) fn detect_pdb_tombstoned_playlist_tree_ids(pdb_path: &Path) -> Vec<TombstonedRowId> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
+    use crate::utils::{read_u16_le_at, read_u32_le_at};
     let Ok(bytes) = std::fs::read(pdb_path) else {
         return Vec::new();
     };
@@ -1787,80 +1788,34 @@ pub(super) fn detect_pdb_tombstoned_playlist_tree_ids(pdb_path: &Path) -> Vec<To
             None => continue,
         };
 
-        // Read row count from packed header (standard packed format for all supported tables).
-        let b18 = read_u8_at(&bytes, off + 0x18).unwrap_or(0) as u32;
-        let b19 = read_u8_at(&bytes, off + 0x19).unwrap_or(0) as u32;
-        let b1a = read_u8_at(&bytes, off + 0x1a).unwrap_or(0) as u32;
-        let packed = b18 | (b19 << 8) | (b1a << 16);
-        let num_row_offsets = (packed & 0x1FFF) as usize;
-        if num_row_offsets == 0 {
+        let page = &bytes[off..off + page_size];
+        let num_row_offsets = crate::utils::packed_page_row_slot_count(page).unwrap_or(0);
+        if num_row_offsets == 0 || !pdb_page::footer_fits(page_size, num_row_offsets) {
             continue;
         }
 
-        // Read rowpf from the footer (grows backward from end of page).
-        let footer_groups = num_row_offsets.div_ceil(16);
-        let mut cursor = page_size;
-        let mut rowpf_groups: Vec<u16> = Vec::with_capacity(footer_groups);
-        let mut row_offsets_per_group: Vec<Vec<u16>> = Vec::with_capacity(footer_groups);
-        let mut ok = true;
-        for g in 0..footer_groups {
-            if cursor < 4 {
-                ok = false;
-                break;
+        for slot in pdb_page::footer_slots(page, num_row_offsets) {
+            let is_active = slot.present;
+            let row_byte_off = off + pdb_page::HEAP_START + slot.heap_off;
+            let id_byte_off = row_byte_off + id_field_offset;
+            if id_byte_off + 4 > bytes.len() {
+                continue;
             }
-            cursor -= 4;
-            let rowpf = read_u16_le_at(&bytes, off + cursor).unwrap_or(0);
-            rowpf_groups.push(rowpf);
-            let glen = num_row_offsets.saturating_sub(g * 16).min(16);
-            if cursor < glen * 2 {
-                ok = false;
-                break;
+            let id = read_u32_le_at(&bytes, id_byte_off).unwrap_or(0);
+            if id == 0 {
+                continue;
             }
-            cursor -= glen * 2;
-            let mut offsets = Vec::with_capacity(glen);
-            for r in 0..glen {
-                let roff = read_u16_le_at(&bytes, off + cursor + r * 2).unwrap_or(0);
-                offsets.push(roff);
-            }
-            row_offsets_per_group.push(offsets);
-        }
-        if !ok {
-            continue;
-        }
-
-        // The footer offset table is stored in REVERSED row order within each
-        // group: position 0 holds the offset for the LAST row in the group,
-        // position glen-1 holds the offset for the FIRST row. Rowpf bits are
-        // in forward (row-index) order, so for position r within a group of
-        // glen rows the correct rowpf bit is g*16 + (glen-1-r).
-        for (g, rowpf) in rowpf_groups.iter().enumerate() {
-            let group_offsets = &row_offsets_per_group[g];
-            let glen = group_offsets.len();
-            for (r, &heap_off) in group_offsets.iter().enumerate() {
-                let bit = g * 16 + (glen - 1 - r);
-                let is_active = (rowpf >> (bit % 16)) & 1 == 1;
-                let heap_start = 0x28usize;
-                let row_byte_off = off + heap_start + heap_off as usize;
-                let id_byte_off = row_byte_off + id_field_offset;
-                if id_byte_off + 4 > bytes.len() {
-                    continue;
-                }
-                let id = read_u32_le_at(&bytes, id_byte_off).unwrap_or(0);
-                if id == 0 {
-                    continue;
-                }
-                if is_active {
-                    active_ids.entry(tt).or_default().insert(id);
-                } else {
-                    candidates.push((
-                        tt,
-                        id,
-                        TombstonedRowId {
-                            page_index: i,
-                            id_field_offset: id_byte_off - off,
-                        },
-                    ));
-                }
+            if is_active {
+                active_ids.entry(tt).or_default().insert(id);
+            } else {
+                candidates.push((
+                    tt,
+                    id,
+                    TombstonedRowId {
+                        page_index: i,
+                        id_field_offset: id_byte_off - off,
+                    },
+                ));
             }
         }
     }
@@ -2266,44 +2221,23 @@ fn detect_pdb_zero_tranrf_pages_for_tables(
         let num_rl = read_u16_le_at(&bytes, off + 0x22).unwrap_or(0) as usize;
         let page = &bytes[off..off + page_size];
         let row_slots = crate::utils::packed_page_row_slot_count(page).unwrap_or(0);
-        if row_slots == 0 {
+        if row_slots == 0 || !pdb_page::footer_fits(page_size, row_slots) {
             continue;
         }
 
-        let groups = row_slots.div_ceil(16);
-        let mut cursor = page_size;
-        let mut rowpf_groups = Vec::with_capacity(groups);
-        let mut tranrf_groups = Vec::with_capacity(groups);
-        let mut footer_group_offsets = Vec::with_capacity(groups);
-        let mut parse_ok = true;
-
-        for g in 0..groups {
-            if cursor < 4 {
-                parse_ok = false;
-                break;
-            }
-            cursor -= 4;
-            rowpf_groups.push(read_u16_le_at(page, cursor).unwrap_or(0));
-            tranrf_groups.push(read_u16_le_at(page, cursor + 2).unwrap_or(0));
-            footer_group_offsets.push(cursor);
-            let glen = (row_slots - g * 16).min(16);
-            if cursor < glen * 2 {
-                parse_ok = false;
-                break;
-            }
-            cursor -= glen * 2;
-        }
-
-        if !parse_ok {
-            continue;
-        }
+        let groups: Vec<_> = pdb_page::footer_groups(page_size, row_slots).collect();
+        let rowpf_groups: Vec<u16> = groups.iter().map(|group| group.rowpf(page)).collect();
+        let tranrf_groups: Vec<u16> = groups.iter().map(|group| group.tranrf(page)).collect();
+        let footer_group_offsets: Vec<usize> = groups.iter().map(|group| group.rowpf_off).collect();
 
         // For u5=1 tables (dict tables, playlist entries) only the last group carries
         // tranrf; all preceding groups are correctly zero per the documented formula.
         // For other tables (u5=trc, u5=2) tranrf must mirror rowpf in every group.
         let needs_fix = if u5 == 1 {
             let last_group = num_rl / 16;
-            last_group < groups && rowpf_groups[last_group] != 0 && tranrf_groups[last_group] == 0
+            last_group < groups.len()
+                && rowpf_groups[last_group] != 0
+                && tranrf_groups[last_group] == 0
         } else {
             rowpf_groups
                 .iter()

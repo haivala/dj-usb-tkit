@@ -1,73 +1,17 @@
 use std::path::PathBuf;
 
+use backend::pdb_page::{self, FooterSlot};
 use backend::utils::{
     packed_page_row_slot_count, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
 };
 
-#[derive(Clone, Copy)]
-struct PageRowSlot {
-    row_index: usize,
-    start: usize,
-    end: usize,
-    present: bool,
-    bits_off: usize,
-    bit_mask: u16,
-}
-
-fn parse_page_row_slots(page: &[u8], len_page: usize) -> Vec<PageRowSlot> {
-    if page.len() < len_page || len_page < 64 {
-        return Vec::new();
-    }
-    let used_s = read_u16_le(page, 30).unwrap_or(0) as usize;
-    if used_s == 0 {
-        return Vec::new();
-    }
-    let payload_len = used_s.min(len_page.saturating_sub(40));
+/// Every footer slot of the page, or none when the footer doesn't fit.
+fn page_footer_slots(page: &[u8], used_s: usize) -> Vec<FooterSlot> {
     let n_header = packed_page_row_slot_count(page).unwrap_or(0);
-    if n_header == 0 {
+    if used_s == 0 || page.len() < 64 || !pdb_page::footer_fits(page.len(), n_header) {
         return Vec::new();
     }
-
-    let mut m = len_page;
-    let mut row_offsets = Vec::<usize>::with_capacity(n_header);
-    let mut row_bits = Vec::<(u16, u16, usize)>::with_capacity(n_header.div_ceil(16));
-    for i in 0..n_header {
-        if i % 16 == 0 {
-            if m < 4 {
-                return Vec::new();
-            }
-            m -= 2;
-            let tranrf = read_u16_le(page, m).unwrap_or(0);
-            m -= 2;
-            let rowpf = read_u16_le(page, m).unwrap_or(0);
-            row_bits.push((rowpf, tranrf, m));
-        }
-        if m < 2 {
-            return Vec::new();
-        }
-        m -= 2;
-        let off = read_u16_le(page, m).unwrap_or(0) as usize;
-        row_offsets.push(off.min(payload_len));
-    }
-
-    let mut slots = Vec::<PageRowSlot>::with_capacity(n_header);
-    for i in 0..n_header {
-        let start = row_offsets[i];
-        let end = row_offsets.get(i + 1).copied().unwrap_or(payload_len);
-        let group_idx = i / 16;
-        let bit = (i % 16) as u16;
-        let (rowpf, _tranrf, bits_off) = row_bits.get(group_idx).copied().unwrap_or((0, 0, 0));
-        let bit_mask = 1u16 << bit;
-        slots.push(PageRowSlot {
-            row_index: i,
-            start,
-            end,
-            present: (rowpf & bit_mask) != 0,
-            bits_off,
-            bit_mask,
-        });
-    }
-    slots
+    pdb_page::footer_slots(page, n_header).collect()
 }
 
 fn parse_pdb_string(row: &[u8], offset: usize) -> String {
@@ -159,13 +103,18 @@ fn main() {
         page_idx, tt, next, seq, nrs, u3, u5, num_rl, rowpf0, tranrf0
     );
 
-    let slots = parse_page_row_slots(page, ps);
     let used_s = read_u16_le(page, 30).unwrap_or(0) as usize;
-    let payload = &page[40..40 + used_s.min(ps - 40)];
-    for s in slots {
-        let len = s.end.saturating_sub(s.start);
-        let (id, so, pid, folder, name) = if s.end <= payload.len() && s.start < s.end {
-            let row = &payload[s.start..s.end];
+    let payload_len = used_s.min(ps - pdb_page::HEAP_START);
+    let payload = &page[pdb_page::HEAP_START..pdb_page::HEAP_START + payload_len];
+    let slots = page_footer_slots(page, used_s);
+    for (i, s) in slots.iter().enumerate() {
+        let start = s.heap_off.min(payload_len);
+        let end = slots
+            .get(i + 1)
+            .map_or(payload_len, |next| next.heap_off.min(payload_len));
+        let len = end.saturating_sub(start);
+        let (id, so, pid, folder, name) = if start < end {
+            let row = &payload[start..end];
             let id = read_u32_le(row, 12).unwrap_or(0);
             let so = read_u32_le(row, 8).unwrap_or(0);
             let pid = read_u32_le(row, 0).unwrap_or(0);
@@ -179,23 +128,11 @@ fn main() {
         } else {
             (0, 0, 0, 0, String::new())
         };
-        let rowpf = read_u16_le(page, s.bits_off).unwrap_or(0);
-        let tranrf = read_u16_le(page, s.bits_off + 2).unwrap_or(0);
+        let rowpf = s.group.rowpf(page);
+        let tranrf = s.group.tranrf(page);
         println!(
             "row={} present={} len={} off=[{}..{}] bit=0x{:04x} rowpf=0x{:04x} tranrf=0x{:04x} id={} sort={} parent={} folder={} name={}",
-            s.row_index,
-            s.present,
-            len,
-            s.start,
-            s.end,
-            s.bit_mask,
-            rowpf,
-            tranrf,
-            id,
-            so,
-            pid,
-            folder,
-            name
+            s.index, s.present, len, start, end, s.bit, rowpf, tranrf, id, so, pid, folder, name
         );
     }
 }

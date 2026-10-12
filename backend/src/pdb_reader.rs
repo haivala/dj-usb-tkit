@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::error::{BackendError, BackendResult};
-use crate::utils::packed_page_row_slot_count;
 
 #[derive(Debug, Clone)]
 pub struct PdbTrackRow {
@@ -608,99 +607,17 @@ fn parse_page_rows(
 
     // The row-slot count is the packed 3-byte field at `0x18..0x1b`, not the
     // single wrapping `nrs` byte at `0x18` combined with `num_rl` (`0x22`) —
-    // see `packed_page_row_slot_count`. The Phase 2 scan below stays as a
+    // see `packed_page_row_slot_count`. The tolerant scan's phase 2 stays as a
     // defensive fallback (in case the header count is ever wrong for some
     // other reason), but no longer needs to correct for `nrs` wrapping.
-    let n_header = packed_page_row_slot_count(page).unwrap_or(0);
-    let index_space = len_page.saturating_sub(payload_end);
-    // Each group of 16 rows needs 4 bytes (presence) + 16*2 (offsets) = 36 bytes.
-    let full_groups = index_space / 36;
-    let leftover = index_space % 36;
-    let partial_rows = if leftover >= 6 { (leftover - 4) / 2 } else { 0 };
-    let n_max = full_groups * 16 + partial_rows;
-    if n_header == 0 && n_max == 0 {
-        return Vec::new();
-    }
-
-    let mut m = len_page;
-    let mut row_offsets = Vec::with_capacity(n_max + 1);
-    let mut row_presence = Vec::with_capacity((n_max / 16) + 2);
-    // Phase 1: Always read n_header entries (trusting the page header).
-    for i in 0..n_header {
-        if i % 16 == 0 {
-            if m < 4 {
-                break;
-            }
-            m -= 4;
-            let Some(bits) = read_u16_le(page, m) else {
-                break;
-            };
-            row_presence.push(bits);
-        }
-        if m < 2 {
-            break;
-        }
-        m -= 2;
-        let Some(off) = read_u16_le(page, m) else {
-            break;
-        };
-        row_offsets.push(off as usize);
-    }
-
-    // Phase 2: If space-derived count is moderately larger (nrs likely wrapped
-    // at 256), continue scanning with strict validation. Only attempt extension
-    // when wrapping is plausible: the gap should be roughly 256 (one wrap).
-    // Skip when the gap is huge (> 512), which indicates unused empty index space.
-    let gap = n_max.saturating_sub(n_header);
-    if gap > 0 && gap <= 512 && row_offsets.len() == n_header {
-        let mut prev_off = row_offsets.last().copied();
-        for i in n_header..n_max {
-            if i % 16 == 0 {
-                if m < 4 || m.saturating_sub(4) < payload_end {
-                    break;
-                }
-                m -= 4;
-                let Some(bits) = read_u16_le(page, m) else {
-                    break;
-                };
-                row_presence.push(bits);
-            }
-            if m < 2 || m.saturating_sub(2) < payload_end {
-                break;
-            }
-            m -= 2;
-            let Some(off) = read_u16_le(page, m) else {
-                break;
-            };
-            let off = off as usize;
-            if off > payload.len() {
-                break;
-            }
-            if let Some(prev) = prev_off
-                && off < prev
-            {
-                break;
-            }
-            prev_off = Some(off);
-            row_offsets.push(off);
-        }
-    }
+    let footer = crate::pdb_page::scan_footer_tolerant(page, len_page, payload_end);
 
     let mut rows = Vec::new();
-    for i in 0..row_offsets.len() {
-        let group_idx = i / 16;
-        let bit = i % 16;
-        let present = row_presence
-            .get(group_idx)
-            .map(|bits| ((bits >> bit) & 1) == 1)
-            .unwrap_or(false);
-        if !present {
+    for i in 0..footer.offsets.len() {
+        if !footer.is_present(i) {
             continue;
         }
-        let Some(&start) = row_offsets.get(i) else {
-            continue;
-        };
-        let raw_end = row_offsets.get(i + 1).copied().unwrap_or(payload.len());
+        let (start, raw_end) = footer.row_bounds(i, payload.len());
         let clamped_start = start.min(payload.len());
         let clamped_end = raw_end.min(payload.len());
         if clamped_start >= clamped_end {

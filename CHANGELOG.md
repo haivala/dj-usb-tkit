@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+- **Chore:** The PDB page footer (row offsets and row presence bits) is now read and
+  written by one shared module (`pdb_page`) instead of separate copies across the writer,
+  reader, repairs and dump tools. Exports and repairs produce the same bytes as before.
+
 ## 0.4.1
 
 - **Fix:** Denon Prime and Numark Mixstream players that import `export.pdb`
