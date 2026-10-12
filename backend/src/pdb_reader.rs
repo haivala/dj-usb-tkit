@@ -1124,7 +1124,7 @@ mod tests {
         page[4..8].copy_from_slice(&1u32.to_le_bytes()); // page_index = 1
         page[8..12].copy_from_slice(&table_type.to_le_bytes());
         // Packed row-slot count at 0x18..0x1b (bits 0-12 = num_row_offsets),
-        // matching `build_data_page` in pdb_writer.rs. `page[24]` (0x18) is
+        // matching `build_data_page` in pdb_writer/fresh.rs. `page[24]` (0x18) is
         // still `nrs` for tests that read it directly and deliberately expect
         // it to wrap at 256.
         let packed = (n as u32) & 0x1FFF;

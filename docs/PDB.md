@@ -131,9 +131,9 @@ real-world interrupted export) is:
 - one or more table `empty_candidate` pages, though still within the header's
   own allocated range (`< next_unused_page`), contain non-zero garbage
   instead of the all-zero blank page the additive writer requires before
-  reusing them (`pdb_writer.rs`'s `append_rows_to_chain_in_place` only
-  reuses an existing `empty_candidate` when every byte on that page is
-  zero — see `backend/src/pdb_writer.rs:3411-3418`);
+  reusing them (`append_rows_to_chain_in_place` in
+  `backend/src/pdb_writer/additive.rs` only reuses an existing
+  `empty_candidate` when every byte on that page is zero);
 - the physical file can also extend past the header's `next_unused_page`
   with non-zero content — capacity that had already been grown into the
   file but never populated. Per the header's own bookkeeping this region is
@@ -174,10 +174,9 @@ content changes, since the true last page's own `next_page` already
 anticipated the corrected `empty_candidate`. See
 `repair_pdb_truncated_table_chain` in `docs/DIAGNOSTICS_REPAIRS.md`. This
 repair must run *before* the strict-parity upgrade fix, not after like the
-other structural repairs: `pdb_writer.rs`'s additive track-append path
-(`mutate_tracks_in_place`, `backend/src/pdb_writer.rs:4711`) hard-fails
-immediately when a table's chain is unreachable
-(`backend/src/pdb_writer.rs:4732`), which otherwise blocks (or makes
+other structural repairs: the additive track-append path
+(`mutate_tracks_in_place` in `backend/src/pdb_writer/additive.rs`) hard-fails
+immediately when a table's chain is unreachable, which otherwise blocks (or makes
 order-dependent) every strict-parity playlist mutation that needs a new or
 changed track row.
 
@@ -339,7 +338,7 @@ tables whose footer the writer owns (`t00`–`t05`, `t07`, `t08`, `t13`, `t19`),
 additively-patched page's **footer convention must match what the from-scratch
 writer would emit for the same row set**: `u5` (`0x20`), `num_rl` (`0x22`), and the
 per-16-row-group `rowpf`/`tranrf` bitmasks. `apply_page_footer_convention` in
-`pdb_writer.rs` is the single writer-side source of truth for this — both the
+`pdb_writer/fresh.rs` is the single writer-side source of truth for this — both the
 from-scratch writer (`build_data_page`) and every in-place page rewrite that
 changes a page's row count call it, so the shape can't drift between the two paths.
 
@@ -383,14 +382,14 @@ For freshly written pages:
   group falsely marked active once history accumulated past one group —
   this produced a PDB that crashed rekordbox desktop on load and caused a
   CDJ-2000NXS2 mount/eject loop; see `write_t19_runtime_footer_groups` in
-  `pdb_writer.rs`.
+  `pdb_writer/fresh.rs`.
 
 For reused pages, the additive writer preserves existing footer groups and ORs
 in only the bits for appended rows — **except `tt=19`**, whose additive and
 in-place-synthesis paths rewrite every footer group from scratch to preserve the
 single-active-row invariant above; the generic OR-in-bits append path declines to
 handle `tt=19` at all (`append_rows_to_existing_page_preserving_footer_state`
-asserts against it). `apply_page_footer_convention` in `pdb_writer.rs` is the
+asserts against it). `apply_page_footer_convention` in `pdb_writer/fresh.rs` is the
 single writer-side source of truth for `u5`/`num_rl` and the per-group `tranrf`
 shape; every in-place page rewrite that changes a page's row count funnels
 through it.
@@ -440,7 +439,7 @@ the wrap with a heuristic (`num_rl==8191` meant "page does not track
 misread by up to a few rows depending on table convention. Decoding the
 packed field directly is correct up to 8191 rows/page and needs no such
 fallback. Call sites that switched from the old heuristic to this decode:
-`pdb_writer.rs`'s `page_has_transaction_tombstones`, `read_page_footer_state`,
+`pdb_writer`'s `page_has_transaction_tombstones`, `read_page_footer_state`,
 `parse_t08_entries_from_page`, and `parse_page_row_slots`; `pdb_reader.rs`'s
 `parse_page_rows` (the row parser behind the main public `parse_pdb_bytes`
 entry point); and `repair.rs`'s `detect_pdb_zero_tranrf_pages_for_tables`,
@@ -454,15 +453,16 @@ they aren't part of the shipped app.
 Two of the fixed sites keep a defensive Phase 2 scan that extends past the
 header-reported count when the page's footer index space can hold more rows
 than the header claims, in case the header count is ever wrong for a reason
-other than the (now-fixed) byte wrap: `pdb_writer.rs`'s
-`parse_t08_entries_from_page` and `pdb_reader.rs`'s `parse_page_rows`.
+other than the (now-fixed) byte wrap: `pdb_writer`'s
+`parse_t08_entries_from_page` and `pdb_reader.rs`'s `parse_page_rows`, both
+through `pdb_page::scan_footer_tolerant`.
 
 The writer cannot rely on the parser's tolerance. It must emit page footer
 values accepted by players.
 
 Because `nrs` (offset `0x18`) is a single byte, no page may hold more than 255
 rows. The writer enforces this as a hard cap (`MAX_ROWS_PER_PAGE` in
-`pdb_writer.rs`), independent of remaining byte capacity, in both the from-scratch
+`pdb_writer/mod.rs`), independent of remaining byte capacity, in both the from-scratch
 writer and in-place chain appends. The cap is reached first by tables with small
 fixed-size rows: `t08` playlist_entries rows are 12 bytes, so byte capacity alone
 would allow well over 255 on a single 4096-byte page. A page at 255 rows spills to

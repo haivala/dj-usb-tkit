@@ -42,6 +42,8 @@
 - **Chore:** The PDB page footer (row offsets and row presence bits) is now read and
   written by one shared module (`pdb_page`) instead of separate copies across the writer,
   reader, repairs and dump tools. Exports and repairs produce the same bytes as before.
+- **Chore:** The PDB writer is split into files by job (data model, whole-file writer,
+  in-place repairs, additive writer, shared row helpers) instead of one large file.
 
 ## 0.4.1
 

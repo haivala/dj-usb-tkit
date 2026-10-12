@@ -1287,7 +1287,7 @@ fn apply_pdb_truncated_table_chain_repair(
 pub(super) struct PdbTornGrowthReport {
     /// Table `empty_candidate` pages that sit within a page no other table
     /// owns, but aren't the all-zero blank page the additive writer expects
-    /// before it will reuse them (`pdb_writer.rs`'s `append_rows_to_chain_in_place`).
+    /// before it will reuse them (`pdb_writer`'s `append_rows_to_chain_in_place`).
     pub(super) garbage_ec_pages: Vec<u32>,
     /// When set, the file should be truncated to this many pages: the header's
     /// own `next_unused_page` claims nothing beyond it is allocated, yet the
@@ -1497,7 +1497,7 @@ pub(crate) fn track_row_data_from_reader_row(
 /// `detect_pdb_string_misalignment`). Re-encodes each row's content unchanged through the
 /// current (already alignment-fixed) `encode_track_row_with_profile` and relocates it via
 /// `mutate_tracks_in_place`, which now refuses to same-size-patch an already-misaligned row (see
-/// `track_row_has_misaligned_utf16_slot` in pdb_writer.rs) and instead always takes the
+/// `track_row_has_misaligned_utf16_slot` in pdb_writer) and instead always takes the
 /// relocate/append path.
 fn apply_pdb_track_string_alignment_repair(usb_root: &Path, ids: &[u32]) -> BackendResult<usize> {
     if ids.is_empty() {
@@ -8669,7 +8669,7 @@ mod tests {
         assert!(detect_pdb_torn_growth_pages(&pdb_path).is_empty());
 
         // The reclaimed ec page must now satisfy the additive writer's own
-        // "all zero" reuse precondition (pdb_writer.rs's
+        // "all zero" reuse precondition (pdb_writer's
         // append_rows_to_chain_in_place), proving a follow-up rekordbox
         // export would succeed instead of hitting the same rejection again.
         let page = &bytes[ec_off..ec_off + TEST_PAGE_SIZE];
