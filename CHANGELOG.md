@@ -56,6 +56,10 @@
   passed to the analysis process unchanged instead of through text, so they also work from a
   folder whose name isn't valid UTF-8. A rekordbox library's ANLZ beat grid is read from its
   path directly, and more export and repair helpers take `Path` instead of text.
+- **Fix:** The "empty analysis files" repair matches each empty file to its track by the
+  file's full path. Before, it compared only the letters and digits of the path, so two
+  analysis folders whose names differ only in where the `/` falls could be mixed up, and the
+  other track's analysis would be rebuilt instead.
 
 ## 0.4.1
 

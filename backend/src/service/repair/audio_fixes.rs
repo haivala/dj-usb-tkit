@@ -366,6 +366,12 @@ pub(super) fn apply_missing_seek_data_repair(
     Ok((fixed, skipped))
 }
 
+/// Lookup key for an analysis file or folder on the USB: its whole path with
+/// `/` separators, lowercased because the stick's filesystem ignores case.
+fn analysis_path_key(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/").to_lowercase()
+}
+
 impl BackendService {
     pub(super) fn apply_fix_empty_analysis_files(
         &self,
@@ -427,14 +433,8 @@ impl BackendService {
                             .filter(|s| *s > 0)
                             .map(|s| s as u64 * 1000),
                     };
-                    map_by_file.insert(
-                        canonicalize_playlist_name(&a.to_string_lossy()),
-                        target.clone(),
-                    );
-                    map_by_dir.insert(
-                        canonicalize_playlist_name(&analysis_dir.to_string_lossy()),
-                        target,
-                    );
+                    map_by_file.insert(analysis_path_key(&a), target.clone());
+                    map_by_dir.insert(analysis_path_key(&analysis_dir), target);
                 }
             }
         }
@@ -475,10 +475,10 @@ impl BackendService {
                         duration_ms: length_seconds.filter(|v| *v > 0).map(|v| v as u64 * 1000),
                     };
                     map_by_file
-                        .entry(canonicalize_playlist_name(&ra.to_string_lossy()))
+                        .entry(analysis_path_key(&ra))
                         .or_insert_with(|| target.clone());
                     map_by_dir
-                        .entry(canonicalize_playlist_name(&analysis_dir.to_string_lossy()))
+                        .entry(analysis_path_key(&analysis_dir))
                         .or_insert(target);
                 }
             }
@@ -490,10 +490,11 @@ impl BackendService {
         let mut writes = 0usize;
 
         for empty_path in empty_analysis_paths {
-            let key_file = canonicalize_playlist_name(empty_path);
-            let key_dir = std::path::Path::new(empty_path)
+            let empty_path_buf = std::path::Path::new(empty_path);
+            let key_file = analysis_path_key(empty_path_buf);
+            let key_dir = empty_path_buf
                 .parent()
-                .map(|p| canonicalize_playlist_name(&p.to_string_lossy()))
+                .map(analysis_path_key)
                 .unwrap_or_default();
             let target = map_by_file
                 .get(&key_file)

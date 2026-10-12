@@ -1654,6 +1654,95 @@ fn apply_fix_empty_analysis_files_bakes_real_pdb_tempo_not_120_default() {
     );
 }
 #[test]
+fn apply_fix_empty_analysis_files_keeps_folders_with_the_same_letters_apart() {
+    let (_td, usb_root) = test_usb_root();
+    let service_data_dir = tempdir().expect("service data dir");
+    let service = BackendService::new(service_data_dir.path()).expect("backend service");
+
+    // `P001/00000001` and `P0010/0000001` differ only in where the `/` is.
+    let track = |id: u32, tempo_x100: u32, anlz_dir: &str, audio: &str| {
+        let audio_path = usb_root.join("Contents").join(audio);
+        std::fs::create_dir_all(audio_path.parent().unwrap()).unwrap();
+        write_sine_wav(&audio_path, 1_000);
+        std::fs::create_dir_all(usb_root.join("PIONEER/USBANLZ").join(anlz_dir)).unwrap();
+        PdbTrackRow {
+            content_link: None,
+            sample_rate_hz: None,
+            file_size_bytes: None,
+            master_content_id: None,
+            master_db_id: None,
+            id,
+            artist_id: 0,
+            album_id: 0,
+            artwork_id: 0,
+            key_id: 0,
+            genre_id: 0,
+            composer_id: 0,
+            label_id: 0,
+            remixer_id: 0,
+            color_id: 0,
+            rating: 0,
+            bitrate_kbps: None,
+            track_number: 0,
+            tempo_x100,
+            release_year: None,
+            bit_depth: None,
+            duration_seconds: Some(222),
+            file_type: None,
+            isrc: None,
+            date_added: None,
+            release_date: None,
+            dj_comment: None,
+            file_name: None,
+            publish_track_info: None,
+            autoload_hotcues: None,
+            title: audio.to_string(),
+            anlz_path: format!("/PIONEER/USBANLZ/{anlz_dir}/ANLZ0000.DAT"),
+            track_file_path: format!("/Contents/{audio}"),
+        }
+    };
+    let parsed = ParsedPdb {
+        tracks: vec![
+            track(1, 14_000, "P001/00000001", "a.wav"),
+            track(2, 9_000, "P0010/0000001", "b.wav"),
+        ],
+        ..ParsedPdb::default()
+    };
+    let dat_path = usb_root.join("PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT");
+    std::fs::write(&dat_path, b"").unwrap();
+    let empty_path =
+        resolve_usb_side_path(&usb_root, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT")
+            .expect("resolve anlz path")
+            .to_string_lossy()
+            .into_owned();
+
+    let mut warnings = Vec::new();
+    let (fixed, skipped, failed, _writes) = service
+        .apply_fix_empty_analysis_files(
+            &usb_root,
+            &[empty_path],
+            None,
+            Some(&parsed),
+            &mut warnings,
+        )
+        .expect("apply fix_empty_analysis_files");
+    assert_eq!((fixed, skipped, failed), (1, 0, 0));
+
+    let dat_bytes = std::fs::read(&dat_path).expect("regenerated .DAT");
+    assert_eq!(
+        read_beatgrid_tempo_from_anlz(&dat_bytes),
+        Some(14_000),
+        "the empty file's own track must be used, not the other folder's"
+    );
+    assert!(
+        !usb_root
+            .join("PIONEER/USBANLZ/P0010/0000001/ANLZ0000.DAT")
+            .exists(),
+        "nothing may be written into the other track's folder"
+    );
+}
+
+#[test]
 fn apply_fix_empty_analysis_files_fails_when_source_audio_cannot_be_decoded() {
     let (_td, usb_root) = test_usb_root();
     let service_data_dir = tempdir().expect("service data dir");
