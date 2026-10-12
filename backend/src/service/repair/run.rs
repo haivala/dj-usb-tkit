@@ -246,8 +246,8 @@ impl BackendService {
                     BPM_KEY_MISMATCH_FIX_ID,
                     "Fix BPM/Key Mismatch",
                     "Rebuild the ANLZ beat grid and set the eDB BPM and key from each \
-                                  track's PDB row, so every player reads the same BPM and key. \
-                                  Waveforms, cues and the first beat are kept.",
+                     track's PDB row, so every player reads the same BPM and key. \
+                     Waveforms, cues and the first beat are kept.",
                 )
             });
         }
@@ -263,10 +263,10 @@ impl BackendService {
                     BEAT_GRID_HEADER_FIX_ID,
                     "Fix Beat Grid",
                     "Rewrite beat grids from app versions before 0.3.7 in rekordbox's \
-                                  format: the .DAT header value two bytes off, and the .EXT extended \
-                                  grid without its checksum and sub-millisecond beat times. Some \
-                                  players (e.g. the XDJ-AZ) refuse Beat Sync on those. Beat positions \
-                                  stay within 1 ms; cues and waveforms are kept.",
+                     format: the .DAT header value two bytes off, and the .EXT extended \
+                     grid without its checksum and sub-millisecond beat times. Some \
+                     players (e.g. the XDJ-AZ) refuse Beat Sync on those. Beat positions \
+                     stay within 1 ms; cues and waveforms are kept.",
                 )
             });
         }
@@ -1017,10 +1017,10 @@ impl BackendService {
                     ENGINE_LIBRARY_FIX_ID,
                     "Keep Engine DJ Library Up to Date",
                     "This USB has an Engine DJ library (Denon Prime, Numark Mixstream). \
-                         Turns on \"Write Engine DJ library\" and rebuilds it now from this USB's \
-                         rekordbox data; from then on it's rebuilt whenever this app changes a USB. \
-                         Play history is kept, but changes made on the player itself (cues, loops, \
-                         playlists created there) are replaced every time.",
+                     Turns on \"Write Engine DJ library\" and rebuilds it now from this USB's \
+                     rekordbox data; from then on it's rebuilt whenever this app changes a USB. \
+                     Play history is kept, but changes made on the player itself (cues, loops, \
+                     playlists created there) are replaced every time.",
                 )
             });
         }
