@@ -39,6 +39,7 @@ pub use export_paths::{
     limit_contents_file_name_with_suffix, normalize_owned_export_path,
     prune_stale_export_owned_files, sanitize_contents_component, sanitize_contents_file_name,
     sanitize_filename_component, stable_u32_hash, to_usb_relative_path, truncate_component,
+    usb_relative_path,
 };
 pub use pdb_encoding::{
     PdbLayoutProfile, encode_album_row, encode_artist_row, encode_artwork_row, encode_key_row,

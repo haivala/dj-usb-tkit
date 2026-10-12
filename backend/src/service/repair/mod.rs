@@ -43,7 +43,7 @@ use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRowData,
     encode_album_row, encode_artist_row, load_table_columns,
     remove_track_ids_from_pdb_playlist_entries, replace_export_playlist_row_with_identity,
-    table_exists, to_usb_relative_path, write_edb_playlist_with_conn, write_pdb,
+    table_exists, usb_relative_path, write_edb_playlist_with_conn, write_pdb,
 };
 use super::usb_staging;
 use super::usb_utils::{

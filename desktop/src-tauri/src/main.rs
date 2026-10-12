@@ -315,8 +315,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
 
-    let mut resolved_node = std::env::var_os("DJTKIT_ESSENTIA_NODE")
-        .map(|v| PathBuf::from(v.to_string_lossy().to_string()));
+    let mut resolved_node = std::env::var_os("DJTKIT_ESSENTIA_NODE").map(PathBuf::from);
     if resolved_node.is_none() {
         let mut runtime_candidates = Vec::<PathBuf>::new();
         if let Some(dir) = resource_dir.as_ref() {
@@ -360,12 +359,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
             .find(|p| is_file(p.as_path()))
         {
             // SAFETY: set once at startup before backend worker threads are spawned.
-            unsafe {
-                std::env::set_var(
-                    "DJTKIT_ESSENTIA_NODE",
-                    runtime.to_string_lossy().to_string(),
-                )
-            };
+            unsafe { std::env::set_var("DJTKIT_ESSENTIA_NODE", &runtime) };
             resolved_node = Some(runtime);
         }
 
@@ -384,8 +378,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
         }
     }
 
-    let mut resolved_runner = std::env::var_os("DJTKIT_ESSENTIA_RUNNER")
-        .map(|v| PathBuf::from(v.to_string_lossy().to_string()));
+    let mut resolved_runner = std::env::var_os("DJTKIT_ESSENTIA_RUNNER").map(PathBuf::from);
     if resolved_runner.is_none() {
         let mut runner_candidates = Vec::<PathBuf>::new();
         if let Some(dir) = resource_dir.as_ref() {
@@ -404,30 +397,19 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
         }
         if let Some(runner) = runner_candidates.into_iter().find(|p| is_file(p.as_path())) {
             // SAFETY: set once at startup before backend worker threads are spawned.
-            unsafe {
-                std::env::set_var(
-                    "DJTKIT_ESSENTIA_RUNNER",
-                    runner.to_string_lossy().to_string(),
-                )
-            };
+            unsafe { std::env::set_var("DJTKIT_ESSENTIA_RUNNER", &runner) };
             resolved_runner = Some(runner);
         }
     }
 
-    let mut resolved_modules = std::env::var_os("DJTKIT_ESSENTIA_NODE_MODULES")
-        .map(|v| PathBuf::from(v.to_string_lossy().to_string()));
+    let mut resolved_modules = std::env::var_os("DJTKIT_ESSENTIA_NODE_MODULES").map(PathBuf::from);
     if resolved_modules.is_none()
         && let Ok(app_data) = _app.path().app_data_dir()
     {
         let modules_dir = app_data.join("essentia").join("node_modules");
         if modules_dir.join("essentia.js").is_dir() {
             // SAFETY: set once at startup before backend worker threads are spawned.
-            unsafe {
-                std::env::set_var(
-                    "DJTKIT_ESSENTIA_NODE_MODULES",
-                    modules_dir.to_string_lossy().to_string(),
-                )
-            };
+            unsafe { std::env::set_var("DJTKIT_ESSENTIA_NODE_MODULES", &modules_dir) };
             resolved_modules = Some(modules_dir);
         }
     }
@@ -471,9 +453,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
     }
 
     let mut probe_cmd = Command::new(&node_bin);
-    probe_cmd
-        .arg(runner_path.to_string_lossy().to_string())
-        .arg(r#"{"sampleRate":44100}"#);
+    probe_cmd.arg(&runner_path).arg(r#"{"sampleRate":44100}"#);
     backend::utils::suppress_console_window(&mut probe_cmd);
     let probe = match probe_cmd.output() {
         Ok(output) => output,

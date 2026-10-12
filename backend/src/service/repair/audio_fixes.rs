@@ -790,7 +790,7 @@ impl BackendService {
                 let dat = std::fs::read(&dat_path).unwrap_or_default();
                 let cue_bytes = std::fs::read(&ext_path).unwrap_or_else(|_| dat.clone());
                 (
-                    to_usb_relative_path(usb_root, &dat_path.to_string_lossy()),
+                    usb_relative_path(usb_root, &dat_path),
                     read_beatgrid_tempo_from_anlz(&dat).map(|t| f64::from(t) / 100.0),
                     read_first_beat_from_anlz(&dat),
                     collapse_anlz_cues(&cue_bytes),

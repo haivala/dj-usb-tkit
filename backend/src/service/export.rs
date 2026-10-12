@@ -32,8 +32,8 @@ use super::export_helpers::{
     exported_media_target_path_with_ordinal, filter_prunable_stale_paths_for_playlist,
     is_safe_export_owned_path, normalize_owned_export_path, preview_pdb,
     prune_stale_export_owned_files, remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash,
-    to_usb_relative_path, verify_edb_content, verify_edb_content_with_conn, verify_pdb_content,
-    write_edb_playlist, write_edb_playlist_with_conn, write_pdb,
+    to_usb_relative_path, usb_relative_path, verify_edb_content, verify_edb_content_with_conn,
+    verify_pdb_content, write_edb_playlist, write_edb_playlist_with_conn, write_pdb,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
@@ -55,7 +55,12 @@ fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<
     if candidate.is_empty() {
         return None;
     }
-    let rel = to_usb_relative_path(usb_root, candidate)?;
+    existing_usb_relative_file(usb_root, Path::new(candidate))
+}
+
+/// [`existing_usb_relative_if_file`] for a path on this machine.
+fn existing_usb_relative_file(usb_root: &Path, path: &Path) -> Option<String> {
+    let rel = usb_relative_path(usb_root, path)?;
     let abs = resolve_usb_side_path(usb_root, &rel)?;
     if abs.is_file() { Some(rel) } else { None }
 }
@@ -171,7 +176,7 @@ fn existing_usb_relative_if_present(usb_root: &Path, relative: &str) -> Option<S
     }
     let abs = resolve_usb_side_path(usb_root, trimmed)?;
     if abs.is_file() {
-        to_usb_relative_path(usb_root, &abs.to_string_lossy())
+        usb_relative_path(usb_root, &abs)
     } else {
         None
     }
@@ -1012,38 +1017,36 @@ impl BackendService {
                 &extension,
                 this_fingerprint,
             );
-            let computed_target_relative =
-                to_usb_relative_path(&usb_root, &target.to_string_lossy());
-            let existing_exported_path =
-                existing_usb_relative_if_file(&usb_root, Some(&source.to_string_lossy()))
-                    .filter(|rel| rel.starts_with("/Contents/"))
-                    .or_else(|| {
-                        // The source file itself isn't inside this USB's Contents tree, but
-                        // the same track may already be physically present under a path we
-                        // didn't write. Match on content fingerprint so re-exporting it reuses
-                        // the existing row/media/artwork instead of minting a duplicate. Skip
-                        // this when the candidate is the same path this run would compute
-                        // anyway (e.g. a stable re-export of a track this app itself placed
-                        // there before) — that's not a foreign path, and treating it as one
-                        // would wrongly mark the file as not-owned and make it look stale to
-                        // prune_stale on the next export.
-                        let fingerprint = content_fingerprint_key(
-                            track.file_size_bytes,
-                            &track.title,
-                            &track.artist,
-                        )?;
-                        let candidate = existing_usb_path_by_fingerprint
-                            .get(&fingerprint)
-                            .and_then(|path| path.as_deref())?;
-                        if computed_target_relative
-                            .as_deref()
-                            .map(canonicalize_playlist_name)
-                            == Some(canonicalize_playlist_name(candidate))
-                        {
-                            return None;
-                        }
-                        existing_usb_relative_if_present(&usb_root, candidate)
-                    });
+            let computed_target_relative = usb_relative_path(&usb_root, &target);
+            let existing_exported_path = existing_usb_relative_file(&usb_root, &source)
+                .filter(|rel| rel.starts_with("/Contents/"))
+                .or_else(|| {
+                    // The source file itself isn't inside this USB's Contents tree, but
+                    // the same track may already be physically present under a path we
+                    // didn't write. Match on content fingerprint so re-exporting it reuses
+                    // the existing row/media/artwork instead of minting a duplicate. Skip
+                    // this when the candidate is the same path this run would compute
+                    // anyway (e.g. a stable re-export of a track this app itself placed
+                    // there before) — that's not a foreign path, and treating it as one
+                    // would wrongly mark the file as not-owned and make it look stale to
+                    // prune_stale on the next export.
+                    let fingerprint = content_fingerprint_key(
+                        track.file_size_bytes,
+                        &track.title,
+                        &track.artist,
+                    )?;
+                    let candidate = existing_usb_path_by_fingerprint
+                        .get(&fingerprint)
+                        .and_then(|path| path.as_deref())?;
+                    if computed_target_relative
+                        .as_deref()
+                        .map(canonicalize_playlist_name)
+                        == Some(canonicalize_playlist_name(candidate))
+                    {
+                        return None;
+                    }
+                    existing_usb_relative_if_present(&usb_root, candidate)
+                });
             let owns_exported_media = existing_exported_path.is_none();
             if !export_dry_run && owns_exported_media {
                 if extension == "wav" || extension == "wave" {
@@ -1055,7 +1058,7 @@ impl BackendService {
             exported_tracks += 1;
 
             let exported_path = existing_exported_path.unwrap_or_else(|| {
-                to_usb_relative_path(&usb_root, &target.to_string_lossy())
+                usb_relative_path(&usb_root, &target)
                     .unwrap_or_else(|| target.to_string_lossy().to_string())
             });
             let mut artwork_relative = None;

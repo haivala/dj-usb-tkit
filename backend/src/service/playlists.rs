@@ -617,7 +617,8 @@ impl BackendService {
             .usb_analysis_path
             .as_deref()
             .map(str::trim)
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty())
+            .map(Path::new);
 
         let usb_origin = add_candidate_is_usb_origin(candidate, request_usb_root);
         if usb_origin {

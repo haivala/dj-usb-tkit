@@ -508,7 +508,7 @@ pub fn export_analysis_bundle_for_track(
         // Left by an earlier export of a different bundle for this path.
         std::fs::remove_file(&twoex_path)?;
     }
-    let relative = to_usb_relative_path(usb_root, &dat_path.to_string_lossy())
+    let relative = usb_relative_path(usb_root, &dat_path)
         .unwrap_or_else(|| dat_path.to_string_lossy().to_string());
     Ok(Some((relative, files_written)))
 }
@@ -582,11 +582,18 @@ pub fn exported_media_target_path_with_ordinal(
 }
 
 pub fn to_usb_relative_path(usb_root: &Path, absolute_or_raw: &str) -> Option<String> {
-    let path = PathBuf::from(absolute_or_raw);
+    usb_relative_path(usb_root, Path::new(absolute_or_raw))
+}
+
+/// [`to_usb_relative_path`] for a path on this machine: absolute, or relative
+/// to `usb_root`.
+pub fn usb_relative_path(usb_root: &Path, path: &Path) -> Option<String> {
+    let joined;
     let abs = if path.is_absolute() {
         path
     } else {
-        usb_root.join(path)
+        joined = usb_root.join(path);
+        &joined
     };
     let rel = abs.strip_prefix(usb_root).ok()?;
     Some(format!("/{}", rel.to_string_lossy().replace('\\', "/")))
@@ -967,8 +974,7 @@ pub fn normalize_owned_export_path(usb_root: &Path, path: &str) -> Option<String
         return None;
     }
     if let Some(abs) = resolve_usb_side_path(usb_root, trimmed) {
-        return to_usb_relative_path(usb_root, &abs.to_string_lossy())
-            .or_else(|| Some(as_usb_relative_path(trimmed)));
+        return usb_relative_path(usb_root, &abs).or_else(|| Some(as_usb_relative_path(trimmed)));
     }
     None
 }

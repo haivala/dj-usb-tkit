@@ -52,6 +52,10 @@
 - **Chore:** The backend service's core file is split into files by area (track library,
   playback, playlists, source roots, settings) instead of one large file.
 - **Chore:** The export helpers' eDB writers and PDB writers each have their own file.
+- **Fix:** The BPM/key analysis runtime's paths (node, runner script, installed modules) are
+  passed to the analysis process unchanged instead of through text, so they also work from a
+  folder whose name isn't valid UTF-8. A rekordbox library's ANLZ beat grid is read from its
+  path directly, and more export and repair helpers take `Path` instead of text.
 
 ## 0.4.1
 

@@ -361,7 +361,7 @@ fn essentia_result_has_detected_values(result: &EssentiaResult) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EssentiaWorkerConfig {
-    node_bin: String,
+    node_bin: PathBuf,
     runner_path: PathBuf,
     pool_size: usize,
 }
@@ -402,7 +402,7 @@ impl EssentiaNodeWorker {
     fn spawn(config: &EssentiaWorkerConfig) -> BackendResult<Self> {
         let mut command = Command::new(&config.node_bin);
         command
-            .arg(config.runner_path.to_string_lossy().to_string())
+            .arg(&config.runner_path)
             .arg("--worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1952,7 +1952,7 @@ fn detect_bpm_key_with_essentia_js(
             let message = format!("BPM/key analysis runtime returned invalid JSON: {err}");
             let details = format!(
                 "node={} runner={} stdout={}",
-                config.node_bin,
+                config.node_bin.display(),
                 config.runner_path.display(),
                 stdout_text
             );
@@ -1974,7 +1974,7 @@ fn detect_bpm_key_with_essentia_js(
         let message = "BPM/key analysis runtime reported failure".to_string();
         let details = format!(
             "node={} runner={} stdout={}",
-            config.node_bin,
+            config.node_bin.display(),
             config.runner_path.display(),
             stdout_text
         );
@@ -1984,7 +1984,7 @@ fn detect_bpm_key_with_essentia_js(
         let message = "BPM/key analysis runtime returned empty BPM/key result".to_string();
         let details = format!(
             "node={} runner={}",
-            config.node_bin,
+            config.node_bin.display(),
             config.runner_path.display()
         );
         return Err(BackendError::Internal(format!("{message} | {details}")));
@@ -1993,33 +1993,33 @@ fn detect_bpm_key_with_essentia_js(
 }
 
 fn resolve_essentia_worker_config() -> BackendResult<EssentiaWorkerConfig> {
-    let node_bin = std::env::var("DJTKIT_ESSENTIA_NODE").unwrap_or_else(|_| "node".to_string());
-    let runner_script = std::env::var("DJTKIT_ESSENTIA_RUNNER")
-        .unwrap_or_else(|_| "../desktop/scripts/essentia_runner.cjs".to_string());
-    let runner_candidate = PathBuf::from(&runner_script);
+    let node_bin = std::env::var_os("DJTKIT_ESSENTIA_NODE")
+        .map_or_else(|| PathBuf::from("node"), PathBuf::from);
+    let runner_candidate = std::env::var_os("DJTKIT_ESSENTIA_RUNNER").map_or_else(
+        || PathBuf::from("../desktop/scripts/essentia_runner.cjs"),
+        PathBuf::from,
+    );
     let runner_path = if runner_candidate.is_absolute() {
         runner_candidate
     } else {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(runner_candidate)
     };
 
-    let node_is_explicit_path =
-        node_bin.contains(std::path::MAIN_SEPARATOR) || node_bin.contains('/');
-    if node_is_explicit_path {
-        let node_path = PathBuf::from(&node_bin);
-        if !node_path.exists() {
-            let message = format!(
-                "BPM/key analysis runtime missing: bundled node not found at {}",
-                node_path.display()
-            );
-            let details = format!("runner={}", runner_path.display());
-            return Err(BackendError::Internal(format!("{message} | {details}")));
-        }
+    // A bare name ("node") is looked up on PATH; anything with a directory
+    // part is an explicit path that must exist.
+    let node_is_explicit_path = node_bin.components().count() > 1;
+    if node_is_explicit_path && !node_bin.exists() {
+        let message = format!(
+            "BPM/key analysis runtime missing: bundled node not found at {}",
+            node_bin.display()
+        );
+        let details = format!("runner={}", runner_path.display());
+        return Err(BackendError::Internal(format!("{message} | {details}")));
     }
 
     if !runner_path.exists() {
         let message = format!("BPM/key analysis runner missing: {}", runner_path.display());
-        let details = format!("node={}", node_bin);
+        let details = format!("node={}", node_bin.display());
         return Err(BackendError::Internal(format!("{message} | {details}")));
     }
 
@@ -2057,15 +2057,13 @@ fn run_essentia_request_once(
     args: &serde_json::Value,
 ) -> BackendResult<Vec<u8>> {
     let mut command = Command::new(&config.node_bin);
-    command
-        .arg(config.runner_path.to_string_lossy().to_string())
-        .arg(args.to_string());
+    command.arg(&config.runner_path).arg(args.to_string());
     strip_appimage_lib_path(&mut command);
     crate::utils::suppress_console_window(&mut command);
     let output = command.output().map_err(|err| {
         let details = format!(
             "node={} runner={}",
-            config.node_bin,
+            config.node_bin.display(),
             config.runner_path.display()
         );
         BackendError::Internal(format!(
@@ -2088,7 +2086,7 @@ fn run_essentia_request_once(
         };
         let details = format!(
             "node={} runner={}",
-            config.node_bin,
+            config.node_bin.display(),
             config.runner_path.display()
         );
         return Err(BackendError::Internal(format!("{message} | {details}")));

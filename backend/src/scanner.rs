@@ -123,7 +123,7 @@ pub fn scan_audio_file(path: &Path) -> BackendResult<ScannedTrack> {
         tonality: meta.tonality,
         file_size_bytes: i64::try_from(metadata.len()).ok(),
         file_modified_at: modified,
-        format_ext: crate::utils::format_ext_from_path(&path.to_string_lossy()),
+        format_ext: crate::utils::format_ext_of(path),
         sample_rate_hz,
         bit_depth,
         bitrate_kbps,

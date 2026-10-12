@@ -809,15 +809,14 @@ impl BackendService {
     pub(crate) fn ensure_usb_analysis_imported(
         &self,
         track_id: &str,
-        anlz_abs_path: &str,
+        anlz_abs_path: &Path,
     ) -> BackendResult<()> {
-        let anlz_abs_path = anlz_abs_path.trim();
-        if track_id.trim().is_empty() || anlz_abs_path.is_empty() {
+        if track_id.trim().is_empty() || anlz_abs_path.as_os_str().is_empty() {
             return Ok(());
         }
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
-        import_anlz_cues_for_track(&tx, track_id, std::path::Path::new(anlz_abs_path))?;
+        import_anlz_cues_for_track(&tx, track_id, anlz_abs_path)?;
         tx.commit()?;
         Ok(())
     }

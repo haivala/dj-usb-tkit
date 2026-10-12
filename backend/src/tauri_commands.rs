@@ -1926,10 +1926,7 @@ pub async fn download_essentia(
         // Make the new install visible to analysis in this session without restart.
         // SAFETY: single write after download completes; analysis threads read this lazily per-job.
         unsafe {
-            std::env::set_var(
-                "DJTKIT_ESSENTIA_NODE_MODULES",
-                node_modules_dir.to_string_lossy().to_string(),
-            );
+            std::env::set_var("DJTKIT_ESSENTIA_NODE_MODULES", &node_modules_dir);
         }
 
         Ok(())

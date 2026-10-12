@@ -200,8 +200,12 @@ pub fn suppress_console_window(cmd: &mut std::process::Command) {
 /// track's format is always known on the wire even when the DB column or PDB
 /// row omits it.
 pub fn format_ext_from_path(path: &str) -> Option<String> {
-    std::path::Path::new(path.trim())
-        .extension()
+    format_ext_of(std::path::Path::new(path.trim()))
+}
+
+/// [`format_ext_from_path`] for a path on this machine.
+pub fn format_ext_of(path: &std::path::Path) -> Option<String> {
+    path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.trim().to_ascii_lowercase())
         .filter(|ext| !ext.is_empty())

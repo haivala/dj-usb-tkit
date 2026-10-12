@@ -604,18 +604,19 @@ impl<'a> RekordboxTrackImporter<'a> {
         // Resolve (or generate) the track ID before any file writes
         let existing_id = self.existing.get(&t.file_path).cloned();
         let file_path = t.file_path.to_string_lossy();
-        let format_ext = crate::utils::format_ext_from_path(&file_path);
+        let format_ext = crate::utils::format_ext_of(&t.file_path);
         let track_id = existing_id
             .clone()
             .unwrap_or_else(|| Uuid::now_v7().to_string());
 
-        let waveform_path = self.resolve_anlz(t);
+        let anlz_abs = self.resolve_anlz(t);
         // rekordbox's tracks aren't analyzed locally, so its own beat grid is
         // the only source of the cue editor's grid anchor.
-        let first_beat_ms = waveform_path
+        let first_beat_ms = anlz_abs
             .as_deref()
             .and_then(read_rekordbox_first_beat)
             .map(i64::from);
+        let waveform_path = anlz_abs.as_deref().and_then(Path::to_str);
         let artwork_path = self.copy_artwork(t, &track_id);
         let album = Some(&t.album).filter(|a| !a.is_empty());
 
@@ -735,7 +736,7 @@ impl<'a> RekordboxTrackImporter<'a> {
 
     /// Waveform: store the original ANLZ path in place - no copy, no conversion.
     /// PWV4 bytes are extracted later when the track is loaded for display.
-    fn resolve_anlz(&mut self, t: &RbTrack) -> Option<String> {
+    fn resolve_anlz(&mut self, t: &RbTrack) -> Option<PathBuf> {
         let Some(anlz_rel) = t.anlz_path.as_deref().and_then(non_empty_db_value) else {
             self.anlz_null += 1;
             return None;
@@ -748,7 +749,7 @@ impl<'a> RekordboxTrackImporter<'a> {
             .find(|p| p.is_file());
         if let Some(anlz_abs) = resolved {
             self.anlz_ok += 1;
-            anlz_abs.to_str().map(str::to_owned)
+            Some(anlz_abs)
         } else {
             self.anlz_miss += 1;
             self.warnings.push(logging::log(
@@ -1027,8 +1028,7 @@ impl BackendService {
 /// First beat of rekordbox's beat grid for a resolved ANLZ path. The grid
 /// (`PQTZ`) lives in the `.DAT` file, while the stored path usually points at
 /// the `.EXT` (preferred for its colour waveform), so read the `.DAT` first.
-fn read_rekordbox_first_beat(anlz_path: &str) -> Option<u32> {
-    let path = Path::new(anlz_path);
+fn read_rekordbox_first_beat(path: &Path) -> Option<u32> {
     [path.with_extension("DAT"), path.to_path_buf()]
         .iter()
         .find_map(|p| read_first_beat_from_anlz(&std::fs::read(p).ok()?))
