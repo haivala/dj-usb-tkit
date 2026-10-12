@@ -54,10 +54,33 @@ struct DetectedRepairs {
 
 /// One line per fix: applied, skipped or failed.
 #[derive(Default)]
-struct FixOutcomes {
-    applied: Vec<String>,
-    skipped: Vec<String>,
-    failed: Vec<String>,
+pub(super) struct FixOutcomes {
+    pub(super) applied: Vec<String>,
+    pub(super) skipped: Vec<String>,
+    pub(super) failed: Vec<String>,
+}
+
+impl FixOutcomes {
+    /// Records one fix of the common shape: "not selected" when it was found
+    /// but not picked, "nothing to apply" when picked but not found, otherwise
+    /// the result of `apply`, whose `Ok` text follows "<title>: ".
+    pub(super) fn record<E: std::fmt::Display>(
+        &mut self,
+        title: &str,
+        selected: bool,
+        found: bool,
+        apply: impl FnOnce() -> Result<String, E>,
+    ) {
+        match (selected, found) {
+            (true, false) => self.skipped.push(format!("{title}: nothing to apply")),
+            (true, true) => match apply() {
+                Ok(detail) => self.applied.push(format!("{title}: {detail}")),
+                Err(err) => self.failed.push(format!("{title} failed: {err}")),
+            },
+            (false, true) => self.skipped.push(format!("{title}: not selected")),
+            (false, false) => {}
+        }
+    }
 }
 
 impl BackendService {
@@ -1209,9 +1232,7 @@ impl BackendService {
             pdb_duplicate_entry_count,
             engine_library_fix_needed,
         } = found;
-        let mut applied_fixes = Vec::<String>::new();
-        let mut skipped_fixes = Vec::<String>::new();
-        let mut failed_fixes = Vec::<String>::new();
+        let mut outcomes = FixOutcomes::default();
 
         warnings.extend(
             self.backup_usb_databases_with_retention(usb_root, "Before repair", None)
@@ -1243,22 +1264,27 @@ impl BackendService {
                 Ok((fixed, skipped, failed, write_count)) => {
                     *estimated_file_writes = (*estimated_file_writes).max(write_count);
                     if failed > 0 {
-                        failed_fixes.push(format!(
+                        outcomes.failed.push(format!(
                             "Fix Empty Analysis Files: fixed {fixed}, skipped {skipped}, failed {failed}"
                         ));
                     } else if fixed > 0 {
-                        applied_fixes.push(format!(
+                        outcomes.applied.push(format!(
                             "Fix Empty Analysis Files: fixed {fixed}, skipped {skipped}"
                         ));
                     } else {
-                        skipped_fixes
+                        outcomes
+                            .skipped
                             .push("Fix Empty Analysis Files: nothing to apply".to_string());
                     }
                 }
-                Err(err) => failed_fixes.push(format!("Fix Empty Analysis Files failed: {err}")),
+                Err(err) => outcomes
+                    .failed
+                    .push(format!("Fix Empty Analysis Files failed: {err}")),
             }
         } else if !empty_analysis_paths.is_empty() {
-            skipped_fixes.push("Fix Empty Analysis Files: not selected".to_string());
+            outcomes
+                .skipped
+                .push("Fix Empty Analysis Files: not selected".to_string());
         }
 
         // Unlike the other structural repairs (which are safe to run after
@@ -1269,21 +1295,15 @@ impl BackendService {
         // exist, so every strict-parity mutation that needs a new/changed
         // track row would otherwise fail (or only succeed once enough other
         // playlists happen to have organically grown the chain past it).
-        if selected.contains(PDB_TRUNCATED_TABLE_CHAIN_FIX_ID) {
-            if pdb_truncated_chains.is_empty() {
-                skipped_fixes.push("Repair Truncated Table Chain: nothing to apply".to_string());
-            } else {
-                match apply_pdb_truncated_table_chain_repair(usb_root, &pdb_truncated_chains) {
-                    Ok(n) => applied_fixes
-                        .push(format!("Repair Truncated Table Chain: fixed {n} table(s)")),
-                    Err(err) => {
-                        failed_fixes.push(format!("Repair Truncated Table Chain failed: {err}"))
-                    }
-                }
-            }
-        } else if !pdb_truncated_chains.is_empty() {
-            skipped_fixes.push("Repair Truncated Table Chain: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Truncated Table Chain",
+            selected.contains(PDB_TRUNCATED_TABLE_CHAIN_FIX_ID),
+            !pdb_truncated_chains.is_empty(),
+            || {
+                apply_pdb_truncated_table_chain_repair(usb_root, &pdb_truncated_chains)
+                    .map(|n| format!("fixed {n} table(s)"))
+            },
+        );
 
         // Also unlike the other structural repairs, torn-growth-pages must be
         // fixed *before* strict parity, for a different reason: its
@@ -1296,27 +1316,23 @@ impl BackendService {
         // Neither `fix_empty_analysis_files` nor the truncated-table-chain
         // repair above grow the PDB file, so running this immediately after
         // them (and still before strict parity) keeps the boundary accurate.
-        if selected.contains(PDB_TORN_GROWTH_PAGES_FIX_ID) {
-            if pdb_torn_growth.is_empty() {
-                skipped_fixes.push("Repair Torn Growth Pages: nothing to apply".to_string());
-            } else {
-                match apply_pdb_torn_growth_pages_repair(usb_root, &pdb_torn_growth) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair Torn Growth Pages: zeroed {n} page(s){}",
+        outcomes.record(
+            "Repair Torn Growth Pages",
+            selected.contains(PDB_TORN_GROWTH_PAGES_FIX_ID),
+            !pdb_torn_growth.is_empty(),
+            || {
+                apply_pdb_torn_growth_pages_repair(usb_root, &pdb_torn_growth).map(|n| {
+                    format!(
+                        "zeroed {n} page(s){}",
                         if pdb_torn_growth.truncate_to_pages.is_some() {
                             ", truncated unpopulated tail"
                         } else {
                             ""
                         }
-                    )),
-                    Err(err) => {
-                        failed_fixes.push(format!("Repair Torn Growth Pages failed: {err}"))
-                    }
-                }
-            }
-        } else if !pdb_torn_growth.is_empty() {
-            skipped_fixes.push("Repair Torn Growth Pages: not selected".to_string());
-        }
+                    )
+                })
+            },
+        );
 
         // Strict parity runs after the two structural prerequisites above so
         // that write_pdb establishes correct page structure before the
@@ -1325,7 +1341,8 @@ impl BackendService {
         if selected.contains(STRICT_PARITY_UPGRADE_FIX_ID) {
             let force_all = strict_repair_force_all_enabled();
             if strict_upgrade_targets.is_empty() && !force_all {
-                skipped_fixes
+                outcomes
+                    .skipped
                     .push("Upgrade Export Data To Strict Parity: nothing to apply".to_string());
             } else {
                 let target_names = if force_all {
@@ -1341,7 +1358,7 @@ impl BackendService {
                 ) {
                     Ok(result) => {
                         if result.failed_playlists > 0 {
-                            failed_fixes.push(format!(
+                            outcomes.failed.push(format!(
                             "Upgrade Export Data To Strict Parity: merged {} playlist(s), wrote {} eDB playlist(s), removed {} duplicate PDB entry/entries, {} failed{}",
                             result.merged_playlists,
                             result.edb_playlists_written,
@@ -1354,7 +1371,7 @@ impl BackendService {
                             }
                         ));
                         } else if result.merged_playlists > 0 {
-                            applied_fixes.push(format!(
+                            outcomes.applied.push(format!(
                             "Upgrade Export Data To Strict Parity: merged {} playlist(s), wrote {} eDB playlist(s), removed {} duplicate PDB entry/entries{}",
                             result.merged_playlists,
                             result.edb_playlists_written,
@@ -1366,348 +1383,235 @@ impl BackendService {
                             }
                         ));
                         } else {
-                            skipped_fixes.push(
+                            outcomes.skipped.push(
                                 "Upgrade Export Data To Strict Parity: nothing to apply"
                                     .to_string(),
                             );
                         }
                     }
-                    Err(err) => failed_fixes.push(format!(
+                    Err(err) => outcomes.failed.push(format!(
                         "Upgrade Export Data To Strict Parity failed: {err}"
                     )),
                 }
             }
         } else if !strict_upgrade_targets.is_empty() {
-            skipped_fixes.push("Upgrade Export Data To Strict Parity: not selected".to_string());
+            outcomes
+                .skipped
+                .push("Upgrade Export Data To Strict Parity: not selected".to_string());
         }
 
         if selected.contains(PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID) {
             match apply_pdb_duplicate_playlist_entries_repair(usb_root) {
-                Ok(0) => skipped_fixes
+                Ok(0) => outcomes
+                    .skipped
                     .push("Remove Duplicate PDB Playlist Entries: nothing to apply".to_string()),
-                Ok(n) => applied_fixes.push(format!(
+                Ok(n) => outcomes.applied.push(format!(
                     "Remove Duplicate PDB Playlist Entries: removed {n} duplicate entry/entries"
                 )),
-                Err(err) => failed_fixes.push(format!(
+                Err(err) => outcomes.failed.push(format!(
                     "Remove Duplicate PDB Playlist Entries failed: {err}"
                 )),
             }
         } else if pdb_duplicate_entry_count > 0 {
-            skipped_fixes.push("Remove Duplicate PDB Playlist Entries: not selected".to_string());
+            outcomes
+                .skipped
+                .push("Remove Duplicate PDB Playlist Entries: not selected".to_string());
         }
 
-        if selected.contains(PDB_ZERO_TRANRF_FIX_ID) {
-            if pdb_zero_tranrf_pages.is_empty() {
-                skipped_fixes
-                    .push("Repair Data Pages With Zero tranrf: nothing to apply".to_string());
-            } else {
-                match apply_pdb_zero_tranrf_repair(usb_root, &pdb_zero_tranrf_pages) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair Data Pages With Zero tranrf: patched {n} page(s)"
-                    )),
-                    Err(err) => failed_fixes
-                        .push(format!("Repair Data Pages With Zero tranrf failed: {err}")),
-                }
-            }
-        } else if !pdb_zero_tranrf_pages.is_empty() {
-            skipped_fixes.push("Repair Data Pages With Zero tranrf: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Data Pages With Zero tranrf",
+            selected.contains(PDB_ZERO_TRANRF_FIX_ID),
+            !pdb_zero_tranrf_pages.is_empty(),
+            || {
+                apply_pdb_zero_tranrf_repair(usb_root, &pdb_zero_tranrf_pages)
+                    .map(|n| format!("patched {n} page(s)"))
+            },
+        );
 
-        if selected.contains(PDB_WRONG_PAGE_FLAGS_FIX_ID) {
-            if pdb_wrong_flags_pages.is_empty() {
-                skipped_fixes.push("Repair PDB Data Page Flags: nothing to apply".to_string());
-            } else {
-                match apply_pdb_wrong_page_flags_repair(usb_root, &pdb_wrong_flags_pages) {
-                    Ok(n) => applied_fixes
-                        .push(format!("Repair PDB Data Page Flags: patched {n} page(s)")),
-                    Err(err) => {
-                        failed_fixes.push(format!("Repair PDB Data Page Flags failed: {err}"))
-                    }
-                }
-            }
-        } else if !pdb_wrong_flags_pages.is_empty() {
-            skipped_fixes.push("Repair PDB Data Page Flags: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair PDB Data Page Flags",
+            selected.contains(PDB_WRONG_PAGE_FLAGS_FIX_ID),
+            !pdb_wrong_flags_pages.is_empty(),
+            || {
+                apply_pdb_wrong_page_flags_repair(usb_root, &pdb_wrong_flags_pages)
+                    .map(|n| format!("patched {n} page(s)"))
+            },
+        );
 
-        if selected.contains(PDB_SENTINEL_U5_FIX_ID) {
-            if pdb_sentinel_u5_pages.is_empty() {
-                skipped_fixes
-                    .push("Repair PDB Data Pages With Sentinel u5: nothing to apply".to_string());
-            } else {
-                match apply_pdb_sentinel_u5_repair(usb_root, &pdb_sentinel_u5_pages) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair PDB Data Pages With Sentinel u5: patched {n} page(s)"
-                    )),
-                    Err(err) => failed_fixes.push(format!(
-                        "Repair PDB Data Pages With Sentinel u5 failed: {err}"
-                    )),
-                }
-            }
-        } else if !pdb_sentinel_u5_pages.is_empty() {
-            skipped_fixes.push("Repair PDB Data Pages With Sentinel u5: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair PDB Data Pages With Sentinel u5",
+            selected.contains(PDB_SENTINEL_U5_FIX_ID),
+            !pdb_sentinel_u5_pages.is_empty(),
+            || {
+                apply_pdb_sentinel_u5_repair(usb_root, &pdb_sentinel_u5_pages)
+                    .map(|n| format!("patched {n} page(s)"))
+            },
+        );
 
-        if selected.contains(PDB_WRONG_HISTORY_SHAPE_FIX_ID) {
-            if pdb_wrong_history_shape_pages.is_empty() {
-                skipped_fixes.push(
-                    "Repair PDB History/Columns Page Footer Shape: nothing to apply".to_string(),
-                );
-            } else {
-                match apply_pdb_wrong_history_page_shape_repair(
-                    usb_root,
-                    &pdb_wrong_history_shape_pages,
-                ) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair PDB History/Columns Page Footer Shape: patched {n} page(s)"
-                    )),
-                    Err(err) => failed_fixes.push(format!(
-                        "Repair PDB History/Columns Page Footer Shape failed: {err}"
-                    )),
-                }
-            }
-        } else if !pdb_wrong_history_shape_pages.is_empty() {
-            skipped_fixes
-                .push("Repair PDB History/Columns Page Footer Shape: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair PDB History/Columns Page Footer Shape",
+            selected.contains(PDB_WRONG_HISTORY_SHAPE_FIX_ID),
+            !pdb_wrong_history_shape_pages.is_empty(),
+            || {
+                apply_pdb_wrong_history_page_shape_repair(usb_root, &pdb_wrong_history_shape_pages)
+                    .map(|n| format!("patched {n} page(s)"))
+            },
+        );
 
-        if selected.contains(PDB_WRONG_TRACK_U5_FIX_ID) {
-            if pdb_wrong_track_u5_pages.is_empty() {
-                skipped_fixes
-                    .push("Repair PDB Track Page Footer Shape: nothing to apply".to_string());
-            } else {
-                match apply_pdb_wrong_track_u5_repair(usb_root, &pdb_wrong_track_u5_pages) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair PDB Track Page Footer Shape: patched {n} page(s)"
-                    )),
-                    Err(err) => failed_fixes
-                        .push(format!("Repair PDB Track Page Footer Shape failed: {err}")),
-                }
-            }
-        } else if !pdb_wrong_track_u5_pages.is_empty() {
-            skipped_fixes.push("Repair PDB Track Page Footer Shape: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair PDB Track Page Footer Shape",
+            selected.contains(PDB_WRONG_TRACK_U5_FIX_ID),
+            !pdb_wrong_track_u5_pages.is_empty(),
+            || {
+                apply_pdb_wrong_track_u5_repair(usb_root, &pdb_wrong_track_u5_pages)
+                    .map(|n| format!("patched {n} page(s)"))
+            },
+        );
 
-        if selected.contains(PDB_T00_MULTIPAGE_ACTIVE_FIX_ID) {
-            if pdb_t00_multipage_active_pages.is_empty() {
-                skipped_fixes.push(
-                    "Repair Track Page Flag (Multi-Page Chain): nothing to apply".to_string(),
-                );
-            } else {
-                match apply_pdb_t00_multipage_active_repair(
-                    usb_root,
-                    &pdb_t00_multipage_active_pages,
-                ) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair Track Page Flag (Multi-Page Chain): patched {n} page(s)"
-                    )),
-                    Err(err) => failed_fixes.push(format!(
-                        "Repair Track Page Flag (Multi-Page Chain) failed: {err}"
-                    )),
-                }
-            }
-        } else if !pdb_t00_multipage_active_pages.is_empty() {
-            skipped_fixes
-                .push("Repair Track Page Flag (Multi-Page Chain): not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Track Page Flag (Multi-Page Chain)",
+            selected.contains(PDB_T00_MULTIPAGE_ACTIVE_FIX_ID),
+            !pdb_t00_multipage_active_pages.is_empty(),
+            || {
+                apply_pdb_t00_multipage_active_repair(usb_root, &pdb_t00_multipage_active_pages)
+                    .map(|n| format!("patched {n} page(s)"))
+            },
+        );
 
-        if selected.contains(PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID) {
-            if pdb_tombstoned_playlist_ids.is_empty() {
-                skipped_fixes
-                    .push("Repair Tombstoned Playlist Tree IDs: nothing to apply".to_string());
-            } else {
-                match apply_pdb_tombstoned_playlist_tree_id_repair(
-                    usb_root,
-                    &pdb_tombstoned_playlist_ids,
-                ) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair Tombstoned Playlist Tree IDs: zeroed id in {n} slot(s)"
-                    )),
-                    Err(err) => failed_fixes
-                        .push(format!("Repair Tombstoned Playlist Tree IDs failed: {err}")),
-                }
-            }
-        } else if !pdb_tombstoned_playlist_ids.is_empty() {
-            skipped_fixes.push("Repair Tombstoned Playlist Tree IDs: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Tombstoned Playlist Tree IDs",
+            selected.contains(PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID),
+            !pdb_tombstoned_playlist_ids.is_empty(),
+            || {
+                apply_pdb_tombstoned_playlist_tree_id_repair(usb_root, &pdb_tombstoned_playlist_ids)
+                    .map(|n| format!("zeroed id in {n} slot(s)"))
+            },
+        );
 
-        if selected.contains(PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID) {
-            if pdb_wrong_playlist_tree_shape_pages.is_empty() {
-                skipped_fixes
-                    .push("Repair PDB Playlist-Tree Page Shape: nothing to apply".to_string());
-            } else {
-                match apply_pdb_wrong_playlist_tree_shape_repair(
+        outcomes.record(
+            "Repair PDB Playlist-Tree Page Shape",
+            selected.contains(PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID),
+            !pdb_wrong_playlist_tree_shape_pages.is_empty(),
+            || {
+                apply_pdb_wrong_playlist_tree_shape_repair(
                     usb_root,
                     &pdb_wrong_playlist_tree_shape_pages,
-                ) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair PDB Playlist-Tree Page Shape: patched {n} page(s)"
-                    )),
-                    Err(err) => failed_fixes
-                        .push(format!("Repair PDB Playlist-Tree Page Shape failed: {err}")),
-                }
-            }
-        } else if !pdb_wrong_playlist_tree_shape_pages.is_empty() {
-            skipped_fixes.push("Repair PDB Playlist-Tree Page Shape: not selected".to_string());
-        }
+                )
+                .map(|n| format!("patched {n} page(s)"))
+            },
+        );
 
-        if selected.contains(PDB_STALE_SENTINEL_BTREE_FIX_ID) {
-            if pdb_stale_sentinel_btree_pages.is_empty() {
-                skipped_fixes.push("Repair Stale Sentinel B-Tree: nothing to apply".to_string());
-            } else {
-                match apply_pdb_stale_sentinel_btree_repair(
-                    usb_root,
-                    &pdb_stale_sentinel_btree_pages,
-                ) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair Stale Sentinel B-Tree: reset {n} sentinel page(s)"
-                    )),
-                    Err(err) => {
-                        failed_fixes.push(format!("Repair Stale Sentinel B-Tree failed: {err}"))
-                    }
-                }
-            }
-        } else if !pdb_stale_sentinel_btree_pages.is_empty() {
-            skipped_fixes.push("Repair Stale Sentinel B-Tree: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Stale Sentinel B-Tree",
+            selected.contains(PDB_STALE_SENTINEL_BTREE_FIX_ID),
+            !pdb_stale_sentinel_btree_pages.is_empty(),
+            || {
+                apply_pdb_stale_sentinel_btree_repair(usb_root, &pdb_stale_sentinel_btree_pages)
+                    .map(|n| format!("reset {n} sentinel page(s)"))
+            },
+        );
 
-        if selected.contains(PDB_EC_CONFLICT_FIX_ID) {
-            if pdb_ec_conflicts.is_empty() {
-                skipped_fixes
-                    .push("Repair Table Write-Pointer Conflict: nothing to apply".to_string());
-            } else {
-                match apply_pdb_ec_data_page_conflict_repair(usb_root, &pdb_ec_conflicts) {
-                    Ok(n) => applied_fixes.push(format!(
-                        "Repair Table Write-Pointer Conflict: fixed {n} table(s)"
-                    )),
-                    Err(err) => failed_fixes
-                        .push(format!("Repair Table Write-Pointer Conflict failed: {err}")),
-                }
-            }
-        } else if !pdb_ec_conflicts.is_empty() {
-            skipped_fixes.push("Repair Table Write-Pointer Conflict: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Table Write-Pointer Conflict",
+            selected.contains(PDB_EC_CONFLICT_FIX_ID),
+            !pdb_ec_conflicts.is_empty(),
+            || {
+                apply_pdb_ec_data_page_conflict_repair(usb_root, &pdb_ec_conflicts)
+                    .map(|n| format!("fixed {n} table(s)"))
+            },
+        );
 
-        if selected.contains(PDB_TRACK_STRING_ALIGNMENT_FIX_ID) {
-            if pdb_misaligned_track_ids.is_empty() {
-                skipped_fixes.push("Repair Track String Alignment: nothing to apply".to_string());
-            } else {
-                match apply_pdb_track_string_alignment_repair(usb_root, &pdb_misaligned_track_ids) {
-                    Ok(n) => applied_fixes
-                        .push(format!("Repair Track String Alignment: fixed {n} row(s)")),
-                    Err(err) => {
-                        failed_fixes.push(format!("Repair Track String Alignment failed: {err}"))
-                    }
-                }
-            }
-        } else if !pdb_misaligned_track_ids.is_empty() {
-            skipped_fixes.push("Repair Track String Alignment: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Track String Alignment",
+            selected.contains(PDB_TRACK_STRING_ALIGNMENT_FIX_ID),
+            !pdb_misaligned_track_ids.is_empty(),
+            || {
+                apply_pdb_track_string_alignment_repair(usb_root, &pdb_misaligned_track_ids)
+                    .map(|n| format!("fixed {n} row(s)"))
+            },
+        );
 
-        if selected.contains(PDB_ALBUM_STRING_ALIGNMENT_FIX_ID) {
-            if pdb_misaligned_album_ids.is_empty() {
-                skipped_fixes.push("Repair Album String Alignment: nothing to apply".to_string());
-            } else {
-                match apply_pdb_album_string_alignment_repair(usb_root, &pdb_misaligned_album_ids) {
-                    Ok(n) => applied_fixes
-                        .push(format!("Repair Album String Alignment: fixed {n} row(s)")),
-                    Err(err) => {
-                        failed_fixes.push(format!("Repair Album String Alignment failed: {err}"))
-                    }
-                }
-            }
-        } else if !pdb_misaligned_album_ids.is_empty() {
-            skipped_fixes.push("Repair Album String Alignment: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Album String Alignment",
+            selected.contains(PDB_ALBUM_STRING_ALIGNMENT_FIX_ID),
+            !pdb_misaligned_album_ids.is_empty(),
+            || {
+                apply_pdb_album_string_alignment_repair(usb_root, &pdb_misaligned_album_ids)
+                    .map(|n| format!("fixed {n} row(s)"))
+            },
+        );
 
-        if selected.contains(PDB_ARTIST_NAME_LAYOUT_FIX_ID) {
-            if pdb_misaligned_artist_ids.is_empty() {
-                skipped_fixes.push("Repair Artist Name Layout: nothing to apply".to_string());
-            } else {
-                match apply_pdb_artist_name_layout_repair(usb_root, &pdb_misaligned_artist_ids) {
-                    Ok(n) => {
-                        applied_fixes.push(format!("Repair Artist Name Layout: fixed {n} row(s)"))
-                    }
-                    Err(err) => {
-                        failed_fixes.push(format!("Repair Artist Name Layout failed: {err}"))
-                    }
-                }
-            }
-        } else if !pdb_misaligned_artist_ids.is_empty() {
-            skipped_fixes.push("Repair Artist Name Layout: not selected".to_string());
-        }
+        outcomes.record(
+            "Repair Artist Name Layout",
+            selected.contains(PDB_ARTIST_NAME_LAYOUT_FIX_ID),
+            !pdb_misaligned_artist_ids.is_empty(),
+            || {
+                apply_pdb_artist_name_layout_repair(usb_root, &pdb_misaligned_artist_ids)
+                    .map(|n| format!("fixed {n} row(s)"))
+            },
+        );
 
         if selected.contains(PDB_HEADER_COMPATIBILITY_FIX_ID) {
             if let Some(repair) = pdb_header_compatibility_repair.as_ref() {
                 match apply_pdb_header_compatibility_repair(usb_root, repair) {
-                    Ok(true) => applied_fixes.push(format!(
+                    Ok(true) => outcomes.applied.push(format!(
                         "Repair PDB Header Compatibility Field: wrote 0x10..0x14 {}->{}",
                         repair.current_value, repair.target_value,
                     )),
-                    Ok(false) => skipped_fixes.push(
+                    Ok(false) => outcomes.skipped.push(
                         "Repair PDB Header Compatibility Field: nothing to apply".to_string(),
                     ),
-                    Err(err) => failed_fixes.push(format!(
+                    Err(err) => outcomes.failed.push(format!(
                         "Repair PDB Header Compatibility Field failed: {err}"
                     )),
                 }
             } else {
-                skipped_fixes
+                outcomes
+                    .skipped
                     .push("Repair PDB Header Compatibility Field: nothing to apply".to_string());
             }
         } else if pdb_header_compatibility_repair.is_some() {
-            skipped_fixes.push("Repair PDB Header Compatibility Field: not selected".to_string());
+            outcomes
+                .skipped
+                .push("Repair PDB Header Compatibility Field: not selected".to_string());
         }
 
-        if selected.contains(RELINK_MOVED_AUDIO_FIX_ID) {
-            if moved_audio_relinks.is_empty() {
-                skipped_fixes.push("Relink Moved Audio Files: nothing to apply".to_string());
-            } else {
-                match self.apply_fix_relink_moved_audio(
+        outcomes.record(
+            "Relink Moved Audio Files",
+            selected.contains(RELINK_MOVED_AUDIO_FIX_ID),
+            !moved_audio_relinks.is_empty(),
+            || {
+                self.apply_fix_relink_moved_audio(
                     usb_root,
                     &moved_audio_relinks,
                     fix_edb_conn.as_mut(),
                     warnings,
-                ) {
-                    Ok(relinked) => applied_fixes.push(format!(
-                        "Relink Moved Audio Files: relinked {relinked} track(s)"
-                    )),
-                    Err(err) => {
-                        failed_fixes.push(format!("Relink Moved Audio Files failed: {err}"))
-                    }
-                }
-            }
-        } else if !moved_audio_relinks.is_empty() {
-            skipped_fixes.push("Relink Moved Audio Files: not selected".to_string());
-        }
+                )
+                .map(|relinked| format!("relinked {relinked} track(s)"))
+            },
+        );
 
-        if selected.contains(UNINDEXED_AUDIO_PLAYLIST_FIX_ID) {
-            if unindexed_audio_files.is_empty() {
-                skipped_fixes
-                    .push("Add Unindexed Audio to a Playlist: nothing to apply".to_string());
-            } else {
-                match self.apply_fix_add_unindexed_audio_playlist(
+        outcomes.record(
+            "Add Unindexed Audio to a Playlist",
+            selected.contains(UNINDEXED_AUDIO_PLAYLIST_FIX_ID),
+            !unindexed_audio_files.is_empty(),
+            || {
+                self.apply_fix_add_unindexed_audio_playlist(
                     usb_root,
                     &unindexed_audio_files,
                     fix_edb_conn.as_mut(),
                     warnings,
-                ) {
-                    Ok((added, without_analysis)) => {
-                        let note = if without_analysis > 0 {
-                            format!(" ({without_analysis} without analysis files)")
-                        } else {
-                            String::new()
-                        };
-                        applied_fixes.push(format!(
-                            "Add Unindexed Audio to a Playlist: added {added} track(s) to \"{UNINDEXED_AUDIO_PLAYLIST_NAME}\"{note}"
-                        ));
-                    }
-                    Err(err) => failed_fixes
-                        .push(format!("Add Unindexed Audio to a Playlist failed: {err}")),
-                }
-            }
-        } else if !unindexed_audio_files.is_empty() {
-            skipped_fixes.push("Add Unindexed Audio to a Playlist: not selected".to_string());
-        }
+                )
+                .map(|(added, without_analysis)| {
+                    let note = if without_analysis > 0 {
+                        format!(" ({without_analysis} without analysis files)")
+                    } else {
+                        String::new()
+                    };
+                    format!("added {added} track(s) to \"{UNINDEXED_AUDIO_PLAYLIST_NAME}\"{note}")
+                })
+            },
+        );
 
         if selected.contains("remove_missing_audio_references") {
             match self.apply_fix_remove_missing_audio_references(
@@ -1722,79 +1626,64 @@ impl BackendService {
                         || removed_db_playlist_links > 0
                         || removed_pdb_entries > 0
                     {
-                        applied_fixes.push(format!(
+                        outcomes.applied.push(format!(
                                 "Remove Missing Audio References: removed content rows {removed_db_content}, playlist_content rows {removed_db_playlist_links}, PDB playlist entries {removed_pdb_entries}"
                             ));
                     } else {
-                        skipped_fixes
+                        outcomes
+                            .skipped
                             .push("Remove Missing Audio References: nothing to apply".to_string());
                     }
                 }
-                Err(err) => {
-                    failed_fixes.push(format!("Remove Missing Audio References failed: {err}"))
-                }
+                Err(err) => outcomes
+                    .failed
+                    .push(format!("Remove Missing Audio References failed: {err}")),
             }
         } else if !missing_audio_track_ids.is_empty() {
-            skipped_fixes.push("Remove Missing Audio References: not selected".to_string());
+            outcomes
+                .skipped
+                .push("Remove Missing Audio References: not selected".to_string());
         }
 
-        if selected.contains(BPM_KEY_MISMATCH_FIX_ID) {
-            if bpm_key_mismatches.is_empty() {
-                skipped_fixes.push("Fix BPM/Key Mismatch: nothing to apply".to_string());
-            } else {
-                match apply_bpm_key_mismatch_repair(
-                    usb_root,
-                    fix_edb_conn.as_mut(),
-                    warnings,
-                ) {
-                    Ok((anlz_fixed, edb_fixed)) => applied_fixes.push(format!(
-                        "Fix BPM/Key Mismatch: rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)"
-                    )),
-                    Err(err) => {
-                        failed_fixes.push(format!("Fix BPM/Key Mismatch failed: {err}"))
-                    }
-                }
-            }
-        } else if !bpm_key_mismatches.is_empty() {
-            skipped_fixes.push("Fix BPM/Key Mismatch: not selected".to_string());
-        }
+        outcomes.record(
+            "Fix BPM/Key Mismatch",
+            selected.contains(BPM_KEY_MISMATCH_FIX_ID),
+            !bpm_key_mismatches.is_empty(),
+            || {
+                apply_bpm_key_mismatch_repair(usb_root, fix_edb_conn.as_mut(), warnings).map(
+                    |(anlz_fixed, edb_fixed)| {
+                        format!("rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)")
+                    },
+                )
+            },
+        );
 
-        if selected.contains(BEAT_GRID_HEADER_FIX_ID) {
-            if app_beat_grids.is_empty() {
-                skipped_fixes.push("Fix Beat Grid: nothing to apply".to_string());
-            } else {
-                match apply_beat_grid_repair(usb_root, warnings) {
-                    Ok(fixed) => {
-                        applied_fixes.push(format!("Fix Beat Grid: fixed {fixed} bundle(s)"))
-                    }
-                    Err(err) => failed_fixes.push(format!("Fix Beat Grid failed: {err}")),
-                }
-            }
-        } else if !app_beat_grids.is_empty() {
-            skipped_fixes.push("Fix Beat Grid: not selected".to_string());
-        }
+        outcomes.record(
+            "Fix Beat Grid",
+            selected.contains(BEAT_GRID_HEADER_FIX_ID),
+            !app_beat_grids.is_empty(),
+            || {
+                apply_beat_grid_repair(usb_root, warnings)
+                    .map(|fixed| format!("fixed {fixed} bundle(s)"))
+            },
+        );
 
         for (format, missing) in &missing_seek_data {
-            let title = format.title();
-            if selected.contains(format.fix_id()) {
-                if missing.is_empty() {
-                    skipped_fixes.push(format!("{title}: nothing to apply"));
-                } else {
-                    match apply_missing_seek_data_repair(usb_root, *format, warnings) {
-                        Ok((fixed, skipped)) => {
-                            applied_fixes.push(format!("{title}: fixed {fixed}, skipped {skipped}"))
-                        }
-                        Err(err) => failed_fixes.push(format!("{title} failed: {err}")),
-                    }
-                }
-            } else if !missing.is_empty() {
-                skipped_fixes.push(format!("{title}: not selected"));
-            }
+            outcomes.record(
+                format.title(),
+                selected.contains(format.fix_id()),
+                !missing.is_empty(),
+                || {
+                    apply_missing_seek_data_repair(usb_root, *format, warnings)
+                        .map(|(fixed, skipped)| format!("fixed {fixed}, skipped {skipped}"))
+                },
+            );
         }
 
         if selected.contains(SYNC_EDB_HISTORY_FROM_PDB_FIX_ID) {
             if !sync_edb_history_supported || !sync_edb_history_needed {
-                skipped_fixes
+                outcomes
+                    .skipped
                     .push("Sync eDB History Tables From PDB: nothing to apply".to_string());
             } else if let Some(parsed) = parsed_pdb.as_ref() {
                 match self.apply_fix_sync_edb_history_from_pdb(
@@ -1804,19 +1693,23 @@ impl BackendService {
                     warnings,
                 ) {
                     Ok((history_written, history_content_written)) => {
-                        applied_fixes.push(format!(
+                        outcomes.applied.push(format!(
                             "Sync eDB History Tables From PDB: wrote history {history_written}, history_content {history_content_written}"
                         ));
                     }
-                    Err(err) => {
-                        failed_fixes.push(format!("Sync eDB History Tables From PDB failed: {err}"))
-                    }
+                    Err(err) => outcomes
+                        .failed
+                        .push(format!("Sync eDB History Tables From PDB failed: {err}")),
                 }
             } else {
-                skipped_fixes.push("Sync eDB History Tables From PDB: PDB unavailable".to_string());
+                outcomes
+                    .skipped
+                    .push("Sync eDB History Tables From PDB: PDB unavailable".to_string());
             }
         } else if sync_edb_history_needed {
-            skipped_fixes.push("Sync eDB History Tables From PDB: not selected".to_string());
+            outcomes
+                .skipped
+                .push("Sync eDB History Tables From PDB: not selected".to_string());
         }
 
         // Checkpoint the shared eDB connection's WAL into the main db
@@ -1857,26 +1750,24 @@ impl BackendService {
             {
                 Ok(summary) => {
                     warnings.extend(summary.warnings);
-                    applied_fixes.push(format!(
+                    outcomes.applied.push(format!(
                         "Keep Engine DJ Library Up to Date: setting on, rebuilt ({} tracks, {} playlists)",
                         summary.tracks, summary.playlists
                     ));
                 }
-                Err(err) => {
-                    failed_fixes.push(format!("Keep Engine DJ Library Up to Date failed: {err}"))
-                }
+                Err(err) => outcomes
+                    .failed
+                    .push(format!("Keep Engine DJ Library Up to Date failed: {err}")),
             }
         } else {
             if engine_library_fix_needed {
-                skipped_fixes.push("Keep Engine DJ Library Up to Date: not selected".to_string());
+                outcomes
+                    .skipped
+                    .push("Keep Engine DJ Library Up to Date: not selected".to_string());
             }
             warnings.extend(self.refresh_engine_library(usb_root));
         }
 
-        FixOutcomes {
-            applied: applied_fixes,
-            skipped: skipped_fixes,
-            failed: failed_fixes,
-        }
+        outcomes
     }
 }

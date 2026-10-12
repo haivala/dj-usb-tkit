@@ -40,6 +40,26 @@ fn match_moved_audio_pairs_by_fingerprint_then_file_name() {
 }
 
 #[test]
+fn fix_outcomes_record_covers_every_selected_found_combination() {
+    use super::run::FixOutcomes;
+
+    let mut outcomes = FixOutcomes::default();
+    let ok = || Ok::<_, String>("fixed 2 row(s)".to_string());
+    outcomes.record("Fix A", true, true, ok);
+    outcomes.record("Fix B", true, true, || Err::<String, _>("disk full"));
+    outcomes.record("Fix C", true, false, ok);
+    outcomes.record("Fix D", false, true, ok);
+    outcomes.record("Fix E", false, false, ok);
+
+    assert_eq!(outcomes.applied, vec!["Fix A: fixed 2 row(s)"]);
+    assert_eq!(outcomes.failed, vec!["Fix B failed: disk full"]);
+    assert_eq!(
+        outcomes.skipped,
+        vec!["Fix C: nothing to apply", "Fix D: not selected"]
+    );
+}
+
+#[test]
 fn match_moved_audio_leaves_ambiguous_pairs_unmatched() {
     // Two candidate files for one reference.
     let missing = vec![(1, "/Contents/x.mp3".to_string(), fp(100, "one"))];
