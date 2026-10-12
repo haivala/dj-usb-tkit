@@ -136,7 +136,7 @@ pub(crate) const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm
 
 type ExistingTrackSnapshot = (
     String,
-    Option<String>,
+    Option<i64>, // file_modified_at, Unix seconds
     String,
     String,
     Option<String>,

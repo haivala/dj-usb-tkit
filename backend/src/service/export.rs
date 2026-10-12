@@ -1181,7 +1181,7 @@ impl BackendService {
                 key: track.key.clone(),
                 source_path: source.to_string_lossy().to_string(),
                 exported_path,
-                file_modified_at: track.file_modified_at.clone(),
+                file_modified_at: track.file_modified_at,
                 file_size_bytes: track.file_size_bytes,
                 sample_rate_hz: track.sample_rate_hz,
                 bit_depth: track.bit_depth,

@@ -38,7 +38,8 @@ pub struct ExportTrackData {
     pub key: Option<String>,
     pub file_path: String,
     pub file_name: String,
-    pub file_modified_at: Option<String>,
+    /// Unix seconds.
+    pub file_modified_at: Option<i64>,
     pub file_size_bytes: Option<i64>,
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u8>,
@@ -91,7 +92,8 @@ pub struct ExportManifestTrack {
     pub key: Option<String>,
     pub source_path: String,
     pub exported_path: String,
-    pub file_modified_at: Option<String>,
+    /// Unix seconds.
+    pub file_modified_at: Option<i64>,
     pub file_size_bytes: Option<i64>,
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u8>,
@@ -1580,10 +1582,7 @@ pub fn resolve_track_created_date_for_export(track: &ExportManifestTrack) -> Opt
     normalize_export_date(track.recorded_date.as_deref())
         .or_else(|| normalize_export_date(track.release_date.as_deref()))
         .or_else(|| {
-            let secs = track
-                .file_modified_at
-                .as_deref()
-                .and_then(|v| v.parse::<i64>().ok())?;
+            let secs = track.file_modified_at?;
             let dt = chrono::Utc.timestamp_opt(secs, 0).single()?;
             Some(dt.format("%Y-%m-%d").to_string())
         })
@@ -1591,10 +1590,7 @@ pub fn resolve_track_created_date_for_export(track: &ExportManifestTrack) -> Opt
 
 pub fn resolve_track_release_date_for_export(track: &ExportManifestTrack) -> Option<String> {
     normalize_export_date(track.release_date.as_deref()).or_else(|| {
-        let secs = track
-            .file_modified_at
-            .as_deref()
-            .and_then(|v| v.parse::<i64>().ok())?;
+        let secs = track.file_modified_at?;
         let dt = chrono::Utc.timestamp_opt(secs, 0).single()?;
         Some(dt.format("%Y-%m-%d").to_string())
     })

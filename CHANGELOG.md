@@ -64,7 +64,11 @@
   so a file whose name has a control character in it is repaired too.
 - **Chore:** How a track was matched (`matchedBy`, `resolvedBy`) and where it plays from
   (`source`) are enums in the backend instead of free text. The app sends the same values
-  as before. The audio player keeps the loaded track's path as a `Path`.
+  as before. The audio player keeps the loaded track's path as a `Path`, and every USB
+  repair's id is a named constant.
+- **Chore:** The library database stores a track file's modified time as a number instead of
+  text. The first start after updating converts it once; the library, cues, playlists and
+  USB links stay as they are.
 
 ## 0.4.1
 

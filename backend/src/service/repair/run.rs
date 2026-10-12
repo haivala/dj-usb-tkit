@@ -171,7 +171,7 @@ impl BackendService {
             proposed_fixes.push(RepairFixProposal {
                 estimated_writes: writes,
                 ..fix_proposal(
-                    "fix_empty_analysis_files",
+                    EMPTY_ANALYSIS_FILES_FIX_ID,
                     "Fix Empty Analysis Files",
                     "Regenerate missing/empty DAT/EXT/2EX bundles when source audio is resolvable.",
                 )
@@ -849,7 +849,7 @@ impl BackendService {
                 estimated_writes: 0,
                 estimated_deletes: missing_audio_track_ids.len(),
                 ..fix_proposal(
-                    "remove_missing_audio_references",
+                    REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID,
                     "Remove Missing Audio References",
                     format!(
                         "Remove playlist/content references for {} track(s) whose audio files no longer exist on the USB.",
@@ -1227,7 +1227,7 @@ impl BackendService {
         // back to opening their own connection if this fails.
         let mut fix_edb_conn = open_edb_rw(usb_root, warnings);
 
-        if selected.contains("fix_empty_analysis_files") {
+        if selected.contains(EMPTY_ANALYSIS_FILES_FIX_ID) {
             match self.apply_fix_empty_analysis_files(
                 usb_root,
                 &empty_analysis_paths,
@@ -1587,7 +1587,7 @@ impl BackendService {
             },
         );
 
-        if selected.contains("remove_missing_audio_references") {
+        if selected.contains(REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID) {
             match self.apply_fix_remove_missing_audio_references(
                 usb_root,
                 &missing_audio_track_ids,

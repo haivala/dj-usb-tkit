@@ -47,7 +47,8 @@ pub struct ScannedTrack {
     pub track_number: Option<u32>,
     pub tonality: Option<String>,
     pub file_size_bytes: Option<i64>,
-    pub file_modified_at: Option<String>,
+    /// Unix seconds.
+    pub file_modified_at: Option<i64>,
     pub format_ext: Option<String>,
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u8>,
@@ -112,7 +113,7 @@ pub fn scan_audio_file(path: &Path) -> BackendResult<ScannedTrack> {
         .modified()
         .ok()
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|dur| dur.as_secs().to_string());
+        .and_then(|dur| i64::try_from(dur.as_secs()).ok());
 
     Ok(ScannedTrack {
         path: path.to_string_lossy().to_string(),

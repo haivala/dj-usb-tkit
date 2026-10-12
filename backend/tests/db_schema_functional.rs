@@ -78,7 +78,19 @@ fn db_migration_is_idempotent_and_adds_expected_columns() {
             |row| row.get(0),
         )
         .expect("schema_version value");
-    assert_eq!(schema_version, 3);
+    assert_eq!(schema_version, 4);
+
+    let modified_type: String = conn
+        .query_row(
+            "SELECT type FROM pragma_table_info('tracks') WHERE name = 'file_modified_at'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("file_modified_at type");
+    assert_eq!(
+        modified_type, "INTEGER",
+        "v4 rebuilds the legacy TEXT column"
+    );
 }
 
 fn seed_legacy_backend_schema(db_path: &Path) {

@@ -3304,7 +3304,7 @@ fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
             "/Contents/Artist/usb_key_clear/{}",
             usb_file.file_name().expect("usb file").to_string_lossy()
         ),
-        file_modified_at: Some("1714521600".to_string()),
+        file_modified_at: Some(1_714_521_600),
         file_size_bytes: std::fs::metadata(&usb_file)
             .ok()
             .and_then(|m| i64::try_from(m.len()).ok()),
@@ -3493,7 +3493,7 @@ fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
             "/Contents/Artist/edb_reuse/{}",
             usb_file.file_name().expect("usb file").to_string_lossy()
         ),
-        file_modified_at: Some("1714521600".to_string()),
+        file_modified_at: Some(1_714_521_600),
         file_size_bytes: std::fs::metadata(&usb_file)
             .ok()
             .and_then(|m| i64::try_from(m.len()).ok()),

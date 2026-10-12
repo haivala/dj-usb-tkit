@@ -23,7 +23,7 @@ fn mapping_test_track() -> ExportManifestTrack {
         key: Some("8A".to_string()),
         source_path: "/source/mapping.mp3".to_string(),
         exported_path: "/Contents/Mapping Artist/Mapping Album/Mapping Track.mp3".to_string(),
-        file_modified_at: Some("1714521600".to_string()),
+        file_modified_at: Some(1_714_521_600),
         file_size_bytes: Some(42_424),
         sample_rate_hz: Some(44_100),
         bit_depth: Some(24),

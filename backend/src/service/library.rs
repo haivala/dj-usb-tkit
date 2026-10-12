@@ -93,7 +93,7 @@ impl BackendService {
                     row.get::<_, String>(19)?, // file_path as key
                     (
                         row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<i64>>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, Option<String>>(4)?,
@@ -800,7 +800,7 @@ impl BackendService {
             .modified()
             .ok()
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|dur| dur.as_secs().to_string());
+            .and_then(|dur| i64::try_from(dur.as_secs()).ok());
         let title = req.title.trim();
         let artist = req.artist.trim();
         let album = req.album.and_then(|value| {

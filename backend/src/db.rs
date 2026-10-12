@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::{BackendError, BackendResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug, Clone)]
 pub struct Db {
@@ -66,7 +66,7 @@ impl Db {
               tonality TEXT,
               file_path TEXT NOT NULL UNIQUE,
               file_size_bytes INTEGER,
-              file_modified_at TEXT,
+              file_modified_at INTEGER,
               format_ext TEXT,
               sample_rate_hz INTEGER,
               bit_depth INTEGER,
@@ -247,6 +247,7 @@ impl Db {
               ON tracks (match_fingerprint);
             "#,
         )?;
+        store_file_modified_at_as_integer(&conn)?;
         set_schema_version(&conn, CURRENT_SCHEMA_VERSION)?;
 
         Ok(())
@@ -388,6 +389,90 @@ fn rename_legacy_rekordbox_names(conn: &Connection) -> BackendResult<()> {
     Ok(())
 }
 
+/// Schema v4: `tracks.file_modified_at` (the file's Unix seconds) is an
+/// `INTEGER` column. Before, it was `TEXT`, and SQLite keeps whatever goes
+/// into a `TEXT` column as text, so the column's declared type has to
+/// change. SQLite can't change a column's type in place, so this rebuilds
+/// `tracks` the way SQLite's docs describe ("Making Other Kinds Of Table
+/// Schema Changes"): a copy made from the table's own current definition with
+/// only that column's type changed, so every other column, index and row
+/// stays exactly as it was. A no-op once done, and on a fresh database.
+fn store_file_modified_at_as_integer(conn: &Connection) -> BackendResult<()> {
+    let declared_type: Option<String> = conn
+        .prepare("SELECT type FROM pragma_table_info('tracks') WHERE name = 'file_modified_at'")?
+        .query_row([], |row| row.get(0))
+        .optional()?;
+    if !declared_type.is_some_and(|t| t.eq_ignore_ascii_case("TEXT")) {
+        return Ok(());
+    }
+
+    let table_sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'tracks'",
+        [],
+        |row| row.get(0),
+    )?;
+    let new_table_sql = rebuilt_tracks_sql(&table_sql).ok_or_else(|| {
+        BackendError::Internal(format!(
+            "schema v4: unexpected tracks definition, not rebuilding: {table_sql}"
+        ))
+    })?;
+    let index_sql = conn
+        .prepare(
+            "SELECT sql FROM sqlite_schema
+             WHERE type = 'index' AND tbl_name = 'tracks' AND sql IS NOT NULL",
+        )?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Dropping the old table would otherwise cascade-delete every cue,
+    // playlist entry and USB link pointing at it. This pragma is ignored
+    // inside a transaction, so it is set before and restored after.
+    conn.execute_batch("PRAGMA foreign_keys = OFF")?;
+    let result = (|| -> BackendResult<()> {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(&new_table_sql)?;
+        tx.execute_batch(
+            "INSERT INTO tracks_v4 SELECT * FROM tracks;
+             UPDATE tracks_v4 SET file_modified_at = NULL
+               WHERE typeof(file_modified_at) NOT IN ('integer', 'null');
+             DROP TABLE tracks;
+             ALTER TABLE tracks_v4 RENAME TO tracks;",
+        )?;
+        for sql in &index_sql {
+            tx.execute_batch(sql)?;
+        }
+        let broken_links: i64 =
+            tx.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })?;
+        if broken_links > 0 {
+            return Err(BackendError::Internal(format!(
+                "schema v4: tracks rebuild would break {broken_links} foreign key(s)"
+            )));
+        }
+        tx.commit()?;
+        Ok(())
+    })();
+    conn.execute_batch("PRAGMA foreign_keys = ON")?;
+    result
+}
+
+/// `tracks`' `CREATE TABLE` text as `tracks_v4` with `file_modified_at` as
+/// `INTEGER`, or `None` if that column isn't declared exactly once as
+/// `file_modified_at TEXT`. Everything from the column list on is kept as is;
+/// the name before it may be quoted (SQLite quotes it after a rename).
+fn rebuilt_tracks_sql(table_sql: &str) -> Option<String> {
+    let body = &table_sql[table_sql.find('(')?..];
+    let old_column = "file_modified_at TEXT";
+    if body.matches(old_column).count() != 1 {
+        return None;
+    }
+    Some(format!(
+        "CREATE TABLE tracks_v4 {}",
+        body.replacen(old_column, "file_modified_at INTEGER", 1)
+    ))
+}
+
 fn set_schema_version(conn: &Connection, version: i64) -> BackendResult<()> {
     conn.execute(
         r#"
@@ -474,6 +559,142 @@ mod tests {
             )
             .expect("count legacy setting");
         assert_eq!(legacy, 0);
+    }
+
+    fn column_type(conn: &Connection, table: &str, column: &str) -> String {
+        conn.query_row(
+            "SELECT type FROM pragma_table_info(?1) WHERE name = ?2",
+            [table, column],
+            |row| row.get(0),
+        )
+        .expect("column type")
+    }
+
+    #[test]
+    fn migrate_stores_file_modified_at_as_integer_and_keeps_linked_rows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let index_count = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'tracks'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count indexes")
+        };
+        let indexes_before;
+        let columns_before: Vec<String>;
+        {
+            let db = Db::new(dir.path()).expect("db init");
+            let conn = db.connect().expect("db connect");
+            indexes_before = index_count(&conn);
+            // Put `tracks` back in its pre-v4 shape: the column declared TEXT.
+            let sql: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'tracks'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("tracks sql");
+            let old_sql = sql
+                .replacen("CREATE TABLE tracks", "CREATE TABLE tracks_old", 1)
+                .replacen("file_modified_at INTEGER", "file_modified_at TEXT", 1);
+            conn.execute_batch(&format!(
+                "PRAGMA foreign_keys = OFF;
+                 {old_sql};
+                 DROP TABLE tracks;
+                 ALTER TABLE tracks_old RENAME TO tracks;
+                 CREATE INDEX idx_tracks_title_artist_album ON tracks (title, artist, album);
+                 CREATE INDEX idx_tracks_match_fingerprint ON tracks (match_fingerprint);
+                 PRAGMA foreign_keys = ON;
+                 UPDATE schema_version SET version = 3;"
+            ))
+            .expect("downgrade tracks");
+            assert_eq!(column_type(&conn, "tracks", "file_modified_at"), "TEXT");
+            columns_before = conn
+                .prepare("SELECT name FROM pragma_table_info('tracks')")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            conn.execute_batch(
+                r#"
+                INSERT INTO tracks (id, title, artist, file_path, file_modified_at,
+                                    created_at, updated_at)
+                  VALUES ('t1', 'T1', 'A', '/m/a.mp3', 1714521600, 'now', 'now'),
+                         ('t2', 'T2', 'A', '/m/b.mp3', 'not a number', 'now', 'now'),
+                         ('t3', 'T3', 'A', '/m/c.mp3', NULL, 'now', 'now');
+                INSERT INTO track_cues (id, track_id, position_ms, created_at, updated_at)
+                  VALUES ('c1', 't1', 1000, 'now', 'now');
+                INSERT INTO playlists (id, name, source, created_at, updated_at)
+                  VALUES ('p1', 'Set', 'app', 'now', 'now');
+                INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at)
+                  VALUES ('pt1', 'p1', 't1', 0, 'now');
+                INSERT INTO usb_devices (id, root_path, root_path_key, first_seen_at,
+                                         last_seen_at, created_at, updated_at)
+                  VALUES ('u1', '/media/stick', '/media/stick', 'now', 'now', 'now', 'now');
+                INSERT INTO track_usb_links (id, track_id, usb_device_id, usb_file_path,
+                                             first_seen_at, last_seen_at)
+                  VALUES ('l1', 't1', 'u1', '/Contents/a.mp3', 'now', 'now');
+                "#,
+            )
+            .expect("seed rows");
+            let stored: String = conn
+                .query_row(
+                    "SELECT typeof(file_modified_at) FROM tracks WHERE id = 't1'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored, "text", "a TEXT column stores the number as text");
+        }
+
+        let db = Db::new(dir.path()).expect("db reopen");
+        let conn = db.connect().expect("db connect");
+        assert_eq!(column_type(&conn, "tracks", "file_modified_at"), "INTEGER");
+        let columns_after: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('tracks')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(columns_after, columns_before, "same columns, same order");
+        assert_eq!(index_count(&conn), indexes_before);
+
+        let modified = |id: &str| -> Option<i64> {
+            conn.query_row(
+                "SELECT file_modified_at FROM tracks WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .expect("read file_modified_at")
+        };
+        assert_eq!(modified("t1"), Some(1_714_521_600));
+        assert_eq!(
+            modified("t2"),
+            None,
+            "a value that isn't a number is dropped"
+        );
+        assert_eq!(modified("t3"), None);
+
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
+        assert_eq!(count("SELECT COUNT(*) FROM tracks"), 3);
+        assert_eq!(count("SELECT COUNT(*) FROM track_cues"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM playlist_tracks"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM track_usb_links"), 1);
+        assert_eq!(count("PRAGMA foreign_keys"), 1, "foreign keys are back on");
+        assert_eq!(
+            count("SELECT version FROM schema_version"),
+            CURRENT_SCHEMA_VERSION
+        );
+
+        // The links still cascade: they point at the rebuilt table.
+        conn.execute("DELETE FROM tracks WHERE id = 't1'", [])
+            .expect("delete track");
+        assert_eq!(count("SELECT COUNT(*) FROM track_cues"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM playlist_tracks"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM track_usb_links"), 0);
     }
 
     #[test]

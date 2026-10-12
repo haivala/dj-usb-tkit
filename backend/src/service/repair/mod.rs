@@ -76,6 +76,8 @@ pub(crate) use pdb_fixes::*;
 pub(crate) use player_menu::*;
 pub(crate) use strict_parity::*;
 
+const EMPTY_ANALYSIS_FILES_FIX_ID: &str = "fix_empty_analysis_files";
+const REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID: &str = "remove_missing_audio_references";
 const BPM_KEY_MISMATCH_FIX_ID: &str = "fix_bpm_key_mismatch";
 const MISSING_MP3_SEEK_DATA_FIX_ID: &str = "add_missing_mp3_seek_data";
 const MISSING_FLAC_SEEK_DATA_FIX_ID: &str = "add_missing_flac_seek_data";
@@ -131,7 +133,7 @@ const PDB_ARTIST_NAME_LAYOUT_FIX_ID: &str = "repair_pdb_artist_name_layout";
 /// checked (a user can't deselect a prerequisite while leaving strict parity
 /// selected).
 const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
-    "fix_empty_analysis_files",
+    EMPTY_ANALYSIS_FILES_FIX_ID,
     PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,
     PDB_TORN_GROWTH_PAGES_FIX_ID,
     STRICT_PARITY_UPGRADE_FIX_ID,
@@ -156,7 +158,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     MISSING_FLAC_SEEK_DATA_FIX_ID,
     RELINK_MOVED_AUDIO_FIX_ID,
     UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
-    "remove_missing_audio_references",
+    REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID,
     SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
     // Last: it rebuilds from the PDB the fixes above leave behind.
     ENGINE_LIBRARY_FIX_ID,
