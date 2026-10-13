@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+- **New feature:** USB repair can delete audio files that are in no playlist and are
+  byte-for-byte copies of a track in the same folder (for example `Track.mp3` next to the
+  exported `Track-1.mp3`). They are no longer offered for the "Unindexed" playlist, where the
+  same track would show up twice.
 - **Improvement:** The Event Log opens from a button in the header instead of from Settings,
   and the button shows how many errors were logged since the log was last opened. When a
   diagnostics, parity or repair-preview item points to details in the log, the button gets a
@@ -62,6 +66,20 @@
 - **Chore:** The backend service's core file is split into files by area (track library,
   playback, playlists, source roots, settings) instead of one large file.
 - **Chore:** The export helpers' eDB writers and PDB writers each have their own file.
+- **Fix:** USB repair now decides which audio files are indexed, missing or unindexed exactly
+  as the parity report does, so every file the report lists gets a repair. Before, a file whose
+  name differed from an indexed one only by a `-1`/`-2` suffix got no repair, and a file the
+  report found by ignoring letter case could still be reported missing by the repair.
+- **Fix:** "Remove Missing Audio References" also removes the track's PDB row and eDB rows
+  that are in no playlist, so the parity report is clean afterwards instead of still listing
+  the missing files. Tracks in a history playlist are never removed; the repair preview lists
+  them instead.
+- **Fix:** A playlist whose only difference between the two databases is a track's rating,
+  colour or artwork now gets "Upgrade Export Data To Strict Parity". Before, the parity report
+  warned about it but the repair offered nothing.
+- **Fix:** "Add Unindexed Audio to a Playlist" analyses a file that has no analysis files on
+  the USB, so the added track has its waveform and the parity report doesn't flag its
+  metadata as incomplete.
 - **Fix:** A thin bar no longer flickers at the bottom of the window while nothing is
   running. The hidden progress bar was still animating and sometimes showed through on Linux.
 - **Fix:** The BPM/key analysis runtime's paths (node, runner script, installed modules) are

@@ -532,6 +532,7 @@ pub(crate) fn build_usb_parity_comparison(
         let mut pdb_missing_core_metadata = 0usize;
         let mut edb_missing_core_metadata = 0usize;
         let mut artwork_mismatch_tracks = 0usize;
+        let mut rating_colour_mismatch_tracks = 0usize;
         let mut path_mismatch_tracks = 0usize;
         let mut dictionary_id_issue_tracks = 0usize;
 
@@ -657,6 +658,17 @@ pub(crate) fn build_usb_parity_comparison(
             let artwork_mismatch = pdb_has_artwork != edb_has_artwork;
             if artwork_mismatch {
                 artwork_mismatch_tracks += 1;
+            }
+            if rating_colour
+                .mismatched_paths
+                .contains(&normalize_pdb_path_for_edb_lookup(
+                    edb_detail
+                        .usb_media_path
+                        .as_deref()
+                        .unwrap_or(&edb_detail.file_path),
+                ))
+            {
+                rating_colour_mismatch_tracks += 1;
             }
 
             let mut mismatches = Vec::<String>::new();
@@ -834,6 +846,7 @@ pub(crate) fn build_usb_parity_comparison(
             edb_missing_core_metadata,
             pdb_missing_core_metadata,
             artwork_mismatch_tracks,
+            rating_colour_mismatch_tracks,
             path_mismatch_tracks,
             dictionary_id_issue_tracks,
             playlist_id_match,

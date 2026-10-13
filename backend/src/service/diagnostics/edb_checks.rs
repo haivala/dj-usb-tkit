@@ -2,12 +2,15 @@
 
 use super::*;
 
-pub(crate) fn collect_edb_indexed_paths(
+/// Audio paths the eDB `content` table indexes, as written (`path`, or
+/// `FolderPath` + `FileNameL` in older schemas). Match them with
+/// `audio_path_key`.
+pub(crate) fn collect_edb_audio_paths(
     conn: &rusqlite::Connection,
     warnings: &mut Vec<WarningEntry>,
-) -> HashSet<String> {
+) -> Vec<String> {
     if !table_exists(conn, "content") {
-        return HashSet::new();
+        return Vec::new();
     }
     let Ok(content_columns) = load_table_columns(conn, "content") else {
         warnings.push(logging::log(
@@ -16,7 +19,7 @@ pub(crate) fn collect_edb_indexed_paths(
             "usb.diagnostics.edb-content-column-scan-failed",
             "eDB content column scan failed",
         ));
-        return HashSet::new();
+        return Vec::new();
     };
     let has_column = |name: &str| content_columns.iter().any(|column| column == name);
     let (query_sql, mode) = if has_column("path") {
@@ -44,7 +47,7 @@ pub(crate) fn collect_edb_indexed_paths(
             "usb.diagnostics.edb-schema-missing-path-columns",
             "eDB content schema missing path columns (expected path or FolderPath/FileNameL)",
         ));
-        return HashSet::new();
+        return Vec::new();
     };
     let mut stmt = match conn.prepare(query_sql) {
         Ok(stmt) => stmt,
@@ -55,10 +58,10 @@ pub(crate) fn collect_edb_indexed_paths(
                 "usb.diagnostics.edb-path-query-prepare-failed",
                 format!("eDB playlist path query prepare failed: {err}"),
             ));
-            return HashSet::new();
+            return Vec::new();
         }
     };
-    let mut out = HashSet::<String>::new();
+    let mut out = Vec::<String>::new();
     let rows = match stmt.query_map([], |row| match mode {
         "path" => Ok((row.get::<_, String>(0).unwrap_or_default(), String::new())),
         _ => Ok((
@@ -74,7 +77,7 @@ pub(crate) fn collect_edb_indexed_paths(
                 "usb.diagnostics.edb-path-query-failed",
                 format!("eDB playlist path query failed: {err}"),
             ));
-            return HashSet::new();
+            return Vec::new();
         }
     };
     for item in rows {
@@ -92,42 +95,9 @@ pub(crate) fn collect_edb_indexed_paths(
         if full.is_empty() {
             continue;
         }
-        // Keep this stage fast on slow USB media: normalize by logical
-        // /Contents/... path shape without per-track filesystem probes.
-        // Existence is already derived from the one-pass Contents scan.
-        let normalized = normalize_path_for_contents_match(&full);
-        if !normalized.is_empty() {
-            out.insert(normalized);
-        }
+        out.push(full);
     }
     out
-}
-
-pub(super) fn collect_edb_content_paths_exact(conn: &rusqlite::Connection) -> HashSet<String> {
-    if !table_exists(conn, "content") {
-        return HashSet::new();
-    }
-    let Ok(mut stmt) = conn.prepare(
-        "SELECT COALESCE(path, '') FROM content WHERE path IS NOT NULL AND trim(path) <> ''",
-    ) else {
-        return HashSet::new();
-    };
-    stmt.query_map([], |row| row.get::<_, String>(0))
-        .ok()
-        .map(|rows| {
-            rows.flatten()
-                // Alias-stripped (trailing space before extension only) to
-                // match the same normalization applied to the on-disk file
-                // set it's compared against below — otherwise a DB row that
-                // still carries a trailing-space alias variant (e.g.
-                // "Track - .mp3") never matches its on-disk file
-                // "Track -.mp3", double-counting the same file as both
-                // "missing" and "unindexed".
-                .map(|p| normalize_path_for_strict_presence_match(&p))
-                .filter(|p| !p.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone)]
@@ -177,33 +147,6 @@ pub(crate) fn evaluate_strict_raw_coverage_parity(
     }
 }
 
-pub(crate) fn collect_strict_indexed_paths(
-    parsed: &crate::pdb_reader::ParsedPdb,
-    edb_playlists: &HashMap<String, ExportDbPlaylist>,
-    conn: &rusqlite::Connection,
-) -> HashSet<String> {
-    // All PDB tracks regardless of playlist/history membership. Alias-stripped
-    // (see `collect_edb_content_paths_exact`) to stay symmetric with the
-    // on-disk file set this is ultimately compared against.
-    let pdb_track_paths = parsed
-        .tracks
-        .iter()
-        .map(|track| normalize_path_for_strict_presence_match(&track.track_file_path))
-        .filter(|path| !path.is_empty());
-    // All eDB content paths, alias-stripped
-    let edb_all_paths = collect_edb_content_paths_exact(conn).into_iter();
-    // eDB playlist paths kept for any track whose path differs from the content table
-    let edb_playlist_paths = edb_playlists
-        .values()
-        .flat_map(|playlist| playlist.tracks.iter())
-        .map(|track| normalize_path_for_strict_presence_match(track.identity_path()))
-        .filter(|path| !path.is_empty());
-    pdb_track_paths
-        .chain(edb_all_paths)
-        .chain(edb_playlist_paths)
-        .collect()
-}
-
 /// Playlist tracks whose star rating or colour differs between the eDB and
 /// their PDB row (bytes 89/88), counted once per track.
 #[derive(Debug, Default, Clone)]
@@ -211,6 +154,8 @@ pub(crate) struct RatingColourParity {
     pub(super) mismatched_tracks: usize,
     pub(super) rating_mismatches: usize,
     pub(super) colour_mismatches: usize,
+    /// `normalize_pdb_path_for_edb_lookup` paths of the mismatched tracks.
+    pub(super) mismatched_paths: HashSet<String>,
 }
 
 pub(super) fn compare_rating_colour(
@@ -246,7 +191,10 @@ pub(super) fn compare_rating_colour(
         let colour_differs = edb.color_id != pdb_colour;
         out.rating_mismatches += usize::from(rating_differs);
         out.colour_mismatches += usize::from(colour_differs);
-        out.mismatched_tracks += usize::from(rating_differs || colour_differs);
+        if rating_differs || colour_differs {
+            out.mismatched_tracks += 1;
+            out.mismatched_paths.insert(key);
+        }
     }
     out
 }

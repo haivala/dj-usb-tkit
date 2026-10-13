@@ -75,6 +75,148 @@ pub(super) fn match_moved_audio(
         .collect()
 }
 
+/// An unindexed file that is a byte-for-byte copy of an indexed file in the
+/// same folder (`remove_duplicate_audio_copies`), e.g. `Track.mp3` next to the
+/// exported `Track-1.mp3`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DuplicateAudioCopy {
+    /// USB-relative path of the unindexed copy (`/Contents/...`).
+    pub(super) copy_path: String,
+    /// USB-relative path of the indexed file it duplicates.
+    pub(super) original_path: String,
+}
+
+fn same_file_bytes(a: &Path, b: &Path) -> bool {
+    match (std::fs::read(a), std::fs::read(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Folder part of `audio_path_key`, so files compare as the presence scan
+/// compares them.
+fn folder_match_key(path: &str) -> String {
+    let key = audio_path_key(path);
+    key.rsplit_once('/')
+        .map(|(folder, _)| folder.to_string())
+        .unwrap_or_default()
+}
+
+/// `audio_path_key`s of the tracks in a history playlist: the PDB's history
+/// entries and the eDB's `history_content` rows. Their tracks are never
+/// removed by `remove_missing_audio_references`.
+pub(super) fn missing_audio_history_keys(
+    parsed: &ParsedPdb,
+    edb_conn: Option<&rusqlite::Connection>,
+) -> HashSet<String> {
+    let history_ids = parsed
+        .history_entries
+        .iter()
+        .filter_map(|e| e.track_id)
+        .collect::<HashSet<_>>();
+    let mut keys = parsed
+        .tracks
+        .iter()
+        .filter(|t| history_ids.contains(&t.id))
+        .map(|t| audio_path_key(&t.track_file_path))
+        .collect::<HashSet<_>>();
+    if let Some(conn) = edb_conn
+        && table_exists(conn, "history_content")
+        && table_exists(conn, "content")
+        && let Ok(mut stmt) = conn.prepare(
+            "SELECT c.path FROM history_content hc JOIN content c ON c.content_id = hc.content_id WHERE c.path IS NOT NULL",
+        )
+        && let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0))
+    {
+        keys.extend(rows.flatten().map(|p| audio_path_key(&p)));
+    }
+    keys
+}
+
+/// The `unindexed` files that are copies of an `indexed` on-disk file in the
+/// same folder: same size, then same bytes. Only same-size files are read.
+pub(super) fn find_duplicate_audio_copies(
+    usb_root: &Path,
+    unindexed: &[String],
+    indexed: &[&String],
+) -> Vec<DuplicateAudioCopy> {
+    let file_size = |rel: &str| {
+        resolve_usb_side_path(usb_root, rel)
+            .and_then(|abs| std::fs::metadata(&abs).ok().map(|m| (abs, m.len())))
+    };
+    let mut indexed_by_folder_size =
+        HashMap::<(String, u64), Vec<(&str, std::path::PathBuf)>>::new();
+    for rel in indexed {
+        if let Some((abs, size)) = file_size(rel) {
+            indexed_by_folder_size
+                .entry((folder_match_key(rel), size))
+                .or_default()
+                .push((rel.as_str(), abs));
+        }
+    }
+    unindexed
+        .iter()
+        .filter_map(|copy| {
+            let (abs, size) = file_size(copy)?;
+            let candidates = indexed_by_folder_size.get(&(folder_match_key(copy), size))?;
+            let (original, _) = candidates
+                .iter()
+                .find(|(_, original_abs)| same_file_bytes(&abs, original_abs))?;
+            Some(DuplicateAudioCopy {
+                copy_path: copy.clone(),
+                original_path: (*original).to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Delete unindexed copies of indexed audio files
+/// (`remove_duplicate_audio_copies`). Each copy is compared with its original
+/// again first, so a file that changed since the scan is kept. Returns the
+/// number of files deleted.
+pub(super) fn apply_remove_duplicate_audio_copies(
+    usb_root: &Path,
+    copies: &[DuplicateAudioCopy],
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<usize> {
+    let mut deleted = 0usize;
+    let mut failed = Vec::<String>::new();
+    for copy in copies {
+        let (Some(copy_abs), Some(original_abs)) = (
+            resolve_usb_side_path(usb_root, &copy.copy_path),
+            resolve_usb_side_path(usb_root, &copy.original_path),
+        ) else {
+            failed.push(copy.copy_path.clone());
+            continue;
+        };
+        if !same_file_bytes(&copy_abs, &original_abs) {
+            failed.push(copy.copy_path.clone());
+            continue;
+        }
+        match std::fs::remove_file(&copy_abs) {
+            Ok(()) => {
+                deleted += 1;
+                warnings.push(logging::log(
+                    Level::Info,
+                    "usb-diagnostics",
+                    "usb.diagnostics.duplicate-audio-removed",
+                    format!("removed duplicate audio file: {}", copy.copy_path),
+                ));
+            }
+            Err(_) => failed.push(copy.copy_path.clone()),
+        }
+    }
+    if failed.is_empty() {
+        Ok(deleted)
+    } else {
+        Err(BackendError::Internal(format!(
+            "deleted {deleted}, kept {} that no longer match their original or could not be deleted: {}",
+            failed.len(),
+            failed.join(", ")
+        )))
+    }
+}
+
 /// Align every track's ANLZ beat grid, eDB `bpmx100` and eDB key to its PDB
 /// row (`fix_bpm_key_mismatch`). Mismatches are re-detected against the
 /// current staged PDB and the given eDB connection, so earlier fixes in the
@@ -745,18 +887,19 @@ impl BackendService {
     /// Index audio files that sit under `Contents/` but are in neither
     /// database (`add_unindexed_audio_playlist`), typically left behind when
     /// the databases were restored from a backup taken before an export. The
-    /// files and their analysis bundles are already on the stick, so this is
-    /// an additive export of a USB-only playlist: tags are read from the
-    /// files, BPM/first beat/cues from each file's canonical ANLZ bundle, and
-    /// the eDB + PDB writers append the tracks to `UNINDEXED_AUDIO_PLAYLIST_NAME`.
-    /// Returns (tracks added, tracks without an analysis bundle).
+    /// files are already on the stick, so this is an additive export of a
+    /// USB-only playlist: tags are read from the files, BPM/first beat/cues
+    /// from each file's canonical ANLZ bundle (generated from the audio when
+    /// there is none), and the eDB + PDB writers append the tracks to
+    /// `UNINDEXED_AUDIO_PLAYLIST_NAME`. Returns (tracks added, bundles
+    /// generated, tracks left without an analysis bundle).
     pub(super) fn apply_fix_add_unindexed_audio_playlist(
         &self,
         usb_root: &std::path::Path,
         files: &[String],
         edb_conn: Option<&mut rusqlite::Connection>,
         warnings: &mut Vec<WarningEntry>,
-    ) -> BackendResult<(usize, usize)> {
+    ) -> BackendResult<(usize, usize, usize)> {
         let local_conn = self.db.connect()?;
         Self::ensure_track_export_identity_schema(&local_conn)?;
         let app_master_db_id = Self::ensure_local_u32_setting(
@@ -766,6 +909,7 @@ impl BackendService {
         )?;
 
         let mut manifest_tracks = Vec::<ExportManifestTrack>::new();
+        let mut analysed = 0usize;
         let mut without_analysis = 0usize;
         for rel in files {
             // The ANLZ path hash and the DB rows both expect `/Contents/...`.
@@ -786,7 +930,33 @@ impl BackendService {
                 }
             };
 
-            let (dat_path, ext_path, _) = canonical_analysis_bundle_paths(usb_root, rel);
+            let (dat_path, ext_path, twoex_path) = canonical_analysis_bundle_paths(usb_root, rel);
+            let duration_ms = detect_track_duration_ms(&abs);
+            // No bundle on the USB: analyse the file as the empty-analysis fix
+            // does, so the track has its waveform and analysis path like any
+            // exported one.
+            if !dat_path.is_file()
+                && let Some(duration_ms) = duration_ms
+            {
+                let waveform = build_waveform_preview_from_audio(
+                    &abs,
+                    crate::service::WAVEFORM_PREVIEW_BINS,
+                    2_000_000,
+                )
+                .unwrap_or_else(|_| WaveformData::empty());
+                let bundle_paths = AnlzBundlePaths {
+                    dat_path: dat_path.clone(),
+                    ext_path: ext_path.clone(),
+                    twoex_path,
+                };
+                if !waveform.peaks.is_empty()
+                    && write_generated_anlz_bundle(&waveform, &bundle_paths, rel, None, duration_ms)
+                        .is_ok()
+                {
+                    let _ = fill_mp3_pvbr(&dat_path, &abs);
+                    analysed += 1;
+                }
+            }
             let (waveform_path, bpm, first_beat_ms, cues) = if dat_path.is_file() {
                 let dat = std::fs::read(&dat_path).unwrap_or_default();
                 let cue_bytes = std::fs::read(&ext_path).unwrap_or_else(|_| dat.clone());
@@ -866,13 +1036,13 @@ impl BackendService {
                 owns_waveform: false,
                 artwork_path: None,
                 waveform_path,
-                duration_ms: detect_track_duration_ms(&abs),
+                duration_ms,
                 first_beat_ms,
                 cues,
             });
         }
         if manifest_tracks.is_empty() {
-            return Ok((0, without_analysis));
+            return Ok((0, analysed, without_analysis));
         }
 
         let playlist = ExportPlaylistData {
@@ -932,26 +1102,30 @@ impl BackendService {
                 message,
             )
         }));
-        Ok((manifest.tracks.len(), without_analysis))
+        Ok((manifest.tracks.len(), analysed, without_analysis))
     }
 
+    /// Remove the tracks whose audio file is gone (`remove_missing_audio_references`):
+    /// eDB `content` rows and their `playlist_content` links, PDB playlist
+    /// entries, track rows and now-unused artwork rows. `missing_paths` are
+    /// the presence scan's missing paths minus history tracks, matched with
+    /// `audio_path_key`. Returns (content rows, playlist links, PDB removal).
     pub(super) fn apply_fix_remove_missing_audio_references(
         &self,
         usb_root: &std::path::Path,
-        missing_track_ids: &HashSet<u32>,
         missing_paths: &[String],
         edb_conn: Option<&mut rusqlite::Connection>,
         warnings: &mut Vec<WarningEntry>,
-    ) -> BackendResult<(usize, usize, usize)> {
-        if missing_track_ids.is_empty() || missing_paths.is_empty() {
-            return Ok((0, 0, 0));
+    ) -> BackendResult<(usize, usize, PdbTrackRemoval)> {
+        if missing_paths.is_empty() {
+            return Ok((0, 0, PdbTrackRemoval::default()));
         }
 
         let mut removed_db_content = 0usize;
         let mut removed_db_playlist_links = 0usize;
-        let missing_path_set = missing_paths
+        let missing_keys = missing_paths
             .iter()
-            .map(|p| normalize_pdb_path_for_edb_lookup(p))
+            .map(|p| audio_path_key(p))
             .collect::<HashSet<_>>();
 
         if let Some(mut handle) =
@@ -982,8 +1156,7 @@ impl BackendService {
                     for row in rows {
                         let (content_id, path) = row?;
                         let Some(path) = path else { continue };
-                        let normalized = normalize_pdb_path_for_edb_lookup(&path);
-                        if missing_path_set.contains(&normalized) {
+                        if missing_keys.contains(&audio_path_key(&path)) {
                             content_ids_to_remove.push(content_id);
                         }
                     }
@@ -1026,26 +1199,20 @@ impl BackendService {
             ));
         }
 
-        let removed_pdb_entries = match remove_track_ids_from_pdb_playlist_entries(
-            usb_root,
-            missing_track_ids,
-        ) {
-            Ok(removed) => removed,
-            Err(err) => {
-                warnings.push(logging::log(
-                        Level::Error,
-                        "usb-repair",
-                        "usb.repair.missing-audio.pdb-update-failed",
-                        format!("repair skipped (missing audio): unable to update PDB playlist entries ({err})"),
-                    ));
-                0
-            }
-        };
+        // Track ids from the PDB as it is now: an earlier fix in this pass
+        // (strict parity) may have rewritten it.
+        let missing_track_ids = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?
+            .tracks
+            .iter()
+            .filter(|t| missing_keys.contains(&audio_path_key(&t.track_file_path)))
+            .map(|t| t.id)
+            .collect::<HashSet<_>>();
+        let removed_pdb = remove_tracks_from_pdb(usb_root, &missing_track_ids).map_err(|err| {
+            BackendError::Internal(format!(
+                "eDB rows removed, but the PDB could not be updated: {err}"
+            ))
+        })?;
 
-        Ok((
-            removed_db_content,
-            removed_db_playlist_links,
-            removed_pdb_entries,
-        ))
+        Ok((removed_db_content, removed_db_playlist_links, removed_pdb))
     }
 }

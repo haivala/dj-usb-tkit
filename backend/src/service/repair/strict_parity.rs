@@ -30,21 +30,10 @@ pub(crate) fn playlist_requires_strict_upgrade(detail: &UsbParityPlaylistDetail)
         || detail.dictionary_id_issue_tracks > 0
         || detail.pdb_duplicate_entries > 0
         || detail.pdb_missing_core_metadata > 0
+        || detail.artwork_mismatch_tracks > 0
+        || detail.rating_colour_mismatch_tracks > 0
         || !detail.playlist_id_match
         || !detail.sort_order_match
-}
-
-pub(super) fn strict_raw_coverage_issue_from_parity_checks(checks: &[DiagCheck]) -> Option<String> {
-    let raw_check = checks
-        .iter()
-        .find(|check| check.label == "USB audio directory raw coverage parity (strict)")?;
-    if matches!(raw_check.status, DiagStatus::Pass) {
-        return None;
-    }
-    Some(format!(
-        "strict raw-count parity drift: {}",
-        raw_check.detail
-    ))
 }
 
 /// Represents a merged track produced during collect-merge-write.

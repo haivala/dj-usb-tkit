@@ -83,7 +83,7 @@ fn match_moved_audio_leaves_ambiguous_pairs_unmatched() {
     assert!(match_moved_audio(&missing, &unindexed).is_empty());
 }
 use crate::edb::ExportDbPlaylist;
-use crate::models::{DiagCheck, DiagStatus, UsbParityPlaylistDetail};
+use crate::models::{DiagStatus, UsbParityPlaylistDetail};
 use crate::pdb_reader::{
     ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistTreeRow, PdbTrackRow,
 };
@@ -113,6 +113,7 @@ fn make_strict_repair_detail(name: &str) -> UsbParityPlaylistDetail {
         edb_missing_core_metadata: 0,
         pdb_missing_core_metadata: 0,
         artwork_mismatch_tracks: 0,
+        rating_colour_mismatch_tracks: 0,
         sample_only_in_pdb: Vec::new(),
         sample_only_in_edb: Vec::new(),
         sample_metadata_mismatches: Vec::new(),
@@ -227,33 +228,6 @@ fn derive_history_sync_payload_uses_named_histories_and_valid_entries() {
     let (history_rows, history_content_rows) = derive_history_sync_payload(&parsed);
     assert_eq!(history_rows, vec![(10, 0, "HISTORY 001".to_string(), 0, 0)]);
     assert_eq!(history_content_rows, vec![(10, 101, 1)]);
-}
-
-#[test]
-fn strict_raw_coverage_issue_wording_uses_raw_count_parity_terms() {
-    let checks = vec![DiagCheck {
-        label: "USB audio directory raw coverage parity (strict)".to_string(),
-        status: DiagStatus::Warn,
-        detail: "extra raw audio files in USB audio directory within warn threshold: +3 file(s) beyond strict indexed set (raw=103, indexed=100, warn<= 5)".to_string(),
-        link: None,
-    }];
-    let issue = strict_raw_coverage_issue_from_parity_checks(&checks)
-        .expect("expected strict raw-coverage issue");
-    assert!(issue.contains("strict raw-count parity drift"));
-    assert!(!issue.to_lowercase().contains("unreferenced"));
-    assert!(!issue.to_lowercase().contains("not indexed"));
-}
-
-#[test]
-fn strict_raw_coverage_issue_absent_when_check_is_pass() {
-    let checks = vec![DiagCheck {
-        label: "USB audio directory raw coverage parity (strict)".to_string(),
-        status: DiagStatus::Pass,
-        detail: "no extra raw audio files in USB audio directory beyond strict indexed set (raw=100, indexed=100)"
-            .to_string(),
-        link: None,
-    }];
-    assert!(strict_raw_coverage_issue_from_parity_checks(&checks).is_none());
 }
 
 fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -1843,4 +1817,62 @@ fn write_sine_wav(path: &Path, duration_ms: u32) {
         out.extend_from_slice(&v.to_le_bytes());
     }
     std::fs::write(path, out).expect("write wav");
+}
+
+fn history_test_track(id: u32, path: &str) -> PdbTrackRow {
+    PdbTrackRow {
+        content_link: None,
+        sample_rate_hz: None,
+        file_size_bytes: None,
+        master_content_id: None,
+        master_db_id: None,
+        id,
+        artist_id: 0,
+        album_id: 0,
+        artwork_id: 0,
+        key_id: 0,
+        genre_id: 0,
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
+        color_id: 0,
+        rating: 0,
+        bitrate_kbps: None,
+        track_number: 0,
+        tempo_x100: 0,
+        release_year: None,
+        bit_depth: None,
+        duration_seconds: None,
+        file_type: None,
+        isrc: None,
+        date_added: None,
+        release_date: None,
+        dj_comment: None,
+        file_name: None,
+        publish_track_info: None,
+        autoload_hotcues: None,
+        title: "Track".to_string(),
+        anlz_path: String::new(),
+        track_file_path: path.to_string(),
+    }
+}
+
+#[test]
+fn missing_audio_history_keys_cover_pdb_history_tracks_only() {
+    let parsed = ParsedPdb {
+        tracks: vec![
+            history_test_track(1, "/Contents/Artist/Played.mp3"),
+            history_test_track(2, "/Contents/Artist/Never Played.mp3"),
+        ],
+        history_entries: vec![PdbHistoryEntryRow {
+            track_id: Some(1),
+            playlist_id: 10,
+            entry_index: 1,
+            source_table: 18,
+        }],
+        ..ParsedPdb::default()
+    };
+    let keys = missing_audio_history_keys(&parsed, None);
+    assert!(keys.contains(&audio_path_key("/Contents/ARTIST/Played.mp3")));
+    assert!(!keys.contains(&audio_path_key("/Contents/Artist/Never Played.mp3")));
 }

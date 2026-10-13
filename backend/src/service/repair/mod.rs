@@ -16,11 +16,11 @@ use crate::edb::{
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    DiagCheck, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
-    RepairFixProposal, RepairUnsupportedItem, RepairUsbDiagnosticsData,
-    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
-    UsbPlayerMenuDivergence, UsbPlayerMenuItem, UsbPlayerMenuItemOrigin, WarningEntry,
+    DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, RepairFixProposal,
+    RepairUnsupportedItem, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
+    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail, UsbPlayerMenuDivergence,
+    UsbPlayerMenuItem, UsbPlayerMenuItemOrigin, WarningEntry,
 };
 use crate::pdb_page;
 use crate::pdb_reader::{ParsedPdb, parse_pdb};
@@ -40,15 +40,15 @@ use super::cues::collapse_anlz_cues;
 use super::export::{APP_CONTENT_LINK_ID, ContentFingerprint, content_fingerprint_key};
 use super::export_helpers::pdb_encoding::ARTIST_SHORT_ASCII_NAME_OFFSET;
 use super::export_helpers::{
-    ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRowData,
-    encode_album_row, encode_artist_row, load_table_columns,
-    remove_track_ids_from_pdb_playlist_entries, replace_export_playlist_row_with_identity,
-    table_exists, usb_relative_path, write_edb_playlist_with_conn, write_pdb,
+    ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRemoval,
+    PdbTrackRowData, encode_album_row, encode_artist_row, load_table_columns,
+    remove_tracks_from_pdb, replace_export_playlist_row_with_identity, table_exists,
+    usb_relative_path, write_edb_playlist_with_conn, write_pdb,
 };
 use super::usb_staging;
 use super::usb_utils::{
-    canonicalize_playlist_name, collect_contents_audio_files, resolve_usb_root,
-    resolve_usb_side_path, sanitize_warning_path, scan_anlz,
+    canonicalize_playlist_name, resolve_usb_root, resolve_usb_side_path, sanitize_warning_path,
+    scan_anlz,
 };
 #[cfg(test)]
 use super::usb_vendor_compat::vendor_pdb_path;
@@ -56,9 +56,9 @@ use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 use crate::scanner::scan_audio_file;
 
 use super::diagnostics::{
-    BpmKeyMismatch, build_meta_key, collect_edb_indexed_paths, contents_path_match_key,
+    BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths,
     detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
-    normalize_path_for_contents_match, normalize_pdb_path_for_edb_lookup, track_identity_key,
+    normalize_pdb_path_for_edb_lookup, scan_audio_presence, track_identity_key,
 };
 
 mod audio_fixes;
@@ -113,6 +113,7 @@ fn fix_always_applied(fix_id: &str) -> bool {
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
 const RELINK_MOVED_AUDIO_FIX_ID: &str = "relink_moved_audio";
 const UNINDEXED_AUDIO_PLAYLIST_FIX_ID: &str = "add_unindexed_audio_playlist";
+const DUPLICATE_AUDIO_COPIES_FIX_ID: &str = "remove_duplicate_audio_copies";
 const ENGINE_LIBRARY_FIX_ID: &str = "keep_engine_library_up_to_date";
 /// USB playlist the unindexed-audio fix collects its files into.
 const UNINDEXED_AUDIO_PLAYLIST_NAME: &str = "Unindexed";
@@ -158,6 +159,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     MISSING_FLAC_SEEK_DATA_FIX_ID,
     RELINK_MOVED_AUDIO_FIX_ID,
     UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
+    DUPLICATE_AUDIO_COPIES_FIX_ID,
     REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID,
     SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
     // Last: it rebuilds from the PDB the fixes above leave behind.

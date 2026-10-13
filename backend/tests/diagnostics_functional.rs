@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
+    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, DiagStatus, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest, RemoveUsbPlaylistRequest,
     RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
     ScanLibraryRequest, SearchTracksRequest, UsbParityPlaylistDetail,
@@ -4299,7 +4299,9 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
         .expect("content row kept");
     assert_eq!(edb_path_after, new_rel);
 
-    // One pass: nothing left to relink, add or remove.
+    // One pass: parity is clean and nothing is left to relink, add or remove.
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(failing.is_empty(), "{failing:#?}");
     let after = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
             usb_root: Some(usb.to_string_lossy().to_string()),
@@ -4367,6 +4369,9 @@ fn repair_removes_missing_and_adds_unrelated_unindexed_audio_in_one_pass() {
         data.applied_fixes
     );
 
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(failing.is_empty(), "{failing:#?}");
+
     let after = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
             usb_root: Some(usb.to_string_lossy().to_string()),
@@ -4385,6 +4390,390 @@ fn repair_removes_missing_and_adds_unrelated_unindexed_audio_in_one_pass() {
         "{:#?}",
         after.proposed_fixes
     );
+}
+
+fn indexed_audio_presence_status(backend: &BackendCommands, usb: &Path) -> DiagStatus {
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity.ok, "parity failed: {parity:?}");
+    parity
+        .data
+        .expect("parity data")
+        .checks
+        .into_iter()
+        .find(|c| c.label == "Indexed audio file presence")
+        .expect("indexed audio file presence check")
+        .status
+}
+
+fn proposed_fix_ids(backend: &BackendCommands, usb: &Path) -> Vec<String> {
+    backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: false,
+            selected_fix_ids: vec![],
+        })
+        .data
+        .expect("preview data")
+        .proposed_fixes
+        .into_iter()
+        .map(|f| f.id)
+        .collect()
+}
+
+/// Puts `<stem>-1.<ext>` next to the exported file: the name export gives a
+/// second file with the same name, so it must not count as indexed just
+/// because it differs from an indexed one only by that suffix.
+fn numbered_sibling(original: &Path) -> PathBuf {
+    let stem = original.file_stem().and_then(|s| s.to_str()).expect("stem");
+    let ext = original.extension().and_then(|s| s.to_str()).expect("ext");
+    original.with_file_name(format!("{stem}-1.{ext}"))
+}
+
+#[test]
+fn repair_deletes_unindexed_copy_of_an_indexed_audio_file() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let original = find_contents_audio_file(&usb);
+    let copy = numbered_sibling(&original);
+    fs::copy(&original, &copy).expect("copy exported audio");
+
+    // Parity reports the copy, and repair offers to delete it rather than
+    // add the same track to the "Unindexed" playlist.
+    assert!(matches!(
+        indexed_audio_presence_status(&backend, &usb),
+        DiagStatus::Warn
+    ));
+    let preview = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: false,
+            selected_fix_ids: vec![],
+        })
+        .data
+        .expect("preview data");
+    let fix = preview
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "remove_duplicate_audio_copies")
+        .unwrap_or_else(|| panic!("{:#?}", preview.proposed_fixes));
+    assert!(fix.destructive);
+    assert_eq!(fix.estimated_deletes, 1);
+    assert_eq!(fix.link.as_deref(), Some("event-log"));
+    assert!(
+        !preview
+            .proposed_fixes
+            .iter()
+            .any(|f| f.id == "add_unindexed_audio_playlist"),
+        "{:#?}",
+        preview.proposed_fixes
+    );
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec![],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m == "Remove Duplicate Audio Copies: deleted 1 file(s)"),
+        "{:#?}",
+        data.applied_fixes
+    );
+    assert!(!copy.exists(), "copy must be deleted");
+    assert!(original.exists(), "indexed file must be kept");
+
+    // One pass: parity is clean and nothing is left to fix.
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(failing.is_empty(), "{failing:#?}");
+    let ids = proposed_fix_ids(&backend, &usb);
+    assert!(
+        !ids.iter().any(|id| matches!(
+            id.as_str(),
+            "remove_duplicate_audio_copies" | "add_unindexed_audio_playlist"
+        )),
+        "{ids:?}"
+    );
+}
+
+#[test]
+fn repair_adds_numbered_unindexed_audio_that_is_not_a_copy() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let original = find_contents_audio_file(&usb);
+    let sibling = numbered_sibling(&original);
+    fs::copy(fixture_audio_path("embedded/track_embedded.mp3"), &sibling)
+        .expect("copy other audio");
+
+    // Parity reports the file and repair offers a fix for it.
+    assert!(matches!(
+        indexed_audio_presence_status(&backend, &usb),
+        DiagStatus::Warn
+    ));
+    let ids = proposed_fix_ids(&backend, &usb);
+    assert!(
+        ids.iter().any(|id| id == "add_unindexed_audio_playlist"),
+        "{ids:?}"
+    );
+    assert!(
+        !ids.iter().any(|id| id == "remove_duplicate_audio_copies"),
+        "{ids:?}"
+    );
+
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+    assert!(
+        sibling.exists(),
+        "a file that is not a copy is never deleted"
+    );
+}
+
+/// Parity report checks that are not Pass, as "label: detail".
+fn failing_parity_checks(backend: &BackendCommands, usb: &Path) -> Vec<String> {
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity.ok, "parity failed: {parity:?}");
+    parity
+        .data
+        .expect("parity data")
+        .checks
+        .into_iter()
+        .filter(|c| !matches!(c.status, DiagStatus::Pass))
+        .map(|c| format!("{}: {}", c.label, c.detail))
+        .collect()
+}
+
+/// Runs every default fix once and asserts the parity report is clean
+/// afterwards: what the report flags, one repair pass resolves.
+fn assert_one_repair_pass_clears_parity(backend: &BackendCommands, usb: &Path) {
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec![],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    let failing = failing_parity_checks(backend, usb);
+    assert!(
+        failing.is_empty(),
+        "parity still flags after one pass: {failing:#?}\napplied: {:#?}",
+        data.applied_fixes
+    );
+}
+
+#[test]
+fn repair_removes_missing_track_from_both_databases_in_one_pass() {
+    // Two tracks so Contents/ still holds audio once one file is deleted
+    // (an empty Contents/ is a databases-only snapshot, see below).
+    let (_root, backend, usb, _target_playlist, _control_playlist) =
+        setup_two_playlist_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let gone = find_contents_audio_file(&usb);
+    let gone_rel = format!(
+        "/{}",
+        gone.strip_prefix(&usb)
+            .expect("under usb")
+            .to_string_lossy()
+            .replace('\\', "/")
+    );
+    fs::remove_file(&gone).expect("delete referenced audio file");
+    assert!(!failing_parity_checks(&backend, &usb).is_empty());
+
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb");
+    assert!(
+        !parsed
+            .tracks
+            .iter()
+            .any(|t| t.track_file_path.eq_ignore_ascii_case(&gone_rel)),
+        "the PDB track row must go too, or parity keeps listing the file"
+    );
+    assert_eq!(parsed.tracks.len(), 1, "the other track is kept");
+}
+
+#[test]
+fn repair_removes_edb_only_content_row_for_missing_file() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
+    let conn = open_edb(&edb_path);
+    conn.execute(
+        "INSERT INTO content (content_id, path, title) VALUES (987654, '/Contents/Gone Artist/Gone.mp3', 'Gone')",
+        [],
+    )
+    .expect("insert eDB-only content row");
+    drop(conn);
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(
+        failing
+            .iter()
+            .any(|c| c.starts_with("Indexed audio file presence")),
+        "{failing:#?}"
+    );
+    assert!(
+        proposed_fix_ids(&backend, &usb)
+            .iter()
+            .any(|id| id == "remove_missing_audio_references")
+    );
+
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+    let remaining: i64 = open_edb(&edb_path)
+        .query_row(
+            "SELECT COUNT(*) FROM content WHERE content_id = 987654",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count content");
+    assert_eq!(remaining, 0);
+}
+
+#[test]
+fn repair_keeps_tracks_in_edb_history_when_their_file_is_missing() {
+    let (_root, backend, usb, _target_playlist, _control_playlist) =
+        setup_two_playlist_strict_parity_fixture();
+    let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
+    let gone = find_contents_audio_file(&usb);
+    let gone_name = gone
+        .file_name()
+        .and_then(|n| n.to_str())
+        .expect("file name")
+        .to_string();
+    let conn = open_edb(&edb_path);
+    let content_id: i64 = conn
+        .query_row(
+            "SELECT content_id FROM content WHERE path LIKE '%' || ?1",
+            [&gone_name],
+            |r| r.get(0),
+        )
+        .expect("content row of the file");
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS history_content(history_id integer, content_id integer, sequenceNo integer);",
+    )
+    .expect("history_content table");
+    conn.execute(
+        "INSERT INTO history_content (history_id, content_id, sequenceNo) VALUES (1, ?1, 1)",
+        [content_id],
+    )
+    .expect("history row");
+    drop(conn);
+    fs::remove_file(&gone).expect("delete referenced audio file");
+
+    let preview = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: false,
+            selected_fix_ids: vec![],
+        })
+        .data
+        .expect("preview data");
+    assert!(
+        !preview
+            .proposed_fixes
+            .iter()
+            .any(|f| f.id == "remove_missing_audio_references"),
+        "{:#?}",
+        preview.proposed_fixes
+    );
+    assert!(
+        preview
+            .unsupported_items
+            .iter()
+            .any(|u| u.issue.contains("in a history playlist")),
+        "{:#?}",
+        preview.unsupported_items
+    );
+}
+
+#[test]
+fn audio_written_twice_by_rekordbox_counts_both_copies_as_indexed() {
+    // rekordbox can leave a track as two files, "Track.mp3" and
+    // "Track-1.mp3", with the PDB row naming one and the eDB row the other.
+    // Both copies are indexed: no unindexed, duplicate or missing finding.
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let original = find_contents_audio_file(&usb);
+    let copy = numbered_sibling(&original);
+    fs::copy(&original, &copy).expect("copy exported audio");
+    let copy_rel = format!(
+        "/{}",
+        copy.strip_prefix(&usb)
+            .expect("under usb")
+            .to_string_lossy()
+            .replace('\\', "/")
+    );
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    conn.execute("UPDATE content SET path = ?1", [&copy_rel])
+        .expect("point eDB at the copy");
+    drop(conn);
+
+    assert!(matches!(
+        indexed_audio_presence_status(&backend, &usb),
+        DiagStatus::Pass
+    ));
+    let ids = proposed_fix_ids(&backend, &usb);
+    assert!(
+        !ids.iter().any(|id| matches!(
+            id.as_str(),
+            "add_unindexed_audio_playlist"
+                | "remove_duplicate_audio_copies"
+                | "remove_missing_audio_references"
+                | "relink_moved_audio"
+        )),
+        "{ids:?}"
+    );
+}
+
+#[test]
+fn repair_resolves_a_rating_or_colour_only_mismatch_in_one_pass() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    conn.execute("UPDATE content SET rating = 3, color_id = 5", [])
+        .expect("set eDB rating and colour");
+    drop(conn);
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(
+        failing
+            .iter()
+            .any(|c| c.starts_with("Rating and colour parity")),
+        "{failing:#?}"
+    );
+    assert!(
+        proposed_fix_ids(&backend, &usb)
+            .iter()
+            .any(|id| id == "upgrade_export_data_to_strict_parity")
+    );
+
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+}
+
+#[test]
+fn repair_resolves_an_artwork_only_mismatch_in_one_pass() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture_with_artwork();
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let artwork_fk = edb_artwork_fk_column(&conn);
+    let (content_id, _image_id, _path) = first_playlist_edb_artwork(&usb, &playlist_name);
+    conn.execute(
+        &format!("UPDATE content SET {artwork_fk} = NULL WHERE content_id = ?1"),
+        [content_id],
+    )
+    .expect("drop eDB artwork link");
+    drop(conn);
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(
+        failing
+            .iter()
+            .any(|c| c.starts_with("Artwork presence parity")),
+        "{failing:#?}"
+    );
+    assert!(
+        proposed_fix_ids(&backend, &usb)
+            .iter()
+            .any(|id| id == "upgrade_export_data_to_strict_parity")
+    );
+
+    assert_one_repair_pass_clears_parity(&backend, &usb);
 }
 
 // ── Remaining repair_usb_diagnostics_with_progress orchestrator branches ──
@@ -4460,7 +4849,7 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
             .iter()
             .any(|m| m.contains("added 1 track(s)")
                 && m.contains("\"Unindexed\"")
-                && m.contains("1 without analysis files")),
+                && m.contains("1 analysed from the audio")),
         "expected the fix to report the added track: applied {:#?} failed {:#?}",
         data.applied_fixes,
         data.failed_fixes
@@ -4504,6 +4893,21 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
             .any(|t| t.track_file_path.ends_with("/99 Unindexed Stray.mp3")),
         "stray file should have a PDB track row"
     );
+
+    // The file had no analysis bundle on the USB; one is generated, so the
+    // track is complete and parity is clean after this one pass.
+    let track = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path.ends_with("/99 Unindexed Stray.mp3"))
+        .expect("track row");
+    assert!(
+        usb.join(track.anlz_path.trim_start_matches('/')).is_file(),
+        "analysis bundle written: {}",
+        track.anlz_path
+    );
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(failing.is_empty(), "{failing:#?}");
 
     // One pass is enough: a fresh preview no longer sees unindexed audio.
     let after = backend

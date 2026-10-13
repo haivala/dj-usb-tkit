@@ -289,34 +289,75 @@ pub fn remove_playlist_and_tracks_from_pdb(
     })
 }
 
-pub fn remove_track_ids_from_pdb_playlist_entries(
+/// What `remove_tracks_from_pdb` removed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PdbTrackRemoval {
+    pub playlist_entries: usize,
+    pub track_rows: usize,
+    pub artwork_rows: usize,
+}
+
+/// Remove tracks from the staged PDB in place: their playlist entries
+/// (`tt=8`), their track rows (`tt=0`) and the artwork rows (`tt=13`) no
+/// remaining track uses. Same tombstone path as the mirror-export cleanup
+/// (`remove_rows_inplace` + `rebuild_sentinel_btrees_inplace`): row-presence
+/// bits are cleared, page layout and table chains are untouched. History
+/// entries are not touched; callers keep history tracks out of `track_ids`.
+pub fn remove_tracks_from_pdb(
     usb_root: &Path,
-    track_ids_to_remove: &HashSet<u32>,
-) -> BackendResult<usize> {
-    use crate::pdb_writer::{extract_playlist_entry_track_id, remove_rows_inplace};
+    track_ids: &HashSet<u32>,
+) -> BackendResult<PdbTrackRemoval> {
+    use crate::pdb_writer::{
+        extract_artwork_id, extract_playlist_entry_track_id, extract_track_id,
+        rebuild_sentinel_btrees_inplace, remove_rows_inplace,
+    };
 
-    if track_ids_to_remove.is_empty() {
-        return Ok(0);
+    let mut result = PdbTrackRemoval::default();
+    if track_ids.is_empty() {
+        return Ok(result);
     }
-
     let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     if !pdb_path.is_file() {
-        return Ok(0);
+        return Ok(result);
     }
+    let parsed = parse_pdb(&pdb_path)?;
+    let artwork_of = |keep: bool| {
+        parsed
+            .tracks
+            .iter()
+            .filter(|t| track_ids.contains(&t.id) != keep && t.artwork_id != 0)
+            .map(|t| t.artwork_id)
+            .collect::<HashSet<u32>>()
+    };
+    let exclusive_artwork_ids = artwork_of(false)
+        .difference(&artwork_of(true))
+        .copied()
+        .collect::<HashSet<_>>();
 
     let mut pdb_bytes = std::fs::read(&pdb_path)?;
-    let removed = remove_rows_inplace(
+    result.playlist_entries = remove_rows_inplace(
         &mut pdb_bytes,
         8,
-        track_ids_to_remove,
+        track_ids,
         extract_playlist_entry_track_id,
     );
-    if removed == 0 {
-        return Ok(0);
+    result.track_rows = remove_rows_inplace(&mut pdb_bytes, 0, track_ids, extract_track_id);
+    if !exclusive_artwork_ids.is_empty() {
+        result.artwork_rows = remove_rows_inplace(
+            &mut pdb_bytes,
+            13,
+            &exclusive_artwork_ids,
+            extract_artwork_id,
+        );
     }
-
+    if result == PdbTrackRemoval::default() {
+        return Ok(result);
+    }
+    if result.track_rows > 0 || result.artwork_rows > 0 {
+        rebuild_sentinel_btrees_inplace(&mut pdb_bytes);
+    }
     std::fs::write(&pdb_path, &pdb_bytes)?;
-    Ok(removed)
+    Ok(result)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

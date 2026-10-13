@@ -42,9 +42,9 @@ struct DetectedRepairs {
     pdb_misaligned_album_ids: Vec<u32>,
     pdb_misaligned_artist_ids: Vec<u32>,
     pdb_header_compatibility_repair: Option<PdbHeaderCompatibilityRepair>,
-    missing_audio_track_ids: HashSet<u32>,
     missing_audio_paths: Vec<String>,
     unindexed_audio_files: Vec<String>,
+    duplicate_audio_copies: Vec<DuplicateAudioCopy>,
     moved_audio_relinks: Vec<MovedAudioRelink>,
     sync_edb_history_supported: bool,
     sync_edb_history_needed: bool,
@@ -148,12 +148,12 @@ impl BackendService {
         let mut warnings = diagnostics.warnings.clone();
         warnings.append(&mut edb_open_warnings);
         let mut estimated_file_writes = 0usize;
-        let estimated_file_deletes = 0usize;
-        let mut missing_audio_track_ids = HashSet::<u32>::new();
+        let mut estimated_file_deletes = 0usize;
         let mut missing_audio_paths = Vec::<String>::new();
         // The same files as on-disk USB-relative paths (`/Contents/...`), not
         // match keys -- what the unindexed-audio fix indexes.
         let mut unindexed_audio_files = Vec::<String>::new();
+        let mut duplicate_audio_copies = Vec::<DuplicateAudioCopy>::new();
         let mut moved_audio_relinks = Vec::<MovedAudioRelink>::new();
         let mut sync_edb_history_supported = false;
         let mut sync_edb_history_needed = false;
@@ -639,179 +639,204 @@ impl BackendService {
                 ),
             ));
         }
-        let contents_root = usb_root.join("Contents");
-        let contents_present = contents_root.is_dir();
-        let all_contents_audio = if contents_present {
-            collect_contents_audio_files(&usb_root)
-        } else {
-            vec![]
-        };
-        let any_audio_on_usb = !all_contents_audio.is_empty();
-
+        // Missing and unindexed audio, by the same rule the parity report's
+        // "Indexed audio file presence" check uses (`scan_audio_presence`), so
+        // every file it lists gets one of the fixes below and one pass of them
+        // leaves nothing it still lists.
+        let edb_audio_paths = edb_conn
+            .as_ref()
+            .map(|conn| collect_edb_audio_paths(conn, &mut warnings))
+            .unwrap_or_default();
         if let Some(parsed) = parsed_pdb.as_ref() {
-            if any_audio_on_usb {
-                let referenced_track_ids = parsed
-                    .playlist_entries
-                    .iter()
-                    .map(|e| e.track_id)
-                    .collect::<HashSet<_>>();
-                for track in &parsed.tracks {
-                    if !referenced_track_ids.contains(&track.id) {
-                        continue;
-                    }
-                    let exists = resolve_usb_side_path(&usb_root, &track.track_file_path)
-                        .is_some_and(|path| path.is_file());
-                    if exists {
-                        continue;
-                    }
-                    missing_audio_track_ids.insert(track.id);
-                    missing_audio_paths
-                        .push(normalize_pdb_path_for_edb_lookup(&track.track_file_path));
-                }
-            } else {
+            let presence = scan_audio_presence(&usb_root, parsed, &edb_audio_paths);
+            if presence.indexed_on_usb.is_empty() && presence.unindexed.is_empty() {
+                // No audio under Contents/ at all: a databases-only snapshot,
+                // where "missing" can't be told apart from "never copied".
                 warnings.push(logging::log(
                     Level::Info,
                     "usb-diagnostics",
                     "usb.diagnostics.missing-audio-scan-skipped",
                     "missing-audio scan skipped: Contents directory is absent or empty (DB-only snapshot)",
                 ));
-            }
-        }
-        missing_audio_paths.sort();
-        missing_audio_paths.dedup();
-        if !missing_audio_track_ids.is_empty() {
-            detected_issues.push(format!(
-                "{} track reference(s) point to missing audio files under Contents",
-                missing_audio_track_ids.len()
-            ));
-        }
-
-        // Detect audio files present on USB that are not indexed in either PDB or eDB content rows.
-        if let Some(parsed) = parsed_pdb.as_ref()
-            && any_audio_on_usb
-        {
-            let mut indexed_paths = parsed
-                .tracks
-                .iter()
-                .map(|t| normalize_path_for_contents_match(&t.track_file_path))
-                .filter(|p| !p.is_empty())
-                .collect::<HashSet<_>>();
-            let edb_indexed_paths = edb_conn
-                .as_ref()
-                .map(|conn| collect_edb_indexed_paths(conn, &mut warnings))
-                .unwrap_or_default();
-            indexed_paths.extend(edb_indexed_paths);
-            // Case-insensitive containment: FAT32/exFAT resolves paths case-insensitively, so
-            // a folder's on-disk casing can drift from the currently-recorded artist/album
-            // casing without the file actually being missing or unindexed.
-            let indexed_paths_ci: HashSet<String> = indexed_paths
-                .iter()
-                .map(|p| contents_path_match_key(p))
-                .collect();
-            unindexed_audio_files = all_contents_audio
-                .iter()
-                .filter(|p| {
-                    let key = normalize_path_for_contents_match(p);
-                    !key.is_empty() && !indexed_paths_ci.contains(&contents_path_match_key(&key))
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            unindexed_audio_files.sort();
-            let mut unindexed_audio_paths = unindexed_audio_files
-                .iter()
-                .map(|p| normalize_path_for_contents_match(p))
-                .collect::<Vec<_>>();
-            unindexed_audio_paths.sort();
-            unindexed_audio_paths.dedup();
-
-            // A missing reference and an unindexed file are often the same
-            // track under a new path (renamed file, moved or re-cased
-            // folder). Pair them first so the track is relinked -- keeping
-            // its playlists, cues and history -- rather than removed from
-            // its playlists and re-added to the "Unindexed" one. The other
-            // two fixes then only see what stayed unmatched.
-            if !missing_audio_track_ids.is_empty() && !unindexed_audio_files.is_empty() {
-                let missing = parsed
+                if !presence.missing.is_empty() {
+                    unsupported_items.push(RepairUnsupportedItem {
+                        issue: format!(
+                            "{} indexed audio file(s) missing: the USB has no audio under Contents",
+                            presence.missing.len()
+                        ),
+                        reason: "Looks like a copy of the databases without the music. Copy the audio files back instead of removing every track.".to_string(),
+                        link: Some("event-log".to_string()),
+                    });
+                }
+            } else {
+                let missing_keys = presence.missing_keys();
+                let missing_audio_track_ids = parsed
                     .tracks
                     .iter()
-                    .filter(|t| missing_audio_track_ids.contains(&t.id))
-                    .map(|t| {
-                        let artist = parsed
-                            .artists
-                            .get(&t.artist_id)
-                            .map(String::as_str)
-                            .unwrap_or("");
-                        (
-                            t.id,
-                            t.track_file_path.clone(),
-                            content_fingerprint_key(
-                                t.file_size_bytes.map(i64::from),
-                                &t.title,
-                                artist,
-                            ),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let unindexed = unindexed_audio_files
-                    .iter()
-                    .map(|rel| {
-                        let fingerprint = resolve_usb_side_path(&usb_root, rel)
-                            .and_then(|abs| scan_audio_file(&abs).ok())
-                            .and_then(|t| {
-                                content_fingerprint_key(t.file_size_bytes, &t.title, &t.artist)
-                            });
-                        (rel.clone(), fingerprint)
-                    })
-                    .collect::<Vec<_>>();
-                moved_audio_relinks = match_moved_audio(&missing, &unindexed);
-            }
-            let relinked_files = moved_audio_relinks
-                .iter()
-                .map(|r| r.new_path.as_str())
-                .collect::<HashSet<_>>();
-            unindexed_audio_files.retain(|p| !relinked_files.contains(p.as_str()));
+                    .filter(|t| missing_keys.contains(&audio_path_key(&t.track_file_path)))
+                    .map(|t| t.id)
+                    .collect::<HashSet<u32>>();
+                missing_audio_paths = presence.missing.clone();
+                unindexed_audio_files = presence.unindexed.clone();
 
-            if !unindexed_audio_paths.is_empty() {
-                detected_issues.push(format!(
-                        "{} audio file(s) exist under Contents but are missing from the canonical-path indexed set (PDB/eDB)",
-                        unindexed_audio_paths.len()
-                    ));
-            }
-            if !unindexed_audio_files.is_empty() {
-                proposed_fixes.push(RepairFixProposal {
-                    estimated_writes: 2,
-                    link: Some("event-log".to_string()),
-                    ..fix_proposal(
-                        UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
-                        "Add Unindexed Audio to a Playlist",
-                        format!(
-                            "{} audio file(s) are on the USB but in no playlist (e.g. after restoring the databases from a backup). Adds them to a USB playlist \"{UNINDEXED_AUDIO_PLAYLIST_NAME}\", reusing their analysis files; nothing is copied or deleted. See Event Log for the file list.",
-                            unindexed_audio_files.len()
+                // A copy of an indexed file sitting next to it is not a new
+                // track: offer to delete it rather than add the same track to
+                // a playlist a second time. Unindexed files are in no
+                // playlist, history included, so nothing referenced is deleted.
+                let indexed_on_usb = presence.indexed_on_usb.iter().collect::<Vec<_>>();
+                duplicate_audio_copies =
+                    find_duplicate_audio_copies(&usb_root, &unindexed_audio_files, &indexed_on_usb);
+                let copies = duplicate_audio_copies
+                    .iter()
+                    .map(|c| c.copy_path.as_str())
+                    .collect::<HashSet<_>>();
+                unindexed_audio_files.retain(|p| !copies.contains(p.as_str()));
+
+                // A missing reference and an unindexed file are often the same
+                // track under a new path (renamed file, moved folder). Pair
+                // them first so the track is relinked -- keeping its
+                // playlists, cues and history -- rather than removed from its
+                // playlists and re-added to the "Unindexed" one. The other two
+                // fixes then only see what stayed unmatched.
+                if !missing_audio_track_ids.is_empty() && !unindexed_audio_files.is_empty() {
+                    let missing = parsed
+                        .tracks
+                        .iter()
+                        .filter(|t| missing_audio_track_ids.contains(&t.id))
+                        .map(|t| {
+                            let artist = parsed
+                                .artists
+                                .get(&t.artist_id)
+                                .map(String::as_str)
+                                .unwrap_or("");
+                            (
+                                t.id,
+                                t.track_file_path.clone(),
+                                content_fingerprint_key(
+                                    t.file_size_bytes.map(i64::from),
+                                    &t.title,
+                                    artist,
+                                ),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let unindexed = unindexed_audio_files
+                        .iter()
+                        .map(|rel| {
+                            let fingerprint = resolve_usb_side_path(&usb_root, rel)
+                                .and_then(|abs| scan_audio_file(&abs).ok())
+                                .and_then(|t| {
+                                    content_fingerprint_key(t.file_size_bytes, &t.title, &t.artist)
+                                });
+                            (rel.clone(), fingerprint)
+                        })
+                        .collect::<Vec<_>>();
+                    moved_audio_relinks = match_moved_audio(&missing, &unindexed);
+                }
+                let relinked_files = moved_audio_relinks
+                    .iter()
+                    .map(|r| r.new_path.as_str())
+                    .collect::<HashSet<_>>();
+                unindexed_audio_files.retain(|p| !relinked_files.contains(p.as_str()));
+                let relinked_keys = moved_audio_relinks
+                    .iter()
+                    .map(|r| audio_path_key(&r.old_path))
+                    .collect::<HashSet<_>>();
+                missing_audio_paths.retain(|p| !relinked_keys.contains(&audio_path_key(p)));
+
+                // A track in a history playlist is never removed, even when
+                // its file is gone: the history is the record of what was
+                // played. Listed for the user instead.
+                let history_keys = missing_audio_history_keys(parsed, edb_conn.as_ref());
+                let (in_history, removable): (Vec<String>, Vec<String>) = missing_audio_paths
+                    .drain(..)
+                    .partition(|p| history_keys.contains(&audio_path_key(p)));
+                missing_audio_paths = removable;
+                if !in_history.is_empty() {
+                    unsupported_items.push(RepairUnsupportedItem {
+                        issue: format!(
+                            "{} track(s) in a history playlist point to missing audio files",
+                            in_history.len()
                         ),
-                    )
-                });
-            }
-            if !unindexed_audio_paths.is_empty() {
-                warnings.push(logging::log(
-                    Level::Warn,
-                    "usb-diagnostics",
-                    "usb.diagnostics.unindexed-audio-summary",
-                    format!(
-                        "canonical-path unindexed audio files detected: {}",
-                        unindexed_audio_paths.len()
-                    ),
-                ));
-                for path in &unindexed_audio_paths {
-                    warnings.push(logging::log(
-                        Level::Warn,
-                        "usb-diagnostics",
-                        "usb.diagnostics.unindexed-audio",
-                        format!("unindexed audio file: {path}"),
-                    ));
+                        reason: "Tracks in a history playlist are not removed. Copy the files back to the USB (Event Log lists them).".to_string(),
+                        link: Some("event-log".to_string()),
+                    });
+                    for path in &in_history {
+                        warnings.push(logging::log(
+                            Level::Warn,
+                            "usb-diagnostics",
+                            "usb.diagnostics.missing-history-audio",
+                            format!("history track's audio file missing: {path}"),
+                        ));
+                    }
                 }
             }
         }
 
+        if !missing_audio_paths.is_empty() {
+            detected_issues.push(format!(
+                "{} track reference(s) point to missing audio files under Contents",
+                missing_audio_paths.len()
+            ));
+        }
+        if !duplicate_audio_copies.is_empty() {
+            detected_issues.push(format!(
+                "{} audio file(s) under Contents are unindexed copies of an indexed file in the same folder",
+                duplicate_audio_copies.len()
+            ));
+            estimated_file_deletes += duplicate_audio_copies.len();
+            proposed_fixes.push(RepairFixProposal {
+                destructive: true,
+                estimated_writes: 0,
+                estimated_deletes: duplicate_audio_copies.len(),
+                link: Some("event-log".to_string()),
+                ..fix_proposal(
+                    DUPLICATE_AUDIO_COPIES_FIX_ID,
+                    "Remove Duplicate Audio Copies",
+                    format!(
+                        "{} audio file(s) are on the USB but in no playlist, and each is a byte-for-byte copy of a track in the same folder. Deletes the copies; the tracks keep their playlists, cues and analysis. See Event Log for the file list.",
+                        duplicate_audio_copies.len()
+                    ),
+                )
+            });
+            for copy in &duplicate_audio_copies {
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.duplicate-audio",
+                    format!(
+                        "duplicate audio file: {} (copy of {})",
+                        copy.copy_path, copy.original_path
+                    ),
+                ));
+            }
+        }
+        if !unindexed_audio_files.is_empty() {
+            detected_issues.push(format!(
+                "{} audio file(s) exist under Contents but are missing from the canonical-path indexed set (PDB/eDB)",
+                unindexed_audio_files.len()
+            ));
+            proposed_fixes.push(RepairFixProposal {
+                estimated_writes: 2,
+                link: Some("event-log".to_string()),
+                ..fix_proposal(
+                    UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
+                    "Add Unindexed Audio to a Playlist",
+                    format!(
+                        "{} audio file(s) are on the USB but in no playlist (e.g. after restoring the databases from a backup). Adds them to a USB playlist \"{UNINDEXED_AUDIO_PLAYLIST_NAME}\", reusing their analysis files; nothing is copied or deleted. See Event Log for the file list.",
+                        unindexed_audio_files.len()
+                    ),
+                )
+            });
+            for path in &unindexed_audio_files {
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.unindexed-audio",
+                    format!("unindexed audio file: {path}"),
+                ));
+            }
+        }
         if !moved_audio_relinks.is_empty() {
             proposed_fixes.push(RepairFixProposal {
                 estimated_writes: 2,
@@ -833,31 +858,21 @@ impl BackendService {
                     format!("moved audio: {} -> {}", relink.old_path, relink.new_path),
                 ));
             }
-            let relinked_ids = moved_audio_relinks
-                .iter()
-                .map(|r| r.track_id)
-                .collect::<HashSet<_>>();
-            let relinked_old_paths = moved_audio_relinks
-                .iter()
-                .map(|r| normalize_pdb_path_for_edb_lookup(&r.old_path))
-                .collect::<HashSet<_>>();
-            missing_audio_track_ids.retain(|id| !relinked_ids.contains(id));
-            missing_audio_paths.retain(|p| !relinked_old_paths.contains(p));
         }
-
         // Safe without a manual review: every missing reference that had a
         // candidate file on the USB was paired above and is relinked instead.
-        if !missing_audio_track_ids.is_empty() {
+        if !missing_audio_paths.is_empty() {
             proposed_fixes.push(RepairFixProposal {
                 destructive: true,
                 estimated_writes: 0,
-                estimated_deletes: missing_audio_track_ids.len(),
+                estimated_deletes: missing_audio_paths.len(),
+                link: Some("event-log".to_string()),
                 ..fix_proposal(
                     REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID,
                     "Remove Missing Audio References",
                     format!(
-                        "Remove playlist/content references for {} track(s) whose audio files no longer exist on the USB.",
-                        missing_audio_track_ids.len()
+                        "Remove the tracks for {} audio file(s) that no longer exist on the USB from both databases (track and content rows, playlist entries). Tracks in a history playlist are kept. See Event Log for the file list.",
+                        missing_audio_paths.len()
                     ),
                 )
             });
@@ -920,17 +935,6 @@ impl BackendService {
         let mut pdb_duplicate_entry_count: usize = 0;
         match parity {
             Ok(report) => {
-                if let Some(raw_issue) =
-                    strict_raw_coverage_issue_from_parity_checks(&report.checks)
-                {
-                    detected_issues.push(raw_issue.clone());
-                    warnings.push(logging::log(
-                        Level::Warn,
-                        "usb-diagnostics",
-                        "usb.diagnostics.strict-raw-coverage",
-                        raw_issue,
-                    ));
-                }
                 let strict_count = report
                     .playlist_details
                     .iter()
@@ -1053,9 +1057,9 @@ impl BackendService {
             pdb_misaligned_album_ids,
             pdb_misaligned_artist_ids,
             pdb_header_compatibility_repair,
-            missing_audio_track_ids,
             missing_audio_paths,
             unindexed_audio_files,
+            duplicate_audio_copies,
             moved_audio_relinks,
             sync_edb_history_supported,
             sync_edb_history_needed,
@@ -1200,9 +1204,9 @@ impl BackendService {
             pdb_misaligned_album_ids,
             pdb_misaligned_artist_ids,
             pdb_header_compatibility_repair,
-            missing_audio_track_ids,
             missing_audio_paths,
             unindexed_audio_files,
+            duplicate_audio_copies,
             moved_audio_relinks,
             sync_edb_history_supported,
             sync_edb_history_needed,
@@ -1580,32 +1584,49 @@ impl BackendService {
                     fix_edb_conn.as_mut(),
                     warnings,
                 )
-                .map(|(added, without_analysis)| {
-                    let note = if without_analysis > 0 {
-                        format!(" ({without_analysis} without analysis files)")
-                    } else {
+                .map(|(added, analysed, without_analysis)| {
+                    let mut notes = Vec::new();
+                    if analysed > 0 {
+                        notes.push(format!("{analysed} analysed from the audio"));
+                    }
+                    if without_analysis > 0 {
+                        notes.push(format!("{without_analysis} without analysis files"));
+                    }
+                    let note = if notes.is_empty() {
                         String::new()
+                    } else {
+                        format!(" ({})", notes.join(", "))
                     };
                     format!("added {added} track(s) to \"{UNINDEXED_AUDIO_PLAYLIST_NAME}\"{note}")
                 })
             },
         );
 
+        outcomes.record(
+            "Remove Duplicate Audio Copies",
+            selected.contains(DUPLICATE_AUDIO_COPIES_FIX_ID),
+            !duplicate_audio_copies.is_empty(),
+            || {
+                apply_remove_duplicate_audio_copies(usb_root, &duplicate_audio_copies, warnings)
+                    .map(|deleted| format!("deleted {deleted} file(s)"))
+            },
+        );
+
         if selected.contains(REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID) {
             match self.apply_fix_remove_missing_audio_references(
                 usb_root,
-                &missing_audio_track_ids,
                 &missing_audio_paths,
                 fix_edb_conn.as_mut(),
                 warnings,
             ) {
-                Ok((removed_db_content, removed_db_playlist_links, removed_pdb_entries)) => {
+                Ok((removed_db_content, removed_db_playlist_links, removed_pdb)) => {
                     if removed_db_content > 0
                         || removed_db_playlist_links > 0
-                        || removed_pdb_entries > 0
+                        || removed_pdb != PdbTrackRemoval::default()
                     {
                         outcomes.applied.push(format!(
-                                "Remove Missing Audio References: removed content rows {removed_db_content}, playlist_content rows {removed_db_playlist_links}, PDB playlist entries {removed_pdb_entries}"
+                                "Remove Missing Audio References: removed content rows {removed_db_content}, playlist_content rows {removed_db_playlist_links}, PDB playlist entries {}, PDB track rows {}",
+                                removed_pdb.playlist_entries, removed_pdb.track_rows
                             ));
                     } else {
                         outcomes
@@ -1617,7 +1638,7 @@ impl BackendService {
                     .failed
                     .push(format!("Remove Missing Audio References failed: {err}")),
             }
-        } else if !missing_audio_track_ids.is_empty() {
+        } else if !missing_audio_paths.is_empty() {
             outcomes
                 .skipped
                 .push("Remove Missing Audio References: not selected".to_string());

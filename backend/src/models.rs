@@ -1874,6 +1874,9 @@ pub struct UsbParityPlaylistDetail {
     pub pdb_missing_core_metadata: usize,
     #[serde(default)]
     pub artwork_mismatch_tracks: usize,
+    /// Tracks whose star rating or colour differs between the PDB and the eDB.
+    #[serde(default)]
+    pub rating_colour_mismatch_tracks: usize,
     #[serde(default)]
     pub sample_only_in_pdb: Vec<String>,
     #[serde(default)]

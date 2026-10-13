@@ -163,13 +163,19 @@ impl BackendService {
                 parsed
                     .tracks
                     .iter()
-                    .map(|t| normalize_path_for_contents_match(&t.track_file_path))
+                    .map(|t| audio_path_key(&t.track_file_path))
                     .filter(|p| !p.is_empty())
                     .collect::<HashSet<_>>()
             })
             .unwrap_or_default();
         let edb_indexed_paths = conn
-            .map(|c| collect_edb_indexed_paths(c, &mut raw_warnings))
+            .map(|c| {
+                collect_edb_audio_paths(c, &mut raw_warnings)
+                    .iter()
+                    .map(|p| audio_path_key(p))
+                    .filter(|p| !p.is_empty())
+                    .collect::<HashSet<_>>()
+            })
             .unwrap_or_default();
 
         // Identify tracks that exist in PDB history playlists but not in any regular playlist.
@@ -193,7 +199,7 @@ impl BackendService {
                 if !history_only_ids.contains(&track.id) {
                     continue;
                 }
-                let norm = normalize_path_for_contents_match(&track.track_file_path);
+                let norm = normalize_path_for_strict_presence_match(&track.track_file_path);
                 if norm.is_empty() {
                     continue;
                 }
@@ -214,7 +220,7 @@ impl BackendService {
                     "usb.diagnostics.history-only",
                     format!("history-only track: {norm} ({pl_str})"),
                 ));
-                out.insert(norm);
+                out.insert(audio_path_key(&norm));
             }
             out
         } else {
@@ -627,30 +633,9 @@ impl BackendService {
         note_stage("read eDB", &mut raw_warnings);
 
         on_progress(58, 100, "USB: Checking indexed audio file presence");
-        let actual_files: HashSet<String> = collect_contents_audio_files(&usb_root)
-            .into_iter()
-            .map(|p| normalize_path_for_strict_presence_match(&p))
-            .filter(|p| !p.is_empty())
-            .collect();
-        let indexed_paths = collect_strict_indexed_paths(parsed, &edb_playlists, conn);
-        // Case-insensitive containment: FAT32/exFAT resolves paths case-insensitively, and a
-        // folder's on-disk casing can drift from the currently-recorded artist/album casing
-        // without the file actually being missing or unindexed. See `contents_path_match_key`.
-        let actual_files_ci: HashSet<String> = actual_files
-            .iter()
-            .map(|p| contents_path_match_key(p))
-            .collect();
-        let indexed_paths_ci: HashSet<String> = indexed_paths
-            .iter()
-            .map(|p| contents_path_match_key(p))
-            .collect();
-        let mut missing_paths: Vec<&String> = indexed_paths
-            .iter()
-            .filter(|p| !actual_files_ci.contains(&contents_path_match_key(p)))
-            .collect();
-        missing_paths.sort();
-        let missing_count = missing_paths.len();
-        for path in &missing_paths {
+        let edb_audio_paths = collect_edb_audio_paths(conn, &mut raw_warnings);
+        let presence = scan_audio_presence(&usb_root, parsed, &edb_audio_paths);
+        for path in &presence.missing {
             raw_warnings.push(logging::log(
                 Level::Warn,
                 "usb-diagnostics",
@@ -658,14 +643,7 @@ impl BackendService {
                 format!("indexed audio file missing from USB: {path}"),
             ));
         }
-        let mut extra_paths: Vec<String> = actual_files
-            .iter()
-            .filter(|p| !indexed_paths_ci.contains(&contents_path_match_key(p)))
-            .cloned()
-            .collect();
-        extra_paths.sort();
-        let extra_count = extra_paths.len();
-        for path in &extra_paths {
+        for path in &presence.unindexed {
             raw_warnings.push(logging::log(
                 Level::Warn,
                 "usb-diagnostics",
@@ -673,8 +651,11 @@ impl BackendService {
                 format!("unindexed audio file: {path}"),
             ));
         }
-        let strict_raw_coverage =
-            evaluate_strict_raw_coverage_parity(missing_count, extra_count, indexed_paths.len());
+        let strict_raw_coverage = evaluate_strict_raw_coverage_parity(
+            presence.missing.len(),
+            presence.unindexed.len(),
+            presence.indexed_count,
+        );
         note_stage("strict raw coverage check", &mut raw_warnings);
 
         on_progress(70, 100, "USB: Comparing playlist sources");

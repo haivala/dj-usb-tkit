@@ -78,7 +78,7 @@ merging and rewriting both databases to match — see "Repair Flow" below.
 | --- | --- |
 | PDB integrity | `export.pdb` exists, parses, has expected header/page state, and has parseable playlists/history |
 | eDB access | encrypted DB can be opened, required tables can be read, and history counts can be inspected |
-| Contents integrity | PDB and eDB indexed media-path sets agree at DB level |
+| Contents integrity | PDB and eDB indexed media-path sets agree at DB level, matched by the same path key as the parity report's raw audio coverage |
 | Analysis integrity | PDB/eDB analysis-path references exist in database rows |
 | Beat grid format (under Analysis integrity) | Always shown. Warns about tracks whose latest export on the stick was written by an app version before 0.3.7 (an export-log record without `appVersion`) and whose `.DAT` still has the old `PQTZ` header. Only those tracks' `.DAT` files are read, and only their first 4 KB. Passes with "no tracks on this USB were exported by this app" when the stick has no export log. When the log can't be read, every track's `.DAT` is checked (first 4 KB each) instead. Points to `fix_beat_grid_header` or a re-export |
 | Playlist resolution | playlist rows resolve to tracks across PDB and eDB |
@@ -100,8 +100,12 @@ run an explicit ANLZ scan when looking for empty or malformed analysis bundles.
 | Paths | media path and analysis path parity |
 | Artwork | artwork presence on both sides |
 | PDB dictionaries | artist, album, key, and artwork ids resolve when linked metadata exists |
-| Raw audio coverage | indexed files under `Contents/` exist and extra audio files are reported |
-| Rating and colour | a playlist track's star rating and colour match between the eDB and its PDB row (bytes 89/88). Minor: a mismatch warns in the technical details only and doesn't change the overall status. "Upgrade Export Data To Strict Parity" carries the eDB's values into the PDB |
+| Raw audio coverage | "Indexed audio file presence": every path a PDB track row or eDB `content` row holds exists under `Contents/`, and every audio file there is held by one of them. Paths match exactly except for a trailing space before the extension and letter case (FAT32/exFAT); a `-1`/`-2` suffix makes a different file, since rekordbox can write a track twice as `Track.mp3` and `Track-1.mp3`. The repair's audio fixes use the same scan |
+| Rating and colour | a playlist track's star rating and colour match between the eDB and its PDB row (bytes 89/88). Minor: a mismatch warns in the technical details only and doesn't change the overall status. The playlist is counted for "Upgrade Export Data To Strict Parity", which carries the eDB's values into the PDB |
+
+Every finding of the parity report has a repair or an entry under
+"Unsupported and Manual Cases", and one pass of the default fixes leaves the
+report clean.
 
 Strict parity can match tracks by normalized media path, analysis path, metadata
 fallback, or id fallback depending on which data is available.
@@ -142,7 +146,7 @@ The current code can propose these repair IDs:
 
 | Repair ID | Applies to | What it does |
 | --- | --- | --- |
-| `upgrade_export_data_to_strict_parity` | PDB and eDB playlist parity failures | Merges playlists from both databases, preserves membership from both sides, rewrites PDB and eDB through the export writers, removes stale duplicate PDB playlist-entry rows, and syncs eDB `sequenceNo` from PDB `t07.sort_order` |
+| `upgrade_export_data_to_strict_parity` | PDB and eDB playlist parity failures, including playlists whose only difference is artwork presence or a track's rating/colour | Merges playlists from both databases, preserves membership from both sides, rewrites PDB and eDB through the export writers, removes stale duplicate PDB playlist-entry rows, and syncs eDB `sequenceNo` from PDB `t07.sort_order` |
 | `fix_empty_analysis_files` | empty USB analysis files with resolvable source audio | Regenerates `DAT/EXT/2EX` bundles for the affected analysis directory, baking in the track's known PDB tempo/duration (the source file's own length when the PDB has none; a track with no known length is reported as failed). With no known tempo the bundle gets no beat grid |
 | `fix_bpm_key_mismatch` | tracks whose eDB `content.bpmx100` or key differs from the PDB `tempo_x100` / key, or whose ANLZ beat-grid tempo (`.DAT`/`.EXT`) differs from the PDB tempo. The automatic diagnosis shows only the database part, as the "BPM/key consistency" check under Analysis Files; the ANLZ files are read only by the repair preview/apply | Rebuilds `PQTZ`/`PQT2` from the PDB tempo and length (the audio file's own length when the PDB has none; with neither, the grid is left alone and a warning names the track) with `apply_analysis_edits_to_anlz` (keeping the bundle's first beat, cues, waveforms and any rekordbox `PSSI`), and sets eDB `bpmx100` and `key_id` from the PDB (key names match sharp/flat-insensitively, as on export). Mismatches are re-detected at apply time, so one pass leaves nothing behind |
 | `fix_beat_grid_header` | Bundles under `USBANLZ` whose beat grid is in the pre-0.3.7 app format: a `.DAT` `PQTZ` header with `00000008 00000000` where rekordbox writes `00000000 00080000`, or an `.EXT` `PQT2` whose checksum doesn't match the `PQTZ` beats. Found on disk, not through the PDB; rekordbox bundles never match | Rebuilds `PQTZ` and `PQT2` in rekordbox's format from the grid the `.DAT` already holds (beat times stay within 1 ms), keeping every other chunk byte for byte (`docs/WAVEFORMS.md`, "Beat-grid layout"). A grid that isn't one constant tempo is skipped with a `usb.repair.beat-grid.skipped` warning. Re-detected at apply time |
@@ -163,8 +167,9 @@ The current code can propose these repair IDs:
 | `repair_pdb_torn_growth_pages` | torn additive-growth write left by an interrupted export (e.g. USB disconnected mid-write) | Zeroes `empty_candidate` page(s) that hold garbage instead of a blank reusable page, truncates any never-populated file tail beyond `next_unused_page`, and recomputes `seqdb` |
 | `repair_pdb_truncated_table_chain` | a table's declared last page is beyond the physical end of the file (interrupted export left growth pointers ahead of the actual written data) | Points the table's `last`/`empty_candidate` fields back at the real last written page (found by walking the chain); does not touch page content. Applied before strict parity, since additive track appends hard-fail while the chain is unreachable |
 | `relink_moved_audio` | a referenced file is missing while the same track sits unindexed under another path (renamed file, moved or re-cased folder) | Pairs missing references with unindexed files by content fingerprint (size + title + artist), else by file name; only one-to-one pairs. Rewrites the PDB track row's path/file name/size in place (same id), updates the eDB `content` row's path, and the bundle's `PPTH`. Applied before the two fixes below, which only see unmatched items |
-| `add_unindexed_audio_playlist` | audio files under `Contents/` not indexed by PDB/eDB (e.g. databases restored from an older backup) | Additive export of a USB-only playlist `Unindexed`: tags read from each file, BPM/first beat/cues from the file's canonical ANLZ bundle (bundle reused, not rewritten; files without one are added without analysis). Nothing is copied or deleted |
-| `remove_missing_audio_references` | DB references to audio files missing from USB | Removes eDB content/playlist links and PDB playlist entries for references with no candidate file (paired ones are relinked instead) |
+| `add_unindexed_audio_playlist` | audio files under `Contents/` not indexed by PDB/eDB (e.g. databases restored from an older backup), matched by exact path like the parity report's indexed-file presence check | Additive export of a USB-only playlist `Unindexed`: tags read from each file, BPM/first beat/cues from the file's canonical ANLZ bundle (bundle reused, not rewritten). A file without a bundle is analysed and gets one, as with `fix_empty_analysis_files`; only a file that can't be analysed is added without. Nothing is copied or deleted |
+| `remove_duplicate_audio_copies` | an unindexed audio file under `Contents/` that is a byte-for-byte copy of an indexed file in the same folder (e.g. `Track.mp3` next to the exported `Track-1.mp3`) | Deletes the copy after comparing it with the original again; the indexed track and its playlists, cues and analysis are untouched. These files are taken out of `add_unindexed_audio_playlist`, so the same track is not added twice. Marked destructive |
+| `remove_missing_audio_references` | PDB track rows or eDB `content` rows whose audio file is missing from the USB, by the parity report's presence scan | Removes the eDB `content` rows and their `playlist_content` links, and the PDB playlist entries, track rows and now-unused artwork rows. Paired references are relinked instead; tracks in a history playlist are never removed (see below) |
 | `sync_edb_history_from_pdb` | eDB history counts differ from PDB-derived history payload | Replaces eDB `history` and `history_content` rows from current PDB history data |
 | `keep_engine_library_up_to_date` | the USB has an Engine DJ library and "Write Engine DJ library" is off, or the library is behind `export.pdb` | Turns the setting on and rebuilds `m.db` from the PDB, after every other fix and the write-back. Play history (`hm.db`) is kept; changes made on the player in `m.db` (cues, loops, playlists) are replaced. Marked destructive for that reason. Not in the default set when no `selectedFixIds` are given (see `docs/ENGINE_DJ.md`) |
 
@@ -176,6 +181,8 @@ Some findings intentionally do not have automatic repairs:
 | --- | --- |
 | malformed entries under `PIONEER/USBANLZ` | reported as unsupported; inspect event-log warnings and re-export affected tracks |
 | parity preview unavailable | repair preview continues, but strict parity upgrade is not proposed |
+| a track in a history playlist (PDB history or eDB `history_content`) whose audio file is missing | reported as unsupported; the track is kept so the play history stays intact. Copy the file back (the Event Log lists the paths) |
+| indexed audio missing while `Contents/` holds no audio at all | reported as unsupported: a databases-only copy, not tracks to remove. Copy the audio back |
 
 ## Player Menu Behavior
 

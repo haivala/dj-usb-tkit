@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use super::{
@@ -250,6 +250,7 @@ fn parity_detail() -> UsbParityPlaylistDetail {
         edb_missing_core_metadata: 0,
         pdb_missing_core_metadata: 0,
         artwork_mismatch_tracks: 0,
+        rating_colour_mismatch_tracks: 0,
         sample_only_in_pdb: Vec::new(),
         sample_only_in_edb: Vec::new(),
         sample_metadata_mismatches: Vec::new(),
@@ -737,9 +738,10 @@ fn parity_comparison_notes_a_rating_or_colour_difference_without_failing() {
         mismatched_tracks: 1,
         rating_mismatches: 1,
         colour_mismatches: 0,
+        mismatched_paths: HashSet::from(["/Contents/Artist/Track.mp3".to_string()]),
     };
 
-    let (checks, summary_rows, _details, overall) = build_usb_parity_comparison(
+    let (checks, summary_rows, details, overall) = build_usb_parity_comparison(
         &parsed,
         &edb_playlists_from_tracks(edb_tracks.clone()),
         &rating_colour,
@@ -763,6 +765,14 @@ fn parity_comparison_notes_a_rating_or_colour_difference_without_failing() {
         .expect("rating/colour summary row");
     assert!(matches!(summary.status, DiagStatus::Warn));
     assert_eq!(summary.count, 1);
+    // Counted on the playlist too, so the repair offers strict parity for it.
+    assert_eq!(details.len(), 1);
+    assert_eq!(details[0].rating_colour_mismatch_tracks, 1);
+    assert!(
+        details[0]
+            .issue_labels
+            .contains(&"rating/colour mismatch 1".to_string())
+    );
     // Minor: it doesn't change the report's overall status.
     let (_, _, _, overall_without) = build_usb_parity_comparison(
         &parsed,
@@ -873,199 +883,121 @@ fn strict_raw_coverage_thresholds_transition_pass_warn_fail() {
     assert_eq!(fail_missing.missing_count, 20);
 }
 
-#[test]
-fn strict_indexed_paths_match_alias_stripped_on_disk_filename() {
-    // Regression: a PDB track row can retain a trailing-space alias
-    // variant of a filename (e.g. "Track - .mp3") that the rest of this
-    // codebase already treats as identical to "Track -.mp3" (write-time
-    // alias matching, the repair module's unindexed-audio detector). Before this
-    // fix, `collect_strict_indexed_paths` compared the raw indexed path
-    // against `collect_contents_audio_files`'s alias-stripped on-disk
-    // set, so the single real file was double-counted: once as
-    // "missing" (the aliased indexed path never matches the real file)
-    // and once as "unindexed" (the real file never matches the aliased
-    // indexed path) in the "Indexed audio file presence" strict check.
-    let root = tempdir().expect("tempdir");
-    let track_dir = root.path().join("Contents").join("Artist");
-    fs::create_dir_all(&track_dir).expect("create contents dir");
-    fs::write(track_dir.join("Track -.mp3"), b"fake audio").expect("write audio file");
-
+/// Writes `files` under `<root>/Contents` and returns `scan_audio_presence`
+/// for PDB tracks at `pdb_paths` and eDB content rows at `edb_paths`.
+fn audio_presence_for(
+    root: &std::path::Path,
+    files: &[&str],
+    pdb_paths: &[&str],
+    edb_paths: &[&str],
+) -> super::AudioPresence {
+    for file in files {
+        let abs = root.join(file.trim_start_matches('/'));
+        fs::create_dir_all(abs.parent().expect("parent")).expect("create contents dir");
+        fs::write(&abs, b"fake audio").expect("write audio file");
+    }
     let mut parsed = ParsedPdb::default();
-    parsed.tracks.push(make_pdb_track(
-        1,
-        "Track",
-        1,
-        "/Contents/Artist/Track - .mp3",
-    ));
-
-    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    let indexed_paths = super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
-
-    let actual_files: std::collections::HashSet<String> =
-        crate::service::usb_utils::collect_contents_audio_files(root.path())
-            .into_iter()
-            .map(|p| super::normalize_path_for_strict_presence_match(&p))
-            .collect();
-
-    let missing_count = indexed_paths
-        .iter()
-        .filter(|p| !actual_files.contains(*p))
-        .count();
-    let extra_count = actual_files
-        .iter()
-        .filter(|p| !indexed_paths.contains(*p))
-        .count();
-    assert_eq!(
-        missing_count, 0,
-        "the aliased indexed path must match the real on-disk file"
-    );
-    assert_eq!(
-        extra_count, 0,
-        "the real on-disk file must match the aliased indexed path"
-    );
+    for (i, path) in pdb_paths.iter().enumerate() {
+        parsed
+            .tracks
+            .push(make_pdb_track(i as u32 + 1, "Track", 1, path));
+    }
+    let edb_paths = edb_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+    super::scan_audio_presence(root, &parsed, &edb_paths)
 }
 
 #[test]
-fn strict_indexed_paths_do_not_collapse_distinct_numeric_suffixed_filenames() {
-    // Regression: `normalize_path_for_contents_match` (used elsewhere for
-    // alias *grouping*) also collapses a trailing "-<digits>" filename
-    // stem suffix, e.g. "Best of-2025.mp3" and "Best of.mp3" would both
-    // normalize to "Best of.mp3". That's wrong for the strict
-    // indexed-vs-on-disk presence check: two genuinely different,
-    // correctly-indexed tracks whose real filenames happen to end in a
-    // numeric suffix (release years, remix/version numbers, catalog
-    // codes — common in a large library) must not be reported as
-    // missing/unindexed just because they'd collide under that broader
-    // normalization. `collect_strict_indexed_paths` must use the
-    // narrower `normalize_path_for_strict_presence_match` instead, which
-    // only trims a trailing space before the extension.
+fn audio_presence_matches_alias_stripped_on_disk_filename() {
+    // A PDB row can keep a trailing-space alias of the file name ("Track - .mp3"
+    // for "Track -.mp3"). It is the same file: neither missing nor unindexed.
     let root = tempdir().expect("tempdir");
-    let track_dir = root.path().join("Contents").join("Artist");
-    fs::create_dir_all(&track_dir).expect("create contents dir");
-    fs::write(track_dir.join("Best of-2025.mp3"), b"fake audio").expect("write audio file 1");
-    fs::write(track_dir.join("Best of.mp3"), b"fake audio").expect("write audio file 2");
+    let presence = audio_presence_for(
+        root.path(),
+        &["/Contents/Artist/Track -.mp3"],
+        &["/Contents/Artist/Track - .mp3"],
+        &[],
+    );
+    assert!(presence.missing.is_empty(), "{presence:?}");
+    assert!(presence.unindexed.is_empty(), "{presence:?}");
+    assert_eq!(presence.indexed_on_usb.len(), 1);
+}
 
-    let mut parsed = ParsedPdb::default();
-    parsed.tracks.push(make_pdb_track(
-        1,
-        "Best of-2025",
-        1,
+#[test]
+fn audio_presence_keeps_numeric_suffixed_filenames_distinct() {
+    // "Best of-2025.mp3" and "Best of.mp3" are two files; neither stands in
+    // for the other. Indexing only one leaves the other unindexed.
+    let root = tempdir().expect("tempdir");
+    let files = [
         "/Contents/Artist/Best of-2025.mp3",
-    ));
-    parsed.tracks.push(make_pdb_track(
-        2,
-        "Best of",
-        1,
         "/Contents/Artist/Best of.mp3",
-    ));
-
-    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    let indexed_paths = super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
-    assert_eq!(
-        indexed_paths.len(),
-        2,
-        "two distinct indexed tracks must not collapse into one key: {indexed_paths:?}"
+    ];
+    let both = audio_presence_for(root.path(), &files, &files, &[]);
+    assert_eq!(both.indexed_count, 2);
+    assert!(
+        both.missing.is_empty() && both.unindexed.is_empty(),
+        "{both:?}"
     );
 
-    let actual_files: std::collections::HashSet<String> =
-        crate::service::usb_utils::collect_contents_audio_files(root.path())
-            .into_iter()
-            .map(|p| super::normalize_path_for_strict_presence_match(&p))
-            .collect();
-    let missing_count = indexed_paths
-        .iter()
-        .filter(|p| !actual_files.contains(*p))
-        .count();
-    let extra_count = actual_files
-        .iter()
-        .filter(|p| !indexed_paths.contains(*p))
-        .count();
-    assert_eq!(
-        missing_count, 0,
-        "both distinctly-named on-disk files must match their own indexed entry"
+    let one = audio_presence_for(
+        root.path(),
+        &[],
+        &["/Contents/Artist/Best of-2025.mp3"],
+        &[],
     );
     assert_eq!(
-        extra_count, 0,
-        "both distinctly-named indexed entries must match their own on-disk file"
+        one.unindexed,
+        vec!["/Contents/Artist/Best of.mp3".to_string()]
     );
 }
 
 #[test]
-fn normalize_path_for_contents_match_preserves_bare_trailing_hyphen() {
-    // Regression: the trailing "-<digits>" dedup-suffix collapse used an empty-suffix
-    // check (`suffix.chars().all(is_ascii_digit)`) that is vacuously true for an empty
-    // string, so a stem ending in a bare "-" with nothing after it (e.g. a 48-char
-    // truncation cutoff landing exactly on a hyphen) was silently stripped as if it were
-    // a "-1"/"-2" dedup suffix, producing a normalized path that doesn't correspond to
-    // any real file.
-    assert_eq!(
-        super::normalize_path_for_contents_match(
-            "/Contents/Artist/Some Album (Free Download)/Artist - Some Album (Free Download) -.mp3"
-        ),
-        "/Contents/Artist/Some Album (Free Download)/Artist - Some Album (Free Download) -.mp3",
-        "a bare trailing hyphen with no digits after it must not be stripped"
-    );
-    // A genuine "-<digits>" dedup suffix must still collapse.
-    assert_eq!(
-        super::normalize_path_for_contents_match("/Contents/Artist/Track-1.mp3"),
-        "/Contents/Artist/Track.mp3",
-    );
-}
-
-#[test]
-fn strict_indexed_paths_match_case_insensitive_on_disk_folder_casing() {
-    // Regression: FAT32/exFAT resolves paths case-insensitively, so a folder created
-    // under an artist tag's original casing keeps that casing on disk even after the
-    // tag is later corrected in the library (FAT doesn't rename an existing directory
-    // entry just because a later write used different casing for the "same"
-    // case-insensitively path). The indexed-vs-on-disk presence comparison must not be
-    // case-sensitive, or this casing drift produces a false missing/unindexed pair even
-    // though the file is perfectly reachable.
+fn audio_presence_matches_case_insensitive_on_disk_folder_casing() {
+    // FAT32/exFAT keep a folder's first casing after the artist tag is
+    // corrected; the file is still reachable.
     let root = tempdir().expect("tempdir");
-    let track_dir = root.path().join("Contents").join("SOME ARTIST");
-    fs::create_dir_all(&track_dir).expect("create contents dir");
-    fs::write(track_dir.join("Track.mp3"), b"fake audio").expect("write audio file");
+    let presence = audio_presence_for(
+        root.path(),
+        &["/Contents/SOME ARTIST/Track.mp3"],
+        &["/Contents/Some Artist/Track.mp3"],
+        &[],
+    );
+    assert!(presence.missing.is_empty(), "{presence:?}");
+    assert!(presence.unindexed.is_empty(), "{presence:?}");
+}
 
-    let mut parsed = ParsedPdb::default();
-    parsed.tracks.push(make_pdb_track(
-        1,
-        "Track",
-        1,
-        "/Contents/Some Artist/Track.mp3",
-    ));
+#[test]
+fn audio_presence_counts_edb_content_paths_as_indexed() {
+    // rekordbox can write a track twice ("Track.mp3" and "Track-1.mp3") with
+    // the PDB row naming one copy and the eDB row the other: both are indexed.
+    let root = tempdir().expect("tempdir");
+    let presence = audio_presence_for(
+        root.path(),
+        &["/Contents/Artist/Track.mp3", "/Contents/Artist/Track-1.mp3"],
+        &["/Contents/Artist/Track-1.mp3"],
+        &["/Contents/Artist/Track.mp3"],
+    );
+    assert_eq!(presence.indexed_count, 2);
+    assert!(presence.unindexed.is_empty(), "{presence:?}");
+    assert!(presence.missing.is_empty(), "{presence:?}");
+}
 
-    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    let indexed_paths = super::collect_strict_indexed_paths(&parsed, &HashMap::new(), &conn);
-    let actual_files: std::collections::HashSet<String> =
-        crate::service::usb_utils::collect_contents_audio_files(root.path())
-            .into_iter()
-            .map(|p| super::normalize_path_for_strict_presence_match(&p))
-            .collect();
-
-    let actual_files_ci: std::collections::HashSet<String> = actual_files
-        .iter()
-        .map(|p| super::contents_path_match_key(p))
-        .collect();
-    let indexed_paths_ci: std::collections::HashSet<String> = indexed_paths
-        .iter()
-        .map(|p| super::contents_path_match_key(p))
-        .collect();
-    let missing_count = indexed_paths
-        .iter()
-        .filter(|p| !actual_files_ci.contains(&super::contents_path_match_key(p)))
-        .count();
-    let extra_count = actual_files
-        .iter()
-        .filter(|p| !indexed_paths_ci.contains(&super::contents_path_match_key(p)))
-        .count();
-    assert_eq!(
-        missing_count, 0,
-        "the indexed path must match the on-disk file despite differing folder casing"
+#[test]
+fn audio_presence_reports_missing_from_either_database_once() {
+    let root = tempdir().expect("tempdir");
+    let presence = audio_presence_for(
+        root.path(),
+        &["/Contents/Artist/Here.mp3"],
+        &["/Contents/Artist/Here.mp3", "/Contents/Artist/Gone.mp3"],
+        &["/Contents/artist/gone.mp3", "/Contents/Artist/Edb Only.mp3"],
     );
     assert_eq!(
-        extra_count, 0,
-        "the on-disk file must match the indexed path despite differing folder casing"
+        presence.missing,
+        vec![
+            "/Contents/Artist/Edb Only.mp3".to_string(),
+            "/Contents/Artist/Gone.mp3".to_string(),
+        ]
     );
+    assert_eq!(presence.indexed_count, 3);
 }
 
 #[test]

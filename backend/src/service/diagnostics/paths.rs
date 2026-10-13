@@ -93,15 +93,11 @@ pub(crate) fn normalize_pdb_path_for_edb_lookup(value: &str) -> String {
 }
 
 /// Trim only the "trailing space before the extension" filename alias (e.g.
-/// "Track .mp3" vs "Track.mp3"). Deliberately narrower than
-/// `normalize_path_for_contents_match`, which also collapses a trailing
-/// `-<digits>` stem suffix — appropriate for that function's alias-grouping
-/// callers, but wrong for a strict indexed-vs-on-disk presence comparison:
-/// it collapses genuinely distinct files whose real filenames happen to end
-/// in a numeric suffix (release years, remix/version numbers, catalog
-/// codes), which are common enough in a large library to produce mass false
-/// "missing"/"unindexed" results instead of fixing the one alias case.
-pub(super) fn normalize_path_for_strict_presence_match(value: &str) -> String {
+/// "Track .mp3" vs "Track.mp3"). A trailing `-<digits>` stem suffix is kept:
+/// files whose names differ only by it are distinct files (rekordbox writes a
+/// second copy of a track as `Track-1.mp3`; release years, version numbers and
+/// catalog codes end that way too). Match through `audio_path_key`.
+pub(crate) fn normalize_path_for_strict_presence_match(value: &str) -> String {
     let normalized = normalize_pdb_path_for_edb_lookup(value);
     if normalized.is_empty() {
         return normalized;
@@ -139,54 +135,6 @@ pub(super) fn normalize_path_for_strict_presence_match(value: &str) -> String {
 /// so warnings/output still show the real on-disk casing.
 pub(crate) fn contents_path_match_key(normalized: &str) -> String {
     normalized.to_ascii_lowercase()
-}
-
-pub(crate) fn normalize_path_for_contents_match(value: &str) -> String {
-    let normalized = normalize_pdb_path_for_edb_lookup(value);
-    if normalized.is_empty() {
-        return normalized;
-    }
-    let path = std::path::Path::new(&normalized);
-    let parent = path
-        .parent()
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_default();
-    let file = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
-    let alias_stripped = if let Some((stem, ext)) = file.rsplit_once('.') {
-        // Trim trailing whitespace: some DJ software appends a space before the
-        // extension as a naming-conflict alias (e.g. "Track .mp3"). Both the
-        // alias form and the original may exist on disk, so normalise both to
-        // the same shape for comparison.
-        let stem = stem.trim_end();
-        let next_stem = stem
-            .rsplit_once('-')
-            .and_then(|(prefix, suffix)| {
-                // `suffix.chars().all(...)` is vacuously true for an empty suffix, so a
-                // stem ending in a bare "-" (no digits after it, e.g. a truncation cutoff
-                // landing exactly on a hyphen) was previously stripped as if it were a
-                // "-<digits>" dedup suffix, silently dropping a real trailing hyphen.
-                if !prefix.is_empty()
-                    && !suffix.is_empty()
-                    && suffix.chars().all(|c| c.is_ascii_digit())
-                {
-                    Some(prefix.to_string())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| stem.to_string());
-        format!("{next_stem}.{ext}")
-    } else {
-        file.to_string()
-    };
-    if parent.is_empty() {
-        alias_stripped
-    } else {
-        format!("{}/{}", parent.trim_end_matches('/'), alias_stripped)
-    }
 }
 
 pub(super) fn normalize_usb_path_for_parity(value: &str) -> String {

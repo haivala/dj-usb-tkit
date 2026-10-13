@@ -34,6 +34,7 @@ use super::usb_utils::{
 };
 use super::usb_vendor_compat::vendor_edb_path;
 
+mod audio_presence;
 mod content_checks;
 mod edb_checks;
 mod overview;
@@ -45,6 +46,7 @@ mod run;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use audio_presence::*;
 pub(crate) use content_checks::*;
 pub(crate) use edb_checks::*;
 use overview::*;
