@@ -39,6 +39,16 @@
 
 ## Unreleased
 
+- **Improvement:** The Event Log opens from a button in the header instead of from Settings,
+  and the button shows how many errors were logged since the log was last opened. When a
+  diagnostics, parity or repair-preview item points to details in the log, the button gets a
+  dot until the log is opened.
+- **Improvement:** Repair-preview items whose details are listed in the Event Log (audio files
+  in no playlist, moved audio files, malformed analysis entries) link to it, like the
+  diagnostics checks already did.
+- **Improvement:** The Backups panel opens from a Backups button on the USB page instead of
+  from Settings.
+- **Improvement:** The sidebar is more compact, so more playlists fit before it scrolls.
 - **Chore:** The PDB page footer (row offsets and row presence bits) is now read and
   written by one shared module (`pdb_page`) instead of separate copies across the writer,
   reader, repairs and dump tools. Exports and repairs produce the same bytes as before.
@@ -52,6 +62,8 @@
 - **Chore:** The backend service's core file is split into files by area (track library,
   playback, playlists, source roots, settings) instead of one large file.
 - **Chore:** The export helpers' eDB writers and PDB writers each have their own file.
+- **Fix:** A thin bar no longer flickers at the bottom of the window while nothing is
+  running. The hidden progress bar was still animating and sometimes showed through on Linux.
 - **Fix:** The BPM/key analysis runtime's paths (node, runner script, installed modules) are
   passed to the analysis process unchanged instead of through text, so they also work from a
   folder whose name isn't valid UTF-8. A rekordbox library's ANLZ beat grid is read from its

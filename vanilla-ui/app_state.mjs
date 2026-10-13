@@ -76,6 +76,10 @@ export function createInitialState() {
     usbPlayerMenuAvailableSelectedKind: null,
     usbPlayerMenuDivergence: null,
     activeTab: "library",
+    // Errors logged since the Event Log was last open (header badge).
+    eventLogUnseenErrors: 0,
+    // A USB report pointed at Event Log details not yet looked at (header dot).
+    eventLogHasLinkedDetails: false,
     sidebarCollapsed: false,
     externalRekordboxDbPath: null,
     rekordboxDbEnabled: false,

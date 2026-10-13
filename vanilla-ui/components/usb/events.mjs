@@ -87,6 +87,10 @@ export function bindUsbEvents(ctx) {
     previewUsbRepairs().catch(catchErr(emitStatus));
   });
 
+  el.usbBackupsBtn?.addEventListener("click", () => {
+    ctx.switchView("backups").catch(catchErr(emitStatus));
+  });
+
   el.applyRepairsBtn?.addEventListener("click", () => {
     applyUsbRepairs().catch(catchErr(emitStatus));
   });

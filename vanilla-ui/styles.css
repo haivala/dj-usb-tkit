@@ -337,6 +337,40 @@ body.library-onboarding {
   transition: all 150ms ease;
 }
 
+.event-log-btn {
+  position: relative;
+  font-size: 15px;
+}
+
+.event-log-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Linked log details are file lists and warnings, not errors: warn colour. */
+#eventLogDot {
+  background: var(--diag-warn);
+}
+
+.event-log-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--bg);
+  pointer-events: none;
+}
+
 .settings-btn:hover,
 .help-btn:hover {
   color: var(--accent);
@@ -548,7 +582,7 @@ body.library-onboarding {
   gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 9px 12px;
+  padding: 6px 12px;
   border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
@@ -594,8 +628,8 @@ body.library-onboarding {
 .nav-sub-item.revealed {
   max-height: 40px;
   opacity: 1;
-  padding-top: 9px;
-  padding-bottom: 9px;
+  padding-top: 6px;
+  padding-bottom: 6px;
   pointer-events: auto;
   cursor: pointer;
 }
@@ -627,7 +661,7 @@ body.library-onboarding {
 .nav-divider {
   height: 1px;
   background: var(--line);
-  margin: 8px 4px;
+  margin: 6px 4px;
 }
 
 .nav-section-label {
@@ -637,7 +671,7 @@ body.library-onboarding {
   text-transform: uppercase;
   letter-spacing: 1.2px;
   color: var(--muted);
-  padding: 8px 12px 4px;
+  padding: 6px 12px 3px;
 }
 
 .nav-playlist-list {
@@ -658,7 +692,7 @@ body.library-onboarding {
   gap: 6px;
   width: 100%;
   text-align: left;
-  padding: 7px 12px;
+  padding: 5px 12px;
   border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
@@ -2600,7 +2634,11 @@ input[type="checkbox"]:disabled {
   opacity: 0;
   transform: translateY(8px);
   pointer-events: none;
-  transition: left 200ms ease, opacity 150ms ease-out, transform 150ms ease-out;
+  /* Idle footer is fully hidden once the fade-out ends, not just transparent:
+     WebKitGTK sometimes paints an opacity:0 layer for a frame, which showed
+     as a flickering bar at the bottom of the window. */
+  visibility: hidden;
+  transition: left 200ms ease, opacity 150ms ease-out, transform 150ms ease-out, visibility 0s linear 150ms;
 }
 
 body.sidebar-collapsed .progress-footer {
@@ -2611,6 +2649,8 @@ body.sidebar-collapsed .progress-footer {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
+  visibility: visible;
+  transition: left 200ms ease, opacity 150ms ease-out, transform 150ms ease-out, visibility 0s;
 }
 
 .progress-meta {
@@ -2732,6 +2772,9 @@ body.sidebar-collapsed .progress-footer {
   transition: width 180ms ease-out;
 }
 
+.progress-footer.active .progress-track::after {
+  animation: shimmer 1.8s linear infinite;
+}
 .progress-track::after {
   content: '';
   position: absolute;
@@ -2743,7 +2786,6 @@ body.sidebar-collapsed .progress-footer {
     var(--shimmer) 50%,
     transparent 100%
   );
-  animation: shimmer 1.8s linear infinite;
 }
 
 @keyframes shimmer {
@@ -3196,6 +3238,11 @@ td button[data-action]:disabled,
 
 .diag-repair-fix-desc {
   color: var(--ink-secondary);
+}
+
+.diag-repair-fix-content .diag-log-link {
+  align-self: flex-start;
+  margin-left: 0;
 }
 
 .diag-repair-fix-meta {
@@ -3930,7 +3977,7 @@ td button[data-action]:disabled,
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 6px 10px;
   margin: 0;
   border: none;
   border-radius: 8px;

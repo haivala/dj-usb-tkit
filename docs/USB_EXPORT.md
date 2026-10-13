@@ -59,7 +59,7 @@ stable cache directory yet, so everything is left on the USB until it's named. T
 kept (USB + cache, combined) is capped by a user-configurable retention count in Settings
 (default 10; oldest cache-side snapshots are pruned first once the cap is exceeded).
 
-Backups are managed through a dedicated **Backups** panel (Settings → Open Backups): it lists
+Backups are managed through a dedicated **Backups** panel (the **Backups** button on the USB page): it lists
 every snapshot (bundling each timestamp's PDB+eDB pair into one "eDB and PDB" row, tagged with
 whether it currently lives on the USB or in the local cache), and lets the user restore or delete
 a snapshot. Restoring or deleting acts on both files in the pair at once. Restoring first backs up

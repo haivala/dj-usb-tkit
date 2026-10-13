@@ -2048,6 +2048,9 @@ pub struct RepairUsbDiagnosticsRequest {
 pub struct RepairUnsupportedItem {
     pub issue: String,
     pub reason: String,
+    /// `"event-log"` when the Event Log already lists the affected items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2065,6 +2068,9 @@ pub struct RepairFixProposal {
     /// (see `REPAIR_FIX_DISPLAY_ORDER` / the apply order in `service::repair`).
     #[serde(default)]
     pub always_applied: bool,
+    /// `"event-log"` when the Event Log already lists the affected items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

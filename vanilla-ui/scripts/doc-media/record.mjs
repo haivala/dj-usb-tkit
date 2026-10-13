@@ -659,13 +659,13 @@ function shots(fixture) {
       },
     },
     {
-      // docs/USB_EXPORT.md: the Backups panel, opened from Settings.
+      // docs/USB_EXPORT.md: the Backups panel, opened from the USB page.
       name: "backup-view",
       caption: "Backups of the USB's databases, on the USB and on this computer",
       opts: { backups: BACKUPS },
       async run(page) {
-        await page.locator("#settingsBtn").click();
-        await page.locator("#openBackupsBtn").click();
+        await openNav(page, "usb");
+        await page.locator("#usbBackupsBtn").click();
         await page.locator("#backupsList .event-log-row").first().waitFor();
         await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
         await page.waitForTimeout(500);

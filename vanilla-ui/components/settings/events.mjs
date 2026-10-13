@@ -83,7 +83,6 @@ export function bindSettingsEvents(ctx) {
     getTauriEventListen,
     pushEventLog,
     closeSettingsDrawer,
-    switchView,
     updatePlaylistExportButtons,
     getCurrentPlaylist,
     renderCurrentPlaylistTracksFromState,
@@ -222,14 +221,6 @@ export function bindSettingsEvents(ctx) {
     emitStatus(`Backups to keep per file: ${count}`);
   });
 
-  el.openBackupsBtn?.addEventListener("click", () => {
-    closeSettingsDrawer();
-    switchView("backups").catch((err) => {
-      console.error(err);
-      emitStatus(err.message || String(err));
-    });
-  });
-
   el.analysisBpmRangeSelect?.addEventListener("change", (event) => {
     const selected = normalizeAnalysisBpmRange(event?.target?.value);
     state.analysisBpmRange = selected;
@@ -345,14 +336,6 @@ export function bindSettingsEvents(ctx) {
       }).catch(() => {});
     }).catch(() => {});
   }
-
-  el.openEventLogBtn?.addEventListener("click", () => {
-    closeSettingsDrawer();
-    switchView("event-log").catch((err) => {
-      console.error(err);
-      emitStatus(err.message || String(err));
-    });
-  });
 
   renderEssentiaInstallRow(ctx);
 }

@@ -150,7 +150,8 @@ function installTauriMock(page, mode) {
                           {
                             label: "PDB metadata completeness",
                             status: "FAIL",
-                            detail: "1 playlist-linked PDB track(s) are missing required player metadata"
+                            detail: "1 playlist-linked PDB track(s) are missing required player metadata",
+                            link: "event-log"
                           }
                         ]
                       },
@@ -260,7 +261,13 @@ function installTauriMock(page, mode) {
                     estimatedDeletes: 0
                   }
                 ],
-                unsupportedItems: [],
+                unsupportedItems: [
+                  {
+                    issue: "2 malformed USBANLZ entry/entries",
+                    reason: "Inspect Event Log entries tagged 'analysis entry malformed'.",
+                    link: "event-log"
+                  }
+                ],
                 estimatedFileWrites: 3,
                 estimatedFileDeletes: 0,
                 warnings: []
@@ -548,8 +555,7 @@ test("console.log messages appear in Event Log", async ({ page }) => {
     console.log(text);
   }, marker);
 
-  await page.locator("#settingsBtn").click();
-  await page.locator("#openEventLogBtn").click();
+  await page.locator("#eventLogBtn").click();
 
   await expect(page.locator("#eventLogList")).toContainText(marker);
 });
@@ -565,8 +571,7 @@ test("CSP security events appear in Event Log", async ({ page }) => {
     window.dispatchEvent(evt);
   });
 
-  await page.locator("#settingsBtn").click();
-  await page.locator("#openEventLogBtn").click();
+  await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).toContainText("CSP violation: style-src");
 });
 
@@ -574,8 +579,7 @@ test("startup includes console bridge message in Event Log", async ({ page }) =>
   await installTauriMock(page, "valid");
   await page.goto("/");
 
-  await page.locator("#settingsBtn").click();
-  await page.locator("#openEventLogBtn").click();
+  await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).toContainText("Frontend console bridge initialized");
 });
 
@@ -593,8 +597,7 @@ test("Event Log source filter dropdown never grows duplicate options for a repea
     console.log("dup-source-3");
   });
 
-  await page.locator("#settingsBtn").click();
-  await page.locator("#openEventLogBtn").click();
+  await page.locator("#eventLogBtn").click();
 
   await expect(page.locator("#eventLogList")).toContainText("dup-source-3");
   await expect(page.locator('#eventLogSourceFilter option[value="console"]')).toHaveCount(1);
@@ -615,11 +618,46 @@ test("USB sub-nav reveal/hide and fallback to USB panel", async ({ page }) => {
   await usbPlaylistsNav.click();
   await expect(page.locator("#panel-usb-playlists")).toHaveClass(/active/);
 
+  // Backups opens from the USB page toolbar; the sidebar keeps USB highlighted.
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbBackupsBtn").click();
+  await expect(page.locator("#panel-backups")).toHaveClass(/active/);
+  await expect(page.locator('.nav-item[data-view="usb"]')).toHaveClass(/active/);
+
   // Second folder pick simulates disconnect/invalid USB in toggle mode.
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#selectUsbFolderBtn").click();
   await expect(usbPlaylistsNav).not.toHaveClass(/revealed/);
   await expect(page.locator("#panel-usb")).toHaveClass(/active/);
+});
+
+test("Event Log header button counts errors logged while closed", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.goto("/");
+
+  const badge = page.locator("#eventLogBadge");
+  await page.locator("#eventLogBtn").click();
+  await expect(badge).toBeHidden();
+  await page.locator('.nav-item[data-view="library"]').click();
+
+  await page.evaluate(() => console.warn("badge-test-warning"));
+  await expect(badge).toBeHidden();
+
+  await page.evaluate(() => {
+    console.error("badge-test-error-1");
+    console.error("badge-test-error-2");
+  });
+  await expect(badge).toHaveText("2");
+  await expect(page.locator("#eventLogBtn")).toHaveAttribute("aria-label", "Event Log, 2 new errors");
+
+  await page.locator("#eventLogBtn").click();
+  await expect(badge).toBeHidden();
+  await expect(page.locator("#eventLogBtn")).toHaveClass(/active/);
+
+  // Errors logged while the log is open are seen, not counted.
+  await page.evaluate(() => console.error("badge-test-error-3"));
+  await page.locator('.nav-item[data-view="library"]').click();
+  await expect(badge).toBeHidden();
 });
 
 test("Event Log flood remains capped", async ({ page }) => {
@@ -630,16 +668,14 @@ test("Event Log flood remains capped", async ({ page }) => {
     for (let i = 0; i < 1200; i += 1) console.log(`flood-${i}`);
   });
 
-  await page.locator("#settingsBtn").click();
-  await page.locator("#openEventLogBtn").click();
+  await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogSummary")).toContainText("1000 event(s)");
 });
 
 test("an open Event Log updates live: new entries on top, repeats coalesce, rows are kept", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
-  await page.locator("#settingsBtn").click();
-  await page.locator("#openEventLogBtn").click();
+  await page.locator("#eventLogBtn").click();
 
   const rows = page.locator("#eventLogList .event-log-row");
   await page.evaluate(() => console.log("live-first"));
@@ -736,6 +772,10 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagSections")).toContainText("Kept up to date");
   await expect(page.locator("#diagSections")).not.toContainText("Playlists compared");
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
+  await expect(page.locator("#eventLogDot")).toBeHidden();
+  // Errors the mock logged take the badge's place; see them so the dot can show.
+  await page.locator("#eventLogBtn").click();
+  await page.locator('.nav-item[data-view="usb"]').click();
 
   await page.locator("#runUsbParityBtn").click();
   // Parity report: heading, plain-language rows, then the collapsed technical details
@@ -763,6 +803,13 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(playlistRows).toContainText("path mismatch 1");
   await expect(playlistRows).toContainText("dict issues 1");
   await expect(playlistRows).toContainText("PDB gaps 1");
+  // A check that links to the Event Log puts a dot on the header button until the log is opened.
+  const eventLogDot = page.locator("#eventLogDot");
+  await expect(eventLogDot).toBeVisible();
+  await parityTechnical.locator(".diag-log-link").click();
+  await expect(page.locator("#panel-event-log")).toHaveClass(/active/);
+  await expect(eventLogDot).toBeHidden();
+  await page.locator('.nav-item[data-view="usb"]').click();
   // Back to diagnostics: the parity badge goes away with the parity report.
   await page.locator("#reDiagnoseBtn").click();
   await expect(page.locator("#diagSections .diag-intro")).toHaveCount(0);
@@ -811,6 +858,11 @@ test("Repair preview locks structural-prerequisite fix checkboxes; the Engine fi
   await expect(controlCheckbox).toBeEnabled();
   await controlCheckbox.uncheck();
   await expect(controlCheckbox).not.toBeChecked();
+
+  // Items whose details the Event Log lists link to it; the others don't.
+  const malformedItem = page.locator("#diagRepairFixes li", { hasText: "malformed USBANLZ" });
+  await expect(malformedItem.locator(".diag-log-link")).toBeVisible();
+  await expect(page.locator("#diagRepairFixes li", { hasText: "Repair PDB Data Page Flags" }).locator(".diag-log-link")).toHaveCount(0);
 
   await expect(page.locator("#exportEngineLibraryCheckbox")).not.toBeChecked();
   const engineFix = page.locator("#diagRepairFixes li", { hasText: "Keep Engine DJ Library Up to Date" });

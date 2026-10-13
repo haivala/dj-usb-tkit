@@ -100,18 +100,25 @@ export function diagStatusIcon(status) {
   return "✗";
 }
 
+// "→ event log" after `anchor`, for an item whose details the Event Log lists
+// (backend-set `link`); also puts the dot on the header Event Log button.
+function appendEventLogLink(ctx, anchor, link) {
+  if (link !== "event-log") return;
+  const btn = cloneTemplate(anchor.ownerDocument, "tplDiagLogLink");
+  btn.addEventListener("click", () => ctx.switchView("event-log").catch((err) => console.error(err)));
+  anchor.after(btn);
+  ctx.markEventLogLinkedDetails();
+}
+
 function renderDiagCheckRow(ctx, container, check, { withLogLink = false } = {}) {
   const doc = container.ownerDocument;
   const row = cloneTemplate(doc, "tplDiagCheck");
   row.classList.add(`diag-check-${check.status.toLowerCase()}`);
   row.querySelector(".diag-indicator").textContent = diagStatusIcon(check.status);
   row.querySelector("strong").textContent = check.label;
-  row.querySelector(".diag-check-detail").textContent = check.detail;
-  if (withLogLink && check.link === "event-log") {
-    const btn = cloneTemplate(doc, "tplDiagLogLink");
-    btn.addEventListener("click", () => ctx.switchView("event-log").catch((err) => console.error(err)));
-    row.appendChild(btn);
-  }
+  const detail = row.querySelector(".diag-check-detail");
+  detail.textContent = check.detail;
+  if (withLogLink) appendEventLogLink(ctx, detail, check.link);
   container.appendChild(row);
 }
 
@@ -349,7 +356,8 @@ export function renderRepairPreview(ctx, data) {
         supported: false,
         destructive: false,
         estimatedWrites: 0,
-        estimatedDeletes: 0
+        estimatedDeletes: 0,
+        link: item.link
       });
     }
 
@@ -383,7 +391,9 @@ export function renderRepairPreview(ctx, data) {
       }
 
       li.querySelector(".diag-repair-fix-title strong").textContent = fix.title;
-      li.querySelector(".diag-repair-fix-desc").textContent = fix.description;
+      const desc = li.querySelector(".diag-repair-fix-desc");
+      desc.textContent = fix.description;
+      appendEventLogLink(ctx, desc, fix.link);
       const meta = li.querySelector(".diag-repair-fix-meta");
       const support = fix.supported ? "✓ supported" : "✗ preview-only";
       const mode = fix.destructive ? "destructive" : "safe";

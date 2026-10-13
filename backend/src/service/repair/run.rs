@@ -15,6 +15,7 @@ fn fix_proposal(id: &str, title: &str, description: impl Into<String>) -> Repair
         estimated_writes: 1,
         estimated_deletes: 0,
         always_applied: false,
+        link: None,
     }
 }
 
@@ -188,6 +189,7 @@ impl BackendService {
                     malformed_analysis_entries.len()
                 ),
                 reason: "These indicate USB analysis directory corruption or stray files. Inspect Event Log entries tagged 'analysis entry malformed' and re-export affected tracks (or rebuild USB analysis data).".to_string(),
+                link: Some("event-log".to_string()),
             });
         }
 
@@ -778,6 +780,7 @@ impl BackendService {
             if !unindexed_audio_files.is_empty() {
                 proposed_fixes.push(RepairFixProposal {
                     estimated_writes: 2,
+                    link: Some("event-log".to_string()),
                     ..fix_proposal(
                         UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
                         "Add Unindexed Audio to a Playlist",
@@ -812,6 +815,7 @@ impl BackendService {
         if !moved_audio_relinks.is_empty() {
             proposed_fixes.push(RepairFixProposal {
                 estimated_writes: 2,
+                link: Some("event-log".to_string()),
                 ..fix_proposal(
                     RELINK_MOVED_AUDIO_FIX_ID,
                     "Relink Moved Audio Files",

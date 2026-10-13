@@ -11,7 +11,39 @@ export function storeEventLogEntry(ctx, entry = {}) {
   if (!pushed) return;
   if (state.activeTab === "event-log") {
     showEventLogEntry(ctx, pushed);
+  } else if (pushed.level === "error") {
+    state.eventLogUnseenErrors += 1;
+    renderEventLogBadge(ctx);
   }
+}
+
+// The header Event Log button's count of errors logged while it was closed,
+// or, with no new errors, a dot when a USB report links to log details.
+export function renderEventLogBadge(ctx) {
+  const { el, state } = ctx;
+  if (!el.eventLogBadge) return;
+  const count = state.eventLogUnseenErrors;
+  const dot = !count && state.eventLogHasLinkedDetails;
+  el.eventLogBadge.textContent = count > 99 ? "99+" : String(count);
+  el.eventLogBadge.classList.toggle("hidden", count === 0);
+  el.eventLogDot?.classList.toggle("hidden", !dot);
+  let label = "Event Log";
+  if (count) label = `Event Log, ${count} new error${count === 1 ? "" : "s"}`;
+  else if (dot) label = "Event Log, has details for the USB report";
+  el.eventLogBtn?.setAttribute("aria-label", label);
+}
+
+// A diagnostics/parity check links to its details in the Event Log.
+export function markEventLogLinkedDetails(ctx) {
+  if (ctx.state.activeTab === "event-log") return;
+  ctx.state.eventLogHasLinkedDetails = true;
+  renderEventLogBadge(ctx);
+}
+
+export function clearEventLogBadge(ctx) {
+  ctx.state.eventLogUnseenErrors = 0;
+  ctx.state.eventLogHasLinkedDetails = false;
+  renderEventLogBadge(ctx);
 }
 
 // Offer each of `sources` in the source filter (once), keeping the selection.

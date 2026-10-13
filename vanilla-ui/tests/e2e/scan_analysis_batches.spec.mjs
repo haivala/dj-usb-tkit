@@ -1488,8 +1488,7 @@ test("a track analysis couldn't finish (no BPM found) is reported as incomplete,
   await page.locator('[data-action="analyze-track"]').click();
 
   await expect(page.locator("#statusText")).toContainText("done: analyzed 0, failed 0, incomplete 1");
-  await page.locator("#settingsBtn").click();
-  await page.locator("#openEventLogBtn").click();
+  await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).toContainText("/music/Track One.mp3: no BPM detected");
 });
 

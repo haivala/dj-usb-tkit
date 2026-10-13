@@ -4243,6 +4243,13 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
     assert!(ids.contains(&"relink_moved_audio"), "{ids:?}");
     assert!(!ids.contains(&"add_unindexed_audio_playlist"), "{ids:?}");
     assert!(!ids.contains(&"remove_missing_audio_references"), "{ids:?}");
+    // The moved-audio pairs are in the Event Log, so the fix links to it.
+    let relink = preview
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "relink_moved_audio")
+        .expect("relink fix");
+    assert_eq!(relink.link.as_deref(), Some("event-log"));
 
     // Default selection: every supported fix.
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
@@ -4419,6 +4426,7 @@ fn repair_detects_unindexed_audio_under_contents() {
                 && !f.destructive
                 && f.description.contains("1 audio file(s)")
                 && f.description.contains("\"Unindexed\"")
+                && f.link.as_deref() == Some("event-log")
         }),
         "expected the unindexed-audio playlist fix: {:#?}",
         data.proposed_fixes

@@ -348,12 +348,16 @@ export async function switchView(ctx, viewId) {
   }
   state.activeTab = viewId;
 
+  // Backups opens from the USB page, so the USB entry stays highlighted.
+  const navViewId = viewId === "backups" ? "usb" : viewId;
   el.navSidebar.querySelectorAll(".nav-item[data-view]").forEach((btn) => {
-    const active = btn.dataset.view === viewId;
+    const active = btn.dataset.view === navViewId;
     btn.classList.toggle("active", active);
     if (active) btn.setAttribute("aria-current", "true");
     else btn.removeAttribute("aria-current");
   });
+
+  el.eventLogBtn?.classList.toggle("active", viewId === "event-log");
 
   el.navPlaylistList.querySelectorAll(".nav-playlist-item").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.playlistId === viewId);
@@ -378,6 +382,7 @@ export async function switchView(ctx, viewId) {
       await ctx.refreshCurrentPlaylistTracks();
     }
   } else if (viewId === "event-log") {
+    ctx.clearEventLogBadge();
     ctx.renderEventLog();
   } else if (viewId === "backups") {
     await ctx.renderBackups();

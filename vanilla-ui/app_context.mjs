@@ -65,7 +65,7 @@ export function createAppContext(env) {
   }
 
   bindActions(messages, "emitMessage emitStatus pushEventLog");
-  bindActions(eventLog, `storeEventLogEntry renderEventLog logWarnings setupConsoleFileLogging
+  bindActions(eventLog, `storeEventLogEntry renderEventLog renderEventLogBadge markEventLogLinkedDetails clearEventLogBadge logWarnings setupConsoleFileLogging
     setupRuntimeErrorLogging`);
   bindActions(backupsUi, "renderBackups restoreUsbBackup deleteUsbBackup");
   bindActions(jobMgr, `setProgress dismissProgress startProgressHeartbeat stopProgressHeartbeat

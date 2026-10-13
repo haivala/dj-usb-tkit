@@ -57,6 +57,7 @@
       <div class="header-utility-group">
         <button class="help-btn" id="helpBtn" data-tooltip="Help" aria-label="Help">?</button>
         <button class="settings-btn" id="settingsBtn" data-tooltip="Settings" aria-label="Settings">&#9881;<span class="settings-btn-dot hidden" id="settingsUpdateDot"></span></button>
+        <button class="help-btn event-log-btn" id="eventLogBtn" data-tooltip="Event Log" aria-label="Event Log">&#9776;<span class="event-log-badge hidden" id="eventLogBadge"></span><span class="settings-btn-dot hidden" id="eventLogDot"></span></button>
       </div>
     </div>
   </header>
@@ -204,6 +205,8 @@
               <button id="runUsbParityBtn" data-tooltip="Check that the USB's legacy (PDB) and new (eDB) databases agree">Parity Report</button>
               <span class="usb-cfg-toolbar-sep"></span>
               <button id="previewRepairsBtn">Preview Fixes</button>
+              <span class="usb-cfg-toolbar-sep"></span>
+              <button id="usbBackupsBtn" data-tooltip="List, restore and delete backups of this USB's databases">Backups</button>
             </div>
           </div>
           <div class="source-bar usb-cfg-recent-bar" id="usbRecentRow">
@@ -554,11 +557,6 @@
           <input type="number" id="backupRetentionCountInput" min="1" max="999" value="10" />
           <span class="muted usb-cfg-toggle-hint">The newest backup always stays on the USB; older ones are archived on this computer up to this count, then pruned.</span>
         </label>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-label">Tools</div>
-        <button id="openEventLogBtn">Open Event Log</button>
-        <button id="openBackupsBtn" disabled>Open Backups</button>
       </div>
     </div>
   </aside>
