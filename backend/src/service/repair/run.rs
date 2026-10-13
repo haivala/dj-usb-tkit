@@ -55,6 +55,82 @@ struct DetectedRepairs {
     engine_library_fix_needed: bool,
 }
 
+/// Progress through the selected repair fixes. Each fix owns a segment of the
+/// apply phase; multi-file fixes can report completed items within theirs.
+struct ApplyProgress<'a> {
+    emit: &'a mut dyn FnMut(usize, usize, &str),
+    total_fixes: usize,
+    started_fixes: usize,
+    start: usize,
+    end: usize,
+    title: String,
+}
+
+impl<'a> ApplyProgress<'a> {
+    fn new(emit: &'a mut dyn FnMut(usize, usize, &str), total_fixes: usize) -> Self {
+        Self {
+            emit,
+            total_fixes: total_fixes.max(1),
+            started_fixes: 0,
+            start: 70,
+            end: 70,
+            title: String::new(),
+        }
+    }
+
+    fn start(&mut self, title: &str) {
+        let index = self.started_fixes.min(self.total_fixes - 1);
+        self.start = 70 + index * 24 / self.total_fixes;
+        self.end = 70 + (index + 1) * 24 / self.total_fixes;
+        self.started_fixes += 1;
+        self.title = title.to_string();
+        (self.emit)(self.start, 100, &format!("USB: Applying {title}"));
+    }
+
+    fn item_done(&mut self, completed: usize, total: usize) {
+        if total == 0 {
+            return;
+        }
+        let completed = completed.min(total);
+        let percent = self.start + (self.end - self.start) * completed / total;
+        (self.emit)(
+            percent,
+            100,
+            &format!("USB: Applying {} ({completed}/{total})", self.title),
+        );
+    }
+
+    fn finish(&mut self) {
+        (self.emit)(self.end, 100, &format!("USB: Finished {}", self.title));
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::ApplyProgress;
+
+    #[test]
+    fn five_fixes_each_receive_a_segment_and_item_progress_stays_inside_it() {
+        let mut events = Vec::new();
+        let mut record = |value, _, label: &str| events.push((value, label.to_string()));
+        let mut progress = ApplyProgress::new(&mut record, 5);
+        for index in 0..5 {
+            progress.start(&format!("Fix {index}"));
+            if index == 2 {
+                progress.item_done(1, 2);
+            }
+            progress.finish();
+        }
+        assert_eq!(events[0].0, 70);
+        assert_eq!(events[2].0, 74);
+        assert_eq!(events[4].0, 79);
+        assert_eq!(events[5], (81, "USB: Applying Fix 2 (1/2)".to_string()));
+        assert_eq!(events[6].0, 84);
+        assert_eq!(events[7].0, 84);
+        assert_eq!(events.last().unwrap().0, 94);
+    }
+}
+
 /// One line per fix: applied, skipped or failed.
 #[derive(Default)]
 pub(super) struct FixOutcomes {
@@ -68,16 +144,19 @@ impl FixOutcomes {
     /// fixes do not consume a progress step.
     fn record_with_progress<E: std::fmt::Display>(
         &mut self,
-        on_start: &mut impl FnMut(&str),
+        progress: &mut ApplyProgress<'_>,
         title: &str,
         selected: bool,
         found: bool,
         apply: impl FnOnce() -> Result<String, E>,
     ) {
         if selected && found {
-            on_start(title);
+            progress.start(title);
         }
         self.record(title, selected, found, apply);
+        if selected && found {
+            progress.finish();
+        }
     }
 
     /// Records one fix of the common shape: "not selected" when it was found
@@ -1234,7 +1313,9 @@ impl BackendService {
             .iter()
             // The Engine DJ library is rebuilt after database write-back and
             // has its own 95% progress step outside the normal apply window.
-            .filter(|fix| selected.contains(&fix.id) && fix.id != ENGINE_LIBRARY_FIX_ID)
+            .filter(|fix| {
+                fix.supported && fix.id != ENGINE_LIBRARY_FIX_ID && selected.contains(&fix.id)
+            })
             .count();
 
         let found = DetectedRepairs {
@@ -1450,20 +1531,10 @@ impl BackendService {
         // back to opening their own connection if this fails.
         on_progress(70, 100, "USB: Opening repair databases");
         let mut fix_edb_conn = open_edb_rw(usb_root, warnings);
-        let mut started_fixes = 0usize;
-        let mut report_fix = |title: &str| {
-            let percent = 70
-                + if selected_fix_count <= 1 {
-                    0
-                } else {
-                    (started_fixes.min(selected_fix_count - 1) * 24) / (selected_fix_count - 1)
-                };
-            started_fixes += 1;
-            on_progress(percent, 100, &format!("USB: Applying {title}"));
-        };
+        let mut progress = ApplyProgress::new(on_progress, selected_fix_count);
 
         if selected.contains(EMPTY_ANALYSIS_FILES_FIX_ID) {
-            report_fix("Fix Empty Analysis Files");
+            progress.start("Fix Empty Analysis Files");
             match self.apply_fix_empty_analysis_files(
                 usb_root,
                 &empty_analysis_paths,
@@ -1491,6 +1562,7 @@ impl BackendService {
                     .failed
                     .push(format!("Fix Empty Analysis Files failed: {err}")),
             }
+            progress.finish();
         } else if !empty_analysis_paths.is_empty() {
             outcomes
                 .skipped
@@ -1506,7 +1578,7 @@ impl BackendService {
         // track row would otherwise fail (or only succeed once enough other
         // playlists happen to have organically grown the chain past it).
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Truncated Table Chain",
             selected.contains(PDB_TRUNCATED_TABLE_CHAIN_FIX_ID),
             !pdb_truncated_chains.is_empty(),
@@ -1528,7 +1600,7 @@ impl BackendService {
         // repair above grow the PDB file, so running this immediately after
         // them (and still before strict parity) keeps the boundary accurate.
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Torn Growth Pages",
             selected.contains(PDB_TORN_GROWTH_PAGES_FIX_ID),
             !pdb_torn_growth.is_empty(),
@@ -1562,7 +1634,7 @@ impl BackendService {
                 } else {
                     Some(&strict_upgrade_targets)
                 };
-                report_fix("Upgrade Export Data To Strict Parity");
+                progress.start("Upgrade Export Data To Strict Parity");
                 match self.apply_strict_parity_upgrade(
                     usb_root,
                     target_names,
@@ -1606,6 +1678,7 @@ impl BackendService {
                         "Upgrade Export Data To Strict Parity failed: {err}"
                     )),
                 }
+                progress.finish();
             }
         } else if !strict_upgrade_targets.is_empty() {
             outcomes
@@ -1614,7 +1687,7 @@ impl BackendService {
         }
 
         if selected.contains(PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID) {
-            report_fix("Remove Duplicate PDB Playlist Entries");
+            progress.start("Remove Duplicate PDB Playlist Entries");
             match apply_pdb_duplicate_playlist_entries_repair(usb_root) {
                 Ok(0) => outcomes
                     .skipped
@@ -1626,6 +1699,7 @@ impl BackendService {
                     "Remove Duplicate PDB Playlist Entries failed: {err}"
                 )),
             }
+            progress.finish();
         } else if pdb_duplicate_entry_count > 0 {
             outcomes
                 .skipped
@@ -1633,7 +1707,7 @@ impl BackendService {
         }
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Data Pages With Zero tranrf",
             selected.contains(PDB_ZERO_TRANRF_FIX_ID),
             !pdb_zero_tranrf_pages.is_empty(),
@@ -1644,7 +1718,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair PDB Data Page Flags",
             selected.contains(PDB_WRONG_PAGE_FLAGS_FIX_ID),
             !pdb_wrong_flags_pages.is_empty(),
@@ -1655,7 +1729,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair PDB Data Pages With Sentinel u5",
             selected.contains(PDB_SENTINEL_U5_FIX_ID),
             !pdb_sentinel_u5_pages.is_empty(),
@@ -1666,7 +1740,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair PDB History/Columns Page Footer Shape",
             selected.contains(PDB_WRONG_HISTORY_SHAPE_FIX_ID),
             !pdb_wrong_history_shape_pages.is_empty(),
@@ -1677,7 +1751,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair PDB Track Page Footer Shape",
             selected.contains(PDB_WRONG_TRACK_U5_FIX_ID),
             !pdb_wrong_track_u5_pages.is_empty(),
@@ -1688,7 +1762,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Track Page Flag (Multi-Page Chain)",
             selected.contains(PDB_T00_MULTIPAGE_ACTIVE_FIX_ID),
             !pdb_t00_multipage_active_pages.is_empty(),
@@ -1699,7 +1773,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Tombstoned Playlist Tree IDs",
             selected.contains(PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID),
             !pdb_tombstoned_playlist_ids.is_empty(),
@@ -1710,7 +1784,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair PDB Playlist-Tree Page Shape",
             selected.contains(PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID),
             !pdb_wrong_playlist_tree_shape_pages.is_empty(),
@@ -1724,7 +1798,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Stale Sentinel B-Tree",
             selected.contains(PDB_STALE_SENTINEL_BTREE_FIX_ID),
             !pdb_stale_sentinel_btree_pages.is_empty(),
@@ -1735,7 +1809,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Table Write-Pointer Conflict",
             selected.contains(PDB_EC_CONFLICT_FIX_ID),
             !pdb_ec_conflicts.is_empty(),
@@ -1746,7 +1820,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Track String Alignment",
             selected.contains(PDB_TRACK_STRING_ALIGNMENT_FIX_ID),
             !pdb_misaligned_track_ids.is_empty(),
@@ -1757,7 +1831,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Album String Alignment",
             selected.contains(PDB_ALBUM_STRING_ALIGNMENT_FIX_ID),
             !pdb_misaligned_album_ids.is_empty(),
@@ -1768,7 +1842,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Repair Artist Name Layout",
             selected.contains(PDB_ARTIST_NAME_LAYOUT_FIX_ID),
             !pdb_misaligned_artist_ids.is_empty(),
@@ -1780,7 +1854,7 @@ impl BackendService {
 
         if selected.contains(PDB_HEADER_COMPATIBILITY_FIX_ID) {
             if let Some(repair) = pdb_header_compatibility_repair.as_ref() {
-                report_fix("Repair PDB Header Compatibility Field");
+                progress.start("Repair PDB Header Compatibility Field");
                 match apply_pdb_header_compatibility_repair(usb_root, repair) {
                     Ok(true) => outcomes.applied.push(format!(
                         "Repair PDB Header Compatibility Field: wrote 0x10..0x14 {}->{}",
@@ -1793,6 +1867,7 @@ impl BackendService {
                         "Repair PDB Header Compatibility Field failed: {err}"
                     )),
                 }
+                progress.finish();
             } else {
                 outcomes
                     .skipped
@@ -1805,7 +1880,7 @@ impl BackendService {
         }
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Relink Moved Audio Files",
             selected.contains(RELINK_MOVED_AUDIO_FIX_ID),
             !moved_audio_relinks.is_empty(),
@@ -1821,7 +1896,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Add Unindexed Audio to a Playlist",
             selected.contains(UNINDEXED_AUDIO_PLAYLIST_FIX_ID),
             !unindexed_audio_files.is_empty(),
@@ -1851,7 +1926,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Remove Duplicate Audio Copies",
             selected.contains(DUPLICATE_AUDIO_COPIES_FIX_ID),
             !duplicate_audio_copies.is_empty(),
@@ -1862,7 +1937,7 @@ impl BackendService {
         );
 
         if selected.contains(REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID) {
-            report_fix("Remove Missing Audio References");
+            progress.start("Remove Missing Audio References");
             match self.apply_fix_remove_missing_audio_references(
                 usb_root,
                 &missing_audio_paths,
@@ -1888,6 +1963,7 @@ impl BackendService {
                     .failed
                     .push(format!("Remove Missing Audio References failed: {err}")),
             }
+            progress.finish();
         } else if !missing_audio_paths.is_empty() {
             outcomes
                 .skipped
@@ -1895,7 +1971,7 @@ impl BackendService {
         }
 
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Give Tracks Their Own Analysis Files",
             selected.contains(SHARED_ANALYSIS_FIX_ID),
             !analysis_ownership.shared.is_empty(),
@@ -1912,7 +1988,7 @@ impl BackendService {
             },
         );
         outcomes.record_with_progress(
-            &mut report_fix,
+            &mut progress,
             "Add Track Path to Analysis Files",
             selected.contains(ANALYSIS_TRACK_PATH_FIX_ID),
             !analysis_ownership.unmarked.is_empty(),
@@ -1922,46 +1998,57 @@ impl BackendService {
             },
         );
 
-        outcomes.record_with_progress(
-            &mut report_fix,
-            "Fix BPM/Key Mismatch",
-            selected.contains(BPM_KEY_MISMATCH_FIX_ID),
-            !bpm_key_mismatches.is_empty(),
-            || {
-                apply_bpm_key_mismatch_repair(
-                    usb_root,
-                    app_master_db_id,
-                    fix_edb_conn.as_mut(),
-                    warnings,
-                )
-                .map(|(anlz_fixed, edb_fixed)| {
-                    format!("rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)")
-                })
-            },
-        );
+        let bpm_selected = selected.contains(BPM_KEY_MISMATCH_FIX_ID);
+        let bpm_found = !bpm_key_mismatches.is_empty();
+        if bpm_selected && bpm_found {
+            progress.start("Fix BPM/Key Mismatch");
+        }
+        outcomes.record("Fix BPM/Key Mismatch", bpm_selected, bpm_found, || {
+            apply_bpm_key_mismatch_repair(
+                usb_root,
+                app_master_db_id,
+                fix_edb_conn.as_mut(),
+                warnings,
+                &mut |done, total| progress.item_done(done, total),
+            )
+            .map(|(anlz_fixed, edb_fixed)| {
+                format!("rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)")
+            })
+        });
+        if bpm_selected && bpm_found {
+            progress.finish();
+        }
 
-        outcomes.record_with_progress(
-            &mut report_fix,
-            "Fix Beat Grid",
-            selected.contains(BEAT_GRID_HEADER_FIX_ID),
-            !app_beat_grids.is_empty(),
-            || {
-                apply_beat_grid_repair(usb_root, warnings)
-                    .map(|fixed| format!("fixed {fixed} bundle(s)"))
-            },
-        );
+        let grid_selected = selected.contains(BEAT_GRID_HEADER_FIX_ID);
+        let grid_found = !app_beat_grids.is_empty();
+        if grid_selected && grid_found {
+            progress.start("Fix Beat Grid");
+        }
+        outcomes.record("Fix Beat Grid", grid_selected, grid_found, || {
+            apply_beat_grid_repair(usb_root, warnings, &mut |done, total| {
+                progress.item_done(done, total)
+            })
+            .map(|fixed| format!("fixed {fixed} bundle(s)"))
+        });
+        if grid_selected && grid_found {
+            progress.finish();
+        }
 
         for (format, missing) in &missing_seek_data {
-            outcomes.record_with_progress(
-                &mut report_fix,
-                format.title(),
-                selected.contains(format.fix_id()),
-                !missing.is_empty(),
-                || {
-                    apply_missing_seek_data_repair(usb_root, *format, warnings)
-                        .map(|(fixed, skipped)| format!("fixed {fixed}, skipped {skipped}"))
-                },
-            );
+            let selected_format = selected.contains(format.fix_id());
+            let found = !missing.is_empty();
+            if selected_format && found {
+                progress.start(format.title());
+            }
+            outcomes.record(format.title(), selected_format, found, || {
+                apply_missing_seek_data_repair(usb_root, *format, warnings, &mut |done, total| {
+                    progress.item_done(done, total)
+                })
+                .map(|(fixed, skipped)| format!("fixed {fixed}, skipped {skipped}"))
+            });
+            if selected_format && found {
+                progress.finish();
+            }
         }
 
         if selected.contains(SYNC_EDB_HISTORY_FROM_PDB_FIX_ID) {
@@ -1970,7 +2057,7 @@ impl BackendService {
                     .skipped
                     .push("Sync eDB History Tables From PDB: nothing to apply".to_string());
             } else if let Some(parsed) = parsed_pdb.as_ref() {
-                report_fix("Sync eDB History Tables From PDB");
+                progress.start("Sync eDB History Tables From PDB");
                 match self.apply_fix_sync_edb_history_from_pdb(
                     usb_root,
                     parsed,
@@ -1986,6 +2073,7 @@ impl BackendService {
                         .failed
                         .push(format!("Sync eDB History Tables From PDB failed: {err}")),
                 }
+                progress.finish();
             } else {
                 outcomes
                     .skipped
@@ -2005,7 +2093,7 @@ impl BackendService {
             let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         }
         drop(fix_edb_conn);
-        drop(report_fix);
+        drop(progress);
 
         // All selected fixes above write to their local staged copies only
         // (see usb_staging.rs) -- flush the accumulated local changes back

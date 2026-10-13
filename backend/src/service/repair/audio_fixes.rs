@@ -230,6 +230,7 @@ pub(super) fn apply_bpm_key_mismatch_repair(
     app_master_db_id: Option<u32>,
     edb_conn: Option<&mut rusqlite::Connection>,
     warnings: &mut Vec<WarningEntry>,
+    on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<(usize, usize)> {
     let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
     let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings));
@@ -241,9 +242,15 @@ pub(super) fn apply_bpm_key_mismatch_repair(
         app_master_db_id,
     );
 
+    let edb_targets: Vec<&BpmKeyMismatch> = mismatches
+        .iter()
+        .filter(|m| m.edb_bpmx100.is_some() || m.pdb_key_for_edb.is_some())
+        .collect();
+    let total = mismatches.len() + edb_targets.len();
     let mut anlz_fixed = 0usize;
-    for m in &mismatches {
+    for (index, m) in mismatches.iter().enumerate() {
         let Some(dat) = m.anlz_dat_path.as_deref() else {
+            on_item(index + 1, total);
             continue;
         };
         // The grid's beat count comes from the track length: the PDB's, else
@@ -260,6 +267,7 @@ pub(super) fn apply_bpm_key_mismatch_repair(
                     m.track_path
                 ),
             ));
+            on_item(index + 1, total);
             continue;
         };
         let edits = AnlzAnalysisEdits {
@@ -277,13 +285,10 @@ pub(super) fn apply_bpm_key_mismatch_repair(
             }
         }
         anlz_fixed += 1;
+        on_item(index + 1, total);
     }
 
     let mut edb_fixed = 0usize;
-    let edb_targets: Vec<&BpmKeyMismatch> = mismatches
-        .iter()
-        .filter(|m| m.edb_bpmx100.is_some() || m.pdb_key_for_edb.is_some())
-        .collect();
     if !edb_targets.is_empty() {
         let Some(handle) = handle.as_mut() else {
             return Err(BackendError::Internal(
@@ -291,7 +296,7 @@ pub(super) fn apply_bpm_key_mismatch_repair(
             ));
         };
         let tx = handle.conn().transaction()?;
-        for m in edb_targets {
+        for (index, m) in edb_targets.into_iter().enumerate() {
             let mut changed = false;
             if m.edb_bpmx100.is_some() {
                 changed |= tx.execute(
@@ -309,6 +314,7 @@ pub(super) fn apply_bpm_key_mismatch_repair(
             if changed {
                 edb_fixed += 1;
             }
+            on_item(mismatches.len() + index + 1, total);
         }
         tx.commit()?;
     }
@@ -573,9 +579,12 @@ pub(super) fn detect_app_beat_grids(usb_root: &Path) -> Vec<std::path::PathBuf> 
 pub(super) fn apply_beat_grid_repair(
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,
+    on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<usize> {
     let mut fixed = 0usize;
-    for dat in detect_app_beat_grids(usb_root) {
+    let targets = detect_app_beat_grids(usb_root);
+    let total = targets.len();
+    for (index, dat) in targets.into_iter().enumerate() {
         match upgrade_bundle_beat_grid(&dat)? {
             GridUpgrade::Rewritten => fixed += 1,
             GridUpgrade::AlreadyCurrent => {}
@@ -589,6 +598,7 @@ pub(super) fn apply_beat_grid_repair(
                 ),
             )),
         }
+        on_item(index + 1, total);
     }
     Ok(fixed)
 }
@@ -728,11 +738,14 @@ pub(super) fn apply_missing_seek_data_repair(
     usb_root: &Path,
     format: SeekFormat,
     warnings: &mut Vec<WarningEntry>,
+    on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<(usize, usize)> {
     let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
     let mut fixed = 0usize;
     let mut skipped = 0usize;
-    for target in detect_missing_seek_data(usb_root, &parsed, format) {
+    let targets = detect_missing_seek_data(usb_root, &parsed, format);
+    let total = targets.len();
+    for (item_index, target) in targets.into_iter().enumerate() {
         let (reason, advice) = match seek_index_for_audio(&target.audio_path) {
             Ok(Some(index)) => {
                 let bytes = std::fs::read(&target.bundle_path)?;
@@ -740,12 +753,16 @@ pub(super) fn apply_missing_seek_data_repair(
                     Some(patched) => {
                         atomic_write_bytes(&target.bundle_path, &patched)?;
                         fixed += 1;
+                        on_item(item_index + 1, total);
                         continue;
                     }
                     None => ("analysis file could not be parsed", SEEK_SKIP_REPORT_HINT),
                 }
             }
-            Ok(None) => continue,
+            Ok(None) => {
+                on_item(item_index + 1, total);
+                continue;
+            }
             Err(skip) => (skip.describe(), skip.advice()),
         };
         skipped += 1;
@@ -759,6 +776,7 @@ pub(super) fn apply_missing_seek_data_repair(
                 target.track_path,
             ),
         ));
+        on_item(item_index + 1, total);
     }
     Ok((fixed, skipped))
 }

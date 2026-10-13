@@ -4047,12 +4047,21 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
     assert_fix_proposed(&backend, &usb, "add_missing_mp3_seek_data");
     // The stick has no FLAC, so the FLAC fix has nothing to offer.
     assert_fix_not_proposed(&backend, &usb, "add_missing_flac_seek_data");
-    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-        apply: true,
-        selected_fix_ids: vec!["add_missing_mp3_seek_data".to_string()],
-    });
+    let mut progress = Vec::new();
+    let repair = backend.repair_usb_diagnostics_with_progress(
+        RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: true,
+            selected_fix_ids: vec!["add_missing_mp3_seek_data".to_string()],
+        },
+        |current, _, message| progress.push((current, message.to_string())),
+    );
     assert!(repair.ok, "repair failed: {repair:?}");
+    assert!(progress.contains(&(70, "USB: Applying Add Missing MP3 Seek Data".to_string())));
+    assert!(progress.contains(&(
+        94,
+        "USB: Applying Add Missing MP3 Seek Data (1/1)".to_string()
+    )));
     let data = repair.data.expect("repair data");
     assert!(
         data.applied_fixes
