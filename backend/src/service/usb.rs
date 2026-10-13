@@ -3700,7 +3700,6 @@ mod tests {
         tracks: &[(&str, &str, &str)],
     ) -> crate::service::export_helpers::ExportManifest {
         crate::service::export_helpers::ExportManifest {
-            version: 1,
             generated_at: "2024-01-01".to_string(),
             playlist_id: playlist_id.to_string(),
             playlist_name: playlist_name.to_string(),

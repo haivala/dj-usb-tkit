@@ -373,7 +373,6 @@ mod tests {
 
     fn manifest(generated_at: &str, tracks: Vec<ExportManifestTrack>) -> ExportManifest {
         ExportManifest {
-            version: 1,
             generated_at: generated_at.to_string(),
             playlist_id: "pl-1".to_string(),
             playlist_name: "Warmup".to_string(),
@@ -528,7 +527,6 @@ mod tests {
         prune_stale: bool,
     ) -> ExportManifest {
         ExportManifest {
-            version: 1,
             generated_at: generated_at.to_string(),
             playlist_id: "pl-1".to_string(),
             playlist_name: "Warmup".to_string(),

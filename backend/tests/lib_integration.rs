@@ -179,7 +179,6 @@ fn seed_usb_missing_audio_fixture(backend: &BackendCommands, usb_root: &Path) ->
         tracks: Vec::new(),
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "1970-01-01T00:00:00Z".to_string(),
         playlist_id: "pl-test".to_string(),
         playlist_name: playlist_name.clone(),
@@ -930,7 +929,6 @@ fn export_to_usb_writes_canonical_outputs() {
     let data = exported.data.expect("export data");
     assert_eq!(data.playlist_id, playlist_id);
     assert_eq!(data.exported_tracks, 1);
-    assert!(data.manifest_path.is_empty());
     let copied_files = WalkDir::new(usb.join("Contents"))
         .into_iter()
         .filter_map(Result::ok)
@@ -3339,7 +3337,6 @@ fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
         duration_ms: Some(180_000),
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "1970-01-01T00:00:00Z".to_string(),
         playlist_id: playlist.id.clone(),
         playlist_name: playlist.name.clone(),
@@ -3528,7 +3525,6 @@ fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
         duration_ms: Some(180_000),
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "1970-01-01T00:00:00Z".to_string(),
         playlist_id: playlist.id.clone(),
         playlist_name: playlist.name.clone(),
@@ -3840,7 +3836,6 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
         tracks: Vec::new(),
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "1970-01-01T00:00:00Z".to_string(),
         playlist_id: "pl-testi".to_string(),
         playlist_name: "Testi".to_string(),
@@ -4140,7 +4135,6 @@ fn repair_usb_diagnostics_strict_upgrade_is_not_proposed_when_neither_side_is_ri
         tracks: Vec::new(),
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "1970-01-01T00:00:00Z".to_string(),
         playlist_id: "pl-thin".to_string(),
         playlist_name: "Thin Repair".to_string(),
@@ -5473,7 +5467,6 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
         tracks: Vec::new(),
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "1970-01-01T00:00:00Z".to_string(),
         playlist_id: "pl-foreign-seed".to_string(),
         playlist_name: "Foreign Seed".to_string(),

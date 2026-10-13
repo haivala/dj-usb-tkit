@@ -1009,7 +1009,6 @@ fn verify_edb_content_fails_when_artwork_file_is_missing_on_disk() {
         tracks: vec![],
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl1".to_string(),
         playlist_name: "Test".to_string(),
@@ -1846,7 +1845,6 @@ fn remove_playlist_and_tracks_from_pdb_allows_removing_last_playlist() {
         }],
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl-last".to_string(),
         playlist_name: "Last Playlist".to_string(),
@@ -2631,7 +2629,6 @@ fn rewrite_pdb_playlist_rebuilds_resolvable_dictionary_rows_on_initialized_usb()
         tracks: vec![make_test_track("t1", "Song One", "a1.mp3")],
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl-dict".to_string(),
         playlist_name: "Dictionary Repair".to_string(),
@@ -2805,7 +2802,6 @@ fn write_pdb_fresh_backfills_dictionary_ids_from_edb_when_manifest_is_thin() {
         Some("/PIONEER/USBANLZ/P111/11111111/ANLZ0000.DAT".to_string());
 
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl-fallback".to_string(),
         playlist_name: "Fallback Playlist".to_string(),
@@ -2889,7 +2885,6 @@ fn write_pdb_updates_alias_matched_track_to_manifest_filename_exactly() {
     track.exported_path = old_path.to_string();
 
     let mut manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: playlist.id.clone(),
         playlist_name: playlist.name.clone(),
@@ -2985,7 +2980,6 @@ fn write_pdb_reuses_existing_row_when_a_different_manifest_track_id_targets_the_
     track_a.exported_path = foreign_path.to_string();
 
     let mut manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: playlist.id.clone(),
         playlist_name: playlist.name.clone(),
@@ -3067,7 +3061,6 @@ fn write_pdb_writes_rating_and_colour_and_keeps_them_when_the_library_has_none()
         track.rating = rating;
         track.color_id = color_id;
         ExportManifest {
-            version: 1,
             generated_at: "2024-01-01".to_string(),
             playlist_id: playlist.id.clone(),
             playlist_name: playlist.name.clone(),
@@ -3187,7 +3180,6 @@ fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
     track.exported_path = old_path.to_string();
 
     let mut manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: playlist.id.clone(),
         playlist_name: playlist.name.clone(),
@@ -3275,7 +3267,6 @@ fn strict_parity_report_has_no_dictionary_id_issues_for_thin_manifest_fallback()
         Some("/PIONEER/USBANLZ/P111/11111111/ANLZ0000.DAT".to_string());
 
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl-fallback-parity".to_string(),
         playlist_name: "Fallback Parity".to_string(),
@@ -3387,7 +3378,6 @@ fn strict_parity_report_has_no_dictionary_id_issues_when_edb_is_thin_but_manifes
         Some("/PIONEER/USBANLZ/P222/22222222/ANLZ0000.DAT".to_string());
 
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl-rich-manifest".to_string(),
         playlist_name: "Rich Manifest".to_string(),
@@ -3481,7 +3471,6 @@ fn strict_parity_additive_write_keeps_dictionary_ids_resolved_with_thin_manifest
     tx.commit().expect("commit eDB tx");
 
     let base_manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl-additive".to_string(),
         playlist_name: "Additive Fallback".to_string(),
@@ -3511,7 +3500,6 @@ fn strict_parity_additive_write_keeps_dictionary_ids_resolved_with_thin_manifest
     add_track_thin_manifest.artwork_path = None;
 
     let additive_manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl-additive".to_string(),
         playlist_name: "Additive Fallback".to_string(),
@@ -3563,7 +3551,6 @@ fn rewrite_pdb_playlist_keeps_f_sharp_and_f_minor_as_distinct_keys() {
         tracks: vec![],
     };
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl-keys".to_string(),
         playlist_name: "Key Collision".to_string(),
@@ -3780,7 +3767,6 @@ fn make_test_manifest(
     tracks: &[(&str, &str, &str)], // (id, title, filename)
 ) -> ExportManifest {
     ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: playlist_id.to_string(),
         playlist_name: playlist_name.to_string(),
@@ -3908,7 +3894,6 @@ fn write_pdb_refreshes_file_size_sample_rate_bitrate_on_reexport_of_existing_tra
 fn collect_owned_paths_includes_media_artwork_analysis() {
     let usb_root = Path::new("/mnt/usb");
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl1".to_string(),
         playlist_name: "Test".to_string(),
@@ -3997,7 +3982,6 @@ fn collect_owned_paths_includes_media_artwork_analysis() {
 fn collect_owned_paths_skips_none_artwork_and_waveform() {
     let usb_root = Path::new("/mnt/usb");
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "2024-01-01".to_string(),
         playlist_id: "pl1".to_string(),
         playlist_name: "Test".to_string(),
@@ -4309,7 +4293,6 @@ fn genre_and_label_tables_preserved_through_export_roundtrip() {
         }],
     };
     let manifest = super::ExportManifest {
-        version: 1,
         generated_at: "2025-01-01".to_string(),
         playlist_id: "pl-1".to_string(),
         playlist_name: "Test".to_string(),

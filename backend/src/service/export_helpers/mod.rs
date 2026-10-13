@@ -62,7 +62,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::{OptionalExtension, params};
-use serde::Serialize;
 
 use crate::error::{BackendError, BackendResult};
 use crate::models::{ExportToUsbOptions, TrackCue, WarningEntry};
@@ -104,10 +103,8 @@ fn canonicalize_artwork_path_lookup(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct ExportManifest {
-    pub version: u32,
     pub generated_at: String,
     pub playlist_id: String,
     pub playlist_name: String,

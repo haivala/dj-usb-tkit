@@ -1219,7 +1219,6 @@ impl BackendService {
 
         on_progress(total_steps, total_steps, "USB: Finalizing export metadata");
         let manifest = ExportManifest {
-            version: 1,
             generated_at: now(),
             playlist_id: playlist.id.clone(),
             playlist_name: playlist.name.clone(),
@@ -1530,7 +1529,6 @@ impl BackendService {
             skipped_tracks,
             exported_artworks,
             exported_analysis_files,
-            manifest_path: String::new(),
             warnings,
         })
     }
@@ -2569,7 +2567,6 @@ mod tests {
 
     fn minimal_manifest(usb_root: &Path, track: ExportManifestTrack) -> ExportManifest {
         ExportManifest {
-            version: 1,
             generated_at: "2024-01-01".to_string(),
             playlist_id: "pl1".to_string(),
             playlist_name: "Playlist".to_string(),

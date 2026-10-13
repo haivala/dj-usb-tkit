@@ -317,7 +317,6 @@ pub(super) fn build_manifest_for_merged_playlist(
         })
         .collect();
     let manifest = ExportManifest {
-        version: 1,
         generated_at: "1970-01-01T00:00:00Z".to_string(),
         playlist_id: playlist_data.id.clone(),
         playlist_name: playlist.name.clone(),

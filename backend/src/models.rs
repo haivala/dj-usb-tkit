@@ -1640,7 +1640,6 @@ pub struct ExportToUsbData {
     pub skipped_tracks: usize,
     pub exported_artworks: usize,
     pub exported_analysis_files: usize,
-    pub manifest_path: String,
     pub warnings: Vec<WarningEntry>,
 }
 

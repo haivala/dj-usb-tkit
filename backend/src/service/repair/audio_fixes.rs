@@ -881,7 +881,6 @@ impl BackendService {
             tracks: Vec::new(),
         };
         let manifest = ExportManifest {
-            version: 1,
             generated_at: crate::service::now(),
             playlist_id: playlist.id.clone(),
             playlist_name: playlist.name.clone(),

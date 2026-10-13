@@ -215,5 +215,4 @@ fn main() {
             .collect::<Vec<_>>();
         println!("warnings: {}", warnings.join(" | "));
     }
-    println!("manifest: {}", data.manifest_path);
 }

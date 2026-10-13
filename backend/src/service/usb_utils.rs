@@ -2419,7 +2419,6 @@ mod diag_tests {
             tracks: Vec::new(),
         };
         let manifest = ExportManifest {
-            version: 1,
             generated_at: now(),
             playlist_id: "local-test".to_string(),
             playlist_name: "Field Test".to_string(),
@@ -2574,7 +2573,6 @@ mod diag_tests {
             tracks: Vec::new(),
         };
         let manifest = ExportManifest {
-            version: 1,
             generated_at: now(),
             playlist_id: "local-test".to_string(),
             playlist_name: "Field Test".to_string(),
