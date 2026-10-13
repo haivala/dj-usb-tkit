@@ -30,7 +30,8 @@ pub use crate::pdb_writer::{T08EntryKey, validate_no_empty_data_pages};
 #[cfg(test)]
 pub use export_paths::canonical_artwork_target_path;
 pub use export_paths::{
-    CONTENT_FILENAME_MAX_LEN, PruneResult, analysis_bundle_path_variants,
+    CONTENT_FILENAME_MAX_LEN, PruneResult, analysis_bundle_claimable,
+    analysis_bundle_path_variants, analysis_bundle_paths_for_track,
     canonical_analysis_bundle_paths, canonical_artwork_target_paths, collect_manifest_owned_paths,
     copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,

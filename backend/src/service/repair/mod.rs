@@ -29,8 +29,8 @@ use super::BackendService;
 use super::SETTING_EXPORT_MASTER_DB_ID;
 use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
 use super::anlz::{
-    AnlzAnalysisEdits, AnlzBundlePaths, GridUpgrade, WaveformData, apply_analysis_edits_to_anlz,
-    atomic_write_bytes, canonical_analysis_bundle_paths, ensure_ppth_chunk, fill_mp3_pvbr,
+    AnlzAnalysisEdits, AnlzBundlePaths, GridUpgrade, WaveformData, analysis_bundle_paths_for_track,
+    apply_analysis_edits_to_anlz, atomic_write_bytes, ensure_ppth_chunk, fill_mp3_pvbr,
     has_misplaced_pqtz_header, has_pvb2_chunk, pqt2_checksum_ok, pvbr_total_samples,
     read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, upgrade_bundle_beat_grid,
     with_seek_index, write_generated_anlz_bundle,
@@ -56,9 +56,10 @@ use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 use crate::scanner::scan_audio_file;
 
 use super::diagnostics::{
-    BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths,
+    AnalysisOwnership, BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths,
     detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
-    normalize_pdb_path_for_edb_lookup, scan_audio_presence, track_identity_key,
+    normalize_pdb_path_for_edb_lookup, scan_analysis_ownership, scan_audio_presence,
+    track_identity_key,
 };
 
 mod audio_fixes;
@@ -79,6 +80,8 @@ pub(crate) use strict_parity::*;
 const EMPTY_ANALYSIS_FILES_FIX_ID: &str = "fix_empty_analysis_files";
 const REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID: &str = "remove_missing_audio_references";
 const BPM_KEY_MISMATCH_FIX_ID: &str = "fix_bpm_key_mismatch";
+const SHARED_ANALYSIS_FIX_ID: &str = "separate_shared_analysis";
+const ANALYSIS_TRACK_PATH_FIX_ID: &str = "add_analysis_track_path";
 const MISSING_MP3_SEEK_DATA_FIX_ID: &str = "add_missing_mp3_seek_data";
 const MISSING_FLAC_SEEK_DATA_FIX_ID: &str = "add_missing_flac_seek_data";
 const BEAT_GRID_HEADER_FIX_ID: &str = "fix_beat_grid_header";
@@ -153,6 +156,9 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_ALBUM_STRING_ALIGNMENT_FIX_ID,
     PDB_ARTIST_NAME_LAYOUT_FIX_ID,
     PDB_HEADER_COMPATIBILITY_FIX_ID,
+    // Before the BPM fix: it only aligns a bundle that is one track's own.
+    SHARED_ANALYSIS_FIX_ID,
+    ANALYSIS_TRACK_PATH_FIX_ID,
     BPM_KEY_MISMATCH_FIX_ID,
     BEAT_GRID_HEADER_FIX_ID,
     MISSING_MP3_SEEK_DATA_FIX_ID,

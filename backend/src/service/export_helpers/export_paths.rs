@@ -342,9 +342,11 @@ pub fn export_artwork_for_player(
 }
 
 // Re-export analysis helpers so they're available via export_helpers::*
-pub use super::super::anlz::canonical_analysis_bundle_paths;
 use super::super::anlz::{
     AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, ensure_ppth_chunk,
+};
+pub use super::super::anlz::{
+    analysis_bundle_claimable, analysis_bundle_paths_for_track, canonical_analysis_bundle_paths,
 };
 use super::super::cues::anlz_cues_from_track_cues;
 
@@ -457,7 +459,9 @@ pub fn export_analysis_bundle_for_track(
     track_path: &str,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<Option<(String, usize)>> {
-    let (dat_path, ext_path, twoex_path) = canonical_analysis_bundle_paths(usb_root, track_path);
+    // Never another track's bundle: on a hash-folder collision this is the
+    // next free `ANLZnnnn`, as rekordbox does.
+    let (dat_path, ext_path, twoex_path) = analysis_bundle_paths_for_track(usb_root, track_path);
 
     let Some(local_bundle_str) = track.waveform_peaks_path.as_deref() else {
         warnings.push(logging::log(

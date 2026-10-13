@@ -25,10 +25,10 @@ pub(crate) type ContentFingerprint = (u32, String, String);
 
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
-    WriteExportLibraryDbResult, WriteExportPdbResult, canonicalize_track_path_identity,
-    collect_manifest_owned_paths, copy_if_different, copy_wav_normalized_if_needed,
-    ensure_analysis_bundle_ppth, export_analysis_bundle_for_track, export_artwork_for_player,
-    export_owned_files_setting_key, exported_media_target_path,
+    WriteExportLibraryDbResult, WriteExportPdbResult, analysis_bundle_claimable,
+    canonicalize_track_path_identity, collect_manifest_owned_paths, copy_if_different,
+    copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth, export_analysis_bundle_for_track,
+    export_artwork_for_player, export_owned_files_setting_key, exported_media_target_path,
     exported_media_target_path_with_ordinal, filter_prunable_stale_paths_for_playlist,
     is_safe_export_owned_path, normalize_owned_export_path, preview_pdb,
     prune_stale_export_owned_files, remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash,
@@ -1107,9 +1107,16 @@ impl BackendService {
                 // Reuse an existing USB-side analysis bundle when the source track
                 // already lives on this stick. Otherwise generate a fresh bundle
                 // from local analysis inputs so waveform/beatgrid fixes apply.
+                // A bundle whose PPTH names another track is that track's
+                // (hash-folder collision): not reused, a fresh one is written.
+                let claimable = |p: &String| {
+                    analysis_bundle_exists(usb_root.as_path(), p)
+                        && resolve_usb_side_path(&usb_root, p)
+                            .is_some_and(|dat| analysis_bundle_claimable(&dat, &exported_path))
+                };
                 if let Some(existing_analysis) =
                     existing_usb_relative_if_file(&usb_root, track.waveform_peaks_path.as_deref())
-                        .filter(|p| analysis_bundle_exists(usb_root.as_path(), p))
+                        .filter(claimable)
                 {
                     if !export_dry_run {
                         ensure_analysis_bundle_ppth(
@@ -1126,7 +1133,7 @@ impl BackendService {
                     if let Some(existing_analysis) = existing_analysis_by_path
                         .get(&exported_key)
                         .cloned()
-                        .filter(|p| analysis_bundle_exists(usb_root.as_path(), p))
+                        .filter(claimable)
                     {
                         if !export_dry_run {
                             ensure_analysis_bundle_ppth(

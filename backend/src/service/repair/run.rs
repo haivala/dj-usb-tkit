@@ -24,6 +24,8 @@ struct DetectedRepairs {
     empty_analysis_paths: Vec<std::path::PathBuf>,
     parsed_pdb: Option<ParsedPdb>,
     bpm_key_mismatches: Vec<BpmKeyMismatch>,
+    analysis_ownership: AnalysisOwnership,
+    app_master_db_id: Option<u32>,
     app_beat_grids: Vec<std::path::PathBuf>,
     missing_seek_data: Vec<(SeekFormat, Vec<MissingSeekData>)>,
     pdb_sentinel_u5_pages: Vec<SentinelU5Page>,
@@ -198,9 +200,28 @@ impl BackendService {
         // and this one) -- only falls back to a fresh parse if diagnostics'
         // own parse failed.
         let parsed_pdb = parsed_pdb_from_diagnostics.or_else(|| parse_pdb(&staged_pdb_path).ok());
+        // This app's export id: the owner of a bundle it shares with another
+        // track (`scan_analysis_ownership`).
+        let app_master_db_id = self
+            .db
+            .connect()
+            .ok()
+            .and_then(|conn| {
+                Self::ensure_local_u32_setting(&conn, SETTING_EXPORT_MASTER_DB_ID, "master-db-id")
+                    .ok()
+            })
+            .and_then(|id| u32::try_from(id).ok());
         let bpm_key_mismatches: Vec<BpmKeyMismatch> = parsed_pdb
             .as_ref()
-            .map(|parsed| detect_bpm_key_mismatches(&usb_root, parsed, edb_conn.as_ref(), true))
+            .map(|parsed| {
+                detect_bpm_key_mismatches(
+                    &usb_root,
+                    parsed,
+                    edb_conn.as_ref(),
+                    true,
+                    app_master_db_id,
+                )
+            })
             .unwrap_or_default();
         if !bpm_key_mismatches.is_empty() {
             detected_issues.push(format!(
@@ -218,14 +239,135 @@ impl BackendService {
                 .count();
             proposed_fixes.push(RepairFixProposal {
                 estimated_writes: anlz_writes + edb_writes,
+                link: Some("event-log".to_string()),
                 ..fix_proposal(
                     BPM_KEY_MISMATCH_FIX_ID,
                     "Fix BPM/Key Mismatch",
                     "Rebuild the ANLZ beat grid and set the eDB BPM and key from each \
                      track's PDB row, so every player reads the same BPM and key. \
-                     Waveforms, cues and the first beat are kept.",
+                     Waveforms, cues and the first beat are kept. See Event Log for the \
+                     tracks.",
                 )
             });
+            for m in &bpm_key_mismatches {
+                let tempo = |t: Option<u16>| {
+                    t.map_or("-".to_string(), |t| format!("{:.2}", f64::from(t) / 100.0))
+                };
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.bpm-key-mismatch",
+                    format!(
+                        "BPM/key mismatch: {} (PDB {:.2}, DAT grid {}, EXT grid {}, eDB {}{})",
+                        m.track_path,
+                        f64::from(m.pdb_tempo_x100) / 100.0,
+                        tempo(m.anlz_tempos_x100[0]),
+                        tempo(m.anlz_tempos_x100[1]),
+                        m.edb_bpmx100
+                            .map_or("same".to_string(), |v| format!("{:.2}", v as f64 / 100.0)),
+                        m.pdb_key_for_edb
+                            .as_deref()
+                            .map_or(String::new(), |k| format!(", eDB key differs from {k}")),
+                    ),
+                ));
+            }
+        }
+        // Analysis bundles that aren't one track's own (see `analysis_ownership`).
+        let analysis_ownership = parsed_pdb
+            .as_ref()
+            .map(|parsed| scan_analysis_ownership(&usb_root, parsed, app_master_db_id, true))
+            .unwrap_or_default();
+        let bundle_rel = |dat: &std::path::Path| {
+            usb_relative_path(&usb_root, dat).unwrap_or_else(|| dat.to_string_lossy().to_string())
+        };
+        if let Some(parsed) = parsed_pdb.as_ref()
+            && !analysis_ownership.shared.is_empty()
+        {
+            let path_of = |id: &u32| {
+                parsed
+                    .tracks
+                    .iter()
+                    .find(|t| t.id == *id)
+                    .map_or_else(String::new, |t| t.track_file_path.clone())
+            };
+            let movers = analysis_ownership
+                .shared
+                .iter()
+                .map(|b| b.track_ids.len() - usize::from(b.owner.is_some()))
+                .sum::<usize>();
+            detected_issues.push(format!(
+                "{} analysis file(s) shared by tracks that need their own ({movers} track(s))",
+                analysis_ownership.shared.len()
+            ));
+            proposed_fixes.push(RepairFixProposal {
+                destructive: true,
+                estimated_writes: movers * 3,
+                link: Some("event-log".to_string()),
+                ..fix_proposal(
+                    SHARED_ANALYSIS_FIX_ID,
+                    "Give Tracks Their Own Analysis Files",
+                    format!(
+                        "{movers} track(s) use another track's analysis file, so players can \
+                         show that track's waveform and beat grid for them. Each gets its own \
+                         file in its folder (ANLZ0001 and on, as rekordbox names them), analysed \
+                         from its audio with its BPM; the file's own track keeps it. Their old \
+                         cues stay with the other track. See Event Log for the tracks."
+                    ),
+                )
+            });
+            for bundle in &analysis_ownership.shared {
+                let tracks = bundle
+                    .track_ids
+                    .iter()
+                    .map(path_of)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let owner = bundle
+                    .owner
+                    .as_ref()
+                    .map_or_else(|| "no track (each gets its own)".to_string(), path_of);
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.shared-analysis",
+                    format!(
+                        "shared analysis file: {} used by {tracks}; kept by {owner}",
+                        bundle_rel(&bundle.dat)
+                    ),
+                ));
+            }
+        }
+        if !analysis_ownership.unmarked.is_empty() {
+            let count = analysis_ownership.unmarked.len();
+            detected_issues.push(format!(
+                "{count} analysis file(s) without the track path players match them by"
+            ));
+            proposed_fixes.push(RepairFixProposal {
+                estimated_writes: count * 3,
+                link: Some("event-log".to_string()),
+                ..fix_proposal(
+                    ANALYSIS_TRACK_PATH_FIX_ID,
+                    "Add Track Path to Analysis Files",
+                    format!(
+                        "{count} analysis file(s) don't name their track (PPTH), which players \
+                         use to find a track's file when two tracks hash to the same folder. \
+                         Writes the track path into each; nothing else changes. See Event Log \
+                         for the files."
+                    ),
+                )
+            });
+            for bundle in &analysis_ownership.unmarked {
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.analysis-without-track-path",
+                    format!(
+                        "analysis file without track path: {} ({})",
+                        bundle_rel(&bundle.dat),
+                        bundle.track_path
+                    ),
+                ));
+            }
         }
         let app_beat_grids = detect_app_beat_grids(&usb_root);
         if !app_beat_grids.is_empty() {
@@ -254,7 +396,35 @@ impl BackendService {
                         .as_ref()
                         .map(|parsed| detect_missing_seek_data(&usb_root, parsed, format))
                         .unwrap_or_default();
-                    (format, missing)
+                    // Files the fix would skip on every pass are listed, not proposed.
+                    let (fixable, unfixable) = partition_fixable_seek_data(missing);
+                    if !unfixable.is_empty() {
+                        unsupported_items.push(RepairUnsupportedItem {
+                            issue: format!(
+                                "{} {} track(s) without seek data that can't be added",
+                                unfixable.len(),
+                                format.name()
+                            ),
+                            reason: "The seek index can't be built from these files (Event Log \
+                                     names each one and why). A damaged file needs an intact \
+                                     copy."
+                                .to_string(),
+                            link: Some("event-log".to_string()),
+                        });
+                        for (target, reason) in &unfixable {
+                            warnings.push(logging::log(
+                                Level::Warn,
+                                "usb-diagnostics",
+                                "usb.diagnostics.seek-data-unfixable",
+                                format!(
+                                    "{} seek data can't be added ({reason}): {}",
+                                    format.name(),
+                                    target.track_path
+                                ),
+                            ));
+                        }
+                    }
+                    (format, fixable)
                 })
                 .collect();
         for (format, missing) in &missing_seek_data {
@@ -1039,6 +1209,8 @@ impl BackendService {
             empty_analysis_paths,
             parsed_pdb,
             bpm_key_mismatches,
+            analysis_ownership,
+            app_master_db_id,
             app_beat_grids,
             missing_seek_data,
             pdb_sentinel_u5_pages,
@@ -1186,6 +1358,8 @@ impl BackendService {
             empty_analysis_paths,
             parsed_pdb,
             bpm_key_mismatches,
+            analysis_ownership,
+            app_master_db_id,
             app_beat_grids,
             missing_seek_data,
             pdb_sentinel_u5_pages,
@@ -1645,15 +1819,45 @@ impl BackendService {
         }
 
         outcomes.record(
+            "Give Tracks Their Own Analysis Files",
+            selected.contains(SHARED_ANALYSIS_FIX_ID),
+            !analysis_ownership.shared.is_empty(),
+            || {
+                apply_separate_shared_analysis(
+                    usb_root,
+                    app_master_db_id,
+                    fix_edb_conn.as_mut(),
+                    warnings,
+                )
+                .map(|(moved, kept)| {
+                    format!("gave {moved} track(s) their own analysis file, {kept} kept theirs")
+                })
+            },
+        );
+        outcomes.record(
+            "Add Track Path to Analysis Files",
+            selected.contains(ANALYSIS_TRACK_PATH_FIX_ID),
+            !analysis_ownership.unmarked.is_empty(),
+            || {
+                apply_add_analysis_track_path(usb_root, app_master_db_id)
+                    .map(|stamped| format!("named the track in {stamped} analysis file(s)"))
+            },
+        );
+
+        outcomes.record(
             "Fix BPM/Key Mismatch",
             selected.contains(BPM_KEY_MISMATCH_FIX_ID),
             !bpm_key_mismatches.is_empty(),
             || {
-                apply_bpm_key_mismatch_repair(usb_root, fix_edb_conn.as_mut(), warnings).map(
-                    |(anlz_fixed, edb_fixed)| {
-                        format!("rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)")
-                    },
+                apply_bpm_key_mismatch_repair(
+                    usb_root,
+                    app_master_db_id,
+                    fix_edb_conn.as_mut(),
+                    warnings,
                 )
+                .map(|(anlz_fixed, edb_fixed)| {
+                    format!("rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)")
+                })
             },
         );
 

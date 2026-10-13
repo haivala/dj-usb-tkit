@@ -4776,6 +4776,303 @@ fn repair_resolves_an_artwork_only_mismatch_in_one_pass() {
     assert_one_repair_pass_clears_parity(&backend, &usb);
 }
 
+/// The `PPTH` track path of an ANLZ file, if any.
+fn anlz_ppth(path: &Path) -> Option<String> {
+    let data = fs::read(path).ok()?;
+    let mut pos = u32::from_be_bytes(data.get(4..8)?.try_into().ok()?) as usize;
+    while pos + 12 <= data.len() {
+        let header_len = u32::from_be_bytes(data[pos + 4..pos + 8].try_into().ok()?) as usize;
+        let total_len = u32::from_be_bytes(data[pos + 8..pos + 12].try_into().ok()?) as usize;
+        if total_len == 0 || pos + total_len > data.len() {
+            return None;
+        }
+        if &data[pos..pos + 4] == b"PPTH" {
+            let units = data[pos + header_len..pos + total_len]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_be_bytes(*c))
+                .take_while(|u| *u != 0)
+                .collect::<Vec<_>>();
+            return String::from_utf16(&units).ok();
+        }
+        pos += total_len;
+    }
+    None
+}
+
+/// Rewrite an ANLZ file without its `PPTH` chunk, as old exports left it.
+fn strip_anlz_ppth(path: &Path) {
+    let data = fs::read(path).expect("read anlz");
+    let header = u32::from_be_bytes(data[4..8].try_into().unwrap()) as usize;
+    let mut out = data[..header].to_vec();
+    let mut pos = header;
+    while pos + 12 <= data.len() {
+        let total_len = u32::from_be_bytes(data[pos + 8..pos + 12].try_into().unwrap()) as usize;
+        if &data[pos..pos + 4] != b"PPTH" {
+            out.extend_from_slice(&data[pos..pos + total_len]);
+        }
+        pos += total_len;
+    }
+    let len = out.len() as u32;
+    out[8..12].copy_from_slice(&len.to_be_bytes());
+    fs::write(path, out).expect("write anlz");
+}
+
+/// Replace every occurrence of `from` with the equally long `to` in a file.
+fn replace_bytes_in_file(path: &Path, from: &str, to: &str) {
+    assert_eq!(from.len(), to.len());
+    let mut data = fs::read(path).expect("read");
+    let mut replaced = 0;
+    let mut i = 0;
+    while i + from.len() <= data.len() {
+        if &data[i..i + from.len()] == from.as_bytes() {
+            data[i..i + from.len()].copy_from_slice(to.as_bytes());
+            replaced += 1;
+            i += from.len();
+        } else {
+            i += 1;
+        }
+    }
+    assert!(replaced > 0, "{from} not found in {}", path.display());
+    fs::write(path, data).expect("write");
+}
+
+/// Write a real ANLZ bundle (`.DAT`, `.EXT`, `.2EX`) at `dat` in place of the
+/// fixture's placeholder files: 120 BPM, 180 s, as `seed_tracks_as_analyzed`
+/// seeds. An empty `track_path` writes no `PPTH`, like the local cache.
+fn write_real_bundle(dat: &Path, track_path: &str) {
+    use backend::service::anlz::{
+        WaveformData, build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file,
+    };
+    let band = vec![40u8; 400];
+    let waveform = WaveformData {
+        peaks: vec![80; 400],
+        bands: vec![3; 400],
+        low_energy: band.clone(),
+        mid_energy: band.clone(),
+        high_energy: band.clone(),
+        low_energy_full: band.clone(),
+        mid_energy_full: band.clone(),
+        high_energy_full: band,
+        peak_level: 1.0,
+    };
+    fs::create_dir_all(dat.parent().expect("parent")).expect("create bundle dir");
+    let dat_bytes = build_anlz_dat_file(&waveform, track_path, Some(120.0), 180_000, None, &[]);
+    let ext_bytes = build_anlz_ext_file(&waveform, track_path, Some(120.0), 180_000, None, &[]);
+    fs::write(dat, dat_bytes).expect("write DAT");
+    fs::write(dat.with_extension("EXT"), ext_bytes).expect("write EXT");
+    fs::write(
+        dat.with_extension("2EX"),
+        build_anlz_2ex_file(&waveform, track_path, 180_000),
+    )
+    .expect("write 2EX");
+}
+
+/// The fixture's exported tracks, with real bundles naming their track.
+fn use_real_usb_bundles(usb: &Path) -> Vec<backend::pdb_reader::PdbTrackRow> {
+    let tracks = parse_pdb(&vendor_db_dir(usb).join("export.pdb"))
+        .expect("parse pdb")
+        .tracks;
+    for track in &tracks {
+        write_real_bundle(
+            &usb.join(track.anlz_path.trim_start_matches('/')),
+            &track.track_file_path,
+        );
+    }
+    tracks
+}
+
+#[test]
+fn repair_gives_tracks_sharing_an_analysis_file_their_own_in_one_pass() {
+    let (_root, backend, usb, _target, _control) = setup_two_playlist_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let tracks = use_real_usb_bundles(&usb);
+    assert_eq!(tracks.len(), 2);
+    let (a, b) = (&tracks[0], &tracks[1]);
+    // Track B's rows point at track A's bundle, which has no PPTH: what an
+    // old export left when two paths hashed to the same folder.
+    replace_bytes_in_file(&pdb_path, &b.anlz_path, &a.anlz_path);
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    conn.execute(
+        "UPDATE content SET analysisDataFilePath = ?1 WHERE analysisDataFilePath = ?2",
+        [&a.anlz_path, &b.anlz_path],
+    )
+    .expect("point eDB at the shared bundle");
+    drop(conn);
+    let a_dat = usb.join(a.anlz_path.trim_start_matches('/'));
+    for file in [
+        a_dat.clone(),
+        a_dat.with_extension("EXT"),
+        a_dat.with_extension("2EX"),
+    ] {
+        strip_anlz_ppth(&file);
+    }
+
+    let ids = proposed_fix_ids(&backend, &usb);
+    assert!(
+        ids.iter().any(|id| id == "separate_shared_analysis"),
+        "{ids:?}"
+    );
+    assert!(
+        !ids.iter().any(|id| id == "fix_bpm_key_mismatch"),
+        "{ids:?}"
+    );
+
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+    let ids = proposed_fix_ids(&backend, &usb);
+    assert!(ids.is_empty(), "{ids:?}");
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb");
+    assert_ne!(parsed.tracks[0].anlz_path, parsed.tracks[1].anlz_path);
+    for track in &parsed.tracks {
+        let dat = usb.join(track.anlz_path.trim_start_matches('/'));
+        for file in [dat.clone(), dat.with_extension("EXT")] {
+            assert_eq!(
+                anlz_ppth(&file).as_deref(),
+                Some(track.track_file_path.as_str()),
+                "{}",
+                file.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn repair_names_the_track_in_an_analysis_file_without_ppth() {
+    let (_root, backend, usb, _playlist) = setup_clean_strict_parity_fixture();
+    let track = use_real_usb_bundles(&usb).remove(0);
+    let dat = usb.join(track.anlz_path.trim_start_matches('/'));
+    strip_anlz_ppth(&dat);
+    let ids = proposed_fix_ids(&backend, &usb);
+    assert!(
+        ids.iter().any(|id| id == "add_analysis_track_path"),
+        "{ids:?}"
+    );
+
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+    assert_eq!(
+        anlz_ppth(&dat).as_deref(),
+        Some(track.track_file_path.as_str())
+    );
+    let ids = proposed_fix_ids(&backend, &usb);
+    assert!(ids.is_empty(), "{ids:?}");
+}
+
+#[test]
+fn export_never_overwrites_another_tracks_analysis_file() {
+    let (root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let track = parse_pdb(&pdb_path).expect("parse pdb").tracks.remove(0);
+    let dat = usb.join(track.anlz_path.trim_start_matches('/'));
+    // What export copies from: a real bundle, without PPTH as the app's
+    // analysis cache keeps it.
+    write_real_bundle(
+        &root
+            .path()
+            .join("data")
+            .join("analysis")
+            .join("waveforms")
+            .join("waveform-0.DAT"),
+        "",
+    );
+    // Another track whose path hashes to the same folder owns ANLZ0000.
+    write_real_bundle(&dat, "/Contents/Someone Else/Other Album/Other Track.mp3");
+    let foreign = fs::read(&dat).expect("read foreign dat");
+
+    let playlist_id = backend
+        .list_playlists()
+        .data
+        .expect("playlists")
+        .items
+        .into_iter()
+        .find(|p| p.name == playlist_name)
+        .expect("playlist")
+        .id;
+    let export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(export.ok, "export failed: {export:?}");
+
+    assert_eq!(
+        fs::read(&dat).expect("read"),
+        foreign,
+        "the other track's file is kept"
+    );
+    let track = parse_pdb(&pdb_path).expect("parse pdb").tracks.remove(0);
+    assert!(
+        track.anlz_path.ends_with("/ANLZ0001.DAT"),
+        "{}",
+        track.anlz_path
+    );
+    let own = usb.join(track.anlz_path.trim_start_matches('/'));
+    assert_eq!(own.parent(), dat.parent(), "same hash folder");
+    // The exported bundle names its track in every file.
+    for file in [
+        own.clone(),
+        own.with_extension("EXT"),
+        own.with_extension("2EX"),
+    ] {
+        assert_eq!(
+            anlz_ppth(&file).as_deref(),
+            Some(track.track_file_path.as_str()),
+            "{}",
+            file.display()
+        );
+    }
+}
+
+#[test]
+fn repair_lists_mp3_whose_seek_data_cant_be_built_instead_of_proposing_it() {
+    let (_root, backend, usb, _playlist) = setup_clean_strict_parity_fixture();
+    use_real_usb_bundles(&usb);
+    // A large zero-filled region in the middle of the audio: the seek index
+    // can't be built, so the fix would skip the file on every pass.
+    let audio = find_contents_audio_file(&usb);
+    let bytes = fs::read(&audio).expect("read audio");
+    let middle = bytes.len() / 2;
+    let corrupted = [&bytes[..middle], &vec![0u8; 128 * 1024], &bytes[middle..]].concat();
+    fs::write(&audio, corrupted).expect("corrupt audio");
+
+    let preview = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: false,
+            selected_fix_ids: vec![],
+        })
+        .data
+        .expect("preview data");
+    assert!(
+        !preview
+            .proposed_fixes
+            .iter()
+            .any(|f| f.id == "add_missing_mp3_seek_data"),
+        "{:#?}",
+        preview.proposed_fixes
+    );
+    assert!(
+        preview.unsupported_items.iter().any(|u| u
+            .issue
+            .contains("without seek data that can't be added")
+            && u.link.as_deref() == Some("event-log")),
+        "{:#?}",
+        preview.unsupported_items
+    );
+    assert!(
+        preview
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("zero-filled region")),
+        "the Event Log names the file and why"
+    );
+}
+
 // ── Remaining repair_usb_diagnostics_with_progress orchestrator branches ──
 
 #[test]

@@ -1922,3 +1922,90 @@ fn track_identity_key_returns_unknown_when_all_empty() {
     let key = super::track_identity_key("", "", "", None);
     assert_eq!(key, "unknown");
 }
+
+/// A `.DAT` at `<root>/<anlz_path>` whose `PPTH` names `track_path` (none
+/// when empty).
+fn write_dat_naming(root: &std::path::Path, anlz_path: &str, track_path: &str) {
+    let dat = root.join(anlz_path.trim_start_matches('/'));
+    fs::create_dir_all(dat.parent().expect("parent")).expect("create bundle dir");
+    let waveform = crate::service::anlz::WaveformData::empty();
+    fs::write(
+        &dat,
+        crate::service::anlz::build_anlz_dat_file(&waveform, track_path, None, 1_000, None, &[]),
+    )
+    .expect("write DAT");
+}
+
+#[test]
+fn analysis_ownership_picks_the_owner_of_a_shared_bundle() {
+    const APP: u32 = 99;
+    let shared = "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT";
+    let track = |id: u32, path: &str, anlz: &str, master_db_id: u32| PdbTrackRow {
+        anlz_path: anlz.to_string(),
+        master_db_id: Some(master_db_id),
+        ..make_pdb_track(id, "Track", 1, path)
+    };
+    let parsed = ParsedPdb {
+        tracks: vec![
+            track(1, "/Contents/A/First.mp3", shared, 7),
+            track(2, "/Contents/B/Second.mp3", shared, APP),
+        ],
+        ..ParsedPdb::default()
+    };
+    let owner = |root: &std::path::Path, app: Option<u32>| {
+        let found = super::scan_analysis_ownership(root, &parsed, app, true);
+        assert_eq!(found.shared.len(), 1, "{found:?}");
+        assert_eq!(found.shared[0].track_ids, vec![1, 2]);
+        found.shared[0].owner
+    };
+
+    let root = tempdir().expect("tempdir");
+    // No PPTH: the track this app exported wrote the file; without knowing
+    // the app's id, nobody owns it.
+    write_dat_naming(root.path(), shared, "");
+    assert_eq!(owner(root.path(), Some(APP)), Some(2));
+    assert_eq!(owner(root.path(), None), None);
+    // A PPTH decides, whoever exported.
+    write_dat_naming(root.path(), shared, "/Contents/A/First.mp3");
+    assert_eq!(owner(root.path(), Some(APP)), Some(1));
+    // Database-only: shared, owner unknown.
+    let db_only = super::scan_analysis_ownership(root.path(), &parsed, Some(APP), false);
+    assert_eq!(db_only.shared.len(), 1);
+}
+
+#[test]
+fn analysis_ownership_finds_unmarked_and_foreign_single_bundles() {
+    let root = tempdir().expect("tempdir");
+    let own = "/PIONEER/USBANLZ/P002/00000002/ANLZ0000.DAT";
+    let bare = "/PIONEER/USBANLZ/P003/00000003/ANLZ0000.DAT";
+    let foreign = "/PIONEER/USBANLZ/P004/00000004/ANLZ0000.DAT";
+    write_dat_naming(root.path(), own, "/Contents/A/Own.mp3");
+    write_dat_naming(root.path(), bare, "");
+    write_dat_naming(root.path(), foreign, "/Contents/A/Own.mp3");
+    let track = |id: u32, path: &str, anlz: &str| PdbTrackRow {
+        anlz_path: anlz.to_string(),
+        ..make_pdb_track(id, "Track", 1, path)
+    };
+    let parsed = ParsedPdb {
+        tracks: vec![
+            track(1, "/Contents/A/Own.mp3", own),
+            track(2, "/Contents/A/Bare.mp3", bare),
+            // Its bundle names track 1: it has none of its own.
+            track(3, "/Contents/A/Foreign.mp3", foreign),
+        ],
+        ..ParsedPdb::default()
+    };
+    let found = super::scan_analysis_ownership(root.path(), &parsed, None, true);
+    assert_eq!(
+        found
+            .unmarked
+            .iter()
+            .map(|b| b.track_id)
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+    assert_eq!(found.shared.len(), 1, "{found:?}");
+    assert_eq!(found.shared[0].track_ids, vec![3]);
+    assert_eq!(found.shared[0].owner, None);
+    assert_eq!(found.non_owner_track_ids(), HashSet::from([3]));
+}

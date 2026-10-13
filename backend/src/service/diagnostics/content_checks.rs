@@ -188,6 +188,8 @@ pub(crate) struct BpmKeyMismatch {
     pub duration_ms: Option<u64>,
     /// Absolute `.DAT` path, set when the DAT or EXT beat-grid tempo differs.
     pub anlz_dat_path: Option<std::path::PathBuf>,
+    /// The `.DAT` and `.EXT` beat-grid tempos (x100) read, when there is a grid.
+    pub anlz_tempos_x100: [Option<u16>; 2],
     /// Current eDB `bpmx100`, set when it differs.
     pub edb_bpmx100: Option<i64>,
     /// The PDB key name, set when the eDB key differs (or is missing).
@@ -208,6 +210,7 @@ pub(crate) fn detect_bpm_key_mismatches(
     parsed: &crate::pdb_reader::ParsedPdb,
     edb: Option<&rusqlite::Connection>,
     scan_anlz: bool,
+    app_master_db_id: Option<u32>,
 ) -> Vec<BpmKeyMismatch> {
     type EdbBpmKey = (Option<i64>, Option<String>);
     let edb_by_path: HashMap<String, EdbBpmKey> = edb
@@ -235,24 +238,36 @@ pub(crate) fn detect_bpm_key_mismatches(
         })
         .unwrap_or_default();
 
+    // A shared bundle is only its owner's to align: rebuilding it for
+    // another track breaks it for the owner, and the next scan flags the
+    // owner. `separate_shared_analysis` gives the other tracks their own
+    // bundle, analysed with their own BPM, before this fix runs.
+    let shared_bundle_tracks = if scan_anlz {
+        scan_analysis_ownership(usb_root, parsed, app_master_db_id, true).non_owner_track_ids()
+    } else {
+        HashSet::new()
+    };
     let mut out = Vec::new();
     for track in &parsed.tracks {
         let pdb_tempo_x100 = track.tempo_x100;
         let edb_row = edb_by_path.get(&track.track_file_path);
 
-        let anlz_dat_path = (scan_anlz && pdb_tempo_x100 > 0)
+        let dat = (scan_anlz && pdb_tempo_x100 > 0 && !shared_bundle_tracks.contains(&track.id))
             .then(|| crate::service::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path))
-            .flatten()
-            .filter(|dat| {
-                [dat.clone(), dat.with_extension("EXT")].iter().any(|p| {
-                    std::fs::read(p)
-                        .ok()
-                        .and_then(|bytes| {
-                            crate::service::anlz::read_beatgrid_tempo_from_anlz(&bytes)
-                        })
-                        .is_some_and(|t| u32::from(t) != pdb_tempo_x100)
-                })
-            });
+            .flatten();
+        let anlz_tempos_x100 = dat.as_ref().map_or([None, None], |dat| {
+            [dat.clone(), dat.with_extension("EXT")].map(|p| {
+                std::fs::read(p)
+                    .ok()
+                    .and_then(|bytes| crate::service::anlz::read_beatgrid_tempo_from_anlz(&bytes))
+            })
+        });
+        let anlz_dat_path = dat.filter(|_| {
+            anlz_tempos_x100
+                .iter()
+                .flatten()
+                .any(|t| u32::from(*t) != pdb_tempo_x100)
+        });
         let edb_bpmx100 = edb_row
             .and_then(|(bpm, _)| *bpm)
             .filter(|v| pdb_tempo_x100 > 0 && *v != i64::from(pdb_tempo_x100));
@@ -279,6 +294,7 @@ pub(crate) fn detect_bpm_key_mismatches(
                     .filter(|s| *s > 0)
                     .map(|s| u64::from(s) * 1000),
                 anlz_dat_path,
+                anlz_tempos_x100,
                 edb_bpmx100,
                 pdb_key_for_edb,
             });

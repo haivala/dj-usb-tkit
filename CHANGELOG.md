@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+- **New feature:** USB repair gives tracks that share an analysis file their own ("Give Tracks
+  Their Own Analysis Files"), named the way rekordbox names them when two tracks land in the same
+  analysis folder, and adds the track path to analysis files that lack it ("Add Track Path to
+  Analysis Files"). Diagnostics warn about shared analysis files.
 - **New feature:** USB repair can delete audio files that are in no playlist and are
   byte-for-byte copies of a track in the same folder (for example `Track.mp3` next to the
   exported `Track-1.mp3`). They are no longer offered for the "Unindexed" playlist, where the
@@ -80,6 +84,18 @@
 - **Fix:** "Add Unindexed Audio to a Playlist" analyses a file that has no analysis files on
   the USB, so the added track has its waveform and the parity report doesn't flag its
   metadata as incomplete.
+- **Fix:** Export no longer overwrites another track's analysis file when two tracks' paths land
+  in the same analysis folder. The second track gets the next file in that folder, named with its
+  track path, as rekordbox does. Before, both tracks used one file, so a player could show one
+  track's waveform and beat grid for the other.
+- **Fix:** "Fix BPM/Key Mismatch" is no longer offered after every repair on a USB where two
+  tracks share an analysis file. Each pass rebuilt the shared beat grid for one track, which made
+  it wrong for the other.
+- **Fix:** An MP3 or FLAC whose seek data can't be built, such as a file with a damaged region,
+  is listed in the repair preview as something to replace instead of being offered on every
+  repair.
+- **Fix:** Analysis files the USB repair creates for MP3 and FLAC tracks get the seek data
+  rekordbox writes, so the seek-data repair isn't offered for them afterwards.
 - **Fix:** A thin bar no longer flickers at the bottom of the window while nothing is
   running. The hidden progress bar was still animating and sometimes showed through on Linux.
 - **Fix:** The BPM/key analysis runtime's paths (node, runner script, installed modules) are

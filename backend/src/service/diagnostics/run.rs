@@ -343,7 +343,7 @@ impl BackendService {
         if let Some((parsed, _)) = parsed_opt.as_ref() {
             // Database-only: the ANLZ beat grids are compared by the repair
             // preview, which scans the analysis files anyway.
-            let mismatches = detect_bpm_key_mismatches(&usb_root, parsed, conn, false);
+            let mismatches = detect_bpm_key_mismatches(&usb_root, parsed, conn, false, None);
             let (status, detail) = if mismatches.is_empty() {
                 (
                     DiagStatus::Pass,
@@ -381,6 +381,52 @@ impl BackendService {
                 status,
                 detail,
                 link: None,
+            });
+            // Database-only, like the BPM check: track rows naming the same
+            // bundle. The repair preview also reads each bundle's PPTH.
+            let shared = scan_analysis_ownership(&usb_root, parsed, None, false).shared;
+            let shared_tracks = shared.iter().map(|b| b.track_ids.len()).sum::<usize>();
+            for bundle in &shared {
+                let tracks = bundle
+                    .track_ids
+                    .iter()
+                    .filter_map(|id| parsed.tracks.iter().find(|t| t.id == *id))
+                    .map(|t| t.track_file_path.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                raw_warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.shared-analysis",
+                    format!(
+                        "shared analysis file: /{} used by {tracks}",
+                        bundle
+                            .dat
+                            .strip_prefix(&usb_root)
+                            .unwrap_or(&bundle.dat)
+                            .to_string_lossy()
+                            .replace('\\', "/")
+                    ),
+                ));
+            }
+            analysis_integrity.checks.push(DiagCheck {
+                label: "Shared analysis files".to_string(),
+                status: if shared.is_empty() {
+                    DiagStatus::Pass
+                } else {
+                    DiagStatus::Warn
+                },
+                detail: if shared.is_empty() {
+                    "every track has its own analysis file".to_string()
+                } else {
+                    format!(
+                        "{shared_tracks} track(s) share {} analysis file(s), so players can show \
+                         one track's waveform and beat grid for another; run the repair \
+                         (separate_shared_analysis) to fix",
+                        shared.len()
+                    )
+                },
+                link: (!shared.is_empty()).then(|| "event-log".to_string()),
             });
             let beat_grids = diagnose_beat_grid_format(&usb_root, parsed);
             if matches!(beat_grids.status, DiagStatus::Warn) {

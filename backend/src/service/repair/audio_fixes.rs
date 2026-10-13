@@ -227,13 +227,19 @@ pub(super) fn apply_remove_duplicate_audio_copies(
 /// `PSSI` as they are. Returns (ANLZ bundles rewritten, eDB rows updated).
 pub(super) fn apply_bpm_key_mismatch_repair(
     usb_root: &std::path::Path,
+    app_master_db_id: Option<u32>,
     edb_conn: Option<&mut rusqlite::Connection>,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(usize, usize)> {
     let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
     let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings));
-    let mismatches: Vec<BpmKeyMismatch> =
-        detect_bpm_key_mismatches(usb_root, &parsed, handle.as_mut().map(|h| &*h.conn()), true);
+    let mismatches: Vec<BpmKeyMismatch> = detect_bpm_key_mismatches(
+        usb_root,
+        &parsed,
+        handle.as_mut().map(|h| &*h.conn()),
+        true,
+        app_master_db_id,
+    );
 
     let mut anlz_fixed = 0usize;
     for m in &mismatches {
@@ -307,6 +313,228 @@ pub(super) fn apply_bpm_key_mismatch_repair(
         tx.commit()?;
     }
     Ok((anlz_fixed, edb_fixed))
+}
+
+/// Add the seek index rekordbox writes to a bundle the repair just
+/// generated: `PVBR` in an MP3's `.DAT` (as local analysis does), `PVB2` in a
+/// FLAC's `.EXT` (local analysis leaves that to the USB repair). Without it the
+/// seek-data fixes would find the new bundle on the next pass. A file whose
+/// index can't be built keeps none; those fixes list it as unsupported.
+fn add_seek_index_to_new_bundle(dat: &Path, audio: &Path) {
+    match SeekFormat::of(&audio.to_string_lossy()) {
+        Some(SeekFormat::Mp3) => {
+            let _ = fill_mp3_pvbr(dat, audio);
+        }
+        Some(SeekFormat::Flac) => {
+            let ext = dat.with_extension("EXT");
+            if let (Ok(Some(index)), Ok(bytes)) = (seek_index_for_audio(audio), std::fs::read(&ext))
+                && let Some(patched) = with_seek_index(&bytes, &index)
+            {
+                let _ = atomic_write_bytes(&ext, &patched);
+            }
+        }
+        None => {}
+    }
+}
+
+/// Put `track_path` into a bundle's `PPTH` (`.DAT`, `.EXT`, `.2EX`).
+fn stamp_bundle_ppth(dat: &Path, track_path: &str) -> BackendResult<()> {
+    for file in [
+        dat.to_path_buf(),
+        dat.with_extension("EXT"),
+        dat.with_extension("2EX"),
+    ] {
+        let Ok(data) = std::fs::read(&file) else {
+            continue;
+        };
+        let patched = ensure_ppth_chunk(&data, track_path);
+        if patched != data {
+            atomic_write_bytes(&file, &patched)?;
+        }
+    }
+    Ok(())
+}
+
+/// Name each track in its own bundle (`add_analysis_track_path`): the
+/// bundles only one track uses whose `PPTH` is missing or stale, re-detected
+/// from the staged PDB. Returns the number of bundles stamped.
+pub(super) fn apply_add_analysis_track_path(
+    usb_root: &Path,
+    app_master_db_id: Option<u32>,
+) -> BackendResult<usize> {
+    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
+    let ownership = scan_analysis_ownership(usb_root, &parsed, app_master_db_id, true);
+    for bundle in &ownership.unmarked {
+        stamp_bundle_ppth(&bundle.dat, &bundle.track_path)?;
+    }
+    Ok(ownership.unmarked.len())
+}
+
+/// Give every track that shares an analysis bundle its own
+/// (`separate_shared_analysis`), re-detected from the staged PDB. The owner
+/// (`scan_analysis_ownership`) keeps the bundle and gets its `PPTH`. Each
+/// other track gets the next free `ANLZnnnn` in its own hash folder
+/// (`analysis_bundle_paths_for_track`), generated from its audio as the
+/// empty-analysis fix does, with the PDB tempo; its PDB row and eDB content
+/// row then point there. Returns (tracks given their own bundle, bundles kept
+/// by an owner); a track whose audio can't be analysed fails the fix after
+/// the others are done.
+pub(super) fn apply_separate_shared_analysis(
+    usb_root: &Path,
+    app_master_db_id: Option<u32>,
+    edb_conn: Option<&mut rusqlite::Connection>,
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<(usize, usize)> {
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
+    let mut bytes = std::fs::read(&pdb_path)?;
+    let page_size = bytes
+        .get(4..8)
+        .and_then(|b| b.try_into().ok())
+        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
+        .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))?;
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
+    let ownership = scan_analysis_ownership(usb_root, &parsed, app_master_db_id, true);
+    let row_by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
+        parsed.tracks.iter().map(|t| (t.id, t)).collect();
+
+    let mut kept = 0usize;
+    let mut mutations = Vec::<crate::pdb_writer::PdbTrackRowMutation>::new();
+    // (track path, new USB-relative `.DAT` path) for the eDB.
+    let mut moved = Vec::<(String, String)>::new();
+    let mut failed = Vec::<String>::new();
+    for bundle in &ownership.shared {
+        // The owner's PPTH first, so its file is never picked as free below.
+        if let Some(owner) = bundle.owner.and_then(|id| row_by_id.get(&id)) {
+            stamp_bundle_ppth(&bundle.dat, &owner.track_file_path)?;
+            kept += 1;
+        }
+        for row in bundle
+            .track_ids
+            .iter()
+            .filter(|id| Some(**id) != bundle.owner)
+            .filter_map(|id| row_by_id.get(id))
+        {
+            let audio =
+                resolve_usb_side_path(usb_root, &row.track_file_path).filter(|path| path.is_file());
+            let duration_ms = row
+                .duration_seconds
+                .filter(|s| *s > 0)
+                .map(|s| u64::from(s) * 1000)
+                .or_else(|| audio.as_deref().and_then(detect_track_duration_ms));
+            let waveform = audio
+                .as_deref()
+                .and_then(|audio| {
+                    build_waveform_preview_from_audio(
+                        audio,
+                        crate::service::WAVEFORM_PREVIEW_BINS,
+                        2_000_000,
+                    )
+                    .ok()
+                })
+                .filter(|w| !w.peaks.is_empty());
+            let (Some(audio), Some(duration_ms), Some(waveform)) = (audio, duration_ms, waveform)
+            else {
+                failed.push(row.track_file_path.clone());
+                continue;
+            };
+            let (dat, ext, twoex) = analysis_bundle_paths_for_track(usb_root, &row.track_file_path);
+            write_generated_anlz_bundle(
+                &waveform,
+                &AnlzBundlePaths {
+                    dat_path: dat.clone(),
+                    ext_path: ext,
+                    twoex_path: twoex,
+                },
+                &row.track_file_path,
+                (row.tempo_x100 > 0).then(|| f64::from(row.tempo_x100) / 100.0),
+                duration_ms,
+            )?;
+            add_seek_index_to_new_bundle(&dat, &audio);
+            let Some(rel) = usb_relative_path(usb_root, &dat) else {
+                failed.push(row.track_file_path.clone());
+                continue;
+            };
+            let mut data = track_row_data_from_reader_row(row);
+            data.anlz_path = rel.clone();
+            mutations.push(crate::pdb_writer::PdbTrackRowMutation {
+                row: data,
+                changed_fields: vec!["anlz_path"],
+            });
+            warnings.push(logging::log(
+                Level::Info,
+                "usb-repair",
+                "usb.repair.shared-analysis.separated",
+                format!("own analysis file for {}: {rel}", row.track_file_path),
+            ));
+            moved.push((row.track_file_path.clone(), rel));
+        }
+    }
+
+    if !mutations.is_empty() {
+        crate::pdb_writer::mutate_tracks_in_place(
+            &mut bytes,
+            &mutations,
+            PdbLayoutProfile::DEFAULT,
+            page_size,
+        )?;
+        let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
+        if !mismatches.is_empty() {
+            let detail = mismatches
+                .iter()
+                .take(8)
+                .map(|m| m.to_string())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            return Err(BackendError::Validation(format!(
+                "separating shared analysis blocked: page-header convention mismatches ({detail})"
+            )));
+        }
+        std::fs::write(&pdb_path, &bytes)?;
+    }
+
+    if !moved.is_empty()
+        && let Some(mut handle) =
+            EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
+        && table_exists(handle.conn(), "content")
+    {
+        let new_by_key = moved
+            .iter()
+            .map(|(track, rel)| (audio_path_key(track), rel))
+            .collect::<HashMap<_, _>>();
+        let tx = handle.conn().transaction()?;
+        let targets = {
+            let mut stmt =
+                tx.prepare("SELECT content_id, path FROM content WHERE path IS NOT NULL")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut targets = Vec::<(i64, String)>::new();
+            for row in rows {
+                let (content_id, path) = row?;
+                if let Some(rel) = new_by_key.get(&audio_path_key(&path)) {
+                    targets.push((content_id, (*rel).clone()));
+                }
+            }
+            targets
+        };
+        for (content_id, rel) in targets {
+            tx.execute(
+                "UPDATE content SET analysisDataFilePath = ?1 WHERE content_id = ?2",
+                params![rel, content_id],
+            )?;
+        }
+        tx.commit()?;
+    }
+
+    if failed.is_empty() {
+        Ok((moved.len(), kept))
+    } else {
+        Err(BackendError::Internal(format!(
+            "gave {} track(s) their own analysis files; could not analyse the audio of: {}",
+            moved.len(),
+            failed.join(", ")
+        )))
+    }
 }
 
 /// `.DAT` files under `USBANLZ` whose beat grid is in the format the app
@@ -417,7 +645,7 @@ impl SeekFormat {
 /// applied.
 #[derive(Debug, Clone)]
 pub(super) struct MissingSeekData {
-    track_path: String,
+    pub(super) track_path: String,
     audio_path: std::path::PathBuf,
     /// The `.DAT` for an MP3, the `.EXT` for a FLAC.
     bundle_path: std::path::PathBuf,
@@ -462,6 +690,33 @@ pub(super) fn detect_missing_seek_data(
         }
     }
     out
+}
+
+/// Split [`detect_missing_seek_data`]'s targets into the ones the fix can
+/// write an index for and the ones it would skip, each with the skip reason
+/// and advice the apply step logs. Builds the index the apply step builds, so
+/// a file the fix always skips is never proposed as fixable.
+pub(super) fn partition_fixable_seek_data(
+    targets: Vec<MissingSeekData>,
+) -> (Vec<MissingSeekData>, Vec<(MissingSeekData, String)>) {
+    let mut fixable = Vec::new();
+    let mut unfixable = Vec::new();
+    for target in targets {
+        let skip = match seek_index_for_audio(&target.audio_path) {
+            Ok(Some(index)) => std::fs::read(&target.bundle_path)
+                .ok()
+                .and_then(|bytes| with_seek_index(&bytes, &index))
+                .is_none()
+                .then(|| format!("analysis file could not be parsed; {SEEK_SKIP_REPORT_HINT}")),
+            Ok(None) => Some("not an MP3 or FLAC".to_string()),
+            Err(skip) => Some(format!("{}; {}", skip.describe(), skip.advice())),
+        };
+        match skip {
+            None => fixable.push(target),
+            Some(reason) => unfixable.push((target, reason)),
+        }
+    }
+    (fixable, unfixable)
 }
 
 /// Write the missing seek indexes of one format found by
@@ -720,8 +975,8 @@ impl BackendService {
                 ));
                 continue;
             }
-            // As local analysis does: MP3s get rekordbox's seek index.
-            let _ = fill_mp3_pvbr(&bundle_paths.dat_path, &source_audio);
+            // The seek index rekordbox writes (MP3 PVBR, FLAC PVB2).
+            add_seek_index_to_new_bundle(&bundle_paths.dat_path, &source_audio);
             fixed += 1;
             writes += 3;
         }
@@ -930,7 +1185,8 @@ impl BackendService {
                 }
             };
 
-            let (dat_path, ext_path, twoex_path) = canonical_analysis_bundle_paths(usb_root, rel);
+            // Its own bundle, or the next free `ANLZnnnn`: never another track's.
+            let (dat_path, ext_path, twoex_path) = analysis_bundle_paths_for_track(usb_root, rel);
             let duration_ms = detect_track_duration_ms(&abs);
             // No bundle on the USB: analyse the file as the empty-analysis fix
             // does, so the track has its waveform and analysis path like any
@@ -953,7 +1209,7 @@ impl BackendService {
                     && write_generated_anlz_bundle(&waveform, &bundle_paths, rel, None, duration_ms)
                         .is_ok()
                 {
-                    let _ = fill_mp3_pvbr(&dat_path, &abs);
+                    add_seek_index_to_new_bundle(&dat_path, &abs);
                     analysed += 1;
                 }
             }

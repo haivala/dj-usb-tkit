@@ -121,6 +121,46 @@ pub fn canonical_analysis_bundle_paths(
     )
 }
 
+/// The bundle `track_path` gets: the first `ANLZnnnn` in its hash folder
+/// (`canonical_analysis_bundle_paths`) that is free or already this track's.
+/// Two paths can hash to the same folder; rekordbox then numbers the second
+/// track's bundle `ANLZ0001`, and players tell them apart by `PPTH`. A file
+/// is this track's when its `PPTH` names the track; one without `PPTH` may be
+/// another track's, so it is never taken over.
+pub fn analysis_bundle_paths_for_track(
+    usb_root: &Path,
+    track_path: &str,
+) -> (PathBuf, PathBuf, PathBuf) {
+    let canonical = canonical_analysis_bundle_paths(usb_root, track_path);
+    let Some(dir) = canonical.0.parent() else {
+        return canonical;
+    };
+    let key = super::diagnostics::audio_path_key(track_path);
+    (0..10_000u32)
+        .map(|n| dir.join(format!("ANLZ{n:04}.DAT")))
+        .find(|dat| {
+            !dat.is_file()
+                || super::diagnostics::bundle_ppth(dat)
+                    .is_some_and(|ppth| super::diagnostics::audio_path_key(&ppth) == key)
+        })
+        .map_or(canonical, |dat| {
+            (
+                dat.with_extension("DAT"),
+                dat.with_extension("EXT"),
+                dat.with_extension("2EX"),
+            )
+        })
+}
+
+/// Whether the bundle at `dat` may be used for `track_path`: its `PPTH`
+/// names the track, or it has none. A bundle naming another track is that
+/// track's.
+pub fn analysis_bundle_claimable(dat: &Path, track_path: &str) -> bool {
+    super::diagnostics::bundle_ppth(dat).is_none_or(|ppth| {
+        super::diagnostics::audio_path_key(&ppth) == super::diagnostics::audio_path_key(track_path)
+    })
+}
+
 pub(crate) fn usb_analysis_path_hash(track_path: &str) -> u32 {
     let mut hash = 0u32;
     for code_unit in track_path.encode_utf16() {
@@ -767,7 +807,7 @@ pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) 
     out
 }
 
-#[cfg(test)]
+/// The track path in an ANLZ file's `PPTH` chunk, if it has one.
 pub(crate) fn ppth_path_from_anlz(data: &[u8]) -> Option<String> {
     if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
         return None;
@@ -1998,6 +2038,37 @@ pub fn build_anlz_2ex_file(waveform: &WaveformData, track_path: &str, duration_m
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A minimal `.DAT` whose `PPTH` names `track_path` (none when empty).
+    fn dat_naming(track_path: &str) -> Vec<u8> {
+        let mut file = build_anlz_file_header();
+        append_ppth_chunk(&mut file, track_path);
+        file
+    }
+
+    #[test]
+    fn analysis_bundle_paths_for_track_never_takes_another_tracks_file() {
+        let usb = tempfile::tempdir().expect("tempdir");
+        let track = "/Contents/Some Artist/Some Album/Track.mp3";
+        let (dat0, _, _) = canonical_analysis_bundle_paths(usb.path(), track);
+        let slot = |n: &str| dat0.with_file_name(format!("ANLZ{n}.DAT"));
+        let pick = || analysis_bundle_paths_for_track(usb.path(), track).0;
+        // Free folder: ANLZ0000, as before.
+        assert_eq!(pick(), slot("0000"));
+
+        std::fs::create_dir_all(dat0.parent().unwrap()).unwrap();
+        // ANLZ0000 already this track's: reused.
+        std::fs::write(&dat0, dat_naming(track)).unwrap();
+        assert_eq!(pick(), slot("0000"));
+        // Another track's, or nobody's (no PPTH): the next free slot.
+        std::fs::write(&dat0, dat_naming("/Contents/Other/Other.mp3")).unwrap();
+        assert_eq!(pick(), slot("0001"));
+        std::fs::write(&dat0, dat_naming("")).unwrap();
+        assert_eq!(pick(), slot("0001"));
+        // ANLZ0001 this track's: found again on the next export.
+        std::fs::write(slot("0001"), dat_naming(track)).unwrap();
+        assert_eq!(pick(), slot("0001"));
+    }
 
     #[test]
     fn usb_analysis_path_hash_matches_known_sample() {
