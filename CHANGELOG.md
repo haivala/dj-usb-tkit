@@ -164,8 +164,8 @@
 - **Improvement:** The Parity Report no longer warns about tracks that have a composer,
   lyricist, original artist, remixer or label set ("Reference-documented field coverage").
   Players don't need those fields. It now compares each track's star rating and colour
-  between the two databases instead, as a minor note in the technical details that doesn't
-  change the result, and **Upgrade Export Data To Strict Parity** copies the newer players'
+  between the two databases instead: a mismatch shows as a warning on **Track details** and
+  on the result, and **Upgrade Export Data To Strict Parity** copies the newer players'
   rating and colour to older players.
 - **Improvement:** MP3 seek data (analysis, and the **Add Missing MP3 Seek Data** repair)
   now also covers files with APE or Lyrics3 tags, CBR files whose first frame was wiped to

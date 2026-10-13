@@ -427,16 +427,10 @@ pub(super) fn parity_overview(
             .flat_map(|g| &g.sections)
             .find(|s| s.title == PARITY_LAYOUT[index].title)
     };
-    let status_of = |index: usize, skip: &[&str]| {
+    let status_of = |index: usize| {
         DiagStatus::worst_of(
             &section(index)
-                .map(|s| {
-                    s.checks
-                        .iter()
-                        .filter(|c| !skip.contains(&c.label.as_str()))
-                        .map(|c| &c.status)
-                        .collect::<Vec<_>>()
-                })
+                .map(|s| s.checks.iter().map(|c| &c.status).collect::<Vec<_>>())
                 .unwrap_or_default(),
         )
     };
@@ -484,8 +478,6 @@ pub(super) fn parity_overview(
             "tracks are listed twice in a playlist on older Pioneer players.",
         ),
     ];
-    // A rating or colour that differs is minor (nothing to repair), so it
-    // stays in the technical details only.
     let track_problems = [
         problem(
             totals.total_pdb_missing_core_metadata,
@@ -506,6 +498,11 @@ pub(super) fn parity_overview(
             totals.total_artwork_mismatches,
             "track has artwork on one kind of Pioneer player but not the other.",
             "tracks have artwork on one kind of Pioneer player but not the other.",
+        ),
+        problem(
+            totals.rating_colour_mismatches,
+            "track has a different rating or colour on older Pioneer players.",
+            "tracks have a different rating or colour on older Pioneer players.",
         ),
     ];
     let file_problems = [
@@ -533,7 +530,7 @@ pub(super) fn parity_overview(
     vec![
         row(
             "Playlists",
-            status_of(PARITY_PLAYLISTS, &[]),
+            status_of(PARITY_PLAYLISTS),
             playlist_problems.into_iter().flatten().collect(),
             format!(
                 "Both databases have the same {}, with the same tracks in the same order.",
@@ -542,14 +539,14 @@ pub(super) fn parity_overview(
         ),
         row(
             "Track details",
-            status_of(PARITY_TRACK_INFO, &["Rating and colour parity"]),
+            status_of(PARITY_TRACK_INFO),
             track_problems.into_iter().flatten().collect(),
             "Every playlist track has complete details and the same artwork in both databases."
                 .to_string(),
         ),
         row(
             "Music files",
-            status_of(PARITY_FILES, &[]),
+            status_of(PARITY_FILES),
             file_problems.into_iter().flatten().collect(),
             "Every playlist track's audio file is on the USB, and both databases point to the \
              same files."

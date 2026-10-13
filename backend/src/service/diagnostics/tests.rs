@@ -312,7 +312,6 @@ fn parity_overview_explains_mismatches_in_plain_words() {
         check("Overall player parity status", DiagStatus::Fail),
         check("Playlist membership parity", DiagStatus::Fail),
         check("PDB metadata completeness", DiagStatus::Pass),
-        // Minor: shows in the technical details only.
         check("Rating and colour parity", DiagStatus::Warn),
         check("Indexed audio file presence", DiagStatus::Pass),
     ];
@@ -333,9 +332,11 @@ fn parity_overview_explains_mismatches_in_plain_words() {
 
     let mut detail = parity_detail();
     detail.only_in_pdb = 2;
+    let mut rated = parity_detail();
+    rated.rating_colour_mismatch_tracks = 3;
     let overview = parity_overview(
         &groups,
-        &ParityTotals::from_details(&[detail, parity_detail()]),
+        &ParityTotals::from_details(&[detail, rated]),
         2,
         Some(&evaluate_strict_raw_coverage_parity(0, 0, 20)),
     );
@@ -360,9 +361,9 @@ fn parity_overview_explains_mismatches_in_plain_words() {
             ),
             (
                 "Track details",
-                true,
-                "Every playlist track has complete details and the same artwork in both \
-                 databases."
+                false,
+                "3 tracks have a different rating or colour on older Pioneer players. \
+                 Preview Fixes shows what can be repaired."
             ),
             (
                 "Music files",

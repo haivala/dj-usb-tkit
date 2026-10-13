@@ -714,7 +714,10 @@ impl BackendService {
         let section_groups = parity_section_groups(&checks);
         let overview = parity_overview(
             &section_groups,
-            &ParityTotals::from_details(&playlist_details),
+            &ParityTotals {
+                rating_colour_mismatches: rating_colour.mismatched_tracks,
+                ..ParityTotals::from_details(&playlist_details)
+            },
             playlist_details.len(),
             Some(&strict_raw_coverage),
         );

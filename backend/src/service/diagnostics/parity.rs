@@ -16,6 +16,8 @@ pub(super) struct ParityTotals {
     pub(super) total_artwork_mismatches: usize,
     pub(super) total_path_mismatches: usize,
     pub(super) total_dictionary_id_issues: usize,
+    /// Playlist tracks counted once each, however many playlists hold them.
+    pub(super) rating_colour_mismatches: usize,
     pub(super) playlist_id_mismatches: usize,
 }
 
@@ -44,6 +46,10 @@ impl ParityTotals {
         let total_path_mismatches: usize = details.iter().map(|d| d.path_mismatch_tracks).sum();
         let total_dictionary_id_issues: usize =
             details.iter().map(|d| d.dictionary_id_issue_tracks).sum();
+        let rating_colour_mismatches: usize = details
+            .iter()
+            .map(|d| d.rating_colour_mismatch_tracks)
+            .sum();
         let playlist_id_mismatches = details.iter().filter(|d| !d.playlist_id_match).count();
         Self {
             fail_playlists,
@@ -58,6 +64,7 @@ impl ParityTotals {
             total_artwork_mismatches,
             total_path_mismatches,
             total_dictionary_id_issues,
+            rating_colour_mismatches,
             playlist_id_mismatches,
         }
     }
@@ -917,6 +924,8 @@ pub(crate) fn build_usb_parity_comparison(
         total_artwork_mismatches,
         total_path_mismatches,
         total_dictionary_id_issues,
+        // The report counts these by track (`rating_colour`) instead.
+        rating_colour_mismatches: _,
         playlist_id_mismatches,
     } = ParityTotals::from_details(&details);
 
@@ -933,6 +942,9 @@ pub(crate) fn build_usb_parity_comparison(
     };
     if let Some(raw_coverage) = strict_raw_coverage.as_ref() {
         overall_status = DiagStatus::worst(&overall_status, &raw_coverage.status);
+    }
+    if rating_colour.mismatched_tracks > 0 {
+        overall_status = DiagStatus::worst(&overall_status, &DiagStatus::Warn);
     }
 
     let mut checks = Vec::<DiagCheck>::new();

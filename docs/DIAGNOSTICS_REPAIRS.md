@@ -102,7 +102,7 @@ run an explicit ANLZ scan when looking for empty or malformed analysis bundles.
 | Artwork | artwork presence on both sides |
 | PDB dictionaries | artist, album, key, and artwork ids resolve when linked metadata exists |
 | Raw audio coverage | "Indexed audio file presence": every path a PDB track row or eDB `content` row holds exists under `Contents/`, and every audio file there is held by one of them. Paths match exactly except for a trailing space before the extension and letter case (FAT32/exFAT); a `-1`/`-2` suffix makes a different file, since rekordbox can write a track twice as `Track.mp3` and `Track-1.mp3`. The repair's audio fixes use the same scan |
-| Rating and colour | a playlist track's star rating and colour match between the eDB and its PDB row (bytes 89/88). Minor: a mismatch warns in the technical details only and doesn't change the overall status. The playlist is counted for "Upgrade Export Data To Strict Parity", which carries the eDB's values into the PDB |
+| Rating and colour | a playlist track's star rating and colour match between the eDB and its PDB row (bytes 89/88). A mismatch is a warning: the "Track details" row and the overall parity status show Warn, not Fail. The playlist is counted for "Upgrade Export Data To Strict Parity", which carries the eDB's values into the PDB |
 
 Every finding of the parity report has a repair or an entry under
 "Unsupported and Manual Cases", and one pass of the default fixes leaves the
