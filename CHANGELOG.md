@@ -54,6 +54,9 @@
 - **Improvement:** Repair-preview items whose details are listed in the Event Log (audio files
   in no playlist, moved audio files, malformed analysis entries) link to it, like the
   diagnostics checks already did.
+- **Improvement:** Apply Fixes shows which repair is running and advances the progress bar across
+  the selected fixes. It also skips rebuilding MP3 and FLAC seek indexes while planning the apply
+  pass; the selected seek-data fix still checks each audio file when it runs.
 - **Improvement:** The Backups panel opens from a Backups button on the USB page instead of
   from Settings.
 - **Improvement:** The sidebar is more compact, so more playlists fit before it scrolls.

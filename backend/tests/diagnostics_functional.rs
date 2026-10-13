@@ -5071,6 +5071,29 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_instead_of_proposing_it() {
             .any(|w| w.message.contains("zero-filled region")),
         "the Event Log names the file and why"
     );
+
+    // An explicit apply does not repeat preview's expensive audio scan, but
+    // still validates the selected fix and reports this damaged file safely.
+    let applied = backend
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            apply: true,
+            selected_fix_ids: vec!["add_missing_mp3_seek_data".to_string()],
+        })
+        .data
+        .expect("apply data");
+    assert!(
+        applied
+            .applied_fixes
+            .iter()
+            .any(|fix| fix == "Add Missing MP3 Seek Data: fixed 0, skipped 1")
+    );
+    assert!(
+        applied
+            .warnings
+            .iter()
+            .any(|warning| warning.code == "usb.repair.seek-data.skipped")
+    );
 }
 
 // ── Remaining repair_usb_diagnostics_with_progress orchestrator branches ──

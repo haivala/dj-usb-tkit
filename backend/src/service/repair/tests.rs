@@ -382,6 +382,7 @@ fn repair_apply_batches_local_writes_and_flushes_pdb_to_usb_once() {
         std::fs::write(&raw_pdb_path, &bytes).expect("write corrupted header value");
     }
     let raw_bytes_before_apply = std::fs::read(&raw_pdb_path).unwrap();
+    let mut progress_messages = Vec::new();
 
     let result = service
         .repair_usb_diagnostics_with_progress(
@@ -390,13 +391,31 @@ fn repair_apply_batches_local_writes_and_flushes_pdb_to_usb_once() {
                 apply: true,
                 selected_fix_ids: vec![PDB_HEADER_COMPATIBILITY_FIX_ID.to_string()],
             },
-            |_, _, _| {},
+            |current, _, message| progress_messages.push((current, message.to_string())),
         )
         .expect("repair apply");
 
     assert!(
         !result.applied_fixes.is_empty() && result.failed_fixes.is_empty(),
         "expected header-compatibility fix to apply cleanly: {result:?}"
+    );
+    assert!(
+        progress_messages
+            .iter()
+            .any(|(percent, message)| *percent == 70
+                && message == "USB: Applying Repair PDB Header Compatibility Field")
+    );
+    assert_eq!(
+        progress_messages
+            .iter()
+            .filter(|(_, message)| message.starts_with("USB: Applying "))
+            .count(),
+        2, // The generic apply stage and the one selected fix.
+    );
+    assert!(
+        progress_messages
+            .iter()
+            .any(|(percent, message)| *percent == 95 && message == "USB: Saving repaired databases")
     );
 
     // The batched end-of-apply write-back must have reached the *raw*
