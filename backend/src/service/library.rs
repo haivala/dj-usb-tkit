@@ -691,8 +691,7 @@ impl BackendService {
 
         let limit = req.limit.clamp(1, 5000);
         let query = req.query.trim().to_lowercase();
-        let sort_by = req.sort_by.as_deref().map(str::trim).unwrap_or_default();
-        let sort_dir = req.sort_dir.as_deref().map(str::trim).unwrap_or_default();
+        let sort = TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref());
         let roots_signature = source_roots.join("\u{1F}");
         let signature = build_track_cursor_signature(&[
             TRACK_CURSOR_VERSION,
@@ -709,8 +708,8 @@ impl BackendService {
             } else {
                 "no_mixxx_db"
             },
-            sort_by,
-            sort_dir,
+            sort.by,
+            sort.dir,
         ]);
         let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
 
@@ -733,7 +732,7 @@ impl BackendService {
         // Client-driven column sort, applied server-side so it spans the whole
         // library, not just the page already loaded. Stable, so equal keys keep
         // the natural file-path order from compute_all_library_tracks.
-        sort_tracks(&mut items, req.sort_by.as_deref(), req.sort_dir.as_deref());
+        sort.apply(&mut items);
 
         let mut total_duration_ms: u64 = 0;
         let mut duration_known_count: usize = 0;
@@ -813,7 +812,7 @@ impl BackendService {
                 let trimmed = value.trim().to_string();
                 (!trimmed.is_empty()).then_some(trimmed)
             })
-            .or_else(|| crate::utils::format_ext_from_path(file_path));
+            .or_else(|| crate::audio_format::format_ext_from_path(file_path));
         let key = req.key.and_then(|value| {
             let trimmed = value.trim().to_string();
             (!trimmed.is_empty()).then_some(trimmed)
@@ -1108,7 +1107,7 @@ pub(crate) fn row_to_track(
 
     let format_ext: Option<String> = row
         .get::<_, Option<String>>(9)?
-        .or_else(|| crate::utils::format_ext_from_path(&file_path));
+        .or_else(|| crate::audio_format::format_ext_from_path(&file_path));
     let sample_rate_hz: Option<u32> = row.get(10)?;
     let bit_depth: Option<u8> = row.get(11)?;
     let bitrate_kbps: Option<u32> = row.get(12)?;
@@ -1159,40 +1158,6 @@ pub(crate) fn row_to_track(
         analysis_ready,
         format_compat,
     })
-}
-
-/// Stable in-place sort of a track page by one of the frontend column keys.
-/// Mirrors `sortTracks` in `vanilla-ui/track_table.mjs` so a client-driven
-/// column sort produces the same order server-side (case-insensitive strings,
-/// missing bpm/duration treated as 0, `artist` tie-broken by title). Unknown
-/// or absent `sort_by` leaves the caller's order untouched.
-pub(super) fn sort_tracks(items: &mut [Track], sort_by: Option<&str>, sort_dir: Option<&str>) {
-    let Some(key) = sort_by.map(str::trim).filter(|value| !value.is_empty()) else {
-        return;
-    };
-    let desc = matches!(sort_dir.map(str::trim), Some("desc"));
-    let ci = |value: &str| value.to_lowercase();
-    items.sort_by(|a, b| {
-        let ord = match key {
-            "title" => ci(&a.title).cmp(&ci(&b.title)),
-            "artist" => ci(&a.artist)
-                .cmp(&ci(&b.artist))
-                .then_with(|| ci(&a.title).cmp(&ci(&b.title))),
-            "album" => ci(a.album.as_deref().unwrap_or_default())
-                .cmp(&ci(b.album.as_deref().unwrap_or_default())),
-            "format" => ci(a.format_ext.as_deref().unwrap_or_default())
-                .cmp(&ci(b.format_ext.as_deref().unwrap_or_default())),
-            "bpm" => a
-                .bpm
-                .unwrap_or(0.0)
-                .partial_cmp(&b.bpm.unwrap_or(0.0))
-                .unwrap_or(std::cmp::Ordering::Equal),
-            "durationMs" => a.duration_ms.unwrap_or(0).cmp(&b.duration_ms.unwrap_or(0)),
-            "key" => key_notation::compare_keys(a.key.as_deref(), b.key.as_deref()),
-            _ => std::cmp::Ordering::Equal,
-        };
-        if desc { ord.reverse() } else { ord }
-    });
 }
 
 /// Resolve a decoded page cursor to the index the next page starts at, over an

@@ -567,7 +567,7 @@ pub fn exported_media_target_path_with_ordinal(
     let raw_source_file_name = source
         .file_name()
         .and_then(|s| s.to_str())
-        .map(sanitize_contents_file_name)
+        .map(|name| sanitize_contents_file_name(&crate::audio_format::export_file_name(name)))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("{}.{}", sanitize_filename_component(title), extension));
     let artist_clean = sanitize_contents_component(artist);

@@ -415,7 +415,9 @@ pub fn try_read_track_index_from_edb_with_conn(
             .as_deref()
             .and_then(|p| resolve_usb_side_path_text(usb_root, p))
             .unwrap_or_default();
-        let format_ext = path.as_deref().and_then(crate::utils::format_ext_from_path);
+        let format_ext = path
+            .as_deref()
+            .and_then(crate::audio_format::format_ext_from_path);
         Ok((
             content_id,
             UsbTrack {
@@ -789,7 +791,9 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             } else {
                 path.clone().unwrap_or_default()
             };
-            let format_ext = path.as_deref().and_then(crate::utils::format_ext_from_path);
+            let format_ext = path
+                .as_deref()
+                .and_then(crate::audio_format::format_ext_from_path);
             Ok(UsbTrack {
                 id: content_id.to_string(),
                 local_track_id: None,

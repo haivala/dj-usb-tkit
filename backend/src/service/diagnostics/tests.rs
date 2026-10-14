@@ -544,7 +544,7 @@ fn make_usb_track(id: &str, title: &str, artist: &str, file_path: &str) -> UsbTr
         key_display: None,
         key_color: None,
         file_path: file_path.to_string(),
-        format_ext: crate::utils::format_ext_from_path(file_path),
+        format_ext: crate::audio_format::format_ext_from_path(file_path),
         needs_hydration: false,
         format_compat: Default::default(),
         usb_media_path: None,

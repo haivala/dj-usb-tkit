@@ -649,7 +649,7 @@ impl<'a> MixxxTrackImporter<'a> {
             .unwrap_or_else(|| Uuid::now_v7().to_string());
         let artwork_path = self.copy_cover(t, &track_id);
         let album = Some(&t.album).filter(|a| !a.is_empty());
-        let format_ext = crate::utils::format_ext_from_path(&t.file_path);
+        let format_ext = crate::audio_format::format_ext_from_path(&t.file_path);
 
         if existing_id.is_some() {
             tx.execute(

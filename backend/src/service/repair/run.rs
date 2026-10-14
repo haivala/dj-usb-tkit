@@ -103,6 +103,11 @@ impl<'a> ApplyProgress<'a> {
     fn finish(&mut self) {
         (self.emit)(self.end, 100, &format!("USB: Finished {}", self.title));
     }
+
+    /// A step outside the per-fix window (before the first fix, after the last).
+    fn report(&mut self, percent: usize, label: &str) {
+        (self.emit)(percent, 100, label);
+    }
 }
 
 #[cfg(test)]
@@ -1354,14 +1359,14 @@ impl BackendService {
         };
         let outcomes = if req.apply {
             on_progress(70, 100, "USB: Applying selected fixes");
+            let mut progress = ApplyProgress::new(&mut on_progress, selected_fix_count);
             self.apply_selected_fixes(
                 &usb_root,
                 &selected,
                 found,
                 &mut warnings,
                 &mut estimated_file_writes,
-                selected_fix_count,
-                &mut on_progress,
+                &mut progress,
             )
         } else {
             FixOutcomes::default()
@@ -1462,19 +1467,15 @@ impl BackendService {
 
     /// Applies every selected fix, in apply order, to what the detect phase
     /// found.
-    fn apply_selected_fixes<F>(
+    fn apply_selected_fixes(
         &self,
         usb_root: &Path,
         selected: &HashSet<String>,
         found: DetectedRepairs,
         warnings: &mut Vec<WarningEntry>,
         estimated_file_writes: &mut usize,
-        selected_fix_count: usize,
-        on_progress: &mut F,
-    ) -> FixOutcomes
-    where
-        F: FnMut(usize, usize, &str),
-    {
+        progress: &mut ApplyProgress<'_>,
+    ) -> FixOutcomes {
         let DetectedRepairs {
             empty_analysis_paths,
             parsed_pdb,
@@ -1511,7 +1512,7 @@ impl BackendService {
         } = found;
         let mut outcomes = FixOutcomes::default();
 
-        on_progress(70, 100, "USB: Backing up databases before repair");
+        progress.report(70, "USB: Backing up databases before repair");
         warnings.extend(
             self.backup_usb_databases_with_retention(usb_root, "Before repair", None)
                 .into_iter()
@@ -1529,9 +1530,8 @@ impl BackendService {
         // each fix independently re-staging/re-opening it -- SQLCipher
         // key negotiation is the expensive part. Individual fixes fall
         // back to opening their own connection if this fails.
-        on_progress(70, 100, "USB: Opening repair databases");
+        progress.report(70, "USB: Opening repair databases");
         let mut fix_edb_conn = open_edb_rw(usb_root, warnings);
-        let mut progress = ApplyProgress::new(on_progress, selected_fix_count);
 
         if selected.contains(EMPTY_ANALYSIS_FILES_FIX_ID) {
             progress.start("Fix Empty Analysis Files");
@@ -1578,7 +1578,7 @@ impl BackendService {
         // track row would otherwise fail (or only succeed once enough other
         // playlists happen to have organically grown the chain past it).
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Truncated Table Chain",
             selected.contains(PDB_TRUNCATED_TABLE_CHAIN_FIX_ID),
             !pdb_truncated_chains.is_empty(),
@@ -1600,7 +1600,7 @@ impl BackendService {
         // repair above grow the PDB file, so running this immediately after
         // them (and still before strict parity) keeps the boundary accurate.
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Torn Growth Pages",
             selected.contains(PDB_TORN_GROWTH_PAGES_FIX_ID),
             !pdb_torn_growth.is_empty(),
@@ -1707,7 +1707,7 @@ impl BackendService {
         }
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Data Pages With Zero tranrf",
             selected.contains(PDB_ZERO_TRANRF_FIX_ID),
             !pdb_zero_tranrf_pages.is_empty(),
@@ -1718,7 +1718,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair PDB Data Page Flags",
             selected.contains(PDB_WRONG_PAGE_FLAGS_FIX_ID),
             !pdb_wrong_flags_pages.is_empty(),
@@ -1729,7 +1729,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair PDB Data Pages With Sentinel u5",
             selected.contains(PDB_SENTINEL_U5_FIX_ID),
             !pdb_sentinel_u5_pages.is_empty(),
@@ -1740,7 +1740,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair PDB History/Columns Page Footer Shape",
             selected.contains(PDB_WRONG_HISTORY_SHAPE_FIX_ID),
             !pdb_wrong_history_shape_pages.is_empty(),
@@ -1751,7 +1751,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair PDB Track Page Footer Shape",
             selected.contains(PDB_WRONG_TRACK_U5_FIX_ID),
             !pdb_wrong_track_u5_pages.is_empty(),
@@ -1762,7 +1762,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Track Page Flag (Multi-Page Chain)",
             selected.contains(PDB_T00_MULTIPAGE_ACTIVE_FIX_ID),
             !pdb_t00_multipage_active_pages.is_empty(),
@@ -1773,7 +1773,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Tombstoned Playlist Tree IDs",
             selected.contains(PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID),
             !pdb_tombstoned_playlist_ids.is_empty(),
@@ -1784,7 +1784,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair PDB Playlist-Tree Page Shape",
             selected.contains(PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID),
             !pdb_wrong_playlist_tree_shape_pages.is_empty(),
@@ -1798,7 +1798,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Stale Sentinel B-Tree",
             selected.contains(PDB_STALE_SENTINEL_BTREE_FIX_ID),
             !pdb_stale_sentinel_btree_pages.is_empty(),
@@ -1809,7 +1809,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Table Write-Pointer Conflict",
             selected.contains(PDB_EC_CONFLICT_FIX_ID),
             !pdb_ec_conflicts.is_empty(),
@@ -1820,7 +1820,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Track String Alignment",
             selected.contains(PDB_TRACK_STRING_ALIGNMENT_FIX_ID),
             !pdb_misaligned_track_ids.is_empty(),
@@ -1831,7 +1831,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Album String Alignment",
             selected.contains(PDB_ALBUM_STRING_ALIGNMENT_FIX_ID),
             !pdb_misaligned_album_ids.is_empty(),
@@ -1842,7 +1842,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Repair Artist Name Layout",
             selected.contains(PDB_ARTIST_NAME_LAYOUT_FIX_ID),
             !pdb_misaligned_artist_ids.is_empty(),
@@ -1880,7 +1880,7 @@ impl BackendService {
         }
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Relink Moved Audio Files",
             selected.contains(RELINK_MOVED_AUDIO_FIX_ID),
             !moved_audio_relinks.is_empty(),
@@ -1896,7 +1896,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Add Unindexed Audio to a Playlist",
             selected.contains(UNINDEXED_AUDIO_PLAYLIST_FIX_ID),
             !unindexed_audio_files.is_empty(),
@@ -1926,7 +1926,7 @@ impl BackendService {
         );
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Remove Duplicate Audio Copies",
             selected.contains(DUPLICATE_AUDIO_COPIES_FIX_ID),
             !duplicate_audio_copies.is_empty(),
@@ -1971,7 +1971,7 @@ impl BackendService {
         }
 
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Give Tracks Their Own Analysis Files",
             selected.contains(SHARED_ANALYSIS_FIX_ID),
             !analysis_ownership.shared.is_empty(),
@@ -1988,7 +1988,7 @@ impl BackendService {
             },
         );
         outcomes.record_with_progress(
-            &mut progress,
+            progress,
             "Add Track Path to Analysis Files",
             selected.contains(ANALYSIS_TRACK_PATH_FIX_ID),
             !analysis_ownership.unmarked.is_empty(),
@@ -2093,13 +2093,12 @@ impl BackendService {
             let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
         }
         drop(fix_edb_conn);
-        drop(progress);
 
         // All selected fixes above write to their local staged copies only
         // (see usb_staging.rs) -- flush the accumulated local changes back
         // to the USB drive here, once per database, instead of once per
         // fix.
-        on_progress(95, 100, "USB: Saving repaired databases");
+        progress.report(95, "USB: Saving repaired databases");
         if let Err(err) = usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Pdb) {
             warnings.push(logging::log(
                 Level::Error,
@@ -2119,7 +2118,7 @@ impl BackendService {
 
         // After the write-back, so it reads the repaired PDB.
         if selected.contains(ENGINE_LIBRARY_FIX_ID) && engine_library_fix_needed {
-            on_progress(95, 100, "USB: Applying Write Engine DJ Library");
+            progress.report(95, "USB: Applying Write Engine DJ Library");
             match self
                 .enable_engine_library()
                 .and_then(|()| crate::service::rebuild_engine_library(usb_root))

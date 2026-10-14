@@ -10,16 +10,11 @@ use lofty::probe::{Probe, read_from_path};
 use lofty::tag::{ItemKey, Tag};
 use walkdir::WalkDir;
 
+use crate::audio_format::{
+    AudioFormat, format_ext_of, is_format_folder_name, is_library_extension,
+};
 use crate::error::{BackendError, BackendResult};
 use crate::wav_format::{WavFormatIssue, detect_wav_format_issue};
-
-const AUDIO_EXTENSIONS: &[&str] = &[
-    "mp3", "flac", "aif", "aiff", "wav", "aac", "m4a", "ogg", "opus", "mp4", "m4p",
-];
-
-const FORMAT_ONLY_FOLDERS: &[&str] = &[
-    "flac", "mp3", "wav", "aiff", "aif", "m4a", "aac", "ogg", "opus",
-];
 
 #[derive(Default)]
 struct EmbeddedMetadata {
@@ -124,7 +119,7 @@ pub fn scan_audio_file(path: &Path) -> BackendResult<ScannedTrack> {
         tonality: meta.tonality,
         file_size_bytes: i64::try_from(metadata.len()).ok(),
         file_modified_at: modified,
-        format_ext: crate::utils::format_ext_of(path),
+        format_ext: format_ext_of(path),
         sample_rate_hz,
         bit_depth,
         bitrate_kbps,
@@ -156,11 +151,7 @@ fn read_audio_technical_metadata(path: &Path) -> (Option<u32>, Option<u8>, Optio
 /// `lofty`'s properties don't expose the raw format tag, so this parses the
 /// RIFF `fmt ` chunk directly. Other formats don't have this issue.
 fn read_wav_extensible_kind(path: &Path) -> Option<WavFormatIssue> {
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase())?;
-    if ext != "wav" && ext != "wave" {
+    if AudioFormat::of_path(path) != Some(AudioFormat::Wav) {
         return None;
     }
     detect_wav_format_issue(path)
@@ -198,13 +189,7 @@ fn is_audio_path(path: &Path) -> bool {
         return false;
     }
 
-    let ext = path
-        .extension()
-        .and_then(|x| x.to_str())
-        .map(|x| x.to_ascii_lowercase())
-        .unwrap_or_default();
-
-    is_supported_audio_extension(&ext)
+    format_ext_of(path).is_some_and(|ext| is_library_extension(&ext))
 }
 
 /// A file the library takes: a supported audio extension and not an MP4 video.
@@ -216,11 +201,8 @@ pub(crate) fn is_library_audio_file(path: &Path) -> bool {
 /// A `.mp4` that carries a video track (a downloaded clip, not an AAC audio
 /// file) -- the library leaves those out.
 fn is_video_file(path: &Path) -> bool {
-    let is_mp4 = path
-        .extension()
-        .and_then(|x| x.to_str())
-        .is_some_and(|x| x.eq_ignore_ascii_case("mp4"));
-    is_mp4 && File::open(path).is_ok_and(|mut file| mp4_has_video_track(&mut file))
+    AudioFormat::of_path(path) == Some(AudioFormat::Mp4)
+        && File::open(path).is_ok_and(|mut file| mp4_has_video_track(&mut file))
 }
 
 /// Walks the MP4 box tree (moov > trak > mdia > hdlr) looking for a track
@@ -362,7 +344,7 @@ fn infer_album_from_path(path: &Path) -> Option<String> {
         return Some(cleaned);
     }
 
-    if is_format_only_folder(parent_name) {
+    if is_format_folder_name(parent_name) {
         let grandparent_name = parent
             .parent()
             .and_then(|p| p.file_name())
@@ -392,15 +374,6 @@ fn strip_format_suffix_from_album_name(name: &str) -> Option<String> {
         }
     }
     None
-}
-
-fn is_format_only_folder(name: &str) -> bool {
-    let lowered = name.trim().to_ascii_lowercase();
-    FORMAT_ONLY_FOLDERS.contains(&lowered.as_str())
-}
-
-fn is_supported_audio_extension(ext: &str) -> bool {
-    AUDIO_EXTENSIONS.contains(&ext)
 }
 
 fn clean_tag_text(value: Option<&str>) -> Option<String> {
@@ -662,7 +635,7 @@ mod tests {
     #[test]
     fn is_audio_all_supported_extensions() {
         for ext in [
-            "mp3", "flac", "aif", "aiff", "wav", "aac", "m4a", "ogg", "opus", "mp4", "m4p",
+            "mp3", "flac", "aif", "aiff", "wav", "wave", "aac", "m4a", "ogg", "opus", "mp4", "m4p",
         ] {
             let path = PathBuf::from(format!("/music/track.{ext}"));
             assert!(is_audio_path(&path), "expected {ext} to be audio");

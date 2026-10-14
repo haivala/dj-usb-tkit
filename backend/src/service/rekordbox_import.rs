@@ -604,7 +604,7 @@ impl<'a> RekordboxTrackImporter<'a> {
         // Resolve (or generate) the track ID before any file writes
         let existing_id = self.existing.get(&t.file_path).cloned();
         let file_path = t.file_path.to_string_lossy();
-        let format_ext = crate::utils::format_ext_of(&t.file_path);
+        let format_ext = crate::audio_format::format_ext_of(&t.file_path);
         let track_id = existing_id
             .clone()
             .unwrap_or_else(|| Uuid::now_v7().to_string());

@@ -608,13 +608,10 @@ pub(super) enum SeekFormat {
 
 impl SeekFormat {
     pub(super) fn of(path: &str) -> Option<Self> {
-        let extension = Path::new(path).extension()?.to_str()?;
-        if extension.eq_ignore_ascii_case("mp3") {
-            Some(Self::Mp3)
-        } else if extension.eq_ignore_ascii_case("flac") {
-            Some(Self::Flac)
-        } else {
-            None
+        match crate::audio_format::AudioFormat::of_path_str(path)? {
+            crate::audio_format::AudioFormat::Mp3 => Some(Self::Mp3),
+            crate::audio_format::AudioFormat::Flac => Some(Self::Flac),
+            _ => None,
         }
     }
 
@@ -1296,7 +1293,7 @@ impl BackendService {
                 file_type: scanned
                     .format_ext
                     .as_deref()
-                    .map(Self::file_type_from_extension),
+                    .map(crate::audio_format::rekordbox_file_type),
                 owns_exported_media: false,
                 owns_artwork: false,
                 owns_waveform: false,

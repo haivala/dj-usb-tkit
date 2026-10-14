@@ -906,11 +906,9 @@ pub(super) fn fill_mp3_pvbr(dat_path: &Path, audio_path: &Path) -> BackendResult
 }
 
 fn try_fill_mp3_pvbr(dat_path: &Path, audio_path: &Path) -> BackendResult<PvbrFill> {
-    let is_mp3 = audio_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("mp3"));
-    if !is_mp3 {
+    if crate::audio_format::AudioFormat::of_path(audio_path)
+        != Some(crate::audio_format::AudioFormat::Mp3)
+    {
         return Ok(PvbrFill::NotMp3);
     }
     let dat = std::fs::read(dat_path)?;

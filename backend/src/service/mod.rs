@@ -40,7 +40,9 @@ mod source_roots;
 #[cfg(test)]
 mod tests;
 mod track_matching;
+mod track_sort;
 
+use crate::audio_format::same_format_extension;
 pub(crate) use library::*;
 #[cfg(test)]
 use playback::*;
@@ -51,8 +53,9 @@ pub(crate) use source_roots::*;
 pub use track_matching::build_track_match_fingerprint;
 use track_matching::{
     library_metadata_candidate_compatible, matching_file_name, matching_file_stem,
-    normalize_hash_part, same_format_extension,
+    normalize_hash_part,
 };
+use track_sort::TrackSort;
 
 // Re-export functions used by commands.rs via crate::service::*
 pub use engine_export::{EngineLibrarySummary, rebuild_engine_library};

@@ -9,10 +9,12 @@
 //! [`WavFormatIssue::is_export_autofixable`].
 //!
 //! Inputs are all fields already present on `Track` (`UsbTrack` only carries
-//! `format_ext`, so its verdict is limited to "unlisted format"). Missing
+//! `format_ext`, so its verdict is whether players read the extension; see
+//! [`compute_usb_format_compat`]). Missing
 //! technical fields mean "can't judge" -> `Ok`, matching the old frontend
 //! behaviour where a `null` sample rate / bitrate short-circuited the check.
 
+use crate::audio_format::{AudioFormat, is_player_extension};
 use crate::models::{FormatCompat, FormatCompatSeverity};
 use crate::wav_format::WavFormatIssue;
 
@@ -54,9 +56,9 @@ pub(crate) fn compute_format_compat(
     bitrate_kbps: Option<u32>,
     wav_extensible_kind: Option<&str>,
 ) -> FormatCompat {
-    let ext = format_ext.unwrap_or_default().trim().to_ascii_lowercase();
+    let format = format_ext.and_then(AudioFormat::from_extension);
 
-    if ext == "wav"
+    if format == Some(AudioFormat::Wav)
         && let Some(issue) = wav_extensible_kind.and_then(WavFormatIssue::from_db_str)
     {
         return if issue.is_export_autofixable() {
@@ -72,14 +74,44 @@ pub(crate) fn compute_format_compat(
         };
     }
 
-    match ext.as_str() {
-        "wav" => match (sample_rate_hz, bit_depth) {
+    let Some(format) = format else {
+        return FormatCompat::warn("Unlisted format");
+    };
+    let verdict = format_verdict(format, sample_rate_hz, bit_depth, bitrate_kbps);
+    let is_wave = format_ext.is_some_and(|ext| ext.trim().eq_ignore_ascii_case("wave"));
+    if is_wave && verdict.severity == FormatCompatSeverity::Ok {
+        return FormatCompat::autofix(
+            "Uses the .wave extension, which CDJs don't recognise. Will be exported as .wav.",
+        );
+    }
+    verdict
+}
+
+/// A file already on a USB stick: no export will rename or convert it, and
+/// USB rows carry no sample rate / bit depth / bitrate, so the only verdict is
+/// whether players read its extension.
+pub(crate) fn compute_usb_format_compat(format_ext: Option<&str>) -> FormatCompat {
+    if format_ext.is_some_and(is_player_extension) {
+        FormatCompat::ok()
+    } else {
+        FormatCompat::warn("Unlisted format")
+    }
+}
+
+fn format_verdict(
+    format: AudioFormat,
+    sample_rate_hz: Option<u32>,
+    bit_depth: Option<u8>,
+    bitrate_kbps: Option<u32>,
+) -> FormatCompat {
+    match format {
+        AudioFormat::Wav => match (sample_rate_hz, bit_depth) {
             (Some(sr), Some(bd)) if !RATES_WAV.contains(&sr) || !BITS_LOSSLESS.contains(&bd) => {
                 FormatCompat::warn("Outside WAV support (16/24-bit, 44.1/48/96 kHz)")
             }
             _ => FormatCompat::ok(),
         },
-        "mp3" => {
+        AudioFormat::Mp3 => {
             let Some(sr) = sample_rate_hz else {
                 return FormatCompat::ok();
             };
@@ -97,13 +129,13 @@ pub(crate) fn compute_format_compat(
                 _ => FormatCompat::ok(),
             }
         }
-        "aac" | "mp4" => match (sample_rate_hz, bitrate_kbps) {
+        AudioFormat::Aac | AudioFormat::Mp4 => match (sample_rate_hz, bitrate_kbps) {
             (Some(sr), Some(br)) if !RATES_AAC.contains(&sr) || !(16..=320).contains(&br) => {
                 FormatCompat::warn("Outside AAC support (16-320 kbps, 16/22.05/24/32/44.1/48 kHz)")
             }
             _ => FormatCompat::ok(),
         },
-        "m4a" => {
+        AudioFormat::M4a => {
             let Some(sr) = sample_rate_hz else {
                 return FormatCompat::ok();
             };
@@ -121,19 +153,21 @@ pub(crate) fn compute_format_compat(
                 FormatCompat::warn("Outside AAC/ALAC support for .m4a")
             }
         }
-        "flac" | "fla" => match (sample_rate_hz, bit_depth) {
+        AudioFormat::Flac => match (sample_rate_hz, bit_depth) {
             (Some(sr), Some(bd)) if !RATES_HIRES.contains(&sr) || !BITS_LOSSLESS.contains(&bd) => {
                 FormatCompat::warn("Outside FLAC support (16/24-bit, 44.1/48/88.2/96 kHz)")
             }
             _ => FormatCompat::ok(),
         },
-        "aif" | "aiff" => match (sample_rate_hz, bit_depth) {
+        AudioFormat::Aiff => match (sample_rate_hz, bit_depth) {
             (Some(sr), Some(bd)) if !RATES_HIRES.contains(&sr) || !BITS_LOSSLESS.contains(&bd) => {
                 FormatCompat::warn("Outside AIFF support (16/24-bit, 44.1/48/88.2/96 kHz)")
             }
             _ => FormatCompat::ok(),
         },
-        _ => FormatCompat::warn("Unlisted format"),
+        AudioFormat::M4p | AudioFormat::Ogg | AudioFormat::Opus | AudioFormat::Alac => {
+            FormatCompat::warn("Unlisted format")
+        }
     }
 }
 
@@ -201,6 +235,37 @@ mod tests {
             compute_format_compat(Some("mp3"), Some(44_100), None, Some(4), None).severity,
             FormatCompatSeverity::Warn
         );
+    }
+
+    #[test]
+    fn wave_extension_is_autofix_unless_the_audio_itself_is_out_of_spec() {
+        let wave = compute_format_compat(Some("WAVE"), Some(44_100), Some(16), None, None);
+        assert_eq!(wave.severity, FormatCompatSeverity::Autofix);
+        assert!(wave.warning.unwrap().contains("exported as .wav"));
+        assert_eq!(
+            compute_format_compat(Some("wave"), Some(192_000), Some(24), None, None).severity,
+            FormatCompatSeverity::Warn
+        );
+    }
+
+    #[test]
+    fn usb_rows_warn_only_for_extensions_players_dont_read() {
+        for ext in [
+            "mp3", "M4A", "aac", "mp4", "wav", "aif", "aiff", "flac", "fla",
+        ] {
+            assert_eq!(
+                compute_usb_format_compat(Some(ext)).severity,
+                FormatCompatSeverity::Ok,
+                "{ext}"
+            );
+        }
+        for ext in [Some("wave"), Some("ogg"), Some("opus"), Some("m4p"), None] {
+            assert_eq!(
+                compute_usb_format_compat(ext).severity,
+                FormatCompatSeverity::Warn,
+                "{ext:?}"
+            );
+        }
     }
 
     #[test]

@@ -403,7 +403,7 @@ mod tests {
             key_display: None,
             key_color: None,
             file_path: usb_media_path.to_string(),
-            format_ext: crate::utils::format_ext_from_path(usb_media_path),
+            format_ext: crate::audio_format::format_ext_from_path(usb_media_path),
             needs_hydration: false,
             format_compat: Default::default(),
             usb_media_path: Some(usb_media_path.to_string()),

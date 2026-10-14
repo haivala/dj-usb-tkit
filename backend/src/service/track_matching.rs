@@ -9,6 +9,7 @@ use std::io::{BufReader, Read};
 use std::path::Path;
 
 use super::usb_utils::canonicalize_playlist_name;
+use crate::audio_format::same_format_extension;
 
 /// (file size, normalized title, normalized artist). This is a candidate
 /// lookup key, not proof that two files contain the same recording.
@@ -71,21 +72,6 @@ pub(crate) fn matching_file_stem(path: &str) -> String {
     let file = matching_file_name(path);
     file.rsplit_once('.')
         .map_or_else(|| file.clone(), |(stem, _)| stem.to_string())
-}
-
-/// Whether two paths have the same known audio format extension. This rules
-/// out an MP3/FLAC match; equal extensions alone do not prove equal encoding
-/// or file identity.
-pub(crate) fn same_format_extension(a: &str, b: &str) -> bool {
-    fn format(path: &str) -> Option<String> {
-        let extension = Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
-        Some(match extension.as_str() {
-            "wave" => "wav".to_string(),
-            "aiff" => "aif".to_string(),
-            _ => extension,
-        })
-    }
-    matches!((format(a), format(b)), (Some(a), Some(b)) if a == b)
 }
 
 pub(crate) const METADATA_DURATION_TOLERANCE_MS: i64 = 2000;
@@ -224,20 +210,6 @@ mod tests {
             build_track_match_fingerprint("Song", "Artist", Some("Album")),
             build_track_match_fingerprint("song", "artist", Some("album"))
         );
-    }
-
-    #[test]
-    fn same_recording_in_different_formats_is_not_the_same_encoded_track() {
-        assert!(same_format_extension(
-            "/music/Track.MP3",
-            "/usb/Track-1.mp3"
-        ));
-        assert!(same_format_extension("/music/Track.WAVE", "/usb/Track.wav"));
-        assert!(!same_format_extension(
-            "/music/Track.mp3",
-            "/usb/Track.flac"
-        ));
-        assert!(!same_format_extension("/music/Track", "/usb/Track.mp3"));
     }
 
     #[test]

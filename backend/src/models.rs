@@ -393,7 +393,7 @@ pub struct BrowseSourceFilesRequest {
     #[serde(default)]
     pub cursor: Option<String>,
     /// One of `title` | `artist` | `album` | `format` | `bpm` | `durationMs` |
-    /// `key`. Absent ⇒ the natural file-path order. See `sort_tracks`.
+    /// `key`. Absent ⇒ the natural file-path order. See `TrackSort`.
     #[serde(default)]
     pub sort_by: Option<String>,
     /// `asc` (default) | `desc`.

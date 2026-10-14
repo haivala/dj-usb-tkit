@@ -844,23 +844,7 @@ pub(crate) fn collect_contents_audio_files(usb_root: &Path) -> Vec<String> {
         if !entry.file_type().is_file() {
             continue;
         }
-        let ext = entry
-            .path()
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|s| s.to_ascii_lowercase());
-        let is_audio = matches!(
-            ext.as_deref(),
-            Some("mp3")
-                | Some("flac")
-                | Some("wav")
-                | Some("aif")
-                | Some("aiff")
-                | Some("m4a")
-                | Some("aac")
-                | Some("ogg")
-        );
-        if !is_audio {
+        if !crate::audio_format::is_player_audio(entry.path()) {
             continue;
         }
         let rel = entry

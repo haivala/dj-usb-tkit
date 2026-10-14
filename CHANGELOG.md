@@ -67,6 +67,12 @@
 - **Improvement:** The Backups panel opens from a Backups button on the USB page instead of
   from Settings.
 - **Improvement:** The sidebar is more compact, so more playlists fit before it scrolls.
+- **Improvement:** Library, playlist and USB track lists sort their columns by the same rules,
+  and a committed playlist sort saves exactly the order the list showed.
+- **Improvement:** Audio format support follows what Pioneer players read. `.wave` files are
+  picked up by the library scan and exported as `.wav`, with a format notice that says so. USB
+  diagnostics and repair count unindexed `.mp4` files and no longer count `.ogg` files, and USB
+  tracks in a format players don't read show the unlisted-format warning.
 - **Chore:** The PDB page footer (row offsets and row presence bits) is now read and
   written by one shared module (`pdb_page`) instead of separate copies across the writer,
   reader, repairs and dump tools. Exports and repairs produce the same bytes as before.

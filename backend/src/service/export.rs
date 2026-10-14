@@ -17,7 +17,8 @@ use crate::models::{
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
 type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
 
-use super::track_matching::{ContentFingerprint, content_fingerprint_key, same_format_extension};
+use super::track_matching::{ContentFingerprint, content_fingerprint_key};
+use crate::audio_format::{AudioFormat, same_format_extension};
 
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
@@ -432,12 +433,7 @@ fn estimate_export_new_bytes(
             continue;
         }
         let source_len = meta.len();
-        let extension = source
-            .extension()
-            .and_then(|s| s.to_str())
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.to_ascii_lowercase())
-            .unwrap_or_else(|| "bin".to_string());
+        let extension = crate::audio_format::export_extension(&source);
         let target = exported_media_target_path(
             media_root,
             &source,
@@ -979,12 +975,7 @@ impl BackendService {
                 continue;
             }
 
-            let extension = source
-                .extension()
-                .and_then(|s| s.to_str())
-                .filter(|s| !s.trim().is_empty())
-                .map(|s| s.to_ascii_lowercase())
-                .unwrap_or_else(|| "bin".to_string());
+            let extension = crate::audio_format::export_extension(&source);
             let this_fingerprint =
                 content_fingerprint_key(track.file_size_bytes, &track.title, &track.artist);
             let target = resolve_collision_free_media_target(
@@ -1032,7 +1023,7 @@ impl BackendService {
                 });
             let owns_exported_media = existing_exported_path.is_none();
             if !export_dry_run && owns_exported_media {
-                if extension == "wav" || extension == "wave" {
+                if AudioFormat::from_extension(&extension) == Some(AudioFormat::Wav) {
                     copy_wav_normalized_if_needed(&source, &target)?;
                 } else {
                     copy_if_different(&source, &target)?;
@@ -1691,7 +1682,7 @@ impl BackendService {
                 file_type: row
                     .get::<_, Option<String>>(36)?
                     .as_deref()
-                    .map(Self::file_type_from_extension),
+                    .map(crate::audio_format::rekordbox_file_type),
                 first_beat_ms: row.get::<_, Option<i64>>(37)?.map(|v| v as u32),
                 beatgrid_from_rekordbox: row.get(38)?,
                 cues: Vec::new(),
@@ -1708,21 +1699,6 @@ impl BackendService {
         }
 
         Ok(playlist)
-    }
-
-    pub(crate) fn file_type_from_extension(ext: &str) -> i64 {
-        // File type codes (USB export format):
-        // MP3=1, MP4=3, M4A=4, FLAC=5, ALAC=6, WAV=11, AIFF=12
-        match ext.trim().to_ascii_lowercase().as_str() {
-            "mp3" => 1,
-            "mp4" => 3,
-            "m4a" | "aac" | "m4p" => 4,
-            "flac" => 5,
-            "alac" => 6,
-            "wav" => 11,
-            "aif" | "aiff" => 12,
-            _ => 0,
-        }
     }
 
     pub(crate) fn resolve_manifest_identity(
@@ -2362,21 +2338,6 @@ mod tests {
 
         let result = existing_usb_relative_if_present(dir.path(), "Contents/track.mp3");
         assert_eq!(result.as_deref(), Some("/Contents/track.mp3"));
-    }
-
-    // --- file_type_from_extension ---
-
-    #[test]
-    fn file_type_from_extension_maps_known_and_unknown_extensions() {
-        assert_eq!(BackendService::file_type_from_extension("mp3"), 1);
-        assert_eq!(BackendService::file_type_from_extension("MP4"), 3);
-        assert_eq!(BackendService::file_type_from_extension("m4a"), 4);
-        assert_eq!(BackendService::file_type_from_extension("aac"), 4);
-        assert_eq!(BackendService::file_type_from_extension("flac"), 5);
-        assert_eq!(BackendService::file_type_from_extension("alac"), 6);
-        assert_eq!(BackendService::file_type_from_extension(" wav "), 11);
-        assert_eq!(BackendService::file_type_from_extension("aiff"), 12);
-        assert_eq!(BackendService::file_type_from_extension("ogg"), 0);
     }
 
     // --- ensure_local_u32_setting / ensure_track_master_content_id / resolve_manifest_identity ---

@@ -294,10 +294,8 @@ fn fill_cached_mp3_seek_indexes(
         rows.filter_map(Result::ok)
             .filter_map(|(id, audio, dat)| {
                 let audio = std::path::PathBuf::from(audio.trim());
-                let is_mp3 = audio
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("mp3"));
+                let is_mp3 = crate::audio_format::AudioFormat::of_path(&audio)
+                    == Some(crate::audio_format::AudioFormat::Mp3);
                 let dat =
                     super::local_cache_bundle_dat(&waveform_dir, std::path::Path::new(dat.trim()))?;
                 is_mp3.then_some((id, dat, audio))

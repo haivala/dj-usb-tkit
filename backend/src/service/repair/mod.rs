@@ -47,7 +47,6 @@ use super::export_helpers::{
 };
 use super::track_matching::{
     ContentFingerprint, content_fingerprint_key, matching_file_name, same_file_bytes,
-    same_format_extension,
 };
 use super::usb_staging;
 use super::usb_utils::{
@@ -57,6 +56,7 @@ use super::usb_utils::{
 #[cfg(test)]
 use super::usb_vendor_compat::vendor_pdb_path;
 use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
+use crate::audio_format::same_format_extension;
 use crate::scanner::scan_audio_file;
 
 use super::diagnostics::{

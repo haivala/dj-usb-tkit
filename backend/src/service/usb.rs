@@ -133,11 +133,12 @@ fn build_usb_track_index(
             let resolved_file_path = resolve_usb_side_path_text(usb_root, &t.track_file_path)
                 .unwrap_or_else(|| t.track_file_path.clone());
             let usb_analysis_path = resolve_usb_side_path_text(usb_root, &t.anlz_path);
-            let format_ext = crate::utils::format_ext_from_path(&t.track_file_path).or_else(|| {
-                t.file_name
-                    .as_deref()
-                    .and_then(crate::utils::format_ext_from_path)
-            });
+            let format_ext =
+                crate::audio_format::format_ext_from_path(&t.track_file_path).or_else(|| {
+                    t.file_name
+                        .as_deref()
+                        .and_then(crate::audio_format::format_ext_from_path)
+                });
             (
                 t.id,
                 UsbTrack {
@@ -161,12 +162,8 @@ fn build_usb_track_index(
                     key_color: None,
                     file_path: resolved_file_path,
                     needs_hydration: false,
-                    format_compat: super::format_compat::compute_format_compat(
+                    format_compat: super::format_compat::compute_usb_format_compat(
                         format_ext.as_deref(),
-                        None,
-                        None,
-                        None,
-                        None,
                     ),
                     format_ext,
                     usb_media_path: Some(t.track_file_path.clone()),
@@ -347,38 +344,6 @@ fn usb_track_matches_query(track: &UsbTrack, query_lower: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// Stable in-place sort mirroring `sort_tracks` (`service::library`) and the
-/// frontend `sortTracks`, for `UsbTrack`. Unknown/absent `sort_by` leaves the
-/// caller's order (PDB entry order) untouched.
-fn sort_usb_tracks(items: &mut [UsbTrack], sort_by: Option<&str>, sort_dir: Option<&str>) {
-    let Some(key) = sort_by.map(str::trim).filter(|value| !value.is_empty()) else {
-        return;
-    };
-    let desc = matches!(sort_dir.map(str::trim), Some("desc"));
-    let ci = |value: &str| value.to_lowercase();
-    items.sort_by(|a, b| {
-        let ord = match key {
-            "title" => ci(&a.title).cmp(&ci(&b.title)),
-            "artist" => ci(&a.artist)
-                .cmp(&ci(&b.artist))
-                .then_with(|| ci(&a.title).cmp(&ci(&b.title))),
-            "album" => ci(a.album.as_deref().unwrap_or_default())
-                .cmp(&ci(b.album.as_deref().unwrap_or_default())),
-            "format" => ci(a.format_ext.as_deref().unwrap_or_default())
-                .cmp(&ci(b.format_ext.as_deref().unwrap_or_default())),
-            "bpm" => a
-                .bpm
-                .unwrap_or(0.0)
-                .partial_cmp(&b.bpm.unwrap_or(0.0))
-                .unwrap_or(std::cmp::Ordering::Equal),
-            "durationMs" => a.duration_ms.unwrap_or(0).cmp(&b.duration_ms.unwrap_or(0)),
-            "key" => super::key_notation::compare_keys(a.key.as_deref(), b.key.as_deref()),
-            _ => std::cmp::Ordering::Equal,
-        };
-        if desc { ord.reverse() } else { ord }
-    });
-}
-
 /// Fills in the expensive payload fields (waveform-preview bytes, artwork data
 /// URL) on an already-resolved cheap `UsbTrack`. Called only for the tracks on
 /// the returned page.
@@ -392,16 +357,10 @@ fn hydrate_usb_track_in_place(
     files: Option<&UsbDisplaySource>,
 ) -> DisplayReadCounts {
     let counts = files.map(|files| files.fill(track)).unwrap_or_default();
-    // USB rows only carry `format_ext` -- no sample rate / bit depth / bitrate
-    // and no WAV extensible-header flag -- so this only ever flags a genuinely
-    // unrecognised extension. Mirrors `Track.format_compat`.
-    track.format_compat = super::format_compat::compute_format_compat(
-        track.format_ext.as_deref(),
-        None,
-        None,
-        None,
-        None,
-    );
+    // USB rows only carry `format_ext`, so this only flags an extension
+    // players don't read.
+    track.format_compat =
+        super::format_compat::compute_usb_format_compat(track.format_ext.as_deref());
 
     // Whether a row is still missing display data the `inspect_usb_track`
     // deep-resolve could fill in (waveform bytes, artwork, BPM, key). Computed
@@ -448,17 +407,16 @@ fn paginate_usb_tracks(
     let (total_duration_ms, duration_known_count) = sum_usb_track_durations(&tracks);
     let total = tracks.len();
 
-    sort_usb_tracks(&mut tracks, req.sort_by.as_deref(), req.sort_dir.as_deref());
+    let sort = super::TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref());
+    sort.apply(&mut tracks);
 
-    let sort_by = req.sort_by.as_deref().map(str::trim).unwrap_or_default();
-    let sort_dir = req.sort_dir.as_deref().map(str::trim).unwrap_or_default();
     let signature = super::build_track_cursor_signature(&[
         "track_cursor_v1",
         command,
         scope_id,
         &query,
-        sort_by,
-        sort_dir,
+        sort.by,
+        sort.dir,
     ]);
     let start = super::decode_offset_cursor(req.cursor.as_deref(), &signature)?.unwrap_or(0);
     let start = start.min(total);
@@ -2298,7 +2256,7 @@ impl BackendService {
                     track.duration_ms,
                     fingerprint,
                     now_ts,
-                    crate::utils::format_ext_from_path(file_path)
+                    crate::audio_format::format_ext_from_path(file_path)
                 ],
             )?;
             id
@@ -2828,11 +2786,11 @@ fn resolve_usb_track_from_sources(
                     .as_deref()
                     .map(Path::new)
                     .and_then(load_waveform_preview_from_analysis_path);
-                let format_ext =
-                    crate::utils::format_ext_from_path(&t.track_file_path).or_else(|| {
+                let format_ext = crate::audio_format::format_ext_from_path(&t.track_file_path)
+                    .or_else(|| {
                         t.file_name
                             .as_deref()
-                            .and_then(crate::utils::format_ext_from_path)
+                            .and_then(crate::audio_format::format_ext_from_path)
                     });
                 return Some((
                     "pdb".to_string(),
@@ -2857,12 +2815,8 @@ fn resolve_usb_track_from_sources(
                         key_color: None,
                         file_path: resolved_file_path,
                         needs_hydration: false,
-                        format_compat: super::format_compat::compute_format_compat(
+                        format_compat: super::format_compat::compute_usb_format_compat(
                             format_ext.as_deref(),
-                            None,
-                            None,
-                            None,
-                            None,
                         ),
                         format_ext,
                         usb_media_path: Some(t.track_file_path.clone()),
@@ -2994,7 +2948,7 @@ mod tests {
             key_display: None,
             key_color: None,
             file_path: file_path.to_string(),
-            format_ext: crate::utils::format_ext_from_path(file_path),
+            format_ext: crate::audio_format::format_ext_from_path(file_path),
             needs_hydration: false,
             format_compat: Default::default(),
             usb_media_path: None,

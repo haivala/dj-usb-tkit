@@ -7,6 +7,8 @@
 
 use std::path::Path;
 
+use crate::audio_format::AudioFormat;
+
 const PVBR_ENTRIES: usize = 400;
 pub(super) const PVBR_PAYLOAD_LEN: usize = PVBR_ENTRIES * 4 + 4;
 const PVB2_ENTRIES: usize = 400;
@@ -95,15 +97,14 @@ impl SeekIndexSkip {
 /// The seek index for an MP3 or FLAC; `Ok(None)` for any other format,
 /// which keeps the empty `PVBR` and gets no `PVB2`.
 pub(super) fn seek_index_for_audio(path: &Path) -> Result<Option<SeekIndex>, SeekIndexSkip> {
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
     let read = || std::fs::read(path).map_err(|_| SeekIndexSkip::Unreadable);
-    match extension.as_str() {
-        "mp3" => parse_mp3_pvbr(&read()?).map(|payload| Some(SeekIndex::Pvbr(payload))),
-        "flac" => parse_flac_pvb2(&read()?).map(|chunk| Some(SeekIndex::Pvb2(chunk))),
+    match AudioFormat::of_path(path) {
+        Some(AudioFormat::Mp3) => {
+            parse_mp3_pvbr(&read()?).map(|payload| Some(SeekIndex::Pvbr(payload)))
+        }
+        Some(AudioFormat::Flac) => {
+            parse_flac_pvb2(&read()?).map(|chunk| Some(SeekIndex::Pvb2(chunk)))
+        }
         _ => Ok(None),
     }
 }

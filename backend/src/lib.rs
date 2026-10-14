@@ -1,3 +1,4 @@
+pub mod audio_format;
 pub mod commands;
 pub mod db;
 pub mod edb;

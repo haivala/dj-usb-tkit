@@ -1618,6 +1618,14 @@ fn media_path_no_album_uses_unknown() {
     assert!(s.contains("UnknownAlbum"), "missing fallback: {s}");
 }
 
+#[test]
+fn media_path_exports_wave_as_wav() {
+    let media = Path::new("/mnt/usb/Contents");
+    let source = Path::new("/local/music/Track.WAVE");
+    let result = exported_media_target_path(media, source, "Artist", None, "Title", "wav");
+    assert_eq!(result.file_name().unwrap(), "Track.wav");
+}
+
 // --- copy_if_different ---
 
 #[test]

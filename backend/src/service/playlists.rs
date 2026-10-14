@@ -337,17 +337,16 @@ impl BackendService {
         // Default order is playlist position (the SQL `ORDER BY`); a client
         // column sort overrides it, applied server-side so it spans the whole
         // playlist.
-        sort_tracks(&mut items, req.sort_by.as_deref(), req.sort_dir.as_deref());
+        let sort = TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref());
+        sort.apply(&mut items);
 
-        let sort_by = req.sort_by.as_deref().map(str::trim).unwrap_or_default();
-        let sort_dir = req.sort_dir.as_deref().map(str::trim).unwrap_or_default();
         let signature = build_track_cursor_signature(&[
             TRACK_CURSOR_VERSION,
             "get_playlist_tracks",
             &req.playlist_id,
             &query,
-            sort_by,
-            sort_dir,
+            sort.by,
+            sort.dir,
         ]);
         let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
         let start_idx = cursor_start_index(&items, cursor.as_ref());
@@ -827,7 +826,7 @@ impl BackendService {
                     stmt.query_map(params![req.playlist_id], |row| row_to_track(row, true))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             };
-            sort_tracks(&mut tracks, req.sort_by.as_deref(), req.sort_dir.as_deref());
+            TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref()).apply(&mut tracks);
             tracks.into_iter().map(|t| t.id).collect()
         } else {
             return Err(BackendError::Validation(
