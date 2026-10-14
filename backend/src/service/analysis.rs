@@ -583,6 +583,10 @@ fn resolve_analysis_bpm_range(
     (min, max)
 }
 
+fn elapsed_ms_since(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 impl BackendService {
     pub fn analyze_new_tracks(
         &self,
@@ -600,6 +604,7 @@ impl BackendService {
         F: FnMut(&AnalyzeTrackProgress),
     {
         self.ensure_no_data_migration()?;
+        let batch_started = Instant::now();
         let job_id = format!("job-analysis-{}", Uuid::now_v7());
         let conn = self.db.connect()?;
         let auto_mode = req.track_ids.is_empty();
@@ -690,6 +695,7 @@ impl BackendService {
                     "No eligible tracks found for analysis",
                 )],
                 items: Vec::new(),
+                elapsed_ms: elapsed_ms_since(batch_started),
             });
         }
         let hydrate_track_ids = tracks
@@ -1127,6 +1133,7 @@ impl BackendService {
             failed,
             warnings,
             items,
+            elapsed_ms: elapsed_ms_since(batch_started),
         })
     }
 

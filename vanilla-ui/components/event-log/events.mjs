@@ -15,4 +15,5 @@ export function bindEventLogEvents(ctx) {
     ctx.clearEventLogBadge();
     renderEventLog();
   });
+  el.eventLogOpenFileBtn?.addEventListener("click", () => ctx.openEventLogFile());
 }

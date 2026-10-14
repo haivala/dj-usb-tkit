@@ -23,7 +23,7 @@ test("setupConsoleFileLogging intercepts console methods and pushes to event log
     const invoked = [];
 
     await setupConsoleFileLogging({
-      isTauriRuntime: () => false,
+      isTauriRuntime: () => true,
       invoke: (cmd, payload) => { invoked.push({ cmd, payload }); },
       pushEventLog: (entry) => { logged.push(entry); }
     });
@@ -38,28 +38,8 @@ test("setupConsoleFileLogging intercepts console methods and pushes to event log
     assert.equal(logged[0].source, "console");
     assert.equal(logged[1].level, "warn");
     assert.equal(logged[2].level, "error");
-    // Non-tauri: no file forwarding
+    // The file is written by storeEventLogEntry, not the console bridge.
     assert.equal(invoked.length, 0);
-  });
-});
-
-test("setupConsoleFileLogging forwards to file in tauri mode", async () => {
-  await withSilencedConsole(async () => {
-    const invoked = [];
-
-    await setupConsoleFileLogging({
-      isTauriRuntime: () => true,
-      invoke: (cmd, payload) => { invoked.push({ cmd, payload }); return Promise.resolve(); },
-      pushEventLog: () => {}
-    });
-
-    console.info("test message");
-
-    // clear_frontend_log + append_frontend_log
-    const appendCalls = invoked.filter((c) => c.cmd === "append_frontend_log");
-    assert.ok(appendCalls.length >= 1);
-    assert.equal(appendCalls[0].payload.level, "info");
-    assert.equal(appendCalls[0].payload.message, "test message");
   });
 });
 

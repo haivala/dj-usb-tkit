@@ -1614,6 +1614,9 @@ pub struct AnalyzeNewTracksData {
     pub warnings: Vec<WarningEntry>,
     #[serde(default)]
     pub items: Vec<Track>,
+    /// Wall-clock time the batch took, paused time included.
+    #[serde(default)]
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

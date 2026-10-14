@@ -19,6 +19,12 @@ The sync mode and the backup-before-export option are in Settings:
 
 ![Settings, with the Export sync mode and the Backups options](assets/settings.png)
 
+Settings → Export also has "Write Engine DJ library", which is off by default.
+With it on, every export (and every other change to the stick's rekordbox data)
+also rebuilds the Engine DJ library on the USB, so Denon and Numark players
+use the app's beat grids and waveforms instead of analyzing each track again.
+See [ENGINE_DJ.md](ENGINE_DJ.md).
+
 Export is intentionally tied to a quick prep loop:
 
 - users can prepare playlists first

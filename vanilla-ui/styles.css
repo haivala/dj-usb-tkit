@@ -2822,7 +2822,15 @@ body.sidebar-collapsed .progress-footer {
 
 .progress-meta #progressText {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: right;
+}
+
+.progress-meta #progressTime {
+  flex-shrink: 0;
 }
 
 .progress-dismiss {

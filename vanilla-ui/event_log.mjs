@@ -67,7 +67,7 @@ export function buildEventLogCoalesceKey(entry) {
   return `${entry.level}|${entry.source}|${entry.code}|${entry.signature}`;
 }
 
-export function createEventLogStore({ maxEntries = 1000 } = {}) {
+export function createEventLogStore({ maxEntries = 500 } = {}) {
   let seq = 0;
   const entries = [];
   const byKey = new Map();

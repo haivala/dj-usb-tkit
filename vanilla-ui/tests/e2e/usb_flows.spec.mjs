@@ -685,7 +685,7 @@ test("Event Log flood remains capped", async ({ page }) => {
   });
 
   await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogSummary")).toContainText("1000 event(s)");
+  await expect(page.locator("#eventLogSummary")).toContainText("500 event(s)");
 });
 
 test("an open Event Log updates live: new entries on top, repeats coalesce, rows are kept", async ({ page }) => {
@@ -715,12 +715,12 @@ test("an open Event Log updates live: new entries on top, repeats coalesce, rows
   await expect(page.locator("#eventLogList")).not.toContainText("live-filtered-out");
   await page.locator("#eventLogSourceFilter").selectOption("all");
 
-  // A flood while open stays capped at the store's 1000 entries.
+  // A flood while open stays capped at the store's 500 entries.
   await page.evaluate(() => {
     for (let i = 0; i < 1200; i += 1) console.log(`live-flood-${i}`);
   });
-  await expect(page.locator("#eventLogSummary")).toContainText("1000 event(s)");
-  await expect(rows).toHaveCount(1000);
+  await expect(page.locator("#eventLogSummary")).toContainText("500 event(s)");
+  await expect(rows).toHaveCount(500);
   await expect(rows.first()).toContainText("live-flood-1199");
 });
 

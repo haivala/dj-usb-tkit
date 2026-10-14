@@ -40,6 +40,7 @@ function makeEl() {
     },
     progressFill: { style: { width: "" } },
     progressText: { textContent: "" },
+    progressTime: { textContent: "" },
     progressPauseBtn: makeButton(),
     progressCancelAnalysisBtn: makeButton()
   };
@@ -136,14 +137,14 @@ test("progress primitives clamp, classify, dismiss, and pause/resume heartbeat",
     state.progressBaseText = "Analyzing";
     pauseProgressHeartbeat({ state, el });
     timers[0].tick();
-    assert.equal(el.progressText.textContent, "Analyzing (paused)");
+    assert.equal(el.progressTime.textContent, "(paused)");
 
     resumeProgressHeartbeat({ state, el });
     assert.equal(state.progressPausedAtMs, null);
-    assert.match(el.progressText.textContent, /Analyzing \(\d+s\)$/);
+    assert.match(el.progressTime.textContent, /^\(\d+s\)$/);
 
     pauseProgressHeartbeat({ state, el });
-    stopProgressHeartbeat({ state });
+    stopProgressHeartbeat({ state, el });
     assert.deepEqual(cleared, [1]);
     assert.equal(state.progressHeartbeatTimer, null);
     assert.equal(state.progressPausedAtMs, null);
@@ -276,7 +277,7 @@ test("handleJobEvent applies analysis progress, duration totals, and delayed pau
     });
     assert.equal(state.analyzingTrackIds.size, 0);
     assert.ok(state.progressPausedAtMs > 0);
-    assert.match(el.progressText.textContent, /\(paused\)$/);
+    assert.equal(el.progressTime.textContent, "(paused)");
     assert.deepEqual(durationSummaries, [[3000, 1]]);
   });
 });

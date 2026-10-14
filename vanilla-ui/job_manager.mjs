@@ -14,13 +14,20 @@ export function setProgress(ctx, active, percent = 0, text = "", opts = {}) {
   el.progressFooter
     .querySelector(".progress-track")
     ?.setAttribute("aria-valuenow", String(clamped));
-  // Keep showing "(paused)" even if a job:event for the track still
-  // finishing up while paused updates the base text in the meantime --
-  // otherwise the display would flicker back to the elapsed-seconds text
-  // until the next heartbeat tick re-asserts it.
-  el.progressText.textContent = state.progressPausedAtMs
-    ? `${state.progressBaseText} (paused)`
-    : state.progressBaseText;
+  // The elapsed time lives in its own span, so per-track text updates never
+  // blank it between heartbeat ticks.
+  el.progressText.textContent = state.progressBaseText;
+}
+
+function elapsedSecs(state) {
+  return Math.max(0, Math.floor((Date.now() - state.progressStartedAtMs) / 1000));
+}
+
+function renderProgressTime(ctx) {
+  const { state, el } = ctx;
+  if (state.progressPausedAtMs) el.progressTime.textContent = "(paused)";
+  else if (!state.progressHeartbeatTimer) el.progressTime.textContent = "";
+  else el.progressTime.textContent = `(${elapsedSecs(state)}s)`;
 }
 
 export function dismissProgress(ctx) {
@@ -53,18 +60,9 @@ export function startProgressHeartbeat(ctx) {
   state.progressPausedAtMs = null;
   state.progressHeartbeatTimer = window.setInterval(() => {
     if (!el.progressFooter.classList.contains("active")) return;
-    // Re-asserted every tick (not just on the pause click) so it wins over
-    // any job:event that re-renders progressText for the track still
-    // finishing up while paused.
-    if (state.progressPausedAtMs) {
-      el.progressText.textContent = `${state.progressBaseText} (paused)`;
-      return;
-    }
-    const now = Date.now();
-    const totalSecs = Math.max(0, Math.floor((now - state.progressStartedAtMs) / 1000));
-    const suffix = ` (${totalSecs}s)`;
-    el.progressText.textContent = `${state.progressBaseText}${suffix}`;
+    renderProgressTime(ctx);
   }, 1000);
+  renderProgressTime(ctx);
 }
 
 export function stopProgressHeartbeat(ctx) {
@@ -73,25 +71,25 @@ export function stopProgressHeartbeat(ctx) {
   window.clearInterval(state.progressHeartbeatTimer);
   state.progressHeartbeatTimer = null;
   state.progressPausedAtMs = null;
+  renderProgressTime(ctx);
 }
 
 export function pauseProgressHeartbeat(ctx) {
-  const { state, el } = ctx;
+  const { state } = ctx;
   if (state.progressPausedAtMs) return;
   state.progressPausedAtMs = Date.now();
-  el.progressText.textContent = `${state.progressBaseText} (paused)`;
+  renderProgressTime(ctx);
 }
 
 export function resumeProgressHeartbeat(ctx) {
-  const { state, el } = ctx;
+  const { state } = ctx;
   if (!state.progressPausedAtMs) return;
   // Shift the start time forward by however long we were paused, so the
   // displayed elapsed time picks back up from where it left off instead of
   // counting the paused interval.
   state.progressStartedAtMs += Date.now() - state.progressPausedAtMs;
   state.progressPausedAtMs = null;
-  const totalSecs = Math.max(0, Math.floor((Date.now() - state.progressStartedAtMs) / 1000));
-  el.progressText.textContent = `${state.progressBaseText} (${totalSecs}s)`;
+  renderProgressTime(ctx);
 }
 
 // Undo a freeze that turned out to be premature: pause was clicked in the
@@ -100,11 +98,10 @@ export function resumeProgressHeartbeat(ctx) {
 // flight. The frozen interval was real work time, so unlike a resume the
 // start time isn't shifted.
 export function unfreezeProgressHeartbeat(ctx) {
-  const { state, el } = ctx;
+  const { state } = ctx;
   if (!state.progressPausedAtMs) return;
   state.progressPausedAtMs = null;
-  const totalSecs = Math.max(0, Math.floor((Date.now() - state.progressStartedAtMs) / 1000));
-  el.progressText.textContent = `${state.progressBaseText} (${totalSecs}s)`;
+  renderProgressTime(ctx);
 }
 
 export function nextPaint() {

@@ -9,11 +9,31 @@ export function storeEventLogEntry(ctx, entry = {}) {
   const { state, eventLogStore } = ctx;
   const pushed = eventLogStore.push(entry);
   if (!pushed) return;
+  appendEventLogFile(ctx, pushed);
   if (state.activeTab === "event-log") {
     showEventLogEntry(ctx, pushed);
   } else if (pushed.level === "error") {
     state.eventLogUnseenErrors += 1;
     renderEventLogBadge(ctx);
+  }
+}
+
+// Every occurrence goes to the session log file, which keeps what the
+// in-memory store drops past its cap or folds into a repeat count.
+function appendEventLogFile(ctx, item) {
+  if (!ctx.isTauriRuntime()) return;
+  const details = item.details ? ` | ${item.details}` : "";
+  ctx.invoke("append_frontend_log", {
+    level: item.level,
+    message: `[${item.source}] [${item.code}] ${item.message}${details}`
+  }).catch(() => {});
+}
+
+export async function openEventLogFile(ctx) {
+  try {
+    await ctx.invoke("open_frontend_log");
+  } catch (err) {
+    ctx.emitStatus(`Could not open the log file: ${err?.message || err}`, { level: "error" });
   }
 }
 
@@ -147,23 +167,15 @@ function showEventLogEntry(ctx, item) {
 
 // Console and runtime error logging setup.
 
-export async function setupConsoleFileLogging({ isTauriRuntime, invoke, pushEventLog }) {
+export async function setupConsoleFileLogging({ pushEventLog }) {
   const original = {
     log: console.log.bind(console),
     info: console.info.bind(console),
     warn: console.warn.bind(console),
     error: console.error.bind(console)
   };
-  const canForwardToFile = isTauriRuntime();
 
-  if (canForwardToFile) {
-    try {
-      await invoke("clear_frontend_log");
-    } catch (_) {
-      // keep console interception even when file logging fails
-    }
-  }
-
+  // pushEventLog also writes the session log file (storeEventLogEntry).
   const forward = (level, args) => {
     const message = args.map((v) => {
       if (typeof v === "string") return v;
@@ -174,7 +186,6 @@ export async function setupConsoleFileLogging({ isTauriRuntime, invoke, pushEven
       }
     }).join(" ");
     pushEventLog({ level, source: "console", message });
-    if (canForwardToFile) invoke("append_frontend_log", { level, message }).catch(() => {});
   };
 
   console.log = (...args) => {

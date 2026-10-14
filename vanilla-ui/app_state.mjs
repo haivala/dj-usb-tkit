@@ -4,7 +4,7 @@ import { DEFAULT_ANALYSIS_BPM_RANGE } from "./components/library/actions.mjs";
 import { createEventLogStore } from "./event_log.mjs";
 
 export const STATIC_TABS = ["library", "usb", "usb-playlists", "usb-history", "usb-player-menu", "event-log", "backups"];
-export const EVENT_LOG_MAX = 1000;
+export const EVENT_LOG_MAX = 500;
 
 export function createInitialState() {
   return {

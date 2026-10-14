@@ -192,12 +192,15 @@ async fn allow_asset_paths(app: tauri::AppHandle, paths: Vec<String>) -> Result<
     Ok(allowed)
 }
 
-fn frontend_log_path() -> PathBuf {
+fn log_dir() -> PathBuf {
     LOG_DIR
         .get()
         .cloned()
         .unwrap_or_else(|| PathBuf::from(".app-data"))
-        .join("frontend-console.log")
+}
+
+fn frontend_log_path() -> PathBuf {
+    log_dir().join("dj-usb-tkit-event-log.txt")
 }
 
 fn quarantine_backend_db_files(data_dir: &Path) -> Result<Vec<PathBuf>, String> {
@@ -505,14 +508,27 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
     Ok(())
 }
 
-#[tauri::command]
-fn clear_frontend_log() -> Result<String, String> {
+/// Each app launch starts a fresh session log; a webview reload keeps it.
+fn clear_frontend_log() -> Result<(), String> {
     let path = frontend_log_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("create log dir failed: {err}"))?;
     }
-    fs::write(&path, b"").map_err(|err| format!("clear log failed: {err}"))?;
-    Ok(path.to_string_lossy().to_string())
+    // Earlier versions' name for the session log; nothing reads it any more.
+    let _ = fs::remove_file(log_dir().join("frontend-console.log"));
+    fs::write(&path, b"").map_err(|err| format!("clear log failed: {err}"))
+}
+
+#[tauri::command]
+fn open_frontend_log(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = frontend_log_path();
+    if !path.exists() {
+        fs::write(&path, b"").map_err(|err| format!("create log failed: {err}"))?;
+    }
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|err| format!("open log failed: {err}"))
 }
 
 const VALID_LOG_LEVELS: &[&str] = &["log", "info", "warn", "error", "debug", "trace"];
@@ -695,6 +711,9 @@ fn main() {
 
             // Store data dir for frontend log path resolution
             let _ = LOG_DIR.set(data_dir.clone());
+            if let Err(err) = clear_frontend_log() {
+                emit_backend_log(&app_handle, "warn", "startup", format!("startup: {err}"));
+            }
 
             let commands = init_backend_commands_with_recovery(&data_dir)?;
             emit_backend_log(
@@ -862,7 +881,7 @@ fn main() {
             backend::tauri_commands::get_playback_status_native,
             backend::tauri_commands::set_playback_metronome,
             backend::tauri_commands::playback_preflight_native,
-            clear_frontend_log,
+            open_frontend_log,
             append_frontend_log,
             get_backend_log_buffer,
             pick_source_folders,

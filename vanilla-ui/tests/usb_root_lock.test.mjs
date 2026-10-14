@@ -29,6 +29,7 @@ function jobCtx(lockCalls) {
     progressFooter: { classList: makeClassList(), querySelector: () => null },
     progressFill: { style: {} },
     progressText: {},
+    progressTime: {},
     progressPauseBtn: { setAttribute() {} },
     progressCancelAnalysisBtn: {}
   };

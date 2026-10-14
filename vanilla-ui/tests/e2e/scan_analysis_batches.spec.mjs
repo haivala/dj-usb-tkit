@@ -63,6 +63,8 @@ function installScanAnalysisMock(page, opts = {}) {
     let bpmRangeSeen = null;
     let analysisPaused = false;
     let analysisCancelled = false;
+    const logFileLines = [];
+    let openLogFileCalls = 0;
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const nowIso = () => new Date().toISOString();
 
@@ -340,15 +342,22 @@ function installScanAnalysisMock(page, opts = {}) {
         analyzed,
         failed,
         warnings: [],
-        items: withAnalysisReady(tracks.filter((track) => ids.includes(String(track.id))))
+        items: withAnalysisReady(tracks.filter((track) => ids.includes(String(track.id)))),
+        elapsedMs: 1500
       };
     };
 
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
+          if (command === "append_frontend_log") {
+            logFileLines.push(`[${payload?.level}] ${payload?.message}`);
+            return null;
+          }
+          if (command === "open_frontend_log") {
+            openLogFileCalls += 1;
+            return null;
+          }
           if (command === "show_window") return null;
           if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: false, path: null } };
@@ -461,6 +470,12 @@ function installScanAnalysisMock(page, opts = {}) {
       },
       get analysisCancelled() {
         return analysisCancelled;
+      },
+      get logFileLines() {
+        return logFileLines;
+      },
+      get openLogFileCalls() {
+        return openLogFileCalls;
       }
     };
   }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange, pauseBeforeBpmKey, holdAfterTrackStart, seedBpmKey });
@@ -1097,16 +1112,32 @@ test("pause button stops picking up new tracks and resume continues the batch", 
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(pausedCount);
   // Only once the batch has genuinely stopped (no track still in flight)
   // does the elapsed timer freeze on "(paused)".
-  await expect(page.locator("#progressText")).toContainText("(paused)");
+  await expect(page.locator("#progressTime")).toHaveText("(paused)");
 
   await page.locator("#progressPauseBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.analysisPaused)).toBe(false);
-  await expect(page.locator("#progressText")).not.toContainText("(paused)");
+  await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
 
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(5);
   await expect(page.locator("#statusText")).toContainText("analyzed 5, failed 0");
   await expect(page.locator("#progressPauseBtn")).toBeHidden();
   await expect(page.locator("#progressCancelAnalysisBtn")).toBeHidden();
+});
+
+test("event log entries go to the session log file, which the Open log file button opens", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 10 });
+  await page.goto("/");
+
+  await page.locator("#scanLibraryBtn").click();
+  await expect(page.locator("#statusText")).toContainText("analyzed 2, failed 0");
+
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#eventLogList")).toContainText("2 track(s) in");
+  const lines = await page.evaluate(() => window.__scanTestStats.logFileLines);
+  expect(lines.some((line) => line.startsWith("[info] [analysis] [analysis.batch_done] ") && line.includes("2 track(s) in"))).toBe(true);
+
+  await page.locator("#eventLogOpenFileBtn").click();
+  await expect.poll(async () => page.evaluate(() => window.__scanTestStats.openLogFileCalls)).toBe(1);
 });
 
 test("pause clicked mid-track keeps the elapsed timer counting until that track actually finishes", async ({ page }) => {
@@ -1128,11 +1159,11 @@ test("pause clicked mid-track keeps the elapsed timer counting until that track 
 
   // The in-flight track hasn't reported ready yet, so the batch hasn't
   // really stopped -- the timer must still be ticking, not frozen.
-  await expect(page.locator("#progressText")).not.toContainText("(paused)");
+  await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
 
   // Once that track finishes (its bpm/key piece lands), nothing else starts
   // because we're paused, so now it has genuinely stopped.
-  await expect(page.locator("#progressText")).toContainText("(paused)");
+  await expect(page.locator("#progressTime")).toHaveText("(paused)");
   const settledCount = await page.locator("#libraryTableBody .bpm-pill").count();
   expect(settledCount).toBeLessThan(3);
 
@@ -1161,10 +1192,10 @@ test("pause clicked between tracks unfreezes the timer if the next track was alr
   // Track 2's first piece shows it was in flight after all, so the timer
   // must go back to counting instead of staying frozen.
   await page.waitForFunction(() => (window.__scanTestStats?.pieceEventsByPiece?.artwork || 0) >= 2);
-  await expect(page.locator("#progressText")).not.toContainText("(paused)");
+  await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
 
   // Once track 2 finishes, nothing else starts, so it's genuinely stopped.
-  await expect(page.locator("#progressText")).toContainText("(paused)");
+  await expect(page.locator("#progressTime")).toHaveText("(paused)");
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
   await page.waitForTimeout(400);
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
@@ -1444,13 +1475,14 @@ function installAnalyzeResponseMock(page, { analyzeResponse }) {
   }, { analyzeResponse });
 }
 
-test("a failed analyze_new_tracks count is reported in the status line", async ({ page }) => {
+test("a failed analyze_new_tracks count is reported in the status line and the batch stats in the event log", async ({ page }) => {
   await installAnalyzeResponseMock(page, {
     analyzeResponse: {
       jobId: "job-1",
       analyzed: 0,
       failed: 1,
-      warnings: ["1 bpm_key (essentia): no BPM/key result"]
+      warnings: ["1 bpm_key (essentia): no BPM/key result"],
+      elapsedMs: 83000
     }
   });
   await page.goto("/");
@@ -1459,6 +1491,8 @@ test("a failed analyze_new_tracks count is reported in the status line", async (
   await page.locator('[data-action="analyze-track"]').click();
 
   await expect(page.locator("#statusText")).toContainText("done: analyzed 0, failed 1");
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#eventLogList")).toContainText("1 track(s) in 1:23 (analyzed 0, failed 1)");
 });
 
 test("a track analysis couldn't finish (no BPM found) is reported as incomplete, not analyzed", async ({ page }) => {

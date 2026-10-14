@@ -433,6 +433,7 @@
             </select>
           </label>
           <button id="eventLogClearBtn">Clear</button>
+          <button id="eventLogOpenFileBtn" data-tooltip="Open this session's full log in a text viewer -- the list here keeps only the newest entries">Open log file</button>
         </div>
         <p class="muted" id="eventLogSummary">No entries</p>
         <div class="event-log-list" id="eventLogList" role="log" aria-live="polite"></div>
@@ -570,6 +571,7 @@
     <div class="progress-meta">
       <span id="progressLabel">Progress</span>
       <span id="progressText">Idle</span>
+      <span id="progressTime"></span>
       <button class="progress-pause" id="progressPauseBtn" aria-label="Pause analysis" aria-pressed="false" hidden>&#10074;&#10074;</button>
       <button class="progress-cancel" id="progressCancelAnalysisBtn" aria-label="Cancel analysis" hidden>&times;</button>
       <button class="progress-dismiss" id="progressDismiss" aria-label="Dismiss">&times;</button>

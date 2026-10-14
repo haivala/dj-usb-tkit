@@ -39,6 +39,16 @@
 
 ## Unreleased
 
+- **New feature:** The Event Log writes everything it records to a log file that covers the
+  whole session, and an "Open log file" button opens it. The list in the window keeps only the
+  newest entries; the file keeps everything since the app was started.
+- **New feature:** When an analysis run finishes, the Event Log records how many tracks it
+  covered and how long it took.
+- **Fix:** The progress bar's elapsed time no longer disappears while analysis shows the track
+  being worked on. A long track name is shortened instead of pushing the time out of view.
+- **Fix:** Analysis no longer fills the Event Log with "no state change" warnings for tracks
+  that weren't on screen or whose BPM and key didn't change.
+
 ## 0.4.2
 
 **Severity:** feature

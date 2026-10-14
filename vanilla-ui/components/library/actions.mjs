@@ -216,21 +216,9 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
     });
     patchLibraryRowByTrackId(ctx, trackId);
   } else {
-    const bpm = Number(payload?.bpm);
-    const hasBpm = payload?.bpm !== undefined
-      && payload?.bpm !== null
-      && Number.isFinite(bpm)
-      && bpm > 0;
-    const hasKey = typeof payload?.key === "string" && payload.key.trim();
-    const hasAnalyzer = typeof payload?.bpmAnalyzer === "string" && payload.bpmAnalyzer.trim();
-    const isBpmKeyPayload = hasBpm || hasKey || hasAnalyzer;
-    if (isBpmKeyPayload) {
-      const foundTrack = state.tracks.find((t) => String(t?.id) === trackId);
-      const warnLabel = foundTrack
-        ? [foundTrack.artist, foundTrack.title].filter(Boolean).join(" - ") || trackId
-        : trackId;
-      ctx.warn("[analysis-ui] no state change for", warnLabel);
-    }
+    // Expected, not a problem: the track isn't on a loaded library page, or
+    // the BPM/key piece and the track-ready event carry the same values.
+    ctx.debugFrontendLog("row-update-skipped", { trackId });
   }
 
   for (const playlist of state.playlists) {
@@ -848,6 +836,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   // Decoded fine, but analysis left something out (no BPM detected, ...).
   let incomplete = 0;
   let failed = 0;
+  let elapsedMs = null;
   const warnings = [];
   let hydratedItems = [];
 
@@ -877,6 +866,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
     analyzed = Math.max(0, Number(batch?.analyzed || 0));
     incomplete = Math.max(0, Number(batch?.incomplete || 0));
     failed = Math.max(0, Number(batch?.failed || 0));
+    elapsedMs = Number.isFinite(Number(batch?.elapsedMs)) ? Number(batch.elapsedMs) : null;
     const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
     warnings.push(...batchWarnings);
     hydratedItems = Array.isArray(batch?.items) ? batch.items : [];
@@ -921,6 +911,15 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   const autoLimitSuffix = autoLimitWarning ? ` | ${autoLimitWarning}` : "";
   const incompleteSuffix = incomplete ? `, incomplete ${incomplete}` : "";
   emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${autoLimitSuffix}`, { warningCount });
+  const processed = analyzed + incomplete + failed;
+  if (processed > 0 && elapsedMs !== null) {
+    ctx.pushEventLog({
+      level: "info",
+      source: "analysis",
+      code: "analysis.batch_done",
+      message: `${modeLabel}: ${processed} track(s) in ${formatDurationMs(elapsedMs)} (analyzed ${analyzed}, failed ${failed}${incompleteSuffix})`
+    });
+  }
   return { analyzed, incomplete, failed, warnings };
 }
 
