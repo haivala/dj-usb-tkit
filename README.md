@@ -1,6 +1,6 @@
 # DJ USB Tkit
 
-Local-first DJ library manager and USB exporter built with Rust + Tauri.
+Local-first DJ library manager — scan, analyze and export playlists to USB for Pioneer CDJ/XDJ, rekordbox and Engine DJ players (Denon, Numark), and repair broken USB drives. Built with Rust + Tauri.
 
 Prebuilt installers for macOS, Windows, and Linux are on the [Releases](https://github.com/haivala/dj-usb-tkit/releases) page.
 
@@ -58,9 +58,14 @@ For a prefix somewhere else, start the app with `WINEPREFIX=/path/to/prefix`
   computer, including their hot cues (see
   [docs/EXTERNAL_LIBRARIES.md](docs/EXTERNAL_LIBRARIES.md)).
 - USB import/export with `mirror` and `additive` playlist sync modes.
+- An Engine DJ library on the USB for Denon and Numark players, kept in step
+  with every change to the stick, so they get the app's beat grids and
+  waveforms without analyzing every track again. Off by default: turn on
+  Settings → Export → "Write Engine DJ library" (see
+  [`docs/ENGINE_DJ.md`](docs/ENGINE_DJ.md)).
 - Local BPM, key, waveform, and artwork analysis for missing track metadata.
-- A cue editor for setting a track's hot cues, beat grid, key, and where the
-  CDJ starts playback, from the library or straight on a connected USB (see
+- A cue editor for setting a track's hot cues, memory cues, beat grid, key,
+  genre, star rating, and where the CDJ starts playback, from the library or straight on a connected USB (see
   [Cue Editor](#cue-editor) below).
 - USB diagnostics, strict parity reporting, and preview-first repair actions.
 - Repair tools can help recover some broken USB database states; backups are
