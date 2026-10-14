@@ -57,6 +57,9 @@ USB export does not generate or regenerate ANLZ from source audio. Export is a c
   `PQTZ`/`PQT2` beat grid; otherwise the grid is rebuilt from the track's tempo and first beat,
 - local analysis cache bundles are generated without a `PPTH` path chunk,
 - export injects or replaces the `PPTH` path chunk when the file is structurally parseable,
+- export writes the bundle as the first `ANLZnnnn` in the track's hash folder that is free or
+  already names the track, so tracks whose paths hash to the same folder each get their own
+  (see "Analysis File Ownership" in `docs/DIAGNOSTICS_REPAIRS.md`),
 - if the bundle files are missing, export is blocked before media copy starts.
 
 Run track analysis before export to create or refresh the local bundle. This keeps CPU-heavy audio

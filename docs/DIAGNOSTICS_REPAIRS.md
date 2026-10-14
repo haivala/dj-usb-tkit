@@ -226,7 +226,9 @@ Players find a track's bundle from its path, not from the database. The hash
 is reduced to about 200,000 folders, so in a large library two tracks can land
 in the same one. rekordbox then writes `ANLZ0000` for one and `ANLZ0001` for
 the other, each naming its track in the `PPTH` chunk, which is how the two are
-told apart.
+told apart. rekordbox reads an app-exported stick laid out this way correctly
+(checked 2026-10-14 with three tracks in one folder and two in another); a CDJ
+check is still open.
 
 - Export picks the first `ANLZnnnn` in the hash folder that is free or already
   names the track (`analysis_bundle_paths_for_track`), and never reuses a

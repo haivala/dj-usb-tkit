@@ -39,14 +39,8 @@
 
 ## Unreleased
 
-- **Improvement:** Diagnostics no longer warn about the transaction bookkeeping rekordbox
-  itself leaves in the PDB (sentinel u5, tranrf=0, page flags and footer shapes, active
-  track pages in a multi-page chain, stale sentinel B-trees, tombstoned rows with an id), so a
-  USB exported only by rekordbox shows green. Repair no longer lists these as fixes; it still
-  tidies them up whenever it runs.
-- **Fix:** When USB repair upgrades playlists to strict parity and the same pass also tidies a
-  PDB playlist page that the upgrade adds a playlist to, the page is now tidied as the upgrade
-  left it. Before, that page could need a second repair run.
+**Severity:** feature
+
 - **New feature:** USB repair gives tracks that share an analysis file their own ("Give Tracks
   Their Own Analysis Files"), named the way rekordbox names them when two tracks land in the same
   analysis folder, and adds the track path to analysis files that lack it ("Add Track Path to
@@ -55,57 +49,25 @@
   byte-for-byte copies of a track in the same folder (for example `Track.mp3` next to the
   exported `Track-1.mp3`). They are no longer offered for the "Unindexed" playlist, where the
   same track would show up twice.
-- **Improvement:** The Event Log opens from a button in the header instead of from Settings,
-  and the button shows how many errors were logged since the log was last opened. When a
-  diagnostics, parity or repair-preview item points to details in the log, the button gets a
-  dot until the log is opened.
-- **Improvement:** Repair-preview items whose details are listed in the Event Log (audio files
-  in no playlist, moved audio files, malformed analysis entries) link to it, like the
-  diagnostics checks already did.
-- **Improvement:** Preview Fixes opens with a plain-language summary like the diagnostics
-  report: a headline saying how many problems Apply Fixes repairs, one row per area it changes
-  (older and newer Pioneer players, playlists, music files, waveforms and beat grids,
-  Denon / Numark players), and a row for problems it can't fix. The detailed list of fixes is
-  under a collapsed "Technical details".
-- **Improvement:** Apply Fixes shows the running repair and divides its progress range among the
-  available selected fixes. BPM/key, beat-grid and seek-data repairs also show completed tracks or
-  files within their range. The apply pass skips rebuilding MP3 and FLAC seek indexes while
-  planning; the selected seek-data fix still checks each audio file when it runs.
+- **New feature:** Sidebar playlists can be put in any order by dragging the handle that shows
+  when hovering a playlist. New playlists appear at the top. The order is the app's own and
+  doesn't change the playlist order on the USB.
+- **New feature:** The sidebar can be made wider or narrower by dragging its right edge. The
+  width is remembered, and double-clicking the edge resets it.
+- **New feature:** The cue editor edits a track's genre and star rating. The genre field
+  suggests the genres the library (and the USB, for a USB track) already has. Opened from a USB
+  row, the edit is written to the PDB and the eDB on the stick as well as the library. A genre
+  set here stays when the library is rescanned or re-imported from rekordbox or Mixxx. Saving
+  only a genre or rating change leaves the beat grid, key and cues as they are.
+- **Fix:** When USB repair upgrades playlists to strict parity and the same pass also tidies a
+  PDB playlist page that the upgrade adds a playlist to, the page is now tidied as the upgrade
+  left it. Before, that page could need a second repair run.
 - **Fix:** Track matching keeps different file formats separate when linking USB tracks to the
   Library, reusing existing USB media, resolving playback, or relinking moved audio. Duplicate
   audio checks compare files in bounded memory. Automatic Library links require matching file
   sizes; missing recorded sizes are read from file metadata when possible. USB playlists keep
   separate entries when the file path is missing and only editable metadata matches. Playback and
   moved-audio repair use the same filename matching rule.
-- **Improvement:** The Backups panel opens from a Backups button on the USB page instead of
-  from Settings.
-- **Improvement:** The sidebar is more compact, so more playlists fit before it scrolls.
-- **Improvement:** Library, playlist and USB track lists search and sort by the same rules, and a
-  committed playlist sort saves exactly the order the list showed. USB list search now also
-  matches text that spans title, artist and album (for example "title artist"), as the Library
-  search already did.
-- **Improvement:** Track lists keep a steady scrollbar sized for the whole list instead of one
-  that jumps each time more tracks load. Dragging it anywhere loads that part of the list
-  directly, with placeholder rows until it arrives, and long lists stay fast because only the
-  rows on screen are drawn. Loading tracks no longer freezes the window, and Library pages load
-  faster because unchanged audio files aren't read again.
-- **Improvement:** Audio format support follows what Pioneer players read. `.wave` files are
-  picked up by the library scan and exported as `.wav`, with a format notice that says so. USB
-  diagnostics and repair count unindexed `.mp4` files and no longer count `.ogg` files, and USB
-  tracks in a format players don't read show the unlisted-format warning.
-- **Chore:** The PDB page footer (row offsets and row presence bits) is now read and
-  written by one shared module (`pdb_page`) instead of separate copies across the writer,
-  reader, repairs and dump tools. Exports and repairs produce the same bytes as before.
-- **Chore:** The PDB writer is split into files by job (data model, whole-file writer,
-  in-place repairs, additive writer, shared row helpers) instead of one large file.
-- **Chore:** USB repairs are split into files by area (PDB page fixes, audio fixes, player
-  menu, history sync, strict parity, the repair run itself), and the repair run's detect and
-  apply phases are separate functions. Repairs offer and apply the same fixes as before.
-- **Chore:** USB diagnostics are split into files by area (PDB integrity, content and
-  analysis checks, parity comparison, overview layout, path helpers) instead of one large file.
-- **Chore:** The backend service's core file is split into files by area (track library,
-  playback, playlists, source roots, settings) instead of one large file.
-- **Chore:** The export helpers' eDB writers and PDB writers each have their own file.
 - **Fix:** USB repair now decides which audio files are indexed, missing or unindexed exactly
   as the parity report does, so every file the report lists gets a repair. Before, a file whose
   name differed from an indexed one only by a `-1`/`-2` suffix got no repair, and a file the
@@ -144,6 +106,64 @@
   other track's analysis would be rebuilt instead. The repair also gets the empty files
   straight from the USB scan instead of reading them back out of the scan's warning text,
   so a file whose name has a control character in it is repaired too.
+- **Fix:** Double-clicking a sidebar playlist to rename it no longer closes the name field right
+  away. Hovering a playlist also shows a pencil button that starts a rename.
+- **Fix:** Diagnostics of a freshly initialized USB with no tracks no longer warn that analysis
+  references are missing for newer players.
+- **Fix:** Resizing the window while the cue editor is open now redraws its waveform and beat
+  grid. Before, the waveform could go blank and the beat grid lines stayed where they were.
+- **Fix:** Re-exporting a track that is already on the USB no longer clears its genre in the
+  eDB. The PDB kept the genre, so the two databases disagreed.
+- **Improvement:** Diagnostics no longer warn about the transaction bookkeeping rekordbox
+  itself leaves in the PDB (sentinel u5, tranrf=0, page flags and footer shapes, active
+  track pages in a multi-page chain, stale sentinel B-trees, tombstoned rows with an id), so a
+  USB exported only by rekordbox shows green. Repair no longer lists these as fixes; it still
+  tidies them up whenever it runs.
+- **Improvement:** The Event Log opens from a button in the header instead of from Settings,
+  and the button shows how many errors were logged since the log was last opened. When a
+  diagnostics, parity or repair-preview item points to details in the log, the button gets a
+  dot until the log is opened.
+- **Improvement:** Repair-preview items whose details are listed in the Event Log (audio files
+  in no playlist, moved audio files, malformed analysis entries) link to it, like the
+  diagnostics checks already did.
+- **Improvement:** Preview Fixes opens with a plain-language summary like the diagnostics
+  report: a headline saying how many problems Apply Fixes repairs, one row per area it changes
+  (older and newer Pioneer players, playlists, music files, waveforms and beat grids,
+  Denon / Numark players), and a row for problems it can't fix. The detailed list of fixes is
+  under a collapsed "Technical details".
+- **Improvement:** Apply Fixes shows the running repair and divides its progress range among the
+  available selected fixes. BPM/key, beat-grid and seek-data repairs also show completed tracks or
+  files within their range. The apply pass skips rebuilding MP3 and FLAC seek indexes while
+  planning; the selected seek-data fix still checks each audio file when it runs.
+- **Improvement:** The Backups panel opens from a Backups button on the USB page instead of
+  from Settings.
+- **Improvement:** The sidebar is more compact, so more playlists fit before it scrolls.
+- **Improvement:** Library, playlist and USB track lists search and sort by the same rules, and a
+  committed playlist sort saves exactly the order the list showed. USB list search now also
+  matches text that spans title, artist and album (for example "title artist"), as the Library
+  search already did.
+- **Improvement:** Track lists keep a steady scrollbar sized for the whole list instead of one
+  that jumps each time more tracks load. Dragging it anywhere loads that part of the list
+  directly, with placeholder rows until it arrives, and long lists stay fast because only the
+  rows on screen are drawn. Loading tracks no longer freezes the window, and Library pages load
+  faster because unchanged audio files aren't read again.
+- **Improvement:** Audio format support follows what Pioneer players read. `.wave` files are
+  picked up by the library scan and exported as `.wav`, with a format notice that says so. USB
+  diagnostics and repair count unindexed `.mp4` files and no longer count `.ogg` files, and USB
+  tracks in a format players don't read show the unlisted-format warning.
+- **Chore:** The PDB page footer (row offsets and row presence bits) is now read and
+  written by one shared module (`pdb_page`) instead of separate copies across the writer,
+  reader, repairs and dump tools. Exports and repairs produce the same bytes as before.
+- **Chore:** The PDB writer is split into files by job (data model, whole-file writer,
+  in-place repairs, additive writer, shared row helpers) instead of one large file.
+- **Chore:** USB repairs are split into files by area (PDB page fixes, audio fixes, player
+  menu, history sync, strict parity, the repair run itself), and the repair run's detect and
+  apply phases are separate functions. Repairs offer and apply the same fixes as before.
+- **Chore:** USB diagnostics are split into files by area (PDB integrity, content and
+  analysis checks, parity comparison, overview layout, path helpers) instead of one large file.
+- **Chore:** The backend service's core file is split into files by area (track library,
+  playback, playlists, source roots, settings) instead of one large file.
+- **Chore:** The export helpers' eDB writers and PDB writers each have their own file.
 - **Chore:** How a track was matched (`matchedBy`, `resolvedBy`) and where it plays from
   (`source`) are enums in the backend instead of free text. The app sends the same values
   as before. The audio player keeps the loaded track's path as a `Path`, and every USB
@@ -151,24 +171,6 @@
 - **Chore:** The library database stores a track file's modified time as a number instead of
   text. The first start after updating converts it once; the library, cues, playlists and
   USB links stay as they are.
-- **New feature:** Sidebar playlists can be put in any order by dragging the handle that shows
-  when hovering a playlist. New playlists appear at the top. The order is the app's own and
-  doesn't change the playlist order on the USB.
-- **New feature:** The sidebar can be made wider or narrower by dragging its right edge. The
-  width is remembered, and double-clicking the edge resets it.
-- **Fix:** Double-clicking a sidebar playlist to rename it no longer closes the name field right
-  away. Hovering a playlist also shows a pencil button that starts a rename.
-- **Fix:** Diagnostics of a freshly initialized USB with no tracks no longer warn that analysis
-  references are missing for newer players.
-- **Fix:** Resizing the window while the cue editor is open now redraws its waveform and beat
-  grid. Before, the waveform could go blank and the beat grid lines stayed where they were.
-- **New feature:** The cue editor edits a track's genre and star rating. The genre field
-  suggests the genres the library (and the USB, for a USB track) already has. Opened from a USB
-  row, the edit is written to the PDB and the eDB on the stick as well as the library. A genre
-  set here stays when the library is rescanned or re-imported from rekordbox or Mixxx. Saving
-  only a genre or rating change leaves the beat grid, key and cues as they are.
-- **Fix:** Re-exporting a track that is already on the USB no longer clears its genre in the
-  eDB. The PDB kept the genre, so the two databases disagreed.
 
 ## 0.4.1
 

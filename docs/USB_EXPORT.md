@@ -220,6 +220,13 @@ If playlist tracks are missing required analysis, export is blocked and UI instr
 
 Analysis bundle handling is copy-only during export. Export requires the track to already have a `DAT` + `EXT` bundle (plus `2EX` when one exists; rekordbox bundles from older analyses have none) and copies/reuses it even if the bundle is older or low-detail. Export does not decode source audio or regenerate ANLZ files; missing bundle files block export before media copy starts. See `docs/WAVEFORMS.md`.
 
+On the USB the bundle goes into `PIONEER/USBANLZ/Pnnn/<hash>/`, the folder hashed
+from the track's USB path. When two tracks' paths hash to the same folder, the
+second gets `ANLZ0001` (the third `ANLZ0002`, and so on), each with a `PPTH`
+naming its own track, as rekordbox does; export never reuses a bundle whose
+`PPTH` names another track. See "Analysis File Ownership" in
+`docs/DIAGNOSTICS_REPAIRS.md`.
+
 **Cue points and edited beat grids** are the one exception to copy-only: when a
 track has rows in `track_cues` or a user-set `first_beat_ms`, the copied
 `.DAT` / `.EXT` are passed through `apply_analysis_edits_to_anlz` (after the
