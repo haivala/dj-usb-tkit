@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.4.2
+
 **Severity:** feature
 
 - **New feature:** USB repair gives tracks that share an analysis file their own ("Give Tracks

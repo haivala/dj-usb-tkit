@@ -729,7 +729,7 @@ function shots(fixture) {
       async run(page) {
         await openHealthCard(page);
         await waitProgressHidden(page);
-        await page.locator("#usbHealthCard .diag-technical").evaluate((details) => { details.open = true; });
+        await page.locator("#diagSections .diag-technical").evaluate((details) => { details.open = true; });
         await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
         await page.waitForTimeout(500);
       },
