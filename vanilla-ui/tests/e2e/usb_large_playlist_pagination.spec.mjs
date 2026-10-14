@@ -32,7 +32,7 @@ function playlistTracksResponder(tracks, hydrate) {
     if (req.sortBy) {
       const dir = req.sortDir === "desc" ? -1 : 1;
       rows = rows.slice().sort((a, b) => {
-        // Mirrors the backend sort_usb_tracks: "artist" ties break by title.
+        // Mirrors the backend TrackSort: "artist" ties break by title.
         const av = req.sortBy === "artist" ? `${a.artist}\0${a.title}` : String(a[req.sortBy] ?? "");
         const bv = req.sortBy === "artist" ? `${b.artist}\0${b.title}` : String(b[req.sortBy] ?? "");
         return av < bv ? -dir : av > bv ? dir : 0;
@@ -209,7 +209,7 @@ test("sorting re-queries the backend so the new first page is hydrated", async (
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
 
-  // The "Track" column sorts by artist then title (see sort_usb_tracks) -- all
+  // The "Track" column sorts by artist then title (see TrackSort) -- all
   // mock tracks share an artist, so SORT_TARGET_TITLE ("AAAA...") lands first.
   await page.locator('[data-track-grid][data-body-id="usbPlaylistTracks"] .track-grid-cell.sortable[data-sort-key="artist"]').click();
 

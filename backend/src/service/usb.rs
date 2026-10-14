@@ -334,16 +334,6 @@ fn sum_usb_track_durations(tracks: &[UsbTrack]) -> (u64, usize) {
     (total_ms, known_count)
 }
 
-fn usb_track_matches_query(track: &UsbTrack, query_lower: &str) -> bool {
-    track.title.to_lowercase().contains(query_lower)
-        || track.artist.to_lowercase().contains(query_lower)
-        || track
-            .album
-            .as_deref()
-            .map(|album| album.to_lowercase().contains(query_lower))
-            .unwrap_or(false)
-}
-
 /// Fills in the expensive payload fields (waveform-preview bytes, artwork data
 /// URL) on an already-resolved cheap `UsbTrack`. Called only for the tracks on
 /// the returned page.
@@ -400,10 +390,8 @@ fn paginate_usb_tracks(
     req: &crate::models::FetchUsbTracksRequest,
     warnings: Vec<WarningEntry>,
 ) -> BackendResult<crate::models::FetchUsbTracksData> {
-    let query = req.query.trim().to_lowercase();
-    if !query.is_empty() {
-        tracks.retain(|track| usb_track_matches_query(track, &query));
-    }
+    let query = super::TrackQuery::new(&req.query);
+    query.retain(&mut tracks);
     let (total_duration_ms, duration_known_count) = sum_usb_track_durations(&tracks);
     let total = tracks.len();
 
@@ -414,7 +402,7 @@ fn paginate_usb_tracks(
         "track_cursor_v1",
         command,
         scope_id,
-        &query,
+        query.as_str(),
         sort.by,
         sort.dir,
     ]);

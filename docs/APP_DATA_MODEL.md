@@ -14,7 +14,7 @@ Represents a local library track. Core fields include identity, display metadata
 
 `rekordboxDbSource` / `mixxxDbSource` are stored flags (`tracks.rekordbox_db_source`, `tracks.mixxx_db_source`) recording that the track was imported from a rekordbox or Mixxx library; a track in both carries both. The library filter uses them to show or hide those tracks (see `docs/EXTERNAL_LIBRARIES.md`).
 
-`formatExt` is always populated on the wire, never inferred by the frontend. The scanner sets it from the file extension at index time; `row_to_track` falls back to `utils::format_ext_from_path(file_path)` for rows whose column is `NULL` (legacy rows, master.db import, USB placeholder merge). `UsbTrack` carries the same field, derived from the PDB track path. This replaced a frontend `describeTrackFormat` path-inference branch.
+`formatExt` is always populated on the wire, never inferred by the frontend. The scanner sets it from the file extension at index time; `row_to_track` falls back to `audio_format::format_ext_from_path(file_path)` for rows whose column is `NULL` (legacy rows, master.db import, USB placeholder merge). `UsbTrack` carries the same field, derived from the PDB track path. This replaced a frontend `describeTrackFormat` path-inference branch.
 
 ### Playlist and PlaylistTrack
 

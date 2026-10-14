@@ -293,10 +293,10 @@ impl BackendService {
         query: &str,
     ) -> BackendResult<Vec<String>> {
         let items = self.load_playlist_tracks_ordered(conn, playlist_id)?;
-        let query = query.trim().to_lowercase();
+        let query = TrackQuery::new(query);
         Ok(items
             .into_iter()
-            .filter(|track| query.is_empty() || track_matches_query(track, &query))
+            .filter(|track| query.matches(track))
             .filter(|track| !track.analysis_ready)
             .map(|track| track.id)
             .collect())
@@ -311,10 +311,8 @@ impl BackendService {
         let conn = self.db.connect()?;
         let mut items = self.load_playlist_tracks_ordered(&conn, &req.playlist_id)?;
 
-        let query = req.query.trim().to_lowercase();
-        if !query.is_empty() {
-            items.retain(|track| track_matches_query(track, &query));
-        }
+        let query = TrackQuery::new(&req.query);
+        query.retain(&mut items);
 
         // Computed once server-side (here) over the whole filtered playlist, not
         // just the returned page -- see `GetPlaylistTracksData::total_duration_ms`.
@@ -344,7 +342,7 @@ impl BackendService {
             TRACK_CURSOR_VERSION,
             "get_playlist_tracks",
             &req.playlist_id,
-            &query,
+            query.as_str(),
             sort.by,
             sort.dir,
         ]);

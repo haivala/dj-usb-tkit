@@ -67,8 +67,10 @@
 - **Improvement:** The Backups panel opens from a Backups button on the USB page instead of
   from Settings.
 - **Improvement:** The sidebar is more compact, so more playlists fit before it scrolls.
-- **Improvement:** Library, playlist and USB track lists sort their columns by the same rules,
-  and a committed playlist sort saves exactly the order the list showed.
+- **Improvement:** Library, playlist and USB track lists search and sort by the same rules, and a
+  committed playlist sort saves exactly the order the list showed. USB list search now also
+  matches text that spans title, artist and album (for example "title artist"), as the Library
+  search already did.
 - **Improvement:** Audio format support follows what Pioneer players read. `.wave` files are
   picked up by the library scan and exported as `.wav`, with a format notice that says so. USB
   diagnostics and repair count unindexed `.mp4` files and no longer count `.ogg` files, and USB

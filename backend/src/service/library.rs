@@ -19,18 +19,6 @@ pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
     !root_key.is_empty() && (file_key == root_key || file_key.starts_with(&format!("{root_key}/")))
 }
 
-/// `query` must already be trimmed/lowercased (see `compute_visible_library_tracks`).
-pub(super) fn track_matches_query(track: &Track, query: &str) -> bool {
-    let haystack = format!(
-        "{} {} {}",
-        track.title,
-        track.artist,
-        track.album.clone().unwrap_or_default()
-    )
-    .to_lowercase();
-    haystack.contains(query)
-}
-
 impl BackendService {
     pub fn scan_library(&self, req: ScanLibraryRequest) -> BackendResult<ScanLibraryData> {
         let source_roots = sanitize_source_roots(req.source_roots);
@@ -654,10 +642,7 @@ impl BackendService {
         query: &str,
     ) -> BackendResult<Vec<Track>> {
         let mut items = self.compute_all_library_tracks(conn, source_roots, libraries)?;
-        let query = query.trim().to_lowercase();
-        if !query.is_empty() {
-            items.retain(|track| track_matches_query(track, &query));
-        }
+        TrackQuery::new(query).retain(&mut items);
         Ok(items)
     }
 
@@ -690,13 +675,13 @@ impl BackendService {
         }
 
         let limit = req.limit.clamp(1, 5000);
-        let query = req.query.trim().to_lowercase();
+        let query = TrackQuery::new(&req.query);
         let sort = TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref());
         let roots_signature = source_roots.join("\u{1F}");
         let signature = build_track_cursor_signature(&[
             TRACK_CURSOR_VERSION,
             "browse_source_files",
-            &query,
+            query.as_str(),
             &roots_signature,
             if libraries.rekordbox_db {
                 "rekordbox_db"
@@ -726,9 +711,7 @@ impl BackendService {
         let source_root_analysis = source_root_analysis(&source_roots, &all_items);
 
         let mut items = all_items;
-        if !query.is_empty() {
-            items.retain(|track| track_matches_query(track, &query));
-        }
+        query.retain(&mut items);
         // Client-driven column sort, applied server-side so it spans the whole
         // library, not just the page already loaded. Stable, so equal keys keep
         // the natural file-path order from compute_all_library_tracks.
