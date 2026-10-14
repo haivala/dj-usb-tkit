@@ -30,15 +30,7 @@ struct DetectedRepairs {
     app_master_db_id: Option<u32>,
     app_beat_grids: Vec<std::path::PathBuf>,
     missing_seek_data: Vec<(SeekFormat, Vec<MissingSeekData>)>,
-    pdb_sentinel_u5_pages: Vec<SentinelU5Page>,
-    pdb_wrong_flags_pages: Vec<WrongFlagsPage>,
-    pdb_zero_tranrf_pages: Vec<ZeroTranrfPage>,
     pdb_wrong_history_shape_pages: Vec<WrongShapeHistoryPage>,
-    pdb_tombstoned_playlist_ids: Vec<TombstonedRowId>,
-    pdb_wrong_track_u5_pages: Vec<WrongTrackU5Page>,
-    pdb_t00_multipage_active_pages: Vec<T00MultipageActivePage>,
-    pdb_stale_sentinel_btree_pages: Vec<StaleSentinelBtree>,
-    pdb_wrong_playlist_tree_shape_pages: Vec<WrongPlaylistTreeShapePage>,
     pdb_ec_conflicts: Vec<EcDataPageConflict>,
     pdb_truncated_chains: Vec<TruncatedTableChain>,
     pdb_torn_growth: PdbTornGrowthReport,
@@ -1297,15 +1289,7 @@ impl BackendService {
             app_master_db_id,
             app_beat_grids,
             missing_seek_data,
-            pdb_sentinel_u5_pages,
-            pdb_wrong_flags_pages,
-            pdb_zero_tranrf_pages,
             pdb_wrong_history_shape_pages,
-            pdb_tombstoned_playlist_ids,
-            pdb_wrong_track_u5_pages,
-            pdb_t00_multipage_active_pages,
-            pdb_stale_sentinel_btree_pages,
-            pdb_wrong_playlist_tree_shape_pages,
             pdb_ec_conflicts,
             pdb_truncated_chains,
             pdb_torn_growth,
@@ -1450,15 +1434,7 @@ impl BackendService {
             app_master_db_id,
             app_beat_grids,
             missing_seek_data,
-            pdb_sentinel_u5_pages,
-            pdb_wrong_flags_pages,
-            pdb_zero_tranrf_pages,
             pdb_wrong_history_shape_pages,
-            pdb_tombstoned_playlist_ids,
-            pdb_wrong_track_u5_pages,
-            pdb_t00_multipage_active_pages,
-            pdb_stale_sentinel_btree_pages,
-            pdb_wrong_playlist_tree_shape_pages,
             pdb_ec_conflicts,
             pdb_truncated_chains,
             pdb_torn_growth,
@@ -1672,6 +1648,33 @@ impl BackendService {
                 .push("Remove Duplicate PDB Playlist Entries: not selected".to_string());
         }
 
+        // rekordbox bookkeeping runs with every apply, so it always follows
+        // the fixes above that rewrite the PDB (strict parity appends rows
+        // and pages). Detect it again on the current file instead of
+        // patching the preview's page snapshot.
+        let bookkeeping_pdb = usb_staging::stage_pdb(usb_root).ok();
+        let bookkeeping_pdb = bookkeeping_pdb.as_deref();
+        let pdb_zero_tranrf_pages = bookkeeping_pdb
+            .map(detect_pdb_zero_tranrf_all_tables)
+            .unwrap_or_default();
+        let pdb_wrong_flags_pages = bookkeeping_pdb
+            .map(detect_pdb_wrong_page_flags)
+            .unwrap_or_default();
+        let pdb_sentinel_u5_pages = bookkeeping_pdb
+            .map(detect_pdb_sentinel_u5_on_data_pages)
+            .unwrap_or_default();
+        let pdb_wrong_track_u5_pages = bookkeeping_pdb
+            .map(detect_pdb_wrong_track_u5)
+            .unwrap_or_default();
+        let pdb_t00_multipage_active_pages = bookkeeping_pdb
+            .map(detect_pdb_t00_multipage_active_pages)
+            .unwrap_or_default();
+        let pdb_tombstoned_playlist_ids = bookkeeping_pdb
+            .map(detect_pdb_tombstoned_playlist_tree_ids)
+            .unwrap_or_default();
+        let pdb_wrong_playlist_tree_shape_pages = bookkeeping_pdb
+            .map(detect_pdb_wrong_playlist_tree_shape)
+            .unwrap_or_default();
         outcomes.record_with_progress(
             progress,
             "Repair Data Pages With Zero tranrf",
@@ -1763,6 +1766,11 @@ impl BackendService {
             },
         );
 
+        // After the page fixes above: resealing a track page can leave its
+        // sentinel's B-tree stale.
+        let pdb_stale_sentinel_btree_pages = bookkeeping_pdb
+            .map(detect_pdb_stale_sentinel_btree)
+            .unwrap_or_default();
         outcomes.record_with_progress(
             progress,
             "Repair Stale Sentinel B-Tree",

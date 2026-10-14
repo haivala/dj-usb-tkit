@@ -201,7 +201,10 @@ Diagnostics report them as Pass ("PDB page headers", "PDB structural
 integrity") with the counts in the detail, and they are not detected issues.
 The repair still proposes them, so tests can assert that the writer never
 produces these shapes, but the editor neither lists nor counts them, and every
-apply runs them alongside whatever else is applied.
+apply runs them alongside whatever else is applied. Since they always follow
+fixes that rewrite the PDB (strict parity appends rows and pages), the apply
+detects them again on the PDB as those fixes left it, not from the preview;
+the stale-B-tree check runs last, after the page fixes that can expose it.
 
 ## Unsupported and Manual Cases
 

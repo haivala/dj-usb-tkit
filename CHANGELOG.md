@@ -44,6 +44,9 @@
   track pages in a multi-page chain, stale sentinel B-trees, tombstoned rows with an id), so a
   USB exported only by rekordbox shows green. Repair no longer lists these as fixes; it still
   tidies them up whenever it runs.
+- **Fix:** When USB repair upgrades playlists to strict parity and the same pass also tidies a
+  PDB playlist page that the upgrade adds a playlist to, the page is now tidied as the upgrade
+  left it. Before, that page could need a second repair run.
 - **New feature:** USB repair gives tracks that share an analysis file their own ("Give Tracks
   Their Own Analysis Files"), named the way rekordbox names them when two tracks land in the same
   analysis folder, and adds the track path to analysis files that lack it ("Add Track Path to
