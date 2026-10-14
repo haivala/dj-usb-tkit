@@ -82,6 +82,13 @@ fn match_moved_audio_leaves_ambiguous_pairs_unmatched() {
     let unindexed = vec![("/Contents/y.mp3".to_string(), fp(300, "other"))];
     assert!(match_moved_audio(&missing, &unindexed).is_empty());
 }
+
+#[test]
+fn match_moved_audio_does_not_relink_across_encodings() {
+    let missing = vec![(1, "/Contents/Track.mp3".to_string(), fp(100, "one"))];
+    let unindexed = vec![("/Contents/Track.flac".to_string(), fp(100, "one"))];
+    assert!(match_moved_audio(&missing, &unindexed).is_empty());
+}
 use crate::edb::ExportDbPlaylist;
 use crate::models::{DiagStatus, UsbParityPlaylistDetail};
 use crate::pdb_reader::{

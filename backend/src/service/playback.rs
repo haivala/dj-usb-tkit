@@ -368,6 +368,12 @@ pub(super) fn best_candidate(
     let mut best_on_disk: Option<Track> = None;
     let mut best_on_disk_score = -1i32;
     for candidate in candidates {
+        if let Some(source_path) = req.file_path.as_deref()
+            && !source_path.is_empty()
+            && !same_format_extension(source_path, &candidate.file_path)
+        {
+            continue;
+        }
         // A known file-size mismatch is stronger evidence of "different
         // file" than any positive score contribution elsewhere can
         // outweigh -- veto outright rather than merely downweighting.
@@ -406,10 +412,10 @@ pub(super) fn score_playback_candidate(track: &Track, req: &ResolvePlaybackSourc
         score += 8;
     }
     if let Some(src_path) = req.file_path.as_deref() {
-        if path_file_name_lower(src_path) == path_file_name_lower(&track.file_path) {
+        if matching_file_name(src_path) == matching_file_name(&track.file_path) {
             score += 16;
         }
-        if path_stem_lower(src_path) == path_stem_lower(&track.file_path) {
+        if matching_file_stem(src_path) == matching_file_stem(&track.file_path) {
             score += 8;
         }
     }

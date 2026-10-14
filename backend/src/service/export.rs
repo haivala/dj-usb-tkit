@@ -17,11 +17,7 @@ use crate::models::{
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
 type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
 
-/// (file size in bytes, canonicalized title, canonicalized artist) — a coarse
-/// content fingerprint used to recognize a track that's already physically on
-/// the USB under a path this app didn't write (e.g. a Rekordbox-managed
-/// layout, or an older export run that used a different naming scheme).
-pub(crate) type ContentFingerprint = (u32, String, String);
+use super::track_matching::{ContentFingerprint, content_fingerprint_key, same_format_extension};
 
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
@@ -63,22 +59,6 @@ fn existing_usb_relative_file(usb_root: &Path, path: &Path) -> Option<String> {
     let rel = usb_relative_path(usb_root, path)?;
     let abs = resolve_usb_side_path(usb_root, &rel)?;
     if abs.is_file() { Some(rel) } else { None }
-}
-
-/// Build a content fingerprint from a size/title/artist triple, or `None` when
-/// the inputs are too weak to fingerprint safely (missing/non-positive size,
-/// or a title that canonicalizes to nothing).
-pub(crate) fn content_fingerprint_key(
-    file_size_bytes: Option<i64>,
-    title: &str,
-    artist: &str,
-) -> Option<ContentFingerprint> {
-    let size = u32::try_from(file_size_bytes?).ok().filter(|&s| s > 0)?;
-    let title_key = canonicalize_playlist_name(title);
-    if title_key.is_empty() {
-        return None;
-    }
-    Some((size, title_key, canonicalize_playlist_name(artist)))
 }
 
 fn record_existing_usb_path_by_fingerprint(
@@ -1038,6 +1018,9 @@ impl BackendService {
                     let candidate = existing_usb_path_by_fingerprint
                         .get(&fingerprint)
                         .and_then(|path| path.as_deref())?;
+                    if !same_format_extension(&source.to_string_lossy(), candidate) {
+                        return None;
+                    }
                     if computed_target_relative
                         .as_deref()
                         .map(canonicalize_playlist_name)

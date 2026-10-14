@@ -994,14 +994,12 @@ impl BackendService {
     }
 }
 
-pub(super) const FINGERPRINT_MATCH_DURATION_TOLERANCE_MS: i64 = 2000;
-
 /// Finds a single high-confidence local-track match for a USB-sourced
-/// fingerprint. Duration (tolerance-based) and file size (exact) must both
-/// agree whenever both sides have the data -- fingerprinting alone is
-/// text-only (lowercased title/artist/album) and can't distinguish
-/// same-length variants like a Clean vs. Explicit edit, so both gates are
-/// required together, each only when its data is actually available.
+/// fingerprint. Duration must agree when available, and an exact file size
+/// must be known on both sides. Missing sizes are read from file metadata
+/// when possible; fingerprinting alone is text-only (title/artist/album).
+/// Different known file formats are rejected even if the text and file facts
+/// match: alternate file formats serve different players and remain separate.
 /// Returns `None` (no match) whenever zero or more than one candidate
 /// survives -- a spurious extra placeholder row is a strictly safer failure
 /// mode than silently linking the wrong audio file. Candidates whose own
@@ -1011,6 +1009,7 @@ pub(super) const FINGERPRINT_MATCH_DURATION_TOLERANCE_MS: i64 = 2000;
 pub(crate) fn find_confident_fingerprint_match(
     conn: &rusqlite::Connection,
     fingerprint: &str,
+    incoming_path: &str,
     incoming_duration_ms: Option<i64>,
     incoming_file_size_bytes: Option<i64>,
     usb_root_paths: &[String],
@@ -1027,6 +1026,11 @@ pub(crate) fn find_confident_fingerprint_match(
         })?
         .collect::<Result<_, _>>()?;
 
+    let incoming_size =
+        super::track_matching::file_size_for_match(incoming_path, incoming_file_size_bytes);
+    let Some(incoming_size) = incoming_size else {
+        return Ok(None);
+    };
     let mut passing = Vec::new();
     for (id, path, cand_duration, cand_size) in rows {
         if usb_root_paths
@@ -1035,15 +1039,14 @@ pub(crate) fn find_confident_fingerprint_match(
         {
             continue;
         }
-        let duration_ok = match (incoming_duration_ms, cand_duration) {
-            (Some(a), Some(b)) => (a - b).abs() <= FINGERPRINT_MATCH_DURATION_TOLERANCE_MS,
-            _ => true,
-        };
-        let size_ok = match (incoming_file_size_bytes, cand_size) {
-            (Some(a), Some(b)) => a == b,
-            _ => true,
-        };
-        if duration_ok && size_ok {
+        if library_metadata_candidate_compatible(
+            incoming_path,
+            &path,
+            incoming_duration_ms,
+            cand_duration,
+            Some(incoming_size),
+            cand_size,
+        ) {
             passing.push(id);
         }
     }
@@ -1156,51 +1159,6 @@ pub(crate) fn row_to_track(
         analysis_ready,
         format_compat,
     })
-}
-
-pub fn build_track_match_fingerprint(title: &str, artist: &str, album: Option<&str>) -> String {
-    let normalized = format!(
-        "{}|{}|{}",
-        normalize_hash_part(title),
-        normalize_hash_part(artist),
-        normalize_hash_part(album.unwrap_or_default()),
-    );
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    normalized.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
-
-pub(super) fn normalize_hash_part(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| {
-            if c.is_ascii_whitespace() {
-                ' '
-            } else {
-                c.to_ascii_lowercase()
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-pub(super) fn path_file_name_lower(value: &str) -> String {
-    let p = value.replace('\\', "/");
-    p.rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-}
-
-pub(super) fn path_stem_lower(value: &str) -> String {
-    let file = path_file_name_lower(value);
-    if let Some((stem, _)) = file.rsplit_once('.') {
-        stem.to_string()
-    } else {
-        file
-    }
 }
 
 /// Stable in-place sort of a track page by one of the frontend column keys.

@@ -52,9 +52,8 @@ use super::usb_vendor_compat::{
     USB_CONTENTS_DIR, USB_VENDOR_ROOT_DIR, vendor_edb_path, vendor_pdb_path,
 };
 use super::{
-    BackendService, FINGERPRINT_MATCH_DURATION_TOLERANCE_MS, browse_path_matches_root,
-    build_track_match_fingerprint, export_log, export_prune_stale_setting,
-    find_confident_fingerprint_match, now, untainted_usb_root_paths,
+    BackendService, browse_path_matches_root, build_track_match_fingerprint, export_log,
+    export_prune_stale_setting, find_confident_fingerprint_match, now, untainted_usb_root_paths,
 };
 
 const SLOW_USB_STAGE_MS: u128 = 8_000;
@@ -2048,6 +2047,7 @@ impl BackendService {
                     match find_confident_fingerprint_match(
                         &conn,
                         &fingerprint,
+                        file_path,
                         track.duration_ms.map(|v| v as i64),
                         track.file_size_bytes,
                         &usb_root_paths,
@@ -2232,6 +2232,7 @@ impl BackendService {
         let matched_id = find_confident_fingerprint_match(
             tx,
             &fingerprint,
+            file_path,
             track.duration_ms.map(|v| v as i64),
             track.file_size_bytes,
             usb_root_paths,
@@ -2333,11 +2334,8 @@ impl BackendService {
     /// now-redundant duplicate rows so Library search/browse stops showing
     /// the same song twice.
     ///
-    /// Deliberately more conservative than the live per-track path in
-    /// `materialize_usb_track_row`: a missing duration or file size on the
-    /// placeholder row blocks the merge here rather than relaxing that gate,
-    /// since a batch pass has no per-track human moment to notice a bad
-    /// merge the way a fresh browse does.
+    /// Missing sizes are recovered from file metadata when available. A
+    /// missing duration or an unavailable size still blocks the merge.
     pub fn merge_orphaned_usb_placeholder_tracks(
         &self,
     ) -> BackendResult<crate::models::MergeUsbPlaceholderTracksData> {
@@ -2379,18 +2377,19 @@ impl BackendService {
                 // leave every row in the group alone.
                 continue;
             }
-            let (local_id, _local_path, local_duration, local_size) = &locals[0];
+            let (local_id, local_path, local_duration, local_size) = &locals[0];
 
-            for (placeholder_id, _placeholder_path, placeholder_duration, placeholder_size) in
+            for (placeholder_id, placeholder_path, placeholder_duration, placeholder_size) in
                 &placeholders
             {
-                let duration_ok = matches!(
-                    (local_duration, placeholder_duration),
-                    (Some(a), Some(b)) if (a - b).abs() <= FINGERPRINT_MATCH_DURATION_TOLERANCE_MS
-                );
-                let size_ok =
-                    matches!((local_size, placeholder_size), (Some(a), Some(b)) if a == b);
-                if !duration_ok || !size_ok {
+                if !super::track_matching::placeholder_merge_candidate(
+                    local_path,
+                    placeholder_path,
+                    *local_duration,
+                    *placeholder_duration,
+                    *local_size,
+                    *placeholder_size,
+                ) {
                     continue;
                 }
 

@@ -14,13 +14,6 @@ pub(super) struct MovedAudioRelink {
     pub(super) new_path: String,
 }
 
-pub(super) fn lowercase_file_name(path: &str) -> String {
-    path.rsplit(['/', '\\'])
-        .next()
-        .unwrap_or_default()
-        .to_lowercase()
-}
-
 /// Pair missing references (`(track id, path, fingerprint)`) with unindexed
 /// files (`(path, fingerprint)`). A reference's candidates are the files with
 /// the same content fingerprint (size + title + artist, as export uses to
@@ -40,17 +33,23 @@ pub(super) fn match_moved_audio(
                 unindexed
                     .iter()
                     .enumerate()
-                    .filter(|(_, (_, other))| other.as_ref() == Some(fp))
+                    .filter(|(_, (path, other))| {
+                        other.as_ref() == Some(fp) && same_format_extension(old_path, path)
+                    })
                     .map(|(ui, _)| ui)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
         let candidates = if by_fingerprint.is_empty() {
-            let name = lowercase_file_name(old_path);
+            let name = matching_file_name(old_path);
             unindexed
                 .iter()
                 .enumerate()
-                .filter(|(_, (path, _))| !name.is_empty() && lowercase_file_name(path) == name)
+                .filter(|(_, (path, _))| {
+                    !name.is_empty()
+                        && matching_file_name(path) == name
+                        && same_format_extension(old_path, path)
+                })
                 .map(|(ui, _)| ui)
                 .collect::<Vec<_>>()
         } else {
@@ -84,13 +83,6 @@ pub(super) struct DuplicateAudioCopy {
     pub(super) copy_path: String,
     /// USB-relative path of the indexed file it duplicates.
     pub(super) original_path: String,
-}
-
-fn same_file_bytes(a: &Path, b: &Path) -> bool {
-    match (std::fs::read(a), std::fs::read(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
 }
 
 /// Folder part of `audio_path_key`, so files compare as the presence scan

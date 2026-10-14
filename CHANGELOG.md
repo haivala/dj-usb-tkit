@@ -58,6 +58,12 @@
   available selected fixes. BPM/key, beat-grid and seek-data repairs also show completed tracks or
   files within their range. The apply pass skips rebuilding MP3 and FLAC seek indexes while
   planning; the selected seek-data fix still checks each audio file when it runs.
+- **Fix:** Track matching keeps different file formats separate when linking USB tracks to the
+  Library, reusing existing USB media, resolving playback, or relinking moved audio. Duplicate
+  audio checks compare files in bounded memory. Automatic Library links require matching file
+  sizes; missing recorded sizes are read from file metadata when possible. USB playlists keep
+  separate entries when the file path is missing and only editable metadata matches. Playback and
+  moved-audio repair use the same filename matching rule.
 - **Improvement:** The Backups panel opens from a Backups button on the USB page instead of
   from Settings.
 - **Improvement:** The sidebar is more compact, so more playlists fit before it scrolls.

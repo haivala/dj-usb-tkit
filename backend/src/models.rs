@@ -264,9 +264,9 @@ pub enum TrackMatch {
     /// The track's own id is a library track.
     #[serde(rename = "self")]
     SelfId,
-    /// Same file content.
+    /// Matching title/artist/album fingerprint, not an audio-byte hash.
     Hash,
-    /// Same title, artist and length.
+    /// Best-effort metadata and filename score.
     Metadata,
     /// No library track.
     #[serde(rename = "none")]

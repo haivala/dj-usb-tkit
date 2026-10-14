@@ -37,13 +37,17 @@ use super::anlz::{
 };
 use super::anlz_seek::{SEEK_SKIP_REPORT_HINT, seek_index_for_audio};
 use super::cues::collapse_anlz_cues;
-use super::export::{APP_CONTENT_LINK_ID, ContentFingerprint, content_fingerprint_key};
+use super::export::APP_CONTENT_LINK_ID;
 use super::export_helpers::pdb_encoding::ARTIST_SHORT_ASCII_NAME_OFFSET;
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRemoval,
     PdbTrackRowData, encode_album_row, encode_artist_row, load_table_columns,
     remove_tracks_from_pdb, replace_export_playlist_row_with_identity, table_exists,
     usb_relative_path, write_edb_playlist_with_conn, write_pdb,
+};
+use super::track_matching::{
+    ContentFingerprint, content_fingerprint_key, matching_file_name, same_file_bytes,
+    same_format_extension,
 };
 use super::usb_staging;
 use super::usb_utils::{

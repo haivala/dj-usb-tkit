@@ -479,34 +479,106 @@ fn find_confident_fingerprint_match_requires_duration_and_size_agreement() {
     );
 
     // Both agree -> match.
-    let matched = find_confident_fingerprint_match(&conn, "fp1", Some(201_000), Some(1_000), &[])
-        .expect("query");
+    let matched = find_confident_fingerprint_match(
+        &conn,
+        "fp1",
+        "/usb/a.mp3",
+        Some(201_000),
+        Some(1_000),
+        &[],
+    )
+    .expect("query");
     assert_eq!(matched, Some("local-1".to_string()));
 
     // Duration diverges beyond tolerance -> no match.
-    let no_match = find_confident_fingerprint_match(&conn, "fp1", Some(210_000), Some(1_000), &[])
-        .expect("query");
+    let no_match = find_confident_fingerprint_match(
+        &conn,
+        "fp1",
+        "/usb/a.mp3",
+        Some(210_000),
+        Some(1_000),
+        &[],
+    )
+    .expect("query");
     assert_eq!(no_match, None);
 
     // Duration matches but size diverges -> no match (Clean/Explicit collision case).
     let no_match_size =
-        find_confident_fingerprint_match(&conn, "fp1", Some(200_500), Some(999), &[])
+        find_confident_fingerprint_match(&conn, "fp1", "/usb/a.mp3", Some(200_500), Some(999), &[])
             .expect("query");
     assert_eq!(no_match_size, None);
 }
 
 #[test]
-fn find_confident_fingerprint_match_relaxes_missing_gate_data() {
+fn find_confident_fingerprint_match_recovers_missing_size_from_file() {
     let (_dir, db) = test_db();
     let conn = db.connect().expect("connect");
-    insert_track(&conn, "local-1", "/music/a.mp3", "fp1", Some(200_000), None);
+    let files = tempfile::tempdir().expect("files");
+    let local = files.path().join("local.mp3");
+    let usb = files.path().join("usb.mp3");
+    std::fs::write(&local, [1u8; 4]).expect("local file");
+    std::fs::write(&usb, [2u8; 4]).expect("USB file");
+    insert_track(
+        &conn,
+        "local-1",
+        local.to_str().unwrap(),
+        "fp1",
+        Some(200_000),
+        None,
+    );
 
-    // Local candidate has no file_size_bytes recorded -- duration alone,
-    // when it matches, is still enough (missing data doesn't force a
-    // non-match, it just isn't checked).
-    let matched = find_confident_fingerprint_match(&conn, "fp1", Some(200_100), Some(9_999), &[])
-        .expect("query");
+    let matched = find_confident_fingerprint_match(
+        &conn,
+        "fp1",
+        usb.to_str().unwrap(),
+        Some(200_100),
+        None,
+        &[],
+    )
+    .expect("query");
     assert_eq!(matched, Some("local-1".to_string()));
+
+    std::fs::write(&usb, [2u8; 5]).expect("different size");
+    let mismatched = find_confident_fingerprint_match(
+        &conn,
+        "fp1",
+        usb.to_str().unwrap(),
+        Some(200_100),
+        None,
+        &[],
+    )
+    .expect("query");
+    assert_eq!(mismatched, None);
+
+    std::fs::remove_file(&local).expect("remove local file");
+    let unavailable = find_confident_fingerprint_match(
+        &conn,
+        "fp1",
+        usb.to_str().unwrap(),
+        Some(200_100),
+        None,
+        &[],
+    )
+    .expect("query");
+    assert_eq!(unavailable, None);
+}
+
+#[test]
+fn find_confident_fingerprint_match_keeps_different_encodings_separate() {
+    let (_dir, db) = test_db();
+    let conn = db.connect().expect("connect");
+    insert_track(
+        &conn,
+        "local-flac",
+        "/music/a.flac",
+        "fp1",
+        Some(200_000),
+        None,
+    );
+    let result =
+        find_confident_fingerprint_match(&conn, "fp1", "/usb/a.mp3", Some(200_000), None, &[])
+            .expect("query");
+    assert_eq!(result, None);
 }
 
 #[test]
@@ -530,8 +602,15 @@ fn find_confident_fingerprint_match_refuses_to_pick_between_two_candidates() {
         Some(1_000),
     );
 
-    let result = find_confident_fingerprint_match(&conn, "fp1", Some(200_000), Some(1_000), &[])
-        .expect("query");
+    let result = find_confident_fingerprint_match(
+        &conn,
+        "fp1",
+        "/usb/a.mp3",
+        Some(200_000),
+        Some(1_000),
+        &[],
+    )
+    .expect("query");
     assert_eq!(result, None, "ambiguous ties must not auto-merge");
 }
 
@@ -551,6 +630,7 @@ fn find_confident_fingerprint_match_skips_candidates_under_a_known_usb_root() {
     let result = find_confident_fingerprint_match(
         &conn,
         "fp1",
+        "/usb/a.mp3",
         Some(200_000),
         Some(1_000),
         &["/mnt/usb1".to_string()],
@@ -789,9 +869,9 @@ fn source_root_keys_equal_normalizes_case_and_trailing_slash() {
 
 #[test]
 fn path_file_name_and_stem_lower_handle_backslashes() {
-    assert_eq!(path_file_name_lower(r"C:\Music\Song.MP3"), "song.mp3");
-    assert_eq!(path_stem_lower(r"C:\Music\Song.MP3"), "song");
-    assert_eq!(path_stem_lower("no-extension"), "no-extension");
+    assert_eq!(matching_file_name(r"C:\Music\Song.MP3"), "song.mp3");
+    assert_eq!(matching_file_stem(r"C:\Music\Song.MP3"), "song");
+    assert_eq!(matching_file_stem("no-extension"), "no-extension");
 }
 
 #[test]

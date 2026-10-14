@@ -39,14 +39,20 @@ mod settings;
 mod source_roots;
 #[cfg(test)]
 mod tests;
+mod track_matching;
 
-pub use library::*;
+pub(crate) use library::*;
 #[cfg(test)]
 use playback::*;
 pub(crate) use playlists::*;
 use rekordbox_resources::*;
 pub use settings::*;
 pub(crate) use source_roots::*;
+pub use track_matching::build_track_match_fingerprint;
+use track_matching::{
+    library_metadata_candidate_compatible, matching_file_name, matching_file_stem,
+    normalize_hash_part, same_format_extension,
+};
 
 // Re-export functions used by commands.rs via crate::service::*
 pub use engine_export::{EngineLibrarySummary, rebuild_engine_library};

@@ -238,6 +238,38 @@ fn merge_orphaned_usb_placeholder_tracks_skips_placeholder_with_missing_file_siz
 }
 
 #[test]
+fn merge_orphaned_usb_placeholder_tracks_keeps_other_encoding() {
+    let (_dir, svc) = new_service();
+    let conn = svc.db.connect().expect("connect");
+    insert_usb_device(&conn, "dev-1", "/mnt/usb1");
+    insert_track(
+        &conn,
+        "local-flac",
+        "/music/Track.flac",
+        "same-metadata",
+        Some(200_000),
+        Some(1_000),
+    );
+    insert_track(
+        &conn,
+        "usb-mp3",
+        "/mnt/usb1/Contents/Track.mp3",
+        "same-metadata",
+        Some(200_000),
+        Some(1_000),
+    );
+    drop(conn);
+
+    let report = svc.merge_orphaned_usb_placeholder_tracks().expect("merge");
+    assert_eq!(report.merged, 0);
+    let conn = svc.db.connect().expect("connect");
+    let remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(remaining, 2);
+}
+
+#[test]
 fn merge_orphaned_usb_placeholder_tracks_is_idempotent() {
     let (_dir, svc) = new_service();
     let conn = svc.db.connect().expect("connect");
@@ -374,6 +406,28 @@ fn resolve_playback_source_excludes_candidate_with_mismatched_file_size() {
     req.file_size_bytes = Some(1_000);
     let resolved = svc.resolve_playback_source(req).expect("resolve");
     assert_eq!(resolved.track_id.as_deref(), Some("right-size"));
+}
+
+#[test]
+fn resolve_playback_source_keeps_different_encoded_copy_separate() {
+    let (_dir, svc) = new_service();
+    let conn = svc.db.connect().expect("connect");
+    let fp = backend::service::build_track_match_fingerprint("Song", "Artist", None);
+    insert_track(
+        &conn,
+        "local-flac",
+        "/music/Song.flac",
+        &fp,
+        Some(200_000),
+        Some(1_000),
+    );
+    drop(conn);
+
+    let mut req = resolve_req("Song", "Artist", None);
+    req.file_path = Some("/usb/Song.mp3".to_string());
+    req.file_size_bytes = Some(1_000);
+    let resolved = svc.resolve_playback_source(req).expect("resolve");
+    assert_eq!(resolved.track_id, None);
 }
 
 #[test]

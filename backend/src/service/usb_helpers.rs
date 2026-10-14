@@ -59,8 +59,7 @@ pub(crate) fn merge_playlist_tracks(
         let mut out = Vec::<UsbTrack>::new();
         let mut seen = HashSet::<String>::new();
         for track in export_tracks {
-            let key = track_merge_key(track);
-            if seen.insert(key) {
+            if track_merge_key(track).is_none_or(|key| seen.insert(key)) {
                 out.push(track.clone());
             }
         }
@@ -75,8 +74,7 @@ pub(crate) fn merge_playlist_tracks(
     let mut seen = HashSet::<String>::new();
     for set in [pdb_tracks, export_tracks] {
         for track in set {
-            let key = track_merge_key(track);
-            if seen.insert(key) {
+            if track_merge_key(track).is_none_or(|key| seen.insert(key)) {
                 out.push(track.clone());
             }
         }
@@ -114,24 +112,18 @@ pub(crate) fn dedupe_usb_playlists_by_name(items: Vec<UsbPlaylist>) -> (Vec<UsbP
     (out, collapsed)
 }
 
-pub(crate) fn track_merge_key(track: &UsbTrack) -> String {
+/// A path or USB record ID identifies a playlist entry. Metadata alone does
+/// not: tracks with the same title and artist can be distinct encodings.
+pub(crate) fn track_merge_key(track: &UsbTrack) -> Option<String> {
     let path = canonicalize_playlist_name(&track.file_path);
     if !path.is_empty() {
-        return format!("path:{path}");
-    }
-    let meta = format!(
-        "meta:{}|{}",
-        canonicalize_playlist_name(&track.title),
-        canonicalize_playlist_name(&track.artist)
-    );
-    if meta != "meta:|" {
-        return meta;
+        return Some(format!("path:{path}"));
     }
     let id = track.id.trim();
     if !id.is_empty() {
-        return format!("id:{id}");
+        return Some(format!("id:{id}"));
     }
-    "unknown".to_string()
+    None
 }
 
 pub(crate) fn sanitize_history_name(value: &str) -> String {
@@ -365,6 +357,25 @@ mod tests {
         let (merged, source) = merge_playlist_tracks(&pdb, &export);
         assert_eq!(source, "pdb");
         assert_eq!(merged.len(), 1);
+    }
+
+    #[test]
+    fn merge_without_path_preserves_distinct_record_ids_and_unknown_entries() {
+        let pdb = vec![
+            make_track("1", "Song", "Artist", ""),
+            make_track("2", "Song", "Artist", ""),
+            make_track("", "Song", "Artist", ""),
+            make_track("", "Song", "Artist", ""),
+            make_track("1", "Song", "Artist", ""),
+        ];
+
+        let (merged, source) = merge_playlist_tracks(&pdb, &[]);
+        assert_eq!(source, "pdb");
+        assert_eq!(merged.len(), 4);
+        assert_eq!(
+            merged.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["1", "2", "", ""]
+        );
     }
 
     #[test]
