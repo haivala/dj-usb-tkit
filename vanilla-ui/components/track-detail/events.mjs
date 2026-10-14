@@ -90,6 +90,8 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.close({
       ...trackDetailDialog.toSavePayload(),
       cuesEdited: trackDetailDialog.cuesEdited(),
+      analysisEdited: trackDetailDialog.analysisEdited(),
+      metadataEdits: trackDetailDialog.metadataEdits(),
     });
   });
 
@@ -512,6 +514,14 @@ export function bindTrackDetailEvents(ctx) {
   );
   el.trackDetailKey?.addEventListener("change", (event) => {
     trackDetailDialog.setKey(event.target.value);
+  });
+
+  el.trackDetailGenre?.addEventListener("change", (event) => {
+    trackDetailDialog.setGenre(event.target.value);
+  });
+  el.trackDetailRating?.addEventListener("click", (event) => {
+    const star = event.target.closest?.("[data-rating]");
+    if (star) trackDetailDialog.setRating(Number(star.dataset.rating));
   });
 
   // Cue rows: play / name / colour / delete (event-delegated). The hot cues

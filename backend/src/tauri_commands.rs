@@ -44,13 +44,15 @@ use crate::models::{
     ResolveTrackIdentityData, ResolveTrackIdentityRequest, RestoreUsbBackupData,
     RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
     RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
-    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
-    SaveUsbTrackAnalysisEditsRequest, ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest,
-    ScanRekordboxDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
-    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetPlaybackMetronomeRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
-    TrackDetail, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
-    UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
+    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsData,
+    SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
+    SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
+    ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SearchTracksData,
+    SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest, SetFrontendSettingData,
+    SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameData,
+    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail, ValidateUsbRootData,
+    ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -822,6 +824,38 @@ pub fn save_track_analysis_edits(
     request: SaveTrackAnalysisEditsRequest,
 ) -> ApiResponse<SaveTrackAnalysisEditsData> {
     state.save_track_analysis_edits(request)
+}
+
+#[tauri::command]
+pub fn save_track_metadata_edits(
+    state: State<'_, BackendCommands>,
+    request: SaveTrackMetadataEditsRequest,
+) -> ApiResponse<SaveTrackMetadataEditsData> {
+    state.save_track_metadata_edits(request)
+}
+
+/// A background `usb_write` job, like `save_usb_track_analysis_edits`: it
+/// writes `export.pdb`, the library and `exportLibrary.db`.
+#[tauri::command]
+pub async fn save_usb_track_metadata_edits(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+    request: SaveUsbTrackMetadataEditsRequest,
+) -> Result<ApiResponse<SaveUsbTrackMetadataEditsData>, String> {
+    let commands = state.inner().clone();
+    run_usb_job_with_progress(
+        &app,
+        "usb_write",
+        "save_usb_track_metadata_edits",
+        "USB: Saving track details",
+        "USB: Track details saved",
+        move |mut progress| {
+            commands.save_usb_track_metadata_edits_with_progress(request, move |c, t, m| {
+                progress(c, t, m);
+            })
+        },
+    )
+    .await
 }
 
 #[tauri::command]

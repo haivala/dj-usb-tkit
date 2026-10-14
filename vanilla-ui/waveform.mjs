@@ -169,8 +169,10 @@ export function drawWaveformCanvas(element) {
 
 const WAVEFORM_PAINT_CHUNK_SIZE = 200;
 
+// The cue editor's waveform shares the classes but draws its own zoomed PWV5
+// view; repainting it here would blank it.
 export function renderWaveformsIn(root = document) {
-  return renderWaveforms(root.querySelectorAll(".waveform.waveform-canvas"));
+  return renderWaveforms(root.querySelectorAll(".waveform.waveform-canvas:not(.track-detail-canvas)"));
 }
 
 // Paint the given `.waveform.waveform-canvas` elements (e.g. just the rows a

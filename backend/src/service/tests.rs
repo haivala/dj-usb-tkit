@@ -1437,7 +1437,11 @@ fn get_playlist_tracks_paginates_filters_and_sorts_server_side() {
         })
         .expect("offset page");
     assert_eq!(
-        jumped.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+        jumped
+            .items
+            .iter()
+            .map(|t| t.id.clone())
+            .collect::<Vec<_>>(),
         ["t2"]
     );
     assert!(jumped.has_more);

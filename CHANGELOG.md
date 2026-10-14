@@ -160,6 +160,15 @@
   away. Hovering a playlist also shows a pencil button that starts a rename.
 - **Fix:** Diagnostics of a freshly initialized USB with no tracks no longer warn that analysis
   references are missing for newer players.
+- **Fix:** Resizing the window while the cue editor is open now redraws its waveform and beat
+  grid. Before, the waveform could go blank and the beat grid lines stayed where they were.
+- **New feature:** The cue editor edits a track's genre and star rating. The genre field
+  suggests the genres the library (and the USB, for a USB track) already has. Opened from a USB
+  row, the edit is written to the PDB and the eDB on the stick as well as the library. A genre
+  set here stays when the library is rescanned or re-imported from rekordbox or Mixxx. Saving
+  only a genre or rating change leaves the beat grid, key and cues as they are.
+- **Fix:** Re-exporting a track that is already on the USB no longer clears its genre in the
+  eDB. The PDB kept the genre, so the two databases disagreed.
 
 ## 0.4.1
 

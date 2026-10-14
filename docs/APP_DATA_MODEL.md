@@ -45,6 +45,11 @@ The beat-grid anchor is `tracks.first_beat_ms` (already present). A companion
 edited) tells re-analysis to keep a user-set value instead of overwriting it
 with `estimate_first_beat_ms`.
 
+`tracks.genre` comes from the file's tag on scan. A genre set in the cue editor
+also sets `tracks.genre_source = 'user'`, and then rescans and rekordbox /
+Mixxx imports leave it as it is. `tracks.rating` (0–5 stars) is set only by
+the cue editor.
+
 Cues and the first beat are read via `get_track_detail` (returns `TrackDetail`
 = `Track` + `firstBeatMs` + ordered `cues` + `detailWaveform`, the raw PWV5
 colour-detail waveform for the modal) and replaced atomically via

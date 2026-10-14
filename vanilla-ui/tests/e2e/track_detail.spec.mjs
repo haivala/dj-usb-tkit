@@ -84,8 +84,15 @@ function installTrackDetailMock(page, opts = {}) {
                 ],
                 detailWaveform: detailWaveformB64,
                 keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: keyLabel(k) })) })),
+                genre: "Techno",
+                rating: 3,
+                genreOptions: ["Breakbeat", "Techno"],
               },
             };
+          }
+          if (command === "save_track_metadata_edits") {
+            const r = payload?.request || {};
+            return { ok: true, data: { trackId: r.trackId, genre: r.genre ?? "Techno", rating: r.rating ?? 3 } };
           }
           // Tiny stand-in for the backend player clock, so pause/resume
           // report a real (advancing, then frozen) position like player.rs does.
@@ -1034,6 +1041,46 @@ test("BPM stepper nudges by 0.01 and clamps to a positive value", async ({ page 
 // start cue on the first beat.
 const FOLLOW_GRID_SEED = { seedCues: [30120, 60000], seedStart: 120, quantize: false };
 
+test("genre and star rating: a change to only them saves only them, leaving the beat grid, key and cues alone", async ({ page }) => {
+  await openCueEditor(page);
+  await expect(page.locator("#trackDetailGenre")).toHaveValue("Techno");
+  await expect(page.locator("#trackDetailGenreOptions option")).toHaveCount(2);
+  const stars = page.locator("#trackDetailRating [data-rating]");
+  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(3);
+
+  await page.locator("#trackDetailGenre").fill("  Breakbeat ");
+  await page.locator("#trackDetailGenre").dispatchEvent("change");
+  await stars.nth(4).click();
+  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(5);
+  await expect(stars.nth(4)).toHaveAttribute("aria-checked", "true");
+  // Clicking the current rating's star clears it; undo brings it back.
+  await stars.nth(4).click();
+  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(0);
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(5);
+
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  const calls = await page.evaluate(() => window.__calls);
+  expect(calls.some((c) => c.command === "save_track_analysis_edits")).toBe(false);
+  const save = calls.find((c) => c.command === "save_track_metadata_edits");
+  expect(save.request).toEqual({ trackId: "t1", genre: "Breakbeat", rating: 5 });
+  await expect(page.locator("#statusText")).toContainText("Saved genre and rating");
+});
+
+test("a rating edit alongside a BPM edit saves both, each with only its own fields", async ({ page }) => {
+  await openCueEditor(page);
+  await setBpmInput(page, "130");
+  await page.locator("#trackDetailRating [data-rating='1']").click();
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const calls = await page.evaluate(() => window.__calls);
+  expect(calls.find((c) => c.command === "save_track_analysis_edits").request.bpm).toBe(130);
+  // Genre wasn't touched: only the rating is sent.
+  expect(calls.find((c) => c.command === "save_track_metadata_edits").request).toEqual({ trackId: "t1", rating: 1 });
+});
+
 async function setBpmInput(page, value) {
   await page.locator("#trackDetailBpm").fill(value);
   await page.locator("#trackDetailBpm").dispatchEvent("change");
@@ -1938,7 +1985,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
           }
           if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") return tracksResponse;
           if (command === "get_usb_track_detail") {
-            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })) } };
+            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })), genre: "House", rating: 2, genreOptions: ["House"] } };
           }
           if (command === "save_usb_track_analysis_edits") {
             if (window.__usbSaveFails) {
@@ -2064,6 +2111,39 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   // The USB row redraws with the new BPM, and so does the library track.
   await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.50");
   await expect(libraryBpm).toHaveText("128.50");
+});
+
+test("a rating-only edit from a USB row saves only the rating through the USB metadata command", async ({ page }) => {
+  await installUsbTrackDetailMock(page);
+  await page.goto("/");
+  await openUsbView(page, "usb-playlists");
+  await page.locator("#refreshUsbBtn").click();
+  await page.locator('[data-usb-playlist-index="0"]').click();
+  await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+
+  const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
+  expect(detailCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
+  await expect(page.locator("#trackDetailGenre")).toHaveValue("House");
+  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(2);
+
+  await page.locator("#trackDetailRating [data-rating='4']").click();
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+
+  const calls = await page.evaluate(() => window.__calls);
+  expect(calls.some((c) => c.command === "save_usb_track_analysis_edits")).toBe(false);
+  const save = calls.find((c) => c.command === "save_usb_track_metadata_edits");
+  expect(save.request).toEqual({
+    usbRoot: "/Volumes/USB-TEST",
+    usbMediaPathRaw: "/Contents/USB Artist/USB Album/track.mp3",
+    rating: 4,
+    localTrackId: "local-1",
+    title: "USB Cue Track",
+    artist: "USB Artist",
+    album: "USB Album",
+  });
+  await expect(page.locator("#statusText")).toContainText("Saved genre and rating to USB");
 });
 
 test("cue editor edits the musical key from a USB playlist row and saves it through the USB commands", async ({ page }) => {

@@ -41,6 +41,7 @@ mod source_roots;
 mod tests;
 mod track_list;
 mod track_matching;
+mod track_metadata;
 
 use crate::audio_format::same_format_extension;
 pub(crate) use library::*;
@@ -166,6 +167,7 @@ type ExistingTrackSnapshot = (
     Option<String>,
     Option<String>, // genre
     Option<String>, // wav_extensible_kind
+    bool,           // genre edited in the app (`genre_source = 'user'`)
 );
 type ExistingTracksByPath = std::collections::HashMap<String, ExistingTrackSnapshot>;
 

@@ -9,8 +9,9 @@ use backend::models::{
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
     FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsRequest,
     GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
-    SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsRequest, ScanLibraryRequest,
-    SearchTracksRequest, SetFrontendSettingRequest, TrackCueInput,
+    SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
+    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SearchTracksRequest,
+    SetFrontendSettingRequest, TrackCueInput,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{
@@ -1372,6 +1373,7 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
         .get_usb_track_detail(GetUsbTrackDetailRequest {
             usb_root: usb.to_string_lossy().to_string(),
             usb_analysis_path_raw: analysis_raw.clone(),
+            usb_media_path_raw: None,
         })
         .data
         .expect("usb detail");
@@ -1465,6 +1467,7 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
         .get_usb_track_detail(GetUsbTrackDetailRequest {
             usb_root: usb.to_string_lossy().to_string(),
             usb_analysis_path_raw: analysis_raw,
+            usb_media_path_raw: None,
         })
         .data
         .expect("usb detail 2");
@@ -1577,6 +1580,231 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
     assert_eq!(anlz_tempo, Some(13_725));
     assert_eq!(local_bpm, 137.25);
     assert_eq!(local_key, "G#m");
+}
+
+/// A genre / rating edit made from a USB view reaches the PDB, the eDB and the
+/// library track, and nothing else: the analysis bundle and the library's
+/// BPM / key / first beat are left exactly as they were.
+#[test]
+fn save_usb_track_metadata_edits_writes_only_genre_and_rating() {
+    let root = tempdir().expect("temp root");
+    let (backend, data_dir, usb, track_id, playlist_id) =
+        export_one_track_with_cues(root.path(), Vec::new());
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let media_raw = usb_track.usb_media_path.clone().expect("usb media path");
+    let analysis_raw = usb_track
+        .usb_analysis_path_raw
+        .clone()
+        .expect("usb analysis path raw");
+    let ext_before = fs::read(only_exported_ext(&usb)).expect("read ext");
+    let library_analysis = |conn: &rusqlite::Connection| {
+        conn.query_row(
+            "SELECT bpm, bpm_analyzer, tonality, tonality_source, first_beat_ms, first_beat_ms_source
+               FROM tracks WHERE id = ?1",
+            [&track_id],
+            |r| {
+                Ok((
+                    r.get::<_, Option<f64>>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<i64>>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .expect("library analysis fields")
+    };
+    let db = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open db");
+    let analysis_before = library_analysis(&db);
+
+    let detail = backend
+        .get_usb_track_detail(GetUsbTrackDetailRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: analysis_raw.clone(),
+            usb_media_path_raw: Some(media_raw.clone()),
+        })
+        .data
+        .expect("usb detail");
+    assert_eq!((detail.genre.as_deref(), detail.rating), (None, 0));
+
+    let saved = backend.save_usb_track_metadata_edits_with_progress(
+        SaveUsbTrackMetadataEditsRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_media_path_raw: media_raw.clone(),
+            genre: Some("  Glitch Polka ".to_string()),
+            rating: Some(4),
+            local_track_id: None,
+            title: Some(usb_track.title.clone()),
+            artist: Some(usb_track.artist.clone()),
+            album: usb_track.album.clone(),
+        },
+        |_, _, _| {},
+    );
+    assert!(saved.ok, "usb metadata save failed: {saved:?}");
+    let saved = saved.data.expect("usb metadata save data");
+    assert_eq!(saved.local_track_id.as_deref(), Some(track_id.as_str()));
+
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
+    let pdb_row = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == media_raw)
+        .expect("pdb track row");
+    assert_eq!(
+        parsed.genres.get(&pdb_row.genre_id).map(String::as_str),
+        Some("Glitch Polka")
+    );
+    assert_eq!(pdb_row.rating, 4);
+    let edb_genre_rating = || -> (Option<String>, i64) {
+        open_usb_edb(&usb)
+            .query_row(
+                "SELECT g.name, c.rating FROM content c LEFT JOIN genre g ON g.genre_id = c.genre_id
+                  WHERE c.path = ?1",
+                [&media_raw],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("edb genre/rating")
+    };
+    assert_eq!(edb_genre_rating(), (Some("Glitch Polka".to_string()), 4));
+    let library_genre_rating = || -> (Option<String>, Option<String>, Option<i64>) {
+        db.query_row(
+            "SELECT genre, genre_source, rating FROM tracks WHERE id = ?1",
+            [&track_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("library genre/rating")
+    };
+    assert_eq!(
+        library_genre_rating(),
+        (
+            Some("Glitch Polka".to_string()),
+            Some("user".to_string()),
+            Some(4)
+        )
+    );
+    assert_eq!(fs::read(only_exported_ext(&usb)).unwrap(), ext_before);
+    assert_eq!(library_analysis(&db), analysis_before);
+
+    let detail = backend
+        .get_usb_track_detail(GetUsbTrackDetailRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: analysis_raw,
+            usb_media_path_raw: Some(media_raw.clone()),
+        })
+        .data
+        .expect("usb detail after save");
+    assert_eq!(
+        (detail.genre.as_deref(), detail.rating),
+        (Some("Glitch Polka"), 4)
+    );
+    assert!(detail.genre_options.iter().any(|g| g == "Glitch Polka"));
+
+    // A rescan of the changed file keeps the edited genre over its (empty) tag.
+    let source = root.path().join("source");
+    fs::File::options()
+        .write(true)
+        .open(source.join("usb_cue_edit.wav"))
+        .and_then(|f| {
+            f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(120))
+        })
+        .expect("touch source file");
+    backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![source.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert_eq!(
+        library_genre_rating(),
+        (
+            Some("Glitch Polka".to_string()),
+            Some("user".to_string()),
+            Some(4)
+        )
+    );
+
+    // A re-export keeps the genre in both databases.
+    let export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(export.ok, "re-export failed: {export:?}");
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
+    let pdb_row = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == media_raw)
+        .expect("pdb track row");
+    assert_eq!(
+        parsed.genres.get(&pdb_row.genre_id).map(String::as_str),
+        Some("Glitch Polka")
+    );
+    assert_eq!(pdb_row.rating, 4);
+    assert_eq!(edb_genre_rating(), (Some("Glitch Polka".to_string()), 4));
+}
+
+/// The library save changes only the genre and rating; clearing the genre
+/// keeps it cleared.
+#[test]
+fn save_track_metadata_edits_leaves_analysis_alone() {
+    let root = tempdir().expect("temp root");
+    let (backend, data_dir, _usb, track_id, _playlist_id) =
+        export_one_track_with_cues(root.path(), Vec::new());
+    let db = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open db");
+    let analysis = || -> (Option<f64>, Option<String>, Option<String>, Option<i64>) {
+        db.query_row(
+            "SELECT bpm, bpm_analyzer, tonality_source, first_beat_ms FROM tracks WHERE id = ?1",
+            [&track_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .expect("analysis fields")
+    };
+    let before = analysis();
+
+    let saved = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
+        track_id: track_id.clone(),
+        genre: Some("Doom Swing".to_string()),
+        rating: Some(2),
+    });
+    assert!(saved.ok, "metadata save failed: {saved:?}");
+    let saved = saved.data.expect("metadata save data");
+    assert_eq!(
+        (saved.genre.as_deref(), saved.rating),
+        (Some("Doom Swing"), 2)
+    );
+    assert_eq!(analysis(), before);
+
+    let detail = backend
+        .get_track_detail(GetTrackDetailRequest {
+            track_id: track_id.clone(),
+        })
+        .data
+        .expect("detail");
+    assert_eq!(
+        (detail.genre.as_deref(), detail.rating),
+        (Some("Doom Swing"), 2)
+    );
+    assert!(detail.genre_options.iter().any(|g| g == "Doom Swing"));
+
+    let cleared = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
+        track_id: track_id.clone(),
+        genre: Some(" ".to_string()),
+        rating: None,
+    });
+    let cleared = cleared.data.expect("cleared");
+    assert_eq!((cleared.genre, cleared.rating), (None, 2));
+
+    let too_high = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
+        track_id,
+        genre: None,
+        rating: Some(6),
+    });
+    assert!(!too_high.ok, "rating 6 must be rejected");
 }
 
 /// Turn the app-exported bundle on `usb` into one shaped like a rekordbox
@@ -1800,6 +2028,7 @@ fn usb_track_detail_reads_rekordbox_memory_cues_as_memory_cues() {
         .get_usb_track_detail(GetUsbTrackDetailRequest {
             usb_root: usb.to_string_lossy().to_string(),
             usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().expect("raw"),
+            usb_media_path_raw: None,
         })
         .data
         .expect("usb detail");
@@ -1840,6 +2069,7 @@ fn usb_memory_cue_edits_reach_the_stick_the_library_and_a_re_export() {
         .get_usb_track_detail(GetUsbTrackDetailRequest {
             usb_root: usb.to_string_lossy().to_string(),
             usb_analysis_path_raw: analysis_raw.clone(),
+            usb_media_path_raw: None,
         })
         .data
         .expect("usb detail");
@@ -2225,6 +2455,7 @@ fn playback_start_cue_is_a_memory_point_only_and_round_trips_local_and_usb() {
         .get_usb_track_detail(GetUsbTrackDetailRequest {
             usb_root: usb.to_string_lossy().to_string(),
             usb_analysis_path_raw: analysis_raw.clone(),
+            usb_media_path_raw: None,
         })
         .data
         .expect("usb detail");

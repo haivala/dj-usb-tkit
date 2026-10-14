@@ -34,13 +34,14 @@ use crate::models::{
     ResolveTrackIdentityData, ResolveTrackIdentityRequest, RestoreUsbBackupData,
     RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
     RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
-    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
-    SaveUsbTrackAnalysisEditsRequest, ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest,
-    ScanRekordboxDbRequest, SearchTracksData, SearchTracksRequest, SetAnalysisPausedData,
-    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
-    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail,
-    ValidateUsbRootData, ValidateUsbRootRequest,
+    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsData,
+    SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
+    SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
+    ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SearchTracksData,
+    SearchTracksRequest, SetAnalysisPausedData, SetFrontendSettingData, SetFrontendSettingRequest,
+    SetPlaybackMetronomeRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
+    TrackDetail, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
+    UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -175,6 +176,27 @@ impl BackendCommands {
         req: SaveTrackAnalysisEditsRequest,
     ) -> ApiResponse<SaveTrackAnalysisEditsData> {
         wrap(self.service.save_track_analysis_edits(req))
+    }
+
+    pub fn save_track_metadata_edits(
+        &self,
+        req: SaveTrackMetadataEditsRequest,
+    ) -> ApiResponse<SaveTrackMetadataEditsData> {
+        wrap(self.service.save_track_metadata_edits(req))
+    }
+
+    pub fn save_usb_track_metadata_edits_with_progress<F>(
+        &self,
+        req: SaveUsbTrackMetadataEditsRequest,
+        on_progress: F,
+    ) -> ApiResponse<SaveUsbTrackMetadataEditsData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        wrap(
+            self.service
+                .save_usb_track_metadata_edits_with_progress(req, on_progress),
+        )
     }
 
     pub fn get_usb_track_detail(

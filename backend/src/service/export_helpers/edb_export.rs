@@ -652,10 +652,15 @@ pub fn update_existing_content_row(
             params![track.artist_id_composer.map(i64::from), content_id],
         )?;
     }
-    if content_columns.contains("genre_id") {
+    // By name, as the PDB row is: the library's `genre_id` is never set, so
+    // writing it would clear the genre the PDB keeps.
+    if content_columns.contains("genre_id")
+        && let Some(genre_name) = track.genre.as_deref().filter(|v| !v.trim().is_empty())
+        && let Some(genre_id) = crate::edb::find_or_insert_genre(tx, genre_name)?
+    {
         tx.execute(
             "UPDATE content SET genre_id = ?1 WHERE content_id = ?2",
-            params![track.genre_id.map(i64::from), content_id],
+            params![genre_id, content_id],
         )?;
     }
     if content_columns.contains("label_id") {

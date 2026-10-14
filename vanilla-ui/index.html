@@ -663,6 +663,12 @@
             <div class="track-detail-subtitle" id="trackDetailSubtitle"></div>
           </div>
         </div>
+        <!-- Right of the title; under it on a narrow window. -->
+        <div class="track-detail-meta">
+          <div class="track-detail-rating" id="trackDetailRating" role="radiogroup" aria-label="Rating" data-tooltip="Click a star to rate; click the same star again to clear"><button type="button" role="radio" aria-checked="false" data-rating="1" aria-label="1 star">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" aria-label="2 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" aria-label="3 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" aria-label="4 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" aria-label="5 stars">&#9733;</button></div>
+          <input type="text" id="trackDetailGenre" class="track-detail-genre" list="trackDetailGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Genre" aria-label="Genre" data-tooltip="Genre: type one or pick one the library already has" />
+          <datalist id="trackDetailGenreOptions"><!-- from the track detail's genreOptions --></datalist>
+        </div>
         <button class="settings-close" id="trackDetailCloseBtn" aria-label="Close">&times;</button>
       </div>
 

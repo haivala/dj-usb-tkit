@@ -662,7 +662,7 @@ impl<'a> MixxxTrackImporter<'a> {
                 // SET expressions see the row's old values.
                 r#"UPDATE tracks SET
                     title = ?1, artist = ?2, album = ?3,
-                    genre = COALESCE(?14, genre),
+                    genre = CASE WHEN genre_source = 'user' THEN genre ELSE COALESCE(?14, genre) END,
                     bpm_analyzer = CASE WHEN ?4 IS NOT NULL
                                          AND (?13 OR bpm IS NULL OR bpm_analyzer = 'mixxx')
                                         THEN 'mixxx' ELSE bpm_analyzer END,

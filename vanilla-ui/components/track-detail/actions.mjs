@@ -136,6 +136,8 @@ export function createTrackDetailController(el, prefs = {}) {
   let overviewDrawnKey = "";
   // What the key <select> was last built from.
   let keySelectBuiltFor = "";
+  // What the genre suggestions were last built from.
+  let genreOptionsBuiltFor = "";
 
   const working = {
     track: null,
@@ -144,6 +146,10 @@ export function createTrackDetailController(el, prefs = {}) {
     key: null,
     // The key picker's `{ label, keys }` groups, from the backend's track detail.
     keyGroups: [],
+    genre: null,
+    rating: 0, // stars, 0 (none) to 5
+    // Existing genres the genre field suggests, from the backend's track detail.
+    genreOptions: [],
     firstBeatMs: null,
     cues: [],
     view: { startMs: 0, endMs: 0 },
@@ -160,6 +166,11 @@ export function createTrackDetailController(el, prefs = {}) {
   // Its cue list alone: a save that didn't edit cues leaves a USB's cues as
   // they are (see `cuesEdited`).
   let openedCuesJson = "";
+  // The analysis part (beat grid, key, cues) and the genre / rating as
+  // opened: each is saved only when it changed (see `analysisEdited`).
+  let openedAnalysisJson = "";
+  let openedGenre = null;
+  let openedRating = 0;
   // Undo/redo: snapshots of the editable state (see `mutate`).
   let undoStack = [];
   let redoStack = [];
@@ -176,6 +187,8 @@ export function createTrackDetailController(el, prefs = {}) {
     return JSON.stringify({
       bpm: working.bpm,
       key: working.key,
+      genre: working.genre,
+      rating: working.rating,
       firstBeatMs: working.firstBeatMs,
       cues: working.cues,
     });
@@ -185,6 +198,8 @@ export function createTrackDetailController(el, prefs = {}) {
     const s = JSON.parse(json);
     working.bpm = s.bpm;
     working.key = s.key;
+    working.genre = s.genre;
+    working.rating = s.rating;
     working.firstBeatMs = s.firstBeatMs;
     working.cues = s.cues;
     working.draggingTempId = null;
@@ -868,6 +883,28 @@ export function createTrackDetailController(el, prefs = {}) {
     if (working.key != null) select.value = working.key;
   }
 
+  function renderGenre() {
+    const input = el.trackDetailGenre;
+    if (!input) return;
+    const list = el.trackDetailGenreOptions;
+    const built = JSON.stringify(working.genreOptions);
+    if (list && built !== genreOptionsBuiltFor) {
+      genreOptionsBuiltFor = built;
+      const { Option } = list.ownerDocument.defaultView;
+      list.replaceChildren(...working.genreOptions.map((name) => new Option(name)));
+    }
+    // Not under the caret: the field commits on change.
+    if (input.ownerDocument.activeElement !== input) input.value = working.genre || "";
+  }
+
+  function renderRating() {
+    for (const star of el.trackDetailRating?.querySelectorAll("[data-rating]") || []) {
+      const on = Number(star.dataset.rating) <= working.rating;
+      star.classList.toggle("is-on", on);
+      star.setAttribute("aria-checked", String(Number(star.dataset.rating) === working.rating));
+    }
+  }
+
   function render() {
     if (!open) return;
     if (el.trackDetailFirstBeatMs) {
@@ -879,6 +916,8 @@ export function createTrackDetailController(el, prefs = {}) {
       el.trackDetailBpm.value = working.bpm == null ? "" : formatBpm(working.bpm);
     }
     syncKeySelect();
+    renderGenre();
+    renderRating();
     renderView();
     renderCueList();
     renderStartChoice();
@@ -1000,6 +1039,23 @@ export function createTrackDetailController(el, prefs = {}) {
       const trimmed = typeof key === "string" ? key.trim() : "";
       mutate(null, () => {
         working.key = trimmed ? trimmed.slice(0, 16) : null;
+      });
+      render();
+    },
+
+    setGenre(genre) {
+      const trimmed = typeof genre === "string" ? genre.trim() : "";
+      mutate(null, () => {
+        working.genre = trimmed ? trimmed.slice(0, 64) : null;
+      });
+      render();
+    },
+
+    /// Set the star rating; the current rating's own star clears it.
+    setRating(stars) {
+      const n = Math.max(0, Math.min(5, Math.round(Number(stars) || 0)));
+      mutate(null, () => {
+        working.rating = n === working.rating ? 0 : n;
       });
       render();
     },
@@ -1325,7 +1381,19 @@ export function createTrackDetailController(el, prefs = {}) {
       if (resolver) resolver(result || null);
     },
 
-    open({ track, firstBeatMs, cues, durationMs, bpm, key, keyOptions: keyGroups, coverCandidates = [] }) {
+    open({
+      track,
+      firstBeatMs,
+      cues,
+      durationMs,
+      bpm,
+      key,
+      keyOptions: keyGroups,
+      genre = null,
+      rating = 0,
+      genreOptions = [],
+      coverCandidates = [],
+    }) {
       if (open) api.close(null);
       open = true;
       working.track = track || {};
@@ -1337,6 +1405,9 @@ export function createTrackDetailController(el, prefs = {}) {
       working.bpm = bpm != null ? bpm : track?.bpm ?? null;
       working.key = key != null ? key : track?.key ?? null;
       working.keyGroups = Array.isArray(keyGroups) ? keyGroups : [];
+      working.genre = genre || null;
+      working.rating = Number(rating) || 0;
+      working.genreOptions = Array.isArray(genreOptions) ? genreOptions : [];
       working.firstBeatMs = firstBeatMs ?? null;
       working.followSuspendUntil = 0;
       working.draggingTempId = null;
@@ -1379,7 +1450,12 @@ export function createTrackDetailController(el, prefs = {}) {
 
       const wf = el.trackDetailWaveform;
       if (wf && typeof ResizeObserver === "function") {
-        resizeObserver = new ResizeObserver(() => renderWaveform());
+        // The beat grid is laid out in whole pixels, so it redraws with the
+        // canvas. On the next frame, not in the callback: a redraw that shifts
+        // the layout (the dialog's scrollbar) would resize the waveform again
+        // mid-callback ("ResizeObserver loop completed with undelivered
+        // notifications").
+        resizeObserver = new ResizeObserver(() => scheduleRenderView());
         resizeObserver.observe(wf);
       }
 
@@ -1387,6 +1463,9 @@ export function createTrackDetailController(el, prefs = {}) {
       const opened = api.toSavePayload();
       openedPayloadJson = JSON.stringify(opened);
       openedCuesJson = JSON.stringify(opened.cues);
+      openedAnalysisJson = JSON.stringify(analysisPart(opened));
+      openedGenre = opened.genre;
+      openedRating = opened.rating;
       for (const listener of openListeners) listener();
 
       return new Promise((resolve) => {
@@ -1394,8 +1473,9 @@ export function createTrackDetailController(el, prefs = {}) {
       });
     },
 
-    /// True once BPM, key, first beat or the cues differ from what was opened
-    /// (view state like zoom or the beat-grid slider doesn't count).
+    /// True once BPM, key, first beat, the cues, genre or rating differ from
+    /// what was opened (view state like zoom or the beat-grid slider doesn't
+    /// count).
     hasUnsavedChanges() {
       return open && JSON.stringify(api.toSavePayload()) !== openedPayloadJson;
     },
@@ -1407,8 +1487,26 @@ export function createTrackDetailController(el, prefs = {}) {
       return JSON.stringify(api.toSavePayload().cues) !== openedCuesJson;
     },
 
+    /// True once BPM, key, first beat or the cues differ from what was
+    /// opened. A save without such an edit writes only the genre / rating.
+    analysisEdited() {
+      return JSON.stringify(analysisPart(api.toSavePayload())) !== openedAnalysisJson;
+    },
+
+    /// The genre / rating fields that differ from what was opened, so a save
+    /// writes only those.
+    metadataEdits() {
+      const { genre, rating } = api.toSavePayload();
+      const edits = {};
+      if (genre !== openedGenre) edits.genre = genre ?? "";
+      if (rating !== openedRating) edits.rating = rating;
+      return edits;
+    },
+
     toSavePayload() {
       return {
+        genre: working.genre,
+        rating: working.rating,
         firstBeatMs: working.firstBeatMs == null ? null : working.firstBeatMs,
         bpm: working.bpm == null ? null : working.bpm,
         key: working.key == null ? null : working.key,
@@ -1425,6 +1523,11 @@ export function createTrackDetailController(el, prefs = {}) {
   };
 
   return api;
+}
+
+/// The beat grid, key and cues of a save payload, without genre and rating.
+function analysisPart({ genre: _genre, rating: _rating, ...analysis }) {
+  return analysis;
 }
 
 /// The cue editor's remembered preferences, kept in app state and persisted
@@ -1469,14 +1572,7 @@ export function createAppTrackDetailController(ctx) {
 /// onto that USB *and* into the local master. The USB must be connected — a
 /// not-connected row is blocked here, never silently downgraded to local-only.
 async function openUsbTrackDetail(ctx, track) {
-  const {
-    command,
-    trackDetailDialog,
-    emitStatus,
-    state,
-    applyRealtimeAnalyzedTrackUpdate,
-    patchTrackAnalysisFields,
-  } = ctx;
+  const { command, trackDetailDialog, emitStatus, state } = ctx;
 
   if (!state?.usbRootValid || !state?.usbRoot) {
     emitStatus("Connect the USB this track is on before editing its cues.");
@@ -1493,6 +1589,7 @@ async function openUsbTrackDetail(ctx, track) {
     detail = await command("get_usb_track_detail", {
       usbRoot: state.usbRoot,
       usbAnalysisPathRaw,
+      usbMediaPathRaw: track.usbMediaPath || null,
     });
   } catch (err) {
     emitStatus(`Could not open cue editor: ${err.message}`);
@@ -1511,6 +1608,9 @@ async function openUsbTrackDetail(ctx, track) {
     bpm: track.bpm,
     key: track.key,
     keyOptions: detail.keyOptions,
+    genre: detail.genre,
+    rating: detail.rating,
+    genreOptions: detail.genreOptions,
     coverCandidates: buildCoverSrcCandidates(ctx, track),
   });
   if (!payload) return;
@@ -1522,6 +1622,32 @@ async function openUsbTrackDetail(ctx, track) {
     await ctx.waitForUsbJobIdle();
   }
 
+  // A genre / rating-only edit leaves the analysis files, BPM and key alone.
+  const metadataEdited = Object.keys(payload.metadataEdits || {}).length > 0;
+  if (payload.analysisEdited || !metadataEdited) {
+    if (!(await saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload))) return;
+  }
+  if (metadataEdited) {
+    try {
+      await command("save_usb_track_metadata_edits", {
+        usbRoot: state.usbRoot,
+        usbMediaPathRaw: track.usbMediaPath,
+        ...payload.metadataEdits,
+        localTrackId: track.localTrackId || null,
+        title: track.title || null,
+        artist: track.artist || null,
+        album: track.album || null,
+      });
+      if (!payload.analysisEdited) emitStatus("Saved genre and rating to USB");
+    } catch (err) {
+      emitStatus(`Could not save genre and rating: ${err.message}`);
+    }
+  }
+}
+
+/// The cue / beat-grid / BPM / key part of a USB save. False when it failed.
+async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
+  const { command, emitStatus, state, applyRealtimeAnalyzedTrackUpdate, patchTrackAnalysisFields } = ctx;
   try {
     const saved = await command("save_usb_track_analysis_edits", {
       usbRoot: state.usbRoot,
@@ -1562,21 +1688,17 @@ async function openUsbTrackDetail(ctx, track) {
     if (localTrackId) {
       applyRealtimeAnalyzedTrackUpdate({ trackId: localTrackId, ...fields });
     }
+    return true;
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);
+    return false;
   }
 }
 
 /// Open the modal for a track: resolve to a local id, fetch detail, and on Save
 /// persist the edits.
 export async function openTrackDetail(ctx, track) {
-  const {
-    command,
-    resolveLocalTrackIdAsync,
-    trackDetailDialog,
-    emitStatus,
-    applyRealtimeAnalyzedTrackUpdate,
-  } = ctx;
+  const { command, resolveLocalTrackIdAsync, trackDetailDialog, emitStatus } = ctx;
 
   if (track?.origin === "usb") {
     return openUsbTrackDetail(ctx, track);
@@ -1613,10 +1735,31 @@ export async function openTrackDetail(ctx, track) {
     bpm: detail.track?.bpm,
     key: detail.track?.key,
     keyOptions: detail.keyOptions,
+    genre: detail.genre,
+    rating: detail.rating,
+    genreOptions: detail.genreOptions,
     coverCandidates: buildCoverSrcCandidates(ctx, track),
   });
   if (!payload) return;
 
+  // A genre / rating-only edit leaves the beat grid, BPM and key alone.
+  const metadataEdited = Object.keys(payload.metadataEdits || {}).length > 0;
+  if (payload.analysisEdited || !metadataEdited) {
+    if (!(await saveLocalAnalysisEdits(ctx, localId, payload))) return;
+  }
+  if (metadataEdited) {
+    try {
+      await command("save_track_metadata_edits", { trackId: localId, ...payload.metadataEdits });
+      if (!payload.analysisEdited) emitStatus("Saved genre and rating");
+    } catch (err) {
+      emitStatus(`Could not save genre and rating: ${err.message}`);
+    }
+  }
+}
+
+/// The cue / beat-grid / BPM / key part of a library save. False when it failed.
+async function saveLocalAnalysisEdits(ctx, localId, payload) {
+  const { command, emitStatus, applyRealtimeAnalyzedTrackUpdate } = ctx;
   try {
     const saved = await command("save_track_analysis_edits", {
       trackId: localId,
@@ -1637,7 +1780,9 @@ export async function openTrackDetail(ctx, track) {
       keyDisplay: saved.keyDisplay,
       keyColor: saved.keyColor,
     });
+    return true;
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);
+    return false;
   }
 }

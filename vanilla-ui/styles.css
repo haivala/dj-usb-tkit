@@ -4221,10 +4221,29 @@ td button[data-action]:disabled,
   padding: 16px;
 }
 .track-detail-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "heading meta close";
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+.track-detail-heading { grid-area: heading; }
+.track-detail-header > .settings-close { grid-area: close; }
+/* Rating and genre: the track's own tags, beside its name. */
+.track-detail-meta {
+  grid-area: meta;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .track-detail-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "heading close" "meta meta";
+  }
+  /* Under the track name: past the 44px cover and its 12px gap. */
+  .track-detail-meta { padding-left: 56px; }
 }
 .track-detail-header h3 { margin: 0; }
 /* Cover, title and "artist · album", like the track's row in the list. */
@@ -4317,6 +4336,26 @@ td button[data-action]:disabled,
 .number-stepper-btns button:active { transform: none; filter: brightness(0.9); }
 .number-stepper input:disabled + .number-stepper-btns { opacity: 0.4; pointer-events: none; }
 .track-detail-unit { font-size: 12px; color: var(--muted); }
+/* Beats the global `input { min-width }`. */
+.track-detail-meta .track-detail-genre { min-width: 0; width: 180px; }
+/* Five stars; hovering lights them up to the one under the pointer. */
+.track-detail-rating { display: inline-flex; }
+.track-detail-rating button {
+  min-width: 0;
+  height: auto;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--line);
+}
+.track-detail-rating button.is-on,
+.track-detail-rating:hover button { color: var(--accent); }
+.track-detail-rating button:hover ~ button { color: var(--line); }
+.track-detail-rating button:hover { background: none; box-shadow: none; }
+.track-detail-rating button:active { transform: none; }
 @media (max-width: 720px) {
   .track-detail-fields { grid-template-columns: max-content max-content; }
   .track-detail-field-group:nth-child(even) > :first-child { margin-left: 0; justify-self: start; }

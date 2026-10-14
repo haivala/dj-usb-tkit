@@ -80,8 +80,10 @@ drive selection from being rendered against a newer selected drive.
 - `remove_tracks_by_source_roots`
 - `relocate_source_root`
 - `get_tracks_by_ids_with_previews`
-- `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform }` for
-  the cue editor (see `docs/CUE_EDITOR.md`). `detailWaveform` is
+- `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform,
+  keyOptions, genre, rating, genreOptions }` for the cue editor (see
+  `docs/CUE_EDITOR.md`). `rating` is 0–5 stars; `genreOptions` is every library
+  genre, sorted ignoring case. `detailWaveform` is
   the **base64** of the raw PWV5 colour-detail waveform payload from the `.EXT`
   (2 bytes/entry, BE u16; absent when the track has no analysis). Cues are
   ordered by `sortOrder`.
@@ -98,10 +100,12 @@ drive selection from being rendered against a newer selected drive.
   `playbackStart: true`: the memory-only playback-start cue (no pad, colour or
   name, never after the first hot cue, dropped without another cue, hot or
   memory; outside the 8).
-- `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw }` → reads
-  `{ firstBeatMs, cues, detailWaveform }` straight off an **on-USB** ANLZ bundle
-  for the cue editor opened from a USB playlist / history row (no local `tracks`
-  row need exist).
+- `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw, usbMediaPathRaw? }` →
+  reads `{ firstBeatMs, cues, detailWaveform, keyOptions }` straight off an
+  **on-USB** ANLZ bundle for the cue editor opened from a USB playlist / history
+  row (no local `tracks` row need exist), plus `{ genre, rating }` from the
+  track's PDB row (at `usbMediaPathRaw`; none when it's missing) and
+  `genreOptions` (the library's genres and the PDB's).
 - `save_usb_track_analysis_edits` — `{ usbRoot, usbAnalysisPathRaw,
   usbMediaPathRaw, bpm?, key?, durationMs?, firstBeatMs?, cues?, localTrackId?,
   title?, artist?, album? }` → writes the on-device ANLZ, eDB and `export.pdb`
@@ -125,6 +129,21 @@ drive selection from being rendered against a newer selected drive.
   and eDB `cue` rows are left exactly as they are; the editor sends `cues` only
   when they were edited, so a BPM, key or first-beat edit never rewrites cues
   (such as rekordbox memory cues) the app's cue model can't represent.
+- `save_track_metadata_edits` — `{ trackId, genre?, rating? }` → sets the
+  library track's genre and/or star rating (0–5) and nothing else, clearing
+  `last_exported_*` on every playlist containing it. A `null` field is left
+  unchanged; an empty `genre` clears it. The genre gets `genre_source = 'user'`,
+  so rescans and rekordbox / Mixxx imports keep it over the file's tag. Returns
+  `{ trackId, genre, rating }`. The cue editor sends it instead of
+  `save_track_analysis_edits` when only the genre / rating changed.
+- `save_usb_track_metadata_edits` — `{ usbRoot, usbMediaPathRaw, genre?,
+  rating?, localTrackId?, title?, artist?, album? }` → the same edit on a USB
+  track: the `export.pdb` track row (t00 genre and rating; a new genre gets a
+  t01 row) and the eDB `content` row **in place**, plus the resolved library
+  track. A track missing from either database blocks the save before anything
+  is written. Leaves the ANLZ bundle, BPM, key and cues alone. Returns
+  `{ localUpdated, localTrackId }`. A background `usb_write` job, serialized by
+  `usb_write_lock` like `save_usb_track_analysis_edits`.
 
 ### Settings
 
@@ -205,8 +224,9 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
 - `backupBeforeExport = false` -> skips backup step
 
 Every command that changes the USB's rekordbox data (`export_to_usb`, `reorder_usb_playlists`,
-`remove_usb_playlist`, `save_usb_track_analysis_edits`, `restore_usb_backup`,
-`repair_usb_diagnostics` with `apply`, and the player-menu updates) then rebuilds the Engine DJ
+`remove_usb_playlist`, `save_usb_track_analysis_edits`, `save_usb_track_metadata_edits`,
+`restore_usb_backup`, `repair_usb_diagnostics` with `apply`, and the player-menu updates) then
+rebuilds the Engine DJ
 library (`Engine Library/Database2`), keeping the player's play history. The
 `ui_export_engine_library_v1` setting (`"1"` = on; off by default) controls it. A failure only
 adds a warning (see `docs/ENGINE_DJ.md`). `repair_usb_diagnostics` returns the setting as

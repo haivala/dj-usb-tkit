@@ -74,7 +74,7 @@ impl BackendService {
         let mut existing_tracks = ExistingTracksByPath::new();
         {
             let mut stmt = tx.prepare(
-                "SELECT id, file_modified_at, title, artist, album, track_number, tonality, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date, genre, file_path, wav_extensible_kind FROM tracks",
+                "SELECT id, file_modified_at, title, artist, album, track_number, tonality, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date, genre, file_path, wav_extensible_kind, COALESCE(genre_source = 'user', 0) FROM tracks",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
@@ -100,6 +100,7 @@ impl BackendService {
                         row.get::<_, Option<String>>(17)?,
                         row.get::<_, Option<String>>(18)?, // genre
                         row.get::<_, Option<String>>(20)?, // wav_extensible_kind
+                        row.get::<_, bool>(21)?,           // genre edited in the app
                     ),
                 ))
             })?;
@@ -185,6 +186,7 @@ impl BackendService {
                     old_recorded_date,
                     old_genre,
                     old_wav_extensible_kind,
+                    genre_edited,
                 )) => {
                     let wav_extensible_kind =
                         item.wav_extensible_kind.map(WavFormatIssue::as_db_str);
@@ -205,7 +207,8 @@ impl BackendService {
                         || old_release_year != item.release_year
                         || old_release_date != item.release_date
                         || old_recorded_date != item.recorded_date
-                        || old_genre != item.genre
+                        // A genre edited in the app wins over the file's tag.
+                        || (!genre_edited && old_genre != item.genre)
                         || old_wav_extensible_kind.as_deref() != wav_extensible_kind;
                     if old_modified != item.file_modified_at || metadata_changed {
                         let fingerprint = build_track_match_fingerprint(
@@ -234,7 +237,7 @@ impl BackendService {
                                 release_year = ?16,
                                 release_date = ?17,
                                 recorded_date = ?18,
-                                genre = ?19,
+                                genre = CASE WHEN genre_source = 'user' THEN genre ELSE ?19 END,
                                 match_fingerprint = ?20,
                                 updated_at = ?21,
                                 wav_extensible_kind = ?23

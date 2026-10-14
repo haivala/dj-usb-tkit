@@ -2327,6 +2327,12 @@ pub struct TrackDetail {
     /// The keys the cue editor offers, grouped for its picker. A save only
     /// accepts one of these.
     pub key_options: Vec<KeyOptionGroup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
+    /// Star rating, 0 (none) to 5.
+    pub rating: u8,
+    /// Genres the editor's genre field suggests, sorted case-insensitively.
+    pub genre_options: Vec<String>,
 }
 
 /// One group of the cue editor's key picker ("Major" / "Minor"), in order.
@@ -2397,6 +2403,9 @@ pub struct GetUsbTrackDetailRequest {
     pub usb_root: String,
     /// `UsbTrack.usb_analysis_path_raw` — the un-resolved on-device ANLZ path.
     pub usb_analysis_path_raw: String,
+    /// The track's PDB-relative media path, to read its genre and rating.
+    #[serde(default)]
+    pub usb_media_path_raw: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2410,6 +2419,13 @@ pub struct UsbTrackAnalysisDetail {
     pub detail_waveform: Option<String>,
     /// Same as `TrackDetail::key_options`.
     pub key_options: Vec<KeyOptionGroup>,
+    /// The track's genre in the USB's PDB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
+    /// The track's star rating in the USB's PDB, 0 to 5.
+    pub rating: u8,
+    /// The library's genres and the USB's, sorted case-insensitively.
+    pub genre_options: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2471,6 +2487,60 @@ pub struct SaveUsbTrackAnalysisEditsData {
     /// The local `tracks` row the save also wrote (resolved by the backend,
     /// not just the request's hint), so the UI can refresh that library track
     /// and the app playlists that contain it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_track_id: Option<String>,
+}
+
+/// Genre / star rating edit from the cue editor. Separate from the analysis
+/// save so a metadata-only edit leaves the beat grid, key and cues alone.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTrackMetadataEditsRequest {
+    pub track_id: String,
+    /// `None` ⇒ leave unchanged; an empty string clears the genre.
+    #[serde(default)]
+    pub genre: Option<String>,
+    /// `None` ⇒ leave unchanged; 0 (no stars) to 5.
+    #[serde(default)]
+    pub rating: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTrackMetadataEditsData {
+    pub track_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
+    pub rating: u8,
+}
+
+/// [`SaveTrackMetadataEditsRequest`] for a track opened from a USB view:
+/// written to the USB's PDB and eDB in place, and to the matched library track.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveUsbTrackMetadataEditsRequest {
+    pub usb_root: String,
+    /// eDB `content.path` / PDB track path lookup key.
+    pub usb_media_path_raw: String,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub rating: Option<u8>,
+    /// Same as `SaveUsbTrackAnalysisEditsRequest::local_track_id`.
+    #[serde(default)]
+    pub local_track_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub album: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveUsbTrackMetadataEditsData {
+    pub local_updated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_track_id: Option<String>,
 }

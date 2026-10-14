@@ -220,25 +220,22 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
 /// rule (`key_names_match`). Returns the staged path + new bytes to write, or
 /// `None` when nothing changes. Nothing is written here, so the caller can
 /// block before touching the device.
-fn build_pdb_track_patch(
-    usb_root: &Path,
-    media_path: &str,
-    bpm: Option<f64>,
-    key: Option<&str>,
-) -> BackendResult<Option<(PathBuf, Vec<u8>)>> {
-    if bpm.is_none() && key.is_none() {
-        return Ok(None);
-    }
-    let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&staged_pdb)?;
-    let page_size = bytes
+/// The page size from a PDB file header.
+pub(super) fn pdb_page_size(bytes: &[u8]) -> BackendResult<usize> {
+    bytes
         .get(4..8)
         .and_then(|b| b.try_into().ok())
         .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-        .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))?;
-    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
+        .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))
+}
+
+/// The PDB track row at a USB media path (exact, else ignoring ASCII case).
+pub(super) fn pdb_track_by_media_path<'a>(
+    parsed: &'a crate::pdb_reader::ParsedPdb,
+    media_path: &str,
+) -> BackendResult<&'a crate::pdb_reader::PdbTrackRow> {
     let media_path = media_path.trim();
-    let row = parsed
+    parsed
         .tracks
         .iter()
         .find(|t| t.track_file_path == media_path)
@@ -250,7 +247,23 @@ fn build_pdb_track_patch(
         })
         .ok_or_else(|| {
             BackendError::NotFound(format!("track not in this USB's export.pdb: {media_path}"))
-        })?;
+        })
+}
+
+fn build_pdb_track_patch(
+    usb_root: &Path,
+    media_path: &str,
+    bpm: Option<f64>,
+    key: Option<&str>,
+) -> BackendResult<Option<(PathBuf, Vec<u8>)>> {
+    if bpm.is_none() && key.is_none() {
+        return Ok(None);
+    }
+    let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
+    let mut bytes = std::fs::read(&staged_pdb)?;
+    let page_size = pdb_page_size(&bytes)?;
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
+    let row = pdb_track_by_media_path(&parsed, media_path)?;
     let mut data = super::repair::track_row_data_from_reader_row(row);
     let mut changed_fields = Vec::<&'static str>::new();
 
@@ -782,21 +795,56 @@ fn apply_local_analysis_edits_tx(
     }
 
     if first_beat_ms.is_some() || cues.is_some() || bpm.is_some() || key.is_some() {
-        tx.execute(
-            "UPDATE tracks SET updated_at = ?1 WHERE id = ?2",
-            params![now, track_id],
-        )?;
-        tx.execute(
-            "UPDATE playlists
-                SET updated_at = ?1,
-                    last_exported_at = NULL,
-                    last_exported_usb_root = NULL,
-                    last_exported_track_count = NULL
-              WHERE id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = ?2)",
-            params![now, track_id],
-        )?;
+        mark_track_edited_tx(tx, track_id, now)?;
     }
     Ok(())
+}
+
+/// Stamp an edited track and mark every playlist containing it as not yet
+/// exported.
+pub(super) fn mark_track_edited_tx(
+    tx: &rusqlite::Transaction<'_>,
+    track_id: &str,
+    now: &str,
+) -> BackendResult<()> {
+    tx.execute(
+        "UPDATE tracks SET updated_at = ?1 WHERE id = ?2",
+        params![now, track_id],
+    )?;
+    tx.execute(
+        "UPDATE playlists
+            SET updated_at = ?1,
+                last_exported_at = NULL,
+                last_exported_usb_root = NULL,
+                last_exported_track_count = NULL
+          WHERE id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = ?2)",
+        params![now, track_id],
+    )?;
+    Ok(())
+}
+
+/// What identifies a USB row's library track for
+/// [`BackendService::resolve_local_track_id_for_usb`].
+pub(super) struct UsbLocalTrackHint<'a> {
+    pub usb_media_path_raw: &'a str,
+    pub local_track_id: Option<&'a str>,
+    pub title: Option<&'a str>,
+    pub artist: Option<&'a str>,
+    pub album: Option<&'a str>,
+    pub bpm: Option<f64>,
+}
+
+impl<'a> UsbLocalTrackHint<'a> {
+    fn of_analysis_edits(req: &'a SaveUsbTrackAnalysisEditsRequest) -> Self {
+        Self {
+            usb_media_path_raw: &req.usb_media_path_raw,
+            local_track_id: req.local_track_id.as_deref(),
+            title: req.title.as_deref(),
+            artist: req.artist.as_deref(),
+            album: req.album.as_deref(),
+            bpm: req.bpm,
+        }
+    }
 }
 
 impl BackendService {
@@ -851,6 +899,7 @@ impl BackendService {
             .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
 
         let cues = cues_for_editor(load_track_cues(&conn, track_id)?);
+        let (genre, rating) = super::track_metadata::library_genre_rating(&conn, track_id)?;
 
         Ok(TrackDetail {
             track,
@@ -858,6 +907,9 @@ impl BackendService {
             cues,
             detail_waveform,
             key_options: key_option_groups(key_notation_setting(&conn)?),
+            genre,
+            rating,
+            genre_options: super::track_metadata::genre_options(&conn, Vec::new())?,
         })
     }
 
@@ -997,6 +1049,25 @@ impl BackendService {
             )));
         }
 
+        // Genre and rating come from the PDB row; a track the PDB lacks still
+        // opens (its save is blocked later), just without them.
+        let media_path = req
+            .usb_media_path_raw
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("");
+        let (genre, rating, usb_genres) = if media_path.is_empty() {
+            (None, 0, Vec::new())
+        } else {
+            super::track_metadata::usb_genre_rating(&usb_root, media_path).unwrap_or_else(|err| {
+                logging::emit(
+                    Level::Warn,
+                    "cues.usb-detail.no-pdb-metadata",
+                    &format!("could not read genre/rating for {media_path}: {err}"),
+                );
+                (None, 0, Vec::new())
+            })
+        };
         let notation = self.key_notation()?;
         Ok(UsbTrackAnalysisDetail {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
@@ -1004,6 +1075,9 @@ impl BackendService {
             detail_waveform: read_pwv5_from_anlz(dat_path)
                 .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
             key_options: key_option_groups(notation),
+            genre,
+            rating,
+            genre_options: super::track_metadata::genre_options(&*self.db.connect()?, usb_genres)?,
         })
     }
 
@@ -1134,7 +1208,9 @@ impl BackendService {
         on_progress(3, USB_SAVE_STEPS, "Updating library track");
         // 6. Local master write (mandatory when a match is found) — before the
         //    eDB commit so a local failure aborts before the device diverges.
-        let local_track_id = match self.resolve_local_track_id_for_usb(&usb_root, &req) {
+        let local_track_id = match self
+            .resolve_local_track_id_for_usb(&usb_root, &UsbLocalTrackHint::of_analysis_edits(&req))
+        {
             Some(track_id) => {
                 let mut conn = self.db.connect()?;
                 let now = now();
@@ -1230,20 +1306,15 @@ impl BackendService {
     /// Resolve the local `tracks` id a USB row maps to, in priority order:
     /// frontend hint → `track_usb_links` → `resolve_playback_source`
     /// (fingerprint/title). Only the USB→local direction is ever needed.
-    fn resolve_local_track_id_for_usb(
+    pub(super) fn resolve_local_track_id_for_usb(
         &self,
         usb_root: &Path,
-        req: &SaveUsbTrackAnalysisEditsRequest,
+        req: &UsbLocalTrackHint<'_>,
     ) -> Option<String> {
         let conn = self.db.connect().ok()?;
 
         // 1. Frontend hint — accept only when the row still exists.
-        if let Some(hint) = req
-            .local_track_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
+        if let Some(hint) = req.local_track_id.map(str::trim).filter(|s| !s.is_empty()) {
             let existing: Option<String> = conn
                 .query_row("SELECT id FROM tracks WHERE id = ?1", params![hint], |r| {
                     r.get(0)
@@ -1285,8 +1356,8 @@ impl BackendService {
         }
 
         // 3. Fingerprint / title fallback.
-        let title = req.title.as_deref().unwrap_or_default().trim().to_string();
-        let artist = req.artist.as_deref().unwrap_or_default().trim().to_string();
+        let title = req.title.unwrap_or_default().trim().to_string();
+        let artist = req.artist.unwrap_or_default().trim().to_string();
         if title.is_empty() && artist.is_empty() {
             return None;
         }
@@ -1294,9 +1365,9 @@ impl BackendService {
             .resolve_playback_source(ResolvePlaybackSourceRequest {
                 title,
                 artist,
-                album: req.album.clone(),
+                album: req.album.map(str::to_string),
                 bpm: req.bpm,
-                file_path: Some(req.usb_media_path_raw.clone()),
+                file_path: Some(req.usb_media_path_raw.to_string()),
                 file_size_bytes: None,
                 track_id: None,
             })
