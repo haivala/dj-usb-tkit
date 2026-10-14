@@ -1,7 +1,6 @@
 import { catchErr, handleTrackAction, trackMetaFingerprint, resolveRowActionTrack } from "../shared/track_actions.mjs";
-import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
+import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
-import { moveArrayItem } from "./actions.mjs";
 
 export function bindUsbEvents(ctx) {
   const {
@@ -205,62 +204,16 @@ export function bindUsbEvents(ctx) {
     emitStatus(`USB playlist selected: ${playlist.name} (${playlist.trackCount ?? "?"} tracks)`);
   });
 
-  let dragSourceLi = null;
-  let dragSourceIndex = null;
-  const usbPlaylistAutoScroller = createDragAutoScroller(el.usbPlaylists);
-
-  el.usbPlaylists.addEventListener("dragstart", (event) => {
-    const handle = event.target.closest("[data-usb-drag-handle]");
-    const li = handle?.closest("li[data-usb-playlist-li]");
-    if (!handle || !li) {
-      event.preventDefault();
-      return;
+  bindListDragReorder(el.usbPlaylists, {
+    handleSelector: "[data-usb-drag-handle]",
+    itemSelector: "li[data-usb-playlist-li]",
+    onMove: (fromIndex, toIndex) => {
+      state.usbPlaylists = moveArrayItem(state.usbPlaylists, fromIndex, toIndex);
+      reorderUsbPlaylists().catch((err) => {
+        console.error(err);
+        emitStatus(`Save playlist order failed: ${err.message}`);
+      });
     }
-    dragSourceLi = li;
-    dragSourceIndex = Number(li.dataset.usbPlaylistLi);
-    li.classList.add("dragging");
-    usbPlaylistAutoScroller.attachWheel();
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(dragSourceIndex));
-    }
-  });
-
-  el.usbPlaylists.addEventListener("dragover", (event) => {
-    if (!dragSourceLi) return;
-    event.preventDefault();
-    usbPlaylistAutoScroller.update(event.clientY);
-    const targetLi = event.target.closest("li[data-usb-playlist-li]");
-    if (!targetLi || targetLi === dragSourceLi) return;
-    const rect = targetLi.getBoundingClientRect();
-    const before = event.clientY < rect.top + rect.height / 2;
-    if (before) {
-      targetLi.before(dragSourceLi);
-    } else {
-      targetLi.after(dragSourceLi);
-    }
-  });
-
-  el.usbPlaylists.addEventListener("drop", (event) => {
-    if (dragSourceLi) event.preventDefault();
-  });
-
-  el.usbPlaylists.addEventListener("dragend", () => {
-    usbPlaylistAutoScroller.stop();
-    usbPlaylistAutoScroller.detachWheel();
-    if (!dragSourceLi) return;
-    dragSourceLi.classList.remove("dragging");
-    const lis = Array.from(el.usbPlaylists.querySelectorAll("li[data-usb-playlist-li]"));
-    const toIndex = lis.indexOf(dragSourceLi);
-    const fromIndex = dragSourceIndex;
-    dragSourceLi = null;
-    dragSourceIndex = null;
-    if (toIndex < 0 || toIndex === fromIndex) return;
-    state.usbPlaylists = moveArrayItem(state.usbPlaylists, fromIndex, toIndex);
-    reorderUsbPlaylists().catch((err) => {
-      console.error(err);
-      emitStatus(`Save playlist order failed: ${err.message}`);
-    });
   });
 
   el.usbPlaylistTracks.addEventListener("click", async (event) => {

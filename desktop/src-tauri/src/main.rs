@@ -803,6 +803,7 @@ fn main() {
             backend::tauri_commands::resolve_playback_source,
             backend::tauri_commands::create_playlist,
             backend::tauri_commands::rename_playlist,
+            backend::tauri_commands::reorder_playlists,
             backend::tauri_commands::delete_playlist,
             backend::tauri_commands::list_playlists,
             backend::tauri_commands::get_playlist_tracks,

@@ -1,4 +1,4 @@
-USB_*
+/USB_*
 target/
 vanilla-ui/node_modules/
 desktop/node_modules/

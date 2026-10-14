@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { moveArrayItem } from "../components/usb/actions.mjs";
+import { moveArrayItem } from "../components/shared/list_drag_reorder.mjs";
 
 test("moveArrayItem returns reordered copies without mutating the input", () => {
   const input = ["a", "b", "c"];

@@ -130,6 +130,9 @@ drive selection from being rendered against a newer selected drive.
 
 - `create_playlist`
 - `rename_playlist`
+- `reorder_playlists` — `{ orderedPlaylistIds }`, every local playlist once, top first; saves the
+  sidebar order (local only, it never changes anything on the USB). `list_playlists` returns that
+  order, with playlists never reordered newest first
 - `delete_playlist`
 - `list_playlists`
 - `get_playlist_tracks`

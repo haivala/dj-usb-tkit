@@ -146,6 +146,13 @@
 - **Chore:** The library database stores a track file's modified time as a number instead of
   text. The first start after updating converts it once; the library, cues, playlists and
   USB links stay as they are.
+- **New feature:** Sidebar playlists can be put in any order by dragging the handle that shows
+  when hovering a playlist. New playlists appear at the top. The order is the app's own and
+  doesn't change the playlist order on the USB.
+- **New feature:** The sidebar can be made wider or narrower by dragging its right edge. The
+  width is remembered, and double-clicking the edge resets it.
+- **Fix:** Double-clicking a sidebar playlist to rename it no longer closes the name field right
+  away. Hovering a playlist also shows a pencil button that starts a rename.
 
 ## 0.4.1
 

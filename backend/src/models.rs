@@ -605,6 +605,20 @@ pub struct RenamePlaylistData {
     pub name: String,
 }
 
+/// The full new sidebar order of the local playlists, top first. Must name
+/// every playlist exactly once.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderPlaylistsRequest {
+    pub ordered_playlist_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderPlaylistsData {
+    pub reordered: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeletePlaylistRequest {

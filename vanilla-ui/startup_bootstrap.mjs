@@ -2,6 +2,7 @@ import { STATIC_TABS } from "./app_state.mjs";
 import { createThemeManager, createAccentManager } from "./components/settings/actions.mjs";
 import { refreshUpdateCheck, UPDATE_RECHECK_INTERVAL_MS } from "./update_check.mjs";
 import { normalizeAnalysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE } from "./components/library/actions.mjs";
+import { applySidebarWidth, clampSidebarWidth } from "./components/shell/actions.mjs";
 import {
   STORAGE_KEY_EXPORT_PRUNE_STALE,
   STORAGE_KEY_EXPORT_BACKUP,
@@ -11,6 +12,7 @@ import {
   STORAGE_KEY_ANALYSIS_ENGINE,
   STORAGE_KEY_KEY_NOTATION,
   STORAGE_KEY_SIDEBAR_COLLAPSED,
+  STORAGE_KEY_SIDEBAR_WIDTH,
   STORAGE_KEY_HELP_SEEN,
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
   STORAGE_KEY_CUE_BEATGRID_LEVEL,
@@ -168,10 +170,17 @@ export function restoreStoredUiPrefs(ctx) {
   } catch {
     state.sidebarCollapsed = false;
   }
+
+  try {
+    state.sidebarWidth = clampSidebarWidth(localStorage?.getItem?.(STORAGE_KEY_SIDEBAR_WIDTH));
+  } catch {
+    state.sidebarWidth = clampSidebarWidth(null);
+  }
 }
 
 export function applySidebarCollapsedUi(ctx) {
   const { state, el, document } = ctx;
+  applySidebarWidth(document, state.sidebarWidth);
   if (state.sidebarCollapsed) {
     el.navSidebar.classList.add("collapsed");
     el.sidebarExpandBtn?.classList.add("visible");
@@ -218,10 +227,9 @@ export function runDeferredInitialLoad(ctx) {
       if (state.playlists.length > 0) {
         const hasCurrent = state.playlists.some((playlist) => playlist.id === state.currentPlaylistId);
         if (!hasCurrent) {
-          // list_playlists is ordered created_at ASC, so the newest playlist is
-          // last -- default the selection to it (matches the post-delete fallback
-          // in components/playlist/actions.mjs).
-          state.currentPlaylistId = state.playlists.at(-1).id;
+          // Default the selection to the top sidebar playlist (matches the
+          // post-delete fallback in components/playlist/actions.mjs).
+          state.currentPlaylistId = state.playlists[0].id;
         }
       }
       ctx.updateModeText();

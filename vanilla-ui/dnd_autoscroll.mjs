@@ -1,6 +1,6 @@
 // Shared auto-scroll behavior for native HTML5 drag-and-drop lists. Used by
-// both the app-playlist track reorder (components/playlist/events.mjs) and
-// the USB playlist sidebar reorder (components/usb/events.mjs) so a drag
+// the app-playlist track reorder (components/playlist/events.mjs) and the
+// playlist list reorders (components/shared/list_drag_reorder.mjs) so a drag
 // that's held near a scrollable list's edge -- or receives wheel input --
 // keeps scrolling the list instead of getting stuck off-screen.
 export function createDragAutoScroller(container, options = {}) {

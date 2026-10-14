@@ -16,11 +16,11 @@ use crate::edb::{
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    DiagOverviewItem, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, RepairFixProposal,
-    RepairUnsupportedItem, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
-    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail, UsbPlayerMenuDivergence,
-    UsbPlayerMenuItem, UsbPlayerMenuItemOrigin, WarningEntry,
+    DiagOverviewItem, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
+    RepairFixProposal, RepairUnsupportedItem, RepairUsbDiagnosticsData,
+    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
+    UsbPlayerMenuDivergence, UsbPlayerMenuItem, UsbPlayerMenuItemOrigin, WarningEntry,
 };
 use crate::pdb_page;
 use crate::pdb_reader::{ParsedPdb, parse_pdb};
@@ -60,8 +60,8 @@ use crate::audio_format::same_format_extension;
 use crate::scanner::scan_audio_file;
 
 use super::diagnostics::{
-    AnalysisOwnership, BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths, counted,
-    detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
+    AnalysisOwnership, BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths,
+    counted, detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
     normalize_pdb_path_for_edb_lookup, scan_analysis_ownership, scan_audio_presence,
     track_identity_key,
 };

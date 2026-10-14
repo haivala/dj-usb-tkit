@@ -462,6 +462,11 @@ body.library-onboarding {
 
 /* ── App layout (sidebar + main) ───────────────────── */
 
+/* Set from the saved width at startup and while dragging the sidebar edge. */
+:root {
+  --sidebar-width: 220px;
+}
+
 .app-layout {
   display: flex;
   flex: 1;
@@ -471,8 +476,9 @@ body.library-onboarding {
 /* ── Navigation sidebar ────────────────────────────── */
 
 .nav-sidebar {
-  width: 220px;
-  min-width: 220px;
+  position: relative;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   background: var(--sidebar-bg);
   border-right: 1px solid var(--line);
   display: flex;
@@ -480,6 +486,37 @@ body.library-onboarding {
   overflow: hidden;
   transition: width 200ms ease, min-width 200ms ease;
   flex-shrink: 0;
+}
+
+/* No width animation while the user drags the edge. */
+.nav-sidebar.resizing {
+  transition: none;
+}
+
+/* Drag the sidebar's right edge to resize it; double-click resets it. */
+.nav-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.nav-sidebar-resizer:hover,
+.nav-sidebar.resizing .nav-sidebar-resizer {
+  background: var(--accent-glow);
+}
+
+body.sidebar-resizing {
+  cursor: col-resize;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.nav-sidebar.collapsed .nav-sidebar-resizer {
+  display: none;
 }
 
 .nav-sidebar.collapsed {
@@ -757,7 +794,7 @@ body.library-onboarding {
   color: var(--success);
 }
 
-.nav-playlist-delete {
+.nav-playlist-icon-btn {
   order: 2;
   display: inline-flex;
   width: 18px;
@@ -781,6 +818,25 @@ body.library-onboarding {
   border-color: var(--danger);
   background: var(--danger-glow);
   box-shadow: none;
+}
+
+.nav-playlist-rename:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  box-shadow: none;
+}
+
+/* Drag handle and rename pencil show only on the hovered/focused row. */
+.nav-playlist-hover-only {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.nav-playlist-item:hover .nav-playlist-hover-only,
+.nav-playlist-item:focus-visible .nav-playlist-hover-only,
+.nav-playlist-hover-only:focus-visible {
+  opacity: 1;
 }
 
 .nav-add-playlist {
@@ -2097,8 +2153,8 @@ input[type="checkbox"]:disabled {
   background: var(--danger-glow);
 }
 
-/* drag handle for reordering USB playlists */
-.list li button .drag-handle {
+/* drag handle for reordering playlists and playlist tracks */
+.drag-handle {
   flex-shrink: 0;
   width: 16px;
   text-align: center;
@@ -2108,11 +2164,12 @@ input[type="checkbox"]:disabled {
   user-select: none;
 }
 
-.list li button .drag-handle:active {
+.drag-handle:active {
   cursor: grabbing;
 }
 
-.list li.dragging {
+.list li.dragging,
+.nav-playlist-list li.dragging {
   opacity: 0.5;
 }
 
@@ -2126,20 +2183,6 @@ input[type="checkbox"]:disabled {
   align-items: center;
   justify-content: center;
   padding: 5px 0;
-}
-
-.track-grid-row .drag-handle {
-  flex-shrink: 0;
-  width: 16px;
-  text-align: center;
-  color: var(--muted);
-  cursor: grab;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.track-grid-row .drag-handle:active {
-  cursor: grabbing;
 }
 
 .track-grid-row .drag-handle.disabled {
@@ -2623,7 +2666,7 @@ input[type="checkbox"]:disabled {
 
 .progress-footer {
   position: fixed;
-  left: 220px;
+  left: var(--sidebar-width);
   right: 0;
   bottom: 0;
   z-index: 20;

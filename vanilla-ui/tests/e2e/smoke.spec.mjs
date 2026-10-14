@@ -6,6 +6,9 @@ function installBasicTauriMock(page, opts = {}) {
 
     const playlists = [];
     const failRename = !!opts?.failRename;
+    let nextPlaylistId = 1;
+    // Playlist track loads still in flight (see `playlistTracksDelayMs`).
+    window.__pendingTrackLoads = 0;
     window.__calls = [];
     const listeners = new Map();
     // Lets a test push backend events (job:event) at the app.
@@ -47,8 +50,9 @@ function installBasicTauriMock(page, opts = {}) {
           }
           if (command === "create_playlist") {
             const name = payload?.request?.name || "Untitled";
-            const playlistId = `pl-${Date.now()}`;
-            playlists.push({
+            const playlistId = `pl-${nextPlaylistId++}`;
+            // Like the backend: new playlists go to the top of the sidebar order.
+            playlists.unshift({
               id: playlistId,
               name,
               source: "local",
@@ -80,8 +84,22 @@ function installBasicTauriMock(page, opts = {}) {
             row.name = name;
             return { ok: true, data: { playlistId, name } };
           }
+          if (command === "reorder_playlists") {
+            const ids = payload?.request?.orderedPlaylistIds || [];
+            const byId = new Map(playlists.map((p) => [p.id, p]));
+            playlists.splice(0, playlists.length, ...ids.map((id) => byId.get(id)));
+            return { ok: true, data: { reordered: ids.length } };
+          }
+          if (command === "set_frontend_setting") {
+            return { ok: true, data: { saved: true } };
+          }
           if (command === "get_playlist_tracks") {
-            return { ok: true, data: { playlistId: payload?.request?.playlistId || "", items: [] } };
+            const data = { playlistId: payload?.request?.playlistId || "", items: [] };
+            if (!opts?.playlistTracksDelayMs) return { ok: true, data };
+            window.__pendingTrackLoads += 1;
+            await new Promise((resolve) => setTimeout(resolve, opts.playlistTracksDelayMs));
+            window.__pendingTrackLoads -= 1;
+            return { ok: true, data };
           }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
@@ -175,7 +193,7 @@ test("restores source roots from localStorage as source chips", async ({ page })
 });
 
 test("sidebar playlist rename updates sidebar and badge", async ({ page }) => {
-  await installBasicTauriMock(page);
+  await installBasicTauriMock(page, { playlistTracksDelayMs: 150 });
   await page.goto("/");
 
   await page.locator("#addPlaylistBtn").click();
@@ -185,19 +203,10 @@ test("sidebar playlist rename updates sidebar and badge", async ({ page }) => {
   const item = page.locator("#navPlaylistList .nav-playlist-item").first();
   await expect(item).toBeVisible();
   await expect(item).toContainText("Rename Me");
-  await page.waitForFunction(() => {
-    const input = document.querySelector("#navPlaylistList .nav-rename-input");
-    if (input) return true;
-    const itemEl = document.querySelector("#navPlaylistList .nav-playlist-item");
-    if (!itemEl) return false;
-    itemEl.dispatchEvent(new MouseEvent("dblclick", {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      detail: 2
-    }));
-    return !!document.querySelector("#navPlaylistList .nav-rename-input");
-  });
+  // A real double-click: its clicks switch to the playlist, whose (slow)
+  // track load re-renders the sidebar; the rename field must survive that.
+  await item.locator(".nav-playlist-name").dblclick();
+  await page.waitForFunction(() => window.__pendingTrackLoads === 0);
   const renameInput = page.locator("#navPlaylistList .nav-rename-input");
   await expect(renameInput).toBeVisible();
   await renameInput.fill("Renamed Playlist");
@@ -208,7 +217,7 @@ test("sidebar playlist rename updates sidebar and badge", async ({ page }) => {
 });
 
 test("sidebar playlist rename failure keeps original name and sets status", async ({ page }) => {
-  await installBasicTauriMock(page, { failRename: true });
+  await installBasicTauriMock(page, { failRename: true, playlistTracksDelayMs: 150 });
   await page.goto("/");
 
   await page.locator("#addPlaylistBtn").click();
@@ -218,19 +227,10 @@ test("sidebar playlist rename failure keeps original name and sets status", asyn
   const item = page.locator("#navPlaylistList .nav-playlist-item").first();
   await expect(item).toBeVisible();
   await expect(item).toContainText("Rename Fail");
-  await page.waitForFunction(() => {
-    const input = document.querySelector("#navPlaylistList .nav-rename-input");
-    if (input) return true;
-    const itemEl = document.querySelector("#navPlaylistList .nav-playlist-item");
-    if (!itemEl) return false;
-    itemEl.dispatchEvent(new MouseEvent("dblclick", {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      detail: 2
-    }));
-    return !!document.querySelector("#navPlaylistList .nav-rename-input");
-  });
+  // A real double-click: its clicks switch to the playlist, whose (slow)
+  // track load re-renders the sidebar; the rename field must survive that.
+  await item.locator(".nav-playlist-name").dblclick();
+  await page.waitForFunction(() => window.__pendingTrackLoads === 0);
   const renameInput = page.locator("#navPlaylistList .nav-rename-input");
   await expect(renameInput).toBeVisible();
   await renameInput.fill("Should Not Save");
@@ -238,6 +238,105 @@ test("sidebar playlist rename failure keeps original name and sets status", asyn
 
   await expect(item).toContainText("Rename Fail");
   await expect(page.locator("#statusText")).toContainText("Rename failed");
+});
+
+async function createSidebarPlaylists(page, names) {
+  for (const name of names) {
+    await page.locator("#addPlaylistBtn").click();
+    await page.locator("#navPlaylistList .nav-new-input").fill(name);
+    await page.locator("#navPlaylistList .nav-new-input").press("Enter");
+    await expect(page.locator("#navPlaylistList .nav-playlist-name").first()).toHaveText(name);
+  }
+}
+
+test("sidebar playlist rename via the hover pencil", async ({ page }) => {
+  await installBasicTauriMock(page);
+  await page.goto("/");
+  await createSidebarPlaylists(page, ["Pencil Me"]);
+
+  const item = page.locator("#navPlaylistList .nav-playlist-item").first();
+  const pencil = item.locator("[data-rename-playlist]");
+  await expect(pencil).toHaveCSS("opacity", "0");
+  await item.hover();
+  await expect(pencil).toHaveCSS("opacity", "1");
+  await pencil.click();
+
+  const renameInput = page.locator("#navPlaylistList .nav-rename-input");
+  await expect(renameInput).toBeFocused();
+  await renameInput.fill("Penciled");
+  await renameInput.press("Enter");
+  await expect(item).toContainText("Penciled");
+});
+
+test("sidebar playlists reorder by dragging and new ones go on top", async ({ page }) => {
+  await installBasicTauriMock(page);
+  await page.goto("/");
+  await createSidebarPlaylists(page, ["Alpha", "Bravo", "Charlie"]);
+
+  const names = page.locator("#navPlaylistList .nav-playlist-name");
+  await expect(names).toHaveText(["Charlie", "Bravo", "Alpha"]);
+
+  const items = page.locator("#navPlaylistList li[data-nav-playlist-li]");
+  await items.nth(2).hover();
+  await items.nth(2).locator("[data-nav-playlist-drag-handle]").dragTo(items.nth(0), {
+    targetPosition: { x: 20, y: 2 }
+  });
+  await expect(names).toHaveText(["Alpha", "Charlie", "Bravo"]);
+
+  const reorderCalls = await page.evaluate(() =>
+    window.__calls.filter((c) => c.command === "reorder_playlists").map((c) => c.payload.request)
+  );
+  expect(reorderCalls).toEqual([{ orderedPlaylistIds: ["pl-1", "pl-3", "pl-2"] }]);
+
+  await createSidebarPlaylists(page, ["Delta"]);
+  await expect(names).toHaveText(["Delta", "Alpha", "Charlie", "Bravo"]);
+});
+
+test("sidebar resizes by dragging its edge, saves the width, and double-click resets it", async ({ page }) => {
+  await installBasicTauriMock(page);
+  await page.goto("/");
+
+  const sidebar = page.locator("#navSidebar");
+  const resizer = page.locator("#navSidebarResizer");
+  const width = async () => (await sidebar.boundingBox()).width;
+  expect(await width()).toBe(220);
+
+  const box = await resizer.boundingBox();
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 100, y, { steps: 5 });
+  await page.mouse.up();
+  const dragged = await width();
+  expect(dragged).toBeGreaterThan(300);
+  expect(dragged).toBeLessThan(330);
+
+  // Dragging far past the limit stops at the maximum.
+  const box2 = await resizer.boundingBox();
+  await page.mouse.move(box2.x + box2.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box2.x + 2000, y, { steps: 5 });
+  await page.mouse.up();
+  expect(await width()).toBe(480);
+
+  const saved = await page.evaluate(() =>
+    window.__calls
+      .filter((c) => c.command === "set_frontend_setting" && c.payload.request.key === "ui_sidebar_width_v1")
+      .map((c) => c.payload.request.value)
+  );
+  expect(saved.at(-1)).toBe("480");
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.sidebarWidth"))).toBe("480");
+
+  await resizer.dblclick();
+  // The reset animates (only live dragging skips the width transition).
+  await expect.poll(width).toBe(220);
+});
+
+test("sidebar width is restored on startup", async ({ page }) => {
+  await installBasicTauriMock(page);
+  await page.addInitScript(() => window.localStorage.setItem("djusbtkit.sidebarWidth", "300"));
+  await page.goto("/");
+  await expect.poll(async () => (await page.locator("#navSidebar").boundingBox()).width).toBe(300);
 });
 
 const updateCheck = (severity, extra = {}) => ({

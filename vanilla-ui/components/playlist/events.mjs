@@ -1,5 +1,6 @@
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
+import { bindListDragReorder } from "../shared/list_drag_reorder.mjs";
 
 export function bindPlaylistEvents(ctx) {
   const {
@@ -8,6 +9,7 @@ export function bindPlaylistEvents(ctx) {
     switchView,
     deletePlaylist,
     startPlaylistRename,
+    reorderPlaylists,
     promptNewPlaylist,
     importExternalPlaylist,
     playlistImportDialog,
@@ -28,8 +30,8 @@ export function bindPlaylistEvents(ctx) {
   playlistTracksCtl.attachScroll();
 
   el.navPlaylistList.addEventListener("mousedown", (event) => {
-    const deleteBtn = event.target.closest("[data-delete-playlist]");
-    if (!deleteBtn) return;
+    const iconBtn = event.target.closest("[data-delete-playlist], [data-rename-playlist]");
+    if (!iconBtn) return;
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
@@ -44,6 +46,15 @@ export function bindPlaylistEvents(ctx) {
       deletePlaylist(deleteBtn.dataset.deletePlaylist).catch(catchErr(emitStatus));
       return;
     }
+    const renameBtn = event.target.closest("[data-rename-playlist]");
+    if (renameBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      startPlaylistRename(renameBtn.dataset.renamePlaylist);
+      return;
+    }
+    // Clicks inside an open rename field (placing the caret) aren't selections.
+    if (event.target.closest(".nav-rename-input")) return;
     const item = event.target.closest(".nav-playlist-item");
     if (!item) return;
     if (el.navPlaylistList.querySelector(".nav-new-input-wrap")) return;
@@ -51,10 +62,19 @@ export function bindPlaylistEvents(ctx) {
   });
 
   el.navPlaylistList.addEventListener("dblclick", (event) => {
+    if (event.target.closest(".nav-rename-input, [data-delete-playlist], [data-nav-playlist-drag-handle]")) return;
     const item = event.target.closest(".nav-playlist-item");
     if (!item) return;
     event.preventDefault();
     startPlaylistRename(item.dataset.playlistId);
+  });
+
+  bindListDragReorder(el.navPlaylistList, {
+    handleSelector: "[data-nav-playlist-drag-handle]",
+    itemSelector: "li[data-nav-playlist-li]",
+    onMove: (fromIndex, toIndex) => {
+      reorderPlaylists(fromIndex, toIndex).catch(catchErr(emitStatus));
+    }
   });
 
   el.addPlaylistBtn.addEventListener("click", () => {

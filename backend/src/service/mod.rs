@@ -96,11 +96,12 @@ use crate::models::{
     PlaybackStatusData, Playlist, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
-    ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    ResolvedBy, ScanLibraryData, ScanLibraryRequest, SearchTracksData, SearchTracksRequest,
-    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
-    SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData, Track, TrackMatch, WarningEntry,
+    ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ReorderPlaylistsData,
+    ReorderPlaylistsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
+    ResolveTrackIdentityData, ResolveTrackIdentityRequest, ResolvedBy, ScanLibraryData,
+    ScanLibraryRequest, SearchTracksData, SearchTracksRequest, SetFrontendSettingData,
+    SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SourceRootAnalysisStatus,
+    SourceRootStatus, StopPlaybackData, Track, TrackMatch, WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
 use crate::scanner::{scan_audio_files, unique_paths};
@@ -123,6 +124,7 @@ pub(crate) const DEFAULT_BACKUP_RETENTION_COUNT: u32 = 10;
 pub(crate) const SETTING_UI_ANALYSIS_BPM_RANGE: &str = "ui_analysis_bpm_range_v1";
 pub(crate) const SETTING_UI_ANALYSIS_ENGINE: &str = "ui_analysis_engine_v1";
 pub(crate) const SETTING_UI_SIDEBAR_COLLAPSED: &str = "ui_sidebar_collapsed_v1";
+pub(crate) const SETTING_UI_SIDEBAR_WIDTH: &str = "ui_sidebar_width_v1";
 pub(crate) const SETTING_UI_HELP_SEEN: &str = "ui_help_seen_v1";
 pub(crate) const SETTING_UI_KEY_NOTATION: &str = "ui_key_notation_v1";
 pub(crate) const SETTING_UI_REKORDBOX_DB_ENABLED: &str = "ui_rekordbox_db_enabled_v1";

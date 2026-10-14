@@ -72,10 +72,9 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, &'static str)> {
             AREA_MUSIC_FILES,
             "Removes tracks whose music file is no longer on the USB. Play history keeps them.",
         ),
-        EMPTY_ANALYSIS_FILES_FIX_ID => (
-            AREA_ANALYSIS,
-            "Rebuilds missing waveforms and beat grids.",
-        ),
+        EMPTY_ANALYSIS_FILES_FIX_ID => {
+            (AREA_ANALYSIS, "Rebuilds missing waveforms and beat grids.")
+        }
         SHARED_ANALYSIS_FIX_ID => (
             AREA_ANALYSIS,
             "Gives tracks that show another track's waveform their own.",

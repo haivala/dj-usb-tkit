@@ -812,13 +812,6 @@ export async function removeUsbPlaylist(ctx, playlist) {
   );
 }
 
-export function moveArrayItem(list, fromIndex, toIndex) {
-  const copy = list.slice();
-  const [item] = copy.splice(fromIndex, 1);
-  copy.splice(toIndex, 0, item);
-  return copy;
-}
-
 export async function reorderUsbPlaylists(ctx) {
   const { state } = ctx;
   const { emitStatus } = ctx;

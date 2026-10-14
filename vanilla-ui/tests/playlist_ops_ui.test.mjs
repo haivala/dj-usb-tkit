@@ -73,10 +73,12 @@ test("renderPlaylistList marks active tabs and active playlist mode", () => {
     document
   });
 
+  // Rendered in list order (list_playlists returns sidebar order, top first).
   const buttons = document.querySelectorAll(".nav-playlist-item");
   assert.equal(buttons.length, 2);
-  assert.equal(buttons[0].classList.contains("active"), true);
-  assert.equal(buttons[1].classList.contains("playlist-active-mode"), true);
+  assert.deepEqual([...buttons].map((b) => b.dataset.playlistId), ["p1", "p2"]);
+  assert.equal(buttons[1].classList.contains("active"), true);
+  assert.equal(buttons[0].classList.contains("playlist-active-mode"), true);
 });
 
 test("formatPlaylistExportStatus describes the last export", () => {

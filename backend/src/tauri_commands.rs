@@ -38,10 +38,11 @@ use crate::models::{
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
-    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
-    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
+    ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
+    ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
+    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
+    ResolveTrackIdentityData, ResolveTrackIdentityRequest, RestoreUsbBackupData,
+    RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
     RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
     SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
     SaveUsbTrackAnalysisEditsRequest, ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest,
@@ -888,6 +889,14 @@ pub fn rename_playlist(
     request: RenamePlaylistRequest,
 ) -> ApiResponse<RenamePlaylistData> {
     state.rename_playlist(request)
+}
+
+#[tauri::command]
+pub fn reorder_playlists(
+    state: State<'_, BackendCommands>,
+    request: ReorderPlaylistsRequest,
+) -> ApiResponse<ReorderPlaylistsData> {
+    state.reorder_playlists(request)
 }
 
 #[tauri::command]

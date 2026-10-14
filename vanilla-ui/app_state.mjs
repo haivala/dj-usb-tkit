@@ -81,6 +81,7 @@ export function createInitialState() {
     // A USB report pointed at Event Log details not yet looked at (header dot).
     eventLogHasLinkedDetails: false,
     sidebarCollapsed: false,
+    sidebarWidth: 220,
     externalRekordboxDbPath: null,
     rekordboxDbEnabled: false,
     rekordboxDbImported: false,

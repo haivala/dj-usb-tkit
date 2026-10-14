@@ -1,5 +1,6 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
+import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
 import { computeExportButtonState, isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
@@ -45,10 +46,14 @@ function toAddTrackCandidatePayload(track) {
 
 export function renderPlaylistList(ctx) {
   const { state, el, document } = ctx;
+  // A rebuild would drop an open rename field (a double-click's first click
+  // switches view, which re-renders); the rename re-renders when it closes.
+  if (el.navPlaylistList.querySelector(".nav-rename-input")) return;
   el.navPlaylistList.querySelectorAll(".nav-playlist-item").forEach((item) => item.closest("li")?.remove());
   el.navPlaylistList.querySelectorAll(".nav-new-input-wrap").forEach((wrap) => wrap.remove());
 
-  [...state.playlists].reverse().forEach((playlist) => {
+  // list_playlists returns sidebar order, top first.
+  state.playlists.forEach((playlist) => {
     const li = cloneTemplate(document, "tplNavPlaylistItem");
     const btn = li.firstElementChild;
     btn.dataset.playlistId = playlist.id;
@@ -143,24 +148,27 @@ export function startPlaylistRename(ctx, playlistId) {
     if (save && newName && newName !== originalName) {
       try {
         const data = await command("rename_playlist", { playlistId, name: newName });
-        playlist.name = data.name;
-        playlist.lastExportedAt = null;
-        playlist.lastExportedUsbRoot = null;
-        playlist.lastExportedTrackCount = null;
+        // loadPlaylists may have replaced the list while the field was open.
+        const current = state.playlists.find((item) => item.id === playlistId) || playlist;
+        current.name = data.name;
+        current.lastExportedAt = null;
+        current.lastExportedUsbRoot = null;
+        current.lastExportedTrackCount = null;
       } catch (err) {
         console.error("rename failed:", err);
         emitStatus(`Rename failed: ${err.message || err}`);
       }
     }
     item.replaceChildren(...itemContent);
-    fillPlaylistSidebarItem(item, playlist);
+    renderPlaylistList(ctx);
+    const current = state.playlists.find((item) => item.id === playlistId) || playlist;
     if (state.activeTab === playlistId) {
-      el.playlistPanelTitle.textContent = playlist.name;
-      renderPlaylistExportStatus(el, playlist);
+      el.playlistPanelTitle.textContent = current.name;
+      renderPlaylistExportStatus(el, current);
     }
     const badge = getCurrentPlaylist(ctx);
     if (badge?.id === playlistId) {
-      el.badgeLabel.textContent = playlist.name;
+      el.badgeLabel.textContent = current.name;
     }
   };
 
@@ -199,6 +207,22 @@ function renderPlaylistExportStatus(el, playlist) {
     status.dataset.tooltip = root;
   } else {
     delete status.dataset.tooltip;
+  }
+}
+
+// Sidebar drag-reorder: moves the playlist locally, then saves the whole
+// order. The order is local only; it never changes anything on the USB.
+export async function reorderPlaylists(ctx, fromIndex, toIndex) {
+  const { state } = ctx;
+  state.playlists = moveArrayItem(state.playlists, fromIndex, toIndex);
+  renderPlaylistList(ctx);
+  try {
+    await ctx.command("reorder_playlists", {
+      orderedPlaylistIds: state.playlists.map((playlist) => playlist.id)
+    });
+  } catch (err) {
+    ctx.emitStatus(`Save playlist order failed: ${err.message || err}`);
+    await loadPlaylists(ctx);
   }
 }
 
@@ -291,7 +315,7 @@ export async function createPlaylist(ctx, name) {
       || (createdPlaylistId
         ? null
         : loadedPlaylists.find((item) => String(item?.name || "") === String(playlist?.name || "")))
-      || loadedPlaylists[loadedPlaylists.length - 1]
+      || loadedPlaylists[0]
       || null;
     const selectedPlaylistId = selectedPlaylist?.id || createdPlaylistId;
     state.currentPlaylistId = selectedPlaylistId;
@@ -454,7 +478,7 @@ export async function deletePlaylist(ctx, playlistId) {
     }
     await loadPlaylists(ctx);
     if (state.currentPlaylistId === playlistId) {
-      state.currentPlaylistId = state.playlists.at(-1)?.id || null;
+      state.currentPlaylistId = state.playlists[0]?.id || null;
     }
     updateModeText();
     await switchView(state.currentPlaylistId || "library");
@@ -598,6 +622,7 @@ export function fillPlaylistSidebarItem(item, playlist) {
     delete status.dataset.tooltip;
     status.removeAttribute("aria-label");
   }
+  item.querySelector(".nav-playlist-rename").dataset.renamePlaylist = playlist.id;
   item.querySelector(".nav-playlist-delete").dataset.deletePlaylist = playlist.id;
 }
 

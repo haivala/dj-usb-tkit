@@ -13,6 +13,7 @@ export const STORAGE_KEY_BACKUP_RETENTION_COUNT = "djusbtkit.backupRetentionCoun
 export const STORAGE_KEY_ANALYSIS_BPM_RANGE = "djusbtkit.analysisBpmRange";
 export const STORAGE_KEY_ANALYSIS_ENGINE = "djusbtkit.analysisEngine";
 export const STORAGE_KEY_SIDEBAR_COLLAPSED = "djusbtkit.sidebarCollapsed";
+export const STORAGE_KEY_SIDEBAR_WIDTH = "djusbtkit.sidebarWidth";
 export const STORAGE_KEY_HELP_SEEN = "djusbtkit.helpSeen";
 export const STORAGE_KEY_REKORDBOX_DB_ENABLED = "djusbtkit.rekordboxDbEnabled";
 export const STORAGE_KEY_MIXXX_DB_ENABLED = "djusbtkit.mixxxDbEnabled";
@@ -37,6 +38,7 @@ export const FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT = "ui_backup_retention_count
 export const FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE = "ui_analysis_bpm_range_v1";
 export const FRONTEND_DB_KEY_ANALYSIS_ENGINE = "ui_analysis_engine_v1";
 export const FRONTEND_DB_KEY_SIDEBAR_COLLAPSED = "ui_sidebar_collapsed_v1";
+export const FRONTEND_DB_KEY_SIDEBAR_WIDTH = "ui_sidebar_width_v1";
 export const FRONTEND_DB_KEY_HELP_SEEN = "ui_help_seen_v1";
 export const FRONTEND_DB_KEY_REKORDBOX_DB_ENABLED = "ui_rekordbox_db_enabled_v1";
 export const FRONTEND_DB_KEY_MIXXX_DB_ENABLED = "ui_mixxx_db_enabled_v1";
@@ -61,6 +63,7 @@ export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_ANALYSIS_BPM_RANGE, dbKey: FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE },
   { storageKey: STORAGE_KEY_ANALYSIS_ENGINE, dbKey: FRONTEND_DB_KEY_ANALYSIS_ENGINE },
   { storageKey: STORAGE_KEY_SIDEBAR_COLLAPSED, dbKey: FRONTEND_DB_KEY_SIDEBAR_COLLAPSED },
+  { storageKey: STORAGE_KEY_SIDEBAR_WIDTH, dbKey: FRONTEND_DB_KEY_SIDEBAR_WIDTH },
   { storageKey: STORAGE_KEY_HELP_SEEN, dbKey: FRONTEND_DB_KEY_HELP_SEEN },
   { storageKey: STORAGE_KEY_REKORDBOX_DB_ENABLED, dbKey: FRONTEND_DB_KEY_REKORDBOX_DB_ENABLED },
   { storageKey: STORAGE_KEY_MIXXX_DB_ENABLED, dbKey: FRONTEND_DB_KEY_MIXXX_DB_ENABLED },

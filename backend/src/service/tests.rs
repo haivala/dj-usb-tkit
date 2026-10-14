@@ -975,7 +975,60 @@ fn list_playlists_names_the_drive_last_exported_to() {
         .into_iter()
         .map(|p| p.last_exported_usb_name)
         .collect();
-    assert_eq!(names, vec![Some("CLUB_STICK".to_string()), None, None]);
+    // Never reordered, so newest first: p3, p2, p1.
+    assert_eq!(names, vec![None, None, Some("CLUB_STICK".to_string())]);
+}
+
+#[test]
+fn reorder_playlists_saves_sidebar_order_and_new_playlists_go_on_top() {
+    let (_dir, service) = test_service();
+    let create = |name: &str| {
+        service
+            .create_playlist(CreatePlaylistRequest {
+                name: name.to_string(),
+            })
+            .expect("create playlist")
+            .playlist_id
+    };
+    let listed_names = || -> Vec<String> {
+        service
+            .list_playlists()
+            .expect("list")
+            .items
+            .into_iter()
+            .map(|p| p.name)
+            .collect()
+    };
+    let a = create("A");
+    let b = create("B");
+    let c = create("C");
+    assert_eq!(listed_names(), ["C", "B", "A"]);
+
+    let saved = service
+        .reorder_playlists(ReorderPlaylistsRequest {
+            ordered_playlist_ids: vec![a.clone(), c.clone(), b.clone()],
+        })
+        .expect("reorder");
+    assert_eq!(saved.reordered, 3);
+    assert_eq!(listed_names(), ["A", "C", "B"]);
+
+    create("D");
+    assert_eq!(listed_names(), ["D", "A", "C", "B"]);
+
+    // Missing, duplicate or unknown ids change nothing.
+    for ids in [
+        vec![a.clone(), c.clone(), b.clone()],
+        vec![a.clone(), a.clone(), c.clone(), b.clone()],
+        vec![a.clone(), c.clone(), b.clone(), "nope".to_string()],
+    ] {
+        let err = service
+            .reorder_playlists(ReorderPlaylistsRequest {
+                ordered_playlist_ids: ids,
+            })
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Validation(_)));
+    }
+    assert_eq!(listed_names(), ["D", "A", "C", "B"]);
 }
 
 #[test]

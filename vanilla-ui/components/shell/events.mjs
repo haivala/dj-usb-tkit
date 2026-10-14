@@ -1,5 +1,11 @@
 import { dismissUpdateBanner } from "../../update_check.mjs";
-import { STORAGE_KEY_SIDEBAR_COLLAPSED, FRONTEND_DB_KEY_SIDEBAR_COLLAPSED } from "../../settings_keys.mjs";
+import {
+  STORAGE_KEY_SIDEBAR_COLLAPSED,
+  FRONTEND_DB_KEY_SIDEBAR_COLLAPSED,
+  STORAGE_KEY_SIDEBAR_WIDTH,
+  FRONTEND_DB_KEY_SIDEBAR_WIDTH
+} from "../../settings_keys.mjs";
+import { applySidebarWidth, clampSidebarWidth, SIDEBAR_WIDTH_DEFAULT } from "./actions.mjs";
 
 export function bindShellEvents(ctx) {
   const {
@@ -32,6 +38,38 @@ export function bindShellEvents(ctx) {
     sidebarExpandBtn.classList.add("visible");
     persistSetting(STORAGE_KEY_SIDEBAR_COLLAPSED, FRONTEND_DB_KEY_SIDEBAR_COLLAPSED, "1");
   });
+
+  // Drag the sidebar's right edge to resize it; double-click resets it.
+  const resizer = el.navSidebarResizer;
+  const saveSidebarWidth = (width) => {
+    state.sidebarWidth = clampSidebarWidth(width);
+    applySidebarWidth(document, state.sidebarWidth);
+    persistSetting(STORAGE_KEY_SIDEBAR_WIDTH, FRONTEND_DB_KEY_SIDEBAR_WIDTH, String(state.sidebarWidth));
+  };
+  resizer?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const left = el.navSidebar.getBoundingClientRect().left;
+    resizer.setPointerCapture?.(event.pointerId);
+    el.navSidebar.classList.add("resizing");
+    document.body.classList.add("sidebar-resizing");
+    const onMove = (moveEvent) => {
+      state.sidebarWidth = clampSidebarWidth(moveEvent.clientX - left);
+      applySidebarWidth(document, state.sidebarWidth);
+    };
+    const onUp = () => {
+      resizer.removeEventListener("pointermove", onMove);
+      resizer.removeEventListener("pointerup", onUp);
+      resizer.removeEventListener("pointercancel", onUp);
+      el.navSidebar.classList.remove("resizing");
+      document.body.classList.remove("sidebar-resizing");
+      saveSidebarWidth(state.sidebarWidth);
+    };
+    resizer.addEventListener("pointermove", onMove);
+    resizer.addEventListener("pointerup", onUp);
+    resizer.addEventListener("pointercancel", onUp);
+  });
+  resizer?.addEventListener("dblclick", () => saveSidebarWidth(SIDEBAR_WIDTH_DEFAULT));
 
   el.confirmOkBtn?.addEventListener("click", () => confirmDialog.close(true));
   el.confirmCancelBtn?.addEventListener("click", () => confirmDialog.close(false));

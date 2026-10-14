@@ -13,6 +13,12 @@ no safe local match exists.
 
 Transport state is pushed through backend events, so the UI reflects start/progress/stop updates without tight polling loops.
 
+In the sidebar, hovering a playlist shows a drag handle on its left and a pencil next to the
+delete button. Drag the handle to reorder the playlists; click the pencil, or double-click the
+name, to rename one. New playlists appear at the top. The sidebar order is the app's own: it does
+not change the playlist order on the USB, which is set in USB → Playlists. Drag the sidebar's
+right edge to make it wider or narrower, and double-click the edge to reset the width.
+
 A playlist can also be imported from a rekordbox or Mixxx library with the
 **Import** button under **New** in the sidebar. It becomes an ordinary local
 playlist; see `docs/EXTERNAL_LIBRARIES.md`.
@@ -24,7 +30,10 @@ Playlist state is modeled as local entities with ordered mapping rows. In practi
 The playlist command layer is intentionally CRUD-oriented:
 
 - `create_playlist`, `rename_playlist`, `delete_playlist` change container metadata
-- `list_playlists` reads container metadata; `get_playlist_tracks` reads ordered
+- `reorder_playlists` saves the sidebar order to `playlists.sort_order`; new playlists get
+  a value below the current minimum so they land on top
+- `list_playlists` reads container metadata in sidebar order (playlists never reordered
+  come newest first); `get_playlist_tracks` reads ordered
   membership, paginated/searched/sorted server-side (see the "Paginated track
   lists" envelope in `docs/COMMANDS.md`; `limit: 0` returns the whole playlist).
   The whole-playlist `totalDurationMs` is computed over the filtered set, not the

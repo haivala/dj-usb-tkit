@@ -90,6 +90,7 @@ pub(super) fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_ANALYSIS_BPM_RANGE,
         SETTING_UI_ANALYSIS_ENGINE,
         SETTING_UI_SIDEBAR_COLLAPSED,
+        SETTING_UI_SIDEBAR_WIDTH,
         SETTING_UI_HELP_SEEN,
         SETTING_UI_KEY_NOTATION,
         SETTING_UI_REKORDBOX_DB_ENABLED,

@@ -124,8 +124,8 @@ test("runDeferredInitialLoad loads initial data, selects fallback playlists, and
   };
   runDeferredInitialLoad(deferredCtx(first, calls));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  // Newest playlist (last in created_at ASC order) is the default selection.
-  assert.equal(first.currentPlaylistId, "p3");
+  // The top sidebar playlist is the default selection.
+  assert.equal(first.currentPlaylistId, "p1");
   assert.equal(first.startupPhase, false);
   assert.equal(calls.includes("playlists"), true);
   assert.equal(calls.includes("tracks"), true);

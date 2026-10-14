@@ -123,6 +123,7 @@
           <span class="nav-label">Donate</span>
         </button>
       </div>
+      <div class="nav-sidebar-resizer" id="navSidebarResizer" data-tooltip="Drag to resize · double-click to reset" aria-hidden="true"></div>
     </aside>
 
     <main>
@@ -828,10 +829,12 @@
     <span class="source-chip"><input class="source-chip-toggle" type="checkbox" aria-label="Filter source" /><span class="source-chip-path"></span><button class="source-chip-remove" aria-label="Remove">&times;</button></span>
   </template>
   <template id="tplNavPlaylistItem">
-    <li><button class="nav-playlist-item">
+    <li data-nav-playlist-li><button class="nav-playlist-item">
+      <span class="drag-handle nav-playlist-hover-only" data-nav-playlist-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">&#10495;</span>
       <span class="nav-playlist-name"></span>
       <span class="nav-playlist-status"></span>
-      <span class="nav-playlist-delete" data-tooltip="Delete playlist" aria-label="Delete playlist" role="button" tabindex="0">&times;</span>
+      <span class="nav-playlist-icon-btn nav-playlist-rename nav-playlist-hover-only" data-tooltip="Rename playlist (or double-click the name)" aria-label="Rename playlist" role="button" tabindex="0">&#9998;</span>
+      <span class="nav-playlist-icon-btn nav-playlist-delete" data-tooltip="Delete playlist" aria-label="Delete playlist" role="button" tabindex="0">&times;</span>
     </button></li>
   </template>
   <template id="tplNavNewPlaylist">

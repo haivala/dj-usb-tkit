@@ -109,3 +109,20 @@ export function renderEmptyState(container, { icon, heading, body, actionLabel, 
     actionsEl.appendChild(btn);
   }
 }
+
+export const SIDEBAR_WIDTH_DEFAULT = 220;
+const SIDEBAR_WIDTH_MIN = 180;
+const SIDEBAR_WIDTH_MAX = 480;
+
+// The sidebar width in px, clamped to the allowed range; anything unusable
+// (missing, not a number) gives the default.
+export function clampSidebarWidth(value) {
+  const px = Math.round(Number(value));
+  if (!Number.isFinite(px) || px <= 0) return SIDEBAR_WIDTH_DEFAULT;
+  return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, px));
+}
+
+// The width lives in a :root variable so the progress footer lines up too.
+export function applySidebarWidth(document, width) {
+  document.documentElement.style.setProperty("--sidebar-width", `${clampSidebarWidth(width)}px`);
+}

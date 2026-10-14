@@ -1,6 +1,7 @@
 //! Local playlists and imported-playlist bookkeeping.
 
 use super::*;
+use std::collections::HashSet;
 
 pub(super) fn track_id_exists(conn: &rusqlite::Connection, track_id: &str) -> BackendResult<bool> {
     let found = conn
@@ -40,8 +41,9 @@ pub(crate) fn insert_local_playlist(
 ) -> BackendResult<String> {
     let id = Uuid::now_v7().to_string();
     let now = now();
+    // New playlists go to the top of the sidebar order (see `list_playlists`).
     conn.execute(
-        "INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at) VALUES (?1, ?2, 'local', NULL, NULL, NULL, ?3, ?3)",
+        "INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at, sort_order) VALUES (?1, ?2, 'local', NULL, NULL, NULL, ?3, ?3, (SELECT COALESCE(MIN(sort_order), 0) - 1 FROM playlists))",
         params![id, name, now],
     )?;
     for (index, track_id) in track_ids.iter().enumerate() {
@@ -212,13 +214,55 @@ impl BackendService {
         })
     }
 
+    /// Saves the user's sidebar order. `ordered_playlist_ids` must name every
+    /// local playlist exactly once; the order is local only and never decides
+    /// anything on the USB.
+    pub fn reorder_playlists(
+        &self,
+        req: ReorderPlaylistsRequest,
+    ) -> BackendResult<ReorderPlaylistsData> {
+        let mut conn = self.db.connect()?;
+        let existing: HashSet<String> = conn
+            .prepare("SELECT id FROM playlists")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        let requested: HashSet<&str> = req
+            .ordered_playlist_ids
+            .iter()
+            .map(String::as_str)
+            .collect();
+        if requested.len() != req.ordered_playlist_ids.len()
+            || requested.len() != existing.len()
+            || !requested.iter().all(|id| existing.contains(*id))
+        {
+            return Err(BackendError::Validation(
+                "playlist order must list every playlist exactly once".to_string(),
+            ));
+        }
+
+        let tx = conn.transaction()?;
+        for (index, id) in req.ordered_playlist_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE playlists SET sort_order = ?1 WHERE id = ?2",
+                params![index as i64, id],
+            )?;
+        }
+        tx.commit()?;
+
+        Ok(ReorderPlaylistsData {
+            reordered: req.ordered_playlist_ids.len(),
+        })
+    }
+
+    /// Local playlists in sidebar order, top first: the user's saved order,
+    /// newest first for playlists that were never reordered.
     pub fn list_playlists(&self) -> BackendResult<ListPlaylistsData> {
         let conn = self.db.connect()?;
         let mut stmt = conn.prepare(
             r#"
             SELECT id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at, import_source
             FROM playlists
-            ORDER BY created_at ASC
+            ORDER BY sort_order IS NULL, sort_order ASC, created_at DESC, id DESC
             "#,
         )?;
 

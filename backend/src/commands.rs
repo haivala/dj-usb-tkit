@@ -28,10 +28,11 @@ use crate::models::{
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
-    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
-    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
+    ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
+    ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
+    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
+    ResolveTrackIdentityData, ResolveTrackIdentityRequest, RestoreUsbBackupData,
+    RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
     RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
     SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveUsbTrackAnalysisEditsData,
     SaveUsbTrackAnalysisEditsRequest, ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest,
@@ -231,6 +232,13 @@ impl BackendCommands {
 
     pub fn rename_playlist(&self, req: RenamePlaylistRequest) -> ApiResponse<RenamePlaylistData> {
         wrap(self.service.rename_playlist(req))
+    }
+
+    pub fn reorder_playlists(
+        &self,
+        req: ReorderPlaylistsRequest,
+    ) -> ApiResponse<ReorderPlaylistsData> {
+        wrap(self.service.reorder_playlists(req))
     }
 
     pub fn delete_playlist(&self, req: DeletePlaylistRequest) -> ApiResponse<DeletePlaylistData> {
