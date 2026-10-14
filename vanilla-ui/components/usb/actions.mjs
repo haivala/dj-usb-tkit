@@ -320,7 +320,9 @@ export function renderRepairPreview(ctx, data) {
   el.usbDiagnosticsCard.classList.remove("hidden");
 
   const issueCount = Array.isArray(data.detectedIssues) ? data.detectedIssues.length : 0;
-  const fixes = data.proposedFixes || [];
+  // Bookkeeping fixes are never shown or selected: the backend applies them
+  // with every repair that runs.
+  const fixes = (data.proposedFixes || []).filter((f) => f.bookkeeping !== true);
   const unsupportedItems = data.unsupportedItems || [];
   const fixCount = fixes.length;
   const supportedFixes = fixes.filter((f) => f.supported);

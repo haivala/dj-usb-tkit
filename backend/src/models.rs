@@ -2071,6 +2071,11 @@ pub struct RepairFixProposal {
     /// (see `REPAIR_FIX_DISPLAY_ORDER` / the apply order in `service::repair`).
     #[serde(default)]
     pub always_applied: bool,
+    /// rekordbox's own transaction bookkeeping (real rekordbox exports carry
+    /// it and play fine): not counted as an issue or listed in the editor,
+    /// but applied with every repair that runs. Set backend-side.
+    #[serde(default)]
+    pub bookkeeping: bool,
     /// `"event-log"` when the Event Log already lists the affected items.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,

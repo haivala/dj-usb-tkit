@@ -4,7 +4,8 @@ use super::*;
 
 /// A supported, non-destructive proposal that writes one file -- the shape
 /// most fixes share. Fixes that differ override fields with struct-update
-/// syntax; `always_applied` is filled in once every proposal is collected.
+/// syntax; `always_applied` and `bookkeeping` are filled in once every
+/// proposal is collected.
 fn fix_proposal(id: &str, title: &str, description: impl Into<String>) -> RepairFixProposal {
     RepairFixProposal {
         id: id.to_string(),
@@ -15,6 +16,7 @@ fn fix_proposal(id: &str, title: &str, description: impl Into<String>) -> Repair
         estimated_writes: 1,
         estimated_deletes: 0,
         always_applied: false,
+        bookkeeping: false,
         link: None,
     }
 }
@@ -613,51 +615,38 @@ impl BackendService {
             ids.sort_unstable();
             ids
         };
+        // rekordbox transaction bookkeeping (see `fix_is_bookkeeping`): no
+        // detected issue and no write of its own -- it rides along with the
+        // PDB write of whatever repair runs.
         if !pdb_zero_tranrf_pages.is_empty() {
-            detected_issues.push(format!(
-                "{} data page(s) with tranrf=0 and active rows (may be rejected by some DJ software versions)",
-                pdb_zero_tranrf_pages.len()
-            ));
-            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_ZERO_TRANRF_FIX_ID,
                 "Repair Data Pages With Zero tranrf",
                 format!(
                     "Set tranrf = rowpf on {} data page(s) where tranrf is zero but active rows \
-                     exist. Some DJ software versions reject databases where tranrf is cleared on \
-                     a live data page.",
+                     exist.",
                     pdb_zero_tranrf_pages.len()
                 ),
             ));
         }
         if !pdb_wrong_flags_pages.is_empty() {
-            detected_issues.push(format!(
-                "{} PDB data page(s) with wrong page_flags byte (firmware may reject as corrupted)",
-                pdb_wrong_flags_pages.len()
-            ));
-            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_WRONG_PAGE_FLAGS_FIX_ID,
                 "Repair PDB Data Page Flags",
                 format!(
-                    "Patch page_flags byte (0x1b) on {} data page(s) to the correct per-table value \
+                    "Patch page_flags byte (0x1b) on {} data page(s) to the per-table value \
                      (tracks/history=0x34, all others=0x24).",
                     pdb_wrong_flags_pages.len()
                 ),
             ));
         }
         if !pdb_sentinel_u5_pages.is_empty() {
-            detected_issues.push(format!(
-                "{} PDB data page(s) with sentinel u5=0x1FFF (may be rejected by some DJ software and player firmware)",
-                pdb_sentinel_u5_pages.len()
-            ));
-            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_SENTINEL_U5_FIX_ID,
                 "Repair PDB Data Pages With Sentinel u5",
                 format!(
-                    "Patch u5/num_rl header fields on {} data page(s) from sentinel 0x1FFF to the correct per-table value. \
-                     Some DJ software and player firmware versions may reject data pages with u5=0x1FFF.",
+                    "Patch u5/num_rl header fields on {} data page(s) from sentinel 0x1FFF to the \
+                     per-table value.",
                     pdb_sentinel_u5_pages.len()
                 ),
             ));
@@ -679,91 +668,57 @@ impl BackendService {
             ));
         }
         if !pdb_wrong_track_u5_pages.is_empty() {
-            detected_issues.push(format!(
-                "{} PDB track page(s) with u5/num_rl shape outside expected values",
-                pdb_wrong_track_u5_pages.len()
-            ));
-            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_WRONG_TRACK_U5_FIX_ID,
                 "Repair PDB Track Page Footer Shape",
                 format!(
                     "Normalise u5/num_rl footer fields on {} tt=0 track page(s) to (1, nrs-1), \
-                     the format written by the current writer. (2, 0) is also accepted by player \
-                     firmware and left untouched on pages that already have it, but this repair \
-                     targets the current writer's own convention.",
+                     the format written by the current writer. (2, 0) is left untouched on pages \
+                     that already have it.",
                     pdb_wrong_track_u5_pages.len()
                 ),
             ));
         }
         if !pdb_t00_multipage_active_pages.is_empty() {
-            detected_issues.push(format!(
-                "{} tt=0 track page(s) with ACTV (0x34) flag in a multi-page chain \
-                 (expected SEAL 0x24; may be flagged as corrupted by some DJ software versions)",
-                pdb_t00_multipage_active_pages.len()
-            ));
-            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_T00_MULTIPAGE_ACTIVE_FIX_ID,
                 "Repair Track Page Flag (Multi-Page Chain)",
                 format!(
-                    "Set flags=0x24 (SEAL) and u5/num_rl=(1, nrs-1) on {} tt=0 track page(s). \
-                     Single-page track chains use ACTV (0x34); multi-page chains are expected \
-                     to use SEAL (0x24). Some DJ software versions may flag ACTV pages in a \
-                     multi-page chain as corrupted.",
+                    "Set flags=0x24 (SEAL) and u5/num_rl=(1, nrs-1) on {} tt=0 track page(s) \
+                     marked ACTV (0x34) in a multi-page chain, the shape the writer produces.",
                     pdb_t00_multipage_active_pages.len()
                 ),
             ));
         }
         if !pdb_tombstoned_playlist_ids.is_empty() {
-            detected_issues.push(format!(
-                "{} tombstoned row(s) with non-zero id in tracks/playlist_tree (may cause duplicate-id rejection)",
-                pdb_tombstoned_playlist_ids.len()
-            ));
-            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID,
                 "Repair Tombstoned Row IDs",
                 format!(
-                    "Zero out the id field in {} tombstoned slot(s) (tracks + playlist_tree) to \
-                     prevent duplicate-id rejection when active and dead rows share the same id.",
+                    "Zero out the id field in {} tombstoned slot(s) (tracks + playlist_tree) whose \
+                     id is also used by an active row.",
                     pdb_tombstoned_playlist_ids.len()
                 ),
             ));
         }
         if !pdb_stale_sentinel_btree_pages.is_empty() {
-            detected_issues.push(format!(
-                "{} PDB sentinel page(s) with stale B-tree index (rejected as corrupted — \
-                 B-tree entries reference wrong pages after additive export grew the table)",
-                pdb_stale_sentinel_btree_pages.len()
-            ));
-            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_STALE_SENTINEL_BTREE_FIX_ID,
                 "Repair Stale Sentinel B-Tree Index",
                 format!(
                     "Reset the B-tree index area in {} sentinel page(s) to the empty state \
-                     (num_entries=0, first_empty=0x1FFF). The DJ software uses the B-tree to validate \
-                     the table chain; stale entries referencing wrong pages cause a 'corrupted' \
-                     error. player firmware walks the page chain directly and is unaffected. \
-                     Fresh exports already write empty B-trees.",
+                     (num_entries=0, first_empty=0x1FFF), as fresh exports write it.",
                     pdb_stale_sentinel_btree_pages.len()
                 ),
             ));
         }
         if !pdb_wrong_playlist_tree_shape_pages.is_empty() {
-            detected_issues.push(format!(
-                "{} PDB playlist_tree page(s) with (u5, num_rl) shape outside expected (nrs, 0)",
-                pdb_wrong_playlist_tree_shape_pages.len()
-            ));
-            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID,
                 "Repair PDB Playlist-Tree Page Footer Shape",
                 format!(
-                    "Set u5=nrs and num_rl=0 on {} tt=7 (playlist_tree) data page(s). \
-                     The export wrote num_rl=1 instead of 0; the expected shape for this \
-                     table is (nrs, 0).",
+                    "Set u5=nrs and num_rl=0 on {} tt=7 (playlist_tree) data page(s), the shape \
+                     the writer produces for this table.",
                     pdb_wrong_playlist_tree_shape_pages.len()
                 ),
             ));
@@ -1298,9 +1253,10 @@ impl BackendService {
         });
         for fix in &mut proposed_fixes {
             fix.always_applied = fix_always_applied(&fix.id);
+            fix.bookkeeping = fix_is_bookkeeping(&fix.id);
         }
 
-        let selected = if req.selected_fix_ids.is_empty() {
+        let mut selected = if req.selected_fix_ids.is_empty() {
             proposed_fixes
                 .iter()
                 // Both change more than the USB's rekordbox data, so only on request.
@@ -1314,6 +1270,16 @@ impl BackendService {
         } else {
             req.selected_fix_ids.iter().cloned().collect()
         };
+        // Bookkeeping is never offered for selection; it rides along with
+        // every repair that runs.
+        if req.apply {
+            selected.extend(
+                proposed_fixes
+                    .iter()
+                    .filter(|f| f.bookkeeping)
+                    .map(|f| f.id.clone()),
+            );
+        }
         let selected_fix_count = proposed_fixes
             .iter()
             // The Engine DJ library is rebuilt after database write-back and

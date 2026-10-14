@@ -3578,15 +3578,7 @@ fn repair_pdb_zero_tranrf_detects_and_fixes_via_orchestrator() {
 #[test]
 fn repair_pdb_wrong_history_page_shape_detects_and_fixes_via_orchestrator() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
-    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
-    read_write_pdb(&pdb_path, |bytes, page_size| {
-        let page = find_pdb_data_page(bytes, page_size, 17).expect("tt=17 data page");
-        let off = page * page_size;
-        let nrs = bytes[off + 0x18];
-        assert!(nrs > 1, "need nrs > 1 to construct the old-bug pattern");
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&1u16.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&(nrs as u16 - 1).to_le_bytes());
-    });
+    break_history_page_shape(&vendor_db_dir(&usb).join("export.pdb"));
 
     assert_fix_proposed(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
     apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
@@ -3627,15 +3619,22 @@ fn repair_pdb_wrong_playlist_tree_shape_detects_and_fixes_via_orchestrator() {
     assert_no_pdb_structural_repairs(&backend, &usb);
 }
 
+fn break_history_page_shape(pdb_path: &Path) {
+    read_write_pdb(pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 17).expect("tt=17 data page");
+        let off = page * page_size;
+        let nrs = bytes[off + 0x18];
+        assert!(nrs > 1, "need nrs > 1 to construct the old-bug pattern");
+        bytes[off + 0x20..off + 0x22].copy_from_slice(&1u16.to_le_bytes());
+        bytes[off + 0x22..off + 0x24].copy_from_slice(&(nrs as u16 - 1).to_le_bytes());
+    });
+}
+
 #[test]
 fn repair_pdb_fix_not_in_selected_ids_is_skipped_not_applied() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
-    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
-    read_write_pdb(&pdb_path, |bytes, page_size| {
-        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
-        bytes[page * page_size + 0x1b] = 0x11;
-    });
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+    break_history_page_shape(&vendor_db_dir(&usb).join("export.pdb"));
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -3645,20 +3644,96 @@ fn repair_pdb_fix_not_in_selected_ids_is_skipped_not_applied() {
     assert!(repair.ok, "repair apply failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.skipped_fixes
-            .iter()
-            .any(|m| m.contains("Repair PDB Data Page Flags") && m.contains("not selected")),
+        data.skipped_fixes.iter().any(|m| {
+            m.contains("Repair PDB History/Columns Page Footer Shape") && m.contains("not selected")
+        }),
         "expected the unselected fix to be reported as skipped: {:#?}",
         data.skipped_fixes
     );
     assert!(
-        !data.applied_fixes.iter().any(|m| m.contains("Page Flags")),
+        !data
+            .applied_fixes
+            .iter()
+            .any(|m| m.contains("History/Columns")),
         "unselected fix must not have been applied: {:#?}",
         data.applied_fixes
     );
 
     // The corruption must still be present since the fix wasn't applied.
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+    assert_fix_proposed(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
+}
+
+/// rekordbox's own transaction bookkeeping (here: a non-default page_flags
+/// byte, as real rekordbox exports carry) never warns or shows up as an
+/// issue, but every repair that runs still normalizes it.
+#[test]
+fn rekordbox_bookkeeping_never_warns_and_rides_along_with_any_repair() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    read_write_pdb(&pdb_path, |bytes, page_size| {
+        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
+        bytes[page * page_size + 0x1b] = 0x11;
+    });
+
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
+    let page_headers = diagnostics
+        .data
+        .expect("diagnostics data")
+        .pdb_integrity
+        .checks
+        .into_iter()
+        .find(|c| c.label == "PDB page headers")
+        .expect("PDB page headers check");
+    assert!(
+        matches!(page_headers.status, DiagStatus::Pass),
+        "rekordbox bookkeeping must not warn: {page_headers:?}"
+    );
+
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(preview.ok, "repair preview failed: {preview:?}");
+    let preview = preview.data.expect("preview data");
+    let fix = preview
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == PDB_WRONG_PAGE_FLAGS_FIX_ID)
+        .expect("bookkeeping fix still proposed");
+    assert!(
+        fix.bookkeeping,
+        "page_flags fix must be flagged bookkeeping"
+    );
+    assert!(
+        !preview
+            .detected_issues
+            .iter()
+            .any(|i| i.contains("page_flags")),
+        "bookkeeping must not count as an issue: {:#?}",
+        preview.detected_issues
+    );
+
+    // A repair for something else normalizes the bookkeeping too.
+    break_history_page_shape(&pdb_path);
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec![PDB_WRONG_HISTORY_SHAPE_FIX_ID.to_string()],
+    });
+    assert!(repair.ok, "repair apply failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|m| m.contains("Repair PDB Data Page Flags")),
+        "bookkeeping must ride along with the selected repair: {:#?}",
+        data.applied_fixes
+    );
+    assert_fix_not_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
 }
 
 // ── fix_empty_analysis_files ──────────────────────────────────────────────

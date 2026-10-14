@@ -39,6 +39,11 @@
 
 ## Unreleased
 
+- **Improvement:** Diagnostics no longer warn about the transaction bookkeeping rekordbox
+  itself leaves in the PDB (sentinel u5, tranrf=0, page flags and footer shapes, active
+  track pages in a multi-page chain, stale sentinel B-trees, tombstoned rows with an id), so a
+  USB exported only by rekordbox shows green. Repair no longer lists these as fixes; it still
+  tidies them up whenever it runs.
 - **New feature:** USB repair gives tracks that share an analysis file their own ("Give Tracks
   Their Own Analysis Files"), named the way rekordbox names them when two tracks land in the same
   analysis folder, and adds the track path to analysis files that lack it ("Add Track Path to
@@ -136,7 +141,7 @@
 
 ## 0.4.1
 
-- **Fix:** Denon Prime and Numark Mixstream players that import `export.pdb`
+- **Fix:** Denon Prime and Numark Mixstream players that import the PDB
   themselves showed many tracks without an artist. The export now writes artist names the
   way rekordbox does. USB diagnostics flag USBs exported with earlier versions, and
   Preview Fixes offers "Repair Artist Name Layout" to fix them in one pass.
@@ -160,7 +165,7 @@
   removal, cue edits, backup restore, repairs.
 - **New feature:** USB diagnostics check the Engine DJ library. They warn when a USB
   has an Engine library that the app isn't keeping up to date, or that is behind
-  `export.pdb`, and Preview Fixes offers "Keep Engine DJ Library Up to Date" to turn the
+  the PDB, and Preview Fixes offers "Keep Engine DJ Library Up to Date" to turn the
   setting on and rebuild it. A USB without one gets a note to turn the setting on before
   using it in an Engine player.
 - **Fix:** Exporting to a USB that rekordbox had exported to no longer resets the star
@@ -693,7 +698,7 @@ Release candidate for testing seek data on the XDJ-AZ.
   alphabetically.
 - **Fix:** saving the cue editor to a USB no longer freezes the window while
   the stick is written. The progress bar shows each write (analysis files,
-  `export.pdb`, library, `exportLibrary.db`). If an export or another USB job
+  PDB, library, eDB). If an export or another USB job
   is running, the save waits for it to finish instead of writing at the same
   time, and back-to-back saves never overwrite each other's changes.
 - **Fix:** opening the cue editor on a track that's already playing no longer
@@ -713,16 +718,16 @@ Release candidate for testing seek data on the XDJ-AZ.
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Fix (CRITICAL):** saving BPM or key in the cue editor from a USB row now
-  writes them to `export.pdb` too. Before, only the beat grid and
-  `exportLibrary.db` changed, so the databases on the stick disagreed and
-  CDJs that read `export.pdb` kept showing the old BPM and key. Update before
+  writes them to the PDB too. Before, only the beat grid and
+  the eDB changed, so the databases on the stick disagreed and
+  CDJs that read the PDB kept showing the old BPM and key. Update before
   editing more tracks on a USB, then run the repair below on sticks you've
   already edited.
 - **New feature:** a "BPM/key consistency" check and a "Fix BPM/Key Mismatch"
   repair (`fix_bpm_key_mismatch`). The automatic USB diagnosis compares BPM
-  and key between `export.pdb` and `exportLibrary.db` (databases only). The
+  and key between the PDB and eDB (databases only). The
   repair also compares each ANLZ beat grid, then rebuilds the grid and sets
-  the eDB BPM and key from `export.pdb` in one pass. Waveforms, cues and the
+  the eDB BPM and key from the PDB in one pass. Waveforms, cues and the
   first beat are kept.
 - **Fix:** after saving in the cue editor, every view shows the new BPM and
   key without a reload: the open app playlist's row, every loaded USB
@@ -943,7 +948,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
   export. Adding a USB track to a local playlist and re-exporting it are
   unchanged.
 - **Improvement:** opening a USB playlist and scrolling, searching, or sorting
-  it no longer re-parses the whole stick's `export.pdb` / `exportLibrary.db` on
+  it no longer re-parses the whole stick's PDB / eDB on
   every request — the parsed result is cached in memory and reused until the
   stick's databases change (or the app writes to them).
 - **Improvement:** local track analysis (BPM/key/beat-grid) is now several times
@@ -1174,7 +1179,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
 
 - **Fix (CRITICAL):** re-initializing a USB after manually deleting its `PIONEER`/`Contents` folders
   always failed with "an internal database error occurred", with no workaround — a stale local
-  staging-cache copy of `exportLibrary.db` left over from before the deletion is now discarded before
+  staging-cache copy of the eDB left over from before the deletion is now discarded before
   rebuilding it, instead of colliding with its already-existing schema
 - **New feature:** add a standalone "Remove Duplicate PDB Playlist Entries" repair fix that cleans
   up stale duplicate `playlist_entries` rows (the same defect fixed by 0.1.27's export-time sweep)
@@ -1194,7 +1199,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix:** initializing a fresh USB now writes its baseline `export.pdb`/`exportLibrary.db` through
+- **Fix:** initializing a fresh USB now writes its baseline PDB/eDB through
   the same local-HDD staging path as every other database write, instead of writing directly to the
   USB — restoring atomic (temp-file + rename) commits and local caching for a drive's very first
   database write
@@ -1492,7 +1497,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
   repair now scans the same page range diagnostics does.
 - **Fix:** running USB diagnostics, the parity report, or repair diagnostics could hang or take much
   longer than necessary on slow/misbehaving USB media. Each of these independently re-opened the
-  encrypted eDB (`exportLibrary.db`) — and, in the repair flow, re-staged the PDB (`export.pdb`) —
+  encrypted eDB — and, in the repair flow, re-staged the PDB —
   once per internal read instead of once per run, so every extra read paid its own USB stat/copy and
   SQLCipher key-negotiation cost. Diagnostics, the parity report, and repair now each open the eDB
   and stage the PDB exactly once and reuse that connection/path for every read in the same run.
@@ -1517,7 +1522,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
   colored — pass/warn/fail — for the USB drive, from the last diagnostics run). Both are always
   visible, showing "No active playlist" / "Not connected" as placeholders rather than disappearing
   when there's nothing to show.
-- **New feature:** USB DB backups (`export.pdb`/`exportLibrary.db` snapshots, taken before every
+- **New feature:** USB DB backups (PDB/eDB snapshots, taken before every
   export/reorder/remove-playlist/repair/menu-config change) now have a dedicated **Backups** panel
   (Settings → Open Backups) to list, restore, and delete snapshots. Since the PDB and eDB are
   always backed up together as a pair, each backup event is listed as a single "eDB and PDB" entry
@@ -1539,7 +1544,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
 - **Chore:** removed the dead `patch_pdb_columns_menu_order_by_kind` / `patch_pdb_columns_playlist_first`
   helpers from `pdb_menu.rs`. They had no callers and bypassed the staging cache, unlike the rest of
   the PDB write path.
-- **Improvement:** the USB-resident `export.pdb` and `exportLibrary.db` are now staged to a
+- **Improvement:** the USB-resident PDB and eDB are now staged to a
   local HDD working copy the first time each is read, instead of being re-read from the USB
   mount on every call. The local copy is reused until the USB file's size/mtime changes, so
   browsing playlists, exporting, running diagnostics, and USB repair all hit local disk instead
@@ -1619,7 +1624,7 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
   warning log alone didn't make it obvious.
 - **Fix (CRITICAL):** stop the Windows build from failing to start with a missing
   `libcrypto-3-x64.dll`, and from failing to build at all on CI. SQLCipher (used to decrypt
-  `exportLibrary.db`) was built with `rusqlite`'s `bundled-sqlcipher` feature, which links
+  the eDB) was built with `rusqlite`'s `bundled-sqlcipher` feature, which links
   against a dynamically-found system OpenSSL instead of bundling one — on Windows this meant
   the installed app needed `libcrypto-3-x64.dll` present alongside it, which the installer
   never shipped. Statically linking against a vendored, from-source OpenSSL build

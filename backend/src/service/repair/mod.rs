@@ -117,6 +117,24 @@ fn fix_always_applied(fix_id: &str) -> bool {
         PDB_TRUNCATED_TABLE_CHAIN_FIX_ID | PDB_TORN_GROWTH_PAGES_FIX_ID
     )
 }
+
+/// Page shapes real rekordbox exports carry as transaction bookkeeping and
+/// that players and rekordbox read fine, so they are never reported as
+/// issues. Our writer never produces them, so their fixes still normalize
+/// them whenever a repair runs. Surfaced as `RepairFixProposal.bookkeeping`.
+fn fix_is_bookkeeping(fix_id: &str) -> bool {
+    matches!(
+        fix_id,
+        PDB_ZERO_TRANRF_FIX_ID
+            | PDB_WRONG_PAGE_FLAGS_FIX_ID
+            | PDB_SENTINEL_U5_FIX_ID
+            | PDB_WRONG_TRACK_U5_FIX_ID
+            | PDB_T00_MULTIPAGE_ACTIVE_FIX_ID
+            | PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID
+            | PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID
+            | PDB_STALE_SENTINEL_BTREE_FIX_ID
+    )
+}
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
 const RELINK_MOVED_AUDIO_FIX_ID: &str = "relink_moved_audio";
 const UNINDEXED_AUDIO_PLAYLIST_FIX_ID: &str = "add_unindexed_audio_playlist";

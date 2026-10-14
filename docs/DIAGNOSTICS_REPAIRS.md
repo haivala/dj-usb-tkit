@@ -136,6 +136,8 @@ When `apply=true`:
 - the desktop UI's repair preview locks these two fixes' checkboxes checked
   whenever they're proposed — they cannot be deselected while leaving strict
   parity selected, since there is no safe outcome from skipping either one;
+- rekordbox bookkeeping fixes (see below) are added to every apply, whatever
+  `selectedFixIds` holds;
 - report commands still remain read-only.
 
 Repair results are returned as applied fixes, skipped fixes, failed fixes,
@@ -175,6 +177,31 @@ The current code can propose these repair IDs:
 | `remove_missing_audio_references` | PDB track rows or eDB `content` rows whose audio file is missing from the USB, by the parity report's presence scan | Removes the eDB `content` rows and their `playlist_content` links, and the PDB playlist entries, track rows and now-unused artwork rows. Paired references are relinked instead; tracks in a history playlist are never removed (see below) |
 | `sync_edb_history_from_pdb` | eDB history counts differ from PDB-derived history payload | Replaces eDB `history` and `history_content` rows from current PDB history data |
 | `keep_engine_library_up_to_date` | the USB has an Engine DJ library and "Write Engine DJ library" is off, or the library is behind `export.pdb` | Turns the setting on and rebuilds `m.db` from the PDB, after every other fix and the write-back. Play history (`hm.db`) is kept; changes made on the player in `m.db` (cues, loops, playlists) are replaced. Marked destructive for that reason. Not in the default set when no `selectedFixIds` are given (see `docs/ENGINE_DJ.md`) |
+
+### rekordbox bookkeeping
+
+Real rekordbox exports carry transaction bookkeeping in the PDB: sentinel
+`u5`, `tranrf=0` on a last-row group, non-default `page_flags`, `t00`/`t07`
+footer shapes the writer doesn't use, `ACTV` track pages inside a multi-page
+chain, stale sentinel B-trees, and tombstoned rows that keep the id of an
+active row. They appear and disappear with each rekordbox export, players and
+rekordbox read them fine, and this app's exporter works on top of them
+unrepaired. These fixes carry `bookkeeping: true`:
+
+- `repair_pdb_sentinel_u5_on_data_pages`
+- `repair_pdb_wrong_page_flags`
+- `repair_pdb_zero_tranrf_on_track_pages`
+- `repair_pdb_wrong_track_u5_num_rl`
+- `repair_pdb_t00_multipage_active_pages`
+- `repair_pdb_tombstoned_playlist_tree_ids`
+- `repair_pdb_wrong_playlist_tree_shape`
+- `repair_pdb_stale_sentinel_btree`
+
+Diagnostics report them as Pass ("PDB page headers", "PDB structural
+integrity") with the counts in the detail, and they are not detected issues.
+The repair still proposes them, so tests can assert that the writer never
+produces these shapes, but the editor neither lists nor counts them, and every
+apply runs them alongside whatever else is applied.
 
 ## Unsupported and Manual Cases
 

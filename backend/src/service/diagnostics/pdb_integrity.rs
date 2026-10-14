@@ -124,49 +124,22 @@ pub(crate) fn diagnose_pdb_integrity(
     }
 
     {
+        // All three are rekordbox transaction bookkeeping: real rekordbox
+        // exports carry them and play fine, so they never warn. Repair USB
+        // still normalizes them whenever it runs (see
+        // `repair::fix_is_bookkeeping`); our own writer never produces them.
         let bad_u5 = crate::service::repair::detect_pdb_sentinel_u5_on_data_pages(pdb_path);
         let bad_flags = crate::service::repair::detect_pdb_wrong_page_flags(pdb_path);
         let bad_tranrf = crate::service::repair::detect_pdb_zero_tranrf_all_tables(pdb_path);
-        if !bad_u5.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-sentinel-u5",
-                format!(
-                    "{} PDB data page(s) with sentinel u5=0x1FFF (may be rejected by some DJ software and player firmware); run repair_pdb_sentinel_u5_on_data_pages to fix.",
-                    bad_u5.len()
-                ),
-            ));
-        }
-        if !bad_flags.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-wrong-page-flags",
-                format!(
-                    "{} PDB data page(s) with wrong page_flags byte (may be rejected by some DJ software and player firmware); run repair_pdb_wrong_page_flags to fix.",
-                    bad_flags.len()
-                ),
-            ));
-        }
-        if !bad_tranrf.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-zero-tranrf",
-                format!(
-                    "{} data page(s) with tranrf=0 on last-row group and active rows (player may reject database); run repair_pdb_zero_tranrf_on_track_pages to fix.",
-                    bad_tranrf.len()
-                ),
-            ));
-        }
-        let any_bad = !bad_u5.is_empty() || !bad_flags.is_empty() || !bad_tranrf.is_empty();
         let mut parts = Vec::new();
         if !bad_u5.is_empty() {
             parts.push(format!("{} page(s) with sentinel u5=0x1FFF", bad_u5.len()));
         }
         if !bad_flags.is_empty() {
-            parts.push(format!("{} page(s) with wrong page_flags", bad_flags.len()));
+            parts.push(format!(
+                "{} page(s) with non-default page_flags",
+                bad_flags.len()
+            ));
         }
         if !bad_tranrf.is_empty() {
             parts.push(format!(
@@ -177,15 +150,23 @@ pub(crate) fn diagnose_pdb_integrity(
         let detail = if parts.is_empty() {
             "u5, page_flags, and tranrf are valid on all data pages".to_string()
         } else {
-            parts.join("; ") + " — may affect desktop DJ software compatibility; repair available"
+            raw_warnings.push(logging::log(
+                Level::Info,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-page-header-bookkeeping",
+                format!(
+                    "rekordbox transaction bookkeeping on PDB data pages: {}; normalized whenever a repair runs.",
+                    parts.join("; ")
+                ),
+            ));
+            format!(
+                "valid; rekordbox transaction bookkeeping: {}",
+                parts.join("; ")
+            )
         };
         checks.push(DiagCheck {
             label: "PDB page headers".to_string(),
-            status: if any_bad {
-                DiagStatus::Warn
-            } else {
-                DiagStatus::Pass
-            },
+            status: DiagStatus::Pass,
             detail,
             link: None,
         });
@@ -205,66 +186,48 @@ pub(crate) fn diagnose_pdb_integrity(
 
         // Hard failures: conditions that cause player or DJ software rejection.
         let mut fail_parts = Vec::new();
-        // Soft warnings: player-tolerant conditions that may appear in existing
-        // PDBs after multiple desktop-library re-exports (non-terminal ACTV pages,
-        // tombstone ID collisions from re-export). Still offered as optional repairs.
+        // Soft warnings: player-tolerant shapes rekordbox itself never writes.
         let mut warn_parts = Vec::new();
+        // rekordbox transaction bookkeeping: real rekordbox exports carry these
+        // and play fine, so they never warn (see the page-headers check above).
+        let mut bookkeeping_parts = Vec::new();
 
         if !stale_btree.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-stale-sentinel-btree",
-                format!(
-                    "{} sentinel page(s) with stale b-tree index (may be rejected by some DJ software); run repair_pdb_stale_sentinel_btree to fix.",
-                    stale_btree.len()
-                ),
-            ));
-            warn_parts.push(format!("{} sentinel(s) stale b-tree", stale_btree.len()));
+            bookkeeping_parts.push(format!("{} sentinel(s) stale b-tree", stale_btree.len()));
         }
         if !wrong_pl_tree.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-wrong-playlist-tree-shape",
-                format!(
-                    "{} playlist_tree page(s) with wrong shape (u5/num_rl); run repair_pdb_wrong_playlist_tree_shape to fix.",
-                    wrong_pl_tree.len()
-                ),
-            ));
-            warn_parts.push(format!(
-                "{} playlist_tree page(s) wrong shape",
+            bookkeeping_parts.push(format!(
+                "{} playlist_tree page(s) with non-default shape",
                 wrong_pl_tree.len()
             ));
         }
         if !tombstoned.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-tombstoned-playlist-id",
-                format!(
-                    "{} tombstoned row(s) with non-zero id; run repair_pdb_tombstoned_playlist_tree_ids to fix.",
-                    tombstoned.len()
-                ),
-            ));
-            warn_parts.push(format!(
+            bookkeeping_parts.push(format!(
                 "{} tombstoned row(s) non-zero id",
                 tombstoned.len()
             ));
         }
         if !wrong_track_u5.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-wrong-track-u5",
-                format!(
-                    "{} track page(s) with wrong u5/num_rl shape; run repair_pdb_wrong_track_u5_num_rl to fix.",
-                    wrong_track_u5.len()
-                ),
-            ));
-            warn_parts.push(format!(
-                "{} track page(s) wrong shape",
+            bookkeeping_parts.push(format!(
+                "{} track page(s) with non-default shape",
                 wrong_track_u5.len()
+            ));
+        }
+        if !t00_multipage_active.is_empty() {
+            bookkeeping_parts.push(format!(
+                "{} track page(s) ACTV in multi-page chain",
+                t00_multipage_active.len()
+            ));
+        }
+        if !bookkeeping_parts.is_empty() {
+            raw_warnings.push(logging::log(
+                Level::Info,
+                "usb-diagnostics",
+                "usb.diagnostics.pdb-structural-bookkeeping",
+                format!(
+                    "rekordbox transaction bookkeeping in PDB tables: {}; normalized whenever a repair runs.",
+                    bookkeeping_parts.join("; ")
+                ),
             ));
         }
         if !wrong_history.is_empty() {
@@ -280,21 +243,6 @@ pub(crate) fn diagnose_pdb_integrity(
             warn_parts.push(format!(
                 "{} history page(s) wrong shape",
                 wrong_history.len()
-            ));
-        }
-        if !t00_multipage_active.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-t00-multipage-active",
-                format!(
-                    "{} tt=0 track page(s) with ACTV flag in multi-page chain (rejected); run repair_pdb_t00_multipage_active_pages to fix.",
-                    t00_multipage_active.len()
-                ),
-            ));
-            warn_parts.push(format!(
-                "{} track page(s) ACTV in multi-page chain",
-                t00_multipage_active.len()
             ));
         }
         if !ec_conflicts.is_empty() {
@@ -364,7 +312,15 @@ pub(crate) fn diagnose_pdb_integrity(
             DiagStatus::Pass
         };
         let detail = if fail_parts.is_empty() && warn_parts.is_empty() {
-            "sentinel b-tree, page shapes, row IDs, and write pointers OK".to_string()
+            let ok = "sentinel b-tree, page shapes, row IDs, and write pointers OK".to_string();
+            if bookkeeping_parts.is_empty() {
+                ok
+            } else {
+                format!(
+                    "{ok}; rekordbox transaction bookkeeping: {}",
+                    bookkeeping_parts.join("; ")
+                )
+            }
         } else {
             let mut segments = Vec::new();
             if !fail_parts.is_empty() {

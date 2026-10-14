@@ -2010,3 +2010,55 @@ fn analysis_ownership_finds_unmarked_and_foreign_single_bundles() {
     assert_eq!(found.shared[0].owner, None);
     assert_eq!(found.non_owner_track_ids(), HashSet::from([3]));
 }
+
+/// rekordbox transaction bookkeeping (here: ACTV track pages inside a
+/// multi-page chain and a playlist_tree footer shape the writer doesn't use)
+/// passes, with the counts named in the detail.
+#[test]
+fn pdb_integrity_reports_rekordbox_bookkeeping_as_pass() {
+    use crate::models::DiagStatus;
+
+    const PAGE: usize = 4096;
+    let data_page = |index: u32, table_type: u32, flags: u8, nrs: u8, next: u32| {
+        let mut p = vec![0u8; PAGE];
+        p[4..8].copy_from_slice(&index.to_le_bytes());
+        p[8..12].copy_from_slice(&table_type.to_le_bytes());
+        p[0x0c..0x10].copy_from_slice(&next.to_le_bytes());
+        p[0x18] = nrs;
+        p[0x1b] = flags;
+        p[0x1e..0x20].copy_from_slice(&1u16.to_le_bytes());
+        p
+    };
+    let mut header = vec![0u8; PAGE];
+    header[4..8].copy_from_slice(&(PAGE as u32).to_le_bytes());
+    let mut playlist_tree = data_page(3, 7, 0x24, 6, 0);
+    playlist_tree[0x20..0x22].copy_from_slice(&1u16.to_le_bytes());
+    playlist_tree[0x22..0x24].copy_from_slice(&1u16.to_le_bytes());
+    let pages = [
+        header,
+        data_page(1, 0, 0x34, 4, 2),
+        data_page(2, 0, 0x34, 4, 0),
+        playlist_tree,
+    ];
+
+    let td = tempfile::tempdir().expect("tempdir");
+    let pdb_path = td.path().join("export.pdb");
+    fs::write(&pdb_path, pages.concat()).expect("write test pdb");
+
+    let mut warnings = Vec::new();
+    let (section, _) = super::pdb_integrity::diagnose_pdb_integrity(&pdb_path, &mut warnings);
+    let check = section
+        .checks
+        .iter()
+        .find(|c| c.label == "PDB structural integrity")
+        .unwrap_or_else(|| panic!("structural integrity check: {:#?}", section.checks));
+    assert!(
+        matches!(check.status, DiagStatus::Pass),
+        "rekordbox bookkeeping must not warn: {check:?}"
+    );
+    assert!(
+        check.detail.contains("ACTV in multi-page chain") && check.detail.contains("playlist_tree"),
+        "detail should name the bookkeeping: {}",
+        check.detail
+    );
+}

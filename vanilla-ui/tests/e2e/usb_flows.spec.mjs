@@ -219,7 +219,7 @@ function installTauriMock(page, mode) {
                 detectedIssues: [
                   "1 table(s) with a declared last page beyond the physical end of the file",
                   "PDB shows signs of a torn additive-growth write",
-                  "1 data page(s) have invalid page_flags"
+                  "1 PDB history/columns page(s) with wrong u5/num_rl shape"
                 ],
                 proposedFixes: [
                   {
@@ -243,12 +243,22 @@ function installTauriMock(page, mode) {
                     estimatedDeletes: 0
                   },
                   {
-                    id: "repair_pdb_wrong_page_flags",
-                    title: "Repair PDB Data Page Flags",
+                    id: "repair_pdb_wrong_history_page_shape",
+                    title: "Repair PDB History/Columns Page Footer Shape",
                     description: "Ordinary structural fix, not a prerequisite.",
                     supported: true,
                     destructive: false,
                     estimatedWrites: 1,
+                    estimatedDeletes: 0
+                  },
+                  {
+                    id: "repair_pdb_wrong_page_flags",
+                    title: "Repair PDB Data Page Flags",
+                    description: "rekordbox transaction bookkeeping.",
+                    supported: true,
+                    destructive: false,
+                    bookkeeping: true,
+                    estimatedWrites: 0,
                     estimatedDeletes: 0
                   },
                   {
@@ -817,7 +827,7 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
 });
 
-test("Repair preview locks structural-prerequisite fix checkboxes; the Engine fix turns the setting on", async ({ page }) => {
+test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkeeping fixes; the Engine fix turns the setting on", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
 
@@ -845,8 +855,13 @@ test("Repair preview locks structural-prerequisite fix checkboxes; the Engine fi
     .locator("#diagRepairFixes li", { hasText: "Repair Torn Growth Pages" })
     .locator(".diag-repair-fix-check");
   const controlCheckbox = page
-    .locator("#diagRepairFixes li", { hasText: "Repair PDB Data Page Flags" })
+    .locator("#diagRepairFixes li", { hasText: "Repair PDB History/Columns Page Footer Shape" })
     .locator(".diag-repair-fix-check");
+
+  // rekordbox bookkeeping is neither listed nor counted: the backend applies
+  // it with every repair.
+  await expect(page.locator("#diagRepairFixes li", { hasText: "Repair PDB Data Page Flags" })).toHaveCount(0);
+  await expect(page.locator("#diagRepairSummary")).toContainText("4 fixable");
 
   await expect(truncatedChainCheckbox).toBeChecked();
   await expect(truncatedChainCheckbox).toBeDisabled();
@@ -862,7 +877,7 @@ test("Repair preview locks structural-prerequisite fix checkboxes; the Engine fi
   // Items whose details the Event Log lists link to it; the others don't.
   const malformedItem = page.locator("#diagRepairFixes li", { hasText: "malformed USBANLZ" });
   await expect(malformedItem.locator(".diag-log-link")).toBeVisible();
-  await expect(page.locator("#diagRepairFixes li", { hasText: "Repair PDB Data Page Flags" }).locator(".diag-log-link")).toHaveCount(0);
+  await expect(page.locator("#diagRepairFixes li", { hasText: "Repair PDB History/Columns Page Footer Shape" }).locator(".diag-log-link")).toHaveCount(0);
 
   await expect(page.locator("#exportEngineLibraryCheckbox")).not.toBeChecked();
   const engineFix = page.locator("#diagRepairFixes li", { hasText: "Keep Engine DJ Library Up to Date" });
