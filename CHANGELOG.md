@@ -153,6 +153,8 @@
   width is remembered, and double-clicking the edge resets it.
 - **Fix:** Double-clicking a sidebar playlist to rename it no longer closes the name field right
   away. Hovering a playlist also shows a pencil button that starts a rename.
+- **Fix:** Diagnostics of a freshly initialized USB with no tracks no longer warn that analysis
+  references are missing for newer players.
 
 ## 0.4.1
 

@@ -5,7 +5,7 @@ use super::{
     DISPLAY_ANALYSIS, DISPLAY_EDB, DISPLAY_ENGINE, DISPLAY_LAYOUT, DISPLAY_LOW_LEVEL, DISPLAY_PDB,
     DISPLAY_PLAYLISTS, ExportDbPlaylist, OverviewFacts, ParityTotals, RatingColourParity,
     build_usb_parity_comparison, compare_rating_colour, count_named_history_rows,
-    diagnose_contents_integrity, diagnose_playlist_resolution_with_db,
+    diagnose_analysis_integrity, diagnose_contents_integrity, diagnose_playlist_resolution_with_db,
     diagnose_playlist_resolution_with_edb_internal, diagnostics_overview,
     evaluate_strict_raw_coverage_parity, normalize_pdb_path_for_edb_lookup,
     normalize_track_path_for_identity, parity_issue_labels, parity_overview, parity_section_groups,
@@ -2061,4 +2061,25 @@ fn pdb_integrity_reports_rekordbox_bookkeeping_as_pass() {
         "detail should name the bookkeeping: {}",
         check.detail
     );
+}
+
+#[test]
+fn edb_analysis_refs_pass_when_the_edb_has_no_tracks() {
+    let edb_check = |content_rows: Option<usize>| {
+        diagnose_analysis_integrity(None, None, content_rows)
+            .checks
+            .into_iter()
+            .find(|c| c.label == "eDB analysis refs")
+            .expect("eDB analysis refs check")
+    };
+    let empty = edb_check(Some(0));
+    assert!(matches!(empty.status, crate::models::DiagStatus::Pass));
+    assert_eq!(empty.detail, "No tracks in the eDB");
+    // Tracks but no playlist data, or an eDB that couldn't be read, still warn.
+    for rows in [Some(3), None] {
+        assert!(matches!(
+            edb_check(rows).status,
+            crate::models::DiagStatus::Warn
+        ));
+    }
 }

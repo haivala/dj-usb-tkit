@@ -378,9 +378,12 @@ pub(super) fn diagnose_beat_grid_format(
     )
 }
 
+/// `edb_content_rows` is the eDB's `content` row count when it could be read;
+/// with no tracks there are no analysis refs to miss.
 pub(crate) fn diagnose_analysis_integrity(
     parsed: Option<&crate::pdb_reader::ParsedPdb>,
     edb_playlist_tracks: Option<&HashMap<String, Vec<UsbTrack>>>,
+    edb_content_rows: Option<usize>,
 ) -> DiagSection {
     let mut checks = Vec::new();
 
@@ -463,6 +466,13 @@ pub(crate) fn diagnose_analysis_integrity(
                 unique_refs,
                 total_playlist_entries
             ),
+            link: None,
+        });
+    } else if edb_content_rows == Some(0) {
+        checks.push(DiagCheck {
+            label: "eDB analysis refs".to_string(),
+            status: DiagStatus::Pass,
+            detail: "No tracks in the eDB".to_string(),
             link: None,
         });
     } else {

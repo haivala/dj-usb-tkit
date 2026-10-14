@@ -509,6 +509,24 @@ body.library-onboarding {
   background: var(--accent-glow);
 }
 
+/* Grip mark centred on the edge so it reads as draggable. */
+.nav-sidebar-resizer::after {
+  content: "\22EE";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.nav-sidebar-resizer:hover::after,
+.nav-sidebar.resizing .nav-sidebar-resizer::after {
+  color: var(--accent);
+}
+
 body.sidebar-resizing {
   cursor: col-resize;
   -webkit-user-select: none;
@@ -827,16 +845,49 @@ body.sidebar-resizing {
   box-shadow: none;
 }
 
-/* Drag handle and rename pencil show only on the hovered/focused row. */
+/* Drag handle and rename pencil show only on the hovered/focused row and take
+   no space otherwise: the handle sits in the row's left padding, and the
+   pencil takes the exported-✓ slot, so names and × never move. */
+.nav-playlist-item {
+  position: relative;
+  padding-left: 18px;
+}
+
+.nav-playlist-item .drag-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
 .nav-playlist-hover-only {
   opacity: 0;
   transition: opacity 120ms ease;
 }
 
+.nav-playlist-rename {
+  display: none;
+  margin-left: auto;
+}
+
 .nav-playlist-item:hover .nav-playlist-hover-only,
-.nav-playlist-item:focus-visible .nav-playlist-hover-only,
-.nav-playlist-hover-only:focus-visible {
+.nav-playlist-item:focus-within .nav-playlist-hover-only {
   opacity: 1;
+}
+
+.nav-playlist-item:hover .nav-playlist-rename,
+.nav-playlist-item:focus-within .nav-playlist-rename {
+  display: inline-flex;
+}
+
+.nav-playlist-item:hover .nav-playlist-status,
+.nav-playlist-item:focus-within .nav-playlist-status {
+  display: none;
 }
 
 .nav-add-playlist {

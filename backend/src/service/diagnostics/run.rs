@@ -336,9 +336,15 @@ impl BackendService {
 
         // --- 4. Analysis Integrity ---
         on_progress(70, 100, "USB: Checking analysis references");
+        let edb_content_rows = conn.and_then(|c| {
+            c.query_row("SELECT COUNT(*) FROM content", [], |r| r.get::<_, i64>(0))
+                .ok()
+                .map(|n| n.max(0) as usize)
+        });
         let mut analysis_integrity = diagnose_analysis_integrity(
             parsed_opt.as_ref().map(|p| &p.0),
             edb_playlist_tracks.as_ref(),
+            edb_content_rows,
         );
         if let Some((parsed, _)) = parsed_opt.as_ref() {
             // Database-only: the ANLZ beat grids are compared by the repair
