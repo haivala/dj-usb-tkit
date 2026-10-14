@@ -5,7 +5,6 @@ export function bindLibraryEvents(ctx) {
   const {
     state,
     el,
-    window,
     renderSourceChips,
     syncAssetScopePaths,
     renderLibraryRows,
@@ -189,8 +188,7 @@ export function bindLibraryEvents(ctx) {
     scan().catch(catchErr(emitStatus));
   });
 
-  el.libraryTableWrap?.addEventListener("scroll", ctx.handleLibraryTableWrapScroll, { passive: true });
-  window.addEventListener("resize", ctx.handleLibraryTableWrapScroll);
+  libraryTracksCtl.attachScroll();
   el.librarySearch.addEventListener("input", () => ctx.scheduleLibrarySearch());
 
   // Source bar accordion

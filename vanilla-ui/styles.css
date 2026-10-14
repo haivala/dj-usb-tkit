@@ -1909,11 +1909,26 @@ td.num, th.num {
   text-align: right;
 }
 
+/* The table only holds the rows around the viewport (see
+   track_list_controller.mjs); the padding stands in for the rows above and
+   below, so the scrollbar spans the whole list. Every row is the same fixed
+   height, which the controller reads from --track-row-height to place them. */
+.track-grid-body {
+  --track-row-height: 47px;
+  padding-top: var(--track-grid-before, 0px);
+  padding-bottom: var(--track-grid-after, 0px);
+}
+
+.track-grid-body > .track-grid-row:not(.track-grid-row-empty) {
+  box-sizing: border-box;
+  height: var(--track-row-height);
+}
+
 .track-grid-body .track-grid-row {
   transition: background 100ms ease;
 }
 
-.track-grid-body .track-grid-row:nth-child(even) {
+.track-grid-body .track-grid-row.is-alt {
   background: var(--bg-raised);
 }
 
@@ -1942,7 +1957,9 @@ td.num, th.num {
 }
 
 /* Loading indicator, toggled by the track-list controller's `data-loading` on
-   the body: "page" replaces the rows, "more" sits below them. */
+   the body: shown while a new list replaces the rows ("page"). Rows still
+   loading for the part of a list on screen ("more") show as skeleton rows
+   instead. */
 .track-grid-loading {
   display: none;
   align-items: center;
@@ -1951,8 +1968,51 @@ td.num, th.num {
   color: var(--muted);
 }
 
-.track-grid-body[data-loading] + .track-grid-loading {
+.track-grid-body[data-loading="page"] + .track-grid-loading {
   display: flex;
+}
+
+/* A new list replaces the rows: drop the old list's space with them. */
+.track-grid-body[data-loading="page"] {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* A row whose page hasn't loaded yet: a bar with a highlight sweeping
+   across it. The sweep is a transform on a layer over the bar (WebKitGTK
+   doesn't repaint an animated fixed background), and every row joins it at
+   the same point of the cycle (--skeleton-phase, set when the row is built),
+   so the bars sweep in step. The duration is SKELETON_SHIMMER_MS in
+   track_table.mjs. */
+.track-grid-row-skeleton .track-grid-skeleton {
+  --skeleton-base: color-mix(in srgb, var(--muted) 14%, var(--bg-raised));
+  --skeleton-shine: color-mix(in srgb, var(--muted) 30%, var(--bg-raised));
+  position: relative;
+  overflow: hidden;
+  grid-column: 1 / -1;
+  align-self: stretch;
+  margin: 8px;
+  border-radius: 6px;
+  background: var(--skeleton-base);
+}
+
+.track-grid-row-skeleton .track-grid-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 30%, var(--skeleton-shine) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: track-grid-skeleton-shimmer 1600ms linear infinite;
+  animation-delay: var(--skeleton-phase, 0ms);
+}
+
+@keyframes track-grid-skeleton-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-grid-row-skeleton .track-grid-skeleton::after { display: none; }
 }
 
 .track-grid-body[data-loading="page"] > .track-grid-row {

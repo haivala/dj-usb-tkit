@@ -392,6 +392,11 @@ pub struct BrowseSourceFilesRequest {
     pub limit: usize,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Absolute start position in the filtered + sorted list; takes
+    /// precedence over `cursor`. Lets a client jump straight to any part of
+    /// the list (the track tables load the rows under the viewport).
+    #[serde(default)]
+    pub offset: Option<usize>,
     /// One of `title` | `artist` | `album` | `format` | `bpm` | `durationMs` |
     /// `key`. Absent ⇒ the natural file-path order. See `TrackSort`.
     #[serde(default)]
@@ -652,6 +657,11 @@ pub struct GetPlaylistTracksRequest {
     pub sort_dir: Option<String>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Absolute start position in the filtered + sorted list; takes
+    /// precedence over `cursor`. Lets a client jump straight to any part of
+    /// the list (the track tables load the rows under the viewport).
+    #[serde(default)]
+    pub offset: Option<usize>,
     /// `0` ⇒ unpaginated (the whole playlist), for backward compatibility.
     #[serde(default)]
     pub limit: usize,
@@ -1528,6 +1538,11 @@ pub struct FetchUsbTracksRequest {
     pub sort_dir: Option<String>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Absolute start position in the filtered + sorted list; takes
+    /// precedence over `cursor`. Lets a client jump straight to any part of
+    /// the list (the track tables load the rows under the viewport).
+    #[serde(default)]
+    pub offset: Option<usize>,
     /// `0` ⇒ the whole (filtered) list.
     #[serde(default)]
     pub limit: usize,

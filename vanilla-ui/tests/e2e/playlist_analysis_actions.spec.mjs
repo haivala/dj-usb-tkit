@@ -20,7 +20,7 @@ test.beforeEach(async ({ page }) => {
           return av < bv ? -m : av > bv ? m : 0;
         });
       }
-      const off = Number(request.cursor || 0);
+      const off = Number(request.offset || 0);
       const lim = Number(request.limit || 0) || rows.length;
       const slice = rows.slice(off, off + lim);
       const nextOff = off + slice.length;

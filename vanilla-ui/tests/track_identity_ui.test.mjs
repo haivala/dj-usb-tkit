@@ -10,7 +10,7 @@ import { makeTestCtx } from "./test_helpers.mjs";
 test("setTrackAnalyzingState updates the set and the rendered library row", async () => {
   const ctx = makeTestCtx();
   ctx.state.tracks = [{ id: "x", title: "X", durationMs: 1000, bpm: 120, waveformPreview: [1] }];
-  await ctx.libraryTracksCtl.rerender();
+  ctx.el.libraryTableBody.append(ctx.buildTrackTableRow(ctx.state.tracks[0], { origin: "local", index: 0 }));
   const row = ctx.el.libraryTableBody.querySelector('.track-grid-row[data-track-id="x"]');
 
   setTrackAnalyzingState(ctx, "x", true);

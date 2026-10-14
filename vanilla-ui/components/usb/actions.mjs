@@ -1518,14 +1518,14 @@ function createUsbTracksController(ctx, { bodyId, fetchCommand, secondaryActionT
       wrap: ctx.el[bodyId]?.closest?.(".table-wrap"),
       durationTarget: bodyId === "historyTracks" ? ctx.el.historyTotalDuration : ctx.el.usbPlaylistTotalDuration,
     }),
-    fetchPage: ({ scopeId, query, sortBy, sortDir, cursor, limit }) =>
+    fetchPage: ({ scopeId, query, sortBy, sortDir, offset, limit }) =>
       ctx.command(fetchCommand, {
         usbRoot: ctx.state.usbRoot || null,
         id: scopeId,
         query,
         sortBy: sortBy || null,
         sortDir: sortDir || null,
-        cursor: cursor || null,
+        offset,
         limit,
       }),
     normalize: (track) => ctx.normalizeTrack(track),
@@ -1539,7 +1539,9 @@ function createUsbTracksController(ctx, { bodyId, fetchCommand, secondaryActionT
       secondaryActionLabel: "Play",
       secondaryActionType,
     }),
-    renderTrackTable: ctx.renderTrackTable,
+    buildRow: ctx.buildTrackTableRow,
+    renderEmpty: ctx.renderEmptyTrackTable,
+    finishRows: ctx.finishTrackRows,
     renderDurationSummary: (target, summary) =>
       renderTrackListDurationSummary(target, summary, formatDurationMs),
     getTableSortState: () => ctx.tableSortState,

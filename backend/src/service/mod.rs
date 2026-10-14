@@ -104,7 +104,7 @@ use crate::models::{
     SourceRootStatus, StopPlaybackData, Track, TrackMatch, WarningEntry,
 };
 use crate::player::{PlaybackController, run_playback_preflight};
-use crate::scanner::{scan_audio_files, unique_paths};
+use crate::scanner::{ScanCache, scan_audio_files, scan_audio_files_cached, unique_paths};
 use crate::wav_format::WavFormatIssue;
 
 const TRACK_QUERY_LIMIT_MAX: usize = 5000;
@@ -256,6 +256,10 @@ pub struct BackendService {
     /// Set while background data migrations run (see `migrations.rs`), so
     /// commands that write the analysis cache wait for them.
     pub(crate) data_migration_running: Arc<AtomicBool>,
+    /// Tag reads of the source folders' audio files, reused by
+    /// `browse_source_files` (which lists the folders on every page) while a
+    /// file is unchanged. Shared across `.clone()`s of the service.
+    pub(crate) library_scan_cache: Arc<ScanCache>,
 }
 
 impl BackendService {
@@ -270,6 +274,7 @@ impl BackendService {
             usb_playlist_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             usb_history_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             data_migration_running: Arc::new(AtomicBool::new(false)),
+            library_scan_cache: Arc::new(ScanCache::default()),
         };
         // Deliberately NOT called here (see `usb_staging::init_cache_root`'s
         // doc comment): `BackendService::new`/`BackendCommands::new` are the

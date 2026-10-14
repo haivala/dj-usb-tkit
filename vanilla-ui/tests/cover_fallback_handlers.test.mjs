@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { attachCoverFallbackHandlers } from "../components/library/actions.mjs";
-import { renderTrackTable } from "../track_table.mjs";
+import { buildTrackTableRow, finishTrackRows } from "../track_table.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
 
 test("attachCoverFallbackHandlers advances fallback queue and replaces with placeholder", () => {
@@ -28,29 +28,29 @@ test("attachCoverFallbackHandlers advances fallback queue and replaces with plac
   assert.equal(placeholder.getAttribute("aria-hidden"), "true");
 });
 
-test("renderTrackTable wires cover fallback handlers after row render", async () => {
+test("finishTrackRows wires cover fallback handlers on the new rows", async () => {
   const ctx = makeTestCtx();
   const tbody = ctx.el.usbPlaylistTracks;
-  await renderTrackTable(ctx, tbody, [
+  const rows = [
     { id: "a", title: "A", artworkDataUrl: "data:image/png;base64,AAA" },
     { id: "b", title: "B" },
-  ], { origin: "usb" });
+  ].map((track, index) => buildTrackTableRow(ctx, track, { origin: "usb", index }));
+  tbody.append(...rows);
+  await finishTrackRows(ctx, rows);
 
-  assert.equal(tbody.querySelectorAll(".track-grid-row").length, 2);
   const img = tbody.querySelector("img.cover-thumb");
   assert.equal(img.dataset.fallbackBound, "1");
 });
 
-test("renderTrackTable in append mode adds rows without clearing existing ones, offsetting indices", async () => {
+test("buildTrackTableRow carries the list position, stripes by it, and builds a skeleton for an unloaded slot", () => {
   const ctx = makeTestCtx();
-  const tbody = ctx.el.usbPlaylistTracks;
-  await renderTrackTable(ctx, tbody, [{ id: "a" }, { id: "b" }], { origin: "usb" });
-  assert.equal(tbody.querySelectorAll(".track-grid-row").length, 2);
+  const loaded = buildTrackTableRow(ctx, { id: "c" }, { origin: "usb", index: 7 });
+  assert.equal(loaded.dataset.trackIndex, "7");
+  assert.equal(loaded.classList.contains("is-alt"), true);
 
-  await renderTrackTable(ctx, tbody, [{ id: "c" }, { id: "d" }], { origin: "usb", append: true, indexOffset: 2 });
-
-  const rows = [...tbody.querySelectorAll(".track-grid-row")];
-  assert.equal(rows.length, 4, "append should add to, not replace, the previous page's rows");
-  assert.deepEqual(rows.map((row) => row.dataset.trackIndex), ["0", "1", "2", "3"],
-    "appended rows continue the index sequence from indexOffset");
+  const skeleton = buildTrackTableRow(ctx, undefined, { origin: "usb", index: 8 });
+  assert.equal(skeleton.classList.contains("track-grid-row-skeleton"), true);
+  assert.equal(skeleton.dataset.trackIndex, "8");
+  assert.equal(skeleton.dataset.trackId, undefined);
+  assert.equal(skeleton.classList.contains("is-alt"), false);
 });

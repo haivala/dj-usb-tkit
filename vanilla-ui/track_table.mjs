@@ -1,8 +1,8 @@
 import { formatDurationMs, formatBpm, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
 import { buildCoverSrcCandidates, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
-import { isTrackCurrentlyPlaying, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
-import { renderWaveformsIn, setWaveformColorData } from "./waveform.mjs";
+import { isTrackCurrentlyPlaying, moveActiveWaveform, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
+import { renderWaveforms, setWaveformColorData } from "./waveform.mjs";
 
 // The BPM cell: the formatted value in a pill (tooltip = which analyzer set
 // it), or "-" before analysis.
@@ -215,80 +215,62 @@ export function createTrackRow(ctx, track, options) {
   return row;
 }
 
-const trackTableRenderTokens = new WeakMap();
-const ROW_BUILD_CHUNK_SIZE = 300;
+// The skeleton row's shimmer cycle; matches the animation in styles.css.
+const SKELETON_SHIMMER_MS = 1600;
 
-export async function renderTrackTable(ctx, tbody, tracks, options = {}) {
-
-  // `options.append`: add `tracks` onto the end of what's already in `tbody`
-  // instead of rebuilding it (used for paginated large-selection loading,
-  // see hydrateSelectionTracks/paginateUsbSelection in usb/events.mjs).
-  // `options.indexOffset`: since an appended page's `tracks` array is only
-  // that page's slice, row indices (used for data-index/data-track-index,
-  // which click handlers resolve back into the *full* view array) need to
-  // be offset by how many rows already precede this page.
-  const isAppend = !!options.append;
-  const indexOffset = Number(options.indexOffset) || 0;
-
-  // Bump the token for this tbody so a slower, still-running render started
-  // by a previous call (e.g. the user rapidly re-selecting playlists) knows
-  // to stop appending rows once a newer render has taken over. An append
-  // call doesn't bump it -- it's a continuation of the render that already
-  // holds the current token, and gets invalidated the same way if a fresh
-  // (non-append) render for this tbody starts before it finishes.
-  let myToken;
-  if (isAppend) {
-    myToken = trackTableRenderTokens.get(tbody) ?? 0;
+// One row of a track table, at `options.index` in the whole list: the
+// track's row, or a skeleton while its page isn't loaded (`track` undefined).
+// Rows are striped by that index, not by DOM position, since the table only
+// holds the rows around the viewport.
+export function buildTrackTableRow(ctx, track, options) {
+  let row;
+  if (!track) {
+    row = cloneTemplate(ctx.document, "tplTrackRowSkeleton");
+    // Join the shimmer where the rows already on screen are, not at its start.
+    row.style.setProperty("--skeleton-phase", `${-(performance.now() % SKELETON_SHIMMER_MS)}ms`);
   } else {
-    myToken = (trackTableRenderTokens.get(tbody) || 0) + 1;
-    trackTableRenderTokens.set(tbody, myToken);
-  }
-  const isStale = () => trackTableRenderTokens.get(tbody) !== myToken;
-
-  if (!isAppend) {
-    tbody.replaceChildren();
-  }
-
-  if (!tracks.length) {
-    if (!isAppend) {
-      tbody.append(cloneTemplate(tbody.ownerDocument, "tplTrackRowEmpty"));
-    }
-    return;
-  }
-
-  try {
-    for (let i = 0; i < tracks.length; i += 1) {
-      if (isStale()) return;
-      const track = tracks[i];
-      const index = i + indexOffset;
-      const row = createTrackRow(ctx, track, { ...options, index });
+    try {
+      row = createTrackRow(ctx, track, options);
       if (Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6) {
         setWaveformColorData(row.querySelector(".waveform"), track.waveformColorData);
       }
-      tbody.append(row);
-      if ((i + 1) % ROW_BUILD_CHUNK_SIZE === 0 && i + 1 < tracks.length) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
-    if (isStale()) return;
-    attachCoverFallbackHandlers(tbody);
-    await renderWaveformsIn(tbody);
-    if (isStale()) return;
-    updateTransportButtonsInDom(ctx, tbody);
-  } catch (error) {
-    if (isStale()) return;
-    if (!isAppend) {
-      tbody.replaceChildren();
-    }
-    tracks.forEach((track) => {
-      const row = cloneTemplate(tbody.ownerDocument, "tplTrackRowFallback");
+    } catch (error) {
+      row = cloneTemplate(ctx.document, "tplTrackRowFallback");
       if (!options.reservesDragColumn) row.querySelector(".td-drag").remove();
       if (!options.withCheckbox) row.querySelector(".td-select").remove();
       row.querySelector(".td-track").textContent = track.title ?? "";
-      tbody.append(row);
-    });
-    ctx.emitStatus(`Track render fallback used: ${error?.message || "unknown render error"}`);
+      ctx.emitStatus(`Track render fallback used: ${error?.message || "unknown render error"}`);
+    }
   }
+  row.dataset.trackIndex = String(options.index);
+  row.classList.toggle("is-alt", options.index % 2 === 1);
+  return row;
+}
+
+export function renderEmptyTrackTable(ctx, tbody) {
+  tbody.replaceChildren(cloneTemplate(tbody.ownerDocument, "tplTrackRowEmpty"));
+}
+
+// Wire up rows just put in the table: cover fallbacks, transport state,
+// waveforms. A rebuilt row of the playing track takes the playhead back --
+// the row it had was dropped when it left the rendered window.
+export async function finishTrackRows(ctx, rows) {
+  const { state } = ctx;
+  const waveforms = [];
+  for (const row of rows) {
+    attachCoverFallbackHandlers(row);
+    updateTransportButtonsInDom(ctx, row);
+    waveforms.push(...row.querySelectorAll(".waveform.waveform-canvas"));
+    const playingHere = state.playbackActive
+      && state.playbackRowKey
+      && row.dataset.playbackRow === state.playbackRowKey
+      && !state.activeWaveform?.isConnected;
+    if (playingHere) {
+      moveActiveWaveform(ctx, row.querySelector(".waveform"))
+        .catch((err) => ctx.warn("Playhead re-attach failed:", err));
+    }
+  }
+  await renderWaveforms(waveforms);
 }
 
 function formatTrackDuration(track) {

@@ -1427,6 +1427,21 @@ fn get_playlist_tracks_paginates_filters_and_sorts_server_side() {
     );
     assert!(!page2.has_more);
 
+    // An offset jumps straight to a position, with no cursor needed.
+    let jumped = service
+        .get_playlist_tracks(GetPlaylistTracksRequest {
+            playlist_id: pid.clone(),
+            limit: 1,
+            offset: Some(1),
+            ..Default::default()
+        })
+        .expect("offset page");
+    assert_eq!(
+        jumped.items.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+        ["t2"]
+    );
+    assert!(jumped.has_more);
+
     // Server-side title sort spans the whole playlist.
     let sorted = service
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -2087,6 +2102,25 @@ fn browse_source_files_sorts_server_side_across_pages() {
             .collect::<Vec<_>>(),
         ["Alpha"]
     );
+
+    // An offset jumps straight to a position in the sorted list.
+    let jumped = service
+        .browse_source_files(BrowseSourceFilesRequest {
+            offset: Some(1),
+            limit: 1,
+            ..req(None)
+        })
+        .expect("offset page");
+    assert_eq!(
+        jumped
+            .items
+            .iter()
+            .map(|t| t.title.clone())
+            .collect::<Vec<_>>(),
+        ["Mu"]
+    );
+    assert!(jumped.has_more);
+    assert_eq!(jumped.total, 3);
 }
 
 #[test]

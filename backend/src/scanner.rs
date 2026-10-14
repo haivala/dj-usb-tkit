@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::Accessor;
@@ -60,6 +61,58 @@ pub struct ScannedTrack {
 }
 
 pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTrack>> {
+    walk_audio_files(source_roots, scan_audio_file)
+}
+
+/// Per-file results of `scan_audio_files_cached`, reused while a file's size
+/// and modification time are unchanged. Holds an entry per audio file ever
+/// seen in the source folders.
+#[derive(Debug, Default)]
+pub struct ScanCache {
+    entries: Mutex<HashMap<PathBuf, CachedScan>>,
+}
+
+#[derive(Debug)]
+struct CachedScan {
+    len: u64,
+    modified: Option<SystemTime>,
+    track: ScannedTrack,
+}
+
+/// `scan_audio_files`, but a file whose size and modification time match the
+/// last scan isn't opened again: walking the folders is cheap, reading every
+/// file's tags is not. New and changed files are read as usual.
+pub fn scan_audio_files_cached(
+    source_roots: &[String],
+    cache: &ScanCache,
+) -> BackendResult<Vec<ScannedTrack>> {
+    walk_audio_files(source_roots, |path| {
+        let metadata = read_file_metadata(path)?;
+        let (len, modified) = (metadata.len(), metadata.modified().ok());
+        let lock = || cache.entries.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(hit) = lock().get(path)
+            && hit.len == len
+            && hit.modified == modified
+        {
+            return Ok(hit.track.clone());
+        }
+        let track = scan_audio_file(path)?;
+        lock().insert(
+            path.to_path_buf(),
+            CachedScan {
+                len,
+                modified,
+                track: track.clone(),
+            },
+        );
+        Ok(track)
+    })
+}
+
+fn walk_audio_files(
+    source_roots: &[String],
+    mut scan: impl FnMut(&Path) -> BackendResult<ScannedTrack>,
+) -> BackendResult<Vec<ScannedTrack>> {
     let mut tracks = Vec::new();
 
     for root in source_roots {
@@ -83,7 +136,7 @@ pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTra
                 continue;
             }
 
-            tracks.push(scan_audio_file(path)?);
+            tracks.push(scan(path)?);
         }
     }
 
@@ -782,6 +835,47 @@ mod tests {
             by_name("extensible_other.wav").wav_extensible_kind,
             Some(WavFormatIssue::ExtensibleOther)
         );
+    }
+
+    #[test]
+    fn cached_scan_rereads_only_new_or_changed_files() {
+        let dir = tempdir().unwrap();
+        let roots = [dir.path().to_string_lossy().to_string()];
+        let path = dir.path().join("a.wav");
+        fs::write(&path, make_minimal_wav_extensible(1)).unwrap();
+        let cache = ScanCache::default();
+        let kind = |tracks: &[ScannedTrack]| {
+            tracks
+                .iter()
+                .find(|t| t.path.ends_with("a.wav"))
+                .and_then(|t| t.wav_extensible_kind)
+        };
+        let first = scan_audio_files_cached(&roots, &cache).unwrap();
+        assert_eq!(kind(&first), Some(WavFormatIssue::ExtensiblePcm));
+
+        // Same size and modification time: the cached result, file not reread.
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::write(&path, make_minimal_wav_extensible(0x0006)).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        let unchanged = scan_audio_files_cached(&roots, &cache).unwrap();
+        assert_eq!(kind(&unchanged), Some(WavFormatIssue::ExtensiblePcm));
+
+        // A newer modification time: read again. A new file: read.
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(modified + std::time::Duration::from_secs(5))
+            .unwrap();
+        fs::write(dir.path().join("b.wav"), make_minimal_wav()).unwrap();
+        let changed = scan_audio_files_cached(&roots, &cache).unwrap();
+        assert_eq!(kind(&changed), Some(WavFormatIssue::ExtensibleOther));
+        assert_eq!(changed.len(), 2);
     }
 
     #[test]

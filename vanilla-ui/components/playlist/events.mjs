@@ -201,6 +201,9 @@ export function bindPlaylistEvents(ctx) {
         })
       : null;
     row.classList.add("dragging");
+    // Only the rows around the viewport are rendered; hold them still while
+    // this row is moved among them (autoscroll only adds rows).
+    playlistTracksCtl.freezeWindow(true);
     autoScroller.attachWheel();
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
@@ -231,6 +234,7 @@ export function bindPlaylistEvents(ctx) {
     autoScroller.stop();
     autoScroller.detachWheel();
     if (!dragSourceRow) return;
+    playlistTracksCtl.freezeWindow(false);
     dragSourceRow.classList.remove("dragging");
     const playlist = getCurrentPlaylist();
     const movedRow = dragSourceRow;
@@ -254,10 +258,17 @@ export function bindPlaylistEvents(ctx) {
     // neighbour, over the whole playlist -- the DOM only holds loaded rows. When
     // a sort was active, `pendingCommit` first persists the sorted view as the
     // playlist order so `beforeTrackId` (a neighbour in that view) lines up.
+    // The next row can be a skeleton (its page not loaded yet): resolve it
+    // through its slot in the list.
     const nextRow = movedRow.nextElementSibling;
     const beforeTrackId = nextRow?.classList?.contains("track-grid-row")
-      ? (nextRow.dataset.trackId || null)
+      ? (nextRow.dataset.trackId || playlistTracksCtl.view[Number(nextRow.dataset.trackIndex)]?.id || null)
       : null;
+    if (nextRow && !beforeTrackId) {
+      emitStatus("Track order not saved: the list was still loading. Try again.");
+      refreshCurrentPlaylistTracks().catch((e) => console.error(e));
+      return;
+    }
     const moveTrackId = movedRow.dataset.trackId;
 
     (async () => {

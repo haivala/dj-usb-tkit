@@ -6,14 +6,12 @@ import { REANALYZE_TOOLTIP } from "../../track_utils.mjs";
 import {
   formatDurationMs,
   renderTrackListDurationSummary,
-  loadMoreIfNearBottom,
 } from "../../track_utils.mjs";
 import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
 
 export const LIBRARY_LOAD_LIMIT_DEFAULT = 200;
 const LIBRARY_LOAD_LIMIT_POST_SCAN = 1000;
 const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
-const LIBRARY_SCROLL_FETCH_THRESHOLD_PX = 120;
 const PREVIEW_HYDRATION_BATCH_SIZE = 48;
 
 export function warningEntryText(entry) {
@@ -207,7 +205,7 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
 
   let libraryChanged = false;
   for (const track of state.tracks) {
-    if (String(track.id) !== trackId) continue;
+    if (String(track?.id) !== trackId) continue;
     libraryChanged = patchTrackAnalysisFields(ctx, track, payload) || libraryChanged;
   }
   if (libraryChanged) {
@@ -227,7 +225,7 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
     const hasAnalyzer = typeof payload?.bpmAnalyzer === "string" && payload.bpmAnalyzer.trim();
     const isBpmKeyPayload = hasBpm || hasKey || hasAnalyzer;
     if (isBpmKeyPayload) {
-      const foundTrack = state.tracks.find((t) => String(t.id) === trackId);
+      const foundTrack = state.tracks.find((t) => String(t?.id) === trackId);
       const warnLabel = foundTrack
         ? [foundTrack.artist, foundTrack.title].filter(Boolean).join(" - ") || trackId
         : trackId;
@@ -237,7 +235,7 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
 
   for (const playlist of state.playlists) {
     for (const track of playlist.tracks || []) {
-      const localTrackId = String(track.localTrackId || track.id || "").trim();
+      const localTrackId = String(track?.localTrackId || track?.id || "").trim();
       if (localTrackId !== trackId) continue;
       patchTrackAnalysisFields(ctx, track, payload);
     }
@@ -530,7 +528,7 @@ export function createLibraryTracksController(ctx) {
       wrap: ctx.el.libraryTableWrap,
       durationTarget: ctx.el.libraryTotalDuration,
     }),
-    fetchPage: ({ query, sortBy, sortDir, cursor, limit }) => {
+    fetchPage: ({ query, sortBy, sortDir, offset, limit }) => {
       const enabledRoots = (ctx.state.sourceRoots || []).filter(
         (root) => ctx.state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(ctx.state, root),
       );
@@ -538,7 +536,7 @@ export function createLibraryTracksController(ctx) {
       const includeMixxxDb = ctx.state.mixxxDbEnabled === true;
       ctx.state.libraryQuery = String(query || "").trim();
       if (!enabledRoots.length && !includeRekordboxDb && !includeMixxxDb) {
-        return { total: 0, items: [], nextCursor: null, hasMore: false, totalDurationMs: 0, durationKnownCount: 0 };
+        return { total: 0, items: [], totalDurationMs: 0, durationKnownCount: 0 };
       }
       return ctx.command("browse_source_files", {
         sourceRoots: enabledRoots,
@@ -547,7 +545,7 @@ export function createLibraryTracksController(ctx) {
         query: ctx.state.libraryQuery,
         sortBy: sortBy || null,
         sortDir: sortDir || null,
-        cursor: cursor || null,
+        offset,
         limit,
       });
     },
@@ -569,7 +567,9 @@ export function createLibraryTracksController(ctx) {
       secondaryActionLabel: "Play",
       secondaryActionType: "play-library",
     }),
-    renderTrackTable: ctx.renderTrackTable,
+    buildRow: ctx.buildTrackTableRow,
+    renderEmpty: ctx.renderEmptyTrackTable,
+    finishRows: ctx.finishTrackRows,
     renderDurationSummary: (_target, summary) =>
       applyLibraryDurationSummary(
         ctx,
@@ -577,13 +577,18 @@ export function createLibraryTracksController(ctx) {
         Number(summary.trackCount || 0) - Number(summary.durationKnownCount || 0),
       ),
     getTableSortState: () => ctx.tableSortState,
+    onError: (err) => {
+      console.error(err);
+      ctx.emitStatus(err.message || String(err));
+    },
     onResponse: (data) => {
       // On a re-query (search / sort) ctx.state.tracks still holds the previous list;
       // snapshot it so surviving tracks keep their lazily hydrated previews. On a
       // full reload (source-filter change) ctx.state.tracks is already cleared and
       // resetAndLoadLibraryTracks took the snapshot before clearing.
-      if ((ctx.state.tracks || []).length) {
-        ctl.prevById = new Map(ctx.state.tracks.map((t) => [String(t.id), t]));
+      const loaded = (ctx.state.tracks || []).filter(Boolean);
+      if (loaded.length) {
+        ctl.prevById = new Map(loaded.map((t) => [String(t.id), t]));
       }
       applySourceRootAnalysis(ctx.state, data.sourceRootAnalysis);
       renderSourceChips(ctx);
@@ -596,7 +601,7 @@ export function createLibraryTracksController(ctx) {
         // all" sets `selectedTrackIds` directly and only re-renders (no `first`
         // page load), so its larger-than-one-page selection is preserved until
         // the query actually changes.
-        const loadedIds = new Set((ctx.state.tracks || []).map((t) => t.id));
+        const loadedIds = new Set((ctx.state.tracks || []).filter(Boolean).map((t) => t.id));
         ctx.state.selectedTrackIds = new Set(
           [...ctx.state.selectedTrackIds].filter((id) => loadedIds.has(id)),
         );
@@ -643,23 +648,9 @@ export async function resetAndLoadLibraryTracks(ctx, query = "", limit = LIBRARY
   state.libraryQuery = String(query || "").trim();
   libraryTracksCtl.query = state.libraryQuery;
   // Snapshot for waveform-preview preservation before ctl.load() clears state.tracks.
-  libraryTracksCtl.prevById = new Map((state.tracks || []).map((t) => [String(t.id), t]));
+  libraryTracksCtl.prevById = new Map((state.tracks || []).filter(Boolean).map((t) => [String(t.id), t]));
   const opts = Number.isFinite(limit) && limit > LIBRARY_LOAD_LIMIT_DEFAULT ? { limit } : {};
   await libraryTracksCtl.load(opts);
-}
-
-export function handleLibraryTableWrapScroll(ctx) {
-  const ctl = ctx.libraryTracksCtl;
-  loadMoreIfNearBottom(
-    ctx.el.libraryTableWrap,
-    LIBRARY_SCROLL_FETCH_THRESHOLD_PX,
-    () => ctl.loading,
-    () => ctl.hasMore,
-    () => ctl.loadMore().catch((err) => {
-      console.error(err);
-      ctx.emitStatus(err.message || String(err));
-    }),
-  );
 }
 
 // Key labels are rendered by the backend in the user's notation, so a notation
@@ -940,7 +931,7 @@ export async function analyzeSingleTrack(ctx, track, modeLabel = null) {
     emitStatus("Track is not in local library yet. Scan library first, then analyze.");
     return;
   }
-  const localTrack = ctx.state.tracks.find((t) => t.id === localId) || track;
+  const localTrack = ctx.state.tracks.find((t) => t?.id === localId) || track;
   const label = modeLabel || (localTrack.analysisReady ? "Reanalyze" : "Analyze missing");
   await analyzeTrackIds(ctx, [localId], label);
 }
@@ -953,7 +944,7 @@ export function patchLibraryRowByTrackId(ctx, trackId) {
   const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
   const row = el.libraryTableBody?.querySelector(selector);
   if (!row) return false;
-  const track = state.tracks.find((t) => String(t.id) === id);
+  const track = state.tracks.find((t) => String(t?.id) === id);
   if (!track) return false;
   const patched = patchLibraryRowCells(ctx, row, track);
   const analyzing = state.analyzingTrackIds.has(id);

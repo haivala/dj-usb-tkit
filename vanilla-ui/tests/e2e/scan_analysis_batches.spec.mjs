@@ -760,7 +760,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           if (command === "browse_source_files") {
             searchQueryCount += 1;
             const query = payload?.request?.query ?? "";
-            const cursor = payload?.request?.cursor ?? null;
+            const cursor = payload?.request?.offset ?? null;
             const sortBy = payload?.request?.sortBy ?? null;
             const sortDir = payload?.request?.sortDir ?? null;
             return { ok: true, data: listPage(cursor, query, sortBy, sortDir) };
@@ -989,6 +989,9 @@ test("scan progressively changes action buttons to Reanalyze", async ({ page }, 
   // default 5s expect timeout even though the app itself isn't slow — triple it here.
   testInfo.setTimeout(testInfo.timeout * 3);
   await installScanAnalysisMock(page, { trackCount: 40, pieceDelayMs: 20 });
+  // Tall enough that the table renders all 40 rows (it only renders the
+  // rows around the viewport).
+  await page.setViewportSize({ width: 1280, height: 2400 });
   await page.goto("/");
 
   await page.locator("#scanLibraryBtn").click();
@@ -1025,6 +1028,7 @@ test("scan forwards selected BPM range to analyze_new_tracks", async ({ page }) 
 
 test("analysis populates BPM and key cells for all tracks", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 40, pieceDelayMs: 10 });
+  await page.setViewportSize({ width: 1280, height: 2400 });
   await page.goto("/");
 
   await page.locator("#scanLibraryBtn").click();
@@ -1286,21 +1290,29 @@ test("sorted library order stays stable during live analysis patching", async ({
   expect(after).toEqual(before);
 });
 
+// The library table only renders the rows around the viewport: scroll a row
+// into view (its page loads when scrolling settles) and locate it by its
+// position in the list.
+async function scrollLibraryToRow(page, index) {
+  await expect(page.locator("#libraryTableBody .track-grid-row[data-track-id]").first()).toBeVisible();
+  await page.evaluate((index) => {
+    const wrap = document.querySelector("#libraryTableWrap");
+    const row = document.querySelector("#libraryTableBody .track-grid-row");
+    wrap.scrollTop = index * row.getBoundingClientRect().height;
+  }, index);
+  await expect(libraryRowAt(page, index)).toBeVisible();
+}
+
+function libraryRowAt(page, index) {
+  return page.locator(`#libraryTableBody .track-grid-row[data-track-id][data-track-index="${index}"]`);
+}
+
 test("analyze on auto-loaded non-materialized track resolves local id", async ({ page }) => {
   await installPagedMaterializeAnalyzeMock(page, { trackCount: 260, pageSize: 200, pieceDelayMs: 120 });
   await page.goto("/");
 
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(200);
-
-  await page.evaluate(() => {
-    const wrap = document.querySelector("#libraryTableWrap");
-    if (!wrap) return;
-    wrap.scrollTop = wrap.scrollHeight;
-    wrap.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(260);
-
-  const targetRow = page.locator("#libraryTableBody .track-grid-row").nth(230);
+  await scrollLibraryToRow(page, 230);
+  const targetRow = libraryRowAt(page, 230);
   await targetRow.locator('[data-action="analyze-track"]').click();
 
   await expect(page.locator("#statusText")).not.toContainText("Track is not in local library yet");
@@ -1318,17 +1330,8 @@ test("analyze reports the not-in-local-library message when materializing the tr
   });
   await page.goto("/");
 
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(200);
-
-  await page.evaluate(() => {
-    const wrap = document.querySelector("#libraryTableWrap");
-    if (!wrap) return;
-    wrap.scrollTop = wrap.scrollHeight;
-    wrap.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(260);
-
-  const targetRow = page.locator("#libraryTableBody .track-grid-row").nth(230);
+  await scrollLibraryToRow(page, 230);
+  const targetRow = libraryRowAt(page, 230);
   await targetRow.locator('[data-action="analyze-track"]').click();
 
   await expect(page.locator("#statusText")).toContainText(
@@ -1347,22 +1350,14 @@ test("analyze on auto-loaded track updates row in place without full reload", as
   });
   await page.goto("/");
 
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(200);
-
-  await page.evaluate(() => {
-    const wrap = document.querySelector("#libraryTableWrap");
-    if (!wrap) return;
-    wrap.scrollTop = wrap.scrollHeight;
-    wrap.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(260);
+  await scrollLibraryToRow(page, 230);
 
   const beforeStats = await page.evaluate(() => ({
     list: Number(window.__pagedAnalyzeStats?.listQueryCount || 0),
     search: Number(window.__pagedAnalyzeStats?.searchQueryCount || 0)
   }));
 
-  const targetRow = page.locator("#libraryTableBody .track-grid-row").nth(230);
+  const targetRow = libraryRowAt(page, 230);
   const before = await targetRow.evaluate((row) => ({
     trackId: String(row.getAttribute("data-track-id") || ""),
     hasBpmPill: !!row.querySelector(".bpm-pill")
@@ -1373,9 +1368,8 @@ test("analyze on auto-loaded track updates row in place without full reload", as
   await targetRow.locator('[data-action="analyze-track"]').click();
 
   await expect(page.locator("#statusText")).toContainText("Analyze missing done: analyzed 1, failed 0");
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(260);
 
-  const afterTrackId = await page.locator("#libraryTableBody .track-grid-row").nth(230)
+  const afterTrackId = await libraryRowAt(page, 230)
     .evaluate((row) => String(row.getAttribute("data-track-id") || ""));
   expect(afterTrackId).toBe(before.trackId);
 

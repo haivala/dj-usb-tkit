@@ -698,13 +698,13 @@ export function createPlaylistTracksController(ctx) {
       wrap: ctx.el.playlistTableWrap,
       durationTarget: ctx.el.playlistTotalDuration,
     }),
-    fetchPage: ({ scopeId, query, sortBy, sortDir, cursor, limit }) =>
+    fetchPage: ({ scopeId, query, sortBy, sortDir, offset, limit }) =>
       ctx.command("get_playlist_tracks", {
         playlistId: scopeId,
         query,
         sortBy: sortBy || null,
         sortDir: sortDir || null,
-        cursor: cursor || null,
+        offset,
         limit,
       }),
     normalize: (track) => ctx.normalizeTrack(track),
@@ -737,7 +737,9 @@ export function createPlaylistTracksController(ctx) {
         dragDisabledTooltip: lock.dragDisabledTooltip,
       };
     },
-    renderTrackTable: ctx.renderTrackTable,
+    buildRow: ctx.buildTrackTableRow,
+    renderEmpty: ctx.renderEmptyTrackTable,
+    finishRows: ctx.finishTrackRows,
     renderDurationSummary: (target, summary) =>
       renderTrackListDurationSummary(target, summary, formatDurationMs),
     getTableSortState: () => ctx.tableSortState,
@@ -750,7 +752,7 @@ export function createPlaylistTracksController(ctx) {
         // Whole-playlist count from the backend, not just the loaded page(s).
         p.trackCount = Number(data.total) || 0;
       }
-      // Reveal the table wrap *before* renderTrackTable paints the rows: a
+      // Reveal the table wrap *before* the rows are built: a
       // waveform canvas measured while an ancestor is `display:none` (the
       // empty-state chrome still applied from a previously-selected empty
       // playlist) sizes to 1x1 and is never repainted when the wrap is later

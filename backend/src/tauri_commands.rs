@@ -754,12 +754,18 @@ pub fn list_tracks(
     state.list_tracks(request)
 }
 
+// Off the main thread: it rebuilds, filters and sorts the whole library per
+// page, and a sync command would freeze the window meanwhile.
 #[tauri::command]
-pub fn browse_source_files(
+pub async fn browse_source_files(
     state: State<'_, BackendCommands>,
     request: BrowseSourceFilesRequest,
-) -> ApiResponse<BrowseSourceFilesData> {
-    state.browse_source_files(request)
+) -> Result<ApiResponse<BrowseSourceFilesData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("browse_source_files", move || {
+        commands.browse_source_files(request)
+    })
+    .await)
 }
 
 #[tauri::command]
@@ -913,11 +919,15 @@ pub fn list_playlists(state: State<'_, BackendCommands>) -> ApiResponse<ListPlay
 }
 
 #[tauri::command]
-pub fn get_playlist_tracks(
+pub async fn get_playlist_tracks(
     state: State<'_, BackendCommands>,
     request: GetPlaylistTracksRequest,
-) -> ApiResponse<GetPlaylistTracksData> {
-    state.get_playlist_tracks(request)
+) -> Result<ApiResponse<GetPlaylistTracksData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_playlist_tracks", move || {
+        commands.get_playlist_tracks(request)
+    })
+    .await)
 }
 
 #[tauri::command]

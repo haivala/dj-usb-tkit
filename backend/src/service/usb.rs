@@ -406,7 +406,10 @@ fn paginate_usb_tracks(
         sort.by,
         sort.dir,
     ]);
-    let start = super::decode_offset_cursor(req.cursor.as_deref(), &signature)?.unwrap_or(0);
+    let start = match req.offset {
+        Some(offset) => offset,
+        None => super::decode_offset_cursor(req.cursor.as_deref(), &signature)?.unwrap_or(0),
+    };
     let start = start.min(total);
     let limit = if req.limit == 0 {
         total.saturating_sub(start).max(1)
@@ -4079,6 +4082,18 @@ mod tests {
             .expect("page 2");
         assert_eq!(page2.items.len(), 1);
         assert!(!page2.has_more);
+
+        // An offset jumps straight to a position, with no cursor needed.
+        let jumped = service
+            .fetch_usb_playlist_tracks(req(crate::models::FetchUsbTracksRequest {
+                limit: 1,
+                offset: Some(1),
+                ..Default::default()
+            }))
+            .expect("offset page");
+        assert_eq!(jumped.items.len(), 1);
+        assert_eq!(jumped.items[0].id, page1.items[1].id);
+        assert!(jumped.has_more);
 
         // Server-side title sort spans the whole playlist.
         let sorted = service

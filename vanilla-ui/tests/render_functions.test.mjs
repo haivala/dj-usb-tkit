@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderTrackTable } from "../track_table.mjs";
+import { buildTrackTableRow, finishTrackRows, renderEmptyTrackTable } from "../track_table.mjs";
 import { ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "../track_utils.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
 
@@ -27,13 +27,14 @@ const baseRowOptions = {
   secondaryActionType: "play-library"
 };
 
-// Renders one track through the real table renderer and returns its row.
+// Builds one track's row through the real table renderer and returns it.
 async function renderRow(track = {}, options = {}, state = { currentPlaylistId: "playlist-1", playlists: [{ id: "playlist-1", name: "P1" }] }) {
   const ctx = makeTestCtx();
   Object.assign(ctx.state, state);
-  const tbody = ctx.el.libraryTableBody;
-  await renderTrackTable(ctx, tbody, [{ ...baseTrack, ...track }], { ...baseRowOptions, ...options });
-  return tbody.querySelector(".track-grid-row");
+  const row = buildTrackTableRow(ctx, { ...baseTrack, ...track }, { ...baseRowOptions, ...options, index: 0 });
+  ctx.el.libraryTableBody.append(row);
+  await finishTrackRows(ctx, [row]);
+  return row;
 }
 
 function formatBadgeRow(track) {
@@ -85,16 +86,14 @@ test("createTrackRow renders a canvas for PWV4-only waveform data", async () => 
   assert.ok(row.querySelector(".waveform-canvas-el"));
 });
 
-test("renderTrackTable empty states use one full-width grid empty cell", async () => {
-  for (const withCheckbox of [true, false]) {
-    const ctx = makeTestCtx();
-    const tbody = ctx.el.libraryTableBody;
-    await renderTrackTable(ctx, tbody, [], { withCheckbox });
-    const rows = tbody.querySelectorAll(".track-grid-row.track-grid-row-empty");
-    assert.equal(rows.length, 1);
-    assert.equal(tbody.querySelectorAll('[role="cell"]').length, 1);
-    assert.equal(tbody.querySelector(".track-grid-cell.track-grid-empty").textContent, "No tracks available.");
-  }
+test("renderEmptyTrackTable uses one full-width grid empty cell", () => {
+  const ctx = makeTestCtx();
+  const tbody = ctx.el.libraryTableBody;
+  renderEmptyTrackTable(ctx, tbody);
+  const rows = tbody.querySelectorAll(".track-grid-row.track-grid-row-empty");
+  assert.equal(rows.length, 1);
+  assert.equal(tbody.querySelectorAll('[role="cell"]').length, 1);
+  assert.equal(tbody.querySelector(".track-grid-cell.track-grid-empty").textContent, "No tracks available.");
 });
 
 test("createTrackRow renders the format badge variant the backend's formatCompat asks for", async () => {

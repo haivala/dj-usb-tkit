@@ -93,7 +93,7 @@ export function createAppContext(env) {
   bindActions(library, `normalizeTrack normalizeUsbPlaylist refreshSourceRootAnalysisStatus
     refreshMissingSourceRoots applyRealtimeAnalyzedTrackUpdate hydrateLoadedTracksPreviewsInBackground
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
-    scheduleLibrarySearch resetAndLoadLibraryTracks handleLibraryTableWrapScroll
+    scheduleLibrarySearch resetAndLoadLibraryTracks
     reloadTrackListsForKeyNotation enabledLibrarySourceRoots scanLibrary analyzeSelectedTracks
     scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState promoteTrackIdentity
     patchTrackAnalysisFields`);
@@ -108,7 +108,7 @@ export function createAppContext(env) {
     removeUsbPlayerMenuItems moveUsbPlayerMenuItems exportPlaylistToUsb patchUsbTrackRow
     patchHistoryTrackRow initializeUsb pickUsbFolder hydrateUsbTrackMetadata loadUsbDevices
     pruneUsbDevice updateUsbRootText`);
-  bindActions(trackTable, "renderTrackTable");
+  bindActions(trackTable, "buildTrackTableRow renderEmptyTrackTable finishTrackRows");
   bindActions(trackDetail, "openTrackDetail");
 
   ctx.confirmDialog = uiCtrl.createConfirmDialogController(ctx.el);

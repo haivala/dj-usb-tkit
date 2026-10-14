@@ -212,7 +212,7 @@ test("Selection state stays correct when filtering visible rows", async ({ page 
 // The library is server-paginated (browse_source_files, LIBRARY_LOAD_LIMIT_DEFAULT tracks/page).
 // "select all" used to only select state.filteredTracks -- the tracks already loaded into the
 // UI -- so on any library with more matches than one page, it silently missed the rest. This
-// mock implements real cursor pagination (unlike installSelectionMock's single-page stub) so
+// mock implements real offset pagination (unlike installSelectionMock's single-page stub) so
 // that regression can't sneak back in unnoticed.
 function installPaginatedLibraryMock(page, { trackCount }) {
   return page.addInitScript(({ trackCount }) => {
@@ -239,9 +239,9 @@ function installPaginatedLibraryMock(page, { trackCount }) {
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "browse_source_files") {
             const limit = Number(payload?.request?.limit) || allTracks.length;
-            const cursor = Number(payload?.request?.cursor) || 0;
-            const page = allTracks.slice(cursor, cursor + limit);
-            const nextOffset = cursor + page.length;
+            const offset = Number(payload?.request?.offset) || 0;
+            const page = allTracks.slice(offset, offset + limit);
+            const nextOffset = offset + page.length;
             const hasMore = nextOffset < allTracks.length;
             return {
               ok: true,
@@ -355,5 +355,7 @@ test("select all loads and adds every matching track across multiple pages, not 
   await expect(page.locator("#statusText")).toContainText(`Added ${trackCount}`, { timeout: 15000 });
 
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(trackCount, { timeout: 15000 });
+  // The table only renders the rows around the viewport; the title carries
+  // the whole playlist's count.
+  await expect(page.locator("#playlistPanelTitle")).toContainText(`(${trackCount} tracks)`, { timeout: 15000 });
 });

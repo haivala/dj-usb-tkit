@@ -1,18 +1,5 @@
 // Track formatting utilities.
 
-// Shared "infinite scroll" check: if `wrap` is scrolled within `thresholdPx`
-// of its bottom, and nothing else is already loading/blocking it, load the
-// next page. Originally specific to the library table
-// (handleLibraryTableWrapScroll); extracted so other large, paginated track
-// lists (USB playlist/history) can reuse the exact same check instead of
-// re-implementing it.
-export function loadMoreIfNearBottom(wrap, thresholdPx, isBusy, hasMore, loadMore) {
-  if (!wrap || isBusy() || !hasMore()) return;
-  const remaining = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight;
-  if (remaining > thresholdPx) return;
-  return loadMore();
-}
-
 // `m:ss` / `h:mm:ss` for a millisecond duration (tracks carry `durationMs`,
 // Option<u64>).
 export function formatDurationMs(value) {

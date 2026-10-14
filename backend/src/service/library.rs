@@ -537,7 +537,7 @@ impl BackendService {
         let scanned = if source_roots.is_empty() {
             Vec::new()
         } else {
-            scan_audio_files(&source_roots)?
+            scan_audio_files_cached(&source_roots, &self.library_scan_cache)?
         };
         let mut stmt = conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks"))?;
         let indexed_rows = stmt.query_map([], |row| row_to_track(row, false))?;
@@ -730,7 +730,9 @@ impl BackendService {
         }
 
         let total = items.len();
-        let start_idx = if let Some(cursor) = cursor.as_ref() {
+        let start_idx = if let Some(offset) = req.offset {
+            offset.min(total)
+        } else if let Some(cursor) = cursor.as_ref() {
             items
                 .iter()
                 .position(|track| {

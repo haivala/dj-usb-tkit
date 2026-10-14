@@ -30,16 +30,21 @@ Failure responses follow:
 
 ### Paginated track lists
 
-`browse_source_files` and `get_playlist_tracks` (and, when they land, the USB
-per-list track commands) share a keyset-pagination shape: the request carries
-`query`, `sortBy` (`title` | `artist` | `album` | `format` | `bpm` |
-`durationMs` | `key`; absent ⇒ natural order), `sortDir` (`asc` | `desc`),
-`cursor`, and `limit` (`0` ⇒ unpaginated). The response carries `items`,
-`total` (filtered count), `nextCursor`, `hasMore`, plus any whole-set
-aggregates (`totalDurationMs`, `sourceRootAnalysis`). Filtering and sorting are
-server-side so they span the entire list, not just the loaded page. A `cursor`
-is bound by signature to its exact `query`/`sortBy`/`sortDir`/scope and is
-rejected with a validation error if any of those changed.
+`browse_source_files`, `get_playlist_tracks` and the USB per-list track
+commands (`fetch_usb_playlist_tracks`, `fetch_usb_history_tracks`) share a
+pagination shape: the request carries `query`, `sortBy` (`title` | `artist` |
+`album` | `format` | `bpm` | `durationMs` | `key`; absent ⇒ natural order),
+`sortDir` (`asc` | `desc`), `offset` or `cursor`, and `limit` (`0` ⇒
+unpaginated). The response carries `items`, `total` (filtered count),
+`nextCursor`, `hasMore`, plus any whole-set aggregates (`totalDurationMs`,
+`sourceRootAnalysis`). Filtering and sorting are server-side so they span the
+entire list, not just the loaded page.
+
+`offset` is a position in the filtered, sorted list and takes precedence over
+`cursor`; the track tables use it to load whichever part of a list is on
+screen. A `cursor` is bound by signature to its exact
+`query`/`sortBy`/`sortDir`/scope and is rejected with a validation error if any
+of those changed.
 
 ## Event model
 

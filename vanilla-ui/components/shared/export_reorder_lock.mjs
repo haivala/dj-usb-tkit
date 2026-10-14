@@ -11,7 +11,7 @@ export function exportReorderLockTooltip(playlistName) {
 // Applies the reorder lock to the currently rendered playlist track grid: sets
 // data-sort-locked on the [data-track-grid] wrapper (which gates the column-sort
 // header click) and the "won't reorder" tooltip on the sortable headers. Returns
-// the two values renderTrackTable() consumes. Kept free of any `state` dependency
+// the two values createTrackRow() consumes. Kept free of any `state` dependency
 // -- callers pass state.playlistUsbExportStatusById as statusById.
 export function applyPlaylistReorderLockToGrid(el, playlist, { searchActive } = {}, statusById) {
   const locksReorder = !!(statusById instanceof Map && statusById.get(playlist.id)?.locksReorder);

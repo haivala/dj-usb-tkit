@@ -4,8 +4,10 @@ import { test, expect } from "./coverage-fixture.mjs";
 // (vanilla-ui/components/shared/track_list_controller.mjs) over the
 // server-paginated `fetch_usb_playlist_tracks` command: each page arrives
 // already hydrated (bpm/key/waveform), and search + sort are backend query
-// params so they span the whole playlist, not just the loaded rows. These
-// tests exercise the real built app end-to-end.
+// params so they span the whole playlist, not just the loaded rows. Pages are
+// fetched by offset for the part of the list on screen, and only the rows
+// around the viewport are rendered. These tests exercise the real built app
+// end-to-end.
 
 const PLAYLIST_SIZE = 350; // larger than one page
 const PAGE_SIZE = 150; // DEFAULT_PAGE_SIZE in track_list_controller.mjs
@@ -39,7 +41,7 @@ function playlistTracksResponder(tracks, hydrate) {
       });
     }
     const total = rows.length;
-    const offset = Number(req.cursor || 0);
+    const offset = Number(req.offset || 0);
     const limit = Number(req.limit || 0) || total;
     const page = rows.slice(offset, offset + limit).map((t) => hydrate(t));
     const nextOffset = offset + page.length;
@@ -155,14 +157,25 @@ function rowByTitle(page, title) {
   return page.locator("#usbPlaylistTracks .track-grid-row").filter({ hasText: title });
 }
 
-test("selecting a large playlist renders the first hydrated page", async ({ page }) => {
+function scrollToEnd(page) {
+  return page.locator('[data-track-grid][data-body-id="usbPlaylistTracks"]').locator("xpath=..")
+    .evaluate((el) => { el.scrollTop = el.scrollHeight; });
+}
+
+const fetchOffsets = (page) => page.evaluate(() => window.__fetchCalls.map((c) => c.offset));
+
+test("selecting a large playlist renders the top of the first hydrated page", async ({ page }) => {
   await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
 
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(PAGE_SIZE);
   await expect(rowByTitle(page, "Track 0000").locator(".bpm-pill")).toBeVisible();
+  // Only the rows around the viewport are in the DOM.
+  const rendered = await page.locator("#usbPlaylistTracks .track-grid-row[data-track-id]").count();
+  expect(rendered).toBeGreaterThan(0);
+  expect(rendered).toBeLessThan(PAGE_SIZE);
   await expect(rowByTitle(page, SORT_TARGET_TITLE)).toHaveCount(0);
+  expect(await fetchOffsets(page)).toEqual([0]);
 
   // The list shows names only; the open playlist's count is in its heading,
   // and the totals sit on the header line.
@@ -172,19 +185,31 @@ test("selecting a large playlist renders the first hydrated page", async ({ page
   await expect(page.locator(".panel-header #usbCountsText")).toHaveText(/^1 playlists, \d+ tracks$/);
 });
 
-test("scrolling near the bottom loads the next hydrated page", async ({ page }) => {
+test("the scrollbar spans the whole playlist from the start", async ({ page }) => {
   await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(PAGE_SIZE);
 
-  const wrap = page.locator('[data-track-grid][data-body-id="usbPlaylistTracks"]').locator("xpath=..");
-  await wrap.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  const body = page.locator("#usbPlaylistTracks");
+  const rowHeight = await body.locator(".track-grid-row").first().evaluate((row) => row.getBoundingClientRect().height);
+  const bodyHeight = await body.evaluate((el) => el.getBoundingClientRect().height);
+  expect(Math.abs(bodyHeight - PLAYLIST_SIZE * rowHeight)).toBeLessThan(2);
+});
 
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(Math.min(PLAYLIST_SIZE, PAGE_SIZE * 2));
-  const row200 = rowByTitle(page, "Track 0200");
-  await expect(row200).toBeVisible();
-  await expect(row200.locator(".bpm-pill")).toBeVisible();
+test("jumping to the end loads just the end of the playlist, hydrated", async ({ page }) => {
+  await installSpecHelpers(page);
+  await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
+  await selectBigPlaylist(page);
+  await expect(rowByTitle(page, "Track 0000")).toBeVisible();
+
+  await scrollToEnd(page);
+
+  const lastRow = rowByTitle(page, `Track ${String(PLAYLIST_SIZE - 1).padStart(4, "0")}`);
+  await expect(lastRow).toBeVisible();
+  await expect(lastRow.locator(".bpm-pill")).toBeVisible();
+  // The page in between is never fetched, and the top rows are gone.
+  expect(await fetchOffsets(page)).not.toContain(PAGE_SIZE);
+  await expect(rowByTitle(page, "Track 0000")).toHaveCount(0);
 });
 
 test("searching re-queries the backend and shows the filtered-in track, hydrated", async ({ page }) => {
@@ -226,10 +251,9 @@ test("a small playlist loads in one page with no further fetch", async ({ page }
   await installTauriMock(page, { trackCount: 80 });
   await selectBigPlaylist(page);
 
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(80);
+  await scrollToEnd(page);
   await expect(rowByTitle(page, "Track 0079").locator(".bpm-pill")).toBeVisible();
-  const calls = await page.evaluate(() => window.__fetchCalls);
-  expect(calls.length).toBe(1);
+  expect(await fetchOffsets(page)).toEqual([0]);
 });
 
 async function releaseFetch(page) {
@@ -260,19 +284,20 @@ test("a slow page load shows the loading indicator instead of stale rows", async
   await expect(body.locator(".track-grid-row:visible")).toHaveCount(0);
 
   await releaseFetch(page);
-  await expect(body.locator(".track-grid-row")).toHaveCount(PAGE_SIZE);
+  await expect(rowByTitle(page, "Track 0000")).toBeVisible();
   await expect(indicator).toBeHidden();
   await expect(body).not.toHaveAttribute("aria-busy", "true");
 
-  // Scrolling for the next page keeps the loaded rows and shows the
-  // indicator below them until the page arrives.
-  const wrap = page.locator('[data-track-grid][data-body-id="usbPlaylistTracks"]').locator("xpath=..");
-  await wrap.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-  await expect(indicator).toBeVisible();
-  await expect(body.locator(".track-grid-row:visible")).toHaveCount(PAGE_SIZE);
+  // Jumping to rows not loaded yet shows skeleton rows until their page
+  // arrives; the list is busy, but the indicator is only for a new list.
+  await scrollToEnd(page);
+  await expect(body.locator(".track-grid-row-skeleton").first()).toBeVisible();
+  await expect(body).toHaveAttribute("aria-busy", "true");
+  await expect(indicator).toBeHidden();
 
   await releaseFetch(page);
-  await expect(body.locator(".track-grid-row")).toHaveCount(PAGE_SIZE * 2);
+  await expect(rowByTitle(page, `Track ${String(PLAYLIST_SIZE - 1).padStart(4, "0")}`)).toBeVisible();
+  await expect(body.locator(".track-grid-row-skeleton")).toHaveCount(0);
   await expect(indicator).toBeHidden();
 });
 

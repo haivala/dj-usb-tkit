@@ -169,8 +169,13 @@ export function drawWaveformCanvas(element) {
 
 const WAVEFORM_PAINT_CHUNK_SIZE = 200;
 
-export async function renderWaveformsIn(root = document) {
-  const elements = root.querySelectorAll(".waveform.waveform-canvas");
+export function renderWaveformsIn(root = document) {
+  return renderWaveforms(root.querySelectorAll(".waveform.waveform-canvas"));
+}
+
+// Paint the given `.waveform.waveform-canvas` elements (e.g. just the rows a
+// track table has built, not the whole table).
+export async function renderWaveforms(elements) {
   if (!elements.length) return;
 
   // Measure every element before painting any of them, so all the

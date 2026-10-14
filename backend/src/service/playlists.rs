@@ -391,7 +391,10 @@ impl BackendService {
             sort.dir,
         ]);
         let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
-        let start_idx = cursor_start_index(&items, cursor.as_ref());
+        let start_idx = match req.offset {
+            Some(offset) => offset.min(items.len()),
+            None => cursor_start_index(&items, cursor.as_ref()),
+        };
         // `limit == 0` ⇒ return the whole (filtered) playlist, for callers that
         // predate pagination.
         let limit = if req.limit == 0 {
