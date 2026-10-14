@@ -216,6 +216,12 @@ function installTauriMock(page, mode) {
             return {
               ok: true,
               data: {
+                summary: "Apply Fixes repairs 4 problems on this USB. The databases are backed up first.",
+                overview: [
+                  { title: "Older Pioneer players", status: "WARN", detail: "Repairs damage left in the player database by an interrupted export." },
+                  { title: "Denon / Numark players", status: "WARN", detail: "Rebuilds the Denon / Numark library." },
+                  { title: "Needs your attention", status: "FAIL", detail: "1 problem can't be fixed automatically." }
+                ],
                 detectedIssues: [
                   "1 table(s) with a declared last page beyond the physical end of the file",
                   "PDB shows signs of a torn additive-growth write",
@@ -848,6 +854,20 @@ test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkee
   await page.locator("#reDiagnoseBtn").click();
   await page.locator("#previewRepairsBtn").click();
 
+  // Plain-language headline and rows first; the fix list is collapsed under
+  // Technical details.
+  await expect(page.locator("#diagRepairSummary")).toHaveText(/repairs 4 problems/);
+  await expect(page.locator("#diagRepairOverview .diag-overview-title")).toHaveText([
+    "Older Pioneer players",
+    "Denon / Numark players",
+    "Needs your attention"
+  ]);
+  await expect(page.locator("#diagRepairOverview .diag-overview-item.diag-check-fail")).toHaveCount(1);
+  const repairTechnical = page.locator("#diagRepairTechnical");
+  await expect(repairTechnical).not.toHaveAttribute("open");
+  await expect(page.locator("#diagRepairFixes")).toBeHidden();
+  await repairTechnical.locator("summary").click();
+
   const truncatedChainCheckbox = page
     .locator("#diagRepairFixes li", { hasText: "Repair Truncated Table Chain" })
     .locator(".diag-repair-fix-check");
@@ -861,7 +881,6 @@ test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkee
   // rekordbox bookkeeping is neither listed nor counted: the backend applies
   // it with every repair.
   await expect(page.locator("#diagRepairFixes li", { hasText: "Repair PDB Data Page Flags" })).toHaveCount(0);
-  await expect(page.locator("#diagRepairSummary")).toContainText("4 fixable");
 
   await expect(truncatedChainCheckbox).toBeChecked();
   await expect(truncatedChainCheckbox).toBeDisabled();

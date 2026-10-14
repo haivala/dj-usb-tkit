@@ -1902,3 +1902,78 @@ fn missing_audio_history_keys_cover_pdb_history_tracks_only() {
     assert!(keys.contains(&audio_path_key("/Contents/ARTIST/Played.mp3")));
     assert!(!keys.contains(&audio_path_key("/Contents/Artist/Never Played.mp3")));
 }
+
+fn proposal(id: &str, supported: bool) -> RepairFixProposal {
+    RepairFixProposal {
+        id: id.to_string(),
+        title: id.to_string(),
+        description: String::new(),
+        supported,
+        destructive: false,
+        estimated_writes: 0,
+        estimated_deletes: 0,
+        always_applied: fix_always_applied(id),
+        bookkeeping: fix_is_bookkeeping(id),
+        link: None,
+    }
+}
+
+#[test]
+fn every_shown_fix_has_a_plain_language_overview_line() {
+    for id in REPAIR_FIX_DISPLAY_ORDER {
+        if !fix_is_bookkeeping(id) {
+            let (summary, items) = repair_overview(&[proposal(id, true)], &[]);
+            assert!(summary.contains("1 problem "), "{id}: {summary}");
+            assert!(
+                !items[0].detail.contains("other errors"),
+                "{id} has no overview line"
+            );
+        }
+    }
+}
+
+#[test]
+fn repair_overview_groups_fixes_by_area_and_flags_what_it_cant_fix() {
+    let (summary, items) = repair_overview(&[], &[]);
+    assert_eq!(summary, "No issues found.");
+    assert!(items.is_empty());
+
+    let fixes = [
+        proposal(PDB_TRUNCATED_TABLE_CHAIN_FIX_ID, true),
+        proposal(PDB_TORN_GROWTH_PAGES_FIX_ID, true),
+        proposal(PDB_WRONG_PAGE_FLAGS_FIX_ID, true),
+        proposal(BPM_KEY_MISMATCH_FIX_ID, true),
+        proposal(ENGINE_LIBRARY_FIX_ID, true),
+    ];
+    let unsupported = [RepairUnsupportedItem {
+        issue: "2 malformed USBANLZ entry/entries".to_string(),
+        reason: "Inspect the Event Log.".to_string(),
+        link: None,
+    }];
+    let (summary, items) = repair_overview(&fixes, &unsupported);
+    // Bookkeeping is neither counted nor shown.
+    assert_eq!(
+        summary,
+        "Apply Fixes repairs 4 problems on this USB. The databases are backed up first."
+    );
+    let titles: Vec<&str> = items.iter().map(|i| i.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        [
+            "Older Pioneer players",
+            "Waveforms & beat grids",
+            "Denon / Numark players",
+            "Needs your attention",
+        ]
+    );
+    // Two fixes with the same plain-language line show it once.
+    assert_eq!(
+        items[0].detail,
+        "Repairs damage left in the player database by an interrupted export."
+    );
+    assert!(matches!(items[3].status, Some(DiagStatus::Fail)));
+    assert!(items[3].detail.starts_with("1 problem can't be fixed"));
+
+    let (summary, _) = repair_overview(&[], &unsupported);
+    assert_eq!(summary, "Nothing here can be fixed automatically.");
+}

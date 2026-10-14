@@ -23,6 +23,8 @@ const fixCheck = (li) => li.querySelector(".diag-repair-fix-check");
 
 test("renderRepairPreview handles no fixes and supported fix selection", () => {
   const empty = renderPreview({
+    summary: "No issues found.",
+    overview: [],
     detectedIssues: [],
     proposedFixes: [],
     estimatedFileWrites: 0,
@@ -32,6 +34,8 @@ test("renderRepairPreview handles no fixes and supported fix selection", () => {
   assert.equal(empty.applyRepairsBtn.disabled, true);
   assert.equal(empty.previewRepairsBtn.disabled, true);
   assert.equal(empty.diagRepairSummary.textContent, "No issues found.");
+  assert.match(empty.diagRepairSummary.className, /diag-repair-summary-clean/);
+  assert.equal(empty.diagRepairTechnical.classList.contains("hidden"), true);
 
   const { ctx, el, fixes } = renderPreview({
     detectedIssues: ["a"],
@@ -59,6 +63,10 @@ test("renderRepairPreview renders each backend fix description verbatim and appe
   // The backend now bakes the full "why this is manual-only" text into the
   // fix's `description` and doesn't emit a duplicate unsupportedItem for it.
   const { el, fixes } = renderPreview({
+    summary: "Nothing here can be fixed automatically.",
+    overview: [
+      { title: "Needs your attention", status: "FAIL", detail: "2 problems can't be fixed automatically." }
+    ],
     detectedIssues: ["unindexed", "missing-audio"],
     proposedFixes: [
       {
@@ -76,7 +84,15 @@ test("renderRepairPreview renders each backend fix description verbatim and appe
     ]
   });
 
-  assert.match(el.diagRepairSummary.textContent, /2 issue\(s\).*0 fixable/);
+  // Headline and overview rows are backend text, rendered verbatim; the fix
+  // list sits in the collapsed technical details.
+  assert.equal(el.diagRepairSummary.textContent, "Nothing here can be fixed automatically.");
+  const rows = [...el.diagRepairOverview.querySelectorAll(".diag-overview-item")];
+  assert.equal(rows.length, 1);
+  assert.ok(rows[0].classList.contains("diag-check-fail"));
+  assert.equal(rows[0].querySelector(".diag-overview-title").textContent, "Needs your attention");
+  assert.equal(el.diagRepairTechnical.open, false);
+  assert.equal(el.diagRepairTechnical.classList.contains("hidden"), false);
   assert.equal(fixes.length, 2);
   assert.equal(fixTitle(fixes[0]), "Remove Missing Audio References");
   assert.match(

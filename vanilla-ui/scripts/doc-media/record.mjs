@@ -744,7 +744,7 @@ function shots(fixture) {
       async run(page) {
         await openHealthCard(page);
         await page.locator("#previewRepairsBtn").click();
-        await page.locator("#diagRepairFixes li").first().waitFor();
+        await page.locator("#diagRepairOverview .diag-overview-item").first().waitFor();
         await waitProgressHidden(page);
         await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
         await page.waitForTimeout(500);

@@ -164,21 +164,27 @@ export function renderDiagnosticsReport(ctx, data) {
   renderReportBody(ctx, data);
 }
 
+// The backend's plain-language summary rows (`DiagOverviewItem`), shared by
+// the diagnostics, parity and repair-preview views.
+function renderOverviewRows(container, overview) {
+  for (const entry of overview || []) {
+    const row = cloneTemplate(container.ownerDocument, "tplDiagOverviewItem");
+    const status = entry.status ? entry.status.toLowerCase() : "na";
+    row.classList.add(`diag-check-${status}`);
+    row.querySelector(".diag-indicator").textContent = entry.status ? diagStatusIcon(entry.status) : "–";
+    row.querySelector(".diag-overview-title").textContent = entry.title;
+    row.querySelector(".diag-overview-detail").textContent = entry.detail;
+    container.appendChild(row);
+  }
+}
+
 // Plain-language summary rows, then the checks grouped into boxes under a
 // collapsed "Technical details". Both are backend-owned
 // (service::diagnostics::{diagnostics_overview, parity_overview, regroup_sections}).
 // Returns the technical body so a report can append its own extras.
 function renderReportBody(ctx, data) {
   const { el, document } = ctx;
-  for (const entry of data.overview || []) {
-    const row = cloneTemplate(document, "tplDiagOverviewItem");
-    const status = entry.status ? entry.status.toLowerCase() : "na";
-    row.classList.add(`diag-check-${status}`);
-    row.querySelector(".diag-indicator").textContent = entry.status ? diagStatusIcon(entry.status) : "–";
-    row.querySelector(".diag-overview-title").textContent = entry.title;
-    row.querySelector(".diag-overview-detail").textContent = entry.detail;
-    el.diagSections.appendChild(row);
-  }
+  renderOverviewRows(el.diagSections, data.overview);
 
   const technical = cloneTemplate(document, "tplDiagTechnical");
   const technicalBody = technical.querySelector(".diag-technical-body");
@@ -278,6 +284,9 @@ function resetDiagnosticsContent(ctx) {
     el.diagRepairSummary.textContent = "";
     el.diagRepairSummary.className = "diag-repair-summary";
   }
+  if (el.diagRepairOverview) {
+    el.diagRepairOverview.replaceChildren();
+  }
   if (el.diagRepairFixes) {
     el.diagRepairFixes.replaceChildren();
   }
@@ -319,7 +328,6 @@ export function renderRepairPreview(ctx, data) {
   if (!el.diagRepairPanel) return;
   el.usbDiagnosticsCard.classList.remove("hidden");
 
-  const issueCount = Array.isArray(data.detectedIssues) ? data.detectedIssues.length : 0;
   // Bookkeeping fixes are never shown or selected: the backend applies them
   // with every repair that runs.
   const fixes = (data.proposedFixes || []).filter((f) => f.bookkeeping !== true);
@@ -329,20 +337,23 @@ export function renderRepairPreview(ctx, data) {
   state.selectedRepairFixIds = new Set(
     supportedFixes.map((f) => String(f?.id || "")).filter(Boolean)
   );
-  const writes = Number(data.estimatedFileWrites || 0);
-  const deletes = Number(data.estimatedFileDeletes || 0);
+  const overview = data.overview || [];
 
+  // Backend-owned: headline and rows (service::repair::repair_overview); the
+  // per-fix list below is the collapsed technical detail.
   if (el.diagRepairSummary) {
-    if (fixCount === 0 && issueCount === 0) {
-      el.diagRepairSummary.textContent = "No issues found.";
-      el.diagRepairSummary.className = "diag-repair-summary diag-repair-summary-clean";
-    } else {
-      const parts = [`${issueCount} issue(s)`, `${supportedFixes.length} fixable`];
-      if (writes) parts.push(`${writes} writes`);
-      if (deletes) parts.push(`${deletes} deletes`);
-      el.diagRepairSummary.textContent = parts.join(" · ");
-      el.diagRepairSummary.className = "diag-repair-summary";
-    }
+    el.diagRepairSummary.textContent = data.summary || "";
+    el.diagRepairSummary.className = overview.length === 0
+      ? "diag-repair-summary diag-repair-summary-clean"
+      : "diag-repair-summary";
+  }
+  if (el.diagRepairOverview) {
+    el.diagRepairOverview.replaceChildren();
+    renderOverviewRows(el.diagRepairOverview, overview);
+  }
+  if (el.diagRepairTechnical) {
+    el.diagRepairTechnical.open = false;
+    el.diagRepairTechnical.classList.toggle("hidden", fixCount === 0 && unsupportedItems.length === 0);
   }
 
   if (el.diagRepairFixes) {

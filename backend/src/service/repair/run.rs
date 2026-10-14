@@ -1399,7 +1399,10 @@ impl BackendService {
                 "USB: Repair preview ready"
             },
         );
+        let (summary, overview) = repair_overview(&proposed_fixes, &unsupported_items);
         Ok(RepairUsbDiagnosticsData {
+            summary,
+            overview,
             detected_issues,
             proposed_fixes,
             unsupported_items,

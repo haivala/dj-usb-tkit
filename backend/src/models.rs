@@ -2084,6 +2084,13 @@ pub struct RepairFixProposal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairUsbDiagnosticsData {
+    /// One-sentence plain-language headline of the preview.
+    #[serde(default)]
+    pub summary: String,
+    /// Plain-language rows of what Apply Fixes changes, by area
+    /// (`service::repair::repair_overview`); the fix list is the detail.
+    #[serde(default)]
+    pub overview: Vec<DiagOverviewItem>,
     pub detected_issues: Vec<String>,
     pub proposed_fixes: Vec<RepairFixProposal>,
     pub unsupported_items: Vec<RepairUnsupportedItem>,

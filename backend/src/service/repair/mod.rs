@@ -16,7 +16,7 @@ use crate::edb::{
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, RepairFixProposal,
+    DiagOverviewItem, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, RepairFixProposal,
     RepairUnsupportedItem, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
     RunUsbDiagnosticsRequest, RunUsbParityReportRequest, UpdateUsbPlayerMenuConfigData,
     UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail, UsbPlayerMenuDivergence,
@@ -60,7 +60,7 @@ use crate::audio_format::same_format_extension;
 use crate::scanner::scan_audio_file;
 
 use super::diagnostics::{
-    AnalysisOwnership, BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths,
+    AnalysisOwnership, BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths, counted,
     detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
     normalize_pdb_path_for_edb_lookup, scan_analysis_ownership, scan_audio_presence,
     track_identity_key,
@@ -68,6 +68,7 @@ use super::diagnostics::{
 
 mod audio_fixes;
 mod history;
+mod overview;
 mod pdb_fixes;
 mod player_menu;
 mod run;
@@ -77,6 +78,7 @@ mod tests;
 
 use audio_fixes::*;
 use history::*;
+use overview::*;
 pub(crate) use pdb_fixes::*;
 pub(crate) use player_menu::*;
 pub(crate) use strict_parity::*;

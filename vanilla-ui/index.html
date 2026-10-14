@@ -244,7 +244,11 @@
                 <!-- Repair preview view (replaces report when active) -->
                 <div id="diagRepairPanel" class="hidden">
                   <p id="diagRepairSummary" class="diag-repair-summary"></p>
-                  <ul id="diagRepairFixes" class="diag-repair-list"></ul>
+                  <div id="diagRepairOverview"></div>
+                  <details class="diag-details diag-technical" id="diagRepairTechnical">
+                    <summary class="muted">Technical details</summary>
+                    <ul id="diagRepairFixes" class="diag-repair-list"></ul>
+                  </details>
                   <div class="diag-repair-actions">
                     <button id="diagBackToReportBtn">Back to Report</button>
                     <button id="applyRepairsBtn" disabled data-primary>Apply Fixes</button>

@@ -172,7 +172,7 @@ pub(super) const PREVIEW_FIXES_HINT: &str = "Preview Fixes shows what can be rep
 
 /// `count` followed by the singular or plural phrase, for overview text
 /// ("1 track is …" / "3 tracks are …").
-pub(super) fn counted(count: usize, one: &str, many: &str) -> String {
+pub(crate) fn counted(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
 }
 
