@@ -20,6 +20,7 @@ This is the documentation set for DJ USB Tkit.
 - `docs/EXTERNAL_LIBRARIES.md` - importing tracks and playlists from rekordbox and Mixxx
 - `docs/PLAYLISTS_PLAYBACK.md` - playlist workflows and native playback behavior
 - `docs/CUE_EDITOR.md` - cue points, beat grid, playback start, keyboard shortcuts, metronome
+- `docs/USB_PREPARE.md` - partitioning and formatting a USB drive on Linux, macOS, and Windows
 - `docs/USB_IMPORT.md` - USB read/merge behavior and hydration model
 - `docs/USB_EXPORT.md` - USB export behavior, mirror/additive sync modes, and strict parity expectations
 - `docs/DIAGNOSTICS_REPAIRS.md` - diagnostics scope, reports, and fix workflows

@@ -62,6 +62,11 @@
 - **Improvement:** Repair-preview items whose details are listed in the Event Log (audio files
   in no playlist, moved audio files, malformed analysis entries) link to it, like the
   diagnostics checks already did.
+- **Improvement:** Preview Fixes opens with a plain-language summary like the diagnostics
+  report: a headline saying how many problems Apply Fixes repairs, one row per area it changes
+  (older and newer Pioneer players, playlists, music files, waveforms and beat grids,
+  Denon / Numark players), and a row for problems it can't fix. The detailed list of fixes is
+  under a collapsed "Technical details".
 - **Improvement:** Apply Fixes shows the running repair and divides its progress range among the
   available selected fixes. BPM/key, beat-grid and seek-data repairs also show completed tracks or
   files within their range. The apply pass skips rebuilding MP3 and FLAC seek indexes while
