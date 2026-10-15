@@ -3,12 +3,12 @@ use std::fs;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    DedupeMode, GetPlaylistTracksRequest, ListMatchingTrackIdsRequest, ScanLibraryRequest,
+    GetPlaylistTracksRequest, ListMatchingTrackIdsRequest, ScanLibraryRequest,
 };
 use tempfile::tempdir;
 
 #[test]
-fn adding_a_track_already_in_the_playlist_honors_skip_and_allow() {
+fn adding_a_track_already_in_the_playlist_skips_it() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
@@ -49,47 +49,29 @@ fn adding_a_track_already_in_the_playlist_honors_skip_and_allow() {
         .expect("playlist data")
         .playlist_id;
 
-    let add_skip =
+    let add_first =
         backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
             source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: vec![track_id.clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
-    assert!(add_skip.ok, "add skip failed: {add_skip:?}");
-    let add_skip_data = add_skip.data.expect("add skip data");
-    assert_eq!(add_skip_data.added, 1);
-    assert_eq!(add_skip_data.skipped, 0);
+    assert!(add_first.ok, "add failed: {add_first:?}");
+    let add_first_data = add_first.data.expect("add data");
+    assert_eq!(add_first_data.added, 1);
+    assert_eq!(add_first_data.skipped, 0);
 
-    let add_skip_again =
+    let add_again =
         backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
             source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: vec![track_id.clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
-    assert!(
-        add_skip_again.ok,
-        "add skip again failed: {add_skip_again:?}"
-    );
-    let add_skip_again_data = add_skip_again.data.expect("add skip again data");
-    assert_eq!(add_skip_again_data.added, 0);
-    assert_eq!(add_skip_again_data.skipped, 1);
-
-    let add_allow =
-        backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
-            playlist_id: playlist_id.clone(),
-            track_ids: vec![track_id.clone()],
-            dedupe: DedupeMode::Allow,
-            ..Default::default()
-        });
-    assert!(add_allow.ok, "add allow failed: {add_allow:?}");
-    let add_allow_data = add_allow.data.expect("add allow data");
-    assert_eq!(add_allow_data.added, 1);
-    assert_eq!(add_allow_data.skipped, 0);
+    assert!(add_again.ok, "add again failed: {add_again:?}");
+    let add_again_data = add_again.data.expect("add again data");
+    assert_eq!(add_again_data.added, 0);
+    assert_eq!(add_again_data.skipped, 1);
 
     let playlist_tracks = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -99,8 +81,8 @@ fn adding_a_track_already_in_the_playlist_honors_skip_and_allow() {
         .data
         .expect("playlist tracks data")
         .items;
-    assert_eq!(playlist_tracks.len(), 2);
-    assert!(playlist_tracks.iter().all(|track| track.id == track_id));
+    assert_eq!(playlist_tracks.len(), 1);
+    assert_eq!(playlist_tracks[0].id, track_id);
 }
 
 #[test]
@@ -156,7 +138,6 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
             query: String::new(),
             track_ids: Vec::new(),
             all_matching: true,
-            dedupe: DedupeMode::Skip,
         })
         .data
         .expect("add-all data");
@@ -172,7 +153,6 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
             query: String::new(),
             track_ids: matching.track_ids.clone(),
             all_matching: false,
-            dedupe: DedupeMode::Skip,
         })
         .data
         .expect("add-again data");

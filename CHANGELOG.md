@@ -74,7 +74,8 @@
 - **Chore:** The backend tests go through the same commands the app uses: the library is read
   and added to playlists the way the library view does it, USB rows are added the way their
   "+" does, and the duplicate-USB-track cleanup runs at startup as it does for users. Seven
-  commands the app never called are removed.
+  commands the app never called are removed, along with an option to add a track to a playlist
+  it's already in that the app never used.
 
 ## 0.4.2
 

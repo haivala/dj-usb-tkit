@@ -5,8 +5,8 @@ use std::path::Path;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    DedupeMode, ExportToUsbOptions, ExportToUsbRequest, GetTracksByIdsRequest,
-    InitializeUsbRequest, RemoveUsbPlaylistRequest, ScanLibraryRequest,
+    ExportToUsbOptions, ExportToUsbRequest, GetTracksByIdsRequest, InitializeUsbRequest,
+    RemoveUsbPlaylistRequest, ScanLibraryRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -247,7 +247,6 @@ fn add_from_library(
         playlist_id: playlist_id.to_string(),
         source_roots,
         track_ids: track_ids.to_vec(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     })
 }

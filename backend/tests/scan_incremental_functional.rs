@@ -3,7 +3,7 @@ use std::fs;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    DedupeMode, GetPlaylistTracksRequest, RelocateSourceRootRequest, ScanLibraryRequest,
+    GetPlaylistTracksRequest, RelocateSourceRootRequest, ScanLibraryRequest,
 };
 use tempfile::tempdir;
 
@@ -174,7 +174,6 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
         source_roots: vec![old_root.clone()],
         playlist_id: playlist.playlist_id.clone(),
         track_ids: vec![track_id.clone()],
-        dedupe: DedupeMode::Allow,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");

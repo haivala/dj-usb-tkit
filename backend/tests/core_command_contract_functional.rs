@@ -5,15 +5,15 @@ use std::path::Path;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CheckSourceRootsRequest,
-    CreatePlaylistRequest, DedupeMode, DeleteUsbBackupRequest, ExportToUsbRequest,
-    FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
-    GetTrackDetailRequest, GetUsbDeviceNameRequest, InitializeUsbRequest, ListUsbBackupsRequest,
-    PlayResolvedTrackRequest, PruneUsbDeviceRequest, RefreshPlaylistExportStatusRequest,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
-    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
-    RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanRekordboxDbRequest,
-    SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
+    CreatePlaylistRequest, DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest,
+    FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, GetTrackDetailRequest,
+    GetUsbDeviceNameRequest, InitializeUsbRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest,
+    PruneUsbDeviceRequest, RefreshPlaylistExportStatusRequest, RemoveTracksFromPlaylistRequest,
+    RemoveUsbPlaylistRequest, RenamePlaylistRequest, ReorderPlaylistTracksRequest,
+    ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest, RestoreUsbBackupRequest,
+    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest,
+    ScanLibraryRequest, ScanRekordboxDbRequest, SetPlaybackMetronomeRequest,
+    SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -255,7 +255,6 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
             source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(add_initial.ok, "initial add failed: {add_initial:?}");
@@ -284,7 +283,6 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_b],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(readd.ok, "re-add failed: {readd:?}");
@@ -359,7 +357,6 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
             source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(add_initial.ok, "initial add failed: {add_initial:?}");

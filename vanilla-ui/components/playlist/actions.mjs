@@ -512,7 +512,6 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
     const add = await command("add_track_candidates_to_playlist", {
       playlistId: playlist.id,
       tracks: candidates.map(toAddTrackCandidatePayload),
-      dedupe: "skip",
       usbRoot: state.usbRoot || null,
       usbRootValid: !!state.usbRootValid
     });
@@ -578,8 +577,7 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
       includeMixxxDb: state.mixxxDbEnabled === true,
       query: String(state.libraryQuery || "").trim(),
       trackIds: allMatching ? [] : trackIds,
-      allMatching,
-      dedupe: "skip"
+      allMatching
     });
   });
 

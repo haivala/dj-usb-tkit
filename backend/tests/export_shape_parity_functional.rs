@@ -301,7 +301,6 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
             source_roots: vec![media_dir.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
-            dedupe: backend::models::DedupeMode::Skip,
             ..Default::default()
         },
     );
@@ -553,7 +552,6 @@ fn export_preserves_full_20_table_family() {
             source_roots: vec![media_dir.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
-            dedupe: backend::models::DedupeMode::Skip,
             ..Default::default()
         },
     );

@@ -6,7 +6,7 @@ use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
-    BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode, DiagStatus, ExportToUsbOptions,
+    BrowseSourceFilesRequest, CreatePlaylistRequest, DiagStatus, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest, GetPlaylistTracksRequest,
     InitializeUsbRequest, MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest,
     ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsRequest,
@@ -503,7 +503,6 @@ fn export_to_usb_normalizes_extensible_pcm_wav_and_leaves_extensible_other_untou
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -641,7 +640,6 @@ fn export_to_usb_preserves_flac_wav_and_aif_media_paths_in_edb_and_pdb() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -777,7 +775,6 @@ fn export_to_usb_does_not_change_player_menu_in_edb_or_pdb() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -869,7 +866,6 @@ fn export_to_usb_many_playlists_pdb_growth_does_not_change_player_menu_in_edb_or
                 source_roots: vec![media.to_string_lossy().to_string()],
                 playlist_id: pid.clone(),
                 track_ids: chunk,
-                dedupe: DedupeMode::Skip,
                 ..Default::default()
             });
         assert!(added.ok, "add tracks to playlist {i} failed: {added:?}");
@@ -995,7 +991,6 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
             source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: first_playlist_id.clone(),
             track_ids: vec![track_ids[0].clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(added_first.ok, "add first track failed: {added_first:?}");
@@ -1065,7 +1060,6 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
             source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: second_playlist_id.clone(),
             track_ids: vec![track_ids[1].clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(added_second.ok, "add second track failed: {added_second:?}");
@@ -1179,7 +1173,6 @@ fn export_edb_and_pdb_media_and_analysis_paths_match_exactly() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![tracks[0].id.clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
 
@@ -1326,7 +1319,6 @@ fn export_edb_and_pdb_artwork_paths_both_resolve_when_artwork_enabled() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
 
@@ -1443,7 +1435,6 @@ fn export_to_usb_rejects_when_playlist_tracks_are_missing_analysis() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(add.ok, "add failed: {add:?}");
@@ -1520,7 +1511,6 @@ fn export_to_usb_skips_missing_source_files_and_reports_warning() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(add.ok, "add failed: {add:?}");
@@ -1620,7 +1610,6 @@ fn export_to_usb_blocks_mirror_prune_when_source_files_are_missing() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(add.ok, "add failed: {add:?}");
@@ -1748,7 +1737,6 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: source_playlist_id.clone(),
         track_ids: vec![track.id.clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(add.ok, "add source track failed: {add:?}");
@@ -1848,7 +1836,6 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
                     .clone()
                     .expect("usb local track id"),
             ],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(add_from_usb.ok, "add from usb failed: {add_from_usb:?}");
@@ -1963,7 +1950,6 @@ fn export_to_usb_option_matrix_controls_artwork_analysis_and_prune_behavior() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track.id],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -2141,7 +2127,6 @@ fn export_to_usb_reexport_is_idempotent_for_media_and_assets() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track.id],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -2320,7 +2305,6 @@ fn export_to_usb_reuses_existing_usb_assets_for_usb_origin_tracks() {
             usb_root_valid: true,
             ..Default::default()
         }],
-        dedupe: DedupeMode::Skip,
         usb_root: Some(usb.to_string_lossy().to_string()),
         usb_root_valid: true,
     });
@@ -2453,7 +2437,6 @@ fn export_to_usb_does_not_use_post_write_parity_merge() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(add.ok, "add failed: {add:?}");
@@ -2589,7 +2572,6 @@ fn first_export_after_initialize_usb_writes_export_pdb_without_skip_warning() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -2683,7 +2665,6 @@ fn repeated_same_playlist_export_keeps_pdb_and_db_membership_stable() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -2844,7 +2825,6 @@ fn export_sync_mode_additive_preserves_existing_playlist_entries() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -3001,7 +2981,6 @@ fn export_sync_mode_mirror_new_playlist_does_not_prune_existing_playlists() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_a_id.clone(),
         track_ids: vec![track_ids[0].clone(), track_ids[1].clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added_a.ok, "add A failed: {added_a:?}");
@@ -3037,7 +3016,6 @@ fn export_sync_mode_mirror_new_playlist_does_not_prune_existing_playlists() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_b_id.clone(),
         track_ids: vec![track_ids[2].clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added_b.ok, "add B failed: {added_b:?}");
@@ -3132,7 +3110,6 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
             source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: exported_id.clone(),
             track_ids: vec![track_ids[0].clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(
@@ -3169,7 +3146,6 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
             source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: never_exported_id.clone(),
             track_ids: vec![track_ids[1].clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(
@@ -3362,7 +3338,6 @@ fn export_writes_engine_library_and_keeps_history_on_re_export() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
 
@@ -3567,7 +3542,6 @@ fn export_backup_creates_timestamped_files_when_enabled() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
 
@@ -3716,7 +3690,6 @@ fn export_backup_skipped_when_disabled() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
 
@@ -3812,7 +3785,6 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
                 source_roots: vec![media.to_string_lossy().to_string()],
                 playlist_id: pid.clone(),
                 track_ids: vec![id.clone()],
-                dedupe: DedupeMode::Skip,
                 ..Default::default()
             });
         assert!(added.ok, "add tracks to playlist {i} failed: {added:?}");
@@ -4036,7 +4008,6 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
                 source_roots: vec![media.to_string_lossy().to_string()],
                 playlist_id: pid.clone(),
                 track_ids: chunk,
-                dedupe: DedupeMode::Skip,
                 ..Default::default()
             });
         assert!(
@@ -4068,7 +4039,6 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: target_playlist_id.clone(),
         track_ids: target_ids.clone(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add target tracks failed: {added:?}");
@@ -4544,7 +4514,6 @@ fn export_mirror_reexport_keeps_reused_analysis_and_artwork_files() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -4719,7 +4688,6 @@ fn export_mirror_prune_keeps_history_protected_track_full_shape() {
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: all_ids.clone(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -5081,7 +5049,6 @@ fn export_mirror_prune_keeps_dropped_track_rows_when_shared_by_another_playlist(
                 source_roots: vec![media.to_string_lossy().to_string()],
                 playlist_id: pid.clone(),
                 track_ids,
-                dedupe: DedupeMode::Skip,
                 ..Default::default()
             });
         assert!(added.ok, "add tracks to {name} failed: {added:?}");

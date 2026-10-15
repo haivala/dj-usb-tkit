@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
-    AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
-    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
-    FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsRequest,
+    AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
+    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsRequest,
     GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
     SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest, TrackCueInput,
@@ -214,7 +214,6 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
                 source_b.to_string_lossy().to_string(),
             ],
             track_ids: remaining_ids.clone(),
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(add_source_tracks.ok, "add source tracks failed");
@@ -372,7 +371,6 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
                 source_b.to_string_lossy().to_string(),
             ],
             track_ids: vec![library_track_id.clone()],
-            dedupe: DedupeMode::Skip,
             ..Default::default()
         });
     assert!(add_from_library.ok, "add from library failed");
@@ -401,7 +399,6 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
                 usb_root_valid: true,
                 ..Default::default()
             }],
-            dedupe: DedupeMode::Skip,
             usb_root: Some(usb_root.clone()),
             usb_root_valid: true,
         })
@@ -1002,7 +999,6 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
 
@@ -1125,7 +1121,6 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
                 usb_analysis_path: imported_usb_track.usb_analysis_path.clone(),
                 ..Default::default()
             }],
-            dedupe: DedupeMode::Skip,
             usb_root: Some(usb.to_string_lossy().to_string()),
             usb_root_valid: true,
         });
@@ -1234,7 +1229,6 @@ fn add_never_viewed_usb_track_materializes_row_and_imports_anlz_cues() {
             usb_analysis_path: usb_track.usb_analysis_path.clone(),
             ..Default::default()
         }],
-        dedupe: DedupeMode::Skip,
         usb_root: Some(usb.to_string_lossy().to_string()),
         usb_root_valid: true,
     });
@@ -1347,7 +1341,6 @@ fn export_one_track_with_cues(
         source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     let export = backend.export_to_usb(ExportToUsbRequest {
@@ -2962,7 +2955,6 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
         source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![materialized.track_id.clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");

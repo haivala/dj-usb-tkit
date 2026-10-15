@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, BrowseSourceFilesRequest, DedupeMode,
+    AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, BrowseSourceFilesRequest,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest, ScanLibraryRequest,
 };
 
@@ -213,7 +213,6 @@ fn main() {
                     ..Default::default()
                 })
                 .collect(),
-            dedupe: DedupeMode::Skip,
             usb_root: None,
             usb_root_valid: false,
         });

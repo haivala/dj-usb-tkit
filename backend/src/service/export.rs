@@ -2502,7 +2502,6 @@ mod tests {
             .add_tracks_to_playlist(crate::models::AddTracksToPlaylistRequest {
                 playlist_id: playlist.playlist_id.clone(),
                 track_ids: vec!["t2".to_string(), "t1".to_string()],
-                dedupe: crate::models::DedupeMode::Allow,
             })
             .expect("add tracks");
 
@@ -3061,7 +3060,6 @@ mod tests {
             .add_tracks_to_playlist(crate::models::AddTracksToPlaylistRequest {
                 playlist_id: playlist.playlist_id.clone(),
                 track_ids: vec!["t1".to_string()],
-                dedupe: crate::models::DedupeMode::Allow,
             })
             .expect("add track");
 

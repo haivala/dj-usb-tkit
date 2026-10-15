@@ -141,8 +141,7 @@ fn dump_usb(
             json!({
                 "playlistId": created.playlist_id,
                 "sourceRoots": [source_dir],
-                "trackIds": track_ids,
-                "dedupe": "skip"
+                "trackIds": track_ids
             }),
         ))
         .unwrap_or_else(|e| fail("add_library_selection_to_playlist", e));

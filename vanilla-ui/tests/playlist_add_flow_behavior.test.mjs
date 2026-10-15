@@ -71,7 +71,6 @@ test("addTracksToCurrentPlaylist sends row candidates to backend and reports res
 
   assert.equal(capturedCommand.name, "add_track_candidates_to_playlist");
   assert.equal(capturedCommand.payload.playlistId, "pl-1");
-  assert.equal(capturedCommand.payload.dedupe, "skip");
   assert.equal(capturedCommand.payload.usbRoot, "/media/USB");
   assert.equal(capturedCommand.payload.usbRootValid, true);
   assert.deepEqual(capturedCommand.payload.tracks[0], {

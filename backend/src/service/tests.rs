@@ -1094,7 +1094,6 @@ fn add_tracks_to_playlist_rejects_empty_ids() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id,
             track_ids: Vec::new(),
-            dedupe: DedupeMode::Allow,
         })
         .unwrap_err();
     assert!(matches!(err, BackendError::Validation(_)));
@@ -1112,7 +1111,6 @@ fn add_tracks_to_playlist_rejects_unknown_track() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id,
             track_ids: vec!["missing-track".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .unwrap_err();
     assert!(matches!(err, BackendError::NotFound(_)));
@@ -1140,7 +1138,6 @@ fn add_track_candidates_to_playlist_materializes_local_source_rows() {
                 file_path: Some(file_path.to_string_lossy().to_string()),
                 ..Default::default()
             }],
-            dedupe: DedupeMode::Skip,
             usb_root: None,
             usb_root_valid: false,
         })
@@ -1201,7 +1198,6 @@ fn add_track_candidates_to_playlist_does_not_fuzzy_resolve_usb_origin_rows() {
                 usb_analysis_path: Some("/usb/PIONEER/USBANLZ/P001/A/ANLZ0000.DAT".to_string()),
                 ..Default::default()
             }],
-            dedupe: DedupeMode::Skip,
             usb_root: None,
             usb_root_valid: false,
         })
@@ -1262,7 +1258,6 @@ fn add_tracks_to_playlist_dedupe_skip_counts_skipped_and_get_playlist_tracks_ord
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["t1".to_string(), "t2".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add tracks");
     assert_eq!(added.added, 2);
@@ -1272,7 +1267,6 @@ fn add_tracks_to_playlist_dedupe_skip_counts_skipped_and_get_playlist_tracks_ord
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["t1".to_string()],
-            dedupe: DedupeMode::Skip,
         })
         .expect("add duplicate with skip mode");
     assert_eq!(skip_result.added, 0);
@@ -1343,7 +1337,6 @@ fn get_playlist_tracks_computes_total_duration_server_side() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add tracks");
 
@@ -1397,7 +1390,6 @@ fn get_playlist_tracks_paginates_filters_and_sorts_server_side() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: pid.clone(),
             track_ids: vec!["t1".into(), "t2".into(), "t3".into()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add tracks");
 
@@ -1535,7 +1527,6 @@ fn remove_tracks_from_playlist_recompacts_positions() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add tracks");
 
@@ -1608,7 +1599,6 @@ fn reorder_playlist_tracks_applies_arbitrary_new_order() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add tracks");
 
@@ -1661,7 +1651,6 @@ fn reorder_playlist_tracks_sort_commit_mode_orders_the_whole_playlist() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add tracks");
 
@@ -1711,7 +1700,6 @@ fn reorder_playlist_tracks_single_move_mode_repositions_one_track() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add tracks");
 
@@ -1794,7 +1782,6 @@ fn reorder_playlist_tracks_rejects_mismatched_track_set() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["t1".to_string(), "t2".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add tracks");
 
@@ -2132,7 +2119,6 @@ fn track_rows_derive_format_ext_from_path_when_the_column_is_null() {
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
             track_ids: vec!["m1".to_string()],
-            dedupe: DedupeMode::Allow,
         })
         .expect("add track");
     let tracks = service

@@ -660,21 +660,11 @@ pub struct GetPlaylistTracksData {
     pub unanalyzed_count: usize,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DedupeMode {
-    Allow,
-    /// What the app always sends: a track already in the playlist isn't added again.
-    #[default]
-    Skip,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddTracksToPlaylistRequest {
     pub playlist_id: String,
     pub track_ids: Vec<String>,
-    pub dedupe: DedupeMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -728,7 +718,6 @@ pub struct AddLibrarySelectionToPlaylistRequest {
     pub track_ids: Vec<String>,
     #[serde(default)]
     pub all_matching: bool,
-    pub dedupe: DedupeMode,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -787,7 +776,6 @@ pub struct AddTrackCandidatesToPlaylistRequest {
     pub playlist_id: String,
     #[serde(default)]
     pub tracks: Vec<AddTrackCandidate>,
-    pub dedupe: DedupeMode,
     #[serde(default)]
     pub usb_root: Option<String>,
     #[serde(default)]

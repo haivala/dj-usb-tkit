@@ -451,9 +451,9 @@ impl BackendService {
             }
         }
 
-        // Pre-load playlist track IDs for dedupe check
+        // A track already in the playlist isn't added again.
         let mut playlist_track_ids = std::collections::HashSet::new();
-        if matches!(req.dedupe, DedupeMode::Skip) {
+        {
             let mut stmt =
                 tx.prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id = ?1")?;
             let rows = stmt.query_map(params![req.playlist_id], |row| row.get::<_, String>(0))?;
@@ -469,9 +469,7 @@ impl BackendService {
                 )));
             }
 
-            if matches!(req.dedupe, DedupeMode::Skip)
-                && playlist_track_ids.contains(track_id.as_str())
-            {
+            if playlist_track_ids.contains(track_id.as_str()) {
                 skipped += 1;
                 continue;
             }
@@ -490,9 +488,7 @@ impl BackendService {
                 ],
             )?;
 
-            if matches!(req.dedupe, DedupeMode::Skip) {
-                playlist_track_ids.insert(track_id.clone());
-            }
+            playlist_track_ids.insert(track_id.clone());
 
             added += 1;
             next_position += 1;
@@ -587,7 +583,6 @@ impl BackendService {
         self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: req.playlist_id,
             track_ids,
-            dedupe: req.dedupe,
         })
     }
 
@@ -631,7 +626,6 @@ impl BackendService {
         let added = self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: req.playlist_id,
             track_ids,
-            dedupe: req.dedupe,
         })?;
 
         Ok(AddTrackCandidatesToPlaylistData {

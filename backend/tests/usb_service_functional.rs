@@ -10,9 +10,8 @@ use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    DedupeMode, ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest,
-    FetchUsbTracksRequest, InitializeUsbRequest, InspectUsbTrackRequest, ScanLibraryRequest,
-    ValidateUsbRootRequest,
+    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbTracksRequest,
+    InitializeUsbRequest, InspectUsbTrackRequest, ScanLibraryRequest, ValidateUsbRootRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
@@ -122,7 +121,6 @@ fn scan_and_export_single_track(
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
@@ -200,7 +198,6 @@ fn scan_and_export_tracks(
         source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
-        dedupe: DedupeMode::Skip,
         ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");

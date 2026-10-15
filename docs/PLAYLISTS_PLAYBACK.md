@@ -41,7 +41,7 @@ The playlist command layer is intentionally CRUD-oriented:
 - `add_library_selection_to_playlist` adds the library view's selection (or every
   track matching its filter); `add_track_candidates_to_playlist` resolves frontend row
   candidates (a USB playlist or history row's "+"). Both end in the same internal add,
-  which applies the dedupe mode
+  which skips a track that's already in the playlist
 - `remove_tracks_from_playlist` removes membership rows
 - `reorder_playlist_tracks` persists a new track order to `playlist_tracks.position`,
   in one of three modes: `orderedTrackIds` (the complete order, must match the
