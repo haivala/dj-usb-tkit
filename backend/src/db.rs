@@ -67,6 +67,7 @@ impl Db {
               file_path TEXT NOT NULL UNIQUE,
               file_size_bytes INTEGER,
               file_modified_at INTEGER,
+              file_created_at INTEGER,
               format_ext TEXT,
               sample_rate_hz INTEGER,
               bit_depth INTEGER,
@@ -236,6 +237,7 @@ impl Db {
         ensure_tracks_column(&conn, "wav_extensible_kind", "TEXT")?;
         ensure_tracks_column(&conn, "tonality_source", "TEXT")?;
         ensure_tracks_column(&conn, "genre_source", "TEXT")?;
+        ensure_tracks_column(&conn, "file_created_at", "INTEGER")?;
         ensure_playlists_column(&conn, "last_exported_at", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_usb_root", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_track_count", "INTEGER")?;
@@ -287,6 +289,7 @@ const ALLOWED_TRACK_COLUMNS: &[&str] = &[
     "wav_extensible_kind",
     "tonality_source",
     "genre_source",
+    "file_created_at",
 ];
 const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[
     "last_exported_at",

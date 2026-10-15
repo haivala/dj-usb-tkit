@@ -208,7 +208,7 @@ fn seed_usb_missing_audio_fixture(backend: &BackendCommands, usb_root: &Path) ->
             key: Some("8A".to_string()),
             source_path: "/tmp/missing-source.mp3".to_string(),
             exported_path: missing_path.clone(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -3302,7 +3302,7 @@ fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
             "/Contents/Artist/usb_key_clear/{}",
             usb_file.file_name().expect("usb file").to_string_lossy()
         ),
-        file_modified_at: Some(1_714_521_600),
+        file_timestamp_at: Some(1_714_521_600),
         file_size_bytes: std::fs::metadata(&usb_file)
             .ok()
             .and_then(|m| i64::try_from(m.len()).ok()),
@@ -3490,7 +3490,7 @@ fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
             "/Contents/Artist/edb_reuse/{}",
             usb_file.file_name().expect("usb file").to_string_lossy()
         ),
-        file_modified_at: Some(1_714_521_600),
+        file_timestamp_at: Some(1_714_521_600),
         file_size_bytes: std::fs::metadata(&usb_file)
             .ok()
             .and_then(|m| i64::try_from(m.len()).ok()),
@@ -3866,7 +3866,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
                 key: Some("8A".to_string()),
                 source_path: "/tmp/a.mp3".to_string(),
                 exported_path: "/Contents/Artist/Album/a.mp3".to_string(),
-                file_modified_at: None,
+                file_timestamp_at: None,
                 file_size_bytes: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -3914,7 +3914,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
                 key: Some("9A".to_string()),
                 source_path: "/tmp/b.mp3".to_string(),
                 exported_path: "/Contents/Artist/Album/b.mp3".to_string(),
-                file_modified_at: None,
+                file_timestamp_at: None,
                 file_size_bytes: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -3962,7 +3962,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
                 key: Some("10A".to_string()),
                 source_path: "/tmp/c.mp3".to_string(),
                 exported_path: "/Contents/Artist/Album/c.mp3".to_string(),
-                file_modified_at: None,
+                file_timestamp_at: None,
                 file_size_bytes: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -4164,7 +4164,7 @@ fn repair_usb_diagnostics_strict_upgrade_is_not_proposed_when_neither_side_is_ri
             key: None,
             source_path: "/tmp/thin.mp3".to_string(),
             exported_path: "/Contents/Artist/Thin/thin.mp3".to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -5496,7 +5496,7 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
             key: Some("8A".to_string()),
             source_path: "/tmp/does-not-matter.mp3".to_string(),
             exported_path: foreign_relative.to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: Some(file_size),
             sample_rate_hz: None,
             bit_depth: None,

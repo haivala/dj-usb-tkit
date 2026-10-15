@@ -1075,7 +1075,7 @@ export function createTrackDetailController(el, prefs = {}) {
     },
 
     /// Add a cue. With an explicit `positionMs` it lands there (double-click on
-    /// the waveform); with no argument it lands at the current playhead ("+ Cue"),
+    /// the waveform); with no argument it lands at the current playhead ("+ Hot cue"),
     /// or where playback was paused.
     /// Name and colour default to "Cue N" / the Nth palette colour (N = 1-based
     /// add order) — assigned once at creation, never renumbered later, and
@@ -1437,6 +1437,10 @@ export function createTrackDetailController(el, prefs = {}) {
       el.trackDetailTitle.textContent = t.title || "Track";
       if (el.trackDetailSubtitle) {
         el.trackDetailSubtitle.textContent = [t.artist, t.album].filter(Boolean).join(" · ");
+      }
+      if (el.trackDetailRevealBtn) {
+        el.trackDetailRevealBtn.hidden = !t.filePath;
+        el.trackDetailRevealBtn.dataset.tooltip = `Show in folder: ${t.filePath || ""}`;
       }
       if (el.trackDetailCover) {
         el.trackDetailCover.replaceChildren(coverElement(el.trackDetailCover.ownerDocument, coverCandidates));

@@ -28,7 +28,7 @@ export function bindTrackDetailEvents(ctx) {
   };
 
   // On open: keep playing (and show it) if it's this track; stop any other
-  // track so Play, "+ Cue" and the playhead all mean this one.
+  // track so Play, "+ Hot cue" and the playhead all mean this one.
   trackDetailDialog.onOpened?.(() => {
     playbackStartedHere = false;
     adopted = null;
@@ -518,6 +518,13 @@ export function bindTrackDetailEvents(ctx) {
 
   el.trackDetailGenre?.addEventListener("change", (event) => {
     trackDetailDialog.setGenre(event.target.value);
+  });
+  el.trackDetailRevealBtn?.addEventListener("click", () => {
+    const path = trackDetailDialog.getWorking().track?.filePath;
+    if (!path) return;
+    ctx.invoke("reveal_track_file", { path }).catch((err) => {
+      ctx.emitStatus(`Could not show the file: ${err?.message || err}`, { level: "error" });
+    });
   });
   el.trackDetailRating?.addEventListener("click", (event) => {
     const star = event.target.closest?.("[data-rating]");

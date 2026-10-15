@@ -33,8 +33,7 @@ Overall status: everything is working on CDJ/XDJ hardware. There are no open
 `warn`/`fail` outcomes on those devices, and all their previously known issues
 are fixed and hardware-confirmed on the hardware that originally showed them. The
 one Engine DJ issue (`engine-pdb-import-artists`) is fixed in 0.4.1 but not yet
-confirmed on the player. The latest run (app 0.1.36,
-2026-09-02) re-validated every scenario on CDJ-2000NXS2, CDJ-3000, and the newly
+confirmed on the player. On 0.1.36 (2026-09-02), a run re-validated every scenario on CDJ-2000NXS2, CDJ-3000, and the newly
 added CDJ-3000X. On 0.2.0 (2026-09-11), CDJ-2000, CDJ-2000NXS and CDJ-2000NXS2
 each ran every scenario available in that version. `cue-points-and-edited-beatgrid` is hardware-confirmed
 on CDJ-2000NXS and CDJ-2000NXS2 for its first release in 0.2.0, and re-confirmed
@@ -51,8 +50,10 @@ from a multi-script album now loads and plays. The other scenarios were not
 re-run on 0.3.1.
 On 0.3.7 (2026-10-09), CDJ-2000NXS and CDJ-2000NXS2 re-ran
 `cue-points-and-edited-beatgrid` with the new memory cues: memory cues and hot
-cues both work. No eDB player (CDJ-3000, CDJ-3000X, XDJ-AZ) has run memory cues
-yet.
+cues both work.
+On 0.4.0 (2026-10-10), CDJ-3000 ran every scenario, including the cue editor
+and memory cues for the first time on that device. CDJ-3000X and XDJ-AZ have
+not run memory cues yet.
 XDJ-AZ (fw 1.30) was added on 0.3.7-rc.3 (2026-10-09): exports play, and the
 beat grid and Beat Sync work on app-analysed tracks. Up to 0.3.7-rc.1 it
 refused the app's beat grids; see Known Issues.
@@ -76,10 +77,7 @@ release (0.1.0) and has stayed working through every version since.
 | XDJ-AZ | `beat-grid-and-beat-sync` | pass | 0.3.7-rc.3 | 2026-10-09 | `fail` at <=0.3.7-rc.1; fixed in 0.3.7-rc.3. |
 | Mixstream Pro | `engine-library` | pass | 0.4.0 | 2026-10-09 | First validation on this device and the first Engine DJ player. |
 | Mixstream Pro | `engine-pdb-import-artists` | untested | 0.4.1 | | `fail` at <=0.4.0; fix in 0.4.1 not yet run on hardware. |
-| CDJ-3000 | `normal-export` | pass | 0.1.36 | 2026-09-02 | |
-| CDJ-3000 | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | |
-| CDJ-3000 | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First direct test of this scenario on CDJ-3000. |
-| CDJ-3000 | `more-than-16-tracks-fresh-usb-init` | pass | 0.1.36 | 2026-09-02 | First direct test of this scenario on CDJ-3000. |
+| CDJ-3000 | everything tested | pass | 0.4.0 | 2026-10-10 | Every CDJ/XDJ scenario run on 0.4.0, the first CDJ-3000 run since 0.1.36 and its first with the cue editor and memory cues. |
 | CDJ-3000X | `normal-export` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
@@ -146,6 +144,7 @@ tested` row.
 | CDJ-2000 | 4.33 | 0.3.7 | `playback-start-position` | pass | 2026-10-09 | maintainer | First validation of the playback-start editor on CDJ-2000. Track loads at the chosen start position. |
 | Mixstream Pro | not recorded | <=0.4.0 | `engine-pdb-import-artists` | fail | 2026-10-09 | maintainer | Run stopped at: artist shown. With no Engine DJ library on the USB, the player's own import of `export.pdb` showed some tracks without an artist. See Known Issues: "0.4.0 and earlier — `engine-pdb-import-artists`". |
 | Mixstream Pro | not recorded | 0.4.0 | `engine-library` | pass | 2026-10-09 | maintainer | First validation on Mixstream Pro. The player used the app's beat grid without analysing again, and hot cues work. A play recorded on the player was still in `hm.db`, with the track's id and play state, after the library was rebuilt following a later export (checked on the USB afterwards, not on the player). |
+| CDJ-3000 | not recorded | 0.4.0 | everything tested | pass | 2026-10-10 | maintainer | Every CDJ/XDJ scenario available in 0.4.0. First CDJ-3000 run since 0.1.36, so the first with the cue editor (hot cues, memory cues, edited beat grid, playback start) on this device. |
 
 ## Known Issues
 

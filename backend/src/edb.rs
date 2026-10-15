@@ -38,8 +38,9 @@ pub struct ExportTrackData {
     pub key: Option<String>,
     pub file_path: String,
     pub file_name: String,
-    /// Unix seconds.
-    pub file_modified_at: Option<i64>,
+    /// Unix seconds; the earlier of the source file's creation and
+    /// modification time (see `ScannedTrack::file_timestamp`).
+    pub file_timestamp_at: Option<i64>,
     pub file_size_bytes: Option<i64>,
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u8>,
@@ -92,8 +93,9 @@ pub struct ExportManifestTrack {
     pub key: Option<String>,
     pub source_path: String,
     pub exported_path: String,
-    /// Unix seconds.
-    pub file_modified_at: Option<i64>,
+    /// Unix seconds; the earlier of the source file's creation and
+    /// modification time (see `ScannedTrack::file_timestamp`).
+    pub file_timestamp_at: Option<i64>,
     pub file_size_bytes: Option<i64>,
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u8>,
@@ -1426,7 +1428,9 @@ pub fn populate_content_values_map(
     if values.contains_key("releaseYear") {
         values.insert(
             "releaseYear".to_string(),
-            Value::Integer(i64::from(track.release_year.unwrap_or(0))),
+            Value::Integer(i64::from(
+                resolve_track_release_year_for_export(track).unwrap_or(0),
+            )),
         );
     }
     if values.contains_key("releaseDate") {
@@ -1582,22 +1586,71 @@ pub fn normalize_export_date(value: Option<&str>) -> Option<String> {
     if out.len() == 10 { Some(out) } else { None }
 }
 
+fn file_timestamp_date(track: &ExportManifestTrack) -> Option<String> {
+    let secs = track.file_timestamp_at?;
+    let dt = chrono::Utc.timestamp_opt(secs, 0).single()?;
+    Some(dt.format("%Y-%m-%d").to_string())
+}
+
+/// The part of the release date the tags do pin down when there's no full
+/// date: `YYYY-MM` or `YYYY` from a partial date tag, else `YYYY` from the
+/// year tag.
+fn partial_release_date(track: &ExportManifestTrack) -> Option<String> {
+    let tag = track.release_date.as_deref().map(str::trim).unwrap_or("");
+    fn digits(s: Option<&str>) -> Option<&str> {
+        s.filter(|s| s.bytes().all(|b| b.is_ascii_digit()))
+    }
+    if let (Some(year), Some("-"), Some(month)) =
+        (digits(tag.get(..4)), tag.get(4..5), digits(tag.get(5..7)))
+    {
+        return Some(format!("{year}-{month}"));
+    }
+    if let Some(year) = digits(tag.get(..4)) {
+        return Some(year.to_string());
+    }
+    track
+        .release_year
+        .filter(|year| (1..=9999).contains(year))
+        .map(|year| format!("{year:04}"))
+}
+
 pub fn resolve_track_created_date_for_export(track: &ExportManifestTrack) -> Option<String> {
     normalize_export_date(track.recorded_date.as_deref())
         .or_else(|| normalize_export_date(track.release_date.as_deref()))
-        .or_else(|| {
-            let secs = track.file_modified_at?;
-            let dt = chrono::Utc.timestamp_opt(secs, 0).single()?;
-            Some(dt.format("%Y-%m-%d").to_string())
-        })
+        .or_else(|| file_timestamp_date(track))
 }
 
+/// Release date written to both the PDB and the eDB: the full date tag, else
+/// the file timestamp. A file timestamp that contradicts a year (or month)
+/// the tags do carry is replaced by the start of that year (or month).
 pub fn resolve_track_release_date_for_export(track: &ExportManifestTrack) -> Option<String> {
     normalize_export_date(track.release_date.as_deref()).or_else(|| {
-        let secs = track.file_modified_at?;
-        let dt = chrono::Utc.timestamp_opt(secs, 0).single()?;
-        Some(dt.format("%Y-%m-%d").to_string())
+        let file_date = file_timestamp_date(track);
+        let Some(partial) = partial_release_date(track) else {
+            return file_date;
+        };
+        match file_date {
+            Some(date) if date.starts_with(&partial) => Some(date),
+            _ if partial.len() == 4 => Some(format!("{partial}-01-01")),
+            _ => Some(format!("{partial}-01")),
+        }
     })
+}
+
+/// Release year written to both the PDB and the eDB: the year tag, else the
+/// year of the release date, so the two fields never disagree.
+pub fn resolve_track_release_year_for_export(track: &ExportManifestTrack) -> Option<u16> {
+    track
+        .release_year
+        .and_then(|year| u16::try_from(year).ok())
+        .filter(|year| *year > 0)
+        .or_else(|| {
+            resolve_track_release_date_for_export(track)?
+                .get(..4)?
+                .parse::<u16>()
+                .ok()
+                .filter(|year| *year > 0)
+        })
 }
 
 pub fn find_key_id_by_name(

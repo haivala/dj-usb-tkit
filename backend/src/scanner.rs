@@ -45,6 +45,8 @@ pub struct ScannedTrack {
     pub file_size_bytes: Option<i64>,
     /// Unix seconds.
     pub file_modified_at: Option<i64>,
+    /// Unix seconds; None where the filesystem doesn't record a creation time.
+    pub file_created_at: Option<i64>,
     pub format_ext: Option<String>,
     pub sample_rate_hz: Option<u32>,
     pub bit_depth: Option<u8>,
@@ -143,6 +145,30 @@ fn walk_audio_files(
     Ok(tracks)
 }
 
+impl ScannedTrack {
+    /// The earlier of the file's creation and modification time. Unzipping
+    /// keeps the archive's modification time but stamps creation as "now",
+    /// while a later tag edit bumps modification, so the earlier one is the
+    /// closest the file itself gets to a release date.
+    pub fn file_timestamp(&self) -> Option<i64> {
+        earliest_file_time(self.file_created_at, self.file_modified_at)
+    }
+}
+
+/// The earlier of two optional Unix-second timestamps.
+pub fn earliest_file_time(a: Option<i64>, b: Option<i64>) -> Option<i64> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+/// A file timestamp as Unix seconds, or None when the OS doesn't provide it.
+pub fn file_time_secs(time: std::io::Result<SystemTime>) -> Option<i64> {
+    let dur = time.ok()?.duration_since(UNIX_EPOCH).ok()?;
+    i64::try_from(dur.as_secs()).ok()
+}
+
 /// Read tags and file facts for one audio file -- the per-file step of
 /// `scan_audio_files`, also used to index audio already sitting on a USB.
 pub fn scan_audio_file(path: &Path) -> BackendResult<ScannedTrack> {
@@ -157,11 +183,6 @@ pub fn scan_audio_file(path: &Path) -> BackendResult<ScannedTrack> {
             .and_then(|s| s.to_str())
             .unwrap_or_default(),
     );
-    let modified = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .and_then(|dur| i64::try_from(dur.as_secs()).ok());
 
     Ok(ScannedTrack {
         path: path.to_string_lossy().to_string(),
@@ -171,7 +192,8 @@ pub fn scan_audio_file(path: &Path) -> BackendResult<ScannedTrack> {
         track_number: meta.track_number.or(fallback_track_number),
         tonality: meta.tonality,
         file_size_bytes: i64::try_from(metadata.len()).ok(),
-        file_modified_at: modified,
+        file_modified_at: file_time_secs(metadata.modified()),
+        file_created_at: file_time_secs(metadata.created()),
         format_ext: format_ext_of(path),
         sample_rate_hz,
         bit_depth,
@@ -879,6 +901,16 @@ mod tests {
     }
 
     #[test]
+    fn earliest_file_time_prefers_the_earlier_known_timestamp() {
+        use super::earliest_file_time;
+        assert_eq!(earliest_file_time(Some(200), Some(100)), Some(100));
+        assert_eq!(earliest_file_time(Some(100), Some(200)), Some(100));
+        assert_eq!(earliest_file_time(None, Some(200)), Some(200));
+        assert_eq!(earliest_file_time(Some(200), None), Some(200));
+        assert_eq!(earliest_file_time(None, None), None);
+    }
+
+    #[test]
     fn scan_finds_audio_and_infers_metadata() {
         let dir = tempdir().unwrap();
         let album_dir = dir.path().join("My Album");
@@ -914,6 +946,7 @@ mod tests {
                 tonality: None,
                 file_size_bytes: None,
                 file_modified_at: None,
+                file_created_at: None,
                 format_ext: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -937,6 +970,7 @@ mod tests {
                 tonality: None,
                 file_size_bytes: None,
                 file_modified_at: None,
+                file_created_at: None,
                 format_ext: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -960,6 +994,7 @@ mod tests {
                 tonality: None,
                 file_size_bytes: None,
                 file_modified_at: None,
+                file_created_at: None,
                 format_ext: None,
                 sample_rate_hz: None,
                 bit_depth: None,

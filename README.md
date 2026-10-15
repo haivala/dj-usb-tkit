@@ -90,7 +90,7 @@ full-detail colour waveform with the beat grid over it.
 </p>
 
 - **Hot cues**: up to 8, lettered A–H by position, each with a name and
-  colour. Add them by double-clicking the waveform, with "+ Cue" or with C
+  colour. Add them by double-clicking the waveform, with "+ Hot cue" or with C
   while playing; drag markers to move them. Quantize (Q) snaps cues to the
   beat, and Shift places one freely.
 - **Beat grid**: fix the BPM (type it, nudge it by 0.01, or ×2 / ÷2 for a half

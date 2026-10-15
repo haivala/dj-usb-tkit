@@ -4346,6 +4346,24 @@ td button[data-action]:disabled,
 .track-detail-unit { font-size: 12px; color: var(--muted); }
 /* Beats the global `input { min-width }`. */
 .track-detail-meta .track-detail-genre { min-width: 0; width: 180px; }
+.track-detail-reveal {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.track-detail-reveal[hidden] { display: none; }
+.track-detail-reveal svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
 /* Five stars; hovering lights them up to the one under the pointer. */
 .track-detail-rating { display: inline-flex; }
 .track-detail-rating button {
@@ -4794,9 +4812,7 @@ td button[data-action]:disabled,
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  padding: 2px 0;
 }
 .memory-slot.is-empty { color: var(--muted); font-size: 12px; }
 .memory-slot-label b { color: var(--ink); font-weight: 600; }
@@ -4826,7 +4842,13 @@ td button[data-action]:disabled,
 }
 .track-detail-cues-head > span { font-weight: 600; margin-right: 8px; }
 /* The memory-cue slot and "+ Cue" sit together at the right. */
-.track-detail-memory-cue { margin-left: auto; }
+/* A divider keeps the memory-cue controls apart from "+ Hot cue". */
+.track-detail-memory-cue {
+  margin-left: auto;
+  margin-right: 4px;
+  padding-right: 12px;
+  border-right: 1px solid var(--line);
+}
 #trackDetailAddCue:disabled { opacity: .4; cursor: default; }
 /* While a cue-editor drag is held (pan, cue marker, overview), nothing on the
    page is selectable, even where the pointer passes over text. */

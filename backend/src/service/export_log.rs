@@ -337,7 +337,7 @@ mod tests {
             key: None,
             source_path: format!("/src/{id}.mp3"),
             exported_path: exported_path.to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,

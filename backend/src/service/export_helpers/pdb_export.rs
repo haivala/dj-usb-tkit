@@ -954,7 +954,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
                 if let Some(ft) = track.file_type.and_then(|v| u16::try_from(v).ok()) {
                     existing_track.file_type = Some(ft);
                 }
-                if let Some(ry) = track.release_year.and_then(|v| u16::try_from(v).ok()) {
+                if let Some(ry) = resolve_track_release_year_for_export(track) {
                     existing_track.release_year = Some(ry);
                 }
                 if let Some(rd) = resolve_track_release_date_for_export(track) {
@@ -1114,7 +1114,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
                 bitrate_kbps: track.bitrate_kbps,
                 track_number: track.track_number,
                 bpm: track.bpm,
-                release_year: track.release_year.and_then(|v| u16::try_from(v).ok()),
+                release_year: resolve_track_release_year_for_export(track),
                 bit_depth: edb_identity
                     .and_then(|(_, _, _, bd)| bd)
                     .or_else(|| track.bit_depth.map(u16::from)),

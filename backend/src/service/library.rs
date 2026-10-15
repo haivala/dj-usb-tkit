@@ -74,7 +74,7 @@ impl BackendService {
         let mut existing_tracks = ExistingTracksByPath::new();
         {
             let mut stmt = tx.prepare(
-                "SELECT id, file_modified_at, title, artist, album, track_number, tonality, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date, genre, file_path, wav_extensible_kind, COALESCE(genre_source = 'user', 0) FROM tracks",
+                "SELECT id, file_modified_at, title, artist, album, track_number, tonality, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date, genre, file_path, wav_extensible_kind, COALESCE(genre_source = 'user', 0), file_created_at FROM tracks",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
@@ -101,6 +101,7 @@ impl BackendService {
                         row.get::<_, Option<String>>(18)?, // genre
                         row.get::<_, Option<String>>(20)?, // wav_extensible_kind
                         row.get::<_, bool>(21)?,           // genre edited in the app
+                        row.get::<_, Option<i64>>(22)?,    // file_created_at
                     ),
                 ))
             })?;
@@ -133,8 +134,8 @@ impl BackendService {
                           file_size_bytes, file_modified_at, format_ext, sample_rate_hz, bit_depth, bitrate_kbps,
                           disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date,
                           genre, duration_ms, artwork_path, waveform_peaks_path, match_fingerprint,
-                          created_at, updated_at, wav_extensible_kind
-                        ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, NULL, NULL, NULL, ?22, ?23, ?23, ?24)
+                          created_at, updated_at, wav_extensible_kind, file_created_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, NULL, NULL, NULL, ?22, ?23, ?23, ?24, ?25)
                         "#,
                         params![
                             id,
@@ -160,7 +161,8 @@ impl BackendService {
                             item.genre,
                             fingerprint,
                             now,
-                            wav_extensible_kind
+                            wav_extensible_kind,
+                            item.file_created_at
                         ],
                     )?;
                     indexed += 1;
@@ -187,6 +189,7 @@ impl BackendService {
                     old_genre,
                     old_wav_extensible_kind,
                     genre_edited,
+                    old_created,
                 )) => {
                     let wav_extensible_kind =
                         item.wav_extensible_kind.map(WavFormatIssue::as_db_str);
@@ -210,7 +213,10 @@ impl BackendService {
                         // A genre edited in the app wins over the file's tag.
                         || (!genre_edited && old_genre != item.genre)
                         || old_wav_extensible_kind.as_deref() != wav_extensible_kind;
-                    if old_modified != item.file_modified_at || metadata_changed {
+                    let file_changed = old_modified != item.file_modified_at || metadata_changed;
+                    // A creation time alone changing (first rescan after the
+                    // column was added) is stored but doesn't count as an update.
+                    if file_changed || old_created != item.file_created_at {
                         let fingerprint = build_track_match_fingerprint(
                             &item.title,
                             &item.artist,
@@ -240,7 +246,8 @@ impl BackendService {
                                 genre = CASE WHEN genre_source = 'user' THEN genre ELSE ?19 END,
                                 match_fingerprint = ?20,
                                 updated_at = ?21,
-                                wav_extensible_kind = ?23
+                                wav_extensible_kind = ?23,
+                                file_created_at = ?24
                             WHERE id = ?22
                             "#,
                             params![
@@ -266,10 +273,13 @@ impl BackendService {
                                 fingerprint,
                                 now,
                                 id,
-                                wav_extensible_kind
+                                wav_extensible_kind,
+                                item.file_created_at
                             ],
                         )?;
-                        updated += 1;
+                        if file_changed {
+                            updated += 1;
+                        }
                     }
                 }
             }
@@ -783,11 +793,8 @@ impl BackendService {
         }
 
         let metadata = std::fs::metadata(path)?;
-        let file_modified_at = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .and_then(|dur| i64::try_from(dur.as_secs()).ok());
+        let file_modified_at = crate::scanner::file_time_secs(metadata.modified());
+        let file_created_at = crate::scanner::file_time_secs(metadata.created());
         let title = req.title.trim();
         let artist = req.artist.trim();
         let album = req.album.and_then(|value| {
@@ -833,7 +840,8 @@ impl BackendService {
                     bit_depth = ?10,
                     bitrate_kbps = ?11,
                     match_fingerprint = ?12,
-                    updated_at = ?13
+                    updated_at = ?13,
+                    file_created_at = ?15
                 WHERE id = ?14
                 "#,
                 params![
@@ -850,7 +858,8 @@ impl BackendService {
                     req.bitrate_kbps,
                     fingerprint,
                     now,
-                    id
+                    id,
+                    file_created_at
                 ],
             )?;
             id
@@ -863,8 +872,8 @@ impl BackendService {
                   file_size_bytes, file_modified_at, format_ext, sample_rate_hz, bit_depth, bitrate_kbps,
                   disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date,
                   duration_ms, artwork_path, waveform_peaks_path, match_fingerprint,
-                  created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?14, ?15, ?15)
+                  created_at, updated_at, file_created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?14, ?15, ?15, ?16)
                 "#,
                 params![
                     id,
@@ -881,7 +890,8 @@ impl BackendService {
                     req.bit_depth,
                     req.bitrate_kbps,
                     fingerprint,
-                    now
+                    now,
+                    file_created_at
                 ],
             )?;
             id

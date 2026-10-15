@@ -23,7 +23,7 @@ fn mapping_test_track() -> ExportManifestTrack {
         key: Some("8A".to_string()),
         source_path: "/source/mapping.mp3".to_string(),
         exported_path: "/Contents/Mapping Artist/Mapping Album/Mapping Track.mp3".to_string(),
-        file_modified_at: Some(1_714_521_600),
+        file_timestamp_at: Some(1_714_521_600),
         file_size_bytes: Some(42_424),
         sample_rate_hz: Some(44_100),
         bit_depth: Some(24),
@@ -275,7 +275,7 @@ fn insert_content_from_template_matches_rb6_null_empty_conventions() {
     assert_eq!(
         row.1.as_deref(),
         Some("2024-05-01"),
-        "releaseDate should fall back to file_modified_at when release_date is missing"
+        "releaseDate should fall back to the file timestamp when release_date is missing"
     );
 }
 
@@ -525,7 +525,59 @@ fn update_existing_content_row_matches_rb6_null_empty_conventions() {
     assert_eq!(
         row.1.as_deref(),
         Some("2024-05-01"),
-        "releaseDate should fall back to file_modified_at after update"
+        "releaseDate should fall back to the file timestamp after update"
+    );
+}
+
+#[test]
+fn release_date_and_year_fall_back_to_file_timestamp() {
+    // 2024-05-01 00:00:00 UTC
+    let mut track = mapping_test_track();
+    track.release_year = None;
+    track.release_date = None;
+    assert_eq!(
+        resolve_track_release_date_for_export(&track).as_deref(),
+        Some("2024-05-01")
+    );
+    assert_eq!(resolve_track_release_year_for_export(&track), Some(2024));
+
+    track.file_timestamp_at = None;
+    assert_eq!(resolve_track_release_date_for_export(&track), None);
+    assert_eq!(resolve_track_release_year_for_export(&track), None);
+}
+
+#[test]
+fn release_year_comes_from_full_date_tag_without_year_tag() {
+    let mut track = mapping_test_track();
+    track.release_year = None;
+    track.release_date = Some("2019-11-22".to_string());
+    assert_eq!(resolve_track_release_year_for_export(&track), Some(2019));
+}
+
+#[test]
+fn file_timestamp_contradicting_tagged_year_is_replaced_by_that_year() {
+    // File timestamp is 2024-05-01; the tags only say 2019.
+    let mut track = mapping_test_track();
+    track.release_year = Some(2019);
+    track.release_date = None;
+    assert_eq!(
+        resolve_track_release_date_for_export(&track).as_deref(),
+        Some("2019-01-01")
+    );
+    assert_eq!(resolve_track_release_year_for_export(&track), Some(2019));
+
+    track.release_date = Some("2019-08".to_string());
+    assert_eq!(
+        resolve_track_release_date_for_export(&track).as_deref(),
+        Some("2019-08-01")
+    );
+
+    // A file timestamp inside the tagged year is kept.
+    track.release_year = Some(2024);
+    track.release_date = Some("2024".to_string());
+    assert_eq!(
+        resolve_track_release_date_for_export(&track).as_deref(),
+        Some("2024-05-01")
     );
 }
 
@@ -538,6 +590,8 @@ fn insert_content_from_template_sets_release_year_zero_when_missing() {
 
     let mut track = mapping_test_track();
     track.release_year = None;
+    track.release_date = None;
+    track.file_timestamp_at = None;
 
     let content_id =
         insert_content_from_template(&conn, &track, Some("2024-07-09")).expect("insert content");
@@ -567,6 +621,8 @@ fn update_existing_content_row_sets_release_year_zero_when_missing() {
 
     let mut track = mapping_test_track();
     track.release_year = None;
+    track.release_date = None;
+    track.file_timestamp_at = None;
 
     let tx = conn.transaction().expect("start tx");
     let columns = load_table_columns_tx(&tx, "content").expect("content columns");
@@ -1040,7 +1096,7 @@ fn verify_edb_content_fails_when_artwork_file_is_missing_on_disk() {
             exported_path:
                 "/Contents/Artist One/Album One/Artist One - Album One - 03 Track One.mp3"
                     .to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -1172,7 +1228,7 @@ fn export_analysis_copies_internal_cache_anlz_even_when_invalid() {
         key: None,
         file_path: fixture_mp3.to_string_lossy().to_string(),
         file_name: "track_no_art.mp3".to_string(),
-        file_modified_at: None,
+        file_timestamp_at: None,
         file_size_bytes: None,
         sample_rate_hz: None,
         bit_depth: None,
@@ -1258,7 +1314,7 @@ fn export_analysis_copies_local_anlz_and_rewrites_ppth_path() {
         key: None,
         file_path: "/should/not/be/read.mp3".to_string(),
         file_name: "track.mp3".to_string(),
-        file_modified_at: None,
+        file_timestamp_at: None,
         file_size_bytes: None,
         sample_rate_hz: None,
         bit_depth: None,
@@ -1528,7 +1584,7 @@ fn export_analysis_does_not_regenerate_when_local_dat_missing() {
         key: None,
         file_path: fixture_mp3.to_string_lossy().to_string(),
         file_name: "track_no_art.mp3".to_string(),
-        file_modified_at: None,
+        file_timestamp_at: None,
         file_size_bytes: None,
         sample_rate_hz: None,
         bit_depth: None,
@@ -1819,7 +1875,7 @@ fn remove_playlist_and_tracks_from_pdb_allows_removing_last_playlist() {
             key: Some("8A".to_string()),
             file_path: "/source/a.mp3".to_string(),
             file_name: "a.mp3".to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -1882,7 +1938,7 @@ fn remove_playlist_and_tracks_from_pdb_allows_removing_last_playlist() {
             key: Some("8A".to_string()),
             source_path: "/source/a.mp3".to_string(),
             exported_path: "/Contents/Artist/Album/a.mp3".to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -2666,7 +2722,7 @@ fn rewrite_pdb_playlist_rebuilds_resolvable_dictionary_rows_on_initialized_usb()
             key: Some("8A".to_string()),
             source_path: "/source/a1.mp3".to_string(),
             exported_path: "/Contents/Artist/Album/a1.mp3".to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -3589,7 +3645,7 @@ fn rewrite_pdb_playlist_keeps_f_sharp_and_f_minor_as_distinct_keys() {
                 key: Some("F#m".to_string()),
                 source_path: "/source/sharp.mp3".to_string(),
                 exported_path: "/Contents/Artist/Album/sharp.mp3".to_string(),
-                file_modified_at: None,
+                file_timestamp_at: None,
                 file_size_bytes: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -3637,7 +3693,7 @@ fn rewrite_pdb_playlist_keeps_f_sharp_and_f_minor_as_distinct_keys() {
                 key: Some("Fm".to_string()),
                 source_path: "/source/minor.mp3".to_string(),
                 exported_path: "/Contents/Artist/Album/minor.mp3".to_string(),
-                file_modified_at: None,
+                file_timestamp_at: None,
                 file_size_bytes: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -3733,7 +3789,7 @@ fn make_test_track(id: &str, title: &str, filename: &str) -> ExportTrackData {
         key: None,
         file_path: format!("/source/{filename}"),
         file_name: filename.to_string(),
-        file_modified_at: None,
+        file_timestamp_at: None,
         file_size_bytes: None,
         sample_rate_hz: None,
         bit_depth: None,
@@ -3807,7 +3863,7 @@ fn make_test_manifest(
                 key: None,
                 source_path: format!("/source/{filename}"),
                 exported_path: format!("/Contents/Artist/Album/{filename}"),
-                file_modified_at: None,
+                file_timestamp_at: None,
                 file_size_bytes: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -3931,7 +3987,7 @@ fn collect_owned_paths_includes_media_artwork_analysis() {
             key: None,
             source_path: "/local/track.mp3".to_string(),
             exported_path: "/Contents/Artist/Album/track.mp3".to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -4019,7 +4075,7 @@ fn collect_owned_paths_skips_none_artwork_and_waveform() {
             key: None,
             source_path: "/local/track.mp3".to_string(),
             exported_path: "/Contents/track.mp3".to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -4267,7 +4323,7 @@ fn genre_and_label_tables_preserved_through_export_roundtrip() {
             key: None,
             file_path: "/source/a.mp3".to_string(),
             file_name: "a.mp3".to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,
@@ -4330,7 +4386,7 @@ fn genre_and_label_tables_preserved_through_export_roundtrip() {
             key: None,
             source_path: "/source/a.mp3".to_string(),
             exported_path: "/Contents/Artist/a.mp3".to_string(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: None,
             sample_rate_hz: None,
             bit_depth: None,

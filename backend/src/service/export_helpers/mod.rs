@@ -23,7 +23,8 @@ pub use crate::edb::{
     load_table_row_template, map_values_for_insert, next_numeric_id, normalize_export_date,
     open_edb_rw, populate_content_values_map, preferred_export_playlist_row_id,
     replace_export_playlist_row_with_identity, resolve_track_created_date_for_export,
-    resolve_track_release_date_for_export, table_exists, upsert_export_playlist_row,
+    resolve_track_release_date_for_export, resolve_track_release_year_for_export, table_exists,
+    upsert_export_playlist_row,
 };
 pub(crate) use crate::metadata::sanitize_metadata;
 pub use crate::pdb_writer::{T08EntryKey, validate_no_empty_data_pages};

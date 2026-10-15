@@ -270,7 +270,7 @@ pub(super) fn build_manifest_for_merged_playlist(
             key: mt.key.clone(),
             source_path: mt.edb_media_path.clone(),
             exported_path: mt.edb_media_path.clone(),
-            file_modified_at: None,
+            file_timestamp_at: None,
             file_size_bytes: mt.file_size_bytes.map(i64::from),
             sample_rate_hz: mt.sample_rate_hz,
             bit_depth: mt.bit_depth.map(|v| v as u8),

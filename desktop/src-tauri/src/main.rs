@@ -531,6 +531,19 @@ fn open_frontend_log(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|err| format!("open log failed: {err}"))
 }
 
+/// Opens the file manager on the track file's folder, with the file selected.
+#[tauri::command]
+fn reveal_track_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = PathBuf::from(path);
+    if !path.is_file() {
+        return Err(format!("file not found: {}", path.display()));
+    }
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|err| format!("show in folder failed: {err}"))
+}
+
 const VALID_LOG_LEVELS: &[&str] = &["log", "info", "warn", "error", "debug", "trace"];
 
 #[tauri::command]
@@ -882,6 +895,7 @@ fn main() {
             backend::tauri_commands::set_playback_metronome,
             backend::tauri_commands::playback_preflight_native,
             open_frontend_log,
+            reveal_track_file,
             append_frontend_log,
             get_backend_log_buffer,
             pick_source_folders,

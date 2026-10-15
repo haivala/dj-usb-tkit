@@ -81,7 +81,7 @@ the waveform markers and in the list. Each gets a default name ("Cue N") and
 colour when added, both editable. On export each cue point becomes a memory
 point **and** a hot-cue pad (see `docs/USB_EXPORT.md`).
 
-- **Add**: double-click the waveform, press "+ Cue" (at the playhead, or where
+- **Add**: double-click the waveform, press "+ Hot cue" (at the playhead, or where
   playback is paused), or press **C**.
 - **Move**: drag a marker. A plain click on a marker plays from that cue.
 - **Quantize ("Q")**, on by default and remembered: added and dragged cues snap
@@ -168,7 +168,7 @@ undo). Space never presses the focused button (Save has focus on open).
 ### Playing, pausing and the metronome
 
 - **Play/pause**: the button left of the hints, or Space. Pause holds the track
-  in the audio engine; "+ Cue" and C then land on the paused spot. The playhead
+  in the audio engine; "+ Hot cue" and C then land on the paused spot. The playhead
   view follows playback when zoomed in, unless you just panned or zoomed.
 - **Metronome** (next to Q): clicks on every grid beat while playing, higher and
   louder on bar starts, so you can hear whether the grid lines up. Grid edits

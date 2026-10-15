@@ -1252,6 +1252,7 @@ impl BackendService {
                 app_master_db_id,
                 APP_CONTENT_LINK_ID,
             )?;
+            let file_timestamp_at = scanned.file_timestamp();
             manifest_tracks.push(ExportManifestTrack {
                 id: identity_key,
                 master_db_id,
@@ -1266,7 +1267,7 @@ impl BackendService {
                 key: scanned.tonality,
                 source_path: rel.clone(),
                 exported_path: rel.clone(),
-                file_modified_at: scanned.file_modified_at,
+                file_timestamp_at,
                 file_size_bytes: scanned.file_size_bytes,
                 sample_rate_hz: scanned.sample_rate_hz,
                 bit_depth: scanned.bit_depth,

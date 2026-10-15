@@ -44,10 +44,19 @@
   newest entries; the file keeps everything since the app was started.
 - **New feature:** When an analysis run finishes, the Event Log records how many tracks it
   covered and how long it took.
+- **New feature:** The cue editor has a folder button that opens the track's folder in the
+  file manager with the file selected, for library and USB tracks alike.
 - **Fix:** The progress bar's elapsed time no longer disappears while analysis shows the track
   being worked on. A long track name is shortened instead of pushing the time out of view.
 - **Fix:** Analysis no longer fills the Event Log with "no state change" warnings for tracks
   that weren't on screen or whose BPM and key didn't change.
+- **Fix:** Exported tracks always carry a release year that matches their release date. A track
+  tagged with a full release date but no year gets the year from that date. A track tagged only
+  with a year or year and month no longer gets a release date from a different year.
+- **Improvement:** When a track has no release date tag, export uses the earlier of the file's
+  created and modified dates instead of always the modified date. That date is usually closer to
+  the release, for example for files unzipped from a purchased album or edited in a tag editor
+  later. Rescan the library to pick up created dates for tracks that were already in it.
 
 ## 0.4.2
 

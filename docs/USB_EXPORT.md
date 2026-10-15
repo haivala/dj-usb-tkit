@@ -178,8 +178,15 @@ Known eDB track-row data currently mapped in export includes:
 
 - `content.length` from local `duration_ms` (seconds)
 - `content.dateAdded` from export run day
-- `content.dateCreated` fallback chain (`recorded_date` -> `release_date` -> `file_modified_at`)
-- `content.releaseDate` from `release_date` or `file_modified_at`
+- `content.dateCreated` fallback chain (`recorded_date` -> `release_date` -> file timestamp)
+- `content.releaseDate` and the PDB release-date slot: the full `release_date` tag, else the
+  file timestamp. When the tags carry only a year (or year and month) and the file timestamp
+  falls outside it, the start of that year (or month) is used instead
+- `content.releaseYear` and the PDB release-year field: the year tag, else the year of the
+  release date above, so year and date always agree
+- the file timestamp is the earlier of the source file's creation and modification time
+  (whichever the OS provides); unzipping keeps the archive's modification time while a later
+  tag edit bumps it, so the earlier one is the closest the file gets to the release
 - `content.analysisDataFilePath`, media path, artwork linkage, and identity fields
 
 Before writing exporter-owned metadata text, the exporter strips embedded NUL

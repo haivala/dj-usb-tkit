@@ -90,6 +90,10 @@ function installTrackDetailMock(page, opts = {}) {
               },
             };
           }
+          if (command === "reveal_track_file") {
+            window.__revealed = payload?.path ?? null;
+            return null;
+          }
           if (command === "save_track_metadata_edits") {
             const r = payload?.request || {};
             return { ok: true, data: { trackId: r.trackId, genre: r.genre ?? "Techno", rating: r.rating ?? 3 } };
@@ -1068,6 +1072,16 @@ test("genre and star rating: a change to only them saves only them, leaving the 
   await expect(page.locator("#statusText")).toContainText("Saved genre and rating");
 });
 
+test("the folder button shows the track's file in its folder", async ({ page }) => {
+  await openCueEditor(page);
+  await expect(page.locator("#trackDetailRevealBtn")).toHaveAttribute("data-tooltip", "Show in folder: /music/one.mp3");
+  await page.locator("#trackDetailRevealBtn").click();
+  await expect.poll(() => page.evaluate(() => window.__revealed)).toBe("/music/one.mp3");
+  // Not an edit: Escape still closes the dialog without pointing at Save.
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+});
+
 test("a rating edit alongside a BPM edit saves both, each with only its own fields", async ({ page }) => {
   await openCueEditor(page);
   await setBpmInput(page, "130");
@@ -1526,7 +1540,7 @@ const modalPlayheadMs = (page) =>
     return (parseFloat(wf.style.getPropertyValue("--playhead-position")) || 0) / 100 * 180000;
   });
 
-test("play/pause pauses in the backend, freezes the playhead, and + Cue lands on the paused spot", async ({ page }) => {
+test("play/pause pauses in the backend, freezes the playhead, and + Hot cue lands on the paused spot", async ({ page }) => {
   await installTrackDetailMock(page, { quantize: false });
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
@@ -1559,7 +1573,7 @@ test("play/pause pauses in the backend, freezes the playhead, and + Cue lands on
   await page.waitForTimeout(300); // prove it does NOT move while paused
   expect(await modalPlayheadMs(page)).toBeCloseTo(pausedMs, 0);
 
-  // "+ Cue" while paused lands at the paused spot, not at 0.
+  // "+ Hot cue" while paused lands at the paused spot, not at 0.
   await page.locator("#trackDetailAddCue").click();
   await page.locator("#trackDetailSaveBtn").click();
   const saveCall = (await calls("save_track_analysis_edits"))[0];

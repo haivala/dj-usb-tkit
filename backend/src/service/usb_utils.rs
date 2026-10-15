@@ -2432,7 +2432,7 @@ mod diag_tests {
                 key: Some("8A".to_string()),
                 source_path: "/tmp/source.mp3".to_string(),
                 exported_path: "/Contents/Artist/UnknownAlbum/source.mp3".to_string(),
-                file_modified_at: None,
+                file_timestamp_at: None,
                 file_size_bytes: None,
                 sample_rate_hz: None,
                 bit_depth: None,
@@ -2588,7 +2588,7 @@ mod diag_tests {
                 exported_path:
                     "/Contents/Artist One/Album One/Artist One - Album One - 03 Track One.mp3"
                         .to_string(),
-                file_modified_at: None,
+                file_timestamp_at: None,
                 file_size_bytes: None,
                 sample_rate_hz: None,
                 bit_depth: None,

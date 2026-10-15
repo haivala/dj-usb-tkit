@@ -168,6 +168,7 @@ type ExistingTrackSnapshot = (
     Option<String>, // genre
     Option<String>, // wav_extensible_kind
     bool,           // genre edited in the app (`genre_source = 'user'`)
+    Option<i64>,    // file_created_at, Unix seconds
 );
 type ExistingTracksByPath = std::collections::HashMap<String, ExistingTrackSnapshot>;
 
