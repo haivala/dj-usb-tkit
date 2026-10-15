@@ -13,7 +13,7 @@ Implemented command set:
   - `delete_playlist`
   - `list_playlists`
   - `get_playlist_tracks`
-  - `add_tracks_to_playlist`
+  - `add_library_selection_to_playlist`
   - `add_track_candidates_to_playlist`
   - `remove_tracks_from_playlist`
   - `reorder_playlist_tracks`
@@ -47,10 +47,8 @@ Implemented command set:
 - Playback:
   - `resolve_playback_source`
   - `play_resolved_track`
-  - `play_track_native`
   - `stop_playback_native`
   - `get_playback_status_native`
-  - `playback_preflight_native`
 
 ## Notes
 - Data is persisted in SQLite at `<data_dir>/backend.db`.

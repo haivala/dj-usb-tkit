@@ -4,17 +4,16 @@ use std::path::Path;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CheckSourceRootsRequest,
+    AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CheckSourceRootsRequest,
     CreatePlaylistRequest, DedupeMode, DeleteUsbBackupRequest, ExportToUsbRequest,
     FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
     GetTrackDetailRequest, GetUsbDeviceNameRequest, InitializeUsbRequest, ListUsbBackupsRequest,
-    PlayResolvedTrackRequest, PlayTrackRequest, PlaybackPreflightRequest, PruneUsbDeviceRequest,
-    RefreshPlaylistExportStatusRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
-    RenamePlaylistRequest, ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest,
-    ResolveTrackIdentityRequest, RestoreUsbBackupRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest, ScanLibraryRequest,
-    ScanRekordboxDbRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput,
-    ValidateUsbRootRequest,
+    PlayResolvedTrackRequest, PruneUsbDeviceRequest, RefreshPlaylistExportStatusRequest,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
+    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
+    RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanRekordboxDbRequest,
+    SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -202,14 +201,6 @@ fn command_surface_covers_usb_name_backup_identity_refresh_and_preflight_wrapper
         !delete.ok,
         "missing delete snapshot should fail: {delete:?}"
     );
-
-    let preflight = backend.playback_preflight_native(PlaybackPreflightRequest {
-        path: "  ".to_string(),
-    });
-    assert!(
-        !preflight.ok,
-        "blank playback preflight path should be rejected: {preflight:?}"
-    );
 }
 
 #[test]
@@ -259,11 +250,14 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
         .expect("playlist data")
         .playlist_id;
 
-    let add_initial = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: playlist_id.clone(),
-        track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
-        dedupe: DedupeMode::Skip,
-    });
+    let add_initial =
+        backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            playlist_id: playlist_id.clone(),
+            track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
+            dedupe: DedupeMode::Skip,
+            ..Default::default()
+        });
     assert!(add_initial.ok, "initial add failed: {add_initial:?}");
 
     let remove_middle = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
@@ -286,10 +280,12 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
         .collect::<Vec<_>>();
     assert_eq!(after_remove_titles, vec!["A".to_string(), "C".to_string()]);
 
-    let readd = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let readd = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_b],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(readd.ok, "re-add failed: {readd:?}");
     assert_eq!(readd.data.expect("re-add data").added, 1);
@@ -358,11 +354,14 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
         .expect("playlist data")
         .playlist_id;
 
-    let add_initial = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: playlist_id.clone(),
-        track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
-        dedupe: DedupeMode::Skip,
-    });
+    let add_initial =
+        backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            playlist_id: playlist_id.clone(),
+            track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
+            dedupe: DedupeMode::Skip,
+            ..Default::default()
+        });
     assert!(add_initial.ok, "initial add failed: {add_initial:?}");
 
     let reorder = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
@@ -646,17 +645,6 @@ fn list_usb_devices_and_prune_usb_device_roundtrip() {
 }
 
 #[test]
-fn merge_orphaned_usb_placeholder_tracks_is_a_noop_on_an_empty_library() {
-    let root = tempdir().expect("temp root");
-    let data_dir = root.path().join("data");
-    let backend = BackendCommands::new(&data_dir).expect("create backend");
-
-    let response = backend.merge_orphaned_usb_placeholder_tracks();
-    assert!(response.ok, "merge failed: {response:?}");
-    assert_eq!(response.data.expect("merge data").merged, 0);
-}
-
-#[test]
 fn fetch_usb_histories_with_progress_returns_api_failure_for_missing_root() {
     let root = tempdir().expect("temp root");
     let data_dir = root.path().join("data");
@@ -806,21 +794,6 @@ fn export_to_usb_with_progress_reports_validation_error_for_empty_playlist_id() 
 }
 
 #[test]
-fn play_track_native_rejects_missing_file_before_touching_audio_hardware() {
-    let root = tempdir().expect("temp root");
-    let data_dir = root.path().join("data");
-    let backend = BackendCommands::new(&data_dir).expect("create backend");
-
-    let response = backend.play_track_native(PlayTrackRequest {
-        path: "/nonexistent/path/to/track.mp3".to_string(),
-        start_offset_ms: None,
-        start_ratio: None,
-    });
-
-    assert!(!response.ok, "missing file should be rejected");
-}
-
-#[test]
 fn play_resolved_track_reports_not_found_without_library_or_usb_path() {
     let root = tempdir().expect("temp root");
     let data_dir = root.path().join("data");
@@ -903,28 +876,6 @@ fn set_playback_metronome_turns_on_only_with_a_usable_bpm() {
             "{req:?}"
         );
     }
-}
-
-#[test]
-#[cfg_attr(
-    coverage,
-    ignore = "hardware-facing playback probe can hang under coverage instrumentation"
-)]
-fn playback_preflight_native_reports_readable_fixture() {
-    let root = tempdir().expect("temp root");
-    let data_dir = root.path().join("data");
-    let backend = BackendCommands::new(&data_dir).expect("create backend");
-
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/audio/formats/track_format_flac.flac");
-    let response = backend.playback_preflight_native(PlaybackPreflightRequest {
-        path: fixture.to_string_lossy().to_string(),
-    });
-
-    assert!(response.ok, "preflight failed: {response:?}");
-    let data = response.data.expect("preflight data");
-    assert!(data.file_exists);
-    assert!(data.file_readable);
 }
 
 #[test]

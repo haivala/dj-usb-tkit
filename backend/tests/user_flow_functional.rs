@@ -4,13 +4,14 @@ use std::path::PathBuf;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistRequest,
+    AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
     FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsRequest,
     GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
     SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest, TrackCueInput,
+    UsbTrack,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{
@@ -205,11 +206,17 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         .expect("source playlist data")
         .playlist_id;
 
-    let add_source_tracks = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: source_playlist_id.clone(),
-        track_ids: remaining_ids.clone(),
-        dedupe: DedupeMode::Skip,
-    });
+    let add_source_tracks =
+        backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            playlist_id: source_playlist_id.clone(),
+            source_roots: vec![
+                source_a.to_string_lossy().to_string(),
+                source_b.to_string_lossy().to_string(),
+            ],
+            track_ids: remaining_ids.clone(),
+            dedupe: DedupeMode::Skip,
+            ..Default::default()
+        });
     assert!(add_source_tracks.ok, "add source tracks failed");
     assert_eq!(add_source_tracks.data.expect("add source data").added, 3);
 
@@ -283,13 +290,14 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         usb_page.ok,
         "fetch usb playlist tracks failed: {usb_page:?}"
     );
-    let usb_local_track_id = usb_page
+    let usb_row = usb_page
         .data
         .expect("usb playlist track page")
         .items
-        .iter()
-        .find_map(|t| t.local_track_id.clone())
+        .into_iter()
+        .find(|t| t.local_track_id.is_some())
         .expect("expected local_track_id from usb playlist page materialization");
+    let usb_local_track_id = usb_row.local_track_id.clone().expect("usb local id");
 
     let usb_histories = backend.fetch_usb_histories(FetchUsbHistoriesRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -303,7 +311,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         !history_items.is_empty(),
         "expected at least one injected history playlist"
     );
-    let mut history_local_track_id = None;
+    let mut history_row = None;
     for history in &history_items {
         let page = backend.fetch_usb_history_tracks(FetchUsbTracksRequest {
             usb_root: Some(usb.to_string_lossy().to_string()),
@@ -312,23 +320,30 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
             ..Default::default()
         });
         assert!(page.ok, "fetch usb history tracks failed: {page:?}");
-        history_local_track_id = page
+        history_row = page
             .data
             .expect("usb history track page")
             .items
-            .iter()
-            .filter_map(|t| t.local_track_id.clone())
-            .find(|id| id != &usb_local_track_id);
-        if history_local_track_id.is_some() {
+            .into_iter()
+            .find(|t| {
+                t.local_track_id
+                    .as_ref()
+                    .is_some_and(|id| id != &usb_local_track_id)
+            });
+        if history_row.is_some() {
             break;
         }
     }
-    let history_local_track_id = history_local_track_id.unwrap_or_else(|| {
+    let history_row = history_row.unwrap_or_else(|| {
         panic!(
             "expected distinct history local track id: {:?}",
             history_items
         )
     });
+    let history_local_track_id = history_row
+        .local_track_id
+        .clone()
+        .expect("history local id");
     let library_track_id = remaining_ids
         .iter()
         .find(|id| *id != &usb_local_track_id && *id != &history_local_track_id)
@@ -349,27 +364,53 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         .expect("target playlist data")
         .playlist_id;
 
-    let add_from_library = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: target_playlist_id.clone(),
-        track_ids: vec![library_track_id.clone()],
-        dedupe: DedupeMode::Skip,
-    });
+    let add_from_library =
+        backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            playlist_id: target_playlist_id.clone(),
+            source_roots: vec![
+                source_a.to_string_lossy().to_string(),
+                source_b.to_string_lossy().to_string(),
+            ],
+            track_ids: vec![library_track_id.clone()],
+            dedupe: DedupeMode::Skip,
+            ..Default::default()
+        });
     assert!(add_from_library.ok, "add from library failed");
     assert_eq!(add_from_library.data.expect("add library data").added, 1);
 
-    let add_from_usb = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: target_playlist_id.clone(),
-        track_ids: vec![usb_local_track_id.clone()],
-        dedupe: DedupeMode::Skip,
-    });
-    assert!(add_from_usb.ok, "add from usb failed");
+    // A USB playlist or history row's "+" sends the row itself, as the app's
+    // `toAddTrackCandidatePayload` builds it.
+    let usb_root = usb.to_string_lossy().to_string();
+    let add_usb_row = |row: &UsbTrack| {
+        backend.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
+            playlist_id: target_playlist_id.clone(),
+            tracks: vec![AddTrackCandidate {
+                track_id: Some(row.id.clone()),
+                local_track_id: row.local_track_id.clone(),
+                title: row.title.clone(),
+                artist: row.artist.clone(),
+                album: row.album.clone(),
+                bpm: row.bpm.filter(|bpm| *bpm > 0.0),
+                file_path: Some(row.file_path.clone()),
+                file_size_bytes: row.file_size_bytes,
+                track_number: row.track_number,
+                key: row.key.clone(),
+                format_ext: row.format_ext.clone(),
+                usb_analysis_path: row.usb_analysis_path.clone(),
+                usb_root: Some(usb_root.clone()),
+                usb_root_valid: true,
+                ..Default::default()
+            }],
+            dedupe: DedupeMode::Skip,
+            usb_root: Some(usb_root.clone()),
+            usb_root_valid: true,
+        })
+    };
+    let add_from_usb = add_usb_row(&usb_row);
+    assert!(add_from_usb.ok, "add from usb failed: {add_from_usb:?}");
     assert_eq!(add_from_usb.data.expect("add usb data").added, 1);
 
-    let add_from_history = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: target_playlist_id.clone(),
-        track_ids: vec![history_local_track_id.clone()],
-        dedupe: DedupeMode::Skip,
-    });
+    let add_from_history = add_usb_row(&history_row);
     assert!(add_from_history.ok, "add from history failed");
     assert_eq!(add_from_history.data.expect("add history data").added, 1);
 
@@ -957,10 +998,12 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         .data
         .expect("playlist")
         .playlist_id;
-    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
 
     let export = backend.export_to_usb(ExportToUsbRequest {
@@ -1300,10 +1343,12 @@ fn export_one_track_with_cues(
         .data
         .expect("playlist")
         .playlist_id;
-    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -2913,10 +2958,12 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![materialized.track_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 1);

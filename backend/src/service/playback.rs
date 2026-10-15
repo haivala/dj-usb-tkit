@@ -67,20 +67,6 @@ pub(super) fn play_resolved_track_data(
 }
 
 impl BackendService {
-    pub fn play_track_native(
-        &self,
-        playback: &PlaybackController,
-        req: PlayTrackRequest,
-    ) -> BackendResult<PlayTrackData> {
-        let status = playback.play_path(&req.path, req.start_offset_ms, req.start_ratio, false)?;
-        Ok(PlayTrackData {
-            path: status.path.unwrap_or(req.path),
-            playing: status.playing,
-            position_ms: status.position_ms,
-            duration_ms: status.duration_ms,
-        })
-    }
-
     pub fn play_resolved_track(
         &self,
         playback: &PlaybackController,
@@ -245,13 +231,6 @@ impl BackendService {
             req.mix.unwrap_or(crate::metronome::DEFAULT_MIX),
         );
         Ok(PlaybackMetronomeData { enabled })
-    }
-
-    pub fn playback_preflight_native(
-        &self,
-        req: PlaybackPreflightRequest,
-    ) -> BackendResult<PlaybackPreflightData> {
-        run_playback_preflight(&req.path)
     }
 
     pub fn resolve_playback_source(

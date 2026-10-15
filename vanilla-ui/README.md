@@ -35,14 +35,13 @@ The UI invokes backend commands through Tauri. Core command names include:
 - `delete_playlist`
 - `list_playlists`
 - `get_playlist_tracks`
-- `add_tracks_to_playlist`
+- `add_library_selection_to_playlist`
 - `add_track_candidates_to_playlist`
 - `remove_tracks_from_playlist`
 - `reorder_playlist_tracks`
 - `resolve_track_identity`
 - `resolve_playback_source`
 - `play_resolved_track`
-- `play_track_native`
 - `stop_playback_native`
 - `fetch_usb_playlists`
 - `fetch_usb_histories`

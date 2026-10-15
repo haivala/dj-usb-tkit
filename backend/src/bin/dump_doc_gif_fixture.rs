@@ -13,8 +13,8 @@
 //! one audio file renamed, one analysis file emptied and one playlist entry
 //! dropped from the eDB only -- the diagnostics and the repair preview.
 use backend::models::{
-    AnalyzeNewTracksRequest, ApiResponse, GetTrackDetailRequest, GetTracksByIdsRequest,
-    ListTracksRequest, ScanLibraryRequest,
+    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesRequest, GetTrackDetailRequest,
+    GetTracksByIdsRequest, ScanLibraryRequest,
 };
 use backend::service::BackendService;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -58,11 +58,12 @@ fn main() {
     })
     .unwrap_or_else(|e| fail("scan_library", e));
     let ids = svc
-        .list_tracks(ListTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source_dir.clone()],
             limit: 1000,
-            cursor: None,
+            ..Default::default()
         })
-        .unwrap_or_else(|e| fail("list_tracks", e))
+        .unwrap_or_else(|e| fail("browse_source_files", e))
         .items
         .into_iter()
         .map(|t| t.id)
@@ -100,13 +101,18 @@ fn main() {
                 .map(|t| t.id.clone())
                 .unwrap_or_else(|| fail("usb spec", format!("no track titled {title:?}")))
         };
-        json["usb"] = dump_usb(&svc, &spec, id_of);
+        json["usb"] = dump_usb(&svc, &spec, source_dir, id_of);
     }
     fs::write(out, serde_json::to_string(&json).expect("serialize"))
         .unwrap_or_else(|e| fail("write output", e));
 }
 
-fn dump_usb(svc: &BackendService, spec: &Value, id_of: impl Fn(&str) -> String) -> Value {
+fn dump_usb(
+    svc: &BackendService,
+    spec: &Value,
+    source_dir: &str,
+    id_of: impl Fn(&str) -> String,
+) -> Value {
     let usb_root = spec["usbRoot"].as_str().expect("usbRoot");
     let broken_root = spec["brokenUsbRoot"].as_str().expect("brokenUsbRoot");
     fs::create_dir_all(usb_root).unwrap_or_else(|e| fail("create usb root", e));
@@ -130,11 +136,16 @@ fn dump_usb(svc: &BackendService, spec: &Value, id_of: impl Fn(&str) -> String) 
             .iter()
             .map(|t| id_of(t.as_str().expect("title")))
             .collect::<Vec<_>>();
-        svc.add_tracks_to_playlist(request(
-            "add_tracks_to_playlist",
-            json!({ "playlistId": created.playlist_id, "trackIds": track_ids, "dedupe": "skip" }),
+        svc.add_library_selection_to_playlist(request(
+            "add_library_selection_to_playlist",
+            json!({
+                "playlistId": created.playlist_id,
+                "sourceRoots": [source_dir],
+                "trackIds": track_ids,
+                "dedupe": "skip"
+            }),
         ))
-        .unwrap_or_else(|e| fail("add_tracks_to_playlist", e));
+        .unwrap_or_else(|e| fail("add_library_selection_to_playlist", e));
         let mut progress = Vec::new();
         let result = svc.export_to_usb_with_progress(
             request(

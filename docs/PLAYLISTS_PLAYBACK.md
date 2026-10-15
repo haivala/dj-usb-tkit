@@ -38,8 +38,11 @@ The playlist command layer is intentionally CRUD-oriented:
   lists" envelope in `docs/COMMANDS.md`; `limit: 0` returns the whole playlist).
   The whole-playlist `totalDurationMs` is computed over the filtered set, not the
   page.
-- `add_track_candidates_to_playlist` resolves frontend row candidates and delegates to `add_tracks_to_playlist`
-- `add_tracks_to_playlist`, `remove_tracks_from_playlist` mutate membership rows
+- `add_library_selection_to_playlist` adds the library view's selection (or every
+  track matching its filter); `add_track_candidates_to_playlist` resolves frontend row
+  candidates (a USB playlist or history row's "+"). Both end in the same internal add,
+  which applies the dedupe mode
+- `remove_tracks_from_playlist` removes membership rows
 - `reorder_playlist_tracks` persists a new track order to `playlist_tracks.position`,
   in one of three modes: `orderedTrackIds` (the complete order, must match the
   current set), `sortBy`/`sortDir` (server sorts the whole playlist by that
@@ -84,7 +87,7 @@ Playback resolution is source-aware:
 
 This prevents the common failure mode of matching the wrong local file by loose metadata while still preserving USB playback for unresolved tracks. It also lets older playlist entries that still reference stale USB placeholder rows self-heal on next playback when a genuine local match exists.
 
-Preflight checks (`playback_preflight_native`) and status queries (`get_playback_status_native`) allow the UI to render actionable state before or during transport actions. Stop behavior is explicit via `stop_playback_native`, which normalizes cleanup in both backend and UI. `pause_playback_native` / `resume_playback_native` hold and continue the loaded track in the engine.
+Status queries (`get_playback_status_native`) allow the UI to render actionable state during transport actions. Stop behavior is explicit via `stop_playback_native`, which normalizes cleanup in both backend and UI. `pause_playback_native` / `resume_playback_native` hold and continue the loaded track in the engine.
 
 The engine can also mix metronome clicks on a beat grid into the playing track (`set_playback_metronome`, `backend/src/metronome.rs`). The cue editor uses it to check a grid by ear; see `docs/CUE_EDITOR.md`.
 

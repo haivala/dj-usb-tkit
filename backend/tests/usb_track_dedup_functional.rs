@@ -2,7 +2,8 @@
 //! playback-resolution fixes. These seed `tracks`/`usb_devices` rows directly
 //! via raw SQL rather than going through a full USB export/browse roundtrip
 //! (covered separately in `lib_integration.rs`), so they can exercise
-//! specific confidence-gate and merge scenarios cheaply.
+//! specific confidence-gate and merge scenarios cheaply. The placeholder merge
+//! runs the way it does for users: as a data migration when the app starts.
 
 use backend::models::ResolvePlaybackSourceRequest;
 use backend::service::BackendService;
@@ -14,6 +15,30 @@ fn new_service() -> (tempfile::TempDir, BackendService) {
     let dir = tempdir().expect("tempdir");
     let svc = BackendService::new(dir.path()).expect("service init");
     (dir, svc)
+}
+
+/// Start the app again on `dir` with the placeholder merge still pending, as
+/// an install from before it would be: startup runs it.
+fn restart_with_pending_placeholder_merge(dir: &std::path::Path) -> BackendService {
+    let conn = rusqlite::Connection::open(dir.join("backend.db")).expect("open db");
+    conn.execute(
+        "DELETE FROM data_migrations WHERE id = '0.2-merge-usb-placeholder-tracks'",
+        [],
+    )
+    .expect("mark merge pending");
+    drop(conn);
+    BackendService::new(dir).expect("restart service")
+}
+
+fn track_ids(svc: &BackendService) -> Vec<String> {
+    let conn = svc.db.connect().expect("connect");
+    let mut stmt = conn
+        .prepare("SELECT id FROM tracks ORDER BY id")
+        .expect("prepare");
+    stmt.query_map([], |row| row.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("ids")
 }
 
 fn insert_track(
@@ -93,10 +118,8 @@ fn merge_orphaned_usb_placeholder_tracks_reassigns_links_and_deletes_placeholder
     insert_playlist_with_track(&conn, "pl-1", "placeholder-1");
     drop(conn);
 
-    let report = svc
-        .merge_orphaned_usb_placeholder_tracks()
-        .expect("merge should succeed");
-    assert_eq!(report.merged, 1);
+    let svc = restart_with_pending_placeholder_merge(dir.path());
+    assert_eq!(track_ids(&svc), ["local-1"]);
 
     let conn = svc.db.connect().expect("connect");
     let placeholder_gone: i64 = conn
@@ -130,7 +153,7 @@ fn merge_orphaned_usb_placeholder_tracks_reassigns_links_and_deletes_placeholder
 
 #[test]
 fn merge_orphaned_usb_placeholder_tracks_skips_diverging_duration_or_size() {
-    let (_dir, svc) = new_service();
+    let (dir, svc) = new_service();
     let conn = svc.db.connect().expect("connect");
     insert_usb_device(&conn, "dev-1", "/mnt/usb1");
 
@@ -197,19 +220,13 @@ fn merge_orphaned_usb_placeholder_tracks_skips_diverging_duration_or_size() {
     );
     drop(conn);
 
-    let report = svc.merge_orphaned_usb_placeholder_tracks().expect("merge");
-    assert_eq!(report.merged, 0, "no group should merge");
-
-    let conn = svc.db.connect().expect("connect");
-    let remaining: i64 = conn
-        .query_row("SELECT COUNT(1) FROM tracks", [], |row| row.get(0))
-        .expect("count");
-    assert_eq!(remaining, 7, "no rows should have been deleted");
+    let svc = restart_with_pending_placeholder_merge(dir.path());
+    assert_eq!(track_ids(&svc).len(), 7, "no group should merge");
 }
 
 #[test]
 fn merge_orphaned_usb_placeholder_tracks_skips_placeholder_with_missing_file_size() {
-    let (_dir, svc) = new_service();
+    let (dir, svc) = new_service();
     let conn = svc.db.connect().expect("connect");
     insert_usb_device(&conn, "dev-1", "/mnt/usb1");
     insert_track(
@@ -230,16 +247,17 @@ fn merge_orphaned_usb_placeholder_tracks_skips_placeholder_with_missing_file_siz
     );
     drop(conn);
 
-    let report = svc.merge_orphaned_usb_placeholder_tracks().expect("merge");
+    let svc = restart_with_pending_placeholder_merge(dir.path());
     assert_eq!(
-        report.merged, 0,
+        track_ids(&svc),
+        ["local-1", "placeholder-1"],
         "missing file_size_bytes on the placeholder must block the batch merge (unlike the live per-track path)"
     );
 }
 
 #[test]
 fn merge_orphaned_usb_placeholder_tracks_keeps_other_encoding() {
-    let (_dir, svc) = new_service();
+    let (dir, svc) = new_service();
     let conn = svc.db.connect().expect("connect");
     insert_usb_device(&conn, "dev-1", "/mnt/usb1");
     insert_track(
@@ -260,18 +278,13 @@ fn merge_orphaned_usb_placeholder_tracks_keeps_other_encoding() {
     );
     drop(conn);
 
-    let report = svc.merge_orphaned_usb_placeholder_tracks().expect("merge");
-    assert_eq!(report.merged, 0);
-    let conn = svc.db.connect().expect("connect");
-    let remaining: i64 = conn
-        .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(remaining, 2);
+    let svc = restart_with_pending_placeholder_merge(dir.path());
+    assert_eq!(track_ids(&svc), ["local-flac", "usb-mp3"]);
 }
 
 #[test]
 fn merge_orphaned_usb_placeholder_tracks_is_idempotent() {
-    let (_dir, svc) = new_service();
+    let (dir, svc) = new_service();
     let conn = svc.db.connect().expect("connect");
     insert_usb_device(&conn, "dev-1", "/mnt/usb1");
     insert_track(
@@ -292,14 +305,14 @@ fn merge_orphaned_usb_placeholder_tracks_is_idempotent() {
     );
     drop(conn);
 
-    let first = svc
-        .merge_orphaned_usb_placeholder_tracks()
-        .expect("first merge");
-    assert_eq!(first.merged, 1);
-    let second = svc
-        .merge_orphaned_usb_placeholder_tracks()
-        .expect("second merge");
-    assert_eq!(second.merged, 0, "re-running the merge should be a no-op");
+    let svc = restart_with_pending_placeholder_merge(dir.path());
+    assert_eq!(track_ids(&svc), ["local-1"]);
+    let svc = restart_with_pending_placeholder_merge(dir.path());
+    assert_eq!(
+        track_ids(&svc),
+        ["local-1"],
+        "re-running the merge should be a no-op"
+    );
 }
 
 fn resolve_req(title: &str, artist: &str, track_id: Option<&str>) -> ResolvePlaybackSourceRequest {

@@ -71,8 +71,10 @@
   created and modified dates instead of always the modified date. That date is usually closer to
   the release, for example for files unzipped from a purchased album or edited in a tag editor
   later. Rescan the library to pick up created dates for tracks that were already in it.
-- **Chore:** The backend tests read the library through the same command the app's track
-  lists use, and two library commands the app never called are removed.
+- **Chore:** The backend tests go through the same commands the app uses: the library is read
+  and added to playlists the way the library view does it, USB rows are added the way their
+  "+" does, and the duplicate-USB-track cleanup runs at startup as it does for users. Seven
+  commands the app never called are removed.
 
 ## 0.4.2
 

@@ -11,7 +11,7 @@ use walkdir::WalkDir;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistRequest,
+    AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
     FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
@@ -579,19 +579,24 @@ fn milestone_one_flow_works() {
         .map(|t| t.id.clone())
         .collect::<Vec<_>>();
 
-    let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add.ok, "add tracks failed: {add:?}");
     assert_eq!(add.data.expect("add data").added, 2);
 
-    let add_again = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: playlist_id.clone(),
-        track_ids,
-        dedupe: DedupeMode::Skip,
-    });
+    let add_again =
+        backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            playlist_id: playlist_id.clone(),
+            track_ids,
+            dedupe: DedupeMode::Skip,
+            ..Default::default()
+        });
     assert!(add_again.ok, "add tracks second time failed: {add_again:?}");
     assert_eq!(add_again.data.expect("add data second").skipped, 2);
 
@@ -700,10 +705,12 @@ fn playlist_tracks_persist_across_backend_restart() {
         assert!(created.ok, "create failed: {created:?}");
         let playlist_id = created.data.expect("playlist data").playlist_id;
 
-        let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
             dedupe: DedupeMode::Skip,
+            ..Default::default()
         });
         assert!(add.ok, "add failed: {add:?}");
         assert_eq!(add.data.expect("add data").added, 2);
@@ -931,10 +938,12 @@ fn export_to_usb_writes_canonical_outputs() {
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add.ok, "add failed: {add:?}");
     seed_track_analysis_fields(&data_dir, &track_id);
@@ -1068,10 +1077,12 @@ fn export_to_usb_copies_anlz_bundle_for_fixture_mp3() {
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add.ok, "add failed: {add:?}");
     seed_track_analysis_fields(&data_dir, &track_id);
@@ -1185,10 +1196,12 @@ fn export_to_usb_prunes_stale_owned_assets_when_enabled() {
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add.ok, "add failed: {add:?}");
 
@@ -1310,10 +1323,12 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
     let playlist_a_id = created_a.data.expect("playlist A data").playlist_id;
-    let add_a = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add_a = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_a_id.clone(),
         track_ids: vec![shared_id.clone(), only_a_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add_a.ok, "add playlist A failed: {add_a:?}");
 
@@ -1322,10 +1337,12 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
     let playlist_b_id = created_b.data.expect("playlist B data").playlist_id;
-    let add_b = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add_b = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_b_id.clone(),
         track_ids: vec![shared_id.clone(), only_b_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add_b.ok, "add playlist B failed: {add_b:?}");
 
@@ -1490,10 +1507,12 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
     let playlist_a_id = created_a.data.expect("playlist A data").playlist_id;
-    let add_a = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add_a = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_a_id.clone(),
         track_ids: vec![shared_id.clone(), only_a_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add_a.ok, "add playlist A failed: {add_a:?}");
 
@@ -1502,10 +1521,12 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
     let playlist_b_id = created_b.data.expect("playlist B data").playlist_id;
-    let add_b = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add_b = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_b_id.clone(),
         track_ids: vec![shared_id.clone(), only_b_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add_b.ok, "add playlist B failed: {add_b:?}");
 
@@ -1640,10 +1661,12 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
     let playlist_a_id = created_a.data.expect("playlist A data").playlist_id;
-    let add_a = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add_a = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_a_id.clone(),
         track_ids: vec![shared_id.clone(), only_a_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add_a.ok, "add playlist A failed: {add_a:?}");
 
@@ -1652,10 +1675,12 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
     let playlist_b_id = created_b.data.expect("playlist B data").playlist_id;
-    let add_b = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add_b = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_b_id.clone(),
         track_ids: vec![shared_id.clone(), only_b_id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add_b.ok, "add playlist B failed: {add_b:?}");
 
@@ -1769,10 +1794,12 @@ fn export_to_usb_preserves_existing_export_db_metadata_when_local_track_is_thin(
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
-    let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track.id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add.ok, "add failed: {add:?}");
 
@@ -1978,10 +2005,12 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
-    let add_old = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add_old = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: old_ids.clone(),
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add_old.ok, "add old tracks failed: {add_old:?}");
 
@@ -2022,10 +2051,12 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
     });
     assert!(removed.ok, "remove old tracks failed: {removed:?}");
 
-    let add_new = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add_new = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: new_ids,
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add_new.ok, "add new tracks failed: {add_new:?}");
 
@@ -4492,10 +4523,12 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("create playlist data").playlist_id;
 
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![library.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
 
@@ -4765,10 +4798,12 @@ fn export_to_usb_produces_identical_content_and_pdb_rows_across_two_runs() {
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("create playlist data").playlist_id;
 
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
 
@@ -5004,10 +5039,12 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
-    let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![local_track.id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(add.ok, "add to playlist failed: {add:?}");
 
@@ -5138,10 +5175,12 @@ fn export_to_usb_records_usb_device_export_history() {
         name: "Export History Playlist".to_string(),
     });
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![local_track.id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     let exported = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -5231,10 +5270,12 @@ fn adding_usb_track_creates_placeholder_when_no_local_match() {
         name: "Placeholder Case Playlist".to_string(),
     });
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![local_track.id.clone()],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     let exported = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -5676,10 +5717,12 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
         playlist_id: playlist_id.clone(),
+        source_roots: vec![source_dir.to_string_lossy().to_string()],
         track_ids: vec![track_id],
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
 

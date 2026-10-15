@@ -296,11 +296,15 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.unwrap().playlist_id;
 
-    let added = backend.add_tracks_to_playlist(backend::models::AddTracksToPlaylistRequest {
-        playlist_id: playlist_id.clone(),
-        track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
-        dedupe: backend::models::DedupeMode::Skip,
-    });
+    let added = backend.add_library_selection_to_playlist(
+        backend::models::AddLibrarySelectionToPlaylistRequest {
+            source_roots: vec![media_dir.to_string_lossy().to_string()],
+            playlist_id: playlist_id.clone(),
+            track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
+            dedupe: backend::models::DedupeMode::Skip,
+            ..Default::default()
+        },
+    );
     assert!(added.ok, "add tracks failed: {added:?}");
 
     let export_expected = backend.export_to_usb(backend::models::ExportToUsbRequest {
@@ -544,11 +548,15 @@ fn export_preserves_full_20_table_family() {
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.unwrap().playlist_id;
 
-    let added = backend.add_tracks_to_playlist(backend::models::AddTracksToPlaylistRequest {
-        playlist_id: playlist_id.clone(),
-        track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
-        dedupe: backend::models::DedupeMode::Skip,
-    });
+    let added = backend.add_library_selection_to_playlist(
+        backend::models::AddLibrarySelectionToPlaylistRequest {
+            source_roots: vec![media_dir.to_string_lossy().to_string()],
+            playlist_id: playlist_id.clone(),
+            track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
+            dedupe: backend::models::DedupeMode::Skip,
+            ..Default::default()
+        },
+    );
     assert!(added.ok, "add tracks failed: {added:?}");
 
     // Export

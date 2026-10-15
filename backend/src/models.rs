@@ -660,10 +660,12 @@ pub struct GetPlaylistTracksData {
     pub unanalyzed_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DedupeMode {
     Allow,
+    /// What the app always sends: a track already in the playlist isn't added again.
+    #[default]
     Skip,
 }
 
@@ -710,7 +712,7 @@ pub struct ListMatchingTrackIdsData {
 /// sends the current filter plus either the ticked ids or `all_matching`, and
 /// the backend enumerates, materializes any browse-only rows, and appends --
 /// so a selection that spans pages the user has scrolled past is never lost.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddLibrarySelectionToPlaylistRequest {
     pub playlist_id: String,
@@ -1294,25 +1296,6 @@ pub struct FetchUsbHistoriesData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PlayTrackRequest {
-    pub path: String,
-    #[serde(default)]
-    pub start_offset_ms: Option<u64>,
-    #[serde(default)]
-    pub start_ratio: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlayTrackData {
-    pub path: String,
-    pub playing: bool,
-    pub position_ms: u64,
-    pub duration_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct PlayResolvedTrackRequest {
     #[serde(default)]
     pub title: String,
@@ -1422,23 +1405,6 @@ pub struct PlaybackMetronomeData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PlaybackPreflightRequest {
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlaybackPreflightData {
-    pub path: String,
-    pub file_exists: bool,
-    pub file_readable: bool,
-    pub safe_output_devices: Vec<String>,
-    pub ready: bool,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct InspectUsbTrackRequest {
     #[serde(default)]
     pub usb_root: Option<String>,
@@ -1456,42 +1422,6 @@ pub struct InspectUsbTrackRequest {
 pub struct InspectUsbTrackData {
     pub source: String,
     pub track: UsbTrack,
-    pub warnings: Vec<WarningEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InspectUsbTrackItem {
-    pub track_id: String,
-    #[serde(default)]
-    pub file_path: Option<String>,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub artist: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InspectUsbTracksRequest {
-    #[serde(default)]
-    pub usb_root: Option<String>,
-    #[serde(default)]
-    pub items: Vec<InspectUsbTrackItem>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InspectUsbTrackResult {
-    pub track_id: String,
-    pub source: Option<String>,
-    pub track: Option<UsbTrack>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InspectUsbTracksData {
-    pub items: Vec<InspectUsbTrackResult>,
     pub warnings: Vec<WarningEntry>,
 }
 

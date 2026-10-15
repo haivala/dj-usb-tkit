@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
-    DiagStatus, ExportToUsbOptions, ExportToUsbRequest, FetchUsbPlaylistsRequest,
+    AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
+    DedupeMode, DiagStatus, ExportToUsbOptions, ExportToUsbRequest, FetchUsbPlaylistsRequest,
     InitializeUsbRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
     RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest,
     UsbParityPlaylistDetail,
@@ -470,10 +470,12 @@ fn setup_clean_strict_parity_fixture_with_local_key(
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 1);
@@ -554,10 +556,12 @@ fn setup_clean_strict_parity_fixture_with_artwork() -> (TempDir, BackendCommands
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 1);
@@ -680,11 +684,14 @@ fn setup_two_playlist_strict_parity_fixture() -> (TempDir, BackendCommands, Path
         });
         assert!(created.ok, "create failed: {created:?}");
         let playlist_id = created.data.expect("playlist data").playlist_id;
-        let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-            playlist_id: playlist_id.clone(),
-            track_ids: vec![track_id],
-            dedupe: DedupeMode::Skip,
-        });
+        let added =
+            backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+                source_roots: vec![media.to_string_lossy().to_string()],
+                playlist_id: playlist_id.clone(),
+                track_ids: vec![track_id],
+                dedupe: DedupeMode::Skip,
+                ..Default::default()
+            });
         assert!(added.ok, "add failed: {added:?}");
         assert_eq!(added.data.expect("add data").added, 1);
 
@@ -899,10 +906,12 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 2);
@@ -2580,10 +2589,12 @@ fn parity_report_overall_status_and_required_summary_use_strict_player_wording()
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 2);
@@ -2717,10 +2728,12 @@ fn parity_report_fails_when_membership_exists_only_in_pdb() {
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 2);
@@ -2865,11 +2878,14 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
         .find(|(file_path, _)| file_path.contains("Resolution Full.mp3"))
         .map(|(_, id)| id.clone())
         .expect("full playlist fixture track");
-    let full_added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: full_playlist_id.clone(),
-        track_ids: vec![full_track_id],
-        dedupe: DedupeMode::Skip,
-    });
+    let full_added =
+        backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            playlist_id: full_playlist_id.clone(),
+            track_ids: vec![full_track_id],
+            dedupe: DedupeMode::Skip,
+            ..Default::default()
+        });
     assert!(full_added.ok, "add failed: {full_added:?}");
     assert_eq!(full_added.data.expect("add data").added, 1);
 
@@ -2889,10 +2905,12 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
         2,
         "expected two partial fixture tracks"
     );
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: partial_track_ids,
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 2);
@@ -3036,10 +3054,12 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 5);
@@ -3190,10 +3210,12 @@ fn parity_report_flags_player_quality_metadata_gaps_and_required_section() {
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids,
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
     assert_eq!(added.data.expect("add data").added, 1);
@@ -3379,10 +3401,12 @@ fn multi_track_export_produces_structurally_clean_pdb() {
     assert!(created.ok, "create playlist: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: all_ids,
         dedupe: DedupeMode::Skip,
+        ..Default::default()
     });
     assert!(added.ok, "add tracks: {added:?}");
 

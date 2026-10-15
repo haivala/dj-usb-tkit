@@ -14,29 +14,27 @@ use crate::commands::BackendCommands;
 use crate::error::{ErrorCode, ErrorPayload};
 use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidatesToPlaylistData,
-    AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AddTracksToPlaylistRequest,
-    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
-    BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
-    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
-    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
-    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
-    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
-    GetFrontendSettingsData, GetPlaylistTracksData, GetPlaylistTracksRequest,
-    GetSourceRootAnalysisData, GetSourceRootAnalysisRequest, GetTrackDetailRequest,
-    GetTracksByIdsData, GetTracksByIdsRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
-    ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
-    InspectUsbTracksRequest, JobEventPayload, ListExternalPlaylistsData,
+    AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AnalyzeNewTracksData,
+    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
+    CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
+    DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData, DeleteUsbBackupRequest,
+    DetectExternalMixxxDbData, DetectExternalRekordboxDbData, ExportToUsbData, ExportToUsbRequest,
+    FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
+    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
+    GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, ImportExternalPlaylistData,
+    ImportExternalPlaylistRequest, InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData,
+    InspectUsbTrackRequest, JobEventPayload, ListExternalPlaylistsData,
     ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
     ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData,
-    PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest,
-    PlaybackEventPayload, PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest,
-    PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData,
-    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
-    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData,
+    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
+    RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
     ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
     ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
@@ -947,14 +945,6 @@ pub async fn get_playlist_tracks(
 }
 
 #[tauri::command]
-pub fn add_tracks_to_playlist(
-    state: State<'_, BackendCommands>,
-    request: AddTracksToPlaylistRequest,
-) -> ApiResponse<AddTracksToPlaylistData> {
-    state.add_tracks_to_playlist(request)
-}
-
-#[tauri::command]
 pub fn add_track_candidates_to_playlist(
     state: State<'_, BackendCommands>,
     request: AddTrackCandidatesToPlaylistRequest,
@@ -1087,13 +1077,6 @@ pub fn delete_usb_backup(
     request: DeleteUsbBackupRequest,
 ) -> ApiResponse<DeleteUsbBackupData> {
     state.delete_usb_backup(request)
-}
-
-#[tauri::command]
-pub fn merge_orphaned_usb_placeholder_tracks(
-    state: State<'_, BackendCommands>,
-) -> ApiResponse<MergeUsbPlaceholderTracksData> {
-    state.merge_orphaned_usb_placeholder_tracks()
 }
 
 /// Runs the pending one-time background data migrations (`migrations.rs`)
@@ -1276,49 +1259,6 @@ pub async fn reorder_usb_playlists(
 }
 
 #[tauri::command]
-pub async fn play_track_native(
-    app: AppHandle,
-    state: State<'_, BackendCommands>,
-    request: PlayTrackRequest,
-) -> Result<ApiResponse<PlayTrackData>, String> {
-    let commands = state.inner().clone();
-    let is_seek = request.start_offset_ms.unwrap_or(0) > 0
-        || request
-            .start_ratio
-            .map(|ratio| ratio > 0.0)
-            .unwrap_or(false);
-    let request_for_call = request.clone();
-    let response = match run_playback_blocking(&app, "start", move || {
-        commands.play_track_native(request_for_call)
-    })
-    .await
-    {
-        Ok(r) => r,
-        Err(r) => return Ok(r),
-    };
-    if let Some(data) = response.data.as_ref() {
-        emit_playback_event(
-            &app,
-            PlaybackEvent::Started {
-                is_seek,
-                path: data.path.clone(),
-                playing: data.playing,
-                position_ms: data.position_ms,
-                duration_ms: data.duration_ms,
-                // legacy path -- `PlayTrackData` carries no resolved track id
-                track_id: None,
-            },
-        );
-    } else {
-        emit_playback_event(
-            &app,
-            PlaybackEvent::Error(response.error.as_ref().map(|e| e.message.clone())),
-        );
-    }
-    Ok(response)
-}
-
-#[tauri::command]
 pub async fn play_resolved_track(
     app: AppHandle,
     state: State<'_, BackendCommands>,
@@ -1479,18 +1419,6 @@ pub async fn set_playback_metronome(
 }
 
 #[tauri::command]
-pub async fn playback_preflight_native(
-    state: State<'_, BackendCommands>,
-    request: PlaybackPreflightRequest,
-) -> Result<ApiResponse<PlaybackPreflightData>, String> {
-    let commands = state.inner().clone();
-    Ok(run_blocking_command("native playback preflight", move || {
-        commands.playback_preflight_native(request)
-    })
-    .await)
-}
-
-#[tauri::command]
 pub async fn inspect_usb_track(
     state: State<'_, BackendCommands>,
     request: InspectUsbTrackRequest,
@@ -1498,18 +1426,6 @@ pub async fn inspect_usb_track(
     let commands = state.inner().clone();
     Ok(run_blocking_command("inspect_usb_track", move || {
         commands.inspect_usb_track(request)
-    })
-    .await)
-}
-
-#[tauri::command]
-pub async fn inspect_usb_tracks(
-    state: State<'_, BackendCommands>,
-    request: InspectUsbTracksRequest,
-) -> Result<ApiResponse<InspectUsbTracksData>, String> {
-    let commands = state.inner().clone();
-    Ok(run_blocking_command("inspect_usb_tracks", move || {
-        commands.inspect_usb_tracks(request)
     })
     .await)
 }

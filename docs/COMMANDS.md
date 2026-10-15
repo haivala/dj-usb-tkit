@@ -163,7 +163,7 @@ drive selection from being rendered against a newer selected drive.
 - `delete_playlist`
 - `list_playlists`
 - `get_playlist_tracks`
-- `add_tracks_to_playlist`
+- `add_library_selection_to_playlist`
 - `add_track_candidates_to_playlist`
 - `remove_tracks_from_playlist`
 - `reorder_playlist_tracks`
@@ -182,7 +182,6 @@ drive selection from being rendered against a newer selected drive.
 - `list_usb_backups`
 - `restore_usb_backup`
 - `delete_usb_backup`
-- `merge_orphaned_usb_placeholder_tracks`
 - `fetch_usb_playlists`
 - `fetch_usb_histories`
 - `fetch_usb_playlist_tracks`
@@ -193,7 +192,6 @@ drive selection from being rendered against a newer selected drive.
 - `remove_usb_playlist`
 - `reorder_usb_playlists`
 - `inspect_usb_track`
-- `inspect_usb_tracks`
 - `initialize_usb`
 - `export_to_usb`
 - `detect_external_rekordbox_db`
@@ -238,11 +236,6 @@ adds a warning (see `docs/ENGINE_DJ.md`). `repair_usb_diagnostics` returns the s
 `get_usb_device_name`/`set_usb_device_name` read/write the user-assigned drive identity (see
 `docs/USB_EXPORT.md`'s "USB drive naming" section); `get_usb_device_name` also returns a
 best-effort `suggestedName` drawn from the OS filesystem label when the drive is unnamed.
-
-`inspect_usb_tracks` is the batched form of `inspect_usb_track`: it hydrates waveform/BPM/
-key/artwork metadata for a chunk of USB tracks in one call (parsing the PDB and opening the eDB
-once per chunk) instead of one backend call per track. It is now used only for the
-resolve-one-row-before-playback path.
 
 `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks` return one
 paginated/searched/sorted page of a selected USB playlist or history session
@@ -297,12 +290,10 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
 
 - `resolve_playback_source`
 - `play_resolved_track`
-- `play_track_native`
 - `stop_playback_native`
 - `pause_playback_native` / `resume_playback_native` — hold the loaded track at
   its position / continue it; `paused` on the returned status and events.
 - `get_playback_status_native`
-- `playback_preflight_native`
 - `set_playback_metronome` — `{ enabled, firstBeatMs?, bpm? }` → `{ enabled }`.
   The engine mixes a click on every grid beat (accented on bar starts) into
   whatever is playing, live, until disabled. Stays off (`enabled: false`)

@@ -92,8 +92,7 @@ use crate::models::{
     GetTracksByIdsData, GetTracksByIdsRequest, ImportedPlaylistRef, InitializeUsbData,
     InitializeUsbRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData,
     MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackMetronomeData,
-    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackSource, PlaybackStatusData, Playlist,
+    PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackSource, PlaybackStatusData, Playlist,
     RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
     RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
@@ -104,7 +103,7 @@ use crate::models::{
     SetPlaybackMetronomeRequest, SourceRootAnalysisStatus, SourceRootStatus, StopPlaybackData,
     Track, TrackMatch, WarningEntry,
 };
-use crate::player::{PlaybackController, run_playback_preflight};
+use crate::player::PlaybackController;
 use crate::scanner::{ScanCache, scan_audio_files, scan_audio_files_cached, unique_paths};
 use crate::wav_format::WavFormatIssue;
 

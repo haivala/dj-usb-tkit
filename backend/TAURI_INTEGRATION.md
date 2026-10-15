@@ -65,7 +65,7 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `delete_playlist`
   - `list_playlists`
   - `get_playlist_tracks`
-  - `add_tracks_to_playlist`
+  - `add_library_selection_to_playlist`
   - `add_track_candidates_to_playlist`
   - `remove_tracks_from_playlist`
 - Frontend settings:
@@ -100,10 +100,8 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
 - Playback:
   - `resolve_playback_source`
   - `play_resolved_track`
-  - `play_track_native`
   - `stop_playback_native`
   - `get_playback_status_native`
-  - `playback_preflight_native`
 
 ## Event Channels
 

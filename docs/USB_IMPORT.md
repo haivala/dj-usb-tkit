@@ -75,9 +75,8 @@ Hydration is split into two surfaces, both server-side:
 This keeps table scrolling predictable because only the visible page pays the hydration I/O,
 and filtering/sorting run over the whole list server-side rather than only the loaded rows.
 
-`inspect_usb_track` (singular) survives for the resolve-one-row-before-playback path.
-`inspect_usb_tracks` (batch) is retained for compatibility but the paginated fetch commands
-have replaced its use as the list-selection hydration path.
+`inspect_usb_track` survives for the resolve-one-row-before-playback path; the paginated
+fetch commands hydrate the list itself.
 
 Parser hardening includes compatibility behavior observed in real exports:
 

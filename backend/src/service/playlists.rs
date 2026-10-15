@@ -417,7 +417,7 @@ impl BackendService {
         })
     }
 
-    pub fn add_tracks_to_playlist(
+    pub(crate) fn add_tracks_to_playlist(
         &self,
         req: AddTracksToPlaylistRequest,
     ) -> BackendResult<AddTracksToPlaylistData> {

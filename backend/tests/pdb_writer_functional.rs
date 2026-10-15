@@ -4,9 +4,9 @@ use std::path::Path;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
-    ExportToUsbOptions, ExportToUsbRequest, InitializeUsbRequest, RemoveUsbPlaylistRequest,
-    ScanLibraryRequest,
+    AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
+    DedupeMode, ExportToUsbOptions, ExportToUsbRequest, GetTracksByIdsRequest,
+    InitializeUsbRequest, RemoveUsbPlaylistRequest, ScanLibraryRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -223,6 +223,35 @@ fn setup_multi_track_fixture() -> (
     (root, backend, usb, track_ids)
 }
 
+/// Add tracks to a playlist the way the library view does: selected in the
+/// view of the folders they live in.
+fn add_from_library(
+    backend: &BackendCommands,
+    playlist_id: &str,
+    track_ids: &[String],
+) -> backend::models::ApiResponse<backend::models::AddTracksToPlaylistData> {
+    let mut source_roots = backend
+        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
+            track_ids: track_ids.to_vec(),
+        })
+        .data
+        .expect("tracks by ids")
+        .items
+        .iter()
+        .filter_map(|t| Path::new(&t.file_path).parent())
+        .map(|dir| dir.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    source_roots.sort();
+    source_roots.dedup();
+    backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        playlist_id: playlist_id.to_string(),
+        source_roots,
+        track_ids: track_ids.to_vec(),
+        dedupe: DedupeMode::Skip,
+        ..Default::default()
+    })
+}
+
 fn export_playlist(
     backend: &BackendCommands,
     usb: &Path,
@@ -235,11 +264,7 @@ fn export_playlist(
     assert!(created.ok, "create_playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: playlist_id.clone(),
-        track_ids: track_ids.to_vec(),
-        dedupe: DedupeMode::Skip,
-    });
+    let added = add_from_library(backend, &playlist_id, track_ids);
     assert!(added.ok, "add_tracks failed: {added:?}");
 
     let export = backend.export_to_usb(ExportToUsbRequest {
@@ -421,11 +446,7 @@ fn pdb_re_export_same_playlist_preserves_track_ids() {
     assert_eq!(ids1.len(), 2);
 
     // Re-export same playlist adding a third track
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-        playlist_id: playlist_id.clone(),
-        track_ids: vec![track_ids[2].clone()],
-        dedupe: DedupeMode::Skip,
-    });
+    let added = add_from_library(&backend, &playlist_id, &[track_ids[2].clone()]);
     assert!(added.ok, "add track failed");
 
     let export = backend.export_to_usb(ExportToUsbRequest {

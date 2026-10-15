@@ -4,13 +4,11 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rodio::cpal::default_host;
-use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{OutputStream, Sink, Source};
 
 use crate::error::{BackendError, BackendResult};
 use crate::metronome::{MetronomeSettings, MetronomeSource};
-use crate::models::{PlaybackPreflightData, PlaybackStatusData};
+use crate::models::PlaybackStatusData;
 
 const PLAYBACK_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 /// Play specifically involves opening/probing/decoding the first packet of a file that may
@@ -487,44 +485,6 @@ fn compute_target_offset_ms(
     offset_ms
 }
 
-pub fn run_playback_preflight(path: &str) -> BackendResult<PlaybackPreflightData> {
-    let normalized = normalize_and_validate_path(path)?;
-    let file_exists = normalized.exists();
-    let file_readable = File::open(&normalized).is_ok();
-    let file_decodable = if file_readable {
-        crate::symphonia_decoder::SeekableSymphoniaSource::open(&normalized).is_ok()
-    } else {
-        false
-    };
-
-    let safe_output_devices = list_safe_output_device_names()?;
-    let ready = file_exists && file_readable && file_decodable && !safe_output_devices.is_empty();
-
-    let message = if !file_exists {
-        "Audio file does not exist".to_string()
-    } else if !file_readable {
-        "Audio file is not readable".to_string()
-    } else if !file_decodable {
-        "Audio file is not decodable by playback engine".to_string()
-    } else if safe_output_devices.is_empty() {
-        "No usable output devices found. Ensure system audio output is available.".to_string()
-    } else {
-        format!(
-            "Ready. Using {} safe output device candidate(s).",
-            safe_output_devices.len()
-        )
-    };
-
-    Ok(PlaybackPreflightData {
-        path: normalized.to_string_lossy().into_owned(),
-        file_exists,
-        file_readable,
-        safe_output_devices,
-        ready,
-        message,
-    })
-}
-
 fn open_output_stream() -> BackendResult<(OutputStream, rodio::OutputStreamHandle)> {
     let _alsa_error_silencer = AlsaErrorSilencer::new();
     let _stderr_probe_silencer = StderrProbeSilencer::new();
@@ -613,34 +573,6 @@ impl StderrProbeSilencer {
     fn new() -> Self {
         Self
     }
-}
-
-fn list_safe_output_device_names() -> BackendResult<Vec<String>> {
-    let host = default_host();
-    let devices_iter = host.output_devices().map_err(|err| {
-        BackendError::Internal(format!("failed to enumerate output devices: {err}"))
-    })?;
-
-    let mut safe_devices = Vec::<String>::new();
-    for device in devices_iter {
-        let name = device
-            .name()
-            .unwrap_or_else(|_| "unknown-output-device".to_string());
-        if is_blocked_device_name(&name) {
-            continue;
-        }
-        safe_devices.push(name);
-    }
-    Ok(safe_devices)
-}
-
-fn is_blocked_device_name(name: &str) -> bool {
-    let lowered = name.to_ascii_lowercase();
-    lowered.contains("jack")
-        || lowered.contains("oss")
-        || lowered.contains("dmix")
-        || lowered.contains("default")
-        || lowered.contains("sysdefault")
 }
 
 #[cfg(any(
@@ -861,25 +793,6 @@ mod tests {
         decoder
             .try_seek(duration / 2)
             .expect("mp3 fixture should support seeking");
-    }
-
-    #[test]
-    #[cfg_attr(
-        coverage,
-        ignore = "hardware-facing playback probe can hang under coverage instrumentation"
-    )]
-    fn run_playback_preflight_reports_flac_fixture_as_decodable() {
-        let preflight = run_playback_preflight(flac_fixture_path().to_str().unwrap())
-            .expect("preflight should succeed for a readable fixture");
-        assert!(preflight.file_exists);
-        assert!(preflight.file_readable);
-        // Device availability varies by test environment; decodability specifically is what
-        // this test guards (the field this branch used to gate on `decode_audio_pcm_symphonia`,
-        // now removed, still needs to report the fixture as decodable via rodio alone).
-        assert_ne!(
-            preflight.message, "Audio file is not decodable by playback engine",
-            "flac fixture should be reported as decodable"
-        );
     }
 
     #[test]
@@ -1124,37 +1037,6 @@ mod tests {
         };
         snapshot(&mut state);
         assert!(state.started_at.is_none());
-    }
-
-    #[test]
-    fn is_blocked_device_name_matches_known_problematic_names_case_insensitively() {
-        for name in [
-            "JACK Audio Connection Kit",
-            "surround51:CARD=default",
-            "OSS Loopback",
-            "dmix:CARD=PCH",
-        ] {
-            assert!(is_blocked_device_name(name), "{name} should be blocked");
-        }
-        assert!(!is_blocked_device_name("USB Audio Device"));
-    }
-
-    #[test]
-    #[cfg_attr(
-        coverage,
-        ignore = "hardware-facing playback probe can hang under coverage instrumentation"
-    )]
-    fn run_playback_preflight_reports_non_audio_file_as_not_decodable() {
-        let manifest_toml = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-        let preflight = run_playback_preflight(manifest_toml.to_str().unwrap())
-            .expect("preflight should succeed even for a non-audio file");
-        assert!(preflight.file_exists);
-        assert!(preflight.file_readable);
-        assert!(!preflight.ready);
-        assert_eq!(
-            preflight.message,
-            "Audio file is not decodable by playback engine"
-        );
     }
 
     #[test]

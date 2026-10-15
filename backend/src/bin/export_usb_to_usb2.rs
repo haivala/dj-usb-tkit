@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, DedupeMode, ExportToUsbRequest,
-    FetchUsbPlaylistsRequest, InitializeUsbRequest, ScanLibraryRequest,
+    AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, BrowseSourceFilesRequest, DedupeMode,
+    ExportToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest, ScanLibraryRequest,
 };
 
 fn fail(message: impl AsRef<str>) -> ! {
@@ -201,14 +201,25 @@ fn main() {
             continue;
         }
 
-        let add = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        // Candidates keep the USB playlist's order (a library selection would
+        // add in library order).
+        let add = backend.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
             playlist_id: playlist_id.clone(),
-            track_ids: ids,
+            tracks: ids
+                .into_iter()
+                .map(|id| AddTrackCandidate {
+                    track_id: Some(id.clone()),
+                    local_track_id: Some(id),
+                    ..Default::default()
+                })
+                .collect(),
             dedupe: DedupeMode::Skip,
+            usb_root: None,
+            usb_root_valid: false,
         });
         if !add.ok {
             eprintln!(
-                "warn: skipping playlist '{}': add_tracks_to_playlist failed: {}",
+                "warn: skipping playlist '{}': add_track_candidates_to_playlist failed: {}",
                 usb_playlist.name,
                 add.error
                     .as_ref()

@@ -2,8 +2,8 @@ use std::fs;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
-    GetPlaylistTracksRequest, RelocateSourceRootRequest, ScanLibraryRequest,
+    AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
+    DedupeMode, GetPlaylistTracksRequest, RelocateSourceRootRequest, ScanLibraryRequest,
 };
 use tempfile::tempdir;
 
@@ -170,10 +170,12 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
         })
         .data
         .expect("playlist data");
-    let added = backend.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![old_root.clone()],
         playlist_id: playlist.playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         dedupe: DedupeMode::Allow,
+        ..Default::default()
     });
     assert!(added.ok, "add tracks failed: {added:?}");
 
