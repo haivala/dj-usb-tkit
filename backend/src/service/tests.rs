@@ -1884,91 +1884,6 @@ fn remove_essentia_removes_dir_and_clears_setting() {
 }
 
 #[test]
-fn list_tracks_paginates_with_cursor() {
-    let (_dir, service) = test_service();
-    let conn = service.db.connect().expect("connect");
-    for i in 0..3 {
-        insert_full_track(
-            &conn,
-            &format!("t{i}"),
-            &format!("Song {i}"),
-            "Artist",
-            &format!("/music/{i}.mp3"),
-            None,
-            None,
-            false,
-        );
-    }
-    drop(conn);
-
-    let page1 = service
-        .list_tracks(ListTracksRequest {
-            limit: 2,
-            cursor: None,
-        })
-        .expect("list page 1");
-    assert_eq!(page1.total, 3);
-    assert_eq!(page1.items.len(), 2);
-    assert!(page1.has_more);
-    let cursor = page1.next_cursor.expect("cursor present");
-
-    let page2 = service
-        .list_tracks(ListTracksRequest {
-            limit: 2,
-            cursor: Some(cursor),
-        })
-        .expect("list page 2");
-    assert_eq!(page2.items.len(), 1);
-    assert!(!page2.has_more);
-}
-
-#[test]
-fn search_tracks_filters_by_query() {
-    let (_dir, service) = test_service();
-    let conn = service.db.connect().expect("connect");
-    insert_full_track(
-        &conn,
-        "t1",
-        "Aurora",
-        "DJ One",
-        "/music/a.mp3",
-        None,
-        None,
-        false,
-    );
-    insert_full_track(
-        &conn,
-        "t2",
-        "Nebula",
-        "DJ Two",
-        "/music/b.mp3",
-        None,
-        None,
-        false,
-    );
-    drop(conn);
-
-    let result = service
-        .search_tracks(SearchTracksRequest {
-            query: "aurora".to_string(),
-            limit: 10,
-            cursor: None,
-        })
-        .expect("search tracks");
-    assert_eq!(result.total, 1);
-    assert_eq!(result.items[0].id, "t1");
-
-    let empty = service
-        .search_tracks(SearchTracksRequest {
-            query: "nonexistent".to_string(),
-            limit: 10,
-            cursor: None,
-        })
-        .expect("search tracks empty");
-    assert_eq!(empty.total, 0);
-}
-
-#[test]
 fn browse_source_files_empty_without_roots_or_rekordbox_db() {
     let (_dir, service) = test_service();
     let result = service
@@ -2692,14 +2607,15 @@ fn remove_tracks_by_source_roots_deletes_matching_prefix() {
         .expect("remove tracks by source roots");
     assert_eq!(result.removed, 1);
 
-    let remaining = service
-        .list_tracks(ListTracksRequest {
-            limit: 10,
-            cursor: None,
-        })
-        .expect("list tracks");
-    assert_eq!(remaining.total, 1);
-    assert_eq!(remaining.items[0].id, "t1");
+    let conn = service.db.connect().expect("connect");
+    let remaining: Vec<String> = conn
+        .prepare("SELECT id FROM tracks")
+        .expect("prepare")
+        .query_map([], |row| row.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("ids");
+    assert_eq!(remaining, ["t1"]);
 }
 
 #[test]

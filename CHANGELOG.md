@@ -65,10 +65,14 @@
   either day first or month first, give only the year. MP3, AIFF and WAV files whose date is
   stored in a custom "DATE" or "YEAR" field, as some tag editors write it, are read too. Scan the
   libraries to update tracks that are already in the library.
+- **Improvement:** Track search also matches the genre and the release year, and each word can
+  match a different field, so "techno 2009" finds techno tracks from 2009.
 - **Improvement:** When a track has no release date tag, export uses the earlier of the file's
   created and modified dates instead of always the modified date. That date is usually closer to
   the release, for example for files unzipped from a purchased album or edited in a tag editor
   later. Rescan the library to pick up created dates for tracks that were already in it.
+- **Chore:** The backend tests read the library through the same command the app's track
+  lists use, and two library commands the app never called are removed.
 
 ## 0.4.2
 

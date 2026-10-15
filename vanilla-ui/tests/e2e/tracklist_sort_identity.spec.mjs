@@ -50,8 +50,6 @@ test("Library: scrub-play after column sort plays the clicked row's track, not t
     const handlers = {
       ...base,
       list_playlists: async () => ({ ok: true, data: { items: [] } }),
-      list_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
-      search_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
       // Library column sort is a backend query param now (shared TrackListController).
       browse_source_files: async (request = {}) => {
         let rows = tracks.slice();
@@ -163,8 +161,6 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
           },
         };
       },
-      list_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
-      search_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
       browse_source_files: async () => ({ ok: true, data: { total: 0, items: [] } }),
       play_resolved_track: async (request) => {
         window.__playResolvedCalls.push(request);
@@ -269,8 +265,6 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
           },
         };
       },
-      list_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
-      search_tracks: async () => ({ ok: true, data: { total: 0, items: [] } }),
       browse_source_files: async () => ({ ok: true, data: { total: 0, items: [] } })
     };
 
@@ -330,8 +324,6 @@ test("Library: sorting by BPM column actually orders rows by numeric BPM value",
     const handlers = {
       ...base,
       list_playlists: async () => ({ ok: true, data: { items: [] } }),
-      list_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
-      search_tracks: async () => ({ ok: true, data: { total: tracks.length, items: tracks } }),
       browse_source_files: async (request = {}) => {
         let rows = tracks.slice();
         if (request.sortBy) {

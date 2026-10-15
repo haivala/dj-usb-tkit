@@ -68,8 +68,6 @@ function baseUsbCommands(payload, command) {
   if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
   if (command === "list_playlists") return { ok: true, data: { items: [] } };
   if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
-  if (command === "search_tracks") return { ok: true, data: { total: 0, items: [] } };
-  if (command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
   if (command === "fetch_usb_histories") return { ok: true, data: { items: [], warnings: [] } };
   if (command === "validate_usb_root") {
     const path = String(payload?.request?.path || "");

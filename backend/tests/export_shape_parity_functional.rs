@@ -272,10 +272,12 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(backend::models::SearchTracksRequest {
+    let search = backend.browse_source_files(backend::models::BrowseSourceFilesRequest {
+        source_roots: vec![media_dir.to_string_lossy().to_string()],
         query: String::new(),
         limit: 100,
         cursor: None,
+        ..Default::default()
     });
     let tracks = search.data.expect("search data").items;
     assert!(
@@ -519,10 +521,12 @@ fn export_preserves_full_20_table_family() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(backend::models::SearchTracksRequest {
+    let search = backend.browse_source_files(backend::models::BrowseSourceFilesRequest {
+        source_roots: vec![media_dir.to_string_lossy().to_string()],
         query: String::new(),
         limit: 100,
         cursor: None,
+        ..Default::default()
     });
     let tracks = search.data.expect("search data").items;
     assert!(!tracks.is_empty(), "no tracks found");

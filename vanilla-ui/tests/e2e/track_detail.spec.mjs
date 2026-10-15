@@ -63,9 +63,6 @@ function installTrackDetailMock(page, opts = {}) {
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
           }
-          if (command === "list_tracks" || command === "search_tracks") {
-            return { ok: true, data: { total: tracks.length, items: tracks.map(withKeyLabel) } };
-          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: tracks.length, items: tracks.map(withKeyLabel), nextCursor: null, hasMore: false } };
           }
@@ -1833,7 +1830,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
           if (command === "get_playlist_tracks") {
             return { ok: true, data: { playlistId: "pl-1", items: [track], total: 1, nextCursor: null, hasMore: false, totalDurationMs: 180000, durationKnownCount: 1, unanalyzedCount: 0 } };
           }
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+          if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [], nextCursor: null, hasMore: false } };
           }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
@@ -1978,7 +1975,6 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
           if (command === "check_source_roots") return { ok: true, data: { roots: [] } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
-          if (command === "list_tracks" || command === "search_tracks") return { ok: true, data: { total: 0, items: [] } };
           if (command === "browse_source_files") {
             const items = opts.libraryTracks || [];
             return { ok: true, data: { total: items.length, items, nextCursor: null, hasMore: false } };
@@ -2320,7 +2316,7 @@ test("cue button is disabled for an un-analyzed track", async ({ page }) => {
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_backend_log_buffer") return [];
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") return { ok: true, data: { items: [], warnings: [] } };
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+          if (command === "browse_source_files") {
             return { ok: true, data: { total: tracks.length, items: tracks, nextCursor: null, hasMore: false } };
           }
           return { ok: true, data: {} };

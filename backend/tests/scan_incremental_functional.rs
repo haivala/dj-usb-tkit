@@ -2,8 +2,8 @@ use std::fs;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, GetPlaylistTracksRequest,
-    RelocateSourceRootRequest, ScanLibraryRequest, SearchTracksRequest,
+    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
+    GetPlaylistTracksRequest, RelocateSourceRootRequest, ScanLibraryRequest,
 };
 use tempfile::tempdir;
 
@@ -65,10 +65,12 @@ fn scan_incremental_covers_unchanged_new_and_deleted_files() {
     assert_eq!(with_delete_data.removed, 1);
 
     let final_tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("final search data");
@@ -92,8 +94,24 @@ fn scan_missing_source_root_reports_not_found_without_pruning_tracks() {
     });
     assert!(first.ok, "first scan failed: {first:?}");
     assert_eq!(first.data.expect("first scan data").indexed, 1);
+    let library = || {
+        backend
+            .browse_source_files(BrowseSourceFilesRequest {
+                source_roots: vec![source_root.clone()],
+                query: String::new(),
+                limit: 50,
+                cursor: None,
+                ..Default::default()
+            })
+            .data
+            .expect("library data")
+            .items
+    };
+    let track_id = library()[0].id.clone();
 
-    fs::remove_dir_all(&media).expect("remove media dir");
+    // The drive is unplugged: its folder is gone.
+    let away = root.path().join("unplugged");
+    fs::rename(&media, &away).expect("unplug media dir");
 
     let missing = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![source_root.clone()],
@@ -104,18 +122,15 @@ fn scan_missing_source_root_reports_not_found_without_pruning_tracks() {
     assert_eq!(missing_data.indexed, 0);
     assert_eq!(missing_data.updated, 0);
     assert_eq!(missing_data.removed, 0);
-    assert_eq!(missing_data.not_found, vec![source_root]);
+    assert_eq!(missing_data.not_found, vec![source_root.clone()]);
     assert!(!missing_data.warnings.is_empty());
 
-    let tracks = backend
-        .search_tracks(SearchTracksRequest {
-            query: String::new(),
-            limit: 50,
-            cursor: None,
-        })
-        .data
-        .expect("search data");
-    assert_eq!(tracks.total, 1, "missing root must not prune tracks");
+    // Plugged back in, the library shows the same track again: the scan of
+    // the missing root didn't prune it.
+    fs::rename(&away, &media).expect("plug media dir back in");
+    let tracks = library();
+    assert_eq!(tracks.len(), 1);
+    assert_eq!(tracks[0].id, track_id, "missing root must not prune tracks");
 }
 
 #[test]
@@ -137,10 +152,12 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![old_root.clone()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data");
@@ -176,10 +193,12 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     assert_eq!(relocated_data.conflicts, 0);
 
     let tracks_after = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![new_root.clone()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data after relocation");

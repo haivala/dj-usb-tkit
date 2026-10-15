@@ -19,12 +19,12 @@ use crate::models::{
     ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
     InspectUsbTracksRequest, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
-    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListTracksData,
-    ListTracksRequest, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData,
-    PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest,
-    PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
-    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
+    ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackMetronomeData,
+    PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
@@ -37,11 +37,11 @@ use crate::models::{
     SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsData,
     SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
-    ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SearchTracksData,
-    SearchTracksRequest, SetAnalysisPausedData, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetPlaybackMetronomeRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
-    TrackDetail, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
-    UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
+    ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SetAnalysisPausedData,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
+    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail,
+    ValidateUsbRootData, ValidateUsbRootRequest,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -115,14 +115,6 @@ impl BackendCommands {
         req: ImportExternalPlaylistRequest,
     ) -> ApiResponse<ImportExternalPlaylistData> {
         wrap(self.service.import_mixxx_playlist(req))
-    }
-
-    pub fn search_tracks(&self, req: SearchTracksRequest) -> ApiResponse<SearchTracksData> {
-        wrap(self.service.search_tracks(req))
-    }
-
-    pub fn list_tracks(&self, req: ListTracksRequest) -> ApiResponse<ListTracksData> {
-        wrap(self.service.list_tracks(req))
     }
 
     pub fn browse_source_files(

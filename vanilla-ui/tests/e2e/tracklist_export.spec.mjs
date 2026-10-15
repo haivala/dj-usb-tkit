@@ -20,8 +20,6 @@ function installTauriMock(page) {
           }
           if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "search_tracks") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
           if (command === "inspect_usb_track") {
             const trackId = String(payload?.request?.trackId || "");
             const track = historyTracks.find((t) => t.id === trackId);

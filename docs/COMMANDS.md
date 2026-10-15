@@ -71,8 +71,6 @@ drive selection from being rendered against a newer selected drive.
 - `scan_library`
 - `scan_rekordbox_db`
 - `scan_mixxx_db`
-- `search_tracks`
-- `list_tracks`
 - `browse_source_files`
 - `check_source_roots`
 - `materialize_source_track`

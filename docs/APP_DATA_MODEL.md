@@ -10,7 +10,7 @@ For USB database field-level inventories, see `docs/PDB.md` and `docs/eDB.md`.
 
 Represents a local library track. Core fields include identity, display metadata (title/artist/album), timing metadata (duration, BPM), and analysis/artwork paths.
 
-`isUsbPath` is derived, not stored: every command that returns `Track` rows to the frontend (`list_tracks`, `search_tracks`, `get_tracks_by_ids_with_previews`, `get_playlist_tracks`, `browse_source_files`) computes it fresh via `apply_is_usb_path`, matching `file_path` against every known USB device root in the `usb_devices` registry (including pruned ones — same `untainted_usb_root_paths`/`browse_path_matches_root` logic `resolve_playback_source` already uses for playback safety). This replaced a frontend heuristic that only checked the currently-selected USB root.
+`isUsbPath` is derived, not stored: every command that returns `Track` rows to the frontend (`get_tracks_by_ids_with_previews`, `get_playlist_tracks`, `browse_source_files`) computes it fresh via `apply_is_usb_path`, matching `file_path` against every known USB device root in the `usb_devices` registry (including pruned ones — same `untainted_usb_root_paths`/`browse_path_matches_root` logic `resolve_playback_source` already uses for playback safety). This replaced a frontend heuristic that only checked the currently-selected USB root.
 
 `rekordboxDbSource` / `mixxxDbSource` are stored flags (`tracks.rekordbox_db_source`, `tracks.mixxx_db_source`) recording that the track was imported from a rekordbox or Mixxx library; a track in both carries both. The library filter uses them to show or hide those tracks (see `docs/EXTERNAL_LIBRARIES.md`).
 

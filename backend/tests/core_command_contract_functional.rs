@@ -4,16 +4,17 @@ use std::path::Path;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, CheckSourceRootsRequest, CreatePlaylistRequest, DedupeMode,
-    DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
-    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbDeviceNameRequest, InitializeUsbRequest,
-    ListTracksRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest, PlayTrackRequest,
-    PlaybackPreflightRequest, PruneUsbDeviceRequest, RefreshPlaylistExportStatusRequest,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
-    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
-    RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanRekordboxDbRequest, SearchTracksRequest,
-    SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
+    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CheckSourceRootsRequest,
+    CreatePlaylistRequest, DedupeMode, DeleteUsbBackupRequest, ExportToUsbRequest,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, GetPlaylistTracksRequest,
+    GetTrackDetailRequest, GetUsbDeviceNameRequest, InitializeUsbRequest, ListUsbBackupsRequest,
+    PlayResolvedTrackRequest, PlayTrackRequest, PlaybackPreflightRequest, PruneUsbDeviceRequest,
+    RefreshPlaylistExportStatusRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
+    RenamePlaylistRequest, ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest,
+    ResolveTrackIdentityRequest, RestoreUsbBackupRequest, RunUsbDiagnosticsRequest,
+    RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest, ScanLibraryRequest,
+    ScanRekordboxDbRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput,
+    ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -23,7 +24,7 @@ fn vendor_db_dir(root: &Path) -> std::path::PathBuf {
 }
 
 #[test]
-fn search_tracks_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {
+fn browse_source_files_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
@@ -47,10 +48,12 @@ fn search_tracks_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let page1 = backend.search_tracks(SearchTracksRequest {
+    let page1 = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 2,
         cursor: None,
+        ..Default::default()
     });
     assert!(page1.ok, "page1 failed: {page1:?}");
     let page1_data = page1.data.expect("page1 data");
@@ -59,10 +62,12 @@ fn search_tracks_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {
     assert!(page1_data.has_more);
     let page1_cursor = page1_data.next_cursor.clone().expect("page1 next cursor");
 
-    let page2 = backend.search_tracks(SearchTracksRequest {
+    let page2 = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 2,
         cursor: Some(page1_cursor.clone()),
+        ..Default::default()
     });
     assert!(page2.ok, "page2 failed: {page2:?}");
     let page2_data = page2.data.expect("page2 data");
@@ -71,10 +76,12 @@ fn search_tracks_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {
     assert!(page2_data.has_more);
     let page2_cursor = page2_data.next_cursor.clone().expect("page2 next cursor");
 
-    let page3 = backend.search_tracks(SearchTracksRequest {
+    let page3 = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 2,
         cursor: Some(page2_cursor),
+        ..Default::default()
     });
     assert!(page3.ok, "page3 failed: {page3:?}");
     let page3_data = page3.data.expect("page3 data");
@@ -97,10 +104,12 @@ fn search_tracks_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {
     }
     assert_eq!(seen.len(), 5, "expected all tracks across 3 pages");
 
-    let mismatch = backend.search_tracks(SearchTracksRequest {
+    let mismatch = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: "Artist".to_string(),
         limit: 2,
         cursor: Some(page1_cursor),
+        ..Default::default()
     });
     assert!(!mismatch.ok, "expected cursor/query mismatch failure");
     let mismatch_error = mismatch.error.expect("mismatch error payload");
@@ -224,10 +233,12 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
 
     let mut id_by_title = HashMap::new();
     for track in backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -321,10 +332,12 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
 
     let mut id_by_title = HashMap::new();
     for track in backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -511,9 +524,12 @@ fn list_tracks_paginates_the_full_library() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let page = backend.list_tracks(ListTracksRequest {
+    let page = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        query: String::new(),
         limit: 2,
         cursor: None,
+        ..Default::default()
     });
     assert!(page.ok, "list_tracks failed: {page:?}");
     let page_data = page.data.expect("page data");
@@ -522,9 +538,12 @@ fn list_tracks_paginates_the_full_library() {
     assert!(page_data.has_more);
 
     let next_cursor = page_data.next_cursor.expect("next cursor");
-    let page2 = backend.list_tracks(ListTracksRequest {
+    let page2 = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        query: String::new(),
         limit: 2,
         cursor: Some(next_cursor),
+        ..Default::default()
     });
     assert!(page2.ok, "second page failed: {page2:?}");
     let page2_data = page2.data.expect("page2 data");
@@ -950,10 +969,12 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let listed = backend.search_tracks(SearchTracksRequest {
+    let listed = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 10,
         cursor: None,
+        ..Default::default()
     });
     let track_id = listed
         .data

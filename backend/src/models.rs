@@ -349,43 +349,6 @@ pub struct ResolvePlaybackSourceData {
     pub track_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchTracksRequest {
-    pub query: String,
-    pub limit: usize,
-    #[serde(default)]
-    pub cursor: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchTracksData {
-    pub total: usize,
-    pub items: Vec<Track>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
-    pub has_more: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ListTracksRequest {
-    pub limit: usize,
-    #[serde(default)]
-    pub cursor: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ListTracksData {
-    pub total: usize,
-    pub items: Vec<Track>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
-    pub has_more: bool,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowseSourceFilesRequest {
@@ -403,7 +366,7 @@ pub struct BrowseSourceFilesRequest {
     /// the list (the track tables load the rows under the viewport).
     #[serde(default)]
     pub offset: Option<usize>,
-    /// One of `title` | `artist` | `album` | `format` | `bpm` | `durationMs` |
+    /// One of `title` | `artist` | `album` | `year` | `format` | `bpm` | `durationMs` |
     /// `key`. Absent ⇒ the natural file-path order. See `TrackSort`.
     #[serde(default)]
     pub sort_by: Option<String>,

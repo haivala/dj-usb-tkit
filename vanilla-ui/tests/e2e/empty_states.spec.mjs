@@ -14,7 +14,7 @@ function installEmptyStateMock(page) {
           if (command === "show_window") return null;
           if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+          if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
           }
           if (command === "create_playlist") {

@@ -4,9 +4,9 @@ use std::path::Path;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
-    ExportToUsbRequest, InitializeUsbRequest, RemoveUsbPlaylistRequest, ScanLibraryRequest,
-    SearchTracksRequest,
+    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
+    ExportToUsbOptions, ExportToUsbRequest, InitializeUsbRequest, RemoveUsbPlaylistRequest,
+    ScanLibraryRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -203,10 +203,12 @@ fn setup_multi_track_fixture() -> (
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let mut tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")

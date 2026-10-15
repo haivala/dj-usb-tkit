@@ -22,12 +22,6 @@ function installTauriMock(page, { deviceName = null, suggestedName = null, getNa
           if (command === "list_playlists") {
             return { ok: true, data: { items: [] } };
           }
-          if (command === "search_tracks") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
-          if (command === "list_tracks") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
           if (command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
           }

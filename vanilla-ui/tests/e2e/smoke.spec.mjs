@@ -45,9 +45,6 @@ function installBasicTauriMock(page, opts = {}) {
           if (command === "list_playlists") {
             return { ok: true, data: { items: playlists } };
           }
-          if (command === "search_tracks" || command === "list_tracks") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
           if (command === "create_playlist") {
             const name = payload?.request?.name || "Untitled";
             const playlistId = `pl-${nextPlaylistId++}`;

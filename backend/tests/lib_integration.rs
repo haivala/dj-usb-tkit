@@ -12,13 +12,13 @@ use walkdir::WalkDir;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistRequest,
-    AnalyzeNewTracksRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
-    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
+    AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
+    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
+    FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
     MaterializeSourceTrackRequest, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
     ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    ScanLibraryRequest, SearchTracksRequest, SetFrontendSettingRequest, WarningEntry,
+    ScanLibraryRequest, SetFrontendSettingRequest, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::BackendService;
@@ -551,10 +551,12 @@ fn milestone_one_flow_works() {
     assert!(scan.ok, "scan failed: {scan:?}");
     assert_eq!(scan.data.expect("scan data").indexed, 2);
 
-    let search = backend.search_tracks(SearchTracksRequest {
+    let search = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: "track".to_string(),
         limit: 20,
         cursor: None,
+        ..Default::default()
     });
     assert!(search.ok, "search failed: {search:?}");
     let search_data = search.data.expect("search data");
@@ -623,10 +625,16 @@ fn removing_source_root_prunes_corresponding_tracks() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let before = backend.search_tracks(SearchTracksRequest {
+    let both_roots = vec![
+        media_a.to_string_lossy().to_string(),
+        media_b.to_string_lossy().to_string(),
+    ];
+    let before = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: both_roots,
         query: String::new(),
         limit: 20,
         cursor: None,
+        ..Default::default()
     });
     assert!(before.ok, "search before failed: {before:?}");
     assert_eq!(before.data.expect("before data").total, 2);
@@ -637,10 +645,13 @@ fn removing_source_root_prunes_corresponding_tracks() {
     assert!(removed.ok, "remove by source roots failed: {removed:?}");
     assert_eq!(removed.data.expect("removed data").removed, 1);
 
-    let after = backend.search_tracks(SearchTracksRequest {
+    // The library view no longer has media-a as a source.
+    let after = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media_b.to_string_lossy().to_string()],
         query: String::new(),
         limit: 20,
         cursor: None,
+        ..Default::default()
     });
     assert!(after.ok, "search after failed: {after:?}");
     let after_data = after.data.expect("after data");
@@ -671,10 +682,12 @@ fn playlist_tracks_persist_across_backend_restart() {
         assert!(scan.ok, "scan failed: {scan:?}");
 
         let tracks = backend
-            .search_tracks(SearchTracksRequest {
+            .browse_source_files(BrowseSourceFilesRequest {
+                source_roots: vec![media.to_string_lossy().to_string()],
                 query: "persist".to_string(),
                 limit: 20,
                 cursor: None,
+                ..Default::default()
             })
             .data
             .expect("search data")
@@ -748,10 +761,12 @@ fn analyzer_fixtures_validate_artwork_and_waveform_behavior() {
         incremental: true,
     });
     assert!(scan.ok, "scan failed: {scan:?}");
-    let indexed = backend.search_tracks(SearchTracksRequest {
+    let indexed = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![audio_root.to_string_lossy().to_string()],
         query: String::new(),
         limit: 200,
         cursor: None,
+        ..Default::default()
     });
     assert!(indexed.ok, "search failed: {indexed:?}");
     let indexed_items = indexed.data.expect("indexed data").items;
@@ -771,10 +786,12 @@ fn analyzer_fixtures_validate_artwork_and_waveform_behavior() {
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
-    let analyzed = backend.search_tracks(SearchTracksRequest {
+    let analyzed = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![audio_root.to_string_lossy().to_string()],
         query: String::new(),
         limit: 200,
         cursor: None,
+        ..Default::default()
     });
     assert!(analyzed.ok, "search analyzed failed: {analyzed:?}");
     let analyzed_items = analyzed.data.expect("analyzed data").items;
@@ -895,10 +912,12 @@ fn export_to_usb_writes_canonical_outputs() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(SearchTracksRequest {
+    let search = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: "track".to_string(),
         limit: 20,
         cursor: None,
+        ..Default::default()
     });
     assert!(search.ok, "search failed: {search:?}");
     let track_id = search
@@ -1030,10 +1049,12 @@ fn export_to_usb_copies_anlz_bundle_for_fixture_mp3() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(SearchTracksRequest {
+    let search = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: "fixture".to_string(),
         limit: 20,
         cursor: None,
+        ..Default::default()
     });
     assert!(search.ok, "search failed: {search:?}");
     let track_id = search
@@ -1142,10 +1163,12 @@ fn export_to_usb_prunes_stale_owned_assets_when_enabled() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(SearchTracksRequest {
+    let search = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: "track".to_string(),
         limit: 20,
         cursor: None,
+        ..Default::default()
     });
     assert!(search.ok, "search failed: {search:?}");
     let track_id = search
@@ -1253,10 +1276,12 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(SearchTracksRequest {
+    let search = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 20,
         cursor: None,
+        ..Default::default()
     });
     assert!(search.ok, "search failed: {search:?}");
     let items = search.data.expect("search data").items;
@@ -1429,10 +1454,12 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let items = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -1578,10 +1605,12 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let items = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -1719,10 +1748,12 @@ fn export_to_usb_preserves_existing_export_db_metadata_when_local_track_is_thin(
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: "thin meta".to_string(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -1901,10 +1932,12 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(SearchTracksRequest {
+    let search = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 20,
         cursor: None,
+        ..Default::default()
     });
     assert!(search.ok, "search failed: {search:?}");
     let items = search.data.expect("search data").items;
@@ -2075,10 +2108,12 @@ fn analyze_new_tracks_emits_per_file_progress() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 100,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2231,10 +2266,15 @@ fn analyze_new_tracks_progress_reports_library_duration_total_scoped_to_visible_
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![
+                root_a.to_string_lossy().to_string(),
+                root_b.to_string_lossy().to_string(),
+            ],
             query: String::new(),
             limit: 100,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2366,10 +2406,12 @@ fn analyze_new_tracks_uses_audio_content_for_bpm_key_not_filename_tokens() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let before = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("before search")
@@ -2388,10 +2430,12 @@ fn analyze_new_tracks_uses_audio_content_for_bpm_key_not_filename_tokens() {
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
     let after = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("after search")
@@ -2431,10 +2475,12 @@ fn analyze_new_tracks_does_not_guess_bpm_key_from_filename_on_silence() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2453,10 +2499,12 @@ fn analyze_new_tracks_does_not_guess_bpm_key_from_filename_on_silence() {
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
     let analyzed = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search analyzed")
@@ -2505,10 +2553,12 @@ fn analyze_new_tracks_with_stratum_default_produces_bpm_and_key() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2527,10 +2577,12 @@ fn analyze_new_tracks_with_stratum_default_produces_bpm_and_key() {
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
     let analyzed = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search analyzed")
@@ -2596,10 +2648,12 @@ fn analyze_new_tracks_respects_requested_bpm_range() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2618,10 +2672,12 @@ fn analyze_new_tracks_respects_requested_bpm_range() {
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
     let analyzed = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search analyzed")
@@ -2705,10 +2761,12 @@ fn analyze_new_tracks_commits_periodically_not_only_at_the_end() {
     assert_eq!(scan.indexed, 20);
 
     let track_ids: Vec<String> = service
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .expect("search succeeds")
         .items
@@ -2736,10 +2794,12 @@ fn analyze_new_tracks_commits_periodically_not_only_at_the_end() {
                 return;
             }
             let committed = observer
-                .search_tracks(SearchTracksRequest {
+                .browse_source_files(BrowseSourceFilesRequest {
+                    source_roots: vec![media.to_string_lossy().to_string()],
                     query: String::new(),
                     limit: 50,
                     cursor: None,
+                    ..Default::default()
                 })
                 .expect("observer search succeeds")
                 .items
@@ -2834,10 +2894,12 @@ fn analyze_new_tracks_commits_periodically_with_real_worker_count_on_moderate_ba
     assert_eq!(scan.indexed, 39);
 
     let track_ids: Vec<String> = service
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .expect("search succeeds")
         .items
@@ -2861,10 +2923,12 @@ fn analyze_new_tracks_commits_periodically_with_real_worker_count_on_moderate_ba
                 return;
             }
             let committed = observer
-                .search_tracks(SearchTracksRequest {
+                .browse_source_files(BrowseSourceFilesRequest {
+                    source_roots: vec![media.to_string_lossy().to_string()],
                     query: String::new(),
                     limit: 50,
                     cursor: None,
+                    ..Default::default()
                 })
                 .expect("observer search succeeds")
                 .items
@@ -2953,10 +3017,12 @@ fn analyze_new_tracks_pauses_and_resumes_between_tracks() {
     assert_eq!(scan.indexed, 6);
 
     let track_ids: Vec<String> = service
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .expect("search succeeds")
         .items
@@ -3079,10 +3145,12 @@ fn analyze_new_tracks_cancel_stops_early_without_hanging() {
     assert_eq!(scan.indexed, 6);
 
     let track_ids: Vec<String> = service
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .expect("search succeeds")
         .items
@@ -3182,10 +3250,12 @@ fn scan_library_rescan_preserves_existing_key_when_scanner_has_no_tonality() {
     assert!(scan1.ok, "initial scan failed: {scan1:?}");
 
     let track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -3210,10 +3280,12 @@ fn scan_library_rescan_preserves_existing_key_when_scanner_has_no_tonality() {
     assert!(scan2.ok, "rescan failed: {scan2:?}");
 
     let rescanned = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search rescanned")
@@ -3614,10 +3686,12 @@ fn analyze_new_tracks_extracts_bpm_key_from_aiff() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -3636,10 +3710,12 @@ fn analyze_new_tracks_extracts_bpm_key_from_aiff() {
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
     let analyzed = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search analyzed")
@@ -4394,10 +4470,12 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(SearchTracksRequest {
+    let search = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![library.to_string_lossy().to_string()],
         query: String::new(),
         limit: 10_000,
         cursor: None,
+        ..Default::default()
     });
     assert!(search.ok, "search failed: {search:?}");
     let tracks = search.data.expect("search data").items;
@@ -4665,10 +4743,12 @@ fn export_to_usb_produces_identical_content_and_pdb_rows_across_two_runs() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
-    let search = backend.search_tracks(SearchTracksRequest {
+    let search = backend.browse_source_files(BrowseSourceFilesRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 10,
         cursor: None,
+        ..Default::default()
     });
     assert!(search.ok, "search failed: {search:?}");
     let tracks = search.data.expect("search data").items;
@@ -4889,10 +4969,12 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let local_track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: "Dedup Roundtrip".to_string(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -5037,10 +5119,12 @@ fn export_to_usb_records_usb_device_export_history() {
         incremental: true,
     });
     let local_track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: "Export History".to_string(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -5128,10 +5212,12 @@ fn adding_usb_track_creates_placeholder_when_no_local_match() {
         incremental: true,
     });
     let local_track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: "Placeholder Case".to_string(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -5227,10 +5313,12 @@ fn analyze_new_tracks_essentia_without_node_returns_error_not_panic() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -5670,10 +5758,12 @@ fn analysis_writes_rekordbox_mp3_seek_index_but_no_flac_one() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
     let ids: Vec<String> = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search")
@@ -5688,10 +5778,12 @@ fn analysis_writes_rekordbox_mp3_seek_index_but_no_flac_one() {
     assert!(analyze.ok, "analyze failed: {analyze:?}");
 
     let tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search")

@@ -10,8 +10,7 @@ use backend::models::{
     FetchUsbTracksRequest, GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsRequest,
     GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
     SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
-    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SearchTracksRequest,
-    SetFrontendSettingRequest, TrackCueInput,
+    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest, TrackCueInput,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{
@@ -112,10 +111,15 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     assert_eq!(remove_data.unanalyzed_count, 3);
 
     let remaining_tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![
+                source_a.to_string_lossy().to_string(),
+                source_b.to_string_lossy().to_string(),
+            ],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("remaining tracks data")
@@ -139,10 +143,15 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     assert_eq!(analyzed_data.failed, 0, "analysis should not fail");
 
     let analyzed_tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![
+                source_a.to_string_lossy().to_string(),
+                source_b.to_string_lossy().to_string(),
+            ],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("tracks after analysis")
@@ -559,10 +568,12 @@ fn first_analysis_keeps_imported_bpm_and_key_and_reanalysis_resets_them() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
     let track_id = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search tracks")
@@ -689,10 +700,12 @@ fn analyze_local_track_waveform_preview_comes_from_anlz_roundtrip() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search tracks")
@@ -759,10 +772,12 @@ fn save_track_analysis_edits_bakes_cues_and_first_beat_into_cached_anlz() {
         incremental: true,
     });
     let track_id = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search")
@@ -888,10 +903,12 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         incremental: true,
     });
     let track_id = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search")
@@ -1245,10 +1262,12 @@ fn export_one_track_with_cues(
         incremental: true,
     });
     let track_id = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search")
@@ -2703,10 +2722,12 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let scanned = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search tracks")
@@ -2727,10 +2748,12 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
     assert_eq!(analyze_data.failed, 0);
 
     let before = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search tracks after analyze")
@@ -2794,10 +2817,12 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
     );
 
     let after = reopened
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search tracks after reopen")

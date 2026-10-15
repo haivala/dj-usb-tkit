@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, DiagStatus, ExportToUsbOptions,
-    ExportToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest, RemoveUsbPlaylistRequest,
-    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    ScanLibraryRequest, SearchTracksRequest, UsbParityPlaylistDetail,
+    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
+    DiagStatus, ExportToUsbOptions, ExportToUsbRequest, FetchUsbPlaylistsRequest,
+    InitializeUsbRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
+    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest,
+    UsbParityPlaylistDetail,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::{TempDir, tempdir};
@@ -438,10 +439,12 @@ fn setup_clean_strict_parity_fixture_with_local_key(
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track_ids = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -522,10 +525,12 @@ fn setup_clean_strict_parity_fixture_with_artwork() -> (TempDir, BackendCommands
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track_ids = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -633,10 +638,12 @@ fn setup_two_playlist_strict_parity_fixture() -> (TempDir, BackendCommands, Path
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -870,10 +877,12 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track_ids = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2549,10 +2558,12 @@ fn parity_report_overall_status_and_required_summary_use_strict_player_wording()
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track_ids = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2684,10 +2695,12 @@ fn parity_report_fails_when_membership_exists_only_in_pdb() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track_ids = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2821,10 +2834,12 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let scanned_tracks = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -2999,10 +3014,12 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track_ids = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -3151,10 +3168,12 @@ fn parity_report_flags_player_quality_metadata_gaps_and_required_section() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track_ids = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -3338,10 +3357,12 @@ fn multi_track_export_produces_structurally_clean_pdb() {
     assert!(scan.ok, "scan: {scan:?}");
 
     let all_ids: Vec<String> = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")

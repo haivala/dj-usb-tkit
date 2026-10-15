@@ -191,9 +191,6 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
-          if (command === "search_tracks" || command === "list_tracks") {
-            return { ok: true, data: { total: libraryTracks.length, items: libraryTracks } };
-          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: libraryTracks.length, items: libraryTracks } };
           }
@@ -433,9 +430,6 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
-          if (command === "search_tracks" || command === "list_tracks") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
           }
@@ -575,9 +569,6 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
-          if (command === "search_tracks" || command === "list_tracks") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
           }
@@ -677,7 +668,6 @@ test("selecting a playlist with tracks right after an empty one still paints its
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
           }
-          if (command === "search_tracks" || command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
           if (command === "set_frontend_setting" || command === "get_frontend_settings") {
             return command === "get_frontend_settings"
@@ -785,9 +775,6 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
             window.__reorderPlaylistTrackCalls.push(request);
             playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId] || [], request);
             return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
-          }
-          if (command === "search_tracks" || command === "list_tracks") {
-            return { ok: true, data: { total: 0, items: [] } };
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
@@ -1167,7 +1154,6 @@ test("switching away from a sorted playlist commits the sort as its real order, 
             playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId], request);
             return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
           }
-          if (command === "search_tracks" || command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
           if (command === "set_frontend_setting" || command === "get_frontend_settings") {
             return command === "get_frontend_settings"
@@ -1285,7 +1271,6 @@ function installTwoPlaylistTauriMock(page) {
             playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId], request);
             return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
           }
-          if (command === "search_tracks" || command === "list_tracks") return { ok: true, data: { total: 0, items: [] } };
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
           if (command === "set_frontend_setting" || command === "get_frontend_settings") {
             return command === "get_frontend_settings"

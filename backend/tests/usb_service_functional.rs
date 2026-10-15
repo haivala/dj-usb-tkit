@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
-    AddTracksToPlaylistRequest, CreatePlaylistRequest, DedupeMode, ExportToUsbOptions,
-    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbTracksRequest, InitializeUsbRequest,
-    InspectUsbTrackItem, InspectUsbTrackRequest, InspectUsbTracksRequest, ScanLibraryRequest,
-    SearchTracksRequest, ValidateUsbRootRequest,
+    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, DedupeMode,
+    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbTracksRequest,
+    InitializeUsbRequest, InspectUsbTrackItem, InspectUsbTrackRequest, InspectUsbTracksRequest,
+    ScanLibraryRequest, ValidateUsbRootRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
@@ -93,10 +93,12 @@ fn scan_and_export_single_track(
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let scanned = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")
@@ -163,10 +165,12 @@ fn scan_and_export_tracks(
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let scanned = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")

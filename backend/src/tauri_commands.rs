@@ -29,15 +29,14 @@ use crate::models::{
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, InspectUsbTracksData,
     InspectUsbTracksRequest, JobEventPayload, ListExternalPlaylistsData,
     ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    ListPlaylistsData, ListTracksData, ListTracksRequest, ListUsbBackupsData,
-    ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest, PlaybackEventPayload,
-    PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest, PlaybackStatusData,
-    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
-    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
+    ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, MergeUsbPlaceholderTracksData,
+    PlayResolvedTrackData, PlayResolvedTrackRequest, PlayTrackData, PlayTrackRequest,
+    PlaybackEventPayload, PlaybackMetronomeData, PlaybackPreflightData, PlaybackPreflightRequest,
+    PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData,
+    RelocateSourceRootRequest, RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest,
+    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
+    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
     ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
     ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
@@ -47,12 +46,11 @@ use crate::models::{
     SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsData,
     SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
-    ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SearchTracksData,
-    SearchTracksRequest, SetAnalysisPausedData, SetAnalysisPausedRequest, SetFrontendSettingData,
-    SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameData,
-    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail, ValidateUsbRootData,
-    ValidateUsbRootRequest,
+    ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SetAnalysisPausedData,
+    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SetPlaybackMetronomeRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
+    TrackDetail, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
+    UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -738,22 +736,6 @@ pub async fn scan_mixxx_db(
     }
 
     Ok(response)
-}
-
-#[tauri::command]
-pub fn search_tracks(
-    state: State<'_, BackendCommands>,
-    request: SearchTracksRequest,
-) -> ApiResponse<SearchTracksData> {
-    state.search_tracks(request)
-}
-
-#[tauri::command]
-pub fn list_tracks(
-    state: State<'_, BackendCommands>,
-    request: ListTracksRequest,
-) -> ApiResponse<ListTracksData> {
-    state.list_tracks(request)
 }
 
 // Off the main thread: it rebuilds, filters and sorts the whole library per

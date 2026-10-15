@@ -29,8 +29,7 @@ The build output is written to `vanilla-ui/dist/`, which is loaded by
 The UI invokes backend commands through Tauri. Core command names include:
 
 - `scan_library`
-- `search_tracks`
-- `list_tracks`
+- `browse_source_files`
 - `create_playlist`
 - `rename_playlist`
 - `delete_playlist`

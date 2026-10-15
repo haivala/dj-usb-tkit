@@ -20,9 +20,6 @@ function installSortMock(page) {
           if (command === "show_window") return null;
           if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "list_tracks" || command === "search_tracks") {
-            return { ok: true, data: { total: tracks.length, items: tracks } };
-          }
           if (command === "browse_source_files") {
             // Library search + column sort are backend query params now
             // (shared TrackListController) -- mirror the server here.

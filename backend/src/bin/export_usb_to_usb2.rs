@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTracksToPlaylistRequest, DedupeMode, ExportToUsbRequest, FetchUsbPlaylistsRequest,
-    InitializeUsbRequest, ScanLibraryRequest, SearchTracksRequest,
+    AddTracksToPlaylistRequest, BrowseSourceFilesRequest, DedupeMode, ExportToUsbRequest,
+    FetchUsbPlaylistsRequest, InitializeUsbRequest, ScanLibraryRequest,
 };
 
 fn fail(message: impl AsRef<str>) -> ! {
@@ -105,33 +105,39 @@ fn main() {
         );
     }
 
-    let search = backend.search_tracks(SearchTracksRequest {
-        query: String::new(),
-        limit: 200_000,
-        cursor: None,
-    });
-    if !search.ok {
-        fail_with_cleanup(
-            format!(
-                "search_tracks failed: {}",
-                search
-                    .error
-                    .as_ref()
-                    .map(|e| e.message.as_str())
-                    .unwrap_or("unknown error")
-            ),
-            &data_dir,
-        );
-    }
-    let track_map = search
-        .data
-        .map(|d| {
-            d.items
+    // The library view's pages (at most 5000 rows each), until the last one.
+    let mut track_map = HashMap::new();
+    let mut cursor = None;
+    loop {
+        let page = backend.browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![source_contents.to_string_lossy().to_string()],
+            query: String::new(),
+            limit: 5000,
+            cursor: cursor.take(),
+            ..Default::default()
+        });
+        let Some(data) = page.data.filter(|_| page.ok) else {
+            fail_with_cleanup(
+                format!(
+                    "browse_source_files failed: {}",
+                    page.error
+                        .as_ref()
+                        .map(|e| e.message.as_str())
+                        .unwrap_or("unknown error")
+                ),
+                &data_dir,
+            );
+        };
+        track_map.extend(
+            data.items
                 .into_iter()
-                .filter_map(|t| canonical_path_key(&t.file_path).map(|key| (key, t.id)))
-                .collect::<HashMap<_, _>>()
-        })
-        .unwrap_or_default();
+                .filter_map(|t| canonical_path_key(&t.file_path).map(|key| (key, t.id))),
+        );
+        if !data.has_more {
+            break;
+        }
+        cursor = data.next_cursor;
+    }
 
     let usb = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
         usb_root: Some(source_root.to_string_lossy().to_string()),

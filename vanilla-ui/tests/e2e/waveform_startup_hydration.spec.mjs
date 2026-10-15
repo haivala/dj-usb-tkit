@@ -57,7 +57,7 @@ function installWaveformStartupMock(page) {
           if (command === "list_playlists") {
             return { ok: true, data: { items: [] } };
           }
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+          if (command === "browse_source_files") {
             return { ok: true, data: { total: baseTracks.length, items: baseTracks } };
           }
           if (command === "get_tracks_by_ids_with_previews") {
@@ -283,8 +283,8 @@ function installSourceChipAnalysisMock(page) {
             window.__lastScanPayload = payload?.request || null;
             return { ok: true, data: { indexed: 1, updated: 0, removed: 0 } };
           }
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
-            if (command === "browse_source_files") window.__lastBrowsePayload = payload?.request || null;
+          if (command === "browse_source_files") {
+            window.__lastBrowsePayload = payload?.request || null;
             return {
               ok: true,
               data: {
@@ -488,9 +488,6 @@ function installSourceChipSearchMock(page) {
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
-          }
-          if (command === "list_tracks" || command === "search_tracks") {
-            return { ok: true, data: { total: 0, items: [] } };
           }
           if (command === "get_source_root_analysis") {
             return {

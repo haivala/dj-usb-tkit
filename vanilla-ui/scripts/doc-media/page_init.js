@@ -241,9 +241,6 @@
             return usb.playerMenu;
           case "export_to_usb":
             return replayExport(r.playlistId);
-          case "list_tracks":
-          case "search_tracks":
-            return ok({ total: tracks.length, items: tracks });
           case "browse_source_files": {
             // Only the checked folders' tracks, as the backend filters them.
             const roots = r.sourceRoots || sourceRoots;

@@ -4,8 +4,7 @@ Implemented command set:
 
 - Library:
   - `scan_library`
-  - `search_tracks`
-  - `list_tracks`
+  - `browse_source_files`
   - `remove_tracks_by_source_roots`
   - `get_tracks_by_ids_with_previews`
 - Playlists:

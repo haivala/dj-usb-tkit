@@ -2,9 +2,9 @@ use std::fs;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddLibrarySelectionToPlaylistRequest, AddTracksToPlaylistRequest, CreatePlaylistRequest,
-    DedupeMode, GetPlaylistTracksRequest, ListMatchingTrackIdsRequest, ScanLibraryRequest,
-    SearchTracksRequest,
+    AddLibrarySelectionToPlaylistRequest, AddTracksToPlaylistRequest, BrowseSourceFilesRequest,
+    CreatePlaylistRequest, DedupeMode, GetPlaylistTracksRequest, ListMatchingTrackIdsRequest,
+    ScanLibraryRequest,
 };
 use tempfile::tempdir;
 
@@ -27,10 +27,12 @@ fn add_tracks_to_playlist_honors_skip_and_allow_dedupe_modes() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let track_id = backend
-        .search_tracks(SearchTracksRequest {
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
+            ..Default::default()
         })
         .data
         .expect("search data")

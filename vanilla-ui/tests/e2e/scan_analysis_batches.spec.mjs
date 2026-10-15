@@ -383,7 +383,7 @@ function installScanAnalysisMock(page, opts = {}) {
               }
             };
           }
-          if (command === "search_tracks" || command === "browse_source_files") {
+          if (command === "browse_source_files") {
             const query = String(payload?.request?.query ?? payload?.query ?? "").toLowerCase();
             const filtered = tracks.filter((t) => {
               if (!query) return true;
@@ -394,9 +394,6 @@ function installScanAnalysisMock(page, opts = {}) {
               ok: true,
               data: { total: filtered.length, items: withAnalysisReady(filtered), totalDurationMs: totalMs, durationKnownCount: knownCount }
             };
-          }
-          if (command === "list_tracks") {
-            return { ok: true, data: { total: tracks.length, items: withAnalysisReady(tracks) } };
           }
           if (command === "get_tracks_by_ids_with_previews") {
             const ids = Array.isArray(payload?.request?.trackIds)
@@ -505,8 +502,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
     const listeners = new Map();
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const nowIso = () => new Date().toISOString();
-    let listQueryCount = 0;
-    let searchQueryCount = 0;
+    let browseQueryCount = 0;
     let analyzeCalls = 0;
     let materializeCalls = 0;
 
@@ -761,19 +757,8 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           if (command === "get_system_parallelism") {
             return { ok: true, data: { workers: 6 } };
           }
-          if (command === "list_tracks") {
-            listQueryCount += 1;
-            const cursor = payload?.request?.cursor ?? null;
-            return { ok: true, data: listPage(cursor, "") };
-          }
-          if (command === "search_tracks") {
-            searchQueryCount += 1;
-            const query = payload?.request?.query ?? payload?.query ?? "";
-            const cursor = payload?.request?.cursor ?? payload?.cursor ?? null;
-            return { ok: true, data: listPage(cursor, query) };
-          }
           if (command === "browse_source_files") {
-            searchQueryCount += 1;
+            browseQueryCount += 1;
             const query = payload?.request?.query ?? "";
             const cursor = payload?.request?.offset ?? null;
             const sortBy = payload?.request?.sortBy ?? null;
@@ -861,11 +846,8 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
     };
 
     window.__pagedAnalyzeStats = {
-      get listQueryCount() {
-        return listQueryCount;
-      },
-      get searchQueryCount() {
-        return searchQueryCount;
+      get browseQueryCount() {
+        return browseQueryCount;
       },
       get analyzeCalls() {
         return analyzeCalls;
@@ -1384,8 +1366,7 @@ test("analyze on auto-loaded track updates row in place without full reload", as
   await scrollLibraryToRow(page, 230);
 
   const beforeStats = await page.evaluate(() => ({
-    list: Number(window.__pagedAnalyzeStats?.listQueryCount || 0),
-    search: Number(window.__pagedAnalyzeStats?.searchQueryCount || 0)
+    browse: Number(window.__pagedAnalyzeStats?.browseQueryCount || 0)
   }));
 
   const targetRow = libraryRowAt(page, 230);
@@ -1405,13 +1386,11 @@ test("analyze on auto-loaded track updates row in place without full reload", as
   expect(afterTrackId).toBe(before.trackId);
 
   const afterStats = await page.evaluate(() => ({
-    list: Number(window.__pagedAnalyzeStats?.listQueryCount || 0),
-    search: Number(window.__pagedAnalyzeStats?.searchQueryCount || 0),
+    browse: Number(window.__pagedAnalyzeStats?.browseQueryCount || 0),
     analyzeCalls: Number(window.__pagedAnalyzeStats?.analyzeCalls || 0)
   }));
   expect(afterStats.analyzeCalls).toBeGreaterThan(0);
-  expect(afterStats.list).toBe(beforeStats.list);
-  expect(afterStats.search).toBeGreaterThanOrEqual(beforeStats.search);
+  expect(afterStats.browse).toBeGreaterThanOrEqual(beforeStats.browse);
 });
 
 // A single-track library with analyze_new_tracks's response fully under the
@@ -1454,7 +1433,7 @@ function installAnalyzeResponseMock(page, { analyzeResponse }) {
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
           }
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+          if (command === "browse_source_files") {
             return { ok: true, data: { total: 1, items: [track] } };
           }
           if (command === "resolve_track_identity") {

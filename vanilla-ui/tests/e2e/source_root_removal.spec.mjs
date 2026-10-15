@@ -78,7 +78,7 @@ function installSourceRemovalMock(page) {
           if (command === "list_playlists") {
             return { ok: true, data: { items: [] } };
           }
-          if (command === "list_tracks" || command === "search_tracks" || command === "browse_source_files") {
+          if (command === "browse_source_files") {
             return { ok: true, data: { total: trackStore.length, items: trackStore } };
           }
           if (command === "remove_tracks_by_source_roots") {
