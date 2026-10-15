@@ -6,10 +6,10 @@ function installSortMock(page) {
     window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
 
     const tracks = [
-      { id: "t1", title: "Zeta", artist: "Bob", album: "A", filePath: "/music/zeta.mp3" },
-      { id: "t2", title: "Alpha", artist: "Bob", album: "A", filePath: "/music/alpha.mp3" },
+      { id: "t1", title: "Zeta", artist: "Bob", album: "A", year: 2021, filePath: "/music/zeta.mp3" },
+      { id: "t2", title: "Alpha", artist: "Bob", album: "A", year: 1994, filePath: "/music/alpha.mp3" },
       { id: "t3", title: "Beta", artist: "Alice", album: "A", filePath: "/music/beta.mp3" },
-      { id: "t4", title: "Gamma", artist: "Cara", album: "A", filePath: "/music/gamma.mp3" }
+      { id: "t4", title: "Gamma", artist: "Cara", album: "A", year: 2008, filePath: "/music/gamma.mp3" }
     ];
 
     window.__TAURI__ = {
@@ -76,4 +76,15 @@ test("Sort cycling on Track column", async ({ page }) => {
 
   await header.click();
   await expect.poll(() => rowTitles(page)).toEqual(["Zeta", "Alpha", "Beta", "Gamma"]);
+});
+
+test("Year column shows the release year and sorts by it", async ({ page }) => {
+  await installSortMock(page);
+  await page.goto("/");
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(4);
+  await expect(page.locator("#libraryTableBody .track-grid-row .td-year"))
+    .toHaveText(["2021", "1994", "", "2008"]);
+
+  await page.locator('#panel-library .sortable[data-sort-key="year"]').click();
+  await expect.poll(() => rowTitles(page)).toEqual(["Beta", "Alpha", "Gamma", "Zeta"]);
 });

@@ -16,6 +16,7 @@ pub(crate) trait ListTrack {
     fn title(&self) -> &str;
     fn artist(&self) -> &str;
     fn album(&self) -> Option<&str>;
+    fn year(&self) -> Option<u32>;
     fn format_ext(&self) -> Option<&str>;
     fn bpm(&self) -> Option<f64>;
     fn duration_ms(&self) -> Option<u64>;
@@ -33,6 +34,9 @@ macro_rules! impl_list_track {
             }
             fn album(&self) -> Option<&str> {
                 self.album.as_deref()
+            }
+            fn year(&self) -> Option<u32> {
+                self.year
             }
             fn format_ext(&self) -> Option<&str> {
                 self.format_ext.as_deref()
@@ -99,6 +103,7 @@ enum SortColumn {
     Title,
     Artist,
     Album,
+    Year,
     Format,
     Bpm,
     DurationMs,
@@ -111,6 +116,7 @@ impl SortColumn {
             "title" => Self::Title,
             "artist" => Self::Artist,
             "album" => Self::Album,
+            "year" => Self::Year,
             "format" => Self::Format,
             "bpm" => Self::Bpm,
             "durationMs" => Self::DurationMs,
@@ -119,7 +125,7 @@ impl SortColumn {
         })
     }
 
-    /// Strings compare case-insensitively, missing bpm/duration count as 0,
+    /// Strings compare case-insensitively, missing year/bpm/duration count as 0,
     /// `artist` is tie-broken by title, and keys follow the Camelot wheel with
     /// unknown keys last.
     fn compare<T: ListTrack>(self, a: &T, b: &T) -> Ordering {
@@ -132,6 +138,7 @@ impl SortColumn {
             Self::Album => {
                 ci(a.album().unwrap_or_default()).cmp(&ci(b.album().unwrap_or_default()))
             }
+            Self::Year => a.year().unwrap_or(0).cmp(&b.year().unwrap_or(0)),
             Self::Format => {
                 ci(a.format_ext().unwrap_or_default()).cmp(&ci(b.format_ext().unwrap_or_default()))
             }
@@ -150,7 +157,7 @@ impl SortColumn {
 }
 
 /// A requested column sort: `sort_by` is one of `title` | `artist` | `album` |
-/// `format` | `bpm` | `durationMs` | `key`, `sort_dir` is `asc` (default) or
+/// `year` | `format` | `bpm` | `durationMs` | `key`, `sort_dir` is `asc` (default) or
 /// `desc`. An absent or unknown column leaves the caller's natural order
 /// (file path, playlist position or PDB entry order) untouched.
 #[derive(Debug, Clone, Copy)]
@@ -267,6 +274,21 @@ mod tests {
         ];
         TrackSort::new(Some("bpm"), None).apply(&mut items);
         assert_eq!(titles(&items), ["unknown", "slow", "fast"]);
+    }
+
+    #[test]
+    fn missing_year_sorts_as_zero() {
+        let with_year = |title: &str, year: Option<u32>| UsbTrack {
+            year,
+            ..track(title, "", None, None)
+        };
+        let mut items = vec![
+            with_year("newer", Some(2021)),
+            with_year("unknown", None),
+            with_year("older", Some(1994)),
+        ];
+        TrackSort::new(Some("year"), None).apply(&mut items);
+        assert_eq!(titles(&items), ["unknown", "older", "newer"]);
     }
 
     #[test]

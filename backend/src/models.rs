@@ -103,6 +103,9 @@ pub struct Track {
     pub title: String,
     pub artist: String,
     pub album: Option<String>,
+    /// Release year from the file's tags.
+    #[serde(default)]
+    pub year: Option<u32>,
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,
     /// `AnalysisEngine::bpm_analyzer` for a detected value (`"stratum-v2"`,
@@ -1094,6 +1097,9 @@ pub struct UsbTrack {
     pub title: String,
     pub artist: String,
     pub album: Option<String>,
+    /// Release year from the PDB track row.
+    #[serde(default)]
+    pub year: Option<u32>,
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,
     pub key: Option<String>,

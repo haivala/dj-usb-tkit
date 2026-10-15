@@ -586,6 +586,7 @@ impl BackendService {
                         title: scanned.title,
                         artist: scanned.artist,
                         album: scanned.album,
+                        year: scanned.release_year,
                         track_number: scanned.track_number,
                         bpm: None,
                         bpm_analyzer: None,
@@ -1123,6 +1124,10 @@ pub(crate) fn row_to_track(
         title: row.get(1)?,
         artist: row.get(2)?,
         album: row.get(3)?,
+        year: row
+            .get::<_, Option<u32>>("release_year")
+            .unwrap_or(None)
+            .filter(|year| *year > 0),
         track_number: row.get(4)?,
         bpm,
         bpm_analyzer,

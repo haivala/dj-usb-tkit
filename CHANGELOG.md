@@ -46,6 +46,9 @@
   covered and how long it took.
 - **New feature:** The cue editor has a folder button that opens the track's folder in the
   file manager with the file selected, for library and USB tracks alike.
+- **New feature:** Track lists have a sortable Year column next to Album. The columns now run
+  Track, Album, Year, BPM, Key, Length and format, so the mixing columns sit closer to the
+  track name and the file format comes last.
 - **Fix:** The progress bar's elapsed time no longer disappears while analysis shows the track
   being worked on. A long track name is shortened instead of pushing the time out of view.
 - **Fix:** Analysis no longer fills the Event Log with "no state change" warnings for tracks

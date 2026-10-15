@@ -1698,6 +1698,9 @@ button[data-export-playlist]:hover {
 /* ── tables ─────────────────────────────────────────── */
 
 .table-wrap {
+  /* Every table header (track grids and <table>s) is this tall, so the
+     vertical scrollbar can start below the sticky header. */
+  --table-head-height: 28px;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -1705,6 +1708,23 @@ button[data-export-playlist]:hover {
   margin-top: 12px;
   border-radius: 8px;
   border: 1px solid var(--line);
+}
+
+/* The gutter beside the header looks like the header (same background and
+   bottom line); the track below it covers the rest. */
+.table-wrap::-webkit-scrollbar {
+  background: linear-gradient(
+    var(--bg-raised) calc(var(--table-head-height) - 1px),
+    var(--line) 0 var(--table-head-height),
+    var(--bg) 0
+  );
+  /* Scrollbars aren't clipped by the wrap's rounded corner: round the
+     gutter itself (wrap radius minus its 1px border). */
+  border-top-right-radius: 7px;
+}
+
+.table-wrap::-webkit-scrollbar-track:vertical {
+  margin-top: var(--table-head-height);
 }
 
 /* Fixed height (8px + 18px + 10px), so a list beside the table can end
@@ -1751,6 +1771,8 @@ thead {
 }
 
 th {
+  box-sizing: border-box;
+  height: var(--table-head-height, auto);
   font-family: 'Outfit', sans-serif;
   font-size: 10px;
   font-weight: 600;
@@ -1780,14 +1802,17 @@ td.num, th.num {
   box-sizing: border-box;
 }
 
-/* BPM and key are fixed widths that fit their widest pill plus the cell
-   padding: "107.97" and "12A" in the 12px mono pill font. */
+/* Columns: identity (track, album, year), then mixing data (BPM, key,
+   length), then the file format. BPM and key are fixed widths that fit
+   their widest pill plus the cell padding: "107.97" and "12A" in the 12px
+   mono pill font; year fits its header label and sort arrows, format the
+   widest badge ("AIFF ⚠" with its box). */
 .track-grid--library {
-  --track-grid-cols: 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 9ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
 }
 
 .track-grid--no-select {
-  --track-grid-cols: 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 9ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
 }
 
 /* App playlist tracks reserve a leading column for the drag-to-reorder
@@ -1795,7 +1820,7 @@ td.num, th.num {
    template, since USB playlist/history tracks use that same class but
    never reorder. */
 .track-grid[data-body-id="playlistTracksBody"] {
-  --track-grid-cols: 24px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) minmax(6ch, 9ch) 8ch 78px 58px minmax(5ch, 14ch);
+  --track-grid-cols: 24px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
 }
 
 .track-grid-row {
@@ -1833,6 +1858,8 @@ td.num, th.num {
 }
 
 .track-grid-head .track-grid-row {
+  box-sizing: border-box;
+  height: var(--table-head-height, auto);
   border-bottom: 1px solid var(--line);
 }
 
@@ -2094,11 +2121,20 @@ input[type="checkbox"]:disabled {
 
 /* Numbers are right-aligned, headers included, so they line up on the
    decimal point / colon ("87.50" under "128.00", "9:08" under "13:45"). */
+.track-grid-body .td-year,
 .track-grid-body .td-bpm,
 .track-grid-body .td-length,
+.track-grid-cell.sortable[data-sort-key="year"],
 .track-grid-cell.sortable[data-sort-key="bpm"],
 .track-grid-cell.sortable[data-sort-key="durationMs"] {
   text-align: right;
+}
+
+/* The format badge is centred: its column fits the widest (warning) badge,
+   so a plain "MP3" would otherwise leave all the slack on one side. */
+.track-grid-body .td-format,
+.track-grid-cell.sortable[data-sort-key="format"] {
+  text-align: center;
 }
 
 /* Fixed-width pills (widest value plus padding and border), so the values
@@ -2152,7 +2188,7 @@ input[type="checkbox"]:disabled {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 2px 5px;
   border-radius: 4px;
   color: var(--ink-secondary);
   border: 1px solid transparent;

@@ -397,6 +397,7 @@ mod tests {
             title: title.to_string(),
             artist: artist.to_string(),
             album: None,
+            year: None,
             track_number: None,
             bpm: None,
             key: None,

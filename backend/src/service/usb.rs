@@ -151,6 +151,7 @@ fn build_usb_track_index(
                     },
                     artist,
                     album,
+                    year: t.release_year.map(u32::from),
                     track_number: (t.track_number > 0).then_some(t.track_number),
                     bpm: if t.tempo_x100 > 0 {
                         Some(t.tempo_x100 as f64 / 100.0)
@@ -1816,6 +1817,7 @@ impl BackendService {
                                         title: format!("Unknown Track #{track_id}"),
                                         artist: "Unknown Artist".to_string(),
                                         album: None,
+                                        year: None,
                                         track_number: None,
                                         bpm: None,
                                         key: None,
@@ -2116,6 +2118,7 @@ impl BackendService {
             title: candidate.title.clone(),
             artist: candidate.artist.clone(),
             album: candidate.album.clone(),
+            year: None,
             track_number: candidate.track_number,
             bpm: candidate.bpm,
             key: candidate.key.clone(),
@@ -2795,6 +2798,7 @@ fn resolve_usb_track_from_sources(
                         },
                         artist,
                         album,
+                        year: t.release_year.map(u32::from),
                         track_number: (t.track_number > 0).then_some(t.track_number),
                         bpm: if t.tempo_x100 > 0 {
                             Some(t.tempo_x100 as f64 / 100.0)
@@ -2933,6 +2937,7 @@ mod tests {
             title: "T".to_string(),
             artist: "A".to_string(),
             album: None,
+            year: None,
             track_number: None,
             bpm: None,
             key: None,

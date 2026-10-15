@@ -163,6 +163,7 @@ export function createTrackRow(ctx, track, options) {
   row.querySelector(".track-title").textContent = track.title ?? "";
   row.querySelector(".track-artist").textContent = track.artist ?? "";
   cell("album").textContent = track.album ?? "";
+  cell("year").textContent = track.year ? String(track.year) : "";
 
   const formatInfo = describeTrackFormat(track);
   const badge = row.querySelector(".format-badge");

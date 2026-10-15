@@ -144,7 +144,7 @@ pub(crate) const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm
     file_size_bytes, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, duration_ms, \
     artwork_path, waveform_peaks_path, bpm_analyzer, created_at, updated_at, \
     COALESCE(rekordbox_db_source, 0) AS rekordbox_db_source, wav_extensible_kind, tonality_source, \
-    COALESCE(mixxx_db_source, 0) AS mixxx_db_source";
+    COALESCE(mixxx_db_source, 0) AS mixxx_db_source, release_year";
 
 type ExistingTrackSnapshot = (
     String,
