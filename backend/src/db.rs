@@ -237,6 +237,7 @@ impl Db {
         ensure_tracks_column(&conn, "wav_extensible_kind", "TEXT")?;
         ensure_tracks_column(&conn, "tonality_source", "TEXT")?;
         ensure_tracks_column(&conn, "genre_source", "TEXT")?;
+        ensure_tracks_column(&conn, "release_year_source", "TEXT")?;
         ensure_tracks_column(&conn, "file_created_at", "INTEGER")?;
         ensure_playlists_column(&conn, "last_exported_at", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_usb_root", "TEXT")?;
@@ -289,6 +290,7 @@ const ALLOWED_TRACK_COLUMNS: &[&str] = &[
     "wav_extensible_kind",
     "tonality_source",
     "genre_source",
+    "release_year_source",
     "file_created_at",
 ];
 const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[

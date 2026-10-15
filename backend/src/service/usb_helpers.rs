@@ -227,6 +227,7 @@ mod tests {
             artist: artist.to_string(),
             album: None,
             year: None,
+            genre: None,
             track_number: None,
             bpm: None,
             key: None,

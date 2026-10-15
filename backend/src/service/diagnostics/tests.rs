@@ -539,6 +539,7 @@ fn make_usb_track(id: &str, title: &str, artist: &str, file_path: &str) -> UsbTr
         artist: artist.to_string(),
         album: None,
         year: None,
+        genre: None,
         track_number: None,
         bpm: None,
         key: None,

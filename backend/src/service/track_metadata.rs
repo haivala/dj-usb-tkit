@@ -1,6 +1,6 @@
-//! Genre and star-rating edits from the cue editor. Saved on their own, so a
-//! genre or rating change leaves the beat grid, key and cues exactly as they
-//! are (no ANLZ rewrite, no BPM/key marked as user-edited).
+//! Genre, star-rating and release-year edits from the cue editor. Saved on
+//! their own, so these changes leave the beat grid, key and cues exactly as
+//! they are (no ANLZ rewrite, no BPM/key marked as user-edited).
 
 use std::path::{Path, PathBuf};
 
@@ -31,6 +31,36 @@ type GenreEdit = Option<Option<String>>;
 
 fn genre_edit(genre: Option<&str>) -> GenreEdit {
     genre.map(|g| Some(g.trim()).filter(|g| !g.is_empty()).map(str::to_string))
+}
+
+/// A requested year edit: `None` leaves the year alone, `Some(None)` clears
+/// it, `Some(Some(year))` sets it.
+type YearEdit = Option<Option<u32>>;
+
+/// Earliest year the editor accepts; the latest is next year.
+const MIN_YEAR: u32 = 1000;
+
+/// `None` leaves the year alone, 0 clears it, anything else must be a year
+/// from 1000 to next year.
+fn validate_year(year: Option<u32>) -> BackendResult<YearEdit> {
+    use chrono::Datelike;
+    let max_year = u32::try_from(chrono::Local::now().year() + 1).unwrap_or(u32::MAX);
+    match year {
+        None => Ok(None),
+        Some(0) => Ok(Some(None)),
+        Some(y) if (MIN_YEAR..=max_year).contains(&y) => Ok(Some(Some(y))),
+        Some(_) => Err(BackendError::Validation(format!(
+            "year must be {MIN_YEAR} to {max_year}"
+        ))),
+    }
+}
+
+/// The release date to store with a year the user set: a date from another
+/// year becomes 1 January of that year, as export does with a file date that
+/// contradicts the year tag. `None` when `date` already fits (or is empty).
+fn release_date_for_user_year(date: Option<&str>, year: u32) -> Option<String> {
+    let date = date.map(str::trim).filter(|d| !d.is_empty())?;
+    (!date.starts_with(&format!("{year:04}"))).then(|| format!("{year:04}-01-01"))
 }
 
 fn validate_rating(rating: Option<u8>) -> BackendResult<Option<u8>> {
@@ -66,19 +96,29 @@ pub(super) fn genre_options(
     Ok(by_key.into_values().collect())
 }
 
-/// A library track's genre and star rating.
-pub(super) fn library_genre_rating(
+/// The fields the cue editor edits besides the analysis.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct EditableMetadata {
+    pub genre: Option<String>,
+    /// Star rating, 0 to 5.
+    pub rating: u8,
+    pub year: Option<u32>,
+}
+
+/// A library track's genre, star rating and release year.
+pub(super) fn library_metadata(
     conn: &Connection,
     track_id: &str,
-) -> BackendResult<(Option<String>, u8)> {
+) -> BackendResult<EditableMetadata> {
     let row = conn
         .query_row(
-            "SELECT genre, rating FROM tracks WHERE id = ?1",
+            "SELECT genre, rating, release_year FROM tracks WHERE id = ?1",
             params![track_id],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<u32>>(2)?,
                 ))
             },
         )
@@ -88,19 +128,23 @@ pub(super) fn library_genre_rating(
         .0
         .map(|g| g.trim().to_string())
         .filter(|g| !g.is_empty());
-    Ok((genre, rating_byte(row.1)))
+    Ok(EditableMetadata {
+        genre,
+        rating: rating_byte(row.1),
+        year: row.2.filter(|y| *y > 0),
+    })
 }
 
 fn rating_byte(rating: Option<i64>) -> u8 {
     rating.unwrap_or(0).clamp(0, i64::from(MAX_RATING)) as u8
 }
 
-/// A USB track's genre and star rating as its PDB row has them, plus every
-/// genre name in that PDB.
-pub(super) fn usb_genre_rating(
+/// A USB track's genre, star rating and release year as its PDB row has
+/// them, plus every genre name in that PDB.
+pub(super) fn usb_metadata(
     usb_root: &Path,
     media_path: &str,
-) -> BackendResult<(Option<String>, u8, Vec<String>)> {
+) -> BackendResult<(EditableMetadata, Vec<String>)> {
     let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
     let parsed = crate::pdb_reader::parse_pdb_bytes(&std::fs::read(&staged_pdb)?)?;
     let row = pdb_track_by_media_path(&parsed, media_path)?;
@@ -109,17 +153,23 @@ pub(super) fn usb_genre_rating(
         .get(&row.genre_id)
         .map(|g| g.trim().to_string())
         .filter(|g| !g.is_empty());
-    let rating = row.rating.min(MAX_RATING);
-    Ok((genre, rating, parsed.genres.into_values().collect()))
+    let metadata = EditableMetadata {
+        genre,
+        rating: row.rating.min(MAX_RATING),
+        year: row.release_year.map(u32::from),
+    };
+    Ok((metadata, parsed.genres.into_values().collect()))
 }
 
-/// Write a genre / rating edit onto a library track. The genre is marked as
-/// the user's, so a rescan or import keeps it over the file's tag.
+/// Write a genre / rating / year edit onto a library track. The genre and
+/// year are marked as the user's, so a rescan or import keeps them over the
+/// file's tags.
 fn apply_local_metadata_edits_tx(
     tx: &rusqlite::Transaction<'_>,
     track_id: &str,
     genre: &GenreEdit,
     rating: Option<u8>,
+    year: YearEdit,
     now: &str,
 ) -> BackendResult<()> {
     if let Some(genre) = genre {
@@ -134,20 +184,27 @@ fn apply_local_metadata_edits_tx(
             params![rating, track_id],
         )?;
     }
-    if genre.is_some() || rating.is_some() {
+    if let Some(year) = year {
+        tx.execute(
+            "UPDATE tracks SET release_year = ?1, release_year_source = 'user' WHERE id = ?2",
+            params![year, track_id],
+        )?;
+    }
+    if genre.is_some() || rating.is_some() || year.is_some() {
         mark_track_edited_tx(tx, track_id, now)?;
     }
     Ok(())
 }
 
-/// The staged PDB with the track row's genre and rating patched in place, or
-/// `None` when the row already has them. A genre the PDB lacks gets a new
-/// genre row.
+/// The staged PDB with the track row's genre, rating and year patched in
+/// place, or `None` when the row already has them. A genre the PDB lacks gets
+/// a new genre row.
 fn build_pdb_metadata_patch(
     usb_root: &Path,
     media_path: &str,
     genre: &GenreEdit,
     rating: Option<u8>,
+    year: YearEdit,
 ) -> BackendResult<Option<(PathBuf, Vec<u8>)>> {
     let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&staged_pdb)?;
@@ -195,6 +252,20 @@ fn build_pdb_metadata_patch(
         changed_fields.push("rating");
     }
 
+    if let Some(year) = year {
+        let wanted = year.and_then(|y| u16::try_from(y).ok());
+        if row.release_year != wanted {
+            data.release_year = wanted;
+            changed_fields.push("release_year");
+        }
+        if let Some(date) =
+            year.and_then(|y| release_date_for_user_year(row.release_date.as_deref(), y))
+        {
+            data.release_date = Some(date);
+            changed_fields.push("release_date");
+        }
+    }
+
     if changed_fields.is_empty() {
         return Ok(None);
     }
@@ -222,6 +293,7 @@ impl BackendService {
         }
         let genre = genre_edit(req.genre.as_deref());
         let rating = validate_rating(req.rating)?;
+        let year = validate_year(req.year)?;
 
         let mut conn = self.db.connect()?;
         let exists = conn
@@ -238,14 +310,15 @@ impl BackendService {
             )));
         }
         let tx = conn.transaction()?;
-        apply_local_metadata_edits_tx(&tx, &track_id, &genre, rating, &now())?;
+        apply_local_metadata_edits_tx(&tx, &track_id, &genre, rating, year, &now())?;
         tx.commit()?;
 
-        let (genre, rating) = library_genre_rating(&conn, &track_id)?;
+        let metadata = library_metadata(&conn, &track_id)?;
         Ok(SaveTrackMetadataEditsData {
             track_id,
-            genre,
-            rating,
+            genre: metadata.genre,
+            rating: metadata.rating,
+            year: metadata.year,
         })
     }
 
@@ -256,7 +329,7 @@ impl BackendService {
         self.save_usb_track_metadata_edits_with_progress(req, |_, _, _| {})
     }
 
-    /// Write a genre / rating edit made from a USB view onto the USB's PDB and
+    /// Write a genre / rating / year edit made from a USB view onto the USB's PDB and
     /// eDB in place, and onto the matched library track. Like the cue save, a
     /// track missing from either database blocks the save before anything is
     /// written. Holds `usb_write_lock` for the whole save.
@@ -284,6 +357,7 @@ impl BackendService {
         }
         let genre = genre_edit(req.genre.as_deref());
         let rating = validate_rating(req.rating)?;
+        let year = validate_year(req.year)?;
 
         let mut warnings: Vec<WarningEntry> = Vec::new();
         let mut edb_conn = open_edb_rw(&usb_root, &mut warnings).ok_or_else(|| {
@@ -296,7 +370,7 @@ impl BackendService {
                 "track not in this USB's library database: {media_path}"
             ))
         })?;
-        let pdb_patch = build_pdb_metadata_patch(&usb_root, media_path, &genre, rating)?;
+        let pdb_patch = build_pdb_metadata_patch(&usb_root, media_path, &genre, rating, year)?;
 
         on_progress(1, STEPS, "USB: Writing export.pdb");
         if let Some((staged_pdb, bytes)) = pdb_patch {
@@ -318,14 +392,14 @@ impl BackendService {
             Some(track_id) => {
                 let mut conn = self.db.connect()?;
                 let tx = conn.transaction()?;
-                apply_local_metadata_edits_tx(&tx, track_id, &genre, rating, &now())?;
+                apply_local_metadata_edits_tx(&tx, track_id, &genre, rating, year, &now())?;
                 tx.commit()?;
             }
             None => logging::emit(
                 Level::Warn,
                 "track-metadata.usb-save.no-local-match",
                 &format!(
-                    "USB genre/rating edit for {media_path} matched no local track; device written, local master not"
+                    "USB genre/rating/year edit for {media_path} matched no local track; device written, local master not"
                 ),
             ),
         }
@@ -353,6 +427,29 @@ impl BackendService {
                 params![rating, content_id],
             )?;
         }
+        if let Some(year) = year {
+            if content_columns.contains("releaseYear") {
+                tx.execute(
+                    "UPDATE content SET releaseYear = ?1 WHERE content_id = ?2",
+                    params![year.unwrap_or(0), content_id],
+                )?;
+            }
+            if let Some(year) = year
+                && content_columns.contains("releaseDate")
+            {
+                let date: Option<String> = tx.query_row(
+                    "SELECT releaseDate FROM content WHERE content_id = ?1",
+                    params![content_id],
+                    |row| row.get(0),
+                )?;
+                if let Some(date) = release_date_for_user_year(date.as_deref(), year) {
+                    tx.execute(
+                        "UPDATE content SET releaseDate = ?1 WHERE content_id = ?2",
+                        params![date, content_id],
+                    )?;
+                }
+            }
+        }
         tx.commit()?;
         drop(edb_conn);
         super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)?;
@@ -364,5 +461,30 @@ impl BackendService {
             local_updated: local_track_id.is_some(),
             local_track_id,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn year_edit_leaves_clears_sets_or_rejects() {
+        assert_eq!(validate_year(None).unwrap(), None);
+        assert_eq!(validate_year(Some(0)).unwrap(), Some(None));
+        assert_eq!(validate_year(Some(1994)).unwrap(), Some(Some(1994)));
+        assert!(validate_year(Some(999)).is_err());
+        assert!(validate_year(Some(9999)).is_err());
+    }
+
+    #[test]
+    fn release_date_follows_a_user_year_it_contradicts() {
+        assert_eq!(
+            release_date_for_user_year(Some("2009-10-09"), 2016).as_deref(),
+            Some("2016-01-01")
+        );
+        assert_eq!(release_date_for_user_year(Some("2016-05-01"), 2016), None);
+        assert_eq!(release_date_for_user_year(Some(" "), 2016), None);
+        assert_eq!(release_date_for_user_year(None, 2016), None);
     }
 }

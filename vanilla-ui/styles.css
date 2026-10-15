@@ -1340,15 +1340,24 @@ main {
   flex: 1;
 }
 
+/* Exactly as tall as the search field beside it, so the table below doesn't
+   move when a selection shows or hides the bar: the button sits inside it,
+   inset 3px. */
 .selection-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  box-sizing: border-box;
+  height: 36px;
+  padding: 0 3px 0 12px;
   border-radius: 8px;
   background: var(--accent-glow);
   border: 1px solid var(--action-btn-border);
   animation: panel-in 150ms ease;
+}
+
+.selection-actions button {
+  height: 28px;
 }
 
 /* ── USB Connection Bar ────────────────────────────── */
@@ -4382,6 +4391,7 @@ td button[data-action]:disabled,
 .track-detail-unit { font-size: 12px; color: var(--muted); }
 /* Beats the global `input { min-width }`. */
 .track-detail-meta .track-detail-genre { min-width: 0; width: 180px; }
+.track-detail-meta .track-detail-year { min-width: 0; width: 7ch; font-variant-numeric: tabular-nums; }
 .track-detail-reveal {
   flex: none;
   width: 32px;

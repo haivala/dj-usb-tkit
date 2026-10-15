@@ -152,6 +152,11 @@ fn build_usb_track_index(
                     artist,
                     album,
                     year: t.release_year.map(u32::from),
+                    genre: parsed
+                        .genres
+                        .get(&t.genre_id)
+                        .map(|g| g.trim().to_string())
+                        .filter(|g| !g.is_empty()),
                     track_number: (t.track_number > 0).then_some(t.track_number),
                     bpm: if t.tempo_x100 > 0 {
                         Some(t.tempo_x100 as f64 / 100.0)
@@ -1818,6 +1823,7 @@ impl BackendService {
                                         artist: "Unknown Artist".to_string(),
                                         album: None,
                                         year: None,
+                                        genre: None,
                                         track_number: None,
                                         bpm: None,
                                         key: None,
@@ -2119,6 +2125,7 @@ impl BackendService {
             artist: candidate.artist.clone(),
             album: candidate.album.clone(),
             year: None,
+            genre: None,
             track_number: candidate.track_number,
             bpm: candidate.bpm,
             key: candidate.key.clone(),
@@ -2799,6 +2806,11 @@ fn resolve_usb_track_from_sources(
                         artist,
                         album,
                         year: t.release_year.map(u32::from),
+                        genre: parsed
+                            .genres
+                            .get(&t.genre_id)
+                            .map(|g| g.trim().to_string())
+                            .filter(|g| !g.is_empty()),
                         track_number: (t.track_number > 0).then_some(t.track_number),
                         bpm: if t.tempo_x100 > 0 {
                             Some(t.tempo_x100 as f64 / 100.0)
@@ -2938,6 +2950,7 @@ mod tests {
             artist: "A".to_string(),
             album: None,
             year: None,
+            genre: None,
             track_number: None,
             bpm: None,
             key: None,

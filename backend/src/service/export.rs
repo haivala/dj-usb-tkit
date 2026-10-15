@@ -1616,6 +1616,9 @@ impl BackendService {
             )));
         };
 
+        // A release year the user set wins over a release date tag from
+        // another year: that date is dropped, so export dates the track from
+        // the year (see `resolve_track_release_date_for_export`).
         let mut stmt = conn.prepare(
             r#"
             SELECT t.id, t.title, t.artist, t.album, t.track_number, t.bpm, t.tonality, t.file_path,
@@ -1625,7 +1628,10 @@ impl BackendService {
                    t.disc_number, t.subtitle, t.comment, t.title_for_search, t.kuvo_delivery_comment,
                    t.dj_play_count, t.rating, t.color_id, t.artist_id_lyricist, t.artist_id_original_artist,
                    t.artist_id_remixer, t.artist_id_composer, t.genre_id, t.genre, t.label_id, t.isrc, t.release_year,
-                   t.release_date, t.recorded_date, t.artwork_path, t.waveform_peaks_path, t.duration_ms, pt.position,
+                   CASE WHEN t.release_year_source = 'user' AND t.release_year IS NOT NULL
+                             AND substr(t.release_date, 1, 4) != printf('%04d', t.release_year)
+                        THEN NULL ELSE t.release_date END,
+                   t.recorded_date, t.artwork_path, t.waveform_peaks_path, t.duration_ms, pt.position,
                    t.format_ext, t.first_beat_ms,
                    (t.rekordbox_db_source = 1
                     AND COALESCE(t.bpm_analyzer, 'rekordbox') = 'rekordbox'

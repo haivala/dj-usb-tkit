@@ -129,16 +129,21 @@ drive selection from being rendered against a newer selected drive.
   and eDB `cue` rows are left exactly as they are; the editor sends `cues` only
   when they were edited, so a BPM, key or first-beat edit never rewrites cues
   (such as rekordbox memory cues) the app's cue model can't represent.
-- `save_track_metadata_edits` — `{ trackId, genre?, rating? }` → sets the
-  library track's genre and/or star rating (0–5) and nothing else, clearing
-  `last_exported_*` on every playlist containing it. A `null` field is left
-  unchanged; an empty `genre` clears it. The genre gets `genre_source = 'user'`,
-  so rescans and rekordbox / Mixxx imports keep it over the file's tag. Returns
-  `{ trackId, genre, rating }`. The cue editor sends it instead of
-  `save_track_analysis_edits` when only the genre / rating changed.
+- `save_track_metadata_edits` — `{ trackId, genre?, rating?, year? }` → sets
+  the library track's genre, star rating (0–5) and/or release year (1000 to
+  next year) and nothing else, clearing `last_exported_*` on every playlist
+  containing it. A `null` field is left unchanged; an empty `genre` or a `year`
+  of 0 clears it. The genre gets `genre_source = 'user'`, so rescans and
+  rekordbox / Mixxx imports keep it over the file's tag; the year gets
+  `release_year_source = 'user'`, which rescans keep, and export then drops a
+  release date tag from another year (the track is dated 1 January of the
+  year). Returns `{ trackId, genre, rating, year }`. The cue editor sends it
+  instead of `save_track_analysis_edits` when only the genre / rating / year
+  changed.
 - `save_usb_track_metadata_edits` — `{ usbRoot, usbMediaPathRaw, genre?,
-  rating?, localTrackId?, title?, artist?, album? }` → the same edit on a USB
-  track: the `export.pdb` track row (t00 genre and rating; a new genre gets a
+  rating?, year?, localTrackId?, title?, artist?, album? }` → the same edit on a
+  USB track: the `export.pdb` track row (t00 genre, rating, release year, and a
+  release date from another year becomes 1 January of it; a new genre gets a
   t01 row) and the eDB `content` row **in place**, plus the resolved library
   track. A track missing from either database blocks the save before anything
   is written. Leaves the ANLZ bundle, BPM, key and cues alone. Returns

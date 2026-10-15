@@ -903,6 +903,7 @@ fn sample_track(id: &str, file_path: &str) -> Track {
         artist: "Artist".to_string(),
         album: None,
         year: None,
+        genre: None,
         track_number: None,
         bpm: None,
         bpm_analyzer: None,

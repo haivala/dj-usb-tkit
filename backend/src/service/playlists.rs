@@ -314,7 +314,7 @@ impl BackendService {
                    t.file_size_bytes, t.format_ext, t.sample_rate_hz, t.bit_depth, t.bitrate_kbps, t.duration_ms,
                    t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at,
                    COALESCE(t.rekordbox_db_source, 0) AS rekordbox_db_source, t.wav_extensible_kind,
-                   COALESCE(t.mixxx_db_source, 0) AS mixxx_db_source, t.release_year
+                   COALESCE(t.mixxx_db_source, 0) AS mixxx_db_source, t.release_year, t.genre
             FROM playlist_tracks pt
             JOIN tracks t ON t.id = pt.track_id
             WHERE pt.playlist_id = ?1
@@ -860,7 +860,7 @@ impl BackendService {
                            t.file_size_bytes, t.format_ext, t.sample_rate_hz, t.bit_depth, t.bitrate_kbps, t.duration_ms,
                            t.artwork_path, t.waveform_peaks_path, t.bpm_analyzer, t.created_at, t.updated_at,
                            COALESCE(t.rekordbox_db_source, 0) AS rekordbox_db_source, t.wav_extensible_kind,
-                   COALESCE(t.mixxx_db_source, 0) AS mixxx_db_source, t.release_year
+                   COALESCE(t.mixxx_db_source, 0) AS mixxx_db_source, t.release_year, t.genre
                     FROM playlist_tracks pt
                     JOIN tracks t ON t.id = pt.track_id
                     WHERE pt.playlist_id = ?1

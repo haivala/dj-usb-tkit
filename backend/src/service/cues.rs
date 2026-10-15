@@ -899,7 +899,7 @@ impl BackendService {
             .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
 
         let cues = cues_for_editor(load_track_cues(&conn, track_id)?);
-        let (genre, rating) = super::track_metadata::library_genre_rating(&conn, track_id)?;
+        let metadata = super::track_metadata::library_metadata(&conn, track_id)?;
 
         Ok(TrackDetail {
             track,
@@ -907,8 +907,9 @@ impl BackendService {
             cues,
             detail_waveform,
             key_options: key_option_groups(key_notation_setting(&conn)?),
-            genre,
-            rating,
+            genre: metadata.genre,
+            rating: metadata.rating,
+            year: metadata.year,
             genre_options: super::track_metadata::genre_options(&conn, Vec::new())?,
         })
     }
@@ -1056,16 +1057,16 @@ impl BackendService {
             .as_deref()
             .map(str::trim)
             .unwrap_or("");
-        let (genre, rating, usb_genres) = if media_path.is_empty() {
-            (None, 0, Vec::new())
+        let (metadata, usb_genres) = if media_path.is_empty() {
+            Default::default()
         } else {
-            super::track_metadata::usb_genre_rating(&usb_root, media_path).unwrap_or_else(|err| {
+            super::track_metadata::usb_metadata(&usb_root, media_path).unwrap_or_else(|err| {
                 logging::emit(
                     Level::Warn,
                     "cues.usb-detail.no-pdb-metadata",
-                    &format!("could not read genre/rating for {media_path}: {err}"),
+                    &format!("could not read genre/rating/year for {media_path}: {err}"),
                 );
-                (None, 0, Vec::new())
+                Default::default()
             })
         };
         let notation = self.key_notation()?;
@@ -1075,8 +1076,9 @@ impl BackendService {
             detail_waveform: read_pwv5_from_anlz(dat_path)
                 .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
             key_options: key_option_groups(notation),
-            genre,
-            rating,
+            genre: metadata.genre,
+            rating: metadata.rating,
+            year: metadata.year,
             genre_options: super::track_metadata::genre_options(&*self.db.connect()?, usb_genres)?,
         })
     }

@@ -17,6 +17,7 @@ pub(crate) trait ListTrack {
     fn artist(&self) -> &str;
     fn album(&self) -> Option<&str>;
     fn year(&self) -> Option<u32>;
+    fn genre(&self) -> Option<&str>;
     fn format_ext(&self) -> Option<&str>;
     fn bpm(&self) -> Option<f64>;
     fn duration_ms(&self) -> Option<u64>;
@@ -38,6 +39,9 @@ macro_rules! impl_list_track {
             fn year(&self) -> Option<u32> {
                 self.year
             }
+            fn genre(&self) -> Option<&str> {
+                self.genre.as_deref()
+            }
             fn format_ext(&self) -> Option<&str> {
                 self.format_ext.as_deref()
             }
@@ -57,9 +61,10 @@ macro_rules! impl_list_track {
 impl_list_track!(Track);
 impl_list_track!(UsbTrack);
 
-/// A search over title, artist and album. The text is matched
-/// case-insensitively against the three fields joined by spaces, so a query
-/// may span them ("Title Artist"). Blank text matches every track.
+/// A search over title, artist, album, genre and year. Each word of the text
+/// must appear, case-insensitively, in one of those fields, so a query may mix
+/// them in any order ("techno 2009", "Artist Title"). Blank text matches
+/// every track.
 #[derive(Debug, Clone)]
 pub(crate) struct TrackQuery {
     lowered: String,
@@ -81,14 +86,18 @@ impl TrackQuery {
         if self.lowered.is_empty() {
             return true;
         }
-        format!(
-            "{} {} {}",
+        let year = track.year().map(|y| y.to_string()).unwrap_or_default();
+        let fields = [
             track.title(),
             track.artist(),
-            track.album().unwrap_or_default()
-        )
-        .to_lowercase()
-        .contains(&self.lowered)
+            track.album().unwrap_or_default(),
+            track.genre().unwrap_or_default(),
+            &year,
+        ]
+        .map(str::to_lowercase);
+        self.lowered
+            .split_whitespace()
+            .all(|word| fields.iter().any(|field| field.contains(word)))
     }
 
     pub(crate) fn retain<T: ListTrack>(&self, items: &mut Vec<T>) {
@@ -211,11 +220,24 @@ mod tests {
     fn query_matches_title_artist_album_case_insensitively_and_across_fields() {
         let mut with_album = track("Night Drive", "Example Artist", None, None);
         with_album.album = Some("Demo Album".into());
+        with_album.genre = Some("Deep Techno".into());
+        with_album.year = Some(2009);
         let mut items = vec![with_album, track("Other", "Someone Else", None, None)];
-        for text in ["night", " EXAMPLE ", "demo album", "drive example"] {
+        for text in [
+            "night",
+            " EXAMPLE ",
+            "demo album",
+            "drive example",
+            "techno",
+            "2009",
+            "techno 2009 night",
+            "artist drive",
+        ] {
             assert!(TrackQuery::new(text).matches(&items[0]), "{text}");
             assert!(!TrackQuery::new(text).matches(&items[1]), "{text}");
         }
+        // Every word has to match somewhere.
+        assert!(!TrackQuery::new("techno 1994").matches(&items[0]));
         TrackQuery::new("  ").retain(&mut items);
         assert_eq!(items.len(), 2);
         TrackQuery::new("someone").retain(&mut items);

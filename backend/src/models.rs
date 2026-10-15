@@ -106,6 +106,9 @@ pub struct Track {
     /// Release year from the file's tags.
     #[serde(default)]
     pub year: Option<u32>,
+    /// Genre: the file's tag, or the one set in the cue editor.
+    #[serde(default)]
+    pub genre: Option<String>,
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,
     /// `AnalysisEngine::bpm_analyzer` for a detected value (`"stratum-v2"`,
@@ -1100,6 +1103,9 @@ pub struct UsbTrack {
     /// Release year from the PDB track row.
     #[serde(default)]
     pub year: Option<u32>,
+    /// Genre from the PDB track row.
+    #[serde(default)]
+    pub genre: Option<String>,
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,
     pub key: Option<String>,
@@ -2340,6 +2346,9 @@ pub struct TrackDetail {
     pub genre: Option<String>,
     /// Star rating, 0 (none) to 5.
     pub rating: u8,
+    /// Release year.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub year: Option<u32>,
     /// Genres the editor's genre field suggests, sorted case-insensitively.
     pub genre_options: Vec<String>,
 }
@@ -2433,6 +2442,9 @@ pub struct UsbTrackAnalysisDetail {
     pub genre: Option<String>,
     /// The track's star rating in the USB's PDB, 0 to 5.
     pub rating: u8,
+    /// The track's release year in the USB's PDB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub year: Option<u32>,
     /// The library's genres and the USB's, sorted case-insensitively.
     pub genre_options: Vec<String>,
 }
@@ -2512,6 +2524,9 @@ pub struct SaveTrackMetadataEditsRequest {
     /// `None` ⇒ leave unchanged; 0 (no stars) to 5.
     #[serde(default)]
     pub rating: Option<u8>,
+    /// `None` ⇒ leave unchanged; 0 clears the year.
+    #[serde(default)]
+    pub year: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2521,6 +2536,8 @@ pub struct SaveTrackMetadataEditsData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,
     pub rating: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub year: Option<u32>,
 }
 
 /// [`SaveTrackMetadataEditsRequest`] for a track opened from a USB view:
@@ -2535,6 +2552,8 @@ pub struct SaveUsbTrackMetadataEditsRequest {
     pub genre: Option<String>,
     #[serde(default)]
     pub rating: Option<u8>,
+    #[serde(default)]
+    pub year: Option<u32>,
     /// Same as `SaveUsbTrackAnalysisEditsRequest::local_track_id`.
     #[serde(default)]
     pub local_track_id: Option<String>,

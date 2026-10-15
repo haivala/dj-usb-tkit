@@ -27,6 +27,11 @@ export function fillBpmCell(cell, track) {
   cell.replaceChildren(pill);
 }
 
+// The year cell: the release year, or blank.
+export function fillYearCell(cell, track) {
+  cell.textContent = track.year ? String(track.year) : "";
+}
+
 // The cue editor button: enabled once the track is analyzed (`ready`) and
 // its row has a waveform to edit on -- a reanalysis clears the waveform, so
 // the button waits for the new one. `ready` is kept on the button, because
@@ -163,7 +168,7 @@ export function createTrackRow(ctx, track, options) {
   row.querySelector(".track-title").textContent = track.title ?? "";
   row.querySelector(".track-artist").textContent = track.artist ?? "";
   cell("album").textContent = track.album ?? "";
-  cell("year").textContent = track.year ? String(track.year) : "";
+  fillYearCell(cell("year"), track);
 
   const formatInfo = describeTrackFormat(track);
   const badge = row.querySelector(".format-badge");

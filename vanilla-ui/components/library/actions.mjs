@@ -1,7 +1,7 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
-import { fillBpmCell, fillKeyCell, coverElement, setCueButtonState } from "../../track_table.mjs";
+import { fillBpmCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState } from "../../track_table.mjs";
 import { REANALYZE_TOOLTIP } from "../../track_utils.mjs";
 import {
   formatDurationMs,
@@ -1111,6 +1111,10 @@ export function patchTrackAnalysisFields(ctx, track, payload) {
   if (payload.analysisReady === true) {
     setIfChanged("analysisReady", true);
   }
+  // The release year after a cue-editor save; null clears it.
+  if (payload.year !== undefined) {
+    setIfChanged("year", payload.year || null);
+  }
   return changed;
 }
 
@@ -1124,6 +1128,9 @@ export function patchLibraryRowCells(ctx, row, track) {
   if (durationTd) {
     durationTd.textContent = formatDurationMsInternal(track.durationMs);
   }
+
+  const yearTd = row.querySelector(".td-year");
+  if (yearTd) fillYearCell(yearTd, track);
 
   const bpmTd = row.querySelector(".td-bpm");
   if (bpmTd) fillBpmCell(bpmTd, track);

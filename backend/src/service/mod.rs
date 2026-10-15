@@ -144,7 +144,7 @@ pub(crate) const TRACK_COLS: &str = "id, title, artist, album, track_number, bpm
     file_size_bytes, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, duration_ms, \
     artwork_path, waveform_peaks_path, bpm_analyzer, created_at, updated_at, \
     COALESCE(rekordbox_db_source, 0) AS rekordbox_db_source, wav_extensible_kind, tonality_source, \
-    COALESCE(mixxx_db_source, 0) AS mixxx_db_source, release_year";
+    COALESCE(mixxx_db_source, 0) AS mixxx_db_source, release_year, genre";
 
 type ExistingTrackSnapshot = (
     String,
@@ -169,6 +169,7 @@ type ExistingTrackSnapshot = (
     Option<String>, // wav_extensible_kind
     bool,           // genre edited in the app (`genre_source = 'user'`)
     Option<i64>,    // file_created_at, Unix seconds
+    bool,           // release year edited in the app (`release_year_source = 'user'`)
 );
 type ExistingTracksByPath = std::collections::HashMap<String, ExistingTrackSnapshot>;
 

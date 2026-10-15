@@ -5,7 +5,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lofty::config::ParseOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::id3::v2::Id3v2Tag;
+use lofty::iff::aiff::AiffFile;
+use lofty::iff::wav::WavFile;
+use lofty::mpeg::MpegFile;
 use lofty::prelude::Accessor;
 use lofty::probe::{Probe, read_from_path};
 use lofty::tag::{ItemKey, Tag};
@@ -348,6 +353,28 @@ fn find_mp4_box<R: Read + Seek>(
     None
 }
 
+/// The text of an ID3v2 `TXXX` frame named "DATE" or "YEAR", which some
+/// taggers write Vorbis-style. lofty leaves user frames with a four-character
+/// name out of the tag it hands over, so this reads the file's ID3v2 tag
+/// itself.
+fn read_id3v2_user_date(path: &Path) -> Option<String> {
+    let ext = crate::audio_format::format_ext_from_path(&path.to_string_lossy())?;
+    let mut file = File::open(path).ok()?;
+    let options = ParseOptions::new().read_properties(false);
+    let date = |tag: Option<&Id3v2Tag>| {
+        let tag = tag?;
+        ["DATE", "YEAR"]
+            .into_iter()
+            .find_map(|name| clean_tag_text(tag.get_user_text(name)))
+    };
+    match ext.as_str() {
+        "mp3" => date(MpegFile::read_from(&mut file, options).ok()?.id3v2()),
+        "aif" | "aiff" => date(AiffFile::read_from(&mut file, options).ok()?.id3v2()),
+        "wav" => date(WavFile::read_from(&mut file, options).ok()?.id3v2()),
+        _ => None,
+    }
+}
+
 fn read_embedded_metadata(path: &Path) -> EmbeddedMetadata {
     let tagged = match read_from_path(path) {
         Ok(file) => file,
@@ -390,18 +417,36 @@ fn read_embedded_metadata(path: &Path) -> EmbeddedMetadata {
             out.isrc = tag_item_text(tag, &ItemKey::Isrc);
         }
         if out.release_year.is_none() {
-            out.release_year = tag.year().filter(|v| *v > 0);
+            out.release_year = tag.year().filter(|v| *v > 0).or_else(|| {
+                tag_item_text(tag, &ItemKey::Year)
+                    .as_deref()
+                    .and_then(normalize_tag_date)
+                    .and_then(|date| year_of_tag_date(&date))
+            });
         }
         if out.release_date.is_none() {
-            out.release_date = tag_item_text(tag, &ItemKey::ReleaseDate)
-                .or_else(|| tag_item_text(tag, &ItemKey::OriginalReleaseDate));
+            out.release_date = tag_date(tag, &ItemKey::ReleaseDate)
+                .or_else(|| tag_date(tag, &ItemKey::OriginalReleaseDate));
         }
         if out.recorded_date.is_none() {
-            out.recorded_date = tag_item_text(tag, &ItemKey::RecordingDate);
+            out.recorded_date = tag_date(tag, &ItemKey::RecordingDate);
         }
         if out.genre.is_none() {
             out.genre = clean_tag_text(tag.genre().as_deref());
         }
+    }
+    if out.release_date.is_none() && out.recorded_date.is_none() {
+        out.recorded_date = read_id3v2_user_date(path)
+            .as_deref()
+            .and_then(normalize_tag_date);
+    }
+    // A date the year tag reader couldn't parse ("18.10.2009") still names
+    // the year.
+    if out.release_year.is_none() {
+        out.release_year = [&out.release_date, &out.recorded_date]
+            .into_iter()
+            .flatten()
+            .find_map(|date| year_of_tag_date(date));
     }
 
     out
@@ -460,6 +505,78 @@ fn clean_tag_text(value: Option<&str>) -> Option<String> {
 
 fn tag_item_text(tag: &Tag, key: &ItemKey) -> Option<String> {
     clean_tag_text(tag.get_string(key))
+}
+
+/// A date tag as `YYYY-MM-DD`, `YYYY-MM` or `YYYY`, which is what export
+/// expects.
+fn tag_date(tag: &Tag, key: &ItemKey) -> Option<String> {
+    tag_item_text(tag, key)
+        .as_deref()
+        .and_then(normalize_tag_date)
+}
+
+/// A date tag in the form export reads: a value starting with an ISO date
+/// (`2009`, `2009-10`, `2009-10-18`, `2009-10-18T12:00`) is kept as it is;
+/// `2009/10/18` and day-first dates (`18.10.2009`, `18-10-2009`) become
+/// `2009-10-18`; `10.2009` becomes `2009-10`. A slash date with the year last
+/// is month-first or day-first by convention, so unless one part is over 12
+/// only its year is kept. Anything else with a single four-digit number
+/// keeps just that year.
+fn normalize_tag_date(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let iso_prefix = |s: &str| {
+        let b = s.as_bytes();
+        let digits =
+            |r: std::ops::Range<usize>| b.get(r).is_some_and(|d| d.iter().all(u8::is_ascii_digit));
+        digits(0..4)
+            && (b.len() == 4
+                || (b[4] == b'-'
+                    && digits(5..7)
+                    && (b.len() == 7 || (b.get(7) == Some(&b'-') && digits(8..10)))))
+    };
+    if iso_prefix(raw) {
+        return Some(raw.to_string());
+    }
+    let parts: Vec<&str> = raw
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let num = |s: &str| s.parse::<u32>().ok();
+    let date = |y: u32, m: u32, d: u32| {
+        chrono::NaiveDate::from_ymd_opt(i32::try_from(y).ok()?, m, d)
+            .map(|date| date.format("%Y-%m-%d").to_string())
+    };
+    let year_only = |y: &str| Some(y.to_string());
+    match parts.as_slice() {
+        [y, m, d] if y.len() == 4 => date(num(y)?, num(m)?, num(d)?).or_else(|| year_only(y)),
+        [a, b, y] if y.len() == 4 && a.len() <= 2 && b.len() <= 2 => {
+            let (a, b, year) = (num(a)?, num(b)?, num(y)?);
+            let day_first = !raw.contains('/') || a > 12;
+            let month_first = raw.contains('/') && b > 12;
+            if day_first {
+                date(year, b, a).or_else(|| year_only(y))
+            } else if month_first {
+                date(year, a, b).or_else(|| year_only(y))
+            } else {
+                year_only(y)
+            }
+        }
+        [m, y] if y.len() == 4 && m.len() <= 2 => match num(m)? {
+            month @ 1..=12 => Some(format!("{y}-{month:02}")),
+            _ => year_only(y),
+        },
+        _ => {
+            let mut years = parts.iter().filter(|p| p.len() == 4);
+            match (years.next(), years.next()) {
+                (Some(y), None) => year_only(y),
+                _ => None,
+            }
+        }
+    }
+}
+
+fn year_of_tag_date(date: &str) -> Option<u32> {
+    date.get(..4)?.parse::<u32>().ok().filter(|year| *year > 0)
 }
 
 fn read_file_metadata(path: &Path) -> BackendResult<std::fs::Metadata> {
@@ -1014,6 +1131,57 @@ mod tests {
         assert_eq!(paths.len(), 2);
         assert!(paths.contains("/a.mp3"));
         assert!(paths.contains("/b.mp3"));
+    }
+
+    #[test]
+    fn date_in_four_letter_txxx_frame_gives_date_and_year() {
+        use lofty::config::WriteOptions;
+        use lofty::tag::TagExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("track.mp3");
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/audio/noart/track_no_art.mp3"),
+            &path,
+        )
+        .expect("copy fixture");
+        let mut tag = Id3v2Tag::new();
+        tag.insert_user_text("DATE".into(), "9.10.2009".into());
+        tag.save_to_path(&path, WriteOptions::default())
+            .expect("write tag");
+
+        let meta = read_embedded_metadata(&path);
+        assert_eq!(meta.recorded_date.as_deref(), Some("2009-10-09"));
+        assert_eq!(meta.release_year, Some(2009));
+    }
+
+    #[test]
+    fn tag_dates_normalize_to_iso() {
+        let cases = [
+            ("2009", Some("2009")),
+            ("2009-10", Some("2009-10")),
+            (" 2009-10-18T12:00:00 ", Some("2009-10-18T12:00:00")),
+            ("2009/10/18", Some("2009-10-18")),
+            ("2009-1-2", Some("2009-01-02")),
+            ("18.10.2009", Some("2009-10-18")),
+            ("18.2.2009", Some("2009-02-18")),
+            ("18-10-2009", Some("2009-10-18")),
+            ("18/10/2009", Some("2009-10-18")),
+            ("10/18/2009", Some("2009-10-18")),
+            // Slash, both parts 12 or under: day or month first is unknown.
+            ("05/06/2009", Some("2009")),
+            ("31.2.2009", Some("2009")),
+            ("10.2009", Some("2009-10")),
+            ("Oct 18, 2009", Some("2009")),
+            ("18.10.09", None),
+            ("unknown", None),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(normalize_tag_date(raw).as_deref(), expected, "{raw}");
+        }
+        assert_eq!(year_of_tag_date("2009-10-18"), Some(2009));
+        assert_eq!(year_of_tag_date("0000"), None);
     }
 
     #[test]

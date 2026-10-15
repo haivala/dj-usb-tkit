@@ -46,6 +46,10 @@
   covered and how long it took.
 - **New feature:** The cue editor has a folder button that opens the track's folder in the
   file manager with the file selected, for library and USB tracks alike.
+- **New feature:** The cue editor edits a track's release year, next to the genre. Opened from a
+  USB row, the edit is written to the PDB and the eDB on the stick as well as the library. A
+  year set here stays when the library is rescanned, and export dates the track from it: a
+  release date from another year becomes 1 January of the edited year.
 - **New feature:** Track lists have a sortable Year column next to Album. The columns now run
   Track, Album, Year, BPM, Key, Length and format, so the mixing columns sit closer to the
   track name and the file format comes last.
@@ -56,6 +60,11 @@
 - **Fix:** Exported tracks always carry a release year that matches their release date. A track
   tagged with a full release date but no year gets the year from that date. A track tagged only
   with a year or year and month no longer gets a release date from a different year.
+- **Fix:** Date tags written day first, such as "18.2.2009", now give the track its release
+  year and are exported as proper dates. Slash dates such as "05/06/2009", which can be read
+  either day first or month first, give only the year. MP3, AIFF and WAV files whose date is
+  stored in a custom "DATE" or "YEAR" field, as some tag editors write it, are read too. Scan the
+  libraries to update tracks that are already in the library.
 - **Improvement:** When a track has no release date tag, export uses the earlier of the file's
   created and modified dates instead of always the modified date. That date is usually closer to
   the release, for example for files unzipped from a purchased album or edited in a tag editor
