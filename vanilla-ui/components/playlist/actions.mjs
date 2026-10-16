@@ -1,4 +1,5 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
+import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
 import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
@@ -722,7 +723,8 @@ export function createPlaylistTracksController(ctx) {
         )
         : {};
       return {
-        withCheckbox: false,
+        withCheckbox: true,
+        selectedIds: ctx.state.trackSelections.playlist.ids,
         origin: "local",
         secondaryActionLabel: "Play",
         secondaryActionType: "play-library",
@@ -760,7 +762,10 @@ export function createPlaylistTracksController(ctx) {
       ctx.el.playlistTableWrap?.classList.toggle("hidden", !hasTracks);
       ctx.el.playlistTotalDuration?.classList.toggle("hidden", !hasTracks);
     },
-    onPage: () => renderPlaylistPanelChrome(ctx),
+    onPage: (_page, { first }) => {
+      if (first) narrowTrackSelectionToLoaded(ctx, "playlist", getCurrentPlaylist(ctx)?.tracks || []);
+      renderPlaylistPanelChrome(ctx);
+    },
   });
   return ctl;
 }
@@ -795,7 +800,7 @@ export function renderPlaylistPanelChrome(ctx) {
   el.playlistTotalDuration?.classList.toggle("hidden", empty);
   // "Not exported yet." says nothing useful about a playlist with no tracks.
   el.playlistExportStatus?.classList.toggle("hidden", empty && !playlist.lastExportedAt);
-  el.playlistSearchInput?.closest(".search-row")?.classList.toggle("hidden", empty);
+  el.playlistSearchInput?.closest(".track-toolbar")?.classList.toggle("hidden", empty);
   el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", empty);
   if (el.playlistSearchInput && el.playlistSearchInput.value !== (state.playlistTrackSearch || "")) {
     el.playlistSearchInput.value = state.playlistTrackSearch || "";

@@ -1,5 +1,6 @@
 import { warningEntryText, patchUsbRowsInContainer } from "../library/actions.mjs";
 import { createTrackListController } from "../shared/track_list_controller.mjs";
+import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
@@ -1509,8 +1510,8 @@ export function renderHistoryList(ctx) {
 // The USB-playlist and USB-history track tables' data layer: paginated +
 // searched + sorted + per-page-hydrated by the backend, rendered via the shared
 // controller. Selection/search/sort/scroll all go through it.
-function createUsbTracksController(ctx, { bodyId, fetchCommand, secondaryActionType, actionType, onScopeChange }) {
-  return createTrackListController({
+function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, secondaryActionType, actionType, onScopeChange }) {
+  const ctl = createTrackListController({
     bodyId,
     onScopeChange,
     getElements: () => ({
@@ -1530,7 +1531,8 @@ function createUsbTracksController(ctx, { bodyId, fetchCommand, secondaryActionT
       }),
     normalize: (track) => ctx.normalizeTrack(track),
     rowOptions: () => ({
-      withCheckbox: false,
+      withCheckbox: true,
+      selectedIds: ctx.state.trackSelections[selectionView].ids,
       actionLabel: "+",
       actionType,
       compactAddButton: true,
@@ -1545,12 +1547,17 @@ function createUsbTracksController(ctx, { bodyId, fetchCommand, secondaryActionT
     renderDurationSummary: (target, summary) =>
       renderTrackListDurationSummary(target, summary, formatDurationMs),
     getTableSortState: () => ctx.tableSortState,
+    onPage: (_page, { first }) => {
+      if (first) narrowTrackSelectionToLoaded(ctx, selectionView, ctl.items);
+    },
   });
+  return ctl;
 }
 
 export function createUsbPlaylistTracksController(ctx) {
   return createUsbTracksController(ctx, {
     bodyId: "usbPlaylistTracks",
+    selectionView: "usbPlaylist",
     fetchCommand: "fetch_usb_playlist_tracks",
     actionType: "add-usb",
     secondaryActionType: "play-usb",
@@ -1561,6 +1568,7 @@ export function createUsbPlaylistTracksController(ctx) {
 export function createUsbHistoryTracksController(ctx) {
   return createUsbTracksController(ctx, {
     bodyId: "historyTracks",
+    selectionView: "usbHistory",
     fetchCommand: "fetch_usb_history_tracks",
     actionType: "add-history",
     secondaryActionType: "play-history",

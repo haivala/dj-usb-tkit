@@ -158,20 +158,23 @@
               </label>
             </div>
           </div>
-          <div class="library-toolbar">
+          <div class="track-toolbar">
             <div class="search-row">
               <input id="librarySearch" placeholder="Search title, artist, album, genre, year" />
             </div>
-            <div class="selection-actions hidden" id="selectionActions">
-              <span id="selectionCount" class="selection-count"></span>
-              <button id="addSelectedBtn" data-primary disabled>+ Add to Playlist</button>
+            <div class="selection-actions is-empty" data-selection-bar="library">
+              <span class="selection-count">0 selected</span>
+              <button type="button" data-selection-action="add" data-primary disabled data-tooltip="Add the selected tracks to the active playlist">+ Playlist</button>
+              <button type="button" data-selection-action="reanalyze" disabled data-tooltip="Reset waveform, BPM, key and first beat of the selected tracks to a fresh analysis, replacing imported or edited values (cues are kept)">Reanalyze</button>
+              <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks">Edit…</button>
+              <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
             </div>
           </div>
           <div class="table-wrap" id="libraryTableWrap">
-            <div class="track-grid track-grid--library" data-track-grid data-body-id="libraryTableBody" role="table" aria-label="Library tracks">
+            <div class="track-grid" data-track-grid data-body-id="libraryTableBody" role="table" aria-label="Library tracks">
               <div class="track-grid-head" role="rowgroup">
                 <div class="track-grid-row" role="row">
-                  <div class="track-grid-cell" role="columnheader"><input type="checkbox" id="selectAllTracks" /></div>
+                  <div class="track-grid-cell" role="columnheader"><input type="checkbox" id="selectAllTracks" data-select-all="library" aria-label="Select all" /></div>
                   <div class="track-grid-cell" role="columnheader"></div>
                   <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden">sorted by &rarr;</span></div>
                   <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title" data-sort-default="Track"><span class="sort-label">Track</span></div>
@@ -279,13 +282,22 @@
               <h3 class="track-list-heading-name"></h3>
               <span class="muted track-list-heading-count"></span>
             </div>
-            <div class="search-row">
-              <input id="usbTrackSearch" placeholder="Search USB playlist tracks" />
+            <div class="track-toolbar">
+              <div class="search-row">
+                <input id="usbTrackSearch" placeholder="Search USB playlist tracks" />
+              </div>
+              <div class="selection-actions is-empty" data-selection-bar="usbPlaylist">
+                <span class="selection-count">0 selected</span>
+                <button type="button" data-selection-action="add" data-primary disabled data-tooltip="Add the selected tracks to the active playlist">+ Playlist</button>
+                <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks">Edit…</button>
+                <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
+              </div>
             </div>
             <div class="table-wrap">
-              <div class="track-grid track-grid--no-select" data-track-grid data-body-id="usbPlaylistTracks" role="table" aria-label="USB playlist tracks">
+              <div class="track-grid" data-track-grid data-body-id="usbPlaylistTracks" role="table" aria-label="USB playlist tracks">
                 <div class="track-grid-head" role="rowgroup">
                   <div class="track-grid-row" role="row">
+                    <div class="track-grid-cell" role="columnheader"><input type="checkbox" data-select-all="usbPlaylist" aria-label="Select all" /></div>
                     <div class="track-grid-cell" role="columnheader"></div>
                     <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden">sorted by &rarr;</span></div>
                     <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title" data-sort-default="Track"><span class="sort-label">Track</span></div>
@@ -324,13 +336,22 @@
               <h3 class="track-list-heading-name"></h3>
               <span class="muted track-list-heading-count"></span>
             </div>
-            <div class="search-row">
-              <input id="historyTrackSearch" placeholder="Search history tracks" />
+            <div class="track-toolbar">
+              <div class="search-row">
+                <input id="historyTrackSearch" placeholder="Search history tracks" />
+              </div>
+              <div class="selection-actions is-empty" data-selection-bar="usbHistory">
+                <span class="selection-count">0 selected</span>
+                <button type="button" data-selection-action="add" data-primary disabled data-tooltip="Add the selected tracks to the active playlist">+ Playlist</button>
+                <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks">Edit…</button>
+                <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
+              </div>
             </div>
             <div class="table-wrap">
-              <div class="track-grid track-grid--no-select" data-track-grid data-body-id="historyTracks" role="table" aria-label="USB history tracks">
+              <div class="track-grid" data-track-grid data-body-id="historyTracks" role="table" aria-label="USB history tracks">
                 <div class="track-grid-head" role="rowgroup">
                   <div class="track-grid-row" role="row">
+                    <div class="track-grid-cell" role="columnheader"><input type="checkbox" data-select-all="usbHistory" aria-label="Select all" /></div>
                     <div class="track-grid-cell" role="columnheader"></div>
                     <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden">sorted by &rarr;</span></div>
                     <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title" data-sort-default="Track"><span class="sort-label">Track</span></div>
@@ -382,15 +403,25 @@
       <!-- Shared playlist panel (reused for whichever playlist is selected) -->
       <section class="panel" id="panel-playlist" role="tabpanel" aria-hidden="true">
         <h2 id="playlistPanelTitle">Playlist</h2>
-        <div class="row search-row">
-          <input id="playlistSearchInput" value="" placeholder="Search playlist tracks" />
+        <div class="track-toolbar">
+          <div class="search-row">
+            <input id="playlistSearchInput" value="" placeholder="Search playlist tracks" />
+          </div>
+          <div class="selection-actions is-empty" data-selection-bar="playlist">
+            <span class="selection-count">0 selected</span>
+            <button type="button" data-selection-action="remove" disabled data-tooltip="Remove the selected tracks from this playlist (they stay in the library)">Remove</button>
+            <button type="button" data-selection-action="reanalyze" disabled data-tooltip="Reset waveform, BPM, key and first beat of the selected tracks to a fresh analysis, replacing imported or edited values (cues are kept)">Reanalyze</button>
+            <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks">Edit…</button>
+            <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
+          </div>
         </div>
         <div id="playlistEmptyState"></div>
         <div class="table-wrap" id="playlistTableWrap">
-          <div class="track-grid track-grid--no-select" data-track-grid data-body-id="playlistTracksBody" role="table" aria-label="Playlist tracks">
+          <div class="track-grid" data-track-grid data-body-id="playlistTracksBody" role="table" aria-label="Playlist tracks">
             <div class="track-grid-head" role="rowgroup">
               <div class="track-grid-row" role="row">
                 <div class="track-grid-cell" role="columnheader"></div>
+                <div class="track-grid-cell" role="columnheader"><input type="checkbox" data-select-all="playlist" aria-label="Select all" /></div>
                 <div class="track-grid-cell" role="columnheader"></div>
                 <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden">sorted by &rarr;</span></div>
                 <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title" data-sort-default="Track"><span class="sort-label">Track</span></div>
@@ -609,6 +640,30 @@
     </div>
   </div>
 
+  <!-- Selection bar "Edit…": one genre / release date / rating edit for every selected track -->
+  <div class="confirm-overlay" id="groupEditOverlay" hidden>
+    <div class="confirm-dialog group-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="groupEditTitle">
+      <h3 id="groupEditTitle">Edit tracks</h3>
+      <div class="group-edit-fields">
+        <label for="groupEditGenre">Genre</label>
+        <input type="text" id="groupEditGenre" list="groupEditGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" />
+        <datalist id="groupEditGenreOptions"><!-- from the summary's genreOptions --></datalist>
+        <label for="groupEditReleaseDate">Release date</label>
+        <input type="text" id="groupEditReleaseDate" maxlength="10" autocomplete="off" spellcheck="false" data-tooltip="YYYY-MM-DD, or just YYYY-MM or YYYY: export completes a month or year" />
+        <span>Rating</span>
+        <div class="group-edit-rating-row">
+          <div class="track-detail-rating" id="groupEditRating" role="radiogroup" aria-label="Rating" data-tooltip="Click a star to rate; click the same star again to clear"><button type="button" role="radio" aria-checked="false" data-rating="1" aria-label="1 star">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" aria-label="2 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" aria-label="3 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" aria-label="4 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" aria-label="5 stars">&#9733;</button></div>
+          <span class="muted" id="groupEditRatingMixed" hidden>Mixed</span>
+        </div>
+      </div>
+      <p class="muted group-edit-hint">Only the fields you change are written; the rest stay as they are on each track. An empty field clears it.</p>
+      <div class="row confirm-actions">
+        <button type="button" id="groupEditCancelBtn">Cancel</button>
+        <button type="button" id="groupEditApplyBtn" data-primary>Apply</button>
+      </div>
+    </div>
+  </div>
+
   <div class="confirm-overlay" id="tracklistExportOverlay" hidden>
     <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="tracklistExportTitle">
       <h3 id="tracklistExportTitle">Export Tracklist</h3>
@@ -674,7 +729,7 @@
           <div class="track-detail-rating" id="trackDetailRating" role="radiogroup" aria-label="Rating" data-tooltip="Click a star to rate; click the same star again to clear"><button type="button" role="radio" aria-checked="false" data-rating="1" aria-label="1 star">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" aria-label="2 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" aria-label="3 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" aria-label="4 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" aria-label="5 stars">&#9733;</button></div>
           <input type="text" id="trackDetailGenre" class="track-detail-genre" list="trackDetailGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Genre" aria-label="Genre" data-tooltip="Genre: type one or pick one the library already has" />
           <datalist id="trackDetailGenreOptions"><!-- from the track detail's genreOptions --></datalist>
-          <input type="text" id="trackDetailYear" class="track-detail-year" inputmode="numeric" maxlength="4" autocomplete="off" spellcheck="false" placeholder="Year" aria-label="Release year" data-tooltip="Release year: empty for none" />
+          <input type="text" id="trackDetailReleaseDate" class="track-detail-release-date" maxlength="10" autocomplete="off" spellcheck="false" placeholder="Release date" aria-label="Release date" data-tooltip="Release date: YYYY-MM-DD, or just YYYY-MM or YYYY (export completes a month or year); empty for none" />
           <button type="button" class="track-detail-reveal" id="trackDetailRevealBtn" aria-label="Show in folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"></path></svg></button>
         </div>
         <button class="settings-close" id="trackDetailCloseBtn" aria-label="Close">&times;</button>

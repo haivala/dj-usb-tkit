@@ -1,4 +1,5 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
+import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState } from "../../track_table.mjs";
@@ -582,19 +583,7 @@ export function createLibraryTracksController(ctx) {
       renderSourceChips(ctx);
     },
     onPage: (_page, { first }) => {
-      if (first) {
-        // On a fresh query/sort (not a scroll-append), narrow the selection to
-        // what the new result set shows -- filtering the library is the user's
-        // way of scoping "add selected" / "analyze selected". Backend "Select
-        // all" sets `selectedTrackIds` directly and only re-renders (no `first`
-        // page load), so its larger-than-one-page selection is preserved until
-        // the query actually changes.
-        const loadedIds = new Set((ctx.state.tracks || []).filter(Boolean).map((t) => t.id));
-        ctx.state.selectedTrackIds = new Set(
-          [...ctx.state.selectedTrackIds].filter((id) => loadedIds.has(id)),
-        );
-        ctx.updateSelectionCount();
-      }
+      if (first) narrowTrackSelectionToLoaded(ctx, "library", ctx.state.tracks || []);
       renderLibraryChrome(ctx);
       void hydrateLoadedTracksPreviewsInBackground(ctx);
     },
@@ -721,14 +710,13 @@ export async function scanLibrary(ctx) {
   );
 }
 
-export async function analyzeSelectedTracks(ctx) {
-  const { emitStatus } = ctx;
-  const trackIds = Array.from(ctx.state.selectedTrackIds || []).filter(Boolean);
-  if (!trackIds.length) {
-    emitStatus("Select at least one track to analyze");
-    return;
-  }
-  await analyzeTrackIds(ctx, trackIds, "Analyze selected");
+// The selection bars' "Reanalyze": explicitly picked tracks are always
+// analyzed afresh, replacing what they had (cues are kept). Filling in only
+// what's missing is the header's job (Scan Library / Analyze Missing Tracks).
+export async function reanalyzeTracks(ctx, trackIds) {
+  const ids = (trackIds || []).filter(Boolean);
+  if (!ids.length) return;
+  await analyzeTrackIds(ctx, ids, "Reanalyze selected", { reanalyze: true });
   await ctx.refreshCurrentPlaylistTracks();
 }
 
@@ -861,7 +849,8 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
       ),
       includeRekordboxDb: state.rekordboxDbEnabled === true,
       includeMixxxDb: state.mixxxDbEnabled === true,
-      query: String(state.libraryQuery || "").trim()
+      query: String(state.libraryQuery || "").trim(),
+      reanalyze: !!options.reanalyze
     });
     analyzed = Math.max(0, Number(batch?.analyzed || 0));
     incomplete = Math.max(0, Number(batch?.incomplete || 0));
@@ -1246,8 +1235,7 @@ export function enabledSourceRoots(sourceRoots, sourceRootEnabled = {}, missingS
   });
 }
 
-export function scanLibraryButtonLabel(sourceRoots, selectedCount = 0) {
-  if (Number(selectedCount) > 0) return "Analyze Selected";
+export function scanLibraryButtonLabel(sourceRoots) {
   const count = Array.isArray(sourceRoots) ? sourceRoots.length : 0;
   return count > 1 ? "Scan Libraries" : "Scan Library";
 }

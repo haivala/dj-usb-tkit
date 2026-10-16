@@ -1,4 +1,6 @@
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
+import { bindTrackSelection } from "../shared/track_selection.mjs";
+import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
 import { enabledSourceRoots, LIBRARY_LOAD_LIMIT_DEFAULT } from "./actions.mjs";
 
 export function bindLibraryEvents(ctx) {
@@ -25,7 +27,7 @@ export function bindLibraryEvents(ctx) {
     scanLibrary,
     scanRekordboxDb,
     scanMixxxDb,
-    analyzeSelectedTracks,
+    reanalyzeTracks,
     addLibrarySelectionToCurrentPlaylist,
     libraryTracksCtl,
   } = ctx;
@@ -158,8 +160,7 @@ export function bindLibraryEvents(ctx) {
   });
 
   el.scanLibraryBtn.addEventListener("click", () => {
-    const action = state.selectedTrackIds.size > 0 ? analyzeSelectedTracks : scanLibrary;
-    action().catch(catchErr(emitStatus));
+    scanLibrary().catch(catchErr(emitStatus));
   });
 
   // Library chips: the checkbox is a pure filter (never an import); ↻ imports.
@@ -202,49 +203,29 @@ export function bindLibraryEvents(ctx) {
     if (state.sourceRoots.length > 6) el.sourceBar?.classList.add("collapsed");
   }, { passive: true });
 
-  el.addSelectedBtn.addEventListener("click", () => {
-    // Backend-owned: it enumerates the ticked ids against the current library
-    // filter and materializes any browse-only rows -- so a selection spanning
-    // pages that have since been dropped isn't silently lost.
-    addLibrarySelectionToCurrentPlaylist({
-      trackIds: Array.from(state.selectedTrackIds || []),
-    }).catch(catchErr(emitStatus));
-  });
-
-  el.selectAllTracks.addEventListener("change", (event) => {
-    const checkbox = event.target;
-    if (!checkbox.checked) {
-      state.selectedTrackIds.clear();
-      renderLibraryRows();
-      updateSelectionCount();
-      return;
-    }
-    (async () => {
-      // Backend enumerates every id matching the current filter in one call --
-      // no need to page the whole list into the client to collect ids.
-      const data = await withProgress("Selecting all matching tracks", async (progress) => {
-        progress(40, "Enumerating tracks...");
-        return command("list_matching_track_ids", {
-          sourceRoots: ctx.enabledLibrarySourceRoots(),
-          includeRekordboxDb: state.rekordboxDbEnabled === true,
-          includeMixxxDb: state.mixxxDbEnabled === true,
-          query: String(state.libraryQuery || "").trim(),
-        });
+  bindTrackSelection(ctx, {
+    view: "library",
+    body: el.libraryTableBody,
+    ctl: libraryTracksCtl,
+    // Backend enumerates every id matching the current filter in one call --
+    // no need to page the whole list into the client to collect ids.
+    selectAll: async () => {
+      const data = await command("list_matching_track_ids", {
+        sourceRoots: ctx.enabledLibrarySourceRoots(),
+        includeRekordboxDb: state.rekordboxDbEnabled === true,
+        includeMixxxDb: state.mixxxDbEnabled === true,
+        query: String(state.libraryQuery || "").trim(),
       });
-      if (!checkbox.checked) return;
-      state.selectedTrackIds = new Set((data?.trackIds || []).filter(Boolean));
-      renderLibraryRows();
-      updateSelectionCount();
-    })().catch(catchErr(emitStatus));
-  });
-
-  el.libraryTableBody.addEventListener("change", (event) => {
-    const id = event.target?.dataset?.id;
-    if (!id) return;
-
-    if (event.target.checked) state.selectedTrackIds.add(id);
-    else state.selectedTrackIds.delete(id);
-    updateSelectionCount();
+      return (data?.trackIds || []).filter(Boolean);
+    },
+    actions: {
+      // Backend-owned: it enumerates the ticked ids against the current
+      // library filter and materializes any browse-only rows -- so a
+      // selection spanning pages that have since been dropped isn't lost.
+      add: (ids) => addLibrarySelectionToCurrentPlaylist({ trackIds: ids }),
+      reanalyze: (ids) => reanalyzeTracks(ids),
+      edit: (ids, rows) => editTrackSelection(ctx, "library", ids, rows),
+    },
   });
 
   el.libraryTableBody.addEventListener("click", (event) => {

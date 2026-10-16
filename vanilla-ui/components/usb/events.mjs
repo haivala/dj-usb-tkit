@@ -1,6 +1,8 @@
 import { catchErr, handleTrackAction, trackMetaFingerprint, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
+import { bindTrackSelection } from "../shared/track_selection.mjs";
+import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
 
 export function bindUsbEvents(ctx) {
   const {
@@ -42,6 +44,33 @@ export function bindUsbEvents(ctx) {
   // wires itself here.
   usbPlaylistTracksCtl.attachScroll();
   usbHistoryTracksCtl.attachScroll();
+
+  // Selection: "+ Playlist" sends the rows themselves, as each row's "+" does.
+  // Select all fetches the whole list (`limit: 0`) under the current search.
+  for (const [view, body, ctl, fetchCommand] of [
+    ["usbPlaylist", el.usbPlaylistTracks, usbPlaylistTracksCtl, "fetch_usb_playlist_tracks"],
+    ["usbHistory", el.historyTracks, usbHistoryTracksCtl, "fetch_usb_history_tracks"],
+  ]) {
+    bindTrackSelection(ctx, {
+      view,
+      body,
+      ctl,
+      selectAll: async () => {
+        if (ctl.scopeId == null) return [];
+        const data = await ctx.command(fetchCommand, {
+          usbRoot: state.usbRoot || null,
+          id: ctl.scopeId,
+          query: ctl.query || "",
+          limit: 0,
+        });
+        return (data?.items || []).map((track) => ctx.normalizeTrack(track));
+      },
+      actions: {
+        add: (_ids, rows) => ctx.addTracksToCurrentPlaylist(rows),
+        edit: (ids, rows) => editTrackSelection(ctx, view, ids, rows),
+      },
+    });
+  }
 
   el.refreshUsbBtn.addEventListener("click", () => {
     refreshUsb().catch(catchErr(emitStatus));

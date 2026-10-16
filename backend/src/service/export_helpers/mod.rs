@@ -136,6 +136,16 @@ pub struct LocalTrackForAnalysis {
     pub reanalysis: bool,
 }
 
+impl LocalTrackForAnalysis {
+    /// Analyze afresh even if this is the track's first analysis: keep no
+    /// BPM, key or first beat (`AnalyzeNewTracksRequest::reanalyze`).
+    pub fn force_reanalysis(&mut self) {
+        self.kept = KeptAnalysis::default();
+        self.kept_first_beat_ms = None;
+        self.reanalysis = true;
+    }
+}
+
 /// A BPM / key that an analysis run keeps: set by the user or imported from
 /// rekordbox / Mixxx, on a track being analyzed for the first time.
 #[derive(Debug, Clone, Default, PartialEq)]

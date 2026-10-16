@@ -1,4 +1,6 @@
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
+import { bindTrackSelection, clearTrackSelection } from "../shared/track_selection.mjs";
+import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 import { bindListDragReorder } from "../shared/list_drag_reorder.mjs";
 
@@ -19,6 +21,7 @@ export function bindPlaylistEvents(ctx) {
     updateModeText,
     exportPlaylistToUsb,
     analyzeTrackIds,
+    reanalyzeTracks,
     refreshCurrentPlaylistTracks,
     playlistTracksCtl,
     commitActivePlaylistSort,
@@ -109,27 +112,55 @@ export function bindPlaylistEvents(ctx) {
     }, 180);
   });
 
+  // Remove tracks from the open playlist (the row's "×" and the selection
+  // bar's Remove); the tracks stay in the library.
+  const removeFromCurrentPlaylist = async (trackIds) => {
+    const playlist = getCurrentPlaylist();
+    if (!playlist || !trackIds.length) return;
+    try {
+      const res = await command("remove_tracks_from_playlist", {
+        playlistId: playlist.id,
+        trackIds
+      });
+      await clearTrackSelection(ctx, "playlist");
+      await loadPlaylists();
+      state.currentPlaylistId = playlist.id;
+      updateModeText();
+      await switchView(playlist.id);
+      emitStatus(`Removed ${res.removed || 0} track(s) from ${playlist.name}`);
+    } catch (err) {
+      console.error(err);
+      emitStatus(`Remove failed: ${err.message || err}`);
+    }
+  };
+
+  bindTrackSelection(ctx, {
+    view: "playlist",
+    body: el.playlistTracksBody,
+    ctl: playlistTracksCtl,
+    // `limit: 0` returns the whole playlist under the current search.
+    selectAll: async () => {
+      const playlist = getCurrentPlaylist();
+      if (!playlist) return [];
+      const data = await command("get_playlist_tracks", {
+        playlistId: playlist.id,
+        query: playlistTracksCtl.query || "",
+        limit: 0,
+      });
+      return data?.items || [];
+    },
+    actions: {
+      remove: (ids) => removeFromCurrentPlaylist(ids),
+      reanalyze: (ids) => reanalyzeTracks(ids),
+      edit: (ids, rows) => editTrackSelection(ctx, "playlist", ids, rows),
+    },
+  });
+
   el.panels.playlist.addEventListener("click", (event) => {
     const actionTarget = event.target.closest("[data-action]");
     if (actionTarget?.dataset?.action === "remove-playlist-track") {
-      const playlist = getCurrentPlaylist();
       const track = resolveRowActionTrack(playlistTracksCtl.view, actionTarget);
-      if (!playlist || !track?.id) return;
-      command("remove_tracks_from_playlist", {
-        playlistId: playlist.id,
-        trackIds: [track.id]
-      })
-        .then(async (res) => {
-          await loadPlaylists();
-          state.currentPlaylistId = playlist.id;
-          updateModeText();
-          await switchView(playlist.id);
-          emitStatus(`Removed ${res.removed || 0} track(s) from ${playlist.name}`);
-        })
-        .catch((err) => {
-          console.error(err);
-          emitStatus(`Remove failed: ${err.message || err}`);
-        });
+      if (track?.id) removeFromCurrentPlaylist([track.id]);
       return;
     }
 

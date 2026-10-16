@@ -79,9 +79,11 @@ drive selection from being rendered against a newer selected drive.
 - `relocate_source_root`
 - `get_tracks_by_ids_with_previews`
 - `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform,
-  keyOptions, genre, rating, genreOptions }` for the cue editor (see
-  `docs/CUE_EDITOR.md`). `rating` is 0–5 stars; `genreOptions` is every library
-  genre, sorted ignoring case. `detailWaveform` is
+  keyOptions, genre, rating, releaseDate, genreOptions }` for the cue editor
+  (see `docs/CUE_EDITOR.md`). `rating` is 0–5 stars; `releaseDate` is the date
+  export writes to the PDB and the eDB (the track's date, completed from its
+  file timestamp as export does); `genreOptions` is every library genre,
+  sorted ignoring case. `detailWaveform` is
   the **base64** of the raw PWV5 colour-detail waveform payload from the `.EXT`
   (2 bytes/entry, BE u16; absent when the track has no analysis). Cues are
   ordered by `sortOrder`.
@@ -101,9 +103,10 @@ drive selection from being rendered against a newer selected drive.
 - `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw, usbMediaPathRaw? }` →
   reads `{ firstBeatMs, cues, detailWaveform, keyOptions }` straight off an
   **on-USB** ANLZ bundle for the cue editor opened from a USB playlist / history
-  row (no local `tracks` row need exist), plus `{ genre, rating }` from the
-  track's PDB row (at `usbMediaPathRaw`; none when it's missing) and
-  `genreOptions` (the library's genres and the PDB's).
+  row (no local `tracks` row need exist), plus `{ genre, rating, releaseDate }`
+  from the track's PDB row at `usbMediaPathRaw` (none when it's missing; the
+  date is the row's release date string, else its year) and `genreOptions`
+  (the library's genres and the PDB's).
 - `save_usb_track_analysis_edits` — `{ usbRoot, usbAnalysisPathRaw,
   usbMediaPathRaw, bpm?, key?, durationMs?, firstBeatMs?, cues?, localTrackId?,
   title?, artist?, album? }` → writes the on-device ANLZ, eDB and `export.pdb`
@@ -127,26 +130,40 @@ drive selection from being rendered against a newer selected drive.
   and eDB `cue` rows are left exactly as they are; the editor sends `cues` only
   when they were edited, so a BPM, key or first-beat edit never rewrites cues
   (such as rekordbox memory cues) the app's cue model can't represent.
-- `save_track_metadata_edits` — `{ trackId, genre?, rating?, year? }` → sets
-  the library track's genre, star rating (0–5) and/or release year (1000 to
-  next year) and nothing else, clearing `last_exported_*` on every playlist
-  containing it. A `null` field is left unchanged; an empty `genre` or a `year`
-  of 0 clears it. The genre gets `genre_source = 'user'`, so rescans and
-  rekordbox / Mixxx imports keep it over the file's tag; the year gets
-  `release_year_source = 'user'`, which rescans keep, and export then drops a
-  release date tag from another year (the track is dated 1 January of the
-  year). Returns `{ trackId, genre, rating, year }`. The cue editor sends it
-  instead of `save_track_analysis_edits` when only the genre / rating / year
-  changed.
-- `save_usb_track_metadata_edits` — `{ usbRoot, usbMediaPathRaw, genre?,
-  rating?, year?, localTrackId?, title?, artist?, album? }` → the same edit on a
-  USB track: the `export.pdb` track row (t00 genre, rating, release year, and a
-  release date from another year becomes 1 January of it; a new genre gets a
-  t01 row) and the eDB `content` row **in place**, plus the resolved library
-  track. A track missing from either database blocks the save before anything
-  is written. Leaves the ANLZ bundle, BPM, key and cues alone. Returns
-  `{ localUpdated, localTrackId }`. A background `usb_write` job, serialized by
-  `usb_write_lock` like `save_usb_track_analysis_edits`.
+- `save_track_metadata_edits` — `{ trackIds, genre?, rating?, releaseDate? }`
+  → sets every listed library track's genre, star rating (0–5) and/or release
+  date to the same values and nothing else, clearing `last_exported_*` on
+  every playlist containing them. `releaseDate` is `YYYY`, `YYYY-MM` or
+  `YYYY-MM-DD` (month and day may have one digit), a real date in a year from
+  1000 to next year; it is stored zero-padded as entered, with its year as
+  the release year, and export completes a year or month as it does a tag's.
+  A `null` field is left unchanged; an empty `genre` or `releaseDate` clears
+  it (the date clears the year too). The genre gets `genre_source = 'user'`,
+  so rescans and rekordbox / Mixxx imports keep it over the file's tag; the
+  date gets `release_date_source = 'user'`, so rescans keep it and its year.
+  An unknown id blocks the save. Returns `{ items: [{ trackId, genre, rating,
+  year, releaseDate }] }`, `releaseDate` being the date export writes (as
+  `get_track_detail`'s). The cue editor sends it with one id instead of
+  `save_track_analysis_edits` when only the genre / rating / release date
+  changed; the selection bar's Edit sends the selection.
+- `save_usb_track_metadata_edits` — `{ usbRoot, tracks: [{ usbMediaPathRaw,
+  localTrackId?, title?, artist?, album? }], genre?, rating?, releaseDate? }`
+  → the same edit on USB tracks: each `export.pdb` track row (t00 genre,
+  rating, release year and date; a new genre gets one t01 row for all of
+  them) and eDB `content` row **in place**, plus each resolved library track.
+  The stick holds only full dates, so a `YYYY` or `YYYY-MM` keeps the date
+  already there when it falls inside it, else becomes the first day of that
+  year or month. A track missing from either database blocks the save before
+  anything is written. Leaves the ANLZ bundle, BPM, key and cues alone.
+  Returns `{ items: [{ usbMediaPathRaw, localTrackId?, year?, releaseDate? }]
+  }` with the PDB's year and date after the save. A background `usb_write`
+  job, serialized by `usb_write_lock` like `save_usb_track_analysis_edits`.
+- `get_tracks_metadata_summary` — `{ trackIds }` /
+  `get_usb_tracks_metadata_summary` — `{ usbRoot, usbMediaPathsRaw }` → what
+  the tracks share, for the selection bar's Edit: `{ count, genre, rating,
+  releaseDate, genreOptions }`, each field `{ value?, mixed }` (`mixed` when the
+  tracks differ). The USB form reads the stick's PDB rows; `genreOptions`
+  adds its genres to the library's.
 
 ### Settings
 

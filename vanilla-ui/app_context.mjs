@@ -14,6 +14,7 @@ import * as uiCtrl from "./ui_controller.mjs";
 import * as messages from "./message_bus.mjs";
 import { createInitialState, createTableSortState, createEventLogState } from "./app_state.mjs";
 import { renderWaveformsIn } from "./waveform.mjs";
+import { createGroupEditDialogController } from "./components/shared/track_metadata_edits.mjs";
 
 // Every element with an `id` in index.html, by id (`el.statusText`, …). Ids
 // inside <template>s aren't part of the document, so they're never collected.
@@ -94,7 +95,7 @@ export function createAppContext(env) {
     refreshMissingSourceRoots applyRealtimeAnalyzedTrackUpdate hydrateLoadedTracksPreviewsInBackground
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
     scheduleLibrarySearch resetAndLoadLibraryTracks
-    reloadTrackListsForKeyNotation enabledLibrarySourceRoots scanLibrary analyzeSelectedTracks
+    reloadTrackListsForKeyNotation enabledLibrarySourceRoots scanLibrary reanalyzeTracks
     scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState promoteTrackIdentity
     patchTrackAnalysisFields`);
   bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus showDiagReportView
@@ -115,6 +116,7 @@ export function createAppContext(env) {
   ctx.openConfirmDialog = (opts) => ctx.confirmDialog.open(opts);
   ctx.tracklistExportDialog = uiCtrl.createTracklistExportDialogController(ctx.el);
   ctx.playlistImportDialog = uiCtrl.createPlaylistImportDialogController(ctx.el, ctx.document);
+  ctx.groupEditDialog = createGroupEditDialogController(ctx.el, ctx.document);
   ctx.trackDetailDialog = trackDetail.createAppTrackDetailController(ctx);
   ctx.libraryTracksCtl = library.createLibraryTracksController(ctx);
   ctx.playlistTracksCtl = playlist.createPlaylistTracksController(ctx);

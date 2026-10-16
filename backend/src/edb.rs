@@ -1590,17 +1590,15 @@ pub fn normalize_export_date(value: Option<&str>) -> Option<String> {
     if out.len() == 10 { Some(out) } else { None }
 }
 
-fn file_timestamp_date(track: &ExportManifestTrack) -> Option<String> {
-    let secs = track.file_timestamp_at?;
-    let dt = chrono::Utc.timestamp_opt(secs, 0).single()?;
+fn timestamp_date(secs: Option<i64>) -> Option<String> {
+    let dt = chrono::Utc.timestamp_opt(secs?, 0).single()?;
     Some(dt.format("%Y-%m-%d").to_string())
 }
 
 /// The part of the release date the tags do pin down when there's no full
-/// date: `YYYY-MM` or `YYYY` from a partial date tag, else `YYYY` from the
-/// year tag.
-fn partial_release_date(track: &ExportManifestTrack) -> Option<String> {
-    let tag = track.release_date.as_deref().map(str::trim).unwrap_or("");
+/// date: `YYYY-MM` or `YYYY` from a partial date, else `YYYY` from the year.
+fn partial_release_date(release_date: Option<&str>, release_year: Option<u32>) -> Option<String> {
+    let tag = release_date.map(str::trim).unwrap_or("");
     fn digits(s: Option<&str>) -> Option<&str> {
         s.filter(|s| s.bytes().all(|b| b.is_ascii_digit()))
     }
@@ -1612,33 +1610,52 @@ fn partial_release_date(track: &ExportManifestTrack) -> Option<String> {
     if let Some(year) = digits(tag.get(..4)) {
         return Some(year.to_string());
     }
-    track
-        .release_year
+    release_year
         .filter(|year| (1..=9999).contains(year))
         .map(|year| format!("{year:04}"))
+}
+
+/// A partial date (`YYYY` or `YYYY-MM`) made a full one: `candidate` when it
+/// falls inside it, else the start of that year or month.
+pub fn complete_partial_date(partial: &str, candidate: Option<&str>) -> String {
+    match candidate {
+        Some(date) if date.len() == 10 && date.starts_with(partial) => date.to_string(),
+        _ if partial.len() == 4 => format!("{partial}-01-01"),
+        _ => format!("{partial}-01"),
+    }
 }
 
 pub fn resolve_track_created_date_for_export(track: &ExportManifestTrack) -> Option<String> {
     normalize_export_date(track.recorded_date.as_deref())
         .or_else(|| normalize_export_date(track.release_date.as_deref()))
-        .or_else(|| file_timestamp_date(track))
+        .or_else(|| timestamp_date(track.file_timestamp_at))
 }
 
-/// Release date written to both the PDB and the eDB: the full date tag, else
-/// the file timestamp. A file timestamp that contradicts a year (or month)
-/// the tags do carry is replaced by the start of that year (or month).
-pub fn resolve_track_release_date_for_export(track: &ExportManifestTrack) -> Option<String> {
-    normalize_export_date(track.release_date.as_deref()).or_else(|| {
-        let file_date = file_timestamp_date(track);
-        let Some(partial) = partial_release_date(track) else {
-            return file_date;
-        };
-        match file_date {
-            Some(date) if date.starts_with(&partial) => Some(date),
-            _ if partial.len() == 4 => Some(format!("{partial}-01-01")),
-            _ => Some(format!("{partial}-01")),
+/// Release date written to both the PDB and the eDB: the full date, else the
+/// file timestamp (Unix seconds). A file timestamp that contradicts a year
+/// (or month) the date or the year do carry is replaced by the start of that
+/// year (or month).
+pub fn resolve_release_date(
+    release_date: Option<&str>,
+    release_year: Option<u32>,
+    file_timestamp_at: Option<i64>,
+) -> Option<String> {
+    normalize_export_date(release_date).or_else(|| {
+        let file_date = timestamp_date(file_timestamp_at);
+        match partial_release_date(release_date, release_year) {
+            Some(partial) => Some(complete_partial_date(&partial, file_date.as_deref())),
+            None => file_date,
         }
     })
+}
+
+/// [`resolve_release_date`] for an export manifest track.
+pub fn resolve_track_release_date_for_export(track: &ExportManifestTrack) -> Option<String> {
+    resolve_release_date(
+        track.release_date.as_deref(),
+        track.release_year,
+        track.file_timestamp_at,
+    )
 }
 
 /// Release year written to both the PDB and the eDB: the year tag, else the

@@ -909,7 +909,7 @@ impl BackendService {
             key_options: key_option_groups(key_notation_setting(&conn)?),
             genre: metadata.genre,
             rating: metadata.rating,
-            year: metadata.year,
+            release_date: metadata.release_date,
             genre_options: super::track_metadata::genre_options(&conn, Vec::new())?,
         })
     }
@@ -1064,7 +1064,7 @@ impl BackendService {
                 logging::emit(
                     Level::Warn,
                     "cues.usb-detail.no-pdb-metadata",
-                    &format!("could not read genre/rating/year for {media_path}: {err}"),
+                    &format!("could not read genre/rating/release date for {media_path}: {err}"),
                 );
                 Default::default()
             })
@@ -1078,7 +1078,7 @@ impl BackendService {
             key_options: key_option_groups(notation),
             genre: metadata.genre,
             rating: metadata.rating,
-            year: metadata.year,
+            release_date: metadata.release_date,
             genre_options: super::track_metadata::genre_options(&*self.db.connect()?, usb_genres)?,
         })
     }

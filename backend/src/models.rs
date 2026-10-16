@@ -1491,6 +1491,11 @@ pub struct AnalyzeNewTracksRequest {
     pub include_mixxx_db: bool,
     #[serde(default)]
     pub query: String,
+    /// With `track_ids`: analyze each one afresh, replacing an imported or
+    /// edited BPM, key and first beat even on its first analysis (the
+    /// selection bar's Reanalyze). Without it a first analysis keeps them.
+    #[serde(default)]
+    pub reanalyze: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2227,9 +2232,10 @@ pub struct TrackDetail {
     pub genre: Option<String>,
     /// Star rating, 0 (none) to 5.
     pub rating: u8,
-    /// Release year.
+    /// The release date export writes (`YYYY-MM-DD`: the track's date,
+    /// completed from its file timestamp), or as much of one as it has.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub year: Option<u32>,
+    pub release_date: Option<String>,
     /// Genres the editor's genre field suggests, sorted case-insensitively.
     pub genre_options: Vec<String>,
 }
@@ -2323,9 +2329,9 @@ pub struct UsbTrackAnalysisDetail {
     pub genre: Option<String>,
     /// The track's star rating in the USB's PDB, 0 to 5.
     pub rating: u8,
-    /// The track's release year in the USB's PDB.
+    /// The track's release date in the USB's PDB, else its year.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub year: Option<u32>,
+    pub release_date: Option<String>,
     /// The library's genres and the USB's, sorted case-insensitively.
     pub genre_options: Vec<String>,
 }
@@ -2393,48 +2399,54 @@ pub struct SaveUsbTrackAnalysisEditsData {
     pub local_track_id: Option<String>,
 }
 
-/// Genre / star rating edit from the cue editor. Separate from the analysis
-/// save so a metadata-only edit leaves the beat grid, key and cues alone.
-#[derive(Debug, Clone, Deserialize)]
+/// Genre / star rating / release date edit, from the cue editor (one track)
+/// or the selection bar's Edit (many). Separate from the analysis save so a
+/// metadata-only edit leaves the beat grid, key and cues alone. Every track
+/// gets the same values.
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveTrackMetadataEditsRequest {
-    pub track_id: String,
+    pub track_ids: Vec<String>,
     /// `None` ⇒ leave unchanged; an empty string clears the genre.
     #[serde(default)]
     pub genre: Option<String>,
     /// `None` ⇒ leave unchanged; 0 (no stars) to 5.
     #[serde(default)]
     pub rating: Option<u8>,
-    /// `None` ⇒ leave unchanged; 0 clears the year.
+    /// `None` ⇒ leave unchanged; `YYYY`, `YYYY-MM` or `YYYY-MM-DD` sets the
+    /// release date and its year, an empty string clears them.
     #[serde(default)]
-    pub year: Option<u32>,
+    pub release_date: Option<String>,
 }
 
+/// A library track's genre, rating, release year and release date (as
+/// `TrackDetail::release_date`) after a save.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SaveTrackMetadataEditsData {
+pub struct TrackMetadataValues {
     pub track_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,
     pub rating: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub year: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
 }
 
-/// [`SaveTrackMetadataEditsRequest`] for a track opened from a USB view:
-/// written to the USB's PDB and eDB in place, and to the matched library track.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SaveUsbTrackMetadataEditsRequest {
-    pub usb_root: String,
+pub struct SaveTrackMetadataEditsData {
+    /// One per saved track, in request order.
+    pub items: Vec<TrackMetadataValues>,
+}
+
+/// One USB track of a [`SaveUsbTrackMetadataEditsRequest`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbMetadataEditTrack {
     /// eDB `content.path` / PDB track path lookup key.
     pub usb_media_path_raw: String,
-    #[serde(default)]
-    pub genre: Option<String>,
-    #[serde(default)]
-    pub rating: Option<u8>,
-    #[serde(default)]
-    pub year: Option<u32>,
     /// Same as `SaveUsbTrackAnalysisEditsRequest::local_track_id`.
     #[serde(default)]
     pub local_track_id: Option<String>,
@@ -2446,12 +2458,80 @@ pub struct SaveUsbTrackMetadataEditsRequest {
     pub album: Option<String>,
 }
 
+/// [`SaveTrackMetadataEditsRequest`] for tracks opened from a USB view:
+/// written to the USB's PDB and eDB in place, and to the matched library
+/// tracks.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveUsbTrackMetadataEditsRequest {
+    pub usb_root: String,
+    pub tracks: Vec<UsbMetadataEditTrack>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub rating: Option<u8>,
+    #[serde(default)]
+    pub release_date: Option<String>,
+}
+
+/// What a USB metadata save did to one track's library copy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbMetadataEditResult {
+    pub usb_media_path_raw: String,
+    /// The library track the edit was also written to, if one matched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_track_id: Option<String>,
+    /// The track's release year and date in the PDB after the save.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub year: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveUsbTrackMetadataEditsData {
-    pub local_updated: bool,
+    /// One per saved track, in request order.
+    pub items: Vec<UsbMetadataEditResult>,
+}
+
+/// One field across a set of tracks: the value they all share, or `mixed`
+/// when they differ (then `value` is absent).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedValue<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_track_id: Option<String>,
+    pub value: Option<T>,
+    pub mixed: bool,
+}
+
+/// What a set of tracks has in common, for the selection bar's Edit: each
+/// field shared by all of them, or mixed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TracksMetadataSummary {
+    pub count: usize,
+    pub genre: SharedValue<String>,
+    /// Star rating, 0 (none) to 5.
+    pub rating: SharedValue<u8>,
+    /// As `TrackDetail::release_date` (library) or the PDB's (USB).
+    pub release_date: SharedValue<String>,
+    /// Genres the editor's genre field suggests, sorted case-insensitively.
+    pub genre_options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTracksMetadataSummaryRequest {
+    pub track_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsbTracksMetadataSummaryRequest {
+    pub usb_root: String,
+    pub usb_media_paths_raw: Vec<String>,
 }
 
 #[cfg(test)]

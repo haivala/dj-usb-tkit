@@ -84,7 +84,7 @@ function installTrackDetailMock(page, opts = {}) {
                 keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: keyLabel(k) })) })),
                 genre: "Techno",
                 rating: 3,
-                year: 2009,
+                releaseDate: "2009-10-09",
                 genreOptions: ["Breakbeat", "Techno"],
               },
             };
@@ -95,7 +95,15 @@ function installTrackDetailMock(page, opts = {}) {
           }
           if (command === "save_track_metadata_edits") {
             const r = payload?.request || {};
-            return { ok: true, data: { trackId: r.trackId, genre: r.genre ?? "Techno", rating: r.rating ?? 3, year: r.year === undefined ? 2009 : r.year || undefined } };
+            return {
+              ok: true,
+              data: {
+                items: (r.trackIds || []).map((trackId) => ({
+                  trackId, genre: r.genre ?? "Techno", rating: r.rating ?? 3,
+                  year: r.releaseDate === undefined ? 2009 : Number(r.releaseDate.slice(0, 4)) || undefined,
+                })),
+              },
+            };
           }
           // Tiny stand-in for the backend player clock, so pause/resume
           // report a real (advancing, then frozen) position like player.rs does.
@@ -1044,7 +1052,7 @@ test("BPM stepper nudges by 0.01 and clamps to a positive value", async ({ page 
 // start cue on the first beat.
 const FOLLOW_GRID_SEED = { seedCues: [30120, 60000], seedStart: 120, quantize: false };
 
-test("genre, star rating and year: a change to only them saves only them, leaving the beat grid, key and cues alone", async ({ page }) => {
+test("genre, star rating and release date: a change to only them saves only them, leaving the beat grid, key and cues alone", async ({ page }) => {
   await openCueEditor(page);
   await expect(page.locator("#trackDetailGenre")).toHaveValue("Techno");
   await expect(page.locator("#trackDetailGenreOptions option")).toHaveCount(2);
@@ -1062,24 +1070,25 @@ test("genre, star rating and year: a change to only them saves only them, leavin
   await page.keyboard.press("Control+z");
   await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(5);
 
-  // The year takes four digits; anything else puts the field back.
-  const year = page.locator("#trackDetailYear");
-  await expect(year).toHaveValue("2009");
-  await year.fill("19x");
-  await year.dispatchEvent("change");
-  await expect(year).toHaveValue("2009");
-  await year.fill("1994");
-  await year.dispatchEvent("change");
-  await expect(year).toHaveValue("1994");
+  // The release date takes YYYY, YYYY-MM or YYYY-MM-DD; anything else puts
+  // the field back.
+  const date = page.locator("#trackDetailReleaseDate");
+  await expect(date).toHaveValue("2009-10-09");
+  await date.fill("19x");
+  await date.dispatchEvent("change");
+  await expect(date).toHaveValue("2009-10-09");
+  await date.fill("1994-3-7");
+  await date.dispatchEvent("change");
+  await expect(date).toHaveValue("1994-3-7");
 
   await page.locator("#trackDetailSaveBtn").click();
   await expect(page.locator("#trackDetailOverlay")).toBeHidden();
   const calls = await page.evaluate(() => window.__calls);
   expect(calls.some((c) => c.command === "save_track_analysis_edits")).toBe(false);
   const save = calls.find((c) => c.command === "save_track_metadata_edits");
-  expect(save.request).toEqual({ trackId: "t1", genre: "Breakbeat", rating: 5, year: 1994 });
+  expect(save.request).toEqual({ trackIds: ["t1"], genre: "Breakbeat", rating: 5, releaseDate: "1994-3-7" });
   await expect(page.locator("#statusText")).toContainText("Saved track details");
-  // The library row shows the saved year.
+  // The library row shows the year the save returned.
   await expect(page.locator("#libraryTableBody .track-grid-row .td-year")).toHaveText("1994");
 });
 
@@ -1103,7 +1112,7 @@ test("a rating edit alongside a BPM edit saves both, each with only its own fiel
   const calls = await page.evaluate(() => window.__calls);
   expect(calls.find((c) => c.command === "save_track_analysis_edits").request.bpm).toBe(130);
   // Genre wasn't touched: only the rating is sent.
-  expect(calls.find((c) => c.command === "save_track_metadata_edits").request).toEqual({ trackId: "t1", rating: 1 });
+  expect(calls.find((c) => c.command === "save_track_metadata_edits").request).toEqual({ trackIds: ["t1"], rating: 1 });
 });
 
 async function setBpmInput(page, value) {
@@ -2010,7 +2019,15 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
           }
           if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") return tracksResponse;
           if (command === "get_usb_track_detail") {
-            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })), genre: "House", rating: 2, year: 2015, genreOptions: ["House"] } };
+            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })), genre: "House", rating: 2, releaseDate: "2015-06-01", genreOptions: ["House"] } };
+          }
+          if (command === "save_usb_track_metadata_edits") {
+            const r = payload?.request || {};
+            const year = r.releaseDate ? Number(r.releaseDate.slice(0, 4)) : undefined;
+            return {
+              ok: true,
+              data: { items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, localTrackId: "local-1", year })) },
+            };
           }
           if (command === "save_usb_track_analysis_edits") {
             if (window.__usbSaveFails) {
@@ -2161,17 +2178,19 @@ test("a rating-only edit from a USB row saves only the rating through the USB me
   const save = calls.find((c) => c.command === "save_usb_track_metadata_edits");
   expect(save.request).toEqual({
     usbRoot: "/Volumes/USB-TEST",
-    usbMediaPathRaw: "/Contents/USB Artist/USB Album/track.mp3",
+    tracks: [{
+      usbMediaPathRaw: "/Contents/USB Artist/USB Album/track.mp3",
+      localTrackId: "local-1",
+      title: "USB Cue Track",
+      artist: "USB Artist",
+      album: "USB Album",
+    }],
     rating: 4,
-    localTrackId: "local-1",
-    title: "USB Cue Track",
-    artist: "USB Artist",
-    album: "USB Album",
   });
   await expect(page.locator("#statusText")).toContainText("Saved track details to USB");
 });
 
-test("clearing the year from a USB row sends year 0 and blanks the row's year", async ({ page }) => {
+test("clearing the release date from a USB row sends an empty date and blanks the row's year", async ({ page }) => {
   await installUsbTrackDetailMock(page);
   await page.goto("/");
   await openUsbView(page, "usb-playlists");
@@ -2180,17 +2199,17 @@ test("clearing the year from a USB row sends year 0 and blanks the row's year", 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await expect(row.locator(".td-year")).toHaveText("2015");
   await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailYear")).toHaveValue("2015");
+  await expect(page.locator("#trackDetailReleaseDate")).toHaveValue("2015-06-01");
 
-  await page.locator("#trackDetailYear").fill("");
-  await page.locator("#trackDetailYear").dispatchEvent("change");
+  await page.locator("#trackDetailReleaseDate").fill("");
+  await page.locator("#trackDetailReleaseDate").dispatchEvent("change");
   await page.locator("#trackDetailSaveBtn").click();
   await expect(page.locator("#trackDetailOverlay")).toBeHidden();
 
   const calls = await page.evaluate(() => window.__calls);
   expect(calls.some((c) => c.command === "save_usb_track_analysis_edits")).toBe(false);
   const save = calls.find((c) => c.command === "save_usb_track_metadata_edits");
-  expect(save.request.year).toBe(0);
+  expect(save.request.releaseDate).toBe("");
   expect(save.request.rating).toBeUndefined();
   await expect(row.locator(".td-year")).toHaveText("");
 });

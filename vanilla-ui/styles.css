@@ -1035,8 +1035,8 @@ main {
 /* Player menu and other panels: description text + action rows are fixed chrome */
 .panel > p.muted     { flex-shrink: 0; }
 .panel > .row        { flex: none; }
-.panel > .search-row { flex: none; }
-.split > .right > .search-row { flex: none; }
+.panel > .track-toolbar { flex: none; }
+.split > .right > .track-toolbar { flex: none; }
 
 /* ── source folder chips ───────────────────────────── */
 
@@ -1317,9 +1317,11 @@ main {
   white-space: nowrap;
 }
 
-/* ── Library toolbar ───────────────────────────────── */
+/* ── Track list toolbar: search + selection bar ────── */
 
-.library-toolbar {
+/* Same in every track list view. The search takes at most half the row, so
+   the selection bar always has room beside it. */
+.track-toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1332,7 +1334,8 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
+  flex: 1 1 0;
+  max-width: 50%;
   min-width: 220px;
 }
 
@@ -1340,24 +1343,39 @@ main {
   flex: 1;
 }
 
-/* Exactly as tall as the search field beside it, so the table below doesn't
-   move when a selection shows or hides the bar: the button sits inside it,
-   inset 3px. */
+/* Always shown and exactly as tall as the search field, so the table below
+   never moves: with nothing selected the actions are just disabled. The
+   buttons sit inside it, inset 3px. */
 .selection-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
   box-sizing: border-box;
   height: 36px;
   padding: 0 3px 0 12px;
   border-radius: 8px;
   background: var(--accent-glow);
   border: 1px solid var(--action-btn-border);
-  animation: panel-in 150ms ease;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.selection-actions.is-empty {
+  background: transparent;
+  border-color: var(--line);
+}
+
+.selection-actions.is-empty .selection-count {
+  color: var(--muted);
 }
 
 .selection-actions button {
   height: 28px;
+}
+
+.selection-actions .selection-clear {
+  width: 28px;
+  padding: 0;
 }
 
 /* ── USB Connection Bar ────────────────────────────── */
@@ -1806,30 +1824,21 @@ td.num, th.num {
   text-align: right;
 }
 
+/* Columns: selection checkbox, cover, waveform, identity (track, album,
+   year), then mixing data (BPM, key, length), then the file format. BPM and
+   key are fixed widths that fit their widest pill plus the cell padding:
+   "107.97" and "12A" in the 12px mono pill font; year fits its header label
+   and sort arrows, format the widest badge ("AIFF ⚠" with its box). */
 .track-grid {
   width: 100%;
   box-sizing: border-box;
-}
-
-/* Columns: identity (track, album, year), then mixing data (BPM, key,
-   length), then the file format. BPM and key are fixed widths that fit
-   their widest pill plus the cell padding: "107.97" and "12A" in the 12px
-   mono pill font; year fits its header label and sort arrows, format the
-   widest badge ("AIFF ⚠" with its box). */
-.track-grid--library {
   --track-grid-cols: 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
 }
 
-.track-grid--no-select {
-  --track-grid-cols: 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
-}
-
 /* App playlist tracks reserve a leading column for the drag-to-reorder
-   handle -- scoped by id rather than widening the shared --no-select
-   template, since USB playlist/history tracks use that same class but
-   never reorder. */
+   handle, before the selection checkbox. */
 .track-grid[data-body-id="playlistTracksBody"] {
-  --track-grid-cols: 24px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
+  --track-grid-cols: 24px 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
 }
 
 .track-grid-row {
@@ -4014,6 +4023,34 @@ td button[data-action]:disabled,
   margin-top: 12px;
 }
 
+/* Selection bar "Edit…": label / field pairs. */
+.group-edit-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 12px;
+  margin: 12px 0;
+}
+
+.group-edit-fields input {
+  min-width: 0;
+}
+
+.group-edit-fields #groupEditReleaseDate {
+  width: 13ch;
+  font-variant-numeric: tabular-nums;
+}
+
+.group-edit-rating-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-edit-fields input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
 .tracklist-export-body {
   display: flex;
   flex-direction: column;
@@ -4391,7 +4428,7 @@ td button[data-action]:disabled,
 .track-detail-unit { font-size: 12px; color: var(--muted); }
 /* Beats the global `input { min-width }`. */
 .track-detail-meta .track-detail-genre { min-width: 0; width: 180px; }
-.track-detail-meta .track-detail-year { min-width: 0; width: 7ch; font-variant-numeric: tabular-nums; }
+.track-detail-meta .track-detail-release-date { min-width: 0; width: 13ch; font-variant-numeric: tabular-nums; }
 .track-detail-reveal {
   flex: none;
   width: 32px;

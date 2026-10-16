@@ -682,6 +682,11 @@ impl BackendService {
                 (total, collect_tracks_for_analysis(&conn, &req.track_ids)?)
             }
         };
+        if req.reanalyze && !req.track_ids.is_empty() {
+            for track in &mut tracks {
+                track.force_reanalysis();
+            }
+        }
         if tracks.is_empty() {
             return Ok(AnalyzeNewTracksData {
                 job_id,

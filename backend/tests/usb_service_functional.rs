@@ -11,7 +11,9 @@ use backend::error::ErrorCode;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbTracksRequest,
-    InitializeUsbRequest, InspectUsbTrackRequest, ScanLibraryRequest, ValidateUsbRootRequest,
+    GetTracksMetadataSummaryRequest, GetUsbTracksMetadataSummaryRequest, InitializeUsbRequest,
+    InspectUsbTrackRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackMetadataEditsRequest,
+    ScanLibraryRequest, SharedValue, UsbMetadataEditTrack, ValidateUsbRootRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
@@ -862,4 +864,232 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
     let c = *bytes.get(offset + 2)?;
     let d = *bytes.get(offset + 3)?;
     Some(u32::from_le_bytes([a, b, c, d]))
+}
+
+// --- group edits (the selection bar's Edit) --------------------------------
+
+/// Several USB tracks get one genre / release date / rating edit: one new genre row
+/// in the PDB shared by all of them, the eDB rows and the library copies
+/// follow, and a track left out keeps what it had. The summary reports what
+/// a selection shares, or that it's mixed.
+#[test]
+fn usb_group_edit_writes_every_selected_track_and_summary_reports_mixed_values() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    let exported = scan_and_export_tracks(
+        &backend,
+        &data_dir,
+        &media,
+        &usb,
+        &[
+            ("formats/track_format_flac.flac", "Group Artist - One.flac"),
+            ("noart/track_no_art.mp3", "Group Artist - Two.mp3"),
+            ("formats/track_format_wav.wav", "Group Artist - Three.wav"),
+        ],
+        "Group Edit Playlist",
+    );
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
+    let media_path = |hint: &str| {
+        parsed
+            .tracks
+            .iter()
+            .find(|t| t.track_file_path.contains(hint))
+            .unwrap_or_else(|| panic!("pdb row for {hint}"))
+            .track_file_path
+            .clone()
+    };
+    let (one, two, three) = (media_path("One"), media_path("Two"), media_path("Three"));
+    let usb_root = usb.to_string_lossy().to_string();
+    let summary = |paths: &[&String]| {
+        backend
+            .get_usb_tracks_metadata_summary(GetUsbTracksMetadataSummaryRequest {
+                usb_root: usb_root.clone(),
+                usb_media_paths_raw: paths.iter().map(|p| (*p).clone()).collect(),
+            })
+            .data
+            .expect("summary")
+    };
+
+    let saved = backend.save_usb_track_metadata_edits_with_progress(
+        SaveUsbTrackMetadataEditsRequest {
+            usb_root: usb_root.clone(),
+            // What the app sends for each row: its path plus the row's
+            // library hints.
+            tracks: [&one, &two]
+                .into_iter()
+                .zip(&exported)
+                .map(|(path, (local_id, title, artist))| UsbMetadataEditTrack {
+                    usb_media_path_raw: path.clone(),
+                    local_track_id: Some(local_id.clone()),
+                    title: Some(title.clone()),
+                    artist: Some(artist.clone()),
+                    album: None,
+                })
+                .collect(),
+            genre: Some("Acid Polka".to_string()),
+            rating: Some(3),
+            release_date: Some("2003-06-21".to_string()),
+        },
+        |_, _, _| {},
+    );
+    assert!(saved.ok, "group save failed: {saved:?}");
+    let items = saved.data.expect("save data").items;
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| item.local_track_id.is_some()));
+
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb after save");
+    let acid_ids: Vec<u32> = parsed
+        .genres
+        .iter()
+        .filter(|(_, name)| name.as_str() == "Acid Polka")
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(acid_ids.len(), 1, "one genre row for the whole edit");
+    for path in [&one, &two] {
+        let row = parsed
+            .tracks
+            .iter()
+            .find(|t| &t.track_file_path == path)
+            .expect("row");
+        assert_eq!(
+            (
+                row.genre_id,
+                row.rating,
+                row.release_year,
+                row.release_date.as_deref()
+            ),
+            (acid_ids[0], 3, Some(2003), Some("2003-06-21"))
+        );
+    }
+    let untouched = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == three)
+        .expect("row");
+    assert_ne!(untouched.genre_id, acid_ids[0]);
+    assert_ne!(untouched.release_year, Some(2003));
+
+    let shared = summary(&[&one, &two]);
+    assert_eq!(shared.count, 2);
+    assert_eq!(
+        shared.genre,
+        SharedValue {
+            value: Some("Acid Polka".to_string()),
+            mixed: false
+        }
+    );
+    assert_eq!(shared.release_date.value.as_deref(), Some("2003-06-21"));
+    assert_eq!(shared.rating.value, Some(3));
+    assert!(shared.genre_options.iter().any(|g| g == "Acid Polka"));
+    let mixed = summary(&[&one, &two, &three]);
+    assert!(mixed.genre.mixed && mixed.release_date.mixed && mixed.rating.mixed);
+    assert_eq!(mixed.genre.value, None);
+
+    // The library copies got the edit too.
+    let library = backend
+        .get_tracks_metadata_summary(GetTracksMetadataSummaryRequest {
+            track_ids: exported
+                .iter()
+                .take(2)
+                .map(|(id, _, _)| id.clone())
+                .collect(),
+        })
+        .data
+        .expect("library summary");
+    assert_eq!(library.genre.value.as_deref(), Some("Acid Polka"));
+    assert_eq!(library.release_date.value.as_deref(), Some("2003-06-21"));
+}
+
+/// A library group edit changes only the fields it names, on every track;
+/// the summary shows a shared value or mixed.
+#[test]
+fn library_group_edit_changes_only_named_fields_on_every_track() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    for name in ["Artist - A.mp3", "Artist - B.mp3", "Artist - C.mp3"] {
+        fs::write(media.join(name), b"audio").expect("write track");
+    }
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let roots = vec![media.to_string_lossy().to_string()];
+    assert!(
+        backend
+            .scan_library(ScanLibraryRequest {
+                source_roots: roots.clone(),
+                incremental: true
+            })
+            .ok
+    );
+    let ids: Vec<String> = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: roots,
+            limit: 10,
+            ..Default::default()
+        })
+        .data
+        .expect("library")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(ids.len(), 3);
+    let save = |track_ids: &[String], req: SaveTrackMetadataEditsRequest| {
+        let saved = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
+            track_ids: track_ids.to_vec(),
+            ..req
+        });
+        assert!(saved.ok, "save failed: {saved:?}");
+        saved.data.expect("save data").items
+    };
+    let summary = || {
+        backend
+            .get_tracks_metadata_summary(GetTracksMetadataSummaryRequest {
+                track_ids: ids.clone(),
+            })
+            .data
+            .expect("summary")
+    };
+
+    save(
+        &ids[..1],
+        SaveTrackMetadataEditsRequest {
+            rating: Some(5),
+            release_date: Some("1999-12-31".to_string()),
+            ..Default::default()
+        },
+    );
+    let before = summary();
+    assert!(before.rating.mixed && before.release_date.mixed);
+    assert_eq!(
+        before.genre,
+        SharedValue {
+            value: None,
+            mixed: false
+        }
+    );
+
+    // Genre only: the first track keeps its rating and release date.
+    let items = save(
+        &ids,
+        SaveTrackMetadataEditsRequest {
+            genre: Some("Gabber Waltz".to_string()),
+            ..Default::default()
+        },
+    );
+    assert_eq!(items.len(), 3);
+    assert_eq!(
+        (items[0].rating, items[0].release_date.as_deref()),
+        (5, Some("1999-12-31"))
+    );
+    let after = summary();
+    assert_eq!(after.genre.value.as_deref(), Some("Gabber Waltz"));
+    assert!(after.rating.mixed && after.release_date.mixed);
 }

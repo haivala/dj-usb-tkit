@@ -8,6 +8,7 @@ import {
   renderPlaylistPanelChrome,
   renderPlaylistList
 } from "../components/playlist/actions.mjs";
+import { createInitialState } from "../app_state.mjs";
 import { bindPlaylistEvents } from "../components/playlist/events.mjs";
 import { APP_TEMPLATES } from "./test_helpers.mjs";
 
@@ -172,7 +173,8 @@ test("bindPlaylistEvents ignores playlist selection clicks while new playlist in
   const switched = [];
 
   bindPlaylistEvents(bindDeps({
-    state: { currentPlaylistId: "p0", selectedTrackIds: new Set() },
+    state: { currentPlaylistId: "p0", trackSelections: createInitialState().trackSelections },
+    document,
     el,
     switchView: async (view) => { switched.push(view); }
   }));

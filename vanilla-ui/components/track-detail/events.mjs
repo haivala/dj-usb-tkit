@@ -519,8 +519,8 @@ export function bindTrackDetailEvents(ctx) {
   el.trackDetailGenre?.addEventListener("change", (event) => {
     trackDetailDialog.setGenre(event.target.value);
   });
-  el.trackDetailYear?.addEventListener("change", (event) => {
-    trackDetailDialog.setYear(event.target.value);
+  el.trackDetailReleaseDate?.addEventListener("change", (event) => {
+    trackDetailDialog.setReleaseDate(event.target.value);
   });
   el.trackDetailRevealBtn?.addEventListener("click", () => {
     const path = trackDetailDialog.getWorking().track?.filePath;

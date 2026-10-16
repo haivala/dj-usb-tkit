@@ -11,7 +11,7 @@ import { initTooltips } from "./tooltip.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
 import { renderEmptyState } from "./components/shell/actions.mjs";
 import { scanLibraryButtonLabel } from "./components/library/actions.mjs";
-import { ANALYZE_SELECTED_TOOLTIP } from "./track_utils.mjs";
+import { renderAllSelectionBars, renderSelectionBar } from "./components/shared/track_selection.mjs";
 import { clearManualUpdateCheck } from "./update_check.mjs";
 
 export function updateActivePlaylistIndicators(ctx) {
@@ -27,8 +27,8 @@ export function updateAddToPlaylistButtons(ctx) {
   document.querySelectorAll('[data-action="add-library"], [data-action="add-usb"], [data-action="add-history"]').forEach((btn) => {
     btn.disabled = !hasPlaylist;
   });
-  const addSelectedBtn = document.getElementById("addSelectedBtn");
-  if (addSelectedBtn) addSelectedBtn.disabled = !hasPlaylist;
+  // The selection bars' "+ Playlist" needs an active playlist too.
+  renderAllSelectionBars(ctx);
 }
 
 export function updateModeText(ctx) {
@@ -50,12 +50,7 @@ export function updateUsbNameBadge(ctx) {
 }
 
 export function updateSelectionCount(ctx) {
-  const { state, el } = ctx;
-  const count = state.selectedTrackIds.size;
-  el.selectionCount.textContent = count > 0 ? `${count} selected` : "";
-  el.selectionActions.classList.toggle("hidden", count === 0);
-  el.addSelectedBtn.disabled = !state.currentPlaylistId || count === 0;
-  updateScanLibraryButtonLabel(ctx);
+  renderSelectionBar(ctx, "library");
 }
 
 export function updateUsbSubNavDisabledState(ctx) {
@@ -106,10 +101,7 @@ export function updateSourceFilterIndicator(ctx) {
 export function updateScanLibraryButtonLabel(ctx) {
   const { state, el } = ctx;
   if (!el.scanLibraryBtn) return;
-  el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.sourceRoots, state.selectedTrackIds.size);
-  // With a selection the button analyzes it (see scanLibraryButtonLabel).
-  if (state.selectedTrackIds.size > 0) el.scanLibraryBtn.dataset.tooltip = ANALYZE_SELECTED_TOOLTIP;
-  else delete el.scanLibraryBtn.dataset.tooltip;
+  el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.sourceRoots);
 }
 
 export function closeSettingsDrawer(ctx) {

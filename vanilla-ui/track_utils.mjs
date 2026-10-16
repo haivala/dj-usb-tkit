@@ -26,8 +26,6 @@ export const ANALYZE_TOOLTIP =
   "Add the missing waveform, BPM, key and first beat; a BPM or key you edited or imported is kept";
 export const REANALYZE_TOOLTIP =
   "Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)";
-export const ANALYZE_SELECTED_TOOLTIP =
-  "Unanalyzed tracks get the missing waveform, BPM, key and first beat (edited or imported BPM/key kept); analyzed tracks are reset to a fresh analysis, replacing those values (cues are kept)";
 export const ANALYZE_PLAYLIST_MISSING_TOOLTIP =
   "Add the missing waveform, BPM, key and first beat to this playlist's unanalyzed tracks; a BPM or key you edited or imported is kept";
 

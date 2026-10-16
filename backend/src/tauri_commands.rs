@@ -23,15 +23,16 @@ use crate::models::{
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
     GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
-    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
-    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, ImportExternalPlaylistData,
-    ImportExternalPlaylistRequest, InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData,
-    InspectUsbTrackRequest, JobEventPayload, ListExternalPlaylistsData,
-    ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData,
-    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
+    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
+    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
+    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
+    JobEventPayload, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
+    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
+    ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, PlayResolvedTrackData, PlayResolvedTrackRequest,
+    PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
@@ -47,8 +48,9 @@ use crate::models::{
     ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SetAnalysisPausedData,
     SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
     SetPlaybackMetronomeRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
-    TrackDetail, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
-    UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
+    TrackDetail, TracksMetadataSummary, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail, ValidateUsbRootData,
+    ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -812,6 +814,24 @@ pub fn save_track_metadata_edits(
     request: SaveTrackMetadataEditsRequest,
 ) -> ApiResponse<SaveTrackMetadataEditsData> {
     state.save_track_metadata_edits(request)
+}
+
+/// What the selected library tracks share, for the selection bar's Edit.
+#[tauri::command]
+pub fn get_tracks_metadata_summary(
+    state: State<'_, BackendCommands>,
+    request: GetTracksMetadataSummaryRequest,
+) -> ApiResponse<TracksMetadataSummary> {
+    state.get_tracks_metadata_summary(request)
+}
+
+/// What the selected USB tracks share, as the USB's PDB has them.
+#[tauri::command]
+pub fn get_usb_tracks_metadata_summary(
+    state: State<'_, BackendCommands>,
+    request: GetUsbTracksMetadataSummaryRequest,
+) -> ApiResponse<TracksMetadataSummary> {
+    state.get_usb_tracks_metadata_summary(request)
 }
 
 /// A background `usb_write` job, like `save_usb_track_analysis_edits`: it

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
+import { createInitialState } from "../app_state.mjs";
 import { setStatusText } from "../message_bus.mjs";
 import {
   closeSettingsDrawer,
@@ -34,9 +35,11 @@ function makeDom(body = "") {
     <button data-action="add-library"></button>
     <button data-action="add-usb"></button>
     <button data-action="add-history"></button>
-    <button id="addSelectedBtn"></button>
-    <div id="selectionCount"></div>
-    <div id="selectionActions" class="hidden"></div>
+    <div class="selection-actions is-empty" data-selection-bar="library">
+      <span class="selection-count"></span>
+      <button data-selection-action="add"></button>
+      <button data-selection-action="clear"></button>
+    </div>
     <nav id="navSidebar">
       <button class="nav-sub-item" data-view="usb-playlists"></button>
       <button class="nav-sub-item" data-view="usb-history"></button>
@@ -76,14 +79,12 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
     "playlistBadge",
     "badgeLabel",
     "navPlaylistList",
-    "selectionCount",
-    "selectionActions",
-    "addSelectedBtn"
   ]);
   el.scanLibraryBtn = document.getElementById("scanLibraryBtn");
+  const { trackSelections } = createInitialState();
 
   updateModeText({
-    state: { currentPlaylistId: "p1" },
+    state: { currentPlaylistId: "p1", trackSelections },
     el,
     document,
     getCurrentPlaylist: () => ({ id: "p1", name: "House" })
@@ -93,18 +94,22 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
   assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), true);
 
   updateActivePlaylistIndicators({ state: { currentPlaylistId: "p2" }, el });
-  updateAddToPlaylistButtons({ state: { currentPlaylistId: "p1" }, document });
-  updateSelectionCount({ state: { currentPlaylistId: "p1", selectedTrackIds: new Set(["a", "b"]), sourceRoots: [] }, el });
+  updateAddToPlaylistButtons({ state: { currentPlaylistId: "p1", trackSelections }, document });
+  trackSelections.library.ids = new Set(["a", "b"]);
+  updateSelectionCount({ state: { currentPlaylistId: "p1", trackSelections, sourceRoots: [] }, el, document });
+  updateScanLibraryButtonLabel({ state: { sourceRoots: [] }, el });
 
   assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), false);
   assert.equal(document.querySelector('[data-playlist-id="p2"]').classList.contains("playlist-active-mode"), true);
   for (const action of ["add-library", "add-usb", "add-history"]) {
     assert.equal(document.querySelector(`[data-action="${action}"]`).disabled, false);
   }
-  assert.equal(el.selectionCount.textContent, "2 selected");
-  assert.equal(el.selectionActions.classList.contains("hidden"), false);
-  assert.equal(el.addSelectedBtn.disabled, false);
-  assert.equal(el.scanLibraryBtn.textContent, "Analyze Selected");
+  const bar = document.querySelector('[data-selection-bar="library"]');
+  assert.equal(bar.querySelector(".selection-count").textContent, "2 selected");
+  assert.equal(bar.classList.contains("is-empty"), false);
+  assert.equal(bar.querySelector('[data-selection-action="add"]').disabled, false);
+  // The header button never turns into a selection action.
+  assert.equal(el.scanLibraryBtn.textContent, "Scan Library");
 });
 
 test("USB nav and empty-state helpers follow the selected-root state", () => {

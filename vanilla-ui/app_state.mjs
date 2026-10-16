@@ -7,7 +7,7 @@ export const STATIC_TABS = ["library", "usb", "usb-playlists", "usb-history", "u
 export const EVENT_LOG_MAX = 500;
 
 export function createInitialState() {
-  return {
+  const state = {
     sourceRoots: [],
     sourceRootEnabled: {},
     missingSourceRoots: new Set(),
@@ -53,7 +53,16 @@ export function createInitialState() {
     // resolution, analysis patching, and selection.
     tracks: [],
     libraryQuery: "",
-    selectedTrackIds: new Set(),
+    // Each track list's selection (components/shared/track_selection.mjs):
+    // the ticked track ids, plus -- for the views whose bar actions need the
+    // row itself (USB playlist / history) -- the rows by id. The library's
+    // ids are also `selectedTrackIds`.
+    trackSelections: {
+      library: { ids: new Set(), rows: new Map() },
+      playlist: { ids: new Set(), rows: new Map() },
+      usbPlaylist: { ids: new Set(), rows: new Map() },
+      usbHistory: { ids: new Set(), rows: new Map() },
+    },
     playlists: [],
     currentPlaylistId: null,
     playlistTrackSearch: "",
@@ -122,6 +131,12 @@ export function createInitialState() {
     selectedRepairFixIds: new Set(),
     startupPhase: true
   };
+  Object.defineProperty(state, "selectedTrackIds", {
+    get: () => state.trackSelections.library.ids,
+    set: (ids) => { state.trackSelections.library.ids = ids; },
+    enumerable: true,
+  });
+  return state;
 }
 
 export function createTableSortState() {

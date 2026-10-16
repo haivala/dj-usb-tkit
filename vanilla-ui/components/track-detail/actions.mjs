@@ -13,6 +13,7 @@
 
 import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_detail.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
+import { patchUsbTrackRows, RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } from "../shared/track_metadata_edits.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { coverElement } from "../../track_table.mjs";
 import { buildCoverSrcCandidates, attachCoverFallbackHandlers } from "../library/actions.mjs";
@@ -148,7 +149,7 @@ export function createTrackDetailController(el, prefs = {}) {
     keyGroups: [],
     genre: null,
     rating: 0, // stars, 0 (none) to 5
-    year: null, // release year, or null for none
+    releaseDate: null, // YYYY, YYYY-MM or YYYY-MM-DD, or null for none
     // Existing genres the genre field suggests, from the backend's track detail.
     genreOptions: [],
     firstBeatMs: null,
@@ -167,12 +168,12 @@ export function createTrackDetailController(el, prefs = {}) {
   // Its cue list alone: a save that didn't edit cues leaves a USB's cues as
   // they are (see `cuesEdited`).
   let openedCuesJson = "";
-  // The analysis part (beat grid, key, cues) and the genre / rating / year
-  // as opened: each is saved only when it changed (see `analysisEdited`).
+  // The analysis part (beat grid, key, cues) and the genre / rating /
+  // release date as opened: each is saved only when it changed (see `analysisEdited`).
   let openedAnalysisJson = "";
   let openedGenre = null;
   let openedRating = 0;
-  let openedYear = null;
+  let openedReleaseDate = null;
   // Undo/redo: snapshots of the editable state (see `mutate`).
   let undoStack = [];
   let redoStack = [];
@@ -191,7 +192,7 @@ export function createTrackDetailController(el, prefs = {}) {
       key: working.key,
       genre: working.genre,
       rating: working.rating,
-      year: working.year,
+      releaseDate: working.releaseDate,
       firstBeatMs: working.firstBeatMs,
       cues: working.cues,
     });
@@ -203,7 +204,7 @@ export function createTrackDetailController(el, prefs = {}) {
     working.key = s.key;
     working.genre = s.genre;
     working.rating = s.rating;
-    working.year = s.year;
+    working.releaseDate = s.releaseDate;
     working.firstBeatMs = s.firstBeatMs;
     working.cues = s.cues;
     working.draggingTempId = null;
@@ -901,11 +902,11 @@ export function createTrackDetailController(el, prefs = {}) {
     if (input.ownerDocument.activeElement !== input) input.value = working.genre || "";
   }
 
-  function renderYear() {
-    const input = el.trackDetailYear;
+  function renderReleaseDate() {
+    const input = el.trackDetailReleaseDate;
     // Not under the caret: the field commits on change.
     if (input && input.ownerDocument.activeElement !== input) {
-      input.value = working.year == null ? "" : String(working.year);
+      input.value = working.releaseDate || "";
     }
   }
 
@@ -929,7 +930,7 @@ export function createTrackDetailController(el, prefs = {}) {
     }
     syncKeySelect();
     renderGenre();
-    renderYear();
+    renderReleaseDate();
     renderRating();
     renderView();
     renderCueList();
@@ -1064,17 +1065,18 @@ export function createTrackDetailController(el, prefs = {}) {
       render();
     },
 
-    /// Set the release year from the field's text: four digits, or empty for
-    /// none. Anything else puts the field back to the current year (the
-    /// backend checks the range on save).
-    setYear(text) {
+    /// Set the release date from the field's text: YYYY, YYYY-MM or
+    /// YYYY-MM-DD, or empty for none. Anything else puts the field back to
+    /// the current date (the backend checks it is a real date in range on
+    /// save).
+    setReleaseDate(text) {
       const trimmed = typeof text === "string" ? text.trim() : "";
-      if (trimmed && !/^\d{4}$/.test(trimmed)) {
-        if (el.trackDetailYear) el.trackDetailYear.value = working.year == null ? "" : String(working.year);
+      if (trimmed && !RELEASE_DATE_PATTERN.test(trimmed)) {
+        if (el.trackDetailReleaseDate) el.trackDetailReleaseDate.value = working.releaseDate || "";
         return;
       }
       mutate(null, () => {
-        working.year = trimmed ? Number(trimmed) : null;
+        working.releaseDate = trimmed || null;
       });
       render();
     },
@@ -1419,7 +1421,7 @@ export function createTrackDetailController(el, prefs = {}) {
       keyOptions: keyGroups,
       genre = null,
       rating = 0,
-      year = null,
+      releaseDate = null,
       genreOptions = [],
       coverCandidates = [],
     }) {
@@ -1436,7 +1438,7 @@ export function createTrackDetailController(el, prefs = {}) {
       working.keyGroups = Array.isArray(keyGroups) ? keyGroups : [];
       working.genre = genre || null;
       working.rating = Number(rating) || 0;
-      working.year = Number(year) || null;
+      working.releaseDate = releaseDate || null;
       working.genreOptions = Array.isArray(genreOptions) ? genreOptions : [];
       working.firstBeatMs = firstBeatMs ?? null;
       working.followSuspendUntil = 0;
@@ -1500,7 +1502,7 @@ export function createTrackDetailController(el, prefs = {}) {
       openedAnalysisJson = JSON.stringify(analysisPart(opened));
       openedGenre = opened.genre;
       openedRating = opened.rating;
-      openedYear = opened.year;
+      openedReleaseDate = opened.releaseDate;
       for (const listener of openListeners) listener();
 
       return new Promise((resolve) => {
@@ -1508,7 +1510,7 @@ export function createTrackDetailController(el, prefs = {}) {
       });
     },
 
-    /// True once BPM, key, first beat, the cues, genre, rating or year differ from
+    /// True once BPM, key, first beat, the cues, genre, rating or release date differ from
     /// what was opened (view state like zoom or the beat-grid slider doesn't
     /// count).
     hasUnsavedChanges() {
@@ -1523,19 +1525,21 @@ export function createTrackDetailController(el, prefs = {}) {
     },
 
     /// True once BPM, key, first beat or the cues differ from what was
-    /// opened. A save without such an edit writes only the genre / rating / year.
+    /// opened. A save without such an edit writes only the genre / rating /
+    /// release date.
     analysisEdited() {
       return JSON.stringify(analysisPart(api.toSavePayload())) !== openedAnalysisJson;
     },
 
-    /// The genre / rating / year fields that differ from what was opened, so
-    /// a save writes only those. An empty genre or a year of 0 clears it.
+    /// The genre / rating / release date fields that differ from what was
+    /// opened, so a save writes only those. An empty genre or release date
+    /// clears it.
     metadataEdits() {
-      const { genre, rating, year } = api.toSavePayload();
+      const { genre, rating, releaseDate } = api.toSavePayload();
       const edits = {};
       if (genre !== openedGenre) edits.genre = genre ?? "";
       if (rating !== openedRating) edits.rating = rating;
-      if (year !== openedYear) edits.year = year ?? 0;
+      if (releaseDate !== openedReleaseDate) edits.releaseDate = releaseDate ?? "";
       return edits;
     },
 
@@ -1543,7 +1547,7 @@ export function createTrackDetailController(el, prefs = {}) {
       return {
         genre: working.genre,
         rating: working.rating,
-        year: working.year,
+        releaseDate: working.releaseDate,
         firstBeatMs: working.firstBeatMs == null ? null : working.firstBeatMs,
         bpm: working.bpm == null ? null : working.bpm,
         key: working.key == null ? null : working.key,
@@ -1562,8 +1566,9 @@ export function createTrackDetailController(el, prefs = {}) {
   return api;
 }
 
-/// The beat grid, key and cues of a save payload, without genre, rating and year.
-function analysisPart({ genre: _genre, rating: _rating, year: _year, ...analysis }) {
+/// The beat grid, key and cues of a save payload, without genre, rating and
+/// release date.
+function analysisPart({ genre: _genre, rating: _rating, releaseDate: _releaseDate, ...analysis }) {
   return analysis;
 }
 
@@ -1647,7 +1652,7 @@ async function openUsbTrackDetail(ctx, track) {
     keyOptions: detail.keyOptions,
     genre: detail.genre,
     rating: detail.rating,
-    year: detail.year,
+    releaseDate: detail.releaseDate,
     genreOptions: detail.genreOptions,
     coverCandidates: buildCoverSrcCandidates(ctx, track),
   });
@@ -1660,50 +1665,19 @@ async function openUsbTrackDetail(ctx, track) {
     await ctx.waitForUsbJobIdle();
   }
 
-  // A genre / rating / year-only edit leaves the analysis files, BPM and key alone.
+  // A genre / rating / release-date-only edit leaves the analysis files, BPM and key alone.
   const metadataEdited = Object.keys(payload.metadataEdits || {}).length > 0;
   if (payload.analysisEdited || !metadataEdited) {
     if (!(await saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload))) return;
   }
   if (metadataEdited) {
     try {
-      const saved = await command("save_usb_track_metadata_edits", {
-        usbRoot: state.usbRoot,
-        usbMediaPathRaw: track.usbMediaPath,
-        ...payload.metadataEdits,
-        localTrackId: track.localTrackId || null,
-        title: track.title || null,
-        artist: track.artist || null,
-        album: track.album || null,
-      });
-      if ("year" in payload.metadataEdits) {
-        await patchUsbTrackRows(ctx, track, { year: payload.metadataEdits.year || null });
-        const localTrackId = saved?.localTrackId || track.localTrackId;
-        if (localTrackId) {
-          ctx.applyRealtimeAnalyzedTrackUpdate({ trackId: localTrackId, year: payload.metadataEdits.year || null });
-        }
-      }
+      await saveUsbMetadataEdits(ctx, [track], payload.metadataEdits);
       if (!payload.analysisEdited) emitStatus("Saved track details to USB");
     } catch (err) {
       emitStatus(`Could not save track details: ${err.message}`);
     }
   }
-}
-
-/// Patch `fields` onto every loaded USB row of `track`'s file -- the same
-/// track can sit in several USB playlists and the history -- and redraw them.
-async function patchUsbTrackRows(ctx, track, fields) {
-  const mediaPath = String(track.usbMediaPath || "").trim();
-  for (const ctl of [ctx.usbPlaylistTracksCtl, ctx.usbHistoryTracksCtl]) {
-    let changed = false;
-    for (const item of ctl?.items || []) {
-      const sameFile = item === track
-        || (mediaPath && String(item?.usbMediaPath || "").trim() === mediaPath);
-      if (sameFile) changed = ctx.patchTrackAnalysisFields(item, fields) || changed;
-    }
-    if (changed) await ctl.rerender();
-  }
-  ctx.patchTrackAnalysisFields(track, fields);
 }
 
 /// The cue / beat-grid / BPM / key part of a USB save. False when it failed.
@@ -1731,7 +1705,7 @@ async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
       keyColor: saved.keyColor,
     };
     // Every loaded USB row of this file, not just the row that was clicked.
-    await patchUsbTrackRows(ctx, track, fields);
+    await patchUsbTrackRows(ctx, [track], fields);
     // The backend also wrote the library track it resolved (not only the
     // row's hint), so refresh that one and the app playlists containing it.
     const localTrackId = saved.localTrackId || track.localTrackId;
@@ -1787,23 +1761,20 @@ export async function openTrackDetail(ctx, track) {
     keyOptions: detail.keyOptions,
     genre: detail.genre,
     rating: detail.rating,
-    year: detail.year,
+    releaseDate: detail.releaseDate,
     genreOptions: detail.genreOptions,
     coverCandidates: buildCoverSrcCandidates(ctx, track),
   });
   if (!payload) return;
 
-  // A genre / rating / year-only edit leaves the beat grid, BPM and key alone.
+  // A genre / rating / release-date-only edit leaves the beat grid, BPM and key alone.
   const metadataEdited = Object.keys(payload.metadataEdits || {}).length > 0;
   if (payload.analysisEdited || !metadataEdited) {
     if (!(await saveLocalAnalysisEdits(ctx, localId, payload))) return;
   }
   if (metadataEdited) {
     try {
-      const saved = await command("save_track_metadata_edits", { trackId: localId, ...payload.metadataEdits });
-      if ("year" in payload.metadataEdits) {
-        ctx.applyRealtimeAnalyzedTrackUpdate({ trackId: localId, year: saved?.year ?? null });
-      }
+      await saveLibraryMetadataEdits(ctx, [localId], payload.metadataEdits);
       if (!payload.analysisEdited) emitStatus("Saved track details");
     } catch (err) {
       emitStatus(`Could not save track details: ${err.message}`);

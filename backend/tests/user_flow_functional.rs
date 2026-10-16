@@ -11,7 +11,7 @@ use backend::models::{
     GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
     SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest, TrackCueInput,
-    UsbTrack,
+    UsbMetadataEditTrack, UsbTrack,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{
@@ -590,7 +590,8 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
 
 /// An imported (or user-set) BPM / key survives the track's first analysis --
 /// in the DB and in the analysis file's beat grid -- and a reanalysis resets
-/// it to the app's detection.
+/// it to the app's detection, as does a forced reanalysis of a track that
+/// was never analyzed.
 #[test]
 fn first_analysis_keeps_imported_bpm_and_key_and_reanalysis_resets_them() {
     let root = tempdir().expect("temp root");
@@ -669,6 +670,24 @@ fn first_analysis_keeps_imported_bpm_and_key_and_reanalysis_resets_them() {
         Some((bpm * 100.0).round() as u16),
         "the beat grid follows the detected BPM"
     );
+
+    // The selection bar's Reanalyze resets even a first analysis.
+    db().execute(
+        "UPDATE tracks SET bpm = 140.0, bpm_analyzer = 'mixxx', tonality = 'Dm',
+                tonality_source = 'mixxx', waveform_peaks_path = NULL
+         WHERE id = ?1",
+        [&track_id],
+    )
+    .expect("mark imported values again");
+    let forced = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        track_ids: vec![track_id.clone()],
+        reanalyze: true,
+        ..Default::default()
+    });
+    assert!(forced.ok, "forced reanalysis failed: {forced:?}");
+    let (bpm, analyzer, _key, _dat) = row();
+    assert_ne!(bpm, 140.0, "a forced reanalysis replaces the imported BPM");
+    assert_ne!(analyzer.as_deref(), Some("mixxx"));
 }
 
 fn write_test_pulsed_key_wav(path: &Path, bpm: f32, duration_ms: u32) {
@@ -1639,12 +1658,13 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
     assert_eq!(local_key, "G#m");
 }
 
-/// A genre / rating / year edit made from a USB view reaches the PDB, the eDB
-/// and the library track, and nothing else: the analysis bundle and the
-/// library's BPM / key / first beat are left exactly as they were. A release
-/// date from another year follows the edited year.
+/// A genre / rating / release date edit made from a USB view reaches the PDB,
+/// the eDB and the library track, and nothing else: the analysis bundle and
+/// the library's BPM / key / first beat are left exactly as they were. A
+/// year alone completes to a full date on the stick; a full date is kept as
+/// it is, through a rescan and a re-export.
 #[test]
-fn save_usb_track_metadata_edits_writes_only_genre_rating_and_year() {
+fn save_usb_track_metadata_edits_writes_only_genre_rating_and_release_date() {
     let root = tempdir().expect("temp root");
     let (backend, data_dir, usb, track_id, playlist_id) =
         export_one_track_with_cues(root.path(), Vec::new());
@@ -1686,23 +1706,33 @@ fn save_usb_track_metadata_edits_writes_only_genre_rating_and_year() {
         .expect("usb detail");
     assert_eq!((detail.genre.as_deref(), detail.rating), (None, 0));
 
+    let edit_track = UsbMetadataEditTrack {
+        usb_media_path_raw: media_raw.clone(),
+        local_track_id: None,
+        title: Some(usb_track.title.clone()),
+        artist: Some(usb_track.artist.clone()),
+        album: usb_track.album.clone(),
+    };
     let saved = backend.save_usb_track_metadata_edits_with_progress(
         SaveUsbTrackMetadataEditsRequest {
             usb_root: usb.to_string_lossy().to_string(),
-            usb_media_path_raw: media_raw.clone(),
+            tracks: vec![edit_track.clone()],
             genre: Some("  Glitch Polka ".to_string()),
             rating: Some(4),
-            year: Some(2016),
-            local_track_id: None,
-            title: Some(usb_track.title.clone()),
-            artist: Some(usb_track.artist.clone()),
-            album: usb_track.album.clone(),
+            release_date: Some("2016".to_string()),
         },
         |_, _, _| {},
     );
     assert!(saved.ok, "usb metadata save failed: {saved:?}");
     let saved = saved.data.expect("usb metadata save data");
-    assert_eq!(saved.local_track_id.as_deref(), Some(track_id.as_str()));
+    assert_eq!(
+        saved.items[0].local_track_id.as_deref(),
+        Some(track_id.as_str())
+    );
+    assert_eq!(
+        (saved.items[0].year, saved.items[0].release_date.as_deref()),
+        (Some(2016), Some("2016-01-01"))
+    );
 
     let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
     let pdb_row = parsed
@@ -1740,15 +1770,23 @@ fn save_usb_track_metadata_edits_writes_only_genre_rating_and_year() {
         (Some(2016), Some("2016-01-01".to_string()))
     );
     assert_eq!(edb_year_date(), (2016, Some("2016-01-01".to_string())));
-    let library_year = || -> (Option<u32>, Option<String>) {
+    let library_date = || -> (Option<u32>, Option<String>, Option<String>) {
         db.query_row(
-            "SELECT release_year, release_year_source FROM tracks WHERE id = ?1",
+            "SELECT release_year, release_date, release_date_source FROM tracks WHERE id = ?1",
             [&track_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
-        .expect("library year")
+        .expect("library release date")
     };
-    assert_eq!(library_year(), (Some(2016), Some("user".to_string())));
+    // The library keeps the year as entered; export completes it.
+    assert_eq!(
+        library_date(),
+        (
+            Some(2016),
+            Some("2016".to_string()),
+            Some("user".to_string())
+        )
+    );
     let edb_genre_rating = || -> (Option<String>, i64) {
         open_usb_edb(&usb)
             .query_row(
@@ -1788,13 +1826,39 @@ fn save_usb_track_metadata_edits_writes_only_genre_rating_and_year() {
         .data
         .expect("usb detail after save");
     assert_eq!(
-        (detail.genre.as_deref(), detail.rating, detail.year),
-        (Some("Glitch Polka"), 4, Some(2016))
+        (
+            detail.genre.as_deref(),
+            detail.rating,
+            detail.release_date.as_deref()
+        ),
+        (Some("Glitch Polka"), 4, Some("2016-01-01"))
     );
     assert!(detail.genre_options.iter().any(|g| g == "Glitch Polka"));
 
-    // A rescan of the changed file keeps the edited genre and year over its
-    // (empty) tags.
+    // A full date is written as it is, and leaves the genre and rating alone.
+    let saved = backend.save_usb_track_metadata_edits_with_progress(
+        SaveUsbTrackMetadataEditsRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            tracks: vec![edit_track],
+            release_date: Some("2016-5-3".to_string()),
+            ..Default::default()
+        },
+        |_, _, _| {},
+    );
+    assert!(saved.ok, "usb release date save failed: {saved:?}");
+    let full_date = (Some(2016), Some("2016-05-03".to_string()));
+    assert_eq!(pdb_year_date(), full_date);
+    assert_eq!(edb_year_date(), (2016, Some("2016-05-03".to_string())));
+    let user_date = (
+        Some(2016),
+        Some("2016-05-03".to_string()),
+        Some("user".to_string()),
+    );
+    assert_eq!(library_date(), user_date);
+    assert_eq!(edb_genre_rating(), (Some("Glitch Polka".to_string()), 4));
+
+    // A rescan of the changed file keeps the edited genre and release date
+    // over its (empty) tags.
     let source = root.path().join("source");
     fs::File::options()
         .write(true)
@@ -1815,15 +1879,9 @@ fn save_usb_track_metadata_edits_writes_only_genre_rating_and_year() {
             Some(4)
         )
     );
-    assert_eq!(library_year(), (Some(2016), Some("user".to_string())));
+    assert_eq!(library_date(), user_date);
 
-    // A re-export keeps the genre and year in both databases, and dates the
-    // track from the edited year over a release date tag from another year.
-    db.execute(
-        "UPDATE tracks SET release_date = '2009-10-09' WHERE id = ?1",
-        [&track_id],
-    )
-    .expect("set release date tag");
+    // A re-export keeps the genre and release date in both databases.
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
         playlist_id,
@@ -1847,15 +1905,14 @@ fn save_usb_track_metadata_edits_writes_only_genre_rating_and_year() {
     );
     assert_eq!(pdb_row.rating, 4);
     assert_eq!(edb_genre_rating(), (Some("Glitch Polka".to_string()), 4));
-    assert_eq!(
-        pdb_year_date(),
-        (Some(2016), Some("2016-01-01".to_string()))
-    );
-    assert_eq!(edb_year_date(), (2016, Some("2016-01-01".to_string())));
+    assert_eq!(pdb_year_date(), full_date);
+    assert_eq!(edb_year_date(), (2016, Some("2016-05-03".to_string())));
 }
 
-/// The library save changes only the genre, rating and year; clearing the
-/// genre and year keeps them cleared.
+/// The library save changes only the genre, rating and release date; clearing
+/// the genre and the date keeps them cleared. The editor gets the date export
+/// writes: a year alone completes from the file timestamp (this year here,
+/// so 1 January).
 #[test]
 fn save_track_metadata_edits_leaves_analysis_alone() {
     let root = tempdir().expect("temp root");
@@ -1873,16 +1930,21 @@ fn save_track_metadata_edits_leaves_analysis_alone() {
     let before = analysis();
 
     let saved = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
-        track_id: track_id.clone(),
+        track_ids: vec![track_id.clone()],
         genre: Some("Doom Swing".to_string()),
         rating: Some(2),
-        year: Some(1994),
+        release_date: Some("1994".to_string()),
     });
     assert!(saved.ok, "metadata save failed: {saved:?}");
-    let saved = saved.data.expect("metadata save data");
+    let saved = &saved.data.expect("metadata save data").items[0];
     assert_eq!(
-        (saved.genre.as_deref(), saved.rating, saved.year),
-        (Some("Doom Swing"), 2, Some(1994))
+        (
+            saved.genre.as_deref(),
+            saved.rating,
+            saved.year,
+            saved.release_date.as_deref()
+        ),
+        (Some("Doom Swing"), 2, Some(1994), Some("1994-01-01"))
     );
     assert_eq!(analysis(), before);
 
@@ -1893,38 +1955,60 @@ fn save_track_metadata_edits_leaves_analysis_alone() {
         .data
         .expect("detail");
     assert_eq!(
-        (detail.genre.as_deref(), detail.rating, detail.year),
-        (Some("Doom Swing"), 2, Some(1994))
+        (
+            detail.genre.as_deref(),
+            detail.rating,
+            detail.release_date.as_deref()
+        ),
+        (Some("Doom Swing"), 2, Some("1994-01-01"))
     );
     assert!(detail.genre_options.iter().any(|g| g == "Doom Swing"));
 
+    let full = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
+        track_ids: vec![track_id.clone()],
+        release_date: Some("1994-03-07".to_string()),
+        ..Default::default()
+    });
+    let full = full.data.expect("full date").items.remove(0);
+    assert_eq!(
+        (full.year, full.release_date.as_deref()),
+        (Some(1994), Some("1994-03-07"))
+    );
+
     let cleared = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
-        track_id: track_id.clone(),
+        track_ids: vec![track_id.clone()],
         genre: Some(" ".to_string()),
         rating: None,
-        year: Some(0),
+        release_date: Some(String::new()),
     });
-    let cleared = cleared.data.expect("cleared");
+    let cleared = cleared.data.expect("cleared").items.remove(0);
     assert_eq!(
         (cleared.genre, cleared.rating, cleared.year),
         (None, 2, None)
     );
+    // Export still dates it, from the file timestamp alone.
+    assert!(
+        cleared
+            .release_date
+            .is_some_and(|d| d.len() == 10 && !d.starts_with("1994"))
+    );
 
     let too_high = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
-        track_id: track_id.clone(),
+        track_ids: vec![track_id.clone()],
         genre: None,
         rating: Some(6),
-        year: None,
+        release_date: None,
     });
     assert!(!too_high.ok, "rating 6 must be rejected");
 
-    let bad_year = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
-        track_id,
-        genre: None,
-        rating: None,
-        year: Some(999),
-    });
-    assert!(!bad_year.ok, "year 999 must be rejected");
+    for bad in ["999", "1994-02-30"] {
+        let rejected = backend.save_track_metadata_edits(SaveTrackMetadataEditsRequest {
+            track_ids: vec![track_id.clone()],
+            release_date: Some(bad.to_string()),
+            ..Default::default()
+        });
+        assert!(!rejected.ok, "release date {bad} must be rejected");
+    }
 }
 
 /// Turn the app-exported bundle on `usb` into one shaped like a rekordbox

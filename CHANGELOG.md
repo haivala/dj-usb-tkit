@@ -46,10 +46,22 @@
   covered and how long it took.
 - **New feature:** The cue editor has a folder button that opens the track's folder in the
   file manager with the file selected, for library and USB tracks alike.
-- **New feature:** The cue editor edits a track's release year, next to the genre. Opened from a
-  USB row, the edit is written to the PDB and the eDB on the stick as well as the library. A
-  year set here stays when the library is rescanned, and export dates the track from it: a
-  release date from another year becomes 1 January of the edited year.
+- **New feature:** The cue editor edits a track's release date, next to the genre: a full date,
+  or just the year or year and month. The field shows the date export writes to the PDB and the
+  eDB, which CDJs that read only the eDB use, so a date that export fills in from the file is
+  visible and can be corrected. Opened from a USB row, the edit is written to the PDB and the
+  eDB on the stick as well as the library. A date set here, and its year, stay when the library
+  is rescanned.
+- **New feature:** Every track list (Media Library, app playlists, USB playlists and USB
+  history) has row checkboxes, a select-all box and a selection bar beside the search. The bar
+  is always there, so the table no longer jumps when a selection starts; its actions wait for a
+  selection. The Library adds the selection to the active playlist or reanalyzes it, an app
+  playlist removes it from the playlist or reanalyzes it, and USB playlists and history add it
+  to the active playlist.
+- **New feature:** The selection bar's Edit… sets the genre, release date and star rating of every
+  selected track in one go, in all four track lists. It shows each field's shared value or
+  "Mixed", and writes only the fields you change; an emptied field is cleared. Edits from USB
+  playlists and history are written to the PDB and the eDB on the stick as well as the library.
 - **New feature:** Track lists have a sortable Year column next to Album. The columns now run
   Track, Album, Year, BPM, Key, Length and format, so the mixing columns sit closer to the
   track name and the file format comes last.
@@ -65,6 +77,10 @@
   either day first or month first, give only the year. MP3, AIFF and WAV files whose date is
   stored in a custom "DATE" or "YEAR" field, as some tag editors write it, are read too. Scan the
   libraries to update tracks that are already in the library.
+- **Improvement:** The Library's Scan button always scans and fills in missing analysis; it no
+  longer turns into "Analyze Selected" while tracks are selected. The selection bar's Reanalyze
+  gives every selected track a fresh analysis, replacing imported or edited BPM, key and first
+  beat even on a track that was never analyzed (cues are kept).
 - **Improvement:** Track search also matches the genre and the release year, and each word can
   match a different field, so "techno 2009" finds techno tracks from 2009.
 - **Improvement:** When a track has no release date tag, export uses the earlier of the file's

@@ -74,7 +74,7 @@ or a list of tracks, for checking changes to these steps.
 3. Use "Analyze Missing Tracks" for only that playlist's unanalyzed local tracks.
 4. Export after missing-analysis count reaches zero.
 
-### Analyze, Reanalyze and Analyze Selected
+### Analyze and Reanalyze
 
 What an analysis run does to a track depends on whether the track is already
 analyzed (has its waveform); the buttons' tooltips say the same:
@@ -86,8 +86,11 @@ analyzed (has its waveform); the buttons' tooltips say the same:
 - **Reanalyze** (track row, once analyzed): resets the waveform, BPM, key and
   first beat to a fresh analysis, replacing imported or edited values. Cues
   are kept.
-- **Analyze Selected** (the Library's scan button while tracks are selected):
-  each selected track gets one or the other, as above.
+- **Reanalyze** in the selection bar (Library and app playlists): every
+  selected track gets the fresh analysis, even one never analyzed before, so
+  imported or edited values are replaced (`reanalyze` on
+  `analyze_new_tracks`). Filling in only what's missing stays with the
+  header's Scan Library and the playlist's Analyze Missing Tracks.
 
 The rule lives in one place, `kept_analysis_values` (`service/analysis.rs`).
 

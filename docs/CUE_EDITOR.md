@@ -3,7 +3,7 @@
 ## How it works
 
 The cue editor sets a track's cue points, its beat grid (BPM + first beat), its
-key, its genre, star rating and release year, and where a CDJ starts playback. Open it with the magnifier button next to
+key, its genre, star rating and release date, and where a CDJ starts playback. Open it with the magnifier button next to
 a track's waveform ("Edit cue points & beat grid") in the library, an app
 playlist, a USB playlist, or USB history. The button is disabled until the track
 is analyzed. Opened from a USB row, a save writes both the USB and the local
@@ -24,15 +24,20 @@ save writes the library track, which every app playlist containing it shows.
 - **Genre** (next to the track name): type one or pick from the genres the library (and the USB, for a
   USB row) already has. An edited genre stays when the library is rescanned,
   even if the file's tag says otherwise. Empty clears it.
-- **Year** (next to the genre): four digits, empty for none. An edited year
-  stays when the library is rescanned. Export then dates the track from that
-  year: a release date tag from another year is replaced by 1 January of the
-  edited year, on the USB as well when the edit is made from a USB row.
+- **Release date** (next to the genre): `YYYY-MM-DD`, or just `YYYY-MM` or
+  `YYYY`; empty for none. The field shows the date export writes to the PDB
+  and the eDB, which CDJs that read only the eDB use: for a library track
+  with only a year or month (or no date at all), that is the date completed
+  from the file timestamp, as export does it. An edited date and its year
+  stay when the library is rescanned. A library track keeps a year or month
+  as entered and export completes it; on the USB, which holds only full
+  dates, a year or month keeps the date already there when it falls inside
+  it, else becomes the first day of that year or month.
 - **Rating** (next to the track name): click a star (1–5); click the current rating's star to clear it.
 
-A save writes only what changed: a genre, rating or year edit leaves the beat
-grid, key and cues as they are, and a cue or beat-grid edit leaves the genre,
-rating and year alone.
+A save writes only what changed: a genre, rating or release date edit leaves
+the beat grid, key and cues as they are, and a cue or beat-grid edit leaves the
+genre, rating and release date alone.
 
 The grid redraws as you edit, so it can be lined up by eye: here a wrong BPM
 (127) drifts off the kicks, 129 runs parallel, typing the first beat puts it on
@@ -225,18 +230,19 @@ it sends `null` and the cues on the stick are left as they are, so a BPM, key or
 first-beat edit can't change cues the editor can't represent, such as rekordbox
 memory cues.
 
-Genre, rating and year are not part of that call. When they changed, Save sends only
+Genre, rating and release date are not part of that call. When they changed, Save sends only
 the changed ones through `save_track_metadata_edits` /
 `save_usb_track_metadata_edits` (`metadataEdits` in the controller), and the
 analysis save runs only when the beat grid, key or cues changed
-(`analysisEdited`), so a genre, rating or year edit never rewrites the ANLZ
+(`analysisEdited`), so a genre, rating or release date edit never rewrites the ANLZ
 bundle or marks BPM / key as edited (`backend/src/service/track_metadata.rs`). A
 library genre set here gets `genre_source = 'user'`, which rescans and
-rekordbox / Mixxx imports keep; a year gets `release_year_source = 'user'`,
-which rescans keep. A year of 0 clears it.
+rekordbox / Mixxx imports keep; a release date gets
+`release_date_source = 'user'` (with its year), which rescans keep. An empty
+release date clears it and the year.
 
 Undo/redo is editor-local: each edit records a JSON snapshot of the editable
-state (`bpm`, `key`, `genre`, `rating`, `year`, `firstBeatMs`, `cues`) taken before it (`mutate` in the
+state (`bpm`, `key`, `genre`, `rating`, `releaseDate`, `firstBeatMs`, `cues`) taken before it (`mutate` in the
 controller). Consecutive edits sharing a key (one cue's name, one drag, one
 held arrow key) collapse into one step; an edit that changes nothing records
 nothing. "Unsaved" compares the save payload with the payload as opened.

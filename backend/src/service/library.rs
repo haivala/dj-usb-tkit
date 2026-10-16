@@ -74,7 +74,7 @@ impl BackendService {
         let mut existing_tracks = ExistingTracksByPath::new();
         {
             let mut stmt = tx.prepare(
-                "SELECT id, file_modified_at, title, artist, album, track_number, tonality, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date, genre, file_path, wav_extensible_kind, COALESCE(genre_source = 'user', 0), file_created_at, COALESCE(release_year_source = 'user', 0) FROM tracks",
+                "SELECT id, file_modified_at, title, artist, album, track_number, tonality, format_ext, sample_rate_hz, bit_depth, bitrate_kbps, disc_number, subtitle, comment, isrc, release_year, release_date, recorded_date, genre, file_path, wav_extensible_kind, COALESCE(genre_source = 'user', 0), file_created_at, COALESCE(release_date_source = 'user', 0) FROM tracks",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
@@ -102,7 +102,7 @@ impl BackendService {
                         row.get::<_, Option<String>>(20)?, // wav_extensible_kind
                         row.get::<_, bool>(21)?,           // genre edited in the app
                         row.get::<_, Option<i64>>(22)?,    // file_created_at
-                        row.get::<_, bool>(23)?,           // release year edited in the app
+                        row.get::<_, bool>(23)?,           // release date edited in the app
                     ),
                 ))
             })?;
@@ -191,7 +191,7 @@ impl BackendService {
                     old_wav_extensible_kind,
                     genre_edited,
                     old_created,
-                    year_edited,
+                    date_edited,
                 )) => {
                     let wav_extensible_kind =
                         item.wav_extensible_kind.map(WavFormatIssue::as_db_str);
@@ -209,9 +209,10 @@ impl BackendService {
                         || old_subtitle != item.subtitle
                         || old_comment != item.comment
                         || old_isrc != item.isrc
-                        // So does a release year edited in the app.
-                        || (!year_edited && old_release_year != item.release_year)
-                        || old_release_date != item.release_date
+                        // So does a release date (and its year) edited in the app.
+                        || (!date_edited
+                            && (old_release_year != item.release_year
+                                || old_release_date != item.release_date))
                         || old_recorded_date != item.recorded_date
                         // A genre edited in the app wins over the file's tag.
                         || (!genre_edited && old_genre != item.genre)
@@ -243,8 +244,8 @@ impl BackendService {
                                 subtitle = ?13,
                                 comment = ?14,
                                 isrc = ?15,
-                                release_year = CASE WHEN release_year_source = 'user' THEN release_year ELSE ?16 END,
-                                release_date = ?17,
+                                release_year = CASE WHEN release_date_source = 'user' THEN release_year ELSE ?16 END,
+                                release_date = CASE WHEN release_date_source = 'user' THEN release_date ELSE ?17 END,
                                 recorded_date = ?18,
                                 genre = CASE WHEN genre_source = 'user' THEN genre ELSE ?19 END,
                                 match_fingerprint = ?20,
