@@ -56,9 +56,11 @@
   history) has row checkboxes, a select-all box and a selection bar beside the search, each
   taking half the row. The bar is always there, so the table no longer jumps when a selection
   starts; until then it shows a hint of what it does, then the count and its actions. On a
-  narrow window the actions switch to short labels. The Library adds the selection to the active playlist or reanalyzes it, an app
-  playlist removes it from the playlist or reanalyzes it, and USB playlists and history add it
-  to the active playlist.
+  narrow window the actions switch to short labels. The Library reanalyzes the selection, and an
+  app playlist removes it from the playlist or reanalyzes it. The Library, USB playlists and
+  history add it to the active playlist with "+ Add to" and the playlist's name. Add to…, in all
+  four lists, opens a list of playlists to add the selection to several at once, shows which
+  already hold all or part of it, and creates a new playlist on the spot.
 - **New feature:** The selection bar's Edit… sets the genre, release date and star rating of every
   selected track in one go, in all four track lists. It shows each field's shared value or
   "Mixed", and writes only the fields you change; an emptied field is cleared. Edits from USB

@@ -165,7 +165,8 @@
             <div class="selection-actions is-empty" data-selection-bar="library">
               <span class="selection-count">0 selected</span>
               <span class="selection-hint">Select tracks to add, reanalyze or edit them</span>
-              <button type="button" data-selection-action="add" data-primary disabled data-tooltip="Add the selected tracks to the active playlist"><span class="selection-label-long">+ Add to playlist</span><span class="selection-label-short">+ Playlist</span></button>
+              <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long">Add to </span><span class="selection-target"></span></button>
+              <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
               <button type="button" data-selection-action="reanalyze" disabled data-tooltip="Reset waveform, BPM, key and first beat of the selected tracks to a fresh analysis, replacing imported or edited values (cues are kept)">Reanalyze</button>
               <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks"><span class="selection-label-long">Edit details…</span><span class="selection-label-short">Edit…</span></button>
               <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
@@ -290,7 +291,8 @@
               <div class="selection-actions is-empty" data-selection-bar="usbPlaylist">
                 <span class="selection-count">0 selected</span>
                 <span class="selection-hint">Select tracks to add to a playlist or edit them</span>
-                <button type="button" data-selection-action="add" data-primary disabled data-tooltip="Add the selected tracks to the active playlist"><span class="selection-label-long">+ Add to playlist</span><span class="selection-label-short">+ Playlist</span></button>
+                <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long">Add to </span><span class="selection-target"></span></button>
+                <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
                 <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks"><span class="selection-label-long">Edit details…</span><span class="selection-label-short">Edit…</span></button>
                 <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
               </div>
@@ -345,7 +347,8 @@
               <div class="selection-actions is-empty" data-selection-bar="usbHistory">
                 <span class="selection-count">0 selected</span>
                 <span class="selection-hint">Select tracks to add to a playlist or edit them</span>
-                <button type="button" data-selection-action="add" data-primary disabled data-tooltip="Add the selected tracks to the active playlist"><span class="selection-label-long">+ Add to playlist</span><span class="selection-label-short">+ Playlist</span></button>
+                <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long">Add to </span><span class="selection-target"></span></button>
+                <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
                 <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks"><span class="selection-label-long">Edit details…</span><span class="selection-label-short">Edit…</span></button>
                 <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
               </div>
@@ -412,7 +415,8 @@
           </div>
           <div class="selection-actions is-empty" data-selection-bar="playlist">
             <span class="selection-count">0 selected</span>
-            <span class="selection-hint">Select tracks to remove, reanalyze or edit them</span>
+            <span class="selection-hint">Select tracks to add, remove, reanalyze or edit them</span>
+            <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
             <button type="button" data-selection-action="remove" disabled data-tooltip="Remove the selected tracks from this playlist (they stay in the library)"><span class="selection-label-long">Remove from playlist</span><span class="selection-label-short">Remove</span></button>
             <button type="button" data-selection-action="reanalyze" disabled data-tooltip="Reset waveform, BPM, key and first beat of the selected tracks to a fresh analysis, replacing imported or edited values (cues are kept)">Reanalyze</button>
             <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks"><span class="selection-label-long">Edit details…</span><span class="selection-label-short">Edit…</span></button>
@@ -668,6 +672,22 @@
     </div>
   </div>
 
+  <!-- Selection bar "Add to…": the playlists to add the selection to -->
+  <div class="confirm-overlay" id="addToOverlay" hidden>
+    <div class="confirm-dialog add-to-dialog" role="dialog" aria-modal="true" aria-labelledby="addToTitle">
+      <h3 id="addToTitle">Add to playlists</h3>
+      <ul class="add-to-list" id="addToList" aria-label="Playlists"><!-- tplAddToItem per playlist --></ul>
+      <div class="add-to-new">
+        <input type="text" id="addToNewName" placeholder="New playlist" maxlength="255" autocomplete="off" spellcheck="false" aria-label="New playlist name" />
+        <button type="button" id="addToCreateBtn" disabled>Create</button>
+      </div>
+      <div class="row confirm-actions">
+        <button type="button" id="addToCancelBtn">Cancel</button>
+        <button type="button" id="addToApplyBtn" data-primary disabled>Add</button>
+      </div>
+    </div>
+  </div>
+
   <div class="confirm-overlay" id="tracklistExportOverlay" hidden>
     <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="tracklistExportTitle">
       <h3 id="tracklistExportTitle">Export Tracklist</h3>
@@ -904,6 +924,9 @@
   </template>
   <template id="tplSourceChip">
     <span class="source-chip"><input class="source-chip-toggle" type="checkbox" aria-label="Filter source" /><span class="source-chip-path"></span><button class="source-chip-remove" aria-label="Remove">&times;</button></span>
+  </template>
+  <template id="tplAddToItem">
+    <li><label class="add-to-item"><input type="checkbox" /><span class="add-to-name"></span><span class="muted add-to-note"></span></label></li>
   </template>
   <template id="tplNavPlaylistItem">
     <li data-nav-playlist-li><button class="nav-playlist-item">

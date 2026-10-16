@@ -1407,6 +1407,15 @@ main {
   display: none;
 }
 
+/* "+ Add to ‹playlist›": a long name is cut short (the tooltip has it all). */
+.selection-target {
+  display: inline-block;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
 @container (max-width: 1000px) {
   .selection-label-long { display: none; }
   .selection-label-short { display: inline; }
@@ -4101,6 +4110,73 @@ td button[data-action]:disabled,
 
 .group-edit-fields input[aria-invalid="true"] {
   border-color: var(--danger);
+}
+
+/* Selection bar "Add to…": the playlists, then the new-playlist field. */
+.add-to-dialog {
+  width: min(420px, 100%);
+}
+
+.add-to-list {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.add-to-list > li + li {
+  border-top: 1px solid var(--line);
+}
+
+.add-to-list > li.muted {
+  padding: 10px 12px;
+}
+
+.add-to-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.add-to-item:hover {
+  background: var(--card-hover);
+}
+
+.add-to-item:has(input:disabled) {
+  cursor: default;
+  background: none;
+}
+
+.add-to-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-to-item input:disabled ~ .add-to-name {
+  color: var(--muted);
+}
+
+.add-to-note {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.add-to-new {
+  display: flex;
+  gap: 8px;
+}
+
+.add-to-new input {
+  flex: 1;
+  min-width: 0;
 }
 
 .tracklist-export-body {

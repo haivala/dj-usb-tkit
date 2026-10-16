@@ -182,6 +182,12 @@ drive selection from being rendered against a newer selected drive.
 - `get_playlist_tracks`
 - `add_library_selection_to_playlist`
 - `add_track_candidates_to_playlist`
+- `add_library_selection_to_playlists` / `add_track_candidates_to_playlists` — the same
+  selection as the two above, resolved once and added to every playlist in `playlistIds`;
+  returns what each playlist took (`items`) and the totals
+- `get_playlist_membership` — `{ trackIds }`, one entry per selected track (its local id, or
+  `null` for a track with no local row yet); every local playlist in sidebar order with how
+  many of them it holds (`contained`) and `state`: `none`, `some` or `all`
 - `remove_tracks_from_playlist`
 - `reorder_playlist_tracks`
 - `refresh_playlist_export_status` — recomputes every playlist's

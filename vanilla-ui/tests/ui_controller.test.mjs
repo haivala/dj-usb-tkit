@@ -37,7 +37,7 @@ function makeDom(body = "") {
     <button data-action="add-history"></button>
     <div class="selection-actions is-empty" data-selection-bar="library">
       <span class="selection-count"></span>
-      <button data-selection-action="add"></button>
+      <button data-selection-action="add" hidden><span class="selection-target"></span></button>
       <button data-selection-action="clear"></button>
     </div>
     <nav id="navSidebar">
@@ -82,21 +82,24 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
   ]);
   el.scanLibraryBtn = document.getElementById("scanLibraryBtn");
   const { trackSelections } = createInitialState();
+  const getCurrentPlaylist = () => ({ id: "p1", name: "House" });
 
   updateModeText({
     state: { currentPlaylistId: "p1", trackSelections },
     el,
     document,
-    getCurrentPlaylist: () => ({ id: "p1", name: "House" })
+    getCurrentPlaylist
   });
   assert.equal(el.playlistBadge.className, "playlist-badge active");
   assert.equal(el.badgeLabel.textContent, "House");
   assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), true);
 
   updateActivePlaylistIndicators({ state: { currentPlaylistId: "p2" }, el });
-  updateAddToPlaylistButtons({ state: { currentPlaylistId: "p1", trackSelections }, document });
+  updateAddToPlaylistButtons({ state: { currentPlaylistId: "p1", trackSelections }, document, getCurrentPlaylist });
   trackSelections.library.ids = new Set(["a", "b"]);
-  updateSelectionCount({ state: { currentPlaylistId: "p1", trackSelections, sourceRoots: [] }, el, document });
+  updateSelectionCount({
+    state: { currentPlaylistId: "p1", trackSelections, sourceRoots: [] }, el, document, getCurrentPlaylist,
+  });
   updateScanLibraryButtonLabel({ state: { sourceRoots: [] }, el });
 
   assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), false);
@@ -107,7 +110,10 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
   const bar = document.querySelector('[data-selection-bar="library"]');
   assert.equal(bar.querySelector(".selection-count").textContent, "2 selected");
   assert.equal(bar.classList.contains("is-empty"), false);
-  assert.equal(bar.querySelector('[data-selection-action="add"]').disabled, false);
+  const add = bar.querySelector('[data-selection-action="add"]');
+  assert.equal(add.disabled, false);
+  assert.equal(add.hidden, false);
+  assert.equal(add.querySelector(".selection-target").textContent, "House");
   // The header button never turns into a selection action.
   assert.equal(el.scanLibraryBtn.textContent, "Scan Library");
 });

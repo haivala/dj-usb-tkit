@@ -795,6 +795,93 @@ pub struct AddTrackCandidatesToPlaylistData {
     pub resolutions: Vec<AddTrackCandidateResolution>,
 }
 
+/// The selection bar's "Add to…": the same selection as
+/// `AddLibrarySelectionToPlaylistRequest`, added to every playlist in
+/// `playlist_ids`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddLibrarySelectionToPlaylistsRequest {
+    pub playlist_ids: Vec<String>,
+    #[serde(default)]
+    pub source_roots: Vec<String>,
+    #[serde(default)]
+    pub include_rekordbox_db: bool,
+    #[serde(default)]
+    pub include_mixxx_db: bool,
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub track_ids: Vec<String>,
+}
+
+/// The selection bar's "Add to…" for USB rows: the same candidates as
+/// `AddTrackCandidatesToPlaylistRequest`, added to every playlist in
+/// `playlist_ids`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTrackCandidatesToPlaylistsRequest {
+    pub playlist_ids: Vec<String>,
+    #[serde(default)]
+    pub tracks: Vec<AddTrackCandidate>,
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    #[serde(default)]
+    pub usb_root_valid: bool,
+}
+
+/// One add to several playlists: the selection is resolved to local tracks
+/// once (`resolved` of `requested`; `resolutions` per candidate for USB rows),
+/// then `items` says what each playlist took, in request order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTracksToPlaylistsData {
+    pub requested: usize,
+    pub resolved: usize,
+    pub unresolved: usize,
+    pub added: usize,
+    pub skipped: usize,
+    pub items: Vec<AddTracksToPlaylistData>,
+    #[serde(default)]
+    pub resolutions: Vec<AddTrackCandidateResolution>,
+}
+
+/// The "Add to…" picker: which playlists already hold the selection. One
+/// entry per selected track, its local id, or `None` for a track with no
+/// local row yet (a USB row never added, a library file not indexed yet).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPlaylistMembershipRequest {
+    #[serde(default)]
+    pub track_ids: Vec<Option<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaylistMembershipState {
+    None,
+    Some,
+    All,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMembership {
+    pub playlist_id: String,
+    pub name: String,
+    /// How many of the selected tracks the playlist already holds.
+    pub contained: usize,
+    pub state: PlaylistMembershipState,
+}
+
+/// Every local playlist in sidebar order, with how much of the selection
+/// (`selected` tracks) it holds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPlaylistMembershipData {
+    pub selected: usize,
+    pub items: Vec<PlaylistMembership>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveTracksFromPlaylistRequest {

@@ -1,7 +1,8 @@
 // Page init script for record.mjs: stands in for the Tauri backend with the
 // payloads the real backend produced (window.__DOC_GIF_FIXTURE__) plus
 // made-up playlists and a connected USB, and draws a cursor and a Shift
-// keycap, which a headless screencast doesn't show. Each library named in
+// keycap, which a headless screencast doesn't show. Playlists can be created
+// and added to from the Library. Each library named in
 // `opts.externalLibraries` (`rekordbox`, `mixxx`) is "detected" as imported,
 // and its made-up playlists can be imported.
 //
@@ -78,8 +79,19 @@
   };
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const exportedNow = new Set();
+  // Playlists added to since: their "exported to USB" marks are cleared.
+  const changedNow = new Set();
   const isExported = (id, items, imported) =>
-    exportedNow.has(id) || (!!items.length && !imported && !(opts.unexported || []).includes(id));
+    exportedNow.has(id)
+    || (!!items.length && !imported && !changedNow.has(id) && !(opts.unexported || []).includes(id));
+  // Library tracks into a playlist, each once.
+  const addToPlaylist = (playlistId, trackIds) => {
+    const playlist = playlists.find((p) => p.id === playlistId);
+    const fresh = tracks.filter((t) => trackIds.includes(t.id) && !playlist.tracks.includes(t));
+    playlist.tracks.push(...fresh);
+    if (fresh.length) changedNow.add(playlistId);
+    return { playlistId, added: fresh.length, skipped: trackIds.length - fresh.length };
+  };
   // Replays the recorded export of playlist `name` as the backend's job
   // events, over about `opts.exportMs`.
   const replayExport = async (playlistId) => {
@@ -165,6 +177,32 @@
             return importPlaylist("mixxx", r);
           case "list_playlists":
             return ok({ items: playlistRows() });
+          case "create_playlist": {
+            const id = `pl-new-${playlists.length}`;
+            playlists.push({ id, name: r.name, tracks: [] });
+            return ok({ playlistId: id, name: r.name });
+          }
+          case "add_library_selection_to_playlist":
+            return ok(addToPlaylist(r.playlistId, r.trackIds || []));
+          case "add_library_selection_to_playlists": {
+            const ids = r.trackIds || [];
+            const items = r.playlistIds.map((id) => addToPlaylist(id, ids));
+            const sum = (key) => items.reduce((total, item) => total + item[key], 0);
+            return ok({
+              requested: ids.length, resolved: ids.length, unresolved: 0,
+              added: sum("added"), skipped: sum("skipped"), items, resolutions: [],
+            });
+          }
+          case "get_playlist_membership": {
+            const ids = r.trackIds || [];
+            const items = playlistRows().map(({ id, name }) => {
+              const held = playlists.find((p) => p.id === id).tracks.map((t) => t.id);
+              const contained = ids.filter((trackId) => held.includes(trackId)).length;
+              const state = contained === 0 ? "none" : contained >= ids.length ? "all" : "some";
+              return { playlistId: id, name, contained, state };
+            });
+            return ok({ selected: ids.length, items });
+          }
           case "get_playlist_tracks": {
             const items = playlists.find((p) => p.id === r.playlistId)?.tracks || [];
             return ok({

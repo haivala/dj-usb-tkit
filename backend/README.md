@@ -15,6 +15,9 @@ Implemented command set:
   - `get_playlist_tracks`
   - `add_library_selection_to_playlist`
   - `add_track_candidates_to_playlist`
+  - `add_library_selection_to_playlists`
+  - `add_track_candidates_to_playlists`
+  - `get_playlist_membership`
   - `remove_tracks_from_playlist`
   - `reorder_playlist_tracks`
 - Frontend settings:

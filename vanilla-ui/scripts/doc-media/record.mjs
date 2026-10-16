@@ -1,6 +1,6 @@
-// Records the docs media in docs/assets/ -- the cue-editor and
-// playlist-import GIFs and the README / cue-editor / Backups screenshots --
-// from the real frontend build.
+// Records the docs media in docs/assets/ -- the cue-editor, playlist-import,
+// export and selection-toolbar GIFs and the README / cue-editor / Backups
+// screenshots -- from the real frontend build.
 //
 //   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
 //   npm run docs:media -- cue-editor cue-editor-drag-cues   (only those)
@@ -551,6 +551,41 @@ function scenes(fixture) {
           await page.waitForTimeout(500);
           await clickOn(page, page.locator("#playlistImportOkBtn"), 300);
           await page.locator("#playlistTracksBody .track-grid-row").first().waitFor();
+          await moveTo(page, 820, 520, 20);
+          await page.waitForTimeout(2200);
+        }, { fullWindow: true });
+      },
+    },
+    {
+      // docs/PLAYLISTS_PLAYBACK.md: ticking tracks, "+ Add to" the active
+      // playlist, then Add to… another playlist and a new one.
+      name: "selection-toolbar",
+      caption: "Selected tracks: + Add to the active playlist, or Add to… several, a new one too",
+      editor: false,
+      opts: {},
+      async run(page, _wf, record) {
+        const current = fixture.playlists.find((p) => p.current);
+        await page.locator(`.nav-playlist-item[data-playlist-id="${current.id}"]`).click();
+        await page.locator("#playlistTracksBody .track-grid-row").first().waitFor();
+        await page.locator('.nav-item[data-view="library"]').click();
+        await page.locator("#libraryTableBody .track-grid-row").first().waitFor();
+        await page.mouse.move(820, 420);
+        await page.waitForTimeout(300);
+        const tick = (title) => page.locator("#libraryTableBody .track-grid-row", { hasText: title })
+          .locator(".td-select input");
+        const bar = page.locator('[data-selection-bar="library"]');
+        const pick = (name) => page.locator("#addToList li", { hasText: name }).locator("input");
+        await record(async () => {
+          await page.waitForTimeout(600);
+          for (const title of ["Low Orbit", "Frost Line", "Afterglow"]) await clickOn(page, tick(title), 350);
+          await page.waitForTimeout(600);
+          await clickOn(page, bar.locator('[data-selection-action="add"]'), 1400);
+          await clickOn(page, bar.locator('[data-selection-action="add-to"]'), 1800);
+          await clickOn(page, pick("House"), 700);
+          await typeInto(page, page.locator("#addToNewName"), "Friday");
+          await page.waitForTimeout(1100);
+          await clickOn(page, page.locator("#addToApplyBtn"), 300);
+          await page.locator("#statusText", { hasText: "Friday" }).waitFor();
           await moveTo(page, 820, 520, 20);
           await page.waitForTimeout(2200);
         }, { fullWindow: true });

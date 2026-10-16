@@ -32,8 +32,16 @@ export function renderSelectionBar(ctx, view) {
   bar.classList.toggle("is-empty", count === 0);
   bar.querySelector(".selection-count").textContent = `${count} selected`;
   for (const button of bar.querySelectorAll("[data-selection-action]")) {
-    const needsPlaylist = button.dataset.selectionAction === "add";
-    button.disabled = count === 0 || (needsPlaylist && !ctx.state.currentPlaylistId);
+    button.disabled = count === 0;
+  }
+  // "+ Add to ‹active playlist›" names its target; with no active playlist
+  // it's gone, and Add to… picks one.
+  const add = bar.querySelector('[data-selection-action="add"]');
+  if (add) {
+    const playlist = ctx.getCurrentPlaylist();
+    add.hidden = !playlist;
+    add.querySelector(".selection-target").textContent = playlist?.name || "";
+    add.dataset.tooltip = playlist ? `Add the selected tracks to ${playlist.name}` : "";
   }
   const box = selectAllBoxOf(ctx, view);
   if (box) {
@@ -86,7 +94,8 @@ export function narrowTrackSelectionToLoaded(ctx, view, loaded) {
 //   ctl:        the view's TrackListController (rows resolve against `view`)
 //   selectAll:  async () => tracks (or ids) -- every track the list shows
 //               under its current search, not just the loaded pages
-//   actions:    { add, remove, reanalyze } -- async (ids, rows) => void
+//   actions:    { add, "add-to", remove, reanalyze, edit }
+//               -- async (ids, rows) => void
 export function bindTrackSelection(ctx, { view, body, ctl, selectAll, actions }) {
   const { emitStatus } = ctx;
 

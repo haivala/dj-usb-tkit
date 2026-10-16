@@ -2,6 +2,7 @@ import { catchErr, handleTrackAction, trackMetaFingerprint, resolveRowActionTrac
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
 import { bindTrackSelection } from "../shared/track_selection.mjs";
+import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
 
 export function bindUsbEvents(ctx) {
@@ -67,6 +68,7 @@ export function bindUsbEvents(ctx) {
       },
       actions: {
         add: (_ids, rows) => ctx.addTracksToCurrentPlaylist(rows),
+        "add-to": (ids, rows) => addSelectionToPlaylists(ctx, view, ids, rows),
         edit: (ids, rows) => editTrackSelection(ctx, view, ids, rows),
       },
     });

@@ -1,7 +1,7 @@
 //! Local playlists and imported-playlist bookkeeping.
 
 use super::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(super) fn track_id_exists(conn: &rusqlite::Connection, track_id: &str) -> BackendResult<bool> {
     let found = conn
@@ -530,28 +530,77 @@ impl BackendService {
     ) -> BackendResult<AddTracksToPlaylistData> {
         let conn = self.db.connect()?;
         ensure_playlist_exists_conn(&conn, &req.playlist_id)?;
-
-        let visible = self.compute_visible_library_tracks(
+        let track_ids = self.resolve_library_selection(
             &conn,
             &req.source_roots,
             ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
             &req.query,
+            &req.track_ids,
+            req.all_matching,
         )?;
+        drop(conn);
 
-        let wanted: std::collections::HashSet<&str> =
-            req.track_ids.iter().map(String::as_str).collect();
+        if track_ids.is_empty() {
+            return Ok(AddTracksToPlaylistData {
+                playlist_id: req.playlist_id,
+                added: 0,
+                skipped: 0,
+            });
+        }
+
+        self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: req.playlist_id,
+            track_ids,
+        })
+    }
+
+    /// The selection bar's "Add to…": the ticked library tracks, resolved
+    /// once, added to each of `playlist_ids`.
+    pub fn add_library_selection_to_playlists(
+        &self,
+        req: AddLibrarySelectionToPlaylistsRequest,
+    ) -> BackendResult<AddTracksToPlaylistsData> {
+        let conn = self.db.connect()?;
+        let playlist_ids = checked_playlist_ids(&conn, &req.playlist_ids)?;
+        let track_ids = self.resolve_library_selection(
+            &conn,
+            &req.source_roots,
+            ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
+            &req.query,
+            &req.track_ids,
+            false,
+        )?;
+        drop(conn);
+        self.add_resolved_to_playlists(&playlist_ids, track_ids, req.track_ids.len(), Vec::new())
+    }
+
+    /// The ticked library rows (or every row, with `all_matching`) under the
+    /// current filter, as local track ids. Every visible row is either a real
+    /// `tracks` row or a browse-only file that isn't indexed yet (`id ==
+    /// file_path`); the latter are materialized so a playlist references a
+    /// stable local id, matching what the single-row "+" does. Enumerating
+    /// against the filter means a selection spanning pages the user scrolled
+    /// past is never lost.
+    fn resolve_library_selection(
+        &self,
+        conn: &rusqlite::Connection,
+        source_roots: &[String],
+        external: ExternalLibraries,
+        query: &str,
+        wanted_ids: &[String],
+        all_matching: bool,
+    ) -> BackendResult<Vec<String>> {
+        let visible = self.compute_visible_library_tracks(conn, source_roots, external, query)?;
+
+        let wanted: HashSet<&str> = wanted_ids.iter().map(String::as_str).collect();
         let chosen: Vec<&Track> = visible
             .iter()
-            .filter(|track| req.all_matching || wanted.contains(track.id.as_str()))
+            .filter(|track| all_matching || wanted.contains(track.id.as_str()))
             .collect();
 
-        // Every visible row is either a real `tracks` row or a browse-only file
-        // that isn't indexed yet (`id == file_path`); materialize the latter so
-        // the playlist references a stable local id, matching what the
-        // single-row "+" does.
         let mut track_ids = Vec::<String>::with_capacity(chosen.len());
         for track in chosen {
-            if track_id_exists(&conn, &track.id)? {
+            if track_id_exists(conn, &track.id)? {
                 track_ids.push(track.id.clone());
                 continue;
             }
@@ -570,44 +619,19 @@ impl BackendService {
             })?;
             track_ids.push(materialized.track_id);
         }
-        drop(conn);
-
-        if track_ids.is_empty() {
-            return Ok(AddTracksToPlaylistData {
-                playlist_id: req.playlist_id,
-                added: 0,
-                skipped: 0,
-            });
-        }
-
-        self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
-            playlist_id: req.playlist_id,
-            track_ids,
-        })
+        Ok(track_ids)
     }
 
     pub fn add_track_candidates_to_playlist(
         &self,
         req: AddTrackCandidatesToPlaylistRequest,
     ) -> BackendResult<AddTrackCandidatesToPlaylistData> {
-        let conn = self.db.connect()?;
         let requested = req.tracks.len();
-        let mut track_ids = Vec::<String>::new();
-        let mut resolutions = Vec::<AddTrackCandidateResolution>::with_capacity(requested);
-
-        for candidate in &req.tracks {
-            let resolution = self.resolve_add_track_candidate(
-                &conn,
-                candidate,
-                req.usb_root.as_deref(),
-                req.usb_root_valid,
-            )?;
-            if let Some(track_id) = resolution.track_id.as_ref() {
-                track_ids.push(track_id.clone());
-            }
-            resolutions.push(resolution);
-        }
-        drop(conn);
+        let (track_ids, resolutions) = self.resolve_add_track_candidates(
+            &req.tracks,
+            req.usb_root.as_deref(),
+            req.usb_root_valid,
+        )?;
 
         let resolved = track_ids.len();
         let unresolved = requested.saturating_sub(resolved);
@@ -637,6 +661,132 @@ impl BackendService {
             skipped: added.skipped,
             resolutions,
         })
+    }
+
+    /// The selection bar's "Add to…" for USB rows: the candidates, resolved
+    /// (and materialized) once, added to each of `playlist_ids`.
+    pub fn add_track_candidates_to_playlists(
+        &self,
+        req: AddTrackCandidatesToPlaylistsRequest,
+    ) -> BackendResult<AddTracksToPlaylistsData> {
+        let playlist_ids = checked_playlist_ids(&*self.db.connect()?, &req.playlist_ids)?;
+        let (track_ids, resolutions) = self.resolve_add_track_candidates(
+            &req.tracks,
+            req.usb_root.as_deref(),
+            req.usb_root_valid,
+        )?;
+        self.add_resolved_to_playlists(&playlist_ids, track_ids, req.tracks.len(), resolutions)
+    }
+
+    /// Local track ids of the candidates that resolve, in order, and each
+    /// candidate's resolution.
+    fn resolve_add_track_candidates(
+        &self,
+        tracks: &[AddTrackCandidate],
+        usb_root: Option<&str>,
+        usb_root_valid: bool,
+    ) -> BackendResult<(Vec<String>, Vec<AddTrackCandidateResolution>)> {
+        let conn = self.db.connect()?;
+        let mut track_ids = Vec::<String>::new();
+        let mut resolutions = Vec::<AddTrackCandidateResolution>::with_capacity(tracks.len());
+        for candidate in tracks {
+            let resolution =
+                self.resolve_add_track_candidate(&conn, candidate, usb_root, usb_root_valid)?;
+            if let Some(track_id) = resolution.track_id.as_ref() {
+                track_ids.push(track_id.clone());
+            }
+            resolutions.push(resolution);
+        }
+        Ok((track_ids, resolutions))
+    }
+
+    fn add_resolved_to_playlists(
+        &self,
+        playlist_ids: &[String],
+        track_ids: Vec<String>,
+        requested: usize,
+        resolutions: Vec<AddTrackCandidateResolution>,
+    ) -> BackendResult<AddTracksToPlaylistsData> {
+        let mut items = Vec::with_capacity(playlist_ids.len());
+        for playlist_id in playlist_ids {
+            items.push(if track_ids.is_empty() {
+                AddTracksToPlaylistData {
+                    playlist_id: playlist_id.clone(),
+                    added: 0,
+                    skipped: 0,
+                }
+            } else {
+                self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+                    playlist_id: playlist_id.clone(),
+                    track_ids: track_ids.clone(),
+                })?
+            });
+        }
+        Ok(AddTracksToPlaylistsData {
+            requested,
+            resolved: track_ids.len(),
+            unresolved: requested.saturating_sub(track_ids.len()),
+            added: items.iter().map(|item| item.added).sum(),
+            skipped: items.iter().map(|item| item.skipped).sum(),
+            items,
+            resolutions,
+        })
+    }
+
+    /// Every local playlist in sidebar order, with how many of the selected
+    /// tracks it already holds -- what the "Add to…" picker shows.
+    pub fn get_playlist_membership(
+        &self,
+        req: GetPlaylistMembershipRequest,
+    ) -> BackendResult<GetPlaylistMembershipData> {
+        let selected = req.track_ids.len();
+        let ids: Vec<&str> = req
+            .track_ids
+            .iter()
+            .filter_map(|id| id.as_deref().map(str::trim).filter(|id| !id.is_empty()))
+            .collect();
+        let wanted: HashSet<&str> = ids.iter().copied().collect();
+
+        // playlist id -> the selected tracks it holds
+        let mut held: HashMap<String, HashSet<String>> = HashMap::new();
+        if !wanted.is_empty() {
+            let conn = self.db.connect()?;
+            let mut stmt = conn.prepare("SELECT playlist_id, track_id FROM playlist_tracks")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (playlist_id, track_id) = row?;
+                if wanted.contains(track_id.as_str()) {
+                    held.entry(playlist_id).or_default().insert(track_id);
+                }
+            }
+        }
+
+        let items = self
+            .list_playlists()?
+            .items
+            .into_iter()
+            .map(|playlist| {
+                let contained = held.get(&playlist.id).map_or(0, |tracks| {
+                    ids.iter().filter(|id| tracks.contains(**id)).count()
+                });
+                let state = if contained == 0 {
+                    PlaylistMembershipState::None
+                } else if contained >= selected {
+                    PlaylistMembershipState::All
+                } else {
+                    PlaylistMembershipState::Some
+                };
+                PlaylistMembership {
+                    playlist_id: playlist.id,
+                    name: playlist.name,
+                    contained,
+                    state,
+                }
+            })
+            .collect();
+        Ok(GetPlaylistMembershipData { selected, items })
     }
 
     pub(super) fn resolve_add_track_candidate(
@@ -929,6 +1079,28 @@ impl BackendService {
             reordered: ordered_track_ids.len(),
         })
     }
+}
+
+/// `playlist_ids` without repeats, in order, each an existing playlist.
+fn checked_playlist_ids(
+    conn: &rusqlite::Connection,
+    playlist_ids: &[String],
+) -> BackendResult<Vec<String>> {
+    let mut seen = HashSet::new();
+    let ids: Vec<String> = playlist_ids
+        .iter()
+        .filter(|id| seen.insert(id.as_str()))
+        .cloned()
+        .collect();
+    if ids.is_empty() {
+        return Err(BackendError::Validation(
+            "playlistIds must contain at least one id".to_string(),
+        ));
+    }
+    for id in &ids {
+        ensure_playlist_exists_conn(conn, id)?;
+    }
+    Ok(ids)
 }
 
 pub(super) fn ensure_playlist_exists_conn(

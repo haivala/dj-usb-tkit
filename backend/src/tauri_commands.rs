@@ -13,14 +13,16 @@ use uuid::Uuid;
 use crate::commands::BackendCommands;
 use crate::error::{ErrorCode, ErrorPayload};
 use crate::models::{
-    AddLibrarySelectionToPlaylistRequest, AddTrackCandidatesToPlaylistData,
-    AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AnalyzeNewTracksData,
-    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
-    CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
-    DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData, DeleteUsbBackupRequest,
-    DetectExternalMixxxDbData, DetectExternalRekordboxDbData, ExportToUsbData, ExportToUsbRequest,
-    FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
+    AddLibrarySelectionToPlaylistRequest, AddLibrarySelectionToPlaylistsRequest,
+    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest,
+    AddTrackCandidatesToPlaylistsRequest, AddTracksToPlaylistData, AddTracksToPlaylistsData,
+    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
+    BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
+    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
+    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
+    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
+    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
+    GetFrontendSettingsData, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
     GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
@@ -986,6 +988,30 @@ pub fn add_library_selection_to_playlist(
     request: AddLibrarySelectionToPlaylistRequest,
 ) -> ApiResponse<AddTracksToPlaylistData> {
     state.add_library_selection_to_playlist(request)
+}
+
+#[tauri::command]
+pub fn add_library_selection_to_playlists(
+    state: State<'_, BackendCommands>,
+    request: AddLibrarySelectionToPlaylistsRequest,
+) -> ApiResponse<AddTracksToPlaylistsData> {
+    state.add_library_selection_to_playlists(request)
+}
+
+#[tauri::command]
+pub fn add_track_candidates_to_playlists(
+    state: State<'_, BackendCommands>,
+    request: AddTrackCandidatesToPlaylistsRequest,
+) -> ApiResponse<AddTracksToPlaylistsData> {
+    state.add_track_candidates_to_playlists(request)
+}
+
+#[tauri::command]
+pub fn get_playlist_membership(
+    state: State<'_, BackendCommands>,
+    request: GetPlaylistMembershipRequest,
+) -> ApiResponse<GetPlaylistMembershipData> {
+    state.get_playlist_membership(request)
 }
 
 #[tauri::command]

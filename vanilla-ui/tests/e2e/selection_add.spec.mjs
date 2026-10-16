@@ -14,6 +14,8 @@ function installSelectionMock(page, mockOpts = {}) {
       album: "Stick Album",
       filePath: `/Volumes/USB-TEST/Contents/stick-${i}.mp3`,
       usbMediaPath: `/Contents/stick-${i}.mp3`,
+      // The first is matched to a library track; the second never was.
+      localTrackId: i === 0 ? "t1" : null,
     }));
 
     const tracks = [
@@ -27,11 +29,47 @@ function installSelectionMock(page, mockOpts = {}) {
     ];
     const playlists = [];
     const playlistTracks = new Map();
+    const addIds = (playlistId, ids) => {
+      const current = playlistTracks.get(playlistId) || [];
+      const fresh = ids.filter((id, i) => !current.includes(id) && ids.indexOf(id) === i);
+      playlistTracks.set(playlistId, [...current, ...fresh]);
+      return { playlistId, added: fresh.length, skipped: ids.length - fresh.length };
+    };
+    const addToPlaylists = (playlistIds, ids, requested) => {
+      const items = playlistIds.map((playlistId) => addIds(playlistId, ids));
+      const sum = (key) => items.reduce((total, item) => total + item[key], 0);
+      return {
+        ok: true,
+        data: {
+          requested, resolved: ids.length, unresolved: requested - ids.length,
+          added: sum("added"), skipped: sum("skipped"), items, resolutions: [],
+        },
+      };
+    };
 
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
           window.__calls.push({ command, request: payload?.request ?? null });
+          if (command === "get_playlist_membership") {
+            const ids = payload?.request?.trackIds || [];
+            const items = playlists.map((p) => {
+              const held = playlistTracks.get(p.id) || [];
+              const contained = ids.filter((id) => id && held.includes(id)).length;
+              const state = contained === 0 ? "none" : contained >= ids.length ? "all" : "some";
+              return { playlistId: p.id, name: p.name, contained, state };
+            });
+            return { ok: true, data: { selected: ids.length, items } };
+          }
+          if (command === "add_library_selection_to_playlists") {
+            const r = payload?.request || {};
+            return addToPlaylists(r.playlistIds, r.trackIds.map(String), r.trackIds.length);
+          }
+          if (command === "add_track_candidates_to_playlists") {
+            const r = payload?.request || {};
+            const ids = r.tracks.map((t) => String(t.localTrackId || t.trackId || "")).filter(Boolean);
+            return addToPlaylists(r.playlistIds, ids, r.tracks.length);
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
@@ -47,7 +85,7 @@ function installSelectionMock(page, mockOpts = {}) {
           }
           if (command === "create_playlist") {
             const name = String(payload?.request?.name || "Untitled");
-            const id = `pl-${Date.now()}`;
+            const id = `pl-${playlists.length + 1}`;
             const row = {
               id, name, source: "local",
               lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null,
@@ -602,3 +640,117 @@ test("Edit… on USB playlist rows writes them to the stick and shows the new ye
   await expect(page.locator("#usbPlaylistTracks .td-year")).toHaveText(["2010", "2010"]);
 });
 
+
+const lastCall = async (page, command) => (await page.evaluate(() => window.__calls))
+  .filter((c) => c.command === command).pop()?.request;
+
+test("+ Add to names the active playlist; Add to… shows what each playlist holds and adds to several, new ones too", async ({ page }) => {
+  await installSelectionMock(page);
+  await page.goto("/");
+  const bar = page.locator(libraryBar);
+  const add = bar.locator('[data-selection-action="add"]');
+  const addTo = bar.locator('[data-selection-action="add-to"]');
+
+  // No active playlist: only Add to… is offered.
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+  await tickRows(page, "libraryTableBody", 1);
+  await expect(add).toBeHidden();
+  await expect(addTo).toBeEnabled();
+  await bar.locator('[data-selection-action="clear"]').click();
+
+  await createPlaylist(page, "Warmup");
+  await tickRows(page, "libraryTableBody", 1);
+  await expect(add).toBeVisible();
+  await expect(add).toHaveText("+ Add to Warmup");
+  await expect(add).toHaveAttribute("data-tooltip", "Add the selected tracks to Warmup");
+  await add.click();
+  await expect(page.locator("#statusText")).toContainText("Added 1 tracks (skipped 0) to Warmup");
+  await bar.locator('[data-selection-action="clear"]').click();
+
+  await createPlaylist(page, "Peak");
+  await expect(add).toHaveText("+ Add to Peak");
+  await tickRows(page, "libraryTableBody", 2);
+  await addTo.click();
+
+  const dialog = page.locator("#addToOverlay");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator("#addToTitle")).toHaveText("Add 2 tracks to playlists");
+  expect((await lastCall(page, "get_playlist_membership")).trackIds).toEqual(["t1", "t2"]);
+  const row = (name) => page.locator("#addToList li", { hasText: name });
+  // Warmup holds one of the two: partly ticked until ticked.
+  await expect(row("Warmup").locator(".add-to-note")).toHaveText("1 of 2 in");
+  await expect(row("Warmup").locator("input")).toHaveJSProperty("indeterminate", true);
+  await expect(row("Peak").locator(".add-to-note")).toHaveText("");
+  await expect(page.locator("#addToApplyBtn")).toBeDisabled();
+
+  // A playlist made here is ticked; it isn't made active.
+  await page.locator("#addToNewName").fill("Late");
+  await page.locator("#addToNewName").press("Enter");
+  await expect(row("Late").locator("input")).toBeChecked();
+  await expect(page.locator("#badgeLabel")).toHaveText("Peak");
+  await row("Warmup").locator("input").check();
+  await page.locator("#addToApplyBtn").click();
+  await expect(dialog).toBeHidden();
+
+  await expect(page.locator("#statusText")).toContainText("Added 3 tracks (skipped 1) to Warmup, Late");
+  const request = await lastCall(page, "add_library_selection_to_playlists");
+  expect(request.playlistIds).toEqual(["pl-1", "pl-3"]);
+  expect(request.trackIds).toEqual(["t1", "t2"]);
+
+  // Both now hold the whole selection: shown ticked, and can't be ticked off.
+  await addTo.click();
+  await expect(row("Warmup").locator(".add-to-note")).toHaveText("Already in");
+  await expect(row("Warmup").locator("input")).toBeDisabled();
+  await expect(row("Late").locator("input")).toBeChecked();
+  await expect(page.locator("#addToApplyBtn")).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("Add to… from a USB playlist sends the rows' library matches and the rows themselves", async ({ page }) => {
+  await installSelectionMock(page, { usb: true });
+  await page.goto("/");
+  await createPlaylist(page, "From Stick");
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator("#refreshUsbBtn").click();
+  await page.locator('[data-usb-playlist-index="0"]').click();
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
+
+  await page.locator('[data-select-all="usbPlaylist"]').check();
+  await page.locator('[data-selection-bar="usbPlaylist"] [data-selection-action="add-to"]').click();
+  // One entry per row: the matched library track, or none.
+  expect((await lastCall(page, "get_playlist_membership")).trackIds).toEqual(["t1", null]);
+  await page.locator("#addToList li", { hasText: "From Stick" }).locator("input").check();
+  await page.locator("#addToApplyBtn").click();
+
+  await expect(page.locator("#statusText")).toContainText("to From Stick");
+  const request = await lastCall(page, "add_track_candidates_to_playlists");
+  expect(request.playlistIds).toEqual(["pl-1"]);
+  expect(request.usbRoot).toBe("/Volumes/USB-TEST");
+  expect(request.tracks.map((t) => t.title)).toEqual(["Stick A", "Stick B"]);
+});
+
+test("Add to… from an app playlist copies its tracks to another playlist by id", async ({ page }) => {
+  await installSelectionMock(page);
+  await page.goto("/");
+  await createPlaylist(page, "Other");
+  await createPlaylist(page, "Trim");
+  await tickRows(page, "libraryTableBody");
+  await page.locator(`${libraryBar} [data-selection-action="add"]`).click();
+  await expect(page.locator("#statusText")).toContainText("Added 3");
+
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Trim" }).click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+  await page.locator('[data-select-all="playlist"]').check();
+  await page.locator('[data-selection-bar="playlist"] [data-selection-action="add-to"]').click();
+  await expect(page.locator("#addToList li", { hasText: "Trim" }).locator(".add-to-note")).toHaveText("Already in");
+  await page.locator("#addToList li", { hasText: "Other" }).locator("input").check();
+  await page.locator("#addToApplyBtn").click();
+
+  await expect(page.locator("#statusText")).toContainText("Added 3 tracks (skipped 0) to Other");
+  const request = await lastCall(page, "add_track_candidates_to_playlists");
+  expect(request.playlistIds).toEqual(["pl-1"]);
+  expect(request.tracks).toEqual([{ trackId: "t1" }, { trackId: "t2" }, { trackId: "t3" }]);
+});

@@ -4,14 +4,16 @@ use std::sync::{Arc, Mutex, mpsc};
 use crate::error::BackendResult;
 use crate::error::ErrorPayload;
 use crate::models::{
-    AddLibrarySelectionToPlaylistRequest, AddTrackCandidatesToPlaylistData,
-    AddTrackCandidatesToPlaylistRequest, AddTracksToPlaylistData, AnalyzeNewTracksData,
-    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
-    CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData, CreatePlaylistRequest,
-    DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData, DeleteUsbBackupRequest,
-    DetectExternalMixxxDbData, DetectExternalRekordboxDbData, ExportToUsbData, ExportToUsbRequest,
-    FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetFrontendSettingsData,
+    AddLibrarySelectionToPlaylistRequest, AddLibrarySelectionToPlaylistsRequest,
+    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest,
+    AddTrackCandidatesToPlaylistsRequest, AddTracksToPlaylistData, AddTracksToPlaylistsData,
+    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
+    BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
+    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
+    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
+    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
+    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
+    GetFrontendSettingsData, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
     GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
@@ -301,6 +303,27 @@ impl BackendCommands {
         req: AddLibrarySelectionToPlaylistRequest,
     ) -> ApiResponse<AddTracksToPlaylistData> {
         wrap(self.service.add_library_selection_to_playlist(req))
+    }
+
+    pub fn add_library_selection_to_playlists(
+        &self,
+        req: AddLibrarySelectionToPlaylistsRequest,
+    ) -> ApiResponse<AddTracksToPlaylistsData> {
+        wrap(self.service.add_library_selection_to_playlists(req))
+    }
+
+    pub fn add_track_candidates_to_playlists(
+        &self,
+        req: AddTrackCandidatesToPlaylistsRequest,
+    ) -> ApiResponse<AddTracksToPlaylistsData> {
+        wrap(self.service.add_track_candidates_to_playlists(req))
+    }
+
+    pub fn get_playlist_membership(
+        &self,
+        req: GetPlaylistMembershipRequest,
+    ) -> ApiResponse<GetPlaylistMembershipData> {
+        wrap(self.service.get_playlist_membership(req))
     }
 
     pub fn remove_tracks_from_playlist(

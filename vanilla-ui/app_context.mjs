@@ -15,6 +15,7 @@ import * as messages from "./message_bus.mjs";
 import { createInitialState, createTableSortState, createEventLogState } from "./app_state.mjs";
 import { renderWaveformsIn } from "./waveform.mjs";
 import { createGroupEditDialogController } from "./components/shared/track_metadata_edits.mjs";
+import { createAddToDialogController } from "./components/shared/add_to_playlists.mjs";
 
 // Every element with an `id` in index.html, by id (`el.statusText`, …). Ids
 // inside <template>s aren't part of the document, so they're never collected.
@@ -117,6 +118,7 @@ export function createAppContext(env) {
   ctx.tracklistExportDialog = uiCtrl.createTracklistExportDialogController(ctx.el);
   ctx.playlistImportDialog = uiCtrl.createPlaylistImportDialogController(ctx.el, ctx.document);
   ctx.groupEditDialog = createGroupEditDialogController(ctx.el, ctx.document);
+  ctx.addToDialog = createAddToDialogController(ctx.el, ctx.document);
   ctx.trackDetailDialog = trackDetail.createAppTrackDetailController(ctx);
   ctx.libraryTracksCtl = library.createLibraryTracksController(ctx);
   ctx.playlistTracksCtl = playlist.createPlaylistTracksController(ctx);

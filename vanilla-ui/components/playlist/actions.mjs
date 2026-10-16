@@ -17,7 +17,7 @@ const PLAYLIST_LOAD_LIMIT_DEFAULT = 150;
 // Builds the wire payload for add_track_candidates_to_playlist from a UI track object,
 // keeping only the fields AddTrackCandidate (backend/src/models.rs) declares so UI-display
 // state/sentinels (e.g. bpm: "" for "not analyzed yet") never reach the backend's strict types.
-function toAddTrackCandidatePayload(track) {
+export function toAddTrackCandidatePayload(track) {
   // > 0, not just isFinite: an empty-string/undefined "not analyzed yet" sentinel coerces to 0
   // via Number(), and 0 is a valid f64 that would otherwise get materialized as a real BPM value.
   const bpm = Number(track?.bpm);
@@ -167,10 +167,8 @@ export function startPlaylistRename(ctx, playlistId) {
       el.playlistPanelTitle.textContent = current.name;
       renderPlaylistExportStatus(el, current);
     }
-    const badge = getCurrentPlaylist(ctx);
-    if (badge?.id === playlistId) {
-      el.badgeLabel.textContent = current.name;
-    }
+    // The badge and the selection bars' "+ Add to ‹name›".
+    if (getCurrentPlaylist(ctx)?.id === playlistId) ctx.updateModeText();
   };
 
   input.addEventListener("keydown", (event) => {
@@ -489,8 +487,21 @@ export async function deletePlaylist(ctx, playlistId) {
   }
 }
 
+// An add's per-candidate resolutions, onto the rows it was sent from: each
+// row learns its local track id, and a row that had another id hands its
+// identity over to the resolved one.
+export function applyAddResolutions(ctx, tracks, resolutions) {
+  (resolutions || []).forEach((resolution, i) => {
+    const resolvedId = String(resolution?.trackId || "").trim();
+    if (!resolvedId) return;
+    if (tracks?.[i]) tracks[i].localTrackId = resolvedId;
+    const previousId = String(resolution.previousId || "").trim();
+    if (previousId && previousId !== resolvedId) ctx.promoteTrackIdentity(previousId, resolvedId);
+  });
+}
+
 export async function addTracksToCurrentPlaylist(ctx, tracks) {
-  const { state, pushEventLog, withProgress, command, promoteTrackIdentity } = ctx;
+  const { state, pushEventLog, withProgress, command } = ctx;
   const { emitStatus } = ctx;
 
   const playlist = requireCurrentPlaylist(ctx);
@@ -516,16 +527,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
       usbRoot: state.usbRoot || null,
       usbRootValid: !!state.usbRootValid
     });
-    for (let i = 0; i < (add.resolutions || []).length; i += 1) {
-      const resolution = add.resolutions[i] || {};
-      const resolvedId = String(resolution.trackId || "").trim();
-      if (!resolvedId) continue;
-      if (tracks?.[i]) tracks[i].localTrackId = resolvedId;
-      const previousId = String(resolution.previousId || "").trim();
-      if (previousId && previousId !== resolvedId) {
-        promoteTrackIdentity(previousId, resolvedId);
-      }
-    }
+    applyAddResolutions(ctx, tracks, add.resolutions);
     if (!Number(add.resolved || 0)) {
       return add;
     }

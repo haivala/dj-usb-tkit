@@ -1,5 +1,6 @@
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindTrackSelection } from "../shared/track_selection.mjs";
+import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
 import { enabledSourceRoots, LIBRARY_LOAD_LIMIT_DEFAULT } from "./actions.mjs";
 
@@ -223,6 +224,7 @@ export function bindLibraryEvents(ctx) {
       // library filter and materializes any browse-only rows -- so a
       // selection spanning pages that have since been dropped isn't lost.
       add: (ids) => addLibrarySelectionToCurrentPlaylist({ trackIds: ids }),
+      "add-to": (ids) => addSelectionToPlaylists(ctx, "library", ids, []),
       reanalyze: (ids) => reanalyzeTracks(ids),
       edit: (ids, rows) => editTrackSelection(ctx, "library", ids, rows),
     },

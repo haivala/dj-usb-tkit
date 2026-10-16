@@ -23,6 +23,22 @@ A playlist can also be imported from a rekordbox or Mixxx library with the
 **Import** button under **New** in the sidebar. It becomes an ordinary local
 playlist; see `docs/EXTERNAL_LIBRARIES.md`.
 
+### Adding selected tracks
+
+Every track list has a checkbox on each row and a select-all box in its header. The selection
+bar beside the search shows what is selected and what can be done with it:
+
+- **+ Add to** and the active playlist's name adds the selection to that playlist (Library, USB
+  playlists and USB history). Without an active playlist the button is not shown.
+- **Add to…** opens the list of playlists, in all four track lists. Tick one or more and click
+  **Add**. A playlist that already holds every selected track is shown ticked and can't be picked;
+  one that holds some of them shows how many. Type a name under the list and press **Create** (or
+  Enter) to make a new playlist; it is ticked for you, and the active playlist stays as it was.
+
+A track already in a playlist is never added to it twice.
+
+![Ticking tracks, + Add to the active playlist, then Add to… another playlist and a new one](assets/selection-toolbar.gif)
+
 ## Deep technical details
 
 Playlist state is modeled as local entities with ordered mapping rows. In practice, this means playlist metadata (`name`, identity, timestamps) is stored separately from ordered membership (`playlistId`, `trackId`, position). Track ordering is therefore explicit and stable, which avoids accidental reshuffling during add/remove operations. Adding or removing playlist tracks also clears the playlist's cached USB export status so the UI stops showing stale "exported" state immediately.
@@ -41,7 +57,10 @@ The playlist command layer is intentionally CRUD-oriented:
 - `add_library_selection_to_playlist` adds the library view's selection (or every
   track matching its filter); `add_track_candidates_to_playlist` resolves frontend row
   candidates (a USB playlist or history row's "+"). Both end in the same internal add,
-  which skips a track that's already in the playlist
+  which skips a track that's already in the playlist. Their `_to_playlists` twins
+  (the selection bar's Add to…) resolve the selection once and add it to several
+  playlists; `get_playlist_membership` says which playlists already hold all or
+  part of a selection
 - `remove_tracks_from_playlist` removes membership rows
 - `reorder_playlist_tracks` persists a new track order to `playlist_tracks.position`,
   in one of three modes: `orderedTrackIds` (the complete order, must match the
