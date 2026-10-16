@@ -1319,8 +1319,10 @@ main {
 
 /* ── Track list toolbar: search + selection bar ────── */
 
-/* Same in every track list view. The search takes at most half the row, so
-   the selection bar always has room beside it. */
+/* Same in every track list view. The search and the selection bar each take
+   half the row. The toolbar is a size container so the bar's buttons can
+   drop to short labels on a narrow row before the bar wraps under the
+   search. */
 .track-toolbar {
   display: flex;
   align-items: center;
@@ -1328,6 +1330,7 @@ main {
   flex-wrap: wrap;
   margin-top: 12px;
   flex-shrink: 0;
+  container-type: inline-size;
 }
 
 .search-row {
@@ -1344,13 +1347,17 @@ main {
 }
 
 /* Always shown and exactly as tall as the search field, so the table below
-   never moves: with nothing selected the actions are just disabled. The
-   buttons sit inside it, inset 3px. */
+   never moves. With a selection: the count on the left, the actions on the
+   right, the clear button last behind a divider (buttons inset 3px). With
+   none: no box, only a hint saying what the bar does, styled like the
+   source rows' labels so it can't pass for a second input. */
 .selection-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  flex: 1 1 0;
+  max-width: 50%;
+  min-width: fit-content;
   box-sizing: border-box;
   height: 36px;
   padding: 0 3px 0 12px;
@@ -1360,22 +1367,67 @@ main {
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-.selection-actions.is-empty {
-  background: transparent;
-  border-color: var(--line);
+.selection-actions .selection-count {
+  margin-right: auto;
+  white-space: nowrap;
 }
 
-.selection-actions.is-empty .selection-count {
+.selection-hint {
+  display: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
   color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selection-actions.is-empty {
+  background: transparent;
+  border-color: transparent;
+}
+
+.selection-actions.is-empty .selection-count,
+.selection-actions.is-empty button {
+  display: none;
+}
+
+.selection-actions.is-empty .selection-hint {
+  display: block;
 }
 
 .selection-actions button {
   height: 28px;
+  white-space: nowrap;
+}
+
+.selection-label-short {
+  display: none;
+}
+
+@container (max-width: 1000px) {
+  .selection-label-long { display: none; }
+  .selection-label-short { display: inline; }
 }
 
 .selection-actions .selection-clear {
+  position: relative;
   width: 28px;
   padding: 0;
+  margin-left: 9px;
+}
+
+/* The divider that sets the clear button apart from the actions. */
+.selection-actions .selection-clear::before {
+  content: "";
+  position: absolute;
+  left: -9px;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--line);
 }
 
 /* ── USB Connection Bar ────────────────────────────── */

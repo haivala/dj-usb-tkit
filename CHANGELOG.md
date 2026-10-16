@@ -53,9 +53,10 @@
   eDB on the stick as well as the library. A date set here, and its year, stay when the library
   is rescanned.
 - **New feature:** Every track list (Media Library, app playlists, USB playlists and USB
-  history) has row checkboxes, a select-all box and a selection bar beside the search. The bar
-  is always there, so the table no longer jumps when a selection starts; its actions wait for a
-  selection. The Library adds the selection to the active playlist or reanalyzes it, an app
+  history) has row checkboxes, a select-all box and a selection bar beside the search, each
+  taking half the row. The bar is always there, so the table no longer jumps when a selection
+  starts; until then it shows a hint of what it does, then the count and its actions. On a
+  narrow window the actions switch to short labels. The Library adds the selection to the active playlist or reanalyzes it, an app
   playlist removes it from the playlist or reanalyzes it, and USB playlists and history add it
   to the active playlist.
 - **New feature:** The selection bar's Edit… sets the genre, release date and star rating of every

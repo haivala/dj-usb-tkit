@@ -3,7 +3,8 @@
 // box in the header and the selection bar beside the search.
 //
 // The bar is always shown, so the table never moves when a selection starts
-// or ends; its actions stay disabled until something is selected. Each view
+// or ends; until something is selected it shows only a hint (index.html,
+// styled by `is-empty`) and its actions stay disabled. Each view
 // has its own selection (`state.trackSelections[view]`: ticked ids, plus the
 // rows by id for views whose actions need the row itself) and its own set of
 // actions -- the bar's buttons in index.html say which.
