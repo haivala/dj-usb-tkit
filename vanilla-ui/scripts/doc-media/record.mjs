@@ -52,6 +52,7 @@ const ALBUMS = [
     folder: "Syyskuu/Night Shift EP",
     album: "Night Shift EP",
     artist: "Kaamos Unit",
+    released: "2025-11-14",
     cover:
       "gradients=s=400x400:c0=0x2e1065:c1=0xdb2777:c2=0xf59e0b:n=3:x0=0:y0=0:x1=400:y1=400:seed=7," +
       "drawgrid=w=40:h=40:t=1:c=white@0.12",
@@ -68,6 +69,7 @@ const ALBUMS = [
     folder: "Syyskuu/Lakeside Tapes",
     album: "Lakeside Tapes",
     artist: "Midsummer Static",
+    released: "2024-06-21",
     cover:
       "mandelbrot=s=400x400:start_x=-0.7453:start_y=0.1127:start_scale=0.012:outer=normalized_iteration_count," +
       "hue=h=190:s=1.1,gblur=sigma=0.8",
@@ -84,6 +86,7 @@ const ALBUMS = [
     folder: "Syyskuu/Polar Night",
     album: "Polar Night",
     artist: "Revontuli Club",
+    released: "2023-12-08",
     cover:
       "gradients=s=400x400:c0=0x064e3b:c1=0x22d3ee:c2=0xa3e635:n=3:x0=0:y0=400:x1=400:y1=0:seed=3," +
       "drawgrid=w=50:h=50:t=2:c=black@0.15",
@@ -101,7 +104,7 @@ const ALBUMS = [
 // breakdown in section `breakdown`, and a snare on 2 and 4 from the fifth, so
 // the waveform and the overview strip have some shape. A sustained triad on
 // the bass root gives the key analysis something to find.
-function synthesizeTrack(path, { title, artist, album, cover, bpm, rootHz, minor, seconds, breakdown }) {
+function synthesizeTrack(path, { title, artist, album, released, cover, bpm, rootHz, minor, seconds, breakdown }) {
   const beat = `(60/${bpm})`;
   const t = "(t-0.05)";
   const inBeat = `mod(${t},${beat})`;
@@ -120,6 +123,10 @@ function synthesizeTrack(path, { title, artist, album, cover, bpm, rootHz, minor
     "-f", "lavfi", "-t", "0.04", "-i", cover,
     "-map", "0:a", "-map", "1:v", "-c:v", "mjpeg", "-disposition:v", "attached_pic",
     "-metadata", `title=${title}`, "-metadata", `artist=${artist}`, "-metadata", `album=${album}`,
+    // A release date (TDRL; TDRC is read as the recording date), so the Year
+    // column and the cue editor's date don't fall back to the files' own
+    // (recording-day) dates.
+    "-metadata", `TDRL=${released}`, "-metadata", `date=${released}`,
     "-b:a", "192k", path,
   ]);
 }
@@ -621,6 +628,13 @@ async function openNav(page, view) {
   await page.waitForTimeout(300);
 }
 
+// The USB views' side list plus the track table don't fit beside the
+// sidebar at this width: collapse it.
+async function collapseSidebar(page) {
+  await page.locator("#sidebarCollapseBtn").click();
+  await page.waitForTimeout(300);
+}
+
 // Opens the USB view's Health & Diagnostics card.
 async function openHealthCard(page) {
   await openNav(page, "usb");
@@ -713,6 +727,7 @@ function shots(fixture) {
       opts: {},
       async run(page) {
         await openNav(page, "usb-playlists");
+        await collapseSidebar(page);
         await openUsbListItem(page, { importBtn: "#refreshUsbBtn", list: "#usbPlaylists", name: "Bass", body: "#usbPlaylistTracks" });
         await page.locator("#usbPlaylistTracks .track-grid-row").nth(1).locator(".track-grid-cell").nth(2).hover();
         await page.waitForTimeout(500);
@@ -725,6 +740,7 @@ function shots(fixture) {
       opts: {},
       async run(page) {
         await openNav(page, "usb-history");
+        await collapseSidebar(page);
         await openUsbListItem(page, { importBtn: "#refreshHistoryBtn", list: "#historyList", name: "HISTORY 002", body: "#historyTracks" });
         await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
         await page.waitForTimeout(500);

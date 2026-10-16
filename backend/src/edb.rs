@@ -333,6 +333,31 @@ pub fn try_read_track_index_from_edb(
     try_read_track_index_from_edb_with_conn(&conn, usb_root, warnings)
 }
 
+/// `c.<column>` when the eDB's `content` table has `column`, else `NULL`, so
+/// a read works across eDB schema versions.
+fn content_column_or_null(conn: &rusqlite::Connection, column: &str) -> String {
+    let found = conn
+        .query_row(
+            "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = ?1",
+            [column],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if found {
+        format!("c.{column}")
+    } else {
+        "NULL".to_string()
+    }
+}
+
+/// A `releaseYear` value as a track's year: none for 0 (no year).
+fn edb_release_year(value: Option<i64>) -> Option<u32> {
+    value
+        .and_then(|year| u32::try_from(year).ok())
+        .filter(|year| *year > 0)
+}
+
 /// Same as `try_read_track_index_from_edb`, but reuses an already-open eDB
 /// connection instead of opening/decrypting a fresh one. Callers that need
 /// several eDB reads in the same operation (e.g. `fetch_usb_playlists`,
@@ -355,6 +380,7 @@ pub fn try_read_track_index_from_edb_with_conn(
         .unwrap_or(0)
         > 0;
     let length_expr = if has_length_col { "c.length" } else { "NULL" };
+    let release_year_expr = content_column_or_null(conn, "releaseYear");
     let image_fk_col = if conn
         .query_row(
             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'imageFilePath_id'",
@@ -381,7 +407,8 @@ pub fn try_read_track_index_from_edb_with_conn(
           c.path,
           img.path AS image_path,
           c.analysisDataFilePath,
-          {length_expr} AS length_seconds
+          {length_expr} AS length_seconds,
+          {release_year_expr} AS release_year
         FROM content c
         LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist
         LEFT JOIN album al ON al.album_id = c.album_id
@@ -413,6 +440,7 @@ pub fn try_read_track_index_from_edb_with_conn(
         let image_path: Option<String> = row.get(7)?;
         let analysis_path: Option<String> = row.get(8)?;
         let length_seconds: Option<i64> = row.get(9)?;
+        let release_year: Option<i64> = row.get(10)?;
         let resolved_file_path = path
             .as_deref()
             .and_then(|p| resolve_usb_side_path_text(usb_root, p))
@@ -428,7 +456,7 @@ pub fn try_read_track_index_from_edb_with_conn(
                 title: title.unwrap_or_else(|| "Unknown Title".to_string()),
                 artist: artist.unwrap_or_else(|| "Unknown Artist".to_string()),
                 album,
-                year: None,
+                year: edb_release_year(release_year),
                 genre: None,
                 track_number: None,
                 bpm: bpmx100.map(|v| v as f64 / 100.0),
@@ -673,6 +701,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
     } else {
         "NULL"
     };
+    let release_year_expr = content_column_or_null(conn, "releaseYear");
     let image_fk_col = if conn
         .query_row(
             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'imageFilePath_id'",
@@ -746,7 +775,8 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
               img.path AS image_path,
               c.analysisDataFilePath,
               {length_expr} AS length_seconds,
-              {track_no_expr} AS track_no
+              {track_no_expr} AS track_no,
+              {release_year_expr} AS release_year
             FROM playlist_content pc
             JOIN content c ON c.content_id = pc.content_id
             LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist
@@ -774,6 +804,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             let analysis_path: Option<String> = row.get(8)?;
             let length_seconds: Option<i64> = row.get(9)?;
             let track_no: Option<i64> = row.get(10)?;
+            let release_year: Option<i64> = row.get(11)?;
             let resolved_image_path = if resolve_paths {
                 image_path
                     .as_deref()
@@ -804,7 +835,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
                 title: title.unwrap_or_else(|| "Unknown Title".to_string()),
                 artist: artist.unwrap_or_else(|| "Unknown Artist".to_string()),
                 album,
-                year: None,
+                year: edb_release_year(release_year),
                 genre: None,
                 track_number: track_no.and_then(|value| u32::try_from(value).ok()),
                 bpm: bpmx100.map(|v| v as f64 / 100.0),

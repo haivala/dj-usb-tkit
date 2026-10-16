@@ -10,10 +10,11 @@ use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbTracksRequest,
-    GetTracksMetadataSummaryRequest, GetUsbTracksMetadataSummaryRequest, InitializeUsbRequest,
-    InspectUsbTrackRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackMetadataEditsRequest,
-    ScanLibraryRequest, SharedValue, UsbMetadataEditTrack, ValidateUsbRootRequest,
+    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
+    FetchUsbTracksRequest, GetTracksMetadataSummaryRequest, GetUsbTracksMetadataSummaryRequest,
+    InitializeUsbRequest, InspectUsbTrackRequest, SaveTrackMetadataEditsRequest,
+    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SharedValue, UsbMetadataEditTrack,
+    ValidateUsbRootRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
@@ -1092,4 +1093,54 @@ fn library_group_edit_changes_only_named_fields_on_every_track() {
     let after = summary();
     assert_eq!(after.genre.value.as_deref(), Some("Gabber Waltz"));
     assert!(after.rating.mixed && after.release_date.mixed);
+}
+
+#[test]
+fn usb_playlist_rows_carry_the_exported_release_year() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    scan_and_export_tracks(
+        &backend,
+        &data_dir,
+        &media,
+        &usb,
+        &[("noart/track_no_art.mp3", "Year Artist - One.mp3")],
+        "Year Playlist",
+    );
+    // Export always dates a track (here from the file), so the PDB has a year.
+    let pdb_year = parse_pdb(&pdb_path(&usb)).expect("parse pdb").tracks[0]
+        .release_year
+        .map(u32::from);
+    assert!(pdb_year.is_some());
+
+    // The playlist's rows come from the eDB, which carries the same year.
+    let usb_root = Some(usb.to_string_lossy().to_string());
+    let playlist = backend
+        .fetch_usb_playlists(FetchUsbPlaylistsRequest {
+            usb_root: usb_root.clone(),
+        })
+        .data
+        .expect("usb playlists")
+        .items
+        .remove(0);
+    assert_eq!(playlist.source, "eDB");
+    assert_eq!(playlist.tracks[0].year, pdb_year);
+    let page = backend
+        .fetch_usb_playlist_tracks(FetchUsbTracksRequest {
+            usb_root,
+            id: playlist.id,
+            limit: 10,
+            ..Default::default()
+        })
+        .data
+        .expect("usb playlist page");
+    assert_eq!(page.items[0].year, pdb_year);
 }

@@ -37,7 +37,9 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.3
+
+**Severity:** feature
 
 - **New feature:** The Event Log writes everything it records to a log file that covers the
   whole session, and an "Open log file" button opens it. The list in the window keeps only the
@@ -95,6 +97,7 @@
   "+" does, and the duplicate-USB-track cleanup runs at startup as it does for users. Seven
   commands the app never called are removed, along with an option to add a track to a playlist
   it's already in that the app never used.
+- **Chore:** Updated dependencies (`combine`, `defmt`).
 
 ## 0.4.2
 
