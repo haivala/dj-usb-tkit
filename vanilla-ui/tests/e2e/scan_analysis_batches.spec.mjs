@@ -1498,28 +1498,3 @@ test("a track analysis couldn't finish (no BPM found) is reported as incomplete,
   await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).toContainText("/music/Track One.mp3: no BPM detected");
 });
-
-test("a structured warning entry's message renders in the status line instead of [object Object]", async ({ page }) => {
-  await installAnalyzeResponseMock(page, {
-    analyzeResponse: {
-      jobId: "job-1",
-      analyzed: 1,
-      failed: 0,
-      warnings: [{
-        level: "info",
-        code: "analysis.auto-select-limit",
-        message: "Auto analysis limit reached: selected 1 of 5 eligible tracks (limit 1). Run analysis again or select tracks explicitly to continue.",
-        source: "analysis"
-      }]
-    }
-  });
-  await page.goto("/");
-
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
-  await page.locator('[data-action="analyze-track"]').click();
-
-  await expect(page.locator("#statusText")).toContainText(
-    "Auto analysis limit reached: selected 1 of 5 eligible tracks"
-  );
-  await expect(page.locator("#statusText")).not.toContainText("[object Object]");
-});

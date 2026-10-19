@@ -78,8 +78,6 @@ const TRACK_ANALYSIS_UPDATE_SQL: &str = r#"
                 WHERE id = ?7
                 "#;
 
-const ANALYSIS_AUTO_SELECT_LIMIT: usize = 3000;
-
 /// A SQL boolean expression, true for a `tracks` row that lacks the core
 /// analysis fields. This is the exact negation of `has_core_analysis_fields`
 /// (waveform peaks path non-empty AND bpm > 0 AND duration_ms > 0), so the
@@ -91,20 +89,6 @@ const ANALYSIS_AUTO_SELECT_LIMIT: usize = 3000;
 pub(crate) const MISSING_CORE_ANALYSIS_SQL: &str = "(COALESCE(TRIM(waveform_peaks_path), '') = '' \
      OR bpm IS NULL OR bpm <= 0 \
      OR duration_ms IS NULL OR duration_ms <= 0)";
-
-// Earlier attempts scaled the commit interval to worker_count (more workers
-// -> commit less often, since N tracks complete in roughly the time of one).
-// That reasoning only accounts for *throughput*, not how long an individual
-// track takes -- a fixed track-count interval (even a small, capped one)
-// still translates to unbounded wall-clock lock-hold time if each track is
-// slow (a debug/dev build, a long/complex track, a slow disk, essentia
-// overhead, etc). Confirmed in practice: 10 tracks at ~20s each in a dev
-// build held the write lock for ~3+ minutes, well past another writer's
-// busy_timeout. The only interval that's actually robust to "how long is a
-// track" without introducing any wall-clock/timer logic is committing after
-// every single track -- the lock is then never held longer than one track's
-// own processing time, regardless of hardware, worker count, or track
-// length. WAL commits are cheap; this is not a meaningful throughput cost.
 
 /// Read the configured analysis engine from app_settings. Defaults to Stratum.
 fn resolve_analysis_engine(db: &crate::db::Db, requested: Option<&str>) -> AnalysisEngine {
@@ -622,8 +606,7 @@ impl BackendService {
         // In auto mode the caller can scope "tracks needing analysis" to one
         // playlist or to the current library filter instead of the whole DB.
         // We resolve the scoped id list here and feed it through the explicit-id
-        // path of `collect_tracks_for_analysis`, keeping the auto-select cap and
-        // its "limit reached" warning.
+        // path of `collect_tracks_for_analysis`.
         let scoped_ids: Option<Vec<String>> = if auto_mode {
             if let Some(playlist_id) = req
                 .playlist_id
@@ -645,9 +628,12 @@ impl BackendService {
                         // A track whose analysis data comes from an attached
                         // master.db doesn't need local analysis -- matches the
                         // frontend's old post-scan `pendingTrackIds` filter.
+                        // Nor does a file the scan couldn't index (a browse-only
+                        // row, `id == file_path`): there's no track to analyze.
                         .filter(|track| {
                             !(req.include_rekordbox_db && track.rekordbox_db_source)
                                 && !track_has_core_analysis_for_source_status(track)
+                                && track.id != track.file_path
                         })
                         .map(|track| track.id.clone())
                         .collect(),
@@ -659,28 +645,13 @@ impl BackendService {
             None
         };
 
-        let (auto_eligible_total, mut tracks) = match scoped_ids {
+        let mut tracks = match scoped_ids {
             // A scoped request with nothing to do must NOT fall through to
             // `collect_tracks_for_analysis(&[])`, which would treat an empty
             // slice as "auto-select the whole DB".
-            Some(ids) if ids.is_empty() => (Some(0usize), Vec::new()),
-            Some(ids) => {
-                let unclamped = ids.len();
-                let capped: Vec<String> =
-                    ids.into_iter().take(ANALYSIS_AUTO_SELECT_LIMIT).collect();
-                (
-                    Some(unclamped),
-                    collect_tracks_for_analysis(&conn, &capped)?,
-                )
-            }
-            None => {
-                let total = if auto_mode {
-                    Some(count_tracks_missing_core_fields(&conn)?)
-                } else {
-                    None
-                };
-                (total, collect_tracks_for_analysis(&conn, &req.track_ids)?)
-            }
+            Some(ids) if ids.is_empty() => Vec::new(),
+            Some(ids) => collect_tracks_for_analysis(&conn, &ids)?,
+            None => collect_tracks_for_analysis(&conn, &req.track_ids)?,
         };
         if req.reanalyze && !req.track_ids.is_empty() {
             for track in &mut tracks {
@@ -718,21 +689,6 @@ impl BackendService {
         let mut incomplete = 0usize;
         let mut failed = 0usize;
         let mut warnings = Vec::<WarningEntry>::new();
-        if let Some(total) = auto_eligible_total
-            && total > tracks.len()
-        {
-            warnings.push(logging::log(
-                Level::Info,
-                "analysis",
-                "analysis.auto-select-limit",
-                format!(
-                    "Auto analysis limit reached: selected {} of {} eligible tracks (limit {}). Run analysis again or select tracks explicitly to continue.",
-                    tracks.len(),
-                    total,
-                    ANALYSIS_AUTO_SELECT_LIMIT
-                ),
-            ));
-        }
         let total = tracks.len();
         let (bpm_min, bpm_max) =
             resolve_analysis_bpm_range(req.bpm_range.as_deref(), req.bpm_min, req.bpm_max);
@@ -1019,10 +975,11 @@ impl BackendService {
                         )?;
                         // Commit after every track (not just periodically) so
                         // the write lock is never held longer than one
-                        // track's own processing time -- see the comment
-                        // above ANALYSIS_AUTO_SELECT_LIMIT for why a
-                        // track-count-based interval, even a small one,
-                        // isn't enough on its own.
+                        // track's own processing time. A track-count interval,
+                        // even a small one, doesn't bound that: slow tracks
+                        // (a dev build, a long track, a slow disk) held the
+                        // lock for minutes, past another writer's
+                        // busy_timeout. WAL commits are cheap.
                         if completed_count < total {
                             drop(persist_stmt);
                             tx_db.commit()?;
@@ -1423,7 +1380,6 @@ pub(crate) fn collect_tracks_for_analysis(
             FROM tracks
             WHERE {MISSING_CORE_ANALYSIS_SQL}
             ORDER BY updated_at ASC
-            LIMIT {ANALYSIS_AUTO_SELECT_LIMIT}
             "#,
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -1471,15 +1427,6 @@ pub(crate) fn collect_tracks_for_analysis(
         }
     }
     Ok(out)
-}
-
-fn count_tracks_missing_core_fields(conn: &rusqlite::Connection) -> BackendResult<usize> {
-    let total: i64 = conn.query_row(
-        &format!("SELECT COUNT(*) FROM tracks WHERE {MISSING_CORE_ANALYSIS_SQL}"),
-        [],
-        |row| row.get(0),
-    )?;
-    Ok(total.max(0) as usize)
 }
 
 fn analyze_track_with_usb_fallback_with_updates<F>(
@@ -2670,16 +2617,15 @@ mod tests {
         AnalysisEngine, EssentiaResult, TRACK_ANALYSIS_UPDATE_SQL,
         build_waveform_data_from_samples, build_waveform_preview_from_audio,
         build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
-        count_tracks_missing_core_fields, decode_audio_mono_samples, discover_cover_art_in_dir,
-        discover_cover_art_in_parent, discover_cover_art_path, duration_ms_from_decoded,
-        essentia_result_has_detected_values, first_beat_for_saved_bpm,
-        has_memory_headroom_for_engine, kept_analysis_values, local_analysis_bundle_paths,
-        normalize_essentia_result, persist_library_artwork_thumbnail_from_image,
-        resolve_analysis_bpm_range, resolve_analysis_engine,
-        resolve_analysis_parallelism_budget_with_cap, resolve_analysis_worker_count_with_cap,
-        resolve_memory_worker_cap, resolve_worker_cap_for_engine, strip_appimage_lib_path,
-        waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
-        waveform_preview_if_persisted,
+        decode_audio_mono_samples, discover_cover_art_in_dir, discover_cover_art_in_parent,
+        discover_cover_art_path, duration_ms_from_decoded, essentia_result_has_detected_values,
+        first_beat_for_saved_bpm, has_memory_headroom_for_engine, kept_analysis_values,
+        local_analysis_bundle_paths, normalize_essentia_result,
+        persist_library_artwork_thumbnail_from_image, resolve_analysis_bpm_range,
+        resolve_analysis_engine, resolve_analysis_parallelism_budget_with_cap,
+        resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
+        resolve_worker_cap_for_engine, strip_appimage_lib_path, waveform_detail_bins_for_duration,
+        waveform_detail_entries_for_duration, waveform_preview_if_persisted,
     };
     use crate::error::BackendError;
     use crate::service::WAVEFORM_PREVIEW_BINS;
@@ -3456,18 +3402,6 @@ mod tests {
             .collect::<Vec<_>>();
         ids.sort();
         assert_eq!(ids, vec!["bpm0", "dur0", "nowave", "t1"]);
-    }
-
-    #[test]
-    fn count_tracks_missing_core_fields_counts_incomplete_rows() {
-        let conn = Connection::open_in_memory().expect("open in-memory db");
-        setup_tracks_table(&conn);
-        insert_track(&conn, "t1", "Track 1");
-        seed_core_analysis_matrix(&conn);
-
-        // t1 + bpm0 + nowave + dur0 == 4; "ok" and "nokeyart" excluded.
-        let missing = count_tracks_missing_core_fields(&conn).expect("count missing");
-        assert_eq!(missing, 4);
     }
 
     // --- resolve_analysis_engine ---

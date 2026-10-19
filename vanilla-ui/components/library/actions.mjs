@@ -19,14 +19,6 @@ export function warningEntryText(entry) {
   return String(entry?.message ?? entry ?? "").trim();
 }
 
-// The backend tags this specific warning with a stable code (analysis.rs
-// `analysis.auto-select-limit`); match on that, not the English message.
-function findAnalysisAutoLimitWarning(warnings) {
-  if (!Array.isArray(warnings)) return null;
-  const hit = warnings.find((w) => w?.code === "analysis.auto-select-limit");
-  return hit ? warningEntryText(hit) : null;
-}
-
 export function trackArtworkChecked(track) {
   return track?.artworkChecked === true;
 }
@@ -700,12 +692,10 @@ export async function scanLibrary(ctx) {
 
   const warningCount = ctx.countWarningsForStatus(warnings);
   const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
-  const autoLimitWarning = findAnalysisAutoLimitWarning(warnings);
-  const autoLimitSuffix = autoLimitWarning ? ` | ${autoLimitWarning}` : "";
   const missingCount = missingSourceRootsArray(state).length;
   const missingSuffix = missingCount ? ` | ${missingCount} source folder(s) missing` : "";
   emitStatus(
-    `Scan done: ${scopedTrackCount} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${autoLimitSuffix}${missingSuffix}`,
+    `Scan done: ${scopedTrackCount} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${missingSuffix}`,
     { warningCount }
   );
 }
@@ -896,10 +886,8 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   }
   const warningCount = ctx.countWarningsForStatus(warnings);
   const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
-  const autoLimitWarning = findAnalysisAutoLimitWarning(warnings);
-  const autoLimitSuffix = autoLimitWarning ? ` | ${autoLimitWarning}` : "";
   const incompleteSuffix = incomplete ? `, incomplete ${incomplete}` : "";
-  emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${autoLimitSuffix}`, { warningCount });
+  emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}`, { warningCount });
   const processed = analyzed + incomplete + failed;
   if (processed > 0 && elapsedMs !== null) {
     ctx.pushEventLog({

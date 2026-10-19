@@ -2,8 +2,8 @@ use std::fs;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    GetPlaylistTracksRequest, RelocateSourceRootRequest, ScanLibraryRequest,
+    AddLibrarySelectionToPlaylistRequest, AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
+    CreatePlaylistRequest, GetPlaylistTracksRequest, RelocateSourceRootRequest, ScanLibraryRequest,
 };
 use tempfile::tempdir;
 
@@ -75,6 +75,43 @@ fn scan_incremental_covers_unchanged_new_and_deleted_files() {
         .data
         .expect("final search data");
     assert_eq!(final_tracks.total, 2, "expected A and C after delete");
+}
+
+// The scan's analysis picks what the library shows as unanalyzed. A file
+// the scan hasn't indexed is listed by its path but has no track to analyze:
+// it's skipped.
+#[test]
+fn scan_analysis_skips_unindexed_files() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::write(media.join("Artist - Indexed.mp3"), b"audio-a").expect("write indexed");
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let roots = vec![media.to_string_lossy().to_string()];
+    scan(&backend, &media);
+    fs::write(media.join("Artist - Unindexed.mp3"), b"audio-b").expect("write unindexed");
+    let listed = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: roots.clone(),
+            limit: 10,
+            ..Default::default()
+        })
+        .data
+        .expect("browse")
+        .items;
+    assert_eq!(listed.len(), 2);
+    assert!(listed.iter().any(|track| track.id == track.file_path));
+
+    let run = backend
+        .analyze_new_tracks(AnalyzeNewTracksRequest {
+            scope_to_library_filter: true,
+            source_roots: roots,
+            ..Default::default()
+        })
+        .data
+        .expect("analysis");
+    // Only the indexed track is attempted (its fake audio fails to decode).
+    assert_eq!(run.analyzed + run.incomplete + run.failed, 1);
 }
 
 #[test]

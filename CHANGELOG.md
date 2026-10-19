@@ -37,6 +37,13 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Improvement:** Scan Library and Analyze Missing Tracks analyze every track that needs it in
+  one run. They no longer stop after 3000 tracks with an "Auto analysis limit reached" notice,
+  which could also appear wrongly when a file in a source folder couldn't be added to the
+  library, for example one still being downloaded.
+
 ## 0.4.3
 
 **Severity:** feature
