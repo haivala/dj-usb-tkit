@@ -2853,6 +2853,82 @@ fn resolve_playback_source_best_candidate_prefers_file_on_disk() {
     assert_eq!(result.track_id.as_deref(), Some("live"));
 }
 
+fn song_request(file_path: Option<&str>) -> ResolvePlaybackSourceRequest {
+    ResolvePlaybackSourceRequest {
+        title: "Song".to_string(),
+        artist: "Artist".to_string(),
+        album: None,
+        bpm: None,
+        file_path: file_path.map(str::to_string),
+        file_size_bytes: None,
+        track_id: None,
+    }
+}
+
+#[test]
+fn resolve_playback_source_plays_own_local_file_over_stale_export_row() {
+    // A library file not indexed yet (e.g. its row was removed) must play
+    // itself, not an old export row that shares its title and artist.
+    let (dir, service) = test_service();
+    let own = dir.path().join("Song.mp3");
+    std::fs::write(&own, b"x").expect("write own file");
+    let own = own.to_string_lossy().to_string();
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "stale-export",
+        "Song",
+        "Artist",
+        "/gone/USB_OLD/Contents/Artist/Song.mp3",
+        None,
+        None,
+        false,
+    );
+    drop(conn);
+
+    let result = service
+        .resolve_playback_source(song_request(Some(&own)))
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::OwnFile);
+    assert_eq!(result.resolved_path.as_deref(), Some(own.as_str()));
+    assert_eq!(result.track_id, None);
+
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(&conn, "own", "Song", "Artist", &own, None, None, false);
+    drop(conn);
+    let result = service
+        .resolve_playback_source(song_request(Some(&own)))
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::SelfId);
+    assert_eq!(result.track_id.as_deref(), Some("own"));
+}
+
+#[test]
+fn unregistered_export_stick_counts_as_usb() {
+    let (dir, service) = test_service();
+    let stick = dir.path().join("STICK");
+    std::fs::create_dir_all(stick.join("PIONEER")).expect("vendor dir");
+    std::fs::create_dir_all(stick.join("Contents")).expect("contents dir");
+    let on_stick = stick.join("Contents").join("Song.mp3");
+    std::fs::write(&on_stick, b"x").expect("write stick file");
+    let on_stick = on_stick.to_string_lossy().to_string();
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(&conn, "stick", "Song", "Artist", &on_stick, None, None, false);
+    drop(conn);
+
+    let result = service
+        .resolve_playback_source(song_request(None))
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::NoMatch);
+
+    let tracks = service
+        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
+            track_ids: vec!["stick".to_string()],
+        })
+        .expect("get tracks by ids");
+    assert!(tracks.items[0].is_usb_path);
+}
+
 #[test]
 fn resolve_playback_source_falls_back_to_missing_file_row_when_nothing_on_disk() {
     // The USB fallback in play_resolved_track relies on still getting a

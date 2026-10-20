@@ -274,13 +274,17 @@ pub enum TrackMatch {
     Hash,
     /// Best-effort metadata and filename score.
     Metadata,
+    /// The request's own file is a local file on disk; no library track
+    /// has its path yet.
+    #[serde(rename = "file")]
+    OwnFile,
     /// No library track.
     #[serde(rename = "none")]
     NoMatch,
 }
 
 impl TrackMatch {
-    /// A library track was found.
+    /// A library track, or the track's own local file, was found.
     pub fn is_match(self) -> bool {
         self != Self::NoMatch
     }
@@ -290,6 +294,7 @@ impl TrackMatch {
             Self::SelfId => "self",
             Self::Hash => "hash",
             Self::Metadata => "metadata",
+            Self::OwnFile => "file",
             Self::NoMatch => "none",
         }
     }
@@ -310,6 +315,8 @@ pub enum ResolvedBy {
     SelfId,
     Hash,
     Metadata,
+    #[serde(rename = "file")]
+    OwnFile,
     #[serde(rename = "none")]
     NoMatch,
     /// A new library track was made for it.
@@ -328,6 +335,7 @@ impl From<TrackMatch> for ResolvedBy {
             TrackMatch::SelfId => Self::SelfId,
             TrackMatch::Hash => Self::Hash,
             TrackMatch::Metadata => Self::Metadata,
+            TrackMatch::OwnFile => Self::OwnFile,
             TrackMatch::NoMatch => Self::NoMatch,
         }
     }
@@ -2639,6 +2647,7 @@ mod tests {
             (TrackMatch::SelfId, "self"),
             (TrackMatch::Hash, "hash"),
             (TrackMatch::Metadata, "metadata"),
+            (TrackMatch::OwnFile, "file"),
             (TrackMatch::NoMatch, "none"),
         ] {
             assert_eq!(wire(matched), text);

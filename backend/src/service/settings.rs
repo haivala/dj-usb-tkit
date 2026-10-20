@@ -158,25 +158,71 @@ pub(crate) fn untainted_usb_root_paths(conn: &rusqlite::Connection) -> BackendRe
         .collect())
 }
 
+/// Whether a path is on an exported USB stick: under a known device root
+/// (`untainted_usb_root_paths`), or in a `Contents` folder next to the
+/// vendor folder -- a stick the app never registered, or a copy of one.
+/// Paths under a configured source root only take the known-root check:
+/// the user said that folder is their library.
+pub(crate) struct UsbPathCheck {
+    device_roots: Vec<String>,
+    source_roots: Vec<String>,
+    /// Per `Contents` parent: whether it holds the vendor folder.
+    export_roots: std::cell::RefCell<std::collections::HashMap<PathBuf, bool>>,
+}
+
+impl UsbPathCheck {
+    pub(crate) fn load(conn: &rusqlite::Connection) -> BackendResult<Self> {
+        Ok(Self {
+            device_roots: untainted_usb_root_paths(conn)?,
+            source_roots: configured_source_roots(conn)?,
+            export_roots: Default::default(),
+        })
+    }
+
+    pub(crate) fn is_usb_path(&self, path: &str) -> bool {
+        if self
+            .device_roots
+            .iter()
+            .any(|root| browse_path_matches_root(path, root))
+        {
+            return true;
+        }
+        if self
+            .source_roots
+            .iter()
+            .any(|root| browse_path_matches_root(path, root))
+        {
+            return false;
+        }
+        let mut export_roots = self.export_roots.borrow_mut();
+        stored_file_path(path)
+            .ancestors()
+            .filter(|dir| dir.file_name().is_some_and(|name| name == "Contents"))
+            .filter_map(Path::parent)
+            .any(|root| {
+                *export_roots
+                    .entry(root.to_path_buf())
+                    .or_insert_with(|| root.join(usb_vendor_compat::USB_VENDOR_ROOT_DIR).is_dir())
+            })
+    }
+}
+
 /// Fills the derived fields every frontend-bound `Track` carries, one query
 /// each for the whole batch (not per-row). Call this from any method that
 /// returns `Track` rows to the frontend.
 ///
 /// - `is_usb_path` mirrors `resolve_playback_source`'s `is_usb_rooted` check
-///   exactly: matched against `file_path` only, against every known USB
-///   device root (including pruned ones -- see `untainted_usb_root_paths`).
+///   exactly: [`UsbPathCheck`] on `file_path` only.
 /// - `key_display` / `key_color` follow the user's key notation setting
 ///   (display only; `key` itself is what gets edited and exported).
 pub(crate) fn apply_frontend_track_fields(
     conn: &rusqlite::Connection,
     tracks: &mut [Track],
 ) -> BackendResult<()> {
-    let usb_root_paths = untainted_usb_root_paths(conn)?;
+    let usb_paths = UsbPathCheck::load(conn)?;
     let notation = key_notation::key_notation_setting(conn)?;
     for track in tracks.iter_mut() {
-        track.is_usb_path = usb_root_paths
-            .iter()
-            .any(|root| browse_path_matches_root(&track.file_path, root));
+        track.is_usb_path = usb_paths.is_usb_path(&track.file_path);
         (track.key_display, track.key_color) =
             key_notation::key_display_fields(track.key.as_deref(), notation);
     }

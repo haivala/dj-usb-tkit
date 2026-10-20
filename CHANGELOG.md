@@ -56,6 +56,8 @@
 - **Fix:** Removing a source folder that sits inside another source folder no longer removes its
   tracks, with their cues and analysis, from the library. Removing a parent folder likewise keeps
   the tracks of a subfolder that is still a source folder.
+- **Fix:** Playing a track in the Media Library always plays its own file. It no longer tries a
+  copy on an old exported USB stick that has the same title and artist.
 - **Fix:** On Linux the app shows up as "DJ USB Tkit" instead of "DJ_USB_Tkit" in application
   menus and launchers.
 - **Improvement:** On Linux the app has a fuller description in application menus, launchers

@@ -238,12 +238,8 @@ impl BackendService {
         req: ResolvePlaybackSourceRequest,
     ) -> BackendResult<ResolvePlaybackSourceData> {
         let conn = self.db.connect()?;
-        let usb_root_paths = untainted_usb_root_paths(&conn)?;
-        let is_usb_rooted = |path: &str| {
-            usb_root_paths
-                .iter()
-                .any(|root| browse_path_matches_root(path, root))
-        };
+        let usb_paths = UsbPathCheck::load(&conn)?;
+        let is_usb_rooted = |path: &str| usb_paths.is_usb_path(path);
 
         // Fast path: any origin (library, playlist, USB, history) may carry
         // the id of the row it was dispatched from. If that row is a
@@ -275,6 +271,34 @@ impl BackendService {
                 }
                 weak_self = Some(data);
             }
+        }
+
+        // The request's own file plays when it's a local file on disk: a
+        // title/artist match could be another copy, or a stale one on an
+        // exported stick.
+        if let Some(path) = req
+            .file_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty() && !is_usb_rooted(path))
+            .filter(|path| stored_file_path(path).is_file())
+        {
+            let track_id = conn
+                .query_row(
+                    "SELECT id FROM tracks WHERE file_path = ?1",
+                    params![path],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            return Ok(ResolvePlaybackSourceData {
+                resolved_path: Some(path.to_string()),
+                matched_by: if track_id.is_some() {
+                    TrackMatch::SelfId
+                } else {
+                    TrackMatch::OwnFile
+                },
+                track_id,
+            });
         }
 
         let title = req.title.trim();
