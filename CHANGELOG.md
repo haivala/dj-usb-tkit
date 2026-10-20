@@ -43,6 +43,8 @@
   one run. They no longer stop after 3000 tracks with an "Auto analysis limit reached" notice,
   which could also appear wrongly when a file in a source folder couldn't be added to the
   library, for example one still being downloaded.
+- **Fix:** On Linux the app shows up as "DJ USB Tkit" instead of "DJ_USB_Tkit" in application
+  menus and launchers.
 
 ## 0.4.3
 

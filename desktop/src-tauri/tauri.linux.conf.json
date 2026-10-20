@@ -12,12 +12,14 @@
       "deb": {
         "files": {
           "/usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml": "art.chiph.djusbtkit.metainfo.xml"
-        }
+        },
+        "desktopTemplate": "main.desktop"
       },
       "rpm": {
         "files": {
           "/usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml": "art.chiph.djusbtkit.metainfo.xml"
-        }
+        },
+        "desktopTemplate": "main.desktop"
       }
     }
   }
