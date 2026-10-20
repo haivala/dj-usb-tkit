@@ -1,3 +1,5 @@
+mod common;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -150,8 +152,10 @@ fn fixture_audio_path(relative: &str) -> PathBuf {
 }
 
 fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name: &str) {
-    let fixture = fixture_audio_path(fixture_relative);
-    fs::copy(&fixture, media_dir.join(target_name)).expect("copy audio fixture");
+    common::copy_unique_audio(
+        &fixture_audio_path(fixture_relative),
+        &media_dir.join(target_name),
+    );
 }
 
 fn read_pdb_header_compatibility_value(pdb_path: &Path) -> u32 {

@@ -1002,6 +1002,7 @@ fn export_artwork_for_player_creates_two_square_jpegs() {
         &usb_root,
         "test-track-1",
         &mut warnings,
+        &FileCloser::new(),
     )
     .unwrap();
     assert!(result.is_some(), "should produce artwork path");
@@ -1029,6 +1030,7 @@ fn export_artwork_for_player_missing_source_returns_none() {
         dir.path(),
         "track-1",
         &mut warnings,
+        &FileCloser::new(),
     )
     .unwrap();
     assert!(result.is_none());
@@ -1262,9 +1264,14 @@ fn export_analysis_copies_internal_cache_anlz_even_when_invalid() {
     };
 
     let mut warnings = Vec::new();
-    let exported =
-        export_analysis_bundle_for_track(&track, &usb_root, "/Contents/t.mp3", &mut warnings)
-            .expect("export analysis bundle");
+    let exported = export_analysis_bundle_for_track(
+        &track,
+        &usb_root,
+        "/Contents/t.mp3",
+        &mut warnings,
+        &FileCloser::new(),
+    )
+    .expect("export analysis bundle");
     assert!(exported.is_some(), "expected waveform path");
 
     let (dat, ext, twoex) = canonical_analysis_bundle_paths(&usb_root, "/Contents/t.mp3");
@@ -1349,8 +1356,14 @@ fn export_analysis_copies_local_anlz_and_rewrites_ppth_path() {
 
     let exported_path = "/Contents/Fixture Ö Artist/Fixture Ä Album/03 - Entä jos Fixture.flac";
     let mut warnings = Vec::new();
-    let result = export_analysis_bundle_for_track(&track, &usb_root, exported_path, &mut warnings)
-        .expect("copy local anlz");
+    let result = export_analysis_bundle_for_track(
+        &track,
+        &usb_root,
+        exported_path,
+        &mut warnings,
+        &FileCloser::new(),
+    )
+    .expect("copy local anlz");
     assert!(result.is_some(), "expected a path returned");
     assert!(warnings.is_empty(), "no warnings expected");
 
@@ -1428,6 +1441,7 @@ fn ensure_analysis_bundle_ppth_rebuilds_beatgrid_from_bpm_alone_on_retain_path()
         &dat_path.to_string_lossy(),
         exported_path,
         &track,
+        &FileCloser::new(),
     )
     .expect("ensure analysis bundle ppth");
 
@@ -1502,10 +1516,15 @@ fn export_analysis_copies_rekordbox_dat_when_track_points_at_ext() {
     };
 
     let mut warnings = Vec::new();
-    let (_, files_written) =
-        export_analysis_bundle_for_track(&track, &usb_root, exported_path, &mut warnings)
-            .expect("export rekordbox bundle")
-            .expect("bundle exported");
+    let (_, files_written) = export_analysis_bundle_for_track(
+        &track,
+        &usb_root,
+        exported_path,
+        &mut warnings,
+        &FileCloser::new(),
+    )
+    .expect("export rekordbox bundle")
+    .expect("bundle exported");
     assert!(warnings.is_empty(), "no warnings expected: {warnings:?}");
     assert_eq!(files_written, 2);
 
@@ -1547,9 +1566,15 @@ fn export_analysis_rebuilds_rekordbox_grid_once_edited_here() {
     };
 
     let mut warnings = Vec::new();
-    export_analysis_bundle_for_track(&track, &usb_root, exported_path, &mut warnings)
-        .expect("export rekordbox bundle")
-        .expect("bundle exported");
+    export_analysis_bundle_for_track(
+        &track,
+        &usb_root,
+        exported_path,
+        &mut warnings,
+        &FileCloser::new(),
+    )
+    .expect("export rekordbox bundle")
+    .expect("bundle exported");
 
     let (dat, ..) = canonical_analysis_bundle_paths(&usb_root, exported_path);
     assert_eq!(
@@ -1618,9 +1643,14 @@ fn export_analysis_does_not_regenerate_when_local_dat_missing() {
     };
 
     let mut warnings = Vec::new();
-    let result =
-        export_analysis_bundle_for_track(&track, &usb_root, "/Contents/t.mp3", &mut warnings)
-            .expect("missing local analysis handled");
+    let result = export_analysis_bundle_for_track(
+        &track,
+        &usb_root,
+        "/Contents/t.mp3",
+        &mut warnings,
+        &FileCloser::new(),
+    )
+    .expect("missing local analysis handled");
     assert!(
         result.is_none(),
         "missing local analysis must not regenerate"
@@ -1691,7 +1721,7 @@ fn copy_if_different_copies_new_file() {
     let dst = dir.path().join("sub/target.bin");
     fs::write(&src, b"hello").unwrap();
 
-    copy_if_different(&src, &dst).unwrap();
+    copy_if_different(&src, &dst, &FileCloser::new()).unwrap();
     assert_eq!(fs::read(&dst).unwrap(), b"hello");
 }
 
@@ -1703,7 +1733,7 @@ fn copy_if_different_skips_same_size() {
     fs::write(&src, b"hello").unwrap();
     fs::write(&dst, b"world").unwrap(); // same size, different content
 
-    copy_if_different(&src, &dst).unwrap();
+    copy_if_different(&src, &dst, &FileCloser::new()).unwrap();
     // Same size → skips copy, so dst still has "world"
     assert_eq!(fs::read(&dst).unwrap(), b"world");
 }
@@ -1716,7 +1746,7 @@ fn copy_if_different_copies_different_size() {
     fs::write(&src, b"hello world").unwrap();
     fs::write(&dst, b"hi").unwrap();
 
-    copy_if_different(&src, &dst).unwrap();
+    copy_if_different(&src, &dst, &FileCloser::new()).unwrap();
     assert_eq!(fs::read(&dst).unwrap(), b"hello world");
 }
 
@@ -1726,7 +1756,7 @@ fn copy_if_different_missing_source_errors() {
     let src = dir.path().join("nonexistent.bin");
     let dst = dir.path().join("target.bin");
 
-    let result = copy_if_different(&src, &dst);
+    let result = copy_if_different(&src, &dst, &FileCloser::new());
     assert!(result.is_err());
 }
 
@@ -1771,7 +1801,7 @@ fn copy_wav_normalized_if_needed_rewrites_extensible_pcm() {
     fs::write(&src, wav_with_extensible_fmt(1, &data)).unwrap();
     let dst = dir.path().join("sub/target.wav");
 
-    copy_wav_normalized_if_needed(&src, &dst).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
 
     let out = fs::read(&dst).unwrap();
     let format_tag = u16::from_le_bytes(out[20..22].try_into().unwrap());
@@ -1789,11 +1819,11 @@ fn copy_wav_normalized_if_needed_skips_rewrite_when_target_up_to_date() {
     fs::write(&src, wav_with_extensible_fmt(1, &[0u8; 20])).unwrap();
     let dst = dir.path().join("target.wav");
 
-    copy_wav_normalized_if_needed(&src, &dst).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
     let first_write = fs::metadata(&dst).unwrap().modified().unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(10));
-    copy_wav_normalized_if_needed(&src, &dst).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
     let second_write = fs::metadata(&dst).unwrap().modified().unwrap();
 
     assert_eq!(
@@ -1829,7 +1859,7 @@ fn copy_wav_normalized_if_needed_falls_back_for_non_extensible_wav() {
     fs::write(&src, &plain).unwrap();
     let dst = dir.path().join("target.wav");
 
-    copy_wav_normalized_if_needed(&src, &dst).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
     assert_eq!(
         fs::read(&dst).unwrap(),
         plain,
@@ -1845,7 +1875,7 @@ fn copy_wav_normalized_if_needed_falls_back_for_extensible_other_subformat() {
     fs::write(&src, &source_bytes).unwrap();
     let dst = dir.path().join("target.wav");
 
-    copy_wav_normalized_if_needed(&src, &dst).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
     assert_eq!(
         fs::read(&dst).unwrap(),
         source_bytes,

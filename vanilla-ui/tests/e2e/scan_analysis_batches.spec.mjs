@@ -25,6 +25,7 @@ function installScanAnalysisMock(page, opts = {}) {
   const pauseBeforeBpmKey = !!opts?.pauseBeforeBpmKey;
   const holdAfterTrackStart = !!opts?.holdAfterTrackStart;
   const seedBpmKey = !!opts?.seedBpmKey;
+  const scanWarnings = Array.isArray(opts?.scanWarnings) ? opts.scanWarnings : [];
   return page.addInitScript(({
     trackCount,
     pieceDelayMs,
@@ -36,7 +37,8 @@ function installScanAnalysisMock(page, opts = {}) {
     analysisBpmRange,
     pauseBeforeBpmKey,
     holdAfterTrackStart,
-    seedBpmKey
+    seedBpmKey,
+    scanWarnings
   }) => {
     // registerBackendJobEvents() (components/playback/actions.mjs) gates the
     // "job:event" listen() call behind isTauriRuntime(), which checks
@@ -379,7 +381,8 @@ function installScanAnalysisMock(page, opts = {}) {
                 removed: 0,
                 scopedTrackCount: tracks.length,
                 albumCount: albums.size,
-                unanalyzedCount: tracks.filter((t) => !isCountable(t)).length
+                unanalyzedCount: tracks.filter((t) => !isCountable(t)).length,
+                warnings: scanWarnings
               }
             };
           }
@@ -475,7 +478,7 @@ function installScanAnalysisMock(page, opts = {}) {
         return openLogFileCalls;
       }
     };
-  }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange, pauseBeforeBpmKey, holdAfterTrackStart, seedBpmKey });
+  }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange, pauseBeforeBpmKey, holdAfterTrackStart, seedBpmKey, scanWarnings });
 }
 
 function installPagedMaterializeAnalyzeMock(page, opts = {}) {
@@ -1021,6 +1024,20 @@ test("scan forwards selected BPM range to analyze_new_tracks", async ({ page }) 
   await page.locator("#scanLibraryBtn").click();
   await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.bpmRangeSeen)).toEqual({ min: 88, max: 175 });
+});
+
+test("a scan's own warnings (a file found in two folders) reach the event log and the status count", async ({ page }) => {
+  const message = "Same file in two places: /music/B/Song.mp3 is identical to /music/A/Song.mp3. The library keeps one; delete the extra copy.";
+  await installScanAnalysisMock(page, {
+    trackCount: 1,
+    pieceDelayMs: 20,
+    scanWarnings: [{ level: "warn", source: "library-scan", code: "scan.duplicate-file", message }]
+  });
+  await page.goto("/");
+  await page.locator("#scanLibraryBtn").click();
+  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0 (1 warning(s))");
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#eventLogList")).toContainText(message);
 });
 
 test("analysis populates BPM and key cells for all tracks", async ({ page }) => {

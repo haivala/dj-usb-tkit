@@ -1,3 +1,5 @@
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -95,8 +97,10 @@ fn fixture_audio_path(relative: &str) -> std::path::PathBuf {
 }
 
 fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name: &str) {
-    let fixture = fixture_audio_path(fixture_relative);
-    fs::copy(&fixture, media_dir.join(target_name)).expect("copy audio fixture");
+    common::copy_unique_audio(
+        &fixture_audio_path(fixture_relative),
+        &media_dir.join(target_name),
+    );
 }
 
 fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> std::path::PathBuf {
@@ -552,10 +556,8 @@ fn export_to_usb_normalizes_extensible_pcm_wav_and_leaves_extensible_other_untou
     assert_eq!(format_tag, 1, "expected normalized PCM format tag");
     let fmt_chunk_size = u32::from_le_bytes(pcm_bytes[16..20].try_into().unwrap());
     assert_eq!(fmt_chunk_size, 16, "expected standard 16-byte fmt chunk");
-    let source_pcm_bytes = fs::read(fixture_audio_path(
-        "formats/track_format_wav_extensible.wav",
-    ))
-    .unwrap();
+    let source_pcm_bytes =
+        fs::read(media.join("Wav Extensible Artist - Extensible Pcm.wav")).unwrap();
     assert!(
         pcm_bytes.ends_with(&source_pcm_bytes[source_pcm_bytes.len() - 100..]),
         "sample data tail must be preserved verbatim through normalization"
@@ -564,10 +566,8 @@ fn export_to_usb_normalizes_extensible_pcm_wav_and_leaves_extensible_other_untou
     // Extensible-other has no safe subformat to convert to, so it must be
     // exported byte-for-byte unchanged (still carrying the hard warning).
     let other_bytes = fs::read(&exported_other).expect("read exported other wav");
-    let source_other_bytes = fs::read(fixture_audio_path(
-        "formats/track_format_wav_extensible_other.wav",
-    ))
-    .unwrap();
+    let source_other_bytes =
+        fs::read(media.join("Wav Extensible Artist - Extensible Other.wav")).unwrap();
     assert_eq!(
         other_bytes, source_other_bytes,
         "extensible-other wav must be copied verbatim, not rewritten"

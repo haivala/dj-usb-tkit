@@ -21,7 +21,7 @@ use super::track_matching::{ContentFingerprint, content_fingerprint_key};
 use crate::audio_format::{AudioFormat, same_format_extension};
 
 use super::export_helpers::{
-    ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
+    ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData, FileCloser,
     WriteExportLibraryDbResult, WriteExportPdbResult, analysis_bundle_claimable,
     canonicalize_track_path_identity, collect_manifest_owned_paths, copy_if_different,
     copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth, export_analysis_bundle_for_track,
@@ -950,6 +950,8 @@ impl BackendService {
         // later collision against the *same* track (not just the same path)
         // can reuse it rather than minting a new suffix.
         let mut claimed_media_targets = HashMap::<PathBuf, Option<ContentFingerprint>>::new();
+        // Written files close off-thread; see `deferred_close`.
+        let closer = FileCloser::new();
 
         for (idx, track) in playlist.tracks.iter().enumerate() {
             on_progress(
@@ -1024,9 +1026,9 @@ impl BackendService {
             let owns_exported_media = existing_exported_path.is_none();
             if !export_dry_run && owns_exported_media {
                 if AudioFormat::from_extension(&extension) == Some(AudioFormat::Wav) {
-                    copy_wav_normalized_if_needed(&source, &target)?;
+                    copy_wav_normalized_if_needed(&source, &target, &closer)?;
                 } else {
-                    copy_if_different(&source, &target)?;
+                    copy_if_different(&source, &target, &closer)?;
                 }
             }
             exported_tracks += 1;
@@ -1062,8 +1064,13 @@ impl BackendService {
                     retain_artwork = true;
                 } else if !export_dry_run
                     && let Some(path) = track.artwork_path.as_deref()
-                    && let Some(asset_path) =
-                        export_artwork_for_player(path, &usb_root, &track.id, &mut warnings)?
+                    && let Some(asset_path) = export_artwork_for_player(
+                        path,
+                        &usb_root,
+                        &track.id,
+                        &mut warnings,
+                        &closer,
+                    )?
                 {
                     artwork_relative =
                         to_usb_relative_path(&usb_root, &asset_path).or(Some(asset_path));
@@ -1098,6 +1105,7 @@ impl BackendService {
                             &existing_analysis,
                             &exported_path,
                             track,
+                            &closer,
                         )?;
                     }
                     analysis_relative = Some(existing_analysis);
@@ -1115,6 +1123,7 @@ impl BackendService {
                                 &existing_analysis,
                                 &exported_path,
                                 track,
+                                &closer,
                             )?;
                         }
                         analysis_relative = Some(existing_analysis);
@@ -1126,6 +1135,7 @@ impl BackendService {
                             &usb_root,
                             &exported_path,
                             &mut warnings,
+                            &closer,
                         )?
                     {
                         analysis_relative = Some(relative);
@@ -1198,6 +1208,7 @@ impl BackendService {
             });
         }
 
+        closer.finish();
         on_progress(total_steps, total_steps, "USB: Finalizing export metadata");
         let manifest = ExportManifest {
             generated_at: now(),

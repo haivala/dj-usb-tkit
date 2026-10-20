@@ -93,7 +93,7 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
     for name in ["Artist - One.mp3", "Artist - Two.mp3", "Artist - Three.mp3"] {
-        fs::write(media.join(name), b"audio").expect("write track");
+        fs::write(media.join(name), name.as_bytes()).expect("write track");
     }
 
     let data_dir = root.path().join("data");
@@ -210,7 +210,7 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
     for name in ["Artist - One.mp3", "Artist - Two.mp3"] {
-        fs::write(media.join(name), b"audio").expect("write track");
+        fs::write(media.join(name), name.as_bytes()).expect("write track");
     }
     let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
     let roots = vec![media.to_string_lossy().to_string()];
@@ -365,4 +365,128 @@ fn add_to_picker_resolves_track_candidates_once_for_every_playlist() {
             vec![local_id.clone()]
         );
     }
+}
+
+fn scan(backend: &BackendCommands, media: &std::path::Path) -> backend::models::ScanLibraryData {
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    scan.data.expect("scan data")
+}
+
+/// (id, file path) of every library track under `media`, by path.
+fn library_tracks(backend: &BackendCommands, media: &std::path::Path) -> Vec<(String, String)> {
+    let mut tracks = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+            ..Default::default()
+        })
+        .data
+        .expect("browse data")
+        .items
+        .into_iter()
+        .map(|track| (track.id, track.file_path))
+        .collect::<Vec<_>>();
+    tracks.sort_by(|a, b| a.1.cmp(&b.1));
+    tracks
+}
+
+fn duplicate_warnings(data: &backend::models::ScanLibraryData) -> Vec<String> {
+    data.warnings
+        .iter()
+        .filter(|w| w.code == "scan.duplicate-file")
+        .map(|w| w.message.clone())
+        .collect()
+}
+
+#[test]
+fn scan_keeps_one_track_for_identical_files_and_warns_every_scan() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let first = media.join("A").join("Artist - Song.mp3");
+    let copy = media.join("B").join("Artist - Song.mp3");
+    for path in [&first, &copy] {
+        fs::create_dir_all(path.parent().unwrap()).expect("create dir");
+        fs::write(path, b"identical audio bytes").expect("write track");
+    }
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+
+    for pass in ["first scan", "rescan"] {
+        let data = scan(&backend, &media);
+        let tracks = library_tracks(&backend, &media);
+        assert_eq!(tracks.len(), 1, "{pass}: one track for two identical files");
+        assert_eq!(
+            tracks[0].1,
+            first.to_string_lossy(),
+            "{pass}: first path kept"
+        );
+        let warnings = duplicate_warnings(&data);
+        assert_eq!(warnings.len(), 1, "{pass}: {warnings:?}");
+        assert!(
+            warnings[0].contains(&*copy.to_string_lossy())
+                && warnings[0].contains(&*first.to_string_lossy()),
+            "{pass}: warning names both files: {}",
+            warnings[0]
+        );
+    }
+}
+
+#[test]
+fn scan_merges_identical_tracks_already_in_the_library_into_the_one_in_more_playlists() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let a = media.join("A").join("Artist - Song.mp3");
+    let b = media.join("B").join("Artist - Song.mp3");
+    // Same size, different bytes: two tracks, as an older version would also
+    // have made of two identical files.
+    for (path, bytes) in [(&a, b"audio bytes one"), (&b, b"audio bytes two")] {
+        fs::create_dir_all(path.parent().unwrap()).expect("create dir");
+        fs::write(path, bytes).expect("write track");
+    }
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    assert!(duplicate_warnings(&scan(&backend, &media)).is_empty());
+    let tracks = library_tracks(&backend, &media);
+    assert_eq!(tracks.len(), 2, "different files stay separate tracks");
+    let (a_id, b_id) = (tracks[0].0.clone(), tracks[1].0.clone());
+
+    let playlist = |name: &str, ids: &[&String]| {
+        let id = backend
+            .create_playlist(CreatePlaylistRequest {
+                name: name.to_string(),
+            })
+            .data
+            .expect("playlist data")
+            .playlist_id;
+        let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            playlist_id: id.clone(),
+            track_ids: ids.iter().map(|id| id.to_string()).collect(),
+            ..Default::default()
+        });
+        assert!(add.ok, "add failed: {add:?}");
+        id
+    };
+    let both = playlist("Both", &[&a_id, &b_id]);
+    let only_b = playlist("Only B", &[&b_id]);
+
+    fs::write(&a, b"audio bytes two").expect("make A identical to B");
+    let data = scan(&backend, &media);
+
+    let tracks = library_tracks(&backend, &media);
+    assert_eq!(tracks.len(), 1, "identical tracks merged");
+    assert_eq!(tracks[0].0, b_id, "the track in more playlists is kept");
+    assert_eq!(playlist_track_ids(&backend, &both), vec![b_id.clone()]);
+    assert_eq!(playlist_track_ids(&backend, &only_b), vec![b_id.clone()]);
+    let warnings = duplicate_warnings(&data);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains(&*a.to_string_lossy()) && warnings[0].contains(&*b.to_string_lossy()),
+        "warning names both files: {}",
+        warnings[0]
+    );
 }

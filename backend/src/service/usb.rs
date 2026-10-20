@@ -2352,28 +2352,7 @@ impl BackendService {
                     continue;
                 }
 
-                // Avoid landing the same track twice in one playlist: drop
-                // the placeholder's row wherever the local track is already
-                // present in that playlist, then reassign whatever's left.
-                tx.execute(
-                    "DELETE FROM playlist_tracks
-                     WHERE track_id = ?1
-                       AND playlist_id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = ?2)",
-                    params![placeholder_id, local_id],
-                )?;
-                tx.execute(
-                    "UPDATE playlist_tracks SET track_id = ?1 WHERE track_id = ?2",
-                    params![local_id, placeholder_id],
-                )?;
-                // track_usb_links' UNIQUE(usb_device_id, usb_file_path) means
-                // a given (device, path) pair can only ever belong to one
-                // row regardless of track_id, so this reassignment can never
-                // collide with an existing link on the local row.
-                tx.execute(
-                    "UPDATE track_usb_links SET track_id = ?1 WHERE track_id = ?2",
-                    params![local_id, placeholder_id],
-                )?;
-                tx.execute("DELETE FROM tracks WHERE id = ?1", params![placeholder_id])?;
+                super::library::merge_track_into(&tx, placeholder_id, local_id)?;
                 merged += 1;
             }
         }

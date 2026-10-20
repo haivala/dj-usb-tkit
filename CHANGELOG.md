@@ -43,6 +43,16 @@
   one run. They no longer stop after 3000 tracks with an "Auto analysis limit reached" notice,
   which could also appear wrongly when a file in a source folder couldn't be added to the
   library, for example one still being downloaded.
+- **Improvement:** Exporting to a USB stick on Linux is much faster. The desktop mounts FAT
+  sticks so that every written file pauses briefly when it's closed; the export now lets those
+  pauses overlap instead of waiting on each one in turn.
+- **Fix:** The same audio file in two folders no longer becomes two tracks in the library. Scan
+  Library keeps one track and warns in the event log which file is the extra copy, on every scan
+  until it's deleted. Copies already in the library are merged on the next scan, keeping the
+  track's cues and playlists, so a playlist holding both copies exports again instead of being
+  blocked.
+- **Fix:** Warnings from Scan Library itself now appear in the event log and in the warning count
+  shown when the scan finishes.
 - **Fix:** On Linux the app shows up as "DJ USB Tkit" instead of "DJ_USB_Tkit" in application
   menus and launchers.
 - **Improvement:** On Linux the app has a fuller description in application menus, launchers

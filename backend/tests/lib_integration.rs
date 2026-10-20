@@ -1,4 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -339,6 +341,8 @@ fn write_test_wav(path: &std::path::Path, freq_hz: f32, duration_ms: u32) {
     }
 
     fs::write(path, out).expect("write wav");
+    // Same parameters, different file: the library keeps one track per file.
+    common::copy_unique_audio(path, path);
 }
 
 fn write_test_silent_wav(path: &std::path::Path, duration_ms: u32) {
@@ -368,6 +372,8 @@ fn write_test_silent_wav(path: &std::path::Path, duration_ms: u32) {
     out.extend_from_slice(&(data_len as u32).to_le_bytes());
     out.resize(44 + data_len, 0u8);
     fs::write(path, out).expect("write silent wav");
+    // Same parameters, different file: the library keeps one track per file.
+    common::copy_unique_audio(path, path);
 }
 
 fn write_test_pulsed_key_wav(path: &std::path::Path, bpm: f32, duration_ms: u32) {
@@ -417,6 +423,8 @@ fn write_test_pulsed_key_wav(path: &std::path::Path, bpm: f32, duration_ms: u32)
     }
 
     fs::write(path, out).expect("write pulsed wav");
+    // Same parameters, different file: the library keeps one track per file.
+    common::copy_unique_audio(path, path);
 }
 
 fn write_test_pulsed_key_aiff(path: &std::path::Path, bpm: f32, duration_ms: u32) {
@@ -471,6 +479,8 @@ fn write_test_pulsed_key_aiff(path: &std::path::Path, bpm: f32, duration_ms: u32
     out.extend_from_slice(&audio_data);
 
     fs::write(path, out).expect("write pulsed aiff");
+    // Same parameters, different file: the library keeps one track per file.
+    common::copy_unique_audio(path, path);
 }
 
 fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {

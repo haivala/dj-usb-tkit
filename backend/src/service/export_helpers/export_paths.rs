@@ -1,7 +1,7 @@
 //! File path utilities: sanitization, artwork/analysis export, pruning, manifest paths.
 
 use std::collections::{HashMap, HashSet};
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
 use super::super::SETTING_EXPORT_OWNED_FILES_PREFIX;
@@ -11,6 +11,7 @@ use super::super::usb_vendor_compat::{
     USB_ANALYSIS_PREFIX, USB_ARTWORK_DIR, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX,
     USB_VENDOR_ROOT_DIR,
 };
+use super::deferred_close::FileCloser;
 use super::{ExportManifest, ExportTrackData};
 use crate::edb::{open_edb_rw, table_exists};
 use crate::error::{BackendError, BackendResult};
@@ -172,7 +173,7 @@ fn limit_contents_file_name_plain(file_name: &str, max_len: usize) -> String {
     }
 }
 
-pub fn copy_if_different(source: &Path, target: &Path) -> BackendResult<()> {
+pub fn copy_if_different(source: &Path, target: &Path, closer: &FileCloser) -> BackendResult<()> {
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -182,7 +183,10 @@ pub fn copy_if_different(source: &Path, target: &Path) -> BackendResult<()> {
         (Err(err), _) => return Err(BackendError::Io(err)),
     };
     if should_copy {
-        std::fs::copy(source, target)?;
+        let mut src = std::fs::File::open(source)?;
+        let mut dst = std::fs::File::create(target)?;
+        std::io::copy(&mut src, &mut dst)?;
+        closer.close(dst);
     }
     Ok(())
 }
@@ -194,15 +198,19 @@ pub fn copy_if_different(source: &Path, target: &Path) -> BackendResult<()> {
 /// never re-encoded. Falls back to a plain `copy_if_different` for anything
 /// that isn't a safely-convertible extensible WAV (unreadable header, or an
 /// extensible subformat other than PCM/float, which stays a hard warning).
-pub fn copy_wav_normalized_if_needed(source: &Path, target: &Path) -> BackendResult<()> {
+pub fn copy_wav_normalized_if_needed(
+    source: &Path,
+    target: &Path,
+    closer: &FileCloser,
+) -> BackendResult<()> {
     let info = match crate::wav_format::parse_wav_fmt(source)? {
         Some(info) => info,
-        None => return copy_if_different(source, target),
+        None => return copy_if_different(source, target, closer),
     };
     if !crate::wav_format::classify(&info)
         .is_some_and(crate::wav_format::WavFormatIssue::is_export_autofixable)
     {
-        return copy_if_different(source, target);
+        return copy_if_different(source, target, closer);
     }
 
     if let Some(parent) = target.parent() {
@@ -221,7 +229,9 @@ pub fn copy_wav_normalized_if_needed(source: &Path, target: &Path) -> BackendRes
         Err(_) => true,
     };
     if should_write {
-        crate::wav_format::rewrite_extensible_to_pcm(source, target)?;
+        closer.close(crate::wav_format::rewrite_extensible_to_pcm(
+            source, target,
+        )?);
     }
     Ok(())
 }
@@ -279,6 +289,7 @@ pub fn export_artwork_for_player(
     usb_root: &Path,
     track_id: &str,
     warnings: &mut Vec<WarningEntry>,
+    closer: &FileCloser,
 ) -> BackendResult<Option<String>> {
     let source = PathBuf::from(source_path);
     if !source.is_file() {
@@ -334,7 +345,7 @@ pub fn export_artwork_for_player(
             ));
             continue;
         }
-        std::fs::write(target_path, buf.into_inner())?;
+        write_file(target_path, &buf.into_inner(), closer)?;
     }
 
     // Return the small path (PDB/export DB references this one)
@@ -350,7 +361,14 @@ pub use super::super::anlz::{
 };
 use super::super::cues::anlz_cues_from_track_cues;
 
-fn write_bytes_if_different(target: &Path, bytes: &[u8]) -> BackendResult<()> {
+fn write_file(target: &Path, bytes: &[u8], closer: &FileCloser) -> BackendResult<()> {
+    let mut file = std::fs::File::create(target)?;
+    file.write_all(bytes)?;
+    closer.close(file);
+    Ok(())
+}
+
+fn write_bytes_if_different(target: &Path, bytes: &[u8], closer: &FileCloser) -> BackendResult<()> {
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -360,7 +378,7 @@ fn write_bytes_if_different(target: &Path, bytes: &[u8]) -> BackendResult<()> {
         Err(err) => return Err(BackendError::Io(err)),
     };
     if should_write {
-        std::fs::write(target, bytes)?;
+        write_file(target, bytes, closer)?;
     }
     Ok(())
 }
@@ -393,13 +411,14 @@ fn write_anlz_with_export_path(
     target: &Path,
     track_path: &str,
     edits: Option<&AnlzAnalysisEdits<'_>>,
+    closer: &FileCloser,
 ) -> BackendResult<()> {
     let source_bytes = std::fs::read(source)?;
     let mut bytes = ensure_ppth_chunk(&source_bytes, track_path);
     if let Some(edits) = edits {
         bytes = apply_analysis_edits_to_anlz(&bytes, edits);
     }
-    write_bytes_if_different(target, &bytes)
+    write_bytes_if_different(target, &bytes, closer)
 }
 
 /// Ensure a reused on-USB analysis bundle has the exported track's PPTH, and
@@ -416,6 +435,7 @@ pub fn ensure_analysis_bundle_ppth(
     analysis_path: &str,
     track_path: &str,
     track: &ExportTrackData,
+    closer: &FileCloser,
 ) -> BackendResult<()> {
     let dat_path = resolve_usb_side_path(usb_root, analysis_path).ok_or_else(|| {
         BackendError::Validation(format!("invalid USB analysis path: {analysis_path}"))
@@ -434,13 +454,13 @@ pub fn ensure_analysis_bundle_ppth(
     for path in [&dat_path, &ext_path] {
         let bytes = std::fs::read(path)?;
         let out = apply_analysis_edits_to_anlz(&ensure_ppth_chunk(&bytes, track_path), &edits);
-        write_bytes_if_different(path, &out)?;
+        write_bytes_if_different(path, &out, closer)?;
     }
     // rekordbox's own bundles from older analyses have no `.2EX`.
     if twoex_path.is_file() {
         let bytes = std::fs::read(&twoex_path)?;
         let with_ppth = ensure_ppth_chunk(&bytes, track_path);
-        write_bytes_if_different(&twoex_path, &with_ppth)?;
+        write_bytes_if_different(&twoex_path, &with_ppth, closer)?;
     }
     Ok(())
 }
@@ -458,6 +478,7 @@ pub fn export_analysis_bundle_for_track(
     usb_root: &Path,
     track_path: &str,
     warnings: &mut Vec<WarningEntry>,
+    closer: &FileCloser,
 ) -> BackendResult<Option<(String, usize)>> {
     // Never another track's bundle: on a hash-folder collision this is the
     // next free `ANLZnnnn`, as rekordbox does.
@@ -502,11 +523,11 @@ pub fn export_analysis_bundle_for_track(
     // "bpm is always set at export" invariant.
     let cues = anlz_cues_from_track_cues(&track.cues);
     let edits = anlz_edits_from_export_track(track, cues.as_slice());
-    write_anlz_with_export_path(&local_dat, &dat_path, track_path, Some(&edits))?;
-    write_anlz_with_export_path(&local_ext, &ext_path, track_path, Some(&edits))?;
+    write_anlz_with_export_path(&local_dat, &dat_path, track_path, Some(&edits), closer)?;
+    write_anlz_with_export_path(&local_ext, &ext_path, track_path, Some(&edits), closer)?;
     let mut files_written = 2;
     if local_twoex.is_file() {
-        write_anlz_with_export_path(&local_twoex, &twoex_path, track_path, None)?;
+        write_anlz_with_export_path(&local_twoex, &twoex_path, track_path, None, closer)?;
         files_written += 1;
     } else if twoex_path.is_file() {
         // Left by an earlier export of a different bundle for this path.

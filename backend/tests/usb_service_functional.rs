@@ -3,6 +3,8 @@
 //! runner (unlike `user_flow_functional.rs`'s end-to-end flow), so they run
 //! unconditionally in CI and sandboxed environments alike.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,8 +40,10 @@ fn fixture_audio_path(relative: &str) -> PathBuf {
 }
 
 fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name: &str) {
-    let fixture = fixture_audio_path(fixture_relative);
-    fs::copy(&fixture, media_dir.join(target_name)).expect("copy audio fixture");
+    common::copy_unique_audio(
+        &fixture_audio_path(fixture_relative),
+        &media_dir.join(target_name),
+    );
 }
 
 fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {
@@ -1017,7 +1021,7 @@ fn library_group_edit_changes_only_named_fields_on_every_track() {
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
     for name in ["Artist - A.mp3", "Artist - B.mp3", "Artist - C.mp3"] {
-        fs::write(media.join(name), b"audio").expect("write track");
+        fs::write(media.join(name), name.as_bytes()).expect("write track");
     }
     let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
     let roots = vec![media.to_string_lossy().to_string()];

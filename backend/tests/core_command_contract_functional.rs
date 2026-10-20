@@ -35,7 +35,7 @@ fn browse_source_files_cursor_paginates_stably_and_rejects_query_mismatch_cursor
         "Artist - 04.mp3",
         "Artist - 05.mp3",
     ] {
-        fs::write(media.join(name), b"audio").expect("write fixture track");
+        fs::write(media.join(name), name.as_bytes()).expect("write fixture track");
     }
 
     let data_dir = root.path().join("data");
@@ -210,7 +210,7 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
     fs::create_dir_all(&media).expect("create media dir");
 
     for name in ["Artist - A.mp3", "Artist - B.mp3", "Artist - C.mp3"] {
-        fs::write(media.join(name), b"audio").expect("write fixture track");
+        fs::write(media.join(name), name.as_bytes()).expect("write fixture track");
     }
 
     let data_dir = root.path().join("data");
@@ -312,7 +312,7 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
     fs::create_dir_all(&media).expect("create media dir");
 
     for name in ["Artist - A.mp3", "Artist - B.mp3", "Artist - C.mp3"] {
-        fs::write(media.join(name), b"audio").expect("write fixture track");
+        fs::write(media.join(name), name.as_bytes()).expect("write fixture track");
     }
 
     let data_dir = root.path().join("data");
@@ -509,7 +509,7 @@ fn list_tracks_paginates_the_full_library() {
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
     for name in ["Artist - 01.mp3", "Artist - 02.mp3", "Artist - 03.mp3"] {
-        fs::write(media.join(name), b"audio").expect("write fixture track");
+        fs::write(media.join(name), name.as_bytes()).expect("write fixture track");
     }
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");

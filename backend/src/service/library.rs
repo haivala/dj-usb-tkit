@@ -1,6 +1,9 @@
 //! Track library: scanning, search, listing, browsing, track identity and paging.
 
+use std::collections::HashMap;
+
 use super::*;
+use crate::scanner::ScannedTrack;
 
 pub(super) fn browse_path_key(path: &str) -> String {
     path.trim().replace('\\', "/").to_ascii_lowercase()
@@ -11,6 +14,154 @@ pub(super) fn browse_path_key(path: &str) -> String {
 /// present over a stale/duplicate row pointing at a moved-or-deleted file.
 pub(super) fn stored_file_path(path: &str) -> &Path {
     Path::new(path.trim())
+}
+
+fn duplicate_file_warning(duplicate_path: &str, kept_path: &str) -> WarningEntry {
+    logging::log(
+        Level::Warn,
+        "library-scan",
+        "scan.duplicate-file",
+        format!(
+            "Same file in two places: {duplicate_path} is identical to {kept_path}. \
+             The library keeps one; delete the extra copy."
+        ),
+    )
+}
+
+/// Scanned files already in the library, by size: the candidates a newly
+/// found file is compared against. Sizes come from the scan, not the DB.
+fn library_paths_by_size(
+    scanned: &[ScannedTrack],
+    existing: &ExistingTracksByPath,
+) -> HashMap<i64, Vec<String>> {
+    let mut by_size = HashMap::<i64, Vec<String>>::new();
+    for item in scanned {
+        if let Some(size) = item.file_size_bytes.filter(|&size| size > 0)
+            && existing.contains_key(&item.path)
+        {
+            by_size.entry(size).or_default().push(item.path.clone());
+        }
+    }
+    by_size
+}
+
+/// The library file `item` is a byte-identical copy of, if any.
+fn identical_library_file(
+    paths_by_size: &HashMap<i64, Vec<String>>,
+    item: &ScannedTrack,
+) -> Option<String> {
+    let candidates = paths_by_size.get(&item.file_size_bytes?)?;
+    candidates
+        .iter()
+        .find(|path| {
+            **path != item.path
+                && track_matching::same_file_bytes(Path::new(&item.path), Path::new(path.as_str()))
+        })
+        .cloned()
+}
+
+struct MergedDuplicateTrack {
+    id: String,
+    file_path: String,
+    waveform_peaks_path: Option<String>,
+}
+
+/// Folds library tracks whose files (same-size groups of `paths_by_size`)
+/// are byte-identical into one track. The kept track is the one with cues,
+/// then the one in more playlists, then the oldest. Returns the removed
+/// tracks; the scan then meets their files as new copies and warns.
+fn merge_identical_library_tracks(
+    tx: &rusqlite::Transaction<'_>,
+    paths_by_size: &HashMap<i64, Vec<String>>,
+) -> BackendResult<Vec<MergedDuplicateTrack>> {
+    struct Row {
+        id: String,
+        path: String,
+        waveform_peaks_path: Option<String>,
+        has_cues: bool,
+        playlists: i64,
+        created_at: String,
+    }
+    let mut stmt = tx.prepare(
+        "SELECT t.id, t.waveform_peaks_path, t.created_at,
+                EXISTS(SELECT 1 FROM track_cues c WHERE c.track_id = t.id),
+                (SELECT COUNT(*) FROM playlist_tracks p WHERE p.track_id = t.id)
+         FROM tracks t WHERE t.file_path = ?1",
+    )?;
+
+    let mut merged = Vec::new();
+    for paths in paths_by_size.values().filter(|paths| paths.len() > 1) {
+        let mut group = Vec::<Row>::new();
+        for path in paths {
+            let row = stmt
+                .query_row(params![path], |row| {
+                    Ok(Row {
+                        id: row.get(0)?,
+                        path: path.clone(),
+                        waveform_peaks_path: row.get(1)?,
+                        created_at: row.get(2)?,
+                        has_cues: row.get(3)?,
+                        playlists: row.get(4)?,
+                    })
+                })
+                .optional()?;
+            group.extend(row);
+        }
+        group.sort_by(|a, b| {
+            b.has_cues
+                .cmp(&a.has_cues)
+                .then(b.playlists.cmp(&a.playlists))
+                .then(a.created_at.cmp(&b.created_at))
+                .then(a.path.cmp(&b.path))
+        });
+        // Each pass keeps the best remaining track and folds in its copies;
+        // what's left are files that differ from it.
+        while !group.is_empty() {
+            let kept = group.remove(0);
+            let (copies, rest): (Vec<Row>, Vec<Row>) = group.into_iter().partition(|row| {
+                track_matching::same_file_bytes(Path::new(&kept.path), Path::new(&row.path))
+            });
+            for copy in copies {
+                merge_track_into(tx, &copy.id, &kept.id)?;
+                merged.push(MergedDuplicateTrack {
+                    id: copy.id,
+                    file_path: copy.path,
+                    waveform_peaks_path: copy.waveform_peaks_path,
+                });
+            }
+            group = rest;
+        }
+    }
+    Ok(merged)
+}
+
+/// Moves `from_id`'s playlist entries and USB links to `into_id`, then
+/// deletes `from_id` (its cues go with it). A playlist already holding
+/// `into_id` keeps a single entry.
+pub(crate) fn merge_track_into(
+    tx: &rusqlite::Transaction<'_>,
+    from_id: &str,
+    into_id: &str,
+) -> BackendResult<()> {
+    tx.execute(
+        "DELETE FROM playlist_tracks
+         WHERE track_id = ?1
+           AND playlist_id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = ?2)",
+        params![from_id, into_id],
+    )?;
+    tx.execute(
+        "UPDATE playlist_tracks SET track_id = ?1 WHERE track_id = ?2",
+        params![into_id, from_id],
+    )?;
+    // track_usb_links' UNIQUE(usb_device_id, usb_file_path) means a given
+    // (device, path) pair can only ever belong to one row regardless of
+    // track_id, so this reassignment can never collide with an existing link.
+    tx.execute(
+        "UPDATE track_usb_links SET track_id = ?1 WHERE track_id = ?2",
+        params![into_id, from_id],
+    )?;
+    tx.execute("DELETE FROM tracks WHERE id = ?1", params![from_id])?;
+    Ok(())
 }
 
 pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
@@ -65,7 +216,9 @@ impl BackendService {
             });
         }
 
-        let scanned = scan_audio_files(&existing_roots)?;
+        let mut scanned = scan_audio_files(&existing_roots)?;
+        // Sorted so the copy kept of two identical new files is always the same one.
+        scanned.sort_by(|a, b| a.path.cmp(&b.path));
         let now = now();
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
@@ -114,12 +267,37 @@ impl BackendService {
 
         let mut indexed = 0usize;
         let mut updated = 0usize;
+        let mut paths_by_size = library_paths_by_size(&scanned, &existing_tracks);
+        // Identical files the library already holds as separate tracks (added
+        // before the scan skipped copies) are folded into one.
+        let merged_duplicates = merge_identical_library_tracks(&tx, &paths_by_size)?;
+        for duplicate in &merged_duplicates {
+            if let Some(paths) = scanned
+                .iter()
+                .find(|item| item.path == duplicate.file_path)
+                .and_then(|item| item.file_size_bytes)
+                .and_then(|size| paths_by_size.get_mut(&size))
+            {
+                paths.retain(|path| *path != duplicate.file_path);
+            }
+            existing_tracks.remove(&duplicate.file_path);
+        }
 
         for item in &scanned {
             let existing = existing_tracks.get(&item.path).cloned();
 
             match existing {
                 None => {
+                    if let Some(kept) = identical_library_file(&paths_by_size, item) {
+                        warnings.push(duplicate_file_warning(&item.path, &kept));
+                        continue;
+                    }
+                    if let Some(size) = item.file_size_bytes {
+                        paths_by_size
+                            .entry(size)
+                            .or_default()
+                            .push(item.path.clone());
+                    }
                     let id = Uuid::now_v7().to_string();
                     let fingerprint = build_track_match_fingerprint(
                         &item.title,
@@ -329,6 +507,18 @@ impl BackendService {
             }
         }
 
+        for duplicate in merged_duplicates {
+            if let Some(dat) = duplicate
+                .waveform_peaks_path
+                .as_deref()
+                .and_then(|p| local_cache_bundle_dat(&waveform_dir, Path::new(p.trim())))
+            {
+                orphaned_cache_bundles.push(dat);
+            }
+            let _ = std::fs::remove_file(artwork_dir.join(format!("{}.jpg", duplicate.id)));
+            removed += 1;
+        }
+
         // Clean up the removed tracks' local ANLZ cache, unless a remaining
         // track shares the bundle (the cache name hashes the lower-cased
         // source path, so case-variant paths map to one bundle).
@@ -462,14 +652,30 @@ impl BackendService {
             .map(|track| (browse_path_key(&track.file_path), track))
             .collect::<std::collections::HashMap<_, _>>();
 
+        // A file not in the library that is a copy of one that is stays
+        // hidden, as the scan never adds it.
+        let mut indexed_paths_by_size = HashMap::<i64, Vec<String>>::new();
+        for item in &scanned {
+            if let Some(size) = item.file_size_bytes.filter(|&size| size > 0)
+                && indexed_by_path.contains_key(&browse_path_key(&item.path))
+            {
+                indexed_paths_by_size
+                    .entry(size)
+                    .or_default()
+                    .push(item.path.clone());
+            }
+        }
+
         let mut seen_paths = std::collections::HashSet::<String>::new();
         let mut items = scanned
             .into_iter()
-            .map(|scanned| {
+            .filter_map(|scanned| {
                 let scanned_key = browse_path_key(&scanned.path);
                 seen_paths.insert(scanned_key.clone());
                 if let Some(existing) = indexed_by_path.get(&scanned_key) {
-                    existing.clone()
+                    Some(existing.clone())
+                } else if identical_library_file(&indexed_paths_by_size, &scanned).is_some() {
+                    None
                 } else {
                     let now = now();
                     let wav_extensible_kind = scanned
@@ -482,7 +688,7 @@ impl BackendService {
                         scanned.bitrate_kbps,
                         wav_extensible_kind.as_deref(),
                     );
-                    Track {
+                    Some(Track {
                         id: scanned.path.clone(),
                         title: scanned.title,
                         artist: scanned.artist,
@@ -517,7 +723,7 @@ impl BackendService {
                         // Freshly scanned, not yet indexed -- no analysis.
                         analysis_ready: false,
                         format_compat,
-                    }
+                    })
                 }
             })
             .collect::<Vec<_>>();

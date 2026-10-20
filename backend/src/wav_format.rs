@@ -148,8 +148,9 @@ pub fn detect_wav_format_issue(path: &Path) -> Option<WavFormatIssue> {
 /// WAV at `target`. Only the `fmt ` chunk is replaced - every other byte
 /// (including sample data) is streamed through verbatim, so this is a
 /// lossless, header-only fix. Returns an error if `source` doesn't classify
-/// as `WavFormatIssue::ExtensiblePcm`.
-pub fn rewrite_extensible_to_pcm(source: &Path, target: &Path) -> BackendResult<()> {
+/// as `WavFormatIssue::ExtensiblePcm`. Returns the still-open target so the
+/// caller decides when it is closed.
+pub fn rewrite_extensible_to_pcm(source: &Path, target: &Path) -> BackendResult<File> {
     let info = parse_wav_fmt(source)?.ok_or_else(|| {
         BackendError::Internal(format!(
             "rewrite_extensible_to_pcm: no fmt chunk found in {}",
@@ -202,7 +203,7 @@ pub fn rewrite_extensible_to_pcm(source: &Path, target: &Path) -> BackendResult<
     out.seek(SeekFrom::Start(4))?;
     out.write_all(&riff_size.to_le_bytes())?;
 
-    Ok(())
+    Ok(out)
 }
 
 #[cfg(test)]

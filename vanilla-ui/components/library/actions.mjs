@@ -669,6 +669,11 @@ export async function scanLibrary(ctx) {
     renderSourceChips(ctx);
     emitStatus(`Source folder missing: ${result.notFound[0]}${result.notFound.length > 1 ? ` (+${result.notFound.length - 1} more)` : ""}. Relocate or remove it.`);
   }
+  // e.g. the same file found in two folders; the backend words them.
+  const scanWarnings = Array.isArray(result?.warnings) ? result.warnings : [];
+  if (scanWarnings.length) {
+    ctx.logWarnings("library-scan", scanWarnings, "Library scan");
+  }
 
   await resetAndLoadLibraryTracks(ctx, "", LIBRARY_LOAD_LIMIT_POST_SCAN);
   // Backend-owned: `scan_library` reports these over the whole scanned library,
@@ -690,7 +695,7 @@ export async function scanLibrary(ctx) {
   const warnings = Array.isArray(analysis?.warnings) ? analysis.warnings : [];
   await ctx.refreshCurrentPlaylistTracks();
 
-  const warningCount = ctx.countWarningsForStatus(warnings);
+  const warningCount = ctx.countWarningsForStatus([...scanWarnings, ...warnings]);
   const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
   const missingCount = missingSourceRootsArray(state).length;
   const missingSuffix = missingCount ? ` | ${missingCount} source folder(s) missing` : "";

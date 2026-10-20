@@ -183,13 +183,14 @@ fn main() {
         options: None,
     });
     if !export.ok {
+        let error = export.error.as_ref();
         fail(format!(
-            "export_to_usb failed: {}",
-            export
-                .error
-                .as_ref()
-                .map(|e| e.message.as_str())
-                .unwrap_or("unknown error")
+            "export_to_usb failed: {}{}",
+            error.map(|e| e.message.as_str()).unwrap_or("unknown error"),
+            error
+                .and_then(|e| e.details.as_ref())
+                .map(|d| format!("\ndetails: {d}"))
+                .unwrap_or_default()
         ));
     }
 

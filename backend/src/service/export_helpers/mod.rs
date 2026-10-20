@@ -1,6 +1,7 @@
 //! Export helpers: the shared export types plus submodules for PDB writing,
 //! eDB writing, PDB row encoding, player menu tables, paths and playlist ops.
 
+pub mod deferred_close;
 pub mod export_paths;
 pub mod pdb_encoding;
 pub mod pdb_menu;
@@ -11,6 +12,7 @@ mod pdb_export;
 #[cfg(test)]
 mod tests;
 
+pub use deferred_close::FileCloser;
 pub use edb_export::*;
 pub use pdb_export::*;
 
