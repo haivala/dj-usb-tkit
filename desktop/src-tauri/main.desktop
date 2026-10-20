@@ -1,8 +1,6 @@
 [Desktop Entry]
 Categories={{categories}}
-{{#if comment}}
-Comment={{comment}}
-{{/if}}
+Comment=DJ USB T[ool]Kit: Local-first DJ library manager — scan, analyze and export playlists to USB for Pioneer CDJ/XDJ, rekordbox and Engine DJ players (Denon, Numark), and repair broken USB drives.
 Exec={{exec}}
 StartupWMClass={{exec}}
 Icon={{icon}}

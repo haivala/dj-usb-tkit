@@ -45,6 +45,8 @@
   library, for example one still being downloaded.
 - **Fix:** On Linux the app shows up as "DJ USB Tkit" instead of "DJ_USB_Tkit" in application
   menus and launchers.
+- **Improvement:** On Linux the app has a fuller description in application menus, launchers
+  and software centers, including how the name is said: DJ USB T[ool]Kit.
 
 ## 0.4.3
 

@@ -5,13 +5,13 @@
   <project_license>AGPL-3.0-or-later</project_license>
 
   <name>DJ USB Tkit</name>
-  <summary>Manage a DJ library and export it to CDJ-ready USB drives</summary>
+  <summary>Local-first DJ library manager and USB exporter for CDJ/XDJ, rekordbox and Engine DJ</summary>
 
   <description>
     <p>
-      DJ USB Tkit is a local-first DJ library manager and USB exporter. It
-      scans your music, analyzes tracks, and writes playlists to USB drives
-      that CDJ players read directly.
+      DJ USB T[ool]Kit: Local-first DJ library manager — scan, analyze and
+      export playlists to USB for Pioneer CDJ/XDJ, rekordbox and Engine DJ players (Denon, Numark),
+      and repair broken USB drives.
     </p>
     <ul>
       <li>Library scanning, playlist management, and local playback</li>
