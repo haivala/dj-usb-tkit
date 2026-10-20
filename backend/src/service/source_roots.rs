@@ -289,6 +289,13 @@ impl BackendService {
 
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
+        // A track another source folder still covers (a parent of the removed
+        // one, or a subfolder of it) stays. The removed roots are left out
+        // explicitly: the setting may not have been rewritten yet.
+        let remaining_roots = configured_source_roots(&tx)?
+            .into_iter()
+            .filter(|root| !roots.iter().any(|removed| source_root_keys_equal(root, removed)))
+            .collect::<Vec<_>>();
         let mut removed = 0usize;
         for root in roots {
             let escaped = root
@@ -297,16 +304,28 @@ impl BackendService {
                 .replace('_', "\\_");
             let slash_like = format!("{escaped}/%");
             let backslash_like = format!("{escaped}\\\\%");
-            let deleted = tx.execute(
+            let mut stmt = tx.prepare(
                 r#"
-                DELETE FROM tracks
+                SELECT id, file_path FROM tracks
                 WHERE file_path = ?1
                    OR file_path LIKE ?2 ESCAPE '\'
                    OR file_path LIKE ?3 ESCAPE '\'
                 "#,
-                params![root, slash_like, backslash_like],
             )?;
-            removed += deleted;
+            let rows = stmt
+                .query_map(params![root, slash_like, backslash_like], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for (id, file_path) in rows {
+                if remaining_roots
+                    .iter()
+                    .any(|remaining| browse_path_matches_root(&file_path, remaining))
+                {
+                    continue;
+                }
+                removed += tx.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+            }
         }
         tx.commit()?;
         Ok(RemoveTracksBySourceRootsData { removed })

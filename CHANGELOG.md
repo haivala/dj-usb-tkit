@@ -53,6 +53,9 @@
   blocked.
 - **Fix:** Warnings from Scan Library itself now appear in the event log and in the warning count
   shown when the scan finishes.
+- **Fix:** Removing a source folder that sits inside another source folder no longer removes its
+  tracks, with their cues and analysis, from the library. Removing a parent folder likewise keeps
+  the tracks of a subfolder that is still a source folder.
 - **Fix:** On Linux the app shows up as "DJ USB Tkit" instead of "DJ_USB_Tkit" in application
   menus and launchers.
 - **Improvement:** On Linux the app has a fuller description in application menus, launchers

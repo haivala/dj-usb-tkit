@@ -54,7 +54,7 @@ export function bindLibraryEvents(ctx) {
     (async () => {
       const confirmed = await openConfirmDialog({
         title: "Remove Source Folder",
-        message: `Remove source folder?\n\n${removedRoot}\n\nAll tracks from this folder will be removed from the library. Tracks that are in a local playlist will also be removed from those playlists.`,
+        message: `Remove source folder?\n\n${removedRoot}\n\nAll tracks from this folder will be removed from the library. Tracks that are in a local playlist will also be removed from those playlists. Tracks that are also inside another source folder stay in the library.`,
         confirmLabel: "Remove"
       });
       if (!confirmed) return;

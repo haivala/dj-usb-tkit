@@ -2605,6 +2605,50 @@ fn remove_tracks_by_source_roots_deletes_matching_prefix() {
 }
 
 #[test]
+fn remove_tracks_by_source_roots_keeps_tracks_another_root_covers() {
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))",
+        params![SETTING_UI_SOURCE_ROOTS, r#"["/music","/music/sub"]"#],
+    )
+    .expect("seed source roots");
+    for (id, path) in [
+        ("top", "/music/a.mp3"),
+        ("sub", "/music/sub/b.mp3"),
+        ("other", "/elsewhere/c.mp3"),
+    ] {
+        insert_full_track(&conn, id, id, "Artist", path, None, None, false);
+    }
+    drop(conn);
+    let remaining = || -> Vec<String> {
+        let conn = service.db.connect().expect("connect");
+        conn.prepare("SELECT id FROM tracks ORDER BY id")
+            .expect("prepare")
+            .query_map([], |row| row.get(0))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("ids")
+    };
+    let remove = |root: &str| {
+        service
+            .remove_tracks_by_source_roots(RemoveTracksBySourceRootsRequest {
+                source_roots: vec![root.to_string()],
+            })
+            .expect("remove tracks by source roots")
+            .removed
+    };
+
+    // The parent still covers the subfolder's track.
+    assert_eq!(remove("/music/sub"), 0);
+    assert_eq!(remaining(), ["other", "sub", "top"]);
+
+    // The still-configured subfolder keeps its track when the parent goes.
+    assert_eq!(remove("/music"), 1);
+    assert_eq!(remaining(), ["other", "sub"]);
+}
+
+#[test]
 fn get_tracks_by_ids_with_previews_dedupes_and_sorts() {
     let (_dir, service) = test_service();
     let conn = service.db.connect().expect("connect");
