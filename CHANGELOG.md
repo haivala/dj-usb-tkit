@@ -37,8 +37,13 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.4
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** Removing a source folder that sits inside another source folder no longer
+  removes its tracks, with their cues and analysis, from the library. Removing a parent folder
+  likewise keeps the tracks of a subfolder that is still a source folder.
 - **Improvement:** Scan Library and Analyze Missing Tracks analyze every track that needs it in
   one run. They no longer stop after 3000 tracks with an "Auto analysis limit reached" notice,
   which could also appear wrongly when a file in a source folder couldn't be added to the
@@ -57,9 +62,6 @@
   blocked.
 - **Fix:** Warnings from Scan Library itself now appear in the event log and in the warning count
   shown when the scan finishes.
-- **Fix:** Removing a source folder that sits inside another source folder no longer removes its
-  tracks, with their cues and analysis, from the library. Removing a parent folder likewise keeps
-  the tracks of a subfolder that is still a source folder.
 - **Fix:** Playing a track in the Media Library always plays its own file. It no longer tries a
   copy on an old exported USB stick that has the same title and artist.
 - **Fix:** On Linux the app shows up as "DJ USB Tkit" instead of "DJ_USB_Tkit" in application
