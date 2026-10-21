@@ -637,6 +637,42 @@ fn install_backend_panic_hook(app: tauri::AppHandle) {
     }));
 }
 
+/// Keeps WebKit's GPU (DMA-BUF) renderer working on NVIDIA. Under Wayland
+/// the driver's explicit sync makes the compositor drop the app ("Error 71");
+/// under X11 WebKit can't allocate its GBM buffers and the window stays
+/// black, so finished frames go to the window through shared memory there
+/// (still drawn on the GPU). Turning the renderer off instead composites
+/// every frame on the CPU. Other drivers keep WebKit's defaults, and a
+/// variable the user set is never overridden.
+#[cfg(target_os = "linux")]
+fn configure_webkit_renderer() {
+    if !Path::new("/proc/driver/nvidia/version").exists() {
+        return;
+    }
+    let wayland_display = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty());
+    // GTK takes the first backend GDK_BACKEND lists ("*" or unset: Wayland
+    // when a Wayland display is there).
+    let on_wayland = match std::env::var("GDK_BACKEND") {
+        Ok(backends) if !backends.trim().is_empty() => {
+            match backends.split(',').next().map(str::trim) {
+                Some("wayland") => true,
+                Some("*") => wayland_display,
+                _ => false,
+            }
+        }
+        _ => wayland_display,
+    };
+    let var = if on_wayland {
+        ("__NV_DISABLE_EXPLICIT_SYNC", "1")
+    } else {
+        ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1")
+    };
+    if std::env::var_os(var.0).is_none() {
+        // SAFETY: set once during startup before worker threads are spawned.
+        unsafe { std::env::set_var(var.0, var.1) };
+    }
+}
+
 fn main() {
     #[cfg(target_os = "linux")]
     {
@@ -653,14 +689,7 @@ fn main() {
             glib::log_default_handler(domain, level, Some(message));
         });
 
-        // AppImage and some Wayland stacks can fail GBM buffer allocation in WebKit.
-        // Keep user overrides intact; only apply this workaround for AppImage.
-        if std::env::var_os("APPIMAGE").is_some()
-            && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
-        {
-            // SAFETY: set once during startup before worker threads are spawned.
-            unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
-        }
+        configure_webkit_renderer();
     }
 
     tauri::Builder::default()

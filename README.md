@@ -51,6 +51,16 @@ finds rekordbox's library in `$WINEPREFIX`, `~/.wine`, or a Bottles bottle.
 For a prefix somewhere else, start the app with `WINEPREFIX=/path/to/prefix`
 (see [docs/EXTERNAL_LIBRARIES.md](docs/EXTERNAL_LIBRARIES.md)).
 
+If the window stays blank or black, or the app closes right after it opens,
+start it with the GPU renderer turned off:
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./DJ_USB_Tkit_*_amd64.AppImage
+```
+
+The app then draws on the CPU, which uses more CPU during long exports and
+analysis runs.
+
 ## Current Capabilities
 
 - Library scanning, playlist management, and native local playback.

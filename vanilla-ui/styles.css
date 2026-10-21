@@ -450,14 +450,28 @@ body.library-onboarding {
   color: var(--accent-hot);
 }
 
-@keyframes donate-glow {
-  0%, 100% { box-shadow: 0 0 8px var(--accent-hot); color: var(--accent-hot); }
-  50%      { box-shadow: 0 0 18px var(--accent-hot); color: var(--accent-hot); }
+/* While exporting, the Donate button gets a steady highlight that stays inside
+   the button, and only its heart beats now and then: two beats, then a rest. */
+@keyframes donate-heartbeat {
+  0%, 20%, 100% { transform: scale(1); }
+  5%            { transform: scale(1.18); }
+  10%           { transform: scale(1); }
+  15%           { transform: scale(1.12); }
 }
 
 .nav-sidebar-footer-link.exporting {
-  animation: donate-glow 1.4s ease-in-out infinite;
   color: var(--accent-hot);
+  background: var(--accent-glow);
+  box-shadow: inset 0 0 0 1px var(--accent-hot);
+}
+
+.nav-sidebar-footer-link.exporting svg {
+  transform-origin: center;
+  animation: donate-heartbeat 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-sidebar-footer-link.exporting svg { animation: none; }
 }
 
 /* ── App layout (sidebar + main) ───────────────────── */
@@ -3049,7 +3063,9 @@ body.sidebar-collapsed .progress-footer {
   transition: width 180ms ease-out;
 }
 
-.progress-footer.active .progress-track::after {
+/* Only while a job runs: a failed job's bar stays up until dismissed, and the
+   sweep would keep repainting it the whole time. */
+.progress-footer.active:not(.error) .progress-track::after {
   animation: shimmer 1.8s linear infinite;
 }
 .progress-track::after {
@@ -3063,6 +3079,9 @@ body.sidebar-collapsed .progress-footer {
     var(--shimmer) 50%,
     transparent 100%
   );
+}
+.progress-footer.error .progress-track::after {
+  display: none;
 }
 
 @keyframes shimmer {

@@ -267,20 +267,25 @@ docker run --rm \
     (
       cd "$TAURI_DIR"
       set +e
-      "$TAURI_BIN" build --config "$TAURI_BUILD_CONFIG" "${TAURI_UPDATER_ARGS[@]}" --bundles "$BUNDLES" -v 2>&1 | tee "$HOST_LOG_DIR/container-build.log"
+      # The full verbose log goes to the file; the console skips the per-library
+      # lines of linuxdeploy (one per bundled file) and the HTTP debug lines.
+      "$TAURI_BIN" build --config "$TAURI_BUILD_CONFIG" "${TAURI_UPDATER_ARGS[@]}" --bundles "$BUNDLES" -v 2>&1 \
+        | tee "$HOST_LOG_DIR/container-build.log" \
+        | grep --line-buffered -v -E "^[[:space:]]*(\[[a-z]+/std(out|err)\] )?[[:space:]]*(Copying file|Deploying (shared library|dependencies|copyright)|Setting rpath|Skipping deployment|Creating directory|WARNING: Could not find copyright|Debug |-- |[[:space:]]*$)"
       build_status=${PIPESTATUS[0]}
       set -e
       if [[ "$build_status" -ne 0 ]]; then
         if [[ ",$BUNDLES," == *",appimage,"* ]]; then
           REAL_APPDIR="$WORKSPACE_TARGET_DIR/release/bundle/appimage/DJ_USB_Tkit.AppDir"
-          echo "==> Tauri AppDir inspection"
           if [[ -d "$REAL_APPDIR" ]]; then
-            find "$REAL_APPDIR" | sort | tee "$HOST_LOG_DIR/tauri-appdir-inspection.log"
+            find "$REAL_APPDIR" | sort > "$HOST_LOG_DIR/tauri-appdir-inspection.log"
           else
-            echo "Tauri AppDir missing: $REAL_APPDIR" | tee "$HOST_LOG_DIR/tauri-appdir-inspection.log"
+            echo "Tauri AppDir missing: $REAL_APPDIR" > "$HOST_LOG_DIR/tauri-appdir-inspection.log"
           fi
+          echo "==> Tauri AppDir listing: $HOST_LOG_DIR/tauri-appdir-inspection.log"
         fi
         echo "==> Host logs directory: $HOST_LOG_DIR"
+        chown -R "$HOST_UID:$HOST_GID" "$HOST_LOG_DIR" 2>/dev/null || true
         exit "$build_status"
       fi
     )
@@ -296,6 +301,7 @@ docker run --rm \
       /usr/local/cargo/registry \
       /usr/local/cargo/git \
       /root/.npm \
+      "$HOST_LOG_DIR" \
       2>/dev/null || true
   '
 

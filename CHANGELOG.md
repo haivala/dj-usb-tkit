@@ -46,6 +46,10 @@
 - **Improvement:** Exporting to a USB stick on Linux is much faster. The desktop mounts FAT
   sticks so that every written file pauses briefly when it's closed; the export now lets those
   pauses overlap instead of waiting on each one in turn.
+- **Improvement:** The Linux AppImage no longer turns off WebKit's GPU renderer at startup. If the
+  window stays blank or black, the README shows how to start it the old way.
+- **Fix:** On Linux with an NVIDIA graphics card, the `.deb` and `.rpm` installs no longer close
+  right after opening under Wayland or show a black window under X11.
 - **Fix:** The same audio file in two folders no longer becomes two tracks in the library. Scan
   Library keeps one track and warns in the event log which file is the extra copy, on every scan
   until it's deleted. Copies already in the library are merged on the next scan, keeping the
