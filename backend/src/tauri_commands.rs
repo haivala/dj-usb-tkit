@@ -1789,6 +1789,20 @@ struct EssentiaDownloadProgress {
     error: Option<String>,
 }
 
+/// HTTP client for the backend's own downloads. reqwest is built without a
+/// bundled TLS crypto provider (`rustls-no-provider`, as tauri-plugin-updater
+/// uses) to keep the aws-lc C build out of the tree, so install rustls's ring
+/// provider first; whichever of us or the updater runs first wins.
+fn http_client() -> Result<reqwest::Client, String> {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+    reqwest::Client::builder()
+        .user_agent(concat!("dj-usb-tkit/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn download_essentia(
     app: AppHandle,
@@ -1842,7 +1856,9 @@ pub async fn download_essentia(
 
     let result: Result<(), String> = async {
         let url = "https://registry.npmjs.org/essentia.js/-/essentia.js-0.1.3.tgz";
-        let response = reqwest::get(url)
+        let response = http_client()?
+            .get(url)
+            .send()
             .await
             .map_err(|e| format!("download failed: {e}"))?;
         let total_bytes = response.content_length();
@@ -1888,7 +1904,9 @@ pub async fn download_essentia(
         // Install known dependency required by essentia.js package.
         let node_wav_tgz = data_dir.join("node_wav_download.tmp.tgz");
         let dep_url = "https://registry.npmjs.org/node-wav/-/node-wav-0.0.2.tgz";
-        let dep_bytes = reqwest::get(dep_url)
+        let dep_bytes = http_client()?
+            .get(dep_url)
+            .send()
             .await
             .map_err(|e| format!("download node-wav failed: {e}"))?
             .bytes()
@@ -2026,11 +2044,7 @@ pub async fn check_for_update() -> ApiResponse<crate::service::update_check::Upd
     let install_kind = current_install_kind();
 
     let fetch = async {
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("dj-usb-tkit/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|e| e.to_string())?;
-        let response = client
+        let response = http_client()?
             .get(RELEASES_API_URL)
             .header("Accept", "application/vnd.github+json")
             .send()

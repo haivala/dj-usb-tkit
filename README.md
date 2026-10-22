@@ -139,7 +139,7 @@ Copyright (c) DJ USB Tkit contributors. Project code is licensed under `AGPL-3.0
 ## Prerequisites
 
 - [Rust](https://rustup.rs/) (stable)
-- [Node.js](https://nodejs.org/) 24 LTS (required for frontend build/tests and optional Essentia runtime path)
+- [Node.js](https://nodejs.org/) 24 LTS (24.15 or newer) or 26 (required for frontend build/tests; the optional Essentia engine uses whichever `node` is installed)
 - System libraries for Tauri v2 (see below)
 - Tauri CLI v2 for release bundles:
 

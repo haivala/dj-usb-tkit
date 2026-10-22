@@ -7,7 +7,7 @@ autobins = false
 
 [features]
 default = []
-tauri = ["dep:tauri", "dep:tauri-plugin-updater", "dep:reqwest", "dep:tar", "dep:futures-util"]
+tauri = ["dep:tauri", "dep:tauri-plugin-updater", "dep:reqwest", "dep:rustls", "dep:tar", "dep:futures-util"]
 dev-tools = []
 
 [dependencies]
@@ -37,11 +37,12 @@ uuid = { version = "1", features = ["v7", "serde"] }
 walkdir = "2"
 stratum-dsp = "1"
 tauri = { version = "2", optional = true }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"], optional = true }
 flate2 = "1"
 tar = { version = "0.4", optional = true }
 futures-util = { version = "0.3", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd"))'.dependencies]
 alsa-sys = "0.3"

@@ -37,6 +37,13 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Chore:** Updated dependencies (`tauri`, `reqwest`, `serde`, `chrono`, `uuid`, `@tauri-apps/api`,
+  `@tauri-apps/cli`, `@playwright/test`, `jsdom`).
+- **Chore:** Building the app needs Node.js 24.15 or newer, or Node.js 26. The macOS and Windows
+  build setup scripts install Node.js 24.22.1.
+
 ## 0.4.4
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

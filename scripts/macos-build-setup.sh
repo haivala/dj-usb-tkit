@@ -71,7 +71,7 @@ if command -v node &>/dev/null; then
     echo "  Already installed: $(node --version)"
 else
     # Install Node locally to ~/.local/nodejs to avoid needing sudo
-    NODE_VER="v24.14.1"
+    NODE_VER="v24.22.1"
     ARCH=$(uname -m)
     if [ "$ARCH" = "arm64" ]; then
         NODE_ARCH="darwin-arm64"

@@ -116,11 +116,11 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
     Write-Host "  Downloading Node.js LTS (portable zip)..."
     $nodeZip = "$env:TEMP\node-lts.zip"
     $nodePath = "$env:LOCALAPPDATA\nodejs"
-    Invoke-WebRequest -Uri "https://nodejs.org/dist/v24.14.1/node-v24.14.1-win-x64.zip" -OutFile $nodeZip
+    Invoke-WebRequest -Uri "https://nodejs.org/dist/v24.22.1/node-v24.22.1-win-x64.zip" -OutFile $nodeZip
     Write-Host "  Extracting to $nodePath..."
     if (Test-Path $nodePath) { Remove-Item $nodePath -Recurse -Force }
     Expand-Archive $nodeZip -DestinationPath "$env:TEMP\node-extract" -Force
-    Move-Item "$env:TEMP\node-extract\node-v24.14.1-win-x64" $nodePath
+    Move-Item "$env:TEMP\node-extract\node-v24.22.1-win-x64" $nodePath
     Remove-Item "$env:TEMP\node-extract" -Recurse -Force -ErrorAction SilentlyContinue
     # Add to PATH for this session only
     $env:Path = "$nodePath;$env:Path"
