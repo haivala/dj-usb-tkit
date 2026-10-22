@@ -24,7 +24,7 @@ function pwv5Base64(entryCount) {
 function makeEl() {
   const dom = new JSDOM(
     `<!doctype html><body>
-      <div id="trackDetailOverlay" hidden>
+      <div id="trackDetailView" hidden>
         <h3 id="trackDetailTitle"></h3>
         <input id="trackDetailFirstBeatMs" />
         <div class="waveform waveform-canvas" id="trackDetailWaveform">
@@ -45,7 +45,7 @@ function makeEl() {
   global.window = dom.window;
   global.document = dom.window.document;
   const ids = [
-    "trackDetailOverlay", "trackDetailTitle", "trackDetailWaveform", "trackDetailBeatgrid",
+    "trackDetailView", "trackDetailTitle", "trackDetailWaveform", "trackDetailBeatgrid",
     "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs", "trackDetailAddCue",
     "trackDetailCueList", "trackDetailSaveBtn", "trackDetailColorPopover",
   ];

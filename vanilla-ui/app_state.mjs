@@ -106,6 +106,9 @@ export function createInitialState() {
     unlistenBackendLogEvent: null,
     activeWaveform: null,
     playbackRowKey: null,
+    // The row the cue editor was last opened from: marked in the lists so
+    // the track is easy to find again after the editor closes.
+    lastEditedRowKey: null,
     playbackTrackId: null,
     playbackPath: null,
     playbackActive: false,

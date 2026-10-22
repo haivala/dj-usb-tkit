@@ -1,4 +1,4 @@
-// PWV5 colour-detail waveform rendering for the track-detail modal.
+// PWV5 colour-detail waveform rendering for the track-detail editor.
 //
 // PWV5 entries are 2 bytes each, big-endian u16: R(3) | G(3) | B(3) | H(5) | _(2).
 // Entry count is duration-derived (~150/sec), so a 4-minute track is ~36k

@@ -482,6 +482,7 @@ body.library-onboarding {
 }
 
 .app-layout {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -989,6 +990,7 @@ body.sidebar-resizing {
 /* ── main & panels ──────────────────────────────────── */
 
 main {
+  position: relative;
   padding: 0 20px;
   flex: 1;
   min-width: 0;
@@ -2050,6 +2052,12 @@ td.num, th.num {
 
 .track-grid-body .track-grid-row.is-alt {
   background: var(--bg-raised);
+}
+
+/* The row the cue editor was last closed on: easy to find again in a long list. */
+.track-grid-body .track-grid-row.is-last-edited {
+  background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.12);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .track-grid-body .track-grid-row:hover {
@@ -4446,16 +4454,34 @@ td button[data-action]:disabled,
   box-shadow: 0 2px 8px var(--accent-glow);
 }
 
-/* ── Track-detail modal: cue points + beat grid ─────────────────────── */
+/* ── Track-detail editor: cue points + beat grid ────────────────────── */
+/* The cue editor opens over the page it was opened from and the sidebar.
+   Nothing underneath re-lays out: the page keeps its scroll position and
+   comes back as it was. No open/close animation: WebKitGTK flickers on it. */
+.track-detail-view {
+  position: absolute;
+  inset: 0;
+  /* Above the job progress footer, which would cover Save / Cancel. */
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 20px 0;
+  /* A step lighter than the page, with its glows mirrored, so the editor
+     reads as its own surface. */
+  background: color-mix(in srgb, var(--card) 35%, var(--bg));
+  background-image:
+    radial-gradient(ellipse at 80% 0%, var(--body-glow-1) 0%, transparent 60%),
+    radial-gradient(ellipse at 20% 100%, var(--body-glow-2) 0%, transparent 50%);
+}
+.track-detail-view[hidden] {
+  display: none;
+}
+
 .track-detail-dialog {
-  width: 98vw;
-  max-height: 97vh;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.25);
-  padding: 16px;
+  padding: 0 0 16px;
 }
 .track-detail-header {
   display: grid;

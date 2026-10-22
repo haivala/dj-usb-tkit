@@ -494,6 +494,128 @@
         <div class="event-log-list" id="backupsList" role="log" aria-live="polite"></div>
       </section>
     </main>
+    <!-- The cue editor: shown over the page it was opened from and the sidebar (see track-detail/actions.mjs). -->
+    <section class="track-detail-view" id="trackDetailView" data-playback-scope hidden>
+      <div class="track-detail-dialog" role="region" aria-labelledby="trackDetailTitle">
+        <div class="track-detail-header">
+          <div class="track-detail-heading">
+            <div class="track-detail-cover" id="trackDetailCover"></div>
+            <div class="track-detail-names">
+              <h3 id="trackDetailTitle">Cue Points</h3>
+              <div class="track-detail-subtitle" id="trackDetailSubtitle"></div>
+            </div>
+          </div>
+          <!-- Right of the title; under it on a narrow window. -->
+          <div class="track-detail-meta">
+            <div class="track-detail-rating" id="trackDetailRating" role="radiogroup" aria-label="Rating" data-tooltip="Click a star to rate; click the same star again to clear"><button type="button" role="radio" aria-checked="false" data-rating="1" aria-label="1 star">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" aria-label="2 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" aria-label="3 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" aria-label="4 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" aria-label="5 stars">&#9733;</button></div>
+            <input type="text" id="trackDetailGenre" class="track-detail-genre" list="trackDetailGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Genre" aria-label="Genre" data-tooltip="Genre: type one or pick one the library already has" />
+            <datalist id="trackDetailGenreOptions"><!-- from the track detail's genreOptions --></datalist>
+            <input type="text" id="trackDetailReleaseDate" class="track-detail-release-date" maxlength="10" autocomplete="off" spellcheck="false" placeholder="Release date" aria-label="Release date" data-tooltip="Release date: YYYY-MM-DD, or just YYYY-MM or YYYY (export completes a month or year); empty for none" />
+            <button type="button" class="track-detail-reveal" id="trackDetailRevealBtn" aria-label="Show in folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"></path></svg></button>
+          </div>
+          <button class="settings-close" id="trackDetailCloseBtn" aria-label="Close">&times;</button>
+        </div>
+
+        <!-- Row 1: the track's tags (BPM, key); row 2: where things start. -->
+        <div class="track-detail-fields">
+          <div class="track-detail-field-group">
+            <label for="trackDetailBpm">BPM</label>
+            <div class="track-detail-field-controls">
+              <button type="button" id="trackDetailBpmMinus" data-tooltip="-0.01 BPM">&minus;</button>
+              <span class="number-stepper"><input type="number" id="trackDetailBpm" min="1" max="999" step="0.01" /><span class="number-stepper-btns" aria-hidden="true"><button type="button" tabindex="-1" data-step="1">&#9652;</button><button type="button" tabindex="-1" data-step="-1">&#9662;</button></span></span>
+              <button type="button" id="trackDetailBpmPlus" data-tooltip="+0.01 BPM">+</button>
+              <button type="button" id="trackDetailBpmHalf" data-tooltip="Halve the BPM (analysis caught double tempo)">÷2</button>
+              <button type="button" id="trackDetailBpmDouble" data-tooltip="Double the BPM (analysis caught half tempo)">×2</button>
+            </div>
+          </div>
+          <div class="track-detail-field-group">
+            <label for="trackDetailKey">Key</label>
+            <div class="track-detail-field-controls">
+              <button type="button" id="trackDetailKeyMinus" data-tooltip="Previous key">&minus;</button>
+              <select id="trackDetailKey"><!-- options from the track detail's keyOptions --></select>
+              <button type="button" id="trackDetailKeyPlus" data-tooltip="Next key">+</button>
+            </div>
+          </div>
+          <div class="track-detail-field-group">
+            <label for="trackDetailFirstBeatMs">First beat</label>
+            <div class="track-detail-field-controls">
+              <button type="button" id="trackDetailFirstBeatMinus" data-tooltip="Back one beat">&minus;</button>
+              <span class="number-stepper"><input type="number" id="trackDetailFirstBeatMs" min="0" step="1" /><span class="number-stepper-btns" aria-hidden="true"><button type="button" tabindex="-1" data-step="1">&#9652;</button><button type="button" tabindex="-1" data-step="-1">&#9662;</button></span></span>
+              <button type="button" id="trackDetailFirstBeatPlus" data-tooltip="Forward one beat">+</button>
+              <span class="track-detail-unit">ms</span>
+            </div>
+          </div>
+          <div class="track-detail-field-group">
+            <span class="track-detail-field-label" id="trackDetailStartLabel">Playback starts at</span>
+            <div class="track-detail-field-controls">
+              <div class="track-detail-segmented" role="radiogroup" aria-labelledby="trackDetailStartLabel">
+                <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstCue" data-tooltip="The CDJ loads on its first cue: cue A, or a memory cue before it">First cue</button>
+                <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstBeat">First beat</button>
+              </div>
+              <span class="track-detail-start-note" id="trackDetailStartNote" hidden>No cue points yet: the CDJ starts at the first audio</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="track-detail-waveform-wrap">
+          <div class="track-detail-zoom">
+            <button type="button" class="track-detail-playpause" id="trackDetailPlayPause" aria-label="Play" data-tooltip="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button>
+            <div class="track-detail-hint" id="trackDetailHint">
+              <span><b>Waveform</b> click to move the playhead · drag the playhead to listen · double-click to add a cue · scroll to zoom · drag to pan</span>
+              <span><b>Cue markers</b> drag to move · <kbd>Q</kbd> on: snaps to beats, <kbd>Shift</kbd> places freely · click to play from the cue · <kbd>M</kbd> adds a memory cue (▼)</span>
+            </div>
+            <span class="track-detail-hint-btn" id="trackDetailHintBtn" tabindex="0" role="note" aria-label="How to use the waveform" data-tooltip="Waveform: click to move the playhead, drag the playhead to listen, double-click to add a cue, scroll to zoom, drag to pan. Cue markers: drag to move, click to play from the cue. With Q on, cues snap to beats; hold Shift to place freely. Keys: Space play/pause · C add cue · M add memory cue · 1–8 jump to cue · ←/→ move the selected cue a beat (Shift: 10 ms) · Ctrl+Z undo · Ctrl+Shift+Z redo." hidden>?</span>
+            <button type="button" class="track-detail-tool" id="trackDetailQuantize" aria-pressed="true" data-tooltip="Quantize: new and dragged cues snap to the nearest beat (hold Shift to place freely)">Q</button>
+            <button type="button" class="track-detail-tool" id="trackDetailFollowGrid" aria-pressed="false" aria-label="Cues follow grid" data-tooltip="Cues follow grid: changing BPM or the first beat moves every cue so it stays on its beat. Off, cues keep their place in the audio, as in rekordbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.55"></path><path d="M12 4h6l-2 2.5 2 2.5h-6z" fill="currentColor"></path><path d="M3 15h6M7 13l2 2-2 2M21 15h-6M17 13l-2 2 2 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+            <button type="button" class="track-detail-tool" id="trackDetailMetronome" aria-pressed="false" aria-label="Metronome" data-tooltip="Metronome: click on every beat while playing, to hear whether the grid lines up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l4 18H5zM12 17l5-10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
+            <label class="track-detail-grid-level track-detail-metronome-mix" hidden data-tooltip="Metronome mix: left favours the music, right the clicks; in the middle both play at full level">Mix <input type="range" id="trackDetailMetronomeMix" min="0" max="100" step="1" /></label>
+            <label class="track-detail-grid-level" data-tooltip="How strongly the beat grid shows over the waveform">Beat grid <input type="range" id="trackDetailGridLevel" min="0" max="100" step="1" /></label>
+            <div class="track-detail-zoom-btns">
+              <button type="button" class="track-detail-zoom-icon" id="trackDetailZoomOut" aria-label="Zoom out" data-tooltip="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21M7.5 10.5h6"></path></svg></button>
+              <button type="button" class="track-detail-zoom-icon" id="trackDetailZoomIn" aria-label="Zoom in" data-tooltip="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button>
+              <button type="button" id="trackDetailZoomFit" data-tooltip="Fit whole track">Fit</button>
+            </div>
+          </div>
+          <div class="waveform waveform-canvas track-detail-canvas" id="trackDetailWaveform">
+            <canvas class="waveform-canvas-el"></canvas>
+            <div class="track-detail-beatgrid" id="trackDetailBeatgrid"></div>
+            <i class="track-detail-prestart" id="trackDetailPreStart" hidden></i>
+            <div class="track-detail-cue-markers" id="trackDetailCueMarkers"></div>
+            <i class="waveform-playhead"></i>
+            <i class="track-detail-playhead" id="trackDetailPlayhead" hidden></i>
+          </div>
+          <div class="track-detail-overview" id="trackDetailOverview" aria-label="Whole track: click or drag to move the view">
+            <canvas class="waveform-canvas-el"></canvas>
+            <div class="track-detail-overview-cues" id="trackDetailOverviewCues"></div>
+            <i class="track-detail-overview-window" id="trackDetailOverviewWindow"></i>
+          </div>
+          <div class="track-detail-wave-footer">
+            <span class="track-detail-zoom-range" id="trackDetailZoomRange" hidden></span>
+            <span class="track-detail-total-time" id="trackDetailTotalTime" hidden></span>
+          </div>
+        </div>
+
+        <div class="track-detail-cues">
+          <div class="track-detail-cues-head">
+            <span>Cues</span>
+            <div class="track-detail-start-cue" id="trackDetailStartCue" hidden></div>
+            <div class="track-detail-memory-cue" id="trackDetailMemoryCue"></div>
+            <button type="button" id="trackDetailAddCue">+ Hot cue</button>
+          </div>
+          <div class="track-detail-cue-list" id="trackDetailCueList"></div>
+        </div>
+
+        <div class="row confirm-actions">
+          <div class="track-detail-history">
+            <button type="button" id="trackDetailUndo" data-tooltip="Undo (Ctrl+Z)" disabled>Undo</button>
+            <button type="button" id="trackDetailRedo" data-tooltip="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
+          </div>
+          <button id="trackDetailCancelBtn">Cancel</button>
+          <button id="trackDetailSaveBtn" data-primary>Save</button>
+        </div>
+      </div>
+      <div class="track-detail-color-popover" id="trackDetailColorPopover" hidden></div>
+    </section>
   </div>
 
   <!-- Settings Drawer -->
@@ -736,128 +858,6 @@
         <button id="playlistImportOkBtn" data-primary>Import</button>
       </div>
     </div>
-  </div>
-
-  <div class="confirm-overlay" id="trackDetailOverlay" data-playback-scope hidden>
-    <div class="track-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="trackDetailTitle">
-      <div class="track-detail-header">
-        <div class="track-detail-heading">
-          <div class="track-detail-cover" id="trackDetailCover"></div>
-          <div class="track-detail-names">
-            <h3 id="trackDetailTitle">Cue Points</h3>
-            <div class="track-detail-subtitle" id="trackDetailSubtitle"></div>
-          </div>
-        </div>
-        <!-- Right of the title; under it on a narrow window. -->
-        <div class="track-detail-meta">
-          <div class="track-detail-rating" id="trackDetailRating" role="radiogroup" aria-label="Rating" data-tooltip="Click a star to rate; click the same star again to clear"><button type="button" role="radio" aria-checked="false" data-rating="1" aria-label="1 star">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" aria-label="2 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" aria-label="3 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" aria-label="4 stars">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" aria-label="5 stars">&#9733;</button></div>
-          <input type="text" id="trackDetailGenre" class="track-detail-genre" list="trackDetailGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Genre" aria-label="Genre" data-tooltip="Genre: type one or pick one the library already has" />
-          <datalist id="trackDetailGenreOptions"><!-- from the track detail's genreOptions --></datalist>
-          <input type="text" id="trackDetailReleaseDate" class="track-detail-release-date" maxlength="10" autocomplete="off" spellcheck="false" placeholder="Release date" aria-label="Release date" data-tooltip="Release date: YYYY-MM-DD, or just YYYY-MM or YYYY (export completes a month or year); empty for none" />
-          <button type="button" class="track-detail-reveal" id="trackDetailRevealBtn" aria-label="Show in folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"></path></svg></button>
-        </div>
-        <button class="settings-close" id="trackDetailCloseBtn" aria-label="Close">&times;</button>
-      </div>
-
-      <!-- Row 1: the track's tags (BPM, key); row 2: where things start. -->
-      <div class="track-detail-fields">
-        <div class="track-detail-field-group">
-          <label for="trackDetailBpm">BPM</label>
-          <div class="track-detail-field-controls">
-            <button type="button" id="trackDetailBpmMinus" data-tooltip="-0.01 BPM">&minus;</button>
-            <span class="number-stepper"><input type="number" id="trackDetailBpm" min="1" max="999" step="0.01" /><span class="number-stepper-btns" aria-hidden="true"><button type="button" tabindex="-1" data-step="1">&#9652;</button><button type="button" tabindex="-1" data-step="-1">&#9662;</button></span></span>
-            <button type="button" id="trackDetailBpmPlus" data-tooltip="+0.01 BPM">+</button>
-            <button type="button" id="trackDetailBpmHalf" data-tooltip="Halve the BPM (analysis caught double tempo)">÷2</button>
-            <button type="button" id="trackDetailBpmDouble" data-tooltip="Double the BPM (analysis caught half tempo)">×2</button>
-          </div>
-        </div>
-        <div class="track-detail-field-group">
-          <label for="trackDetailKey">Key</label>
-          <div class="track-detail-field-controls">
-            <button type="button" id="trackDetailKeyMinus" data-tooltip="Previous key">&minus;</button>
-            <select id="trackDetailKey"><!-- options from the track detail's keyOptions --></select>
-            <button type="button" id="trackDetailKeyPlus" data-tooltip="Next key">+</button>
-          </div>
-        </div>
-        <div class="track-detail-field-group">
-          <label for="trackDetailFirstBeatMs">First beat</label>
-          <div class="track-detail-field-controls">
-            <button type="button" id="trackDetailFirstBeatMinus" data-tooltip="Back one beat">&minus;</button>
-            <span class="number-stepper"><input type="number" id="trackDetailFirstBeatMs" min="0" step="1" /><span class="number-stepper-btns" aria-hidden="true"><button type="button" tabindex="-1" data-step="1">&#9652;</button><button type="button" tabindex="-1" data-step="-1">&#9662;</button></span></span>
-            <button type="button" id="trackDetailFirstBeatPlus" data-tooltip="Forward one beat">+</button>
-            <span class="track-detail-unit">ms</span>
-          </div>
-        </div>
-        <div class="track-detail-field-group">
-          <span class="track-detail-field-label" id="trackDetailStartLabel">Playback starts at</span>
-          <div class="track-detail-field-controls">
-            <div class="track-detail-segmented" role="radiogroup" aria-labelledby="trackDetailStartLabel">
-              <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstCue" data-tooltip="The CDJ loads on its first cue: cue A, or a memory cue before it">First cue</button>
-              <button type="button" role="radio" aria-checked="false" id="trackDetailStartFirstBeat">First beat</button>
-            </div>
-            <span class="track-detail-start-note" id="trackDetailStartNote" hidden>No cue points yet: the CDJ starts at the first audio</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="track-detail-waveform-wrap">
-        <div class="track-detail-zoom">
-          <button type="button" class="track-detail-playpause" id="trackDetailPlayPause" aria-label="Play" data-tooltip="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button>
-          <div class="track-detail-hint" id="trackDetailHint">
-            <span><b>Waveform</b> click to move the playhead · drag the playhead to listen · double-click to add a cue · scroll to zoom · drag to pan</span>
-            <span><b>Cue markers</b> drag to move · <kbd>Q</kbd> on: snaps to beats, <kbd>Shift</kbd> places freely · click to play from the cue · <kbd>M</kbd> adds a memory cue (▼)</span>
-          </div>
-          <span class="track-detail-hint-btn" id="trackDetailHintBtn" tabindex="0" role="note" aria-label="How to use the waveform" data-tooltip="Waveform: click to move the playhead, drag the playhead to listen, double-click to add a cue, scroll to zoom, drag to pan. Cue markers: drag to move, click to play from the cue. With Q on, cues snap to beats; hold Shift to place freely. Keys: Space play/pause · C add cue · M add memory cue · 1–8 jump to cue · ←/→ move the selected cue a beat (Shift: 10 ms) · Ctrl+Z undo · Ctrl+Shift+Z redo." hidden>?</span>
-          <button type="button" class="track-detail-tool" id="trackDetailQuantize" aria-pressed="true" data-tooltip="Quantize: new and dragged cues snap to the nearest beat (hold Shift to place freely)">Q</button>
-          <button type="button" class="track-detail-tool" id="trackDetailFollowGrid" aria-pressed="false" aria-label="Cues follow grid" data-tooltip="Cues follow grid: changing BPM or the first beat moves every cue so it stays on its beat. Off, cues keep their place in the audio, as in rekordbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.55"></path><path d="M12 4h6l-2 2.5 2 2.5h-6z" fill="currentColor"></path><path d="M3 15h6M7 13l2 2-2 2M21 15h-6M17 13l-2 2 2 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
-          <button type="button" class="track-detail-tool" id="trackDetailMetronome" aria-pressed="false" aria-label="Metronome" data-tooltip="Metronome: click on every beat while playing, to hear whether the grid lines up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l4 18H5zM12 17l5-10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
-          <label class="track-detail-grid-level track-detail-metronome-mix" hidden data-tooltip="Metronome mix: left favours the music, right the clicks; in the middle both play at full level">Mix <input type="range" id="trackDetailMetronomeMix" min="0" max="100" step="1" /></label>
-          <label class="track-detail-grid-level" data-tooltip="How strongly the beat grid shows over the waveform">Beat grid <input type="range" id="trackDetailGridLevel" min="0" max="100" step="1" /></label>
-          <div class="track-detail-zoom-btns">
-            <button type="button" class="track-detail-zoom-icon" id="trackDetailZoomOut" aria-label="Zoom out" data-tooltip="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21M7.5 10.5h6"></path></svg></button>
-            <button type="button" class="track-detail-zoom-icon" id="trackDetailZoomIn" aria-label="Zoom in" data-tooltip="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button>
-            <button type="button" id="trackDetailZoomFit" data-tooltip="Fit whole track">Fit</button>
-          </div>
-        </div>
-        <div class="waveform waveform-canvas track-detail-canvas" id="trackDetailWaveform">
-          <canvas class="waveform-canvas-el"></canvas>
-          <div class="track-detail-beatgrid" id="trackDetailBeatgrid"></div>
-          <i class="track-detail-prestart" id="trackDetailPreStart" hidden></i>
-          <div class="track-detail-cue-markers" id="trackDetailCueMarkers"></div>
-          <i class="waveform-playhead"></i>
-          <i class="track-detail-playhead" id="trackDetailPlayhead" hidden></i>
-        </div>
-        <div class="track-detail-overview" id="trackDetailOverview" aria-label="Whole track: click or drag to move the view">
-          <canvas class="waveform-canvas-el"></canvas>
-          <div class="track-detail-overview-cues" id="trackDetailOverviewCues"></div>
-          <i class="track-detail-overview-window" id="trackDetailOverviewWindow"></i>
-        </div>
-        <div class="track-detail-wave-footer">
-          <span class="track-detail-zoom-range" id="trackDetailZoomRange" hidden></span>
-          <span class="track-detail-total-time" id="trackDetailTotalTime" hidden></span>
-        </div>
-      </div>
-
-      <div class="track-detail-cues">
-        <div class="track-detail-cues-head">
-          <span>Cues</span>
-          <div class="track-detail-start-cue" id="trackDetailStartCue" hidden></div>
-          <div class="track-detail-memory-cue" id="trackDetailMemoryCue"></div>
-          <button type="button" id="trackDetailAddCue">+ Hot cue</button>
-        </div>
-        <div class="track-detail-cue-list" id="trackDetailCueList"></div>
-      </div>
-
-      <div class="row confirm-actions">
-        <div class="track-detail-history">
-          <button type="button" id="trackDetailUndo" data-tooltip="Undo (Ctrl+Z)" disabled>Undo</button>
-          <button type="button" id="trackDetailRedo" data-tooltip="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
-        </div>
-        <button id="trackDetailCancelBtn">Cancel</button>
-        <button id="trackDetailSaveBtn" data-primary>Save</button>
-      </div>
-    </div>
-    <div class="track-detail-color-popover" id="trackDetailColorPopover" hidden></div>
   </div>
 
   <!-- Empty state template (hidden, cloned by JS) -->

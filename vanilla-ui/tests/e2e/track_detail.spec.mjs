@@ -178,7 +178,7 @@ test("track-detail modal adds a cue at the playhead and saves it", async ({ page
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
 
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("120");
 
   // Clicking the waveform parks the playhead there.
@@ -199,7 +199,7 @@ test("track-detail modal adds a cue at the playhead and saves it", async ({ page
   expect((await page.locator("#trackDetailCueList").boundingBox()).height).toBe(listHeight);
 
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const saveCall = await page.evaluate(() =>
     window.__calls.find((c) => c.command === "save_track_analysis_edits")
@@ -217,11 +217,42 @@ test("track-detail modal adds a cue at the playhead and saves it", async ({ page
   expect(saveCall.request.cues[0].playbackStart).toBe(false);
 });
 
+test("the cue editor covers its page, and the edited row stays marked after closing", async ({ page }) => {
+  await installTrackDetailMock(page, { secondTrack: true });
+  await page.goto("/");
+  const view = page.locator("#trackDetailView");
+  const rows = page.locator("#libraryTableBody .track-grid-row");
+  const inert = () =>
+    page.evaluate(() =>
+      ["#panel-library", "#navSidebar", ".topbar"].map((sel) => document.querySelector(sel).inert)
+    );
+
+  await rows.nth(0).locator('[data-action="edit-track-detail"]').click();
+  await expect(view).toBeVisible();
+  // It covers the page and the sidebar; only the editor is usable while it's open.
+  expect(await view.evaluate((n) => n.parentElement.className)).toBe("app-layout");
+  expect(await inert()).toEqual([true, true, true]);
+
+  await page.locator("#trackDetailCancelBtn").click();
+  await expect(view).toBeHidden();
+  expect(await inert()).toEqual([false, false, false]);
+  await expect(rows.nth(0)).toHaveClass(/is-last-edited/);
+  await expect(rows.nth(1)).not.toHaveClass(/is-last-edited/);
+
+  // Editing another track moves the mark.
+  await rows.nth(1).locator('[data-action="edit-track-detail"]').click();
+  await expect(view).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(view).toBeHidden();
+  await expect(rows.nth(1)).toHaveClass(/is-last-edited/);
+  await expect(rows.nth(0)).not.toHaveClass(/is-last-edited/);
+});
+
 async function openCueEditor(page, opts) {
   await installTrackDetailMock(page, opts);
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 }
 
 const startPersistCalls = (page) =>
@@ -307,39 +338,31 @@ test("playback-start choice: informational with no cues, then applies the rememb
   expect(saveCall.request.cues[1].playbackStart).toBe(false);
 });
 
-test("an outside click or Escape closes the cue editor only when nothing is unsaved", async ({ page }) => {
+test("Escape closes the cue editor only when nothing is unsaved", async ({ page }) => {
   await openCueEditor(page, { seedCues: [30000] });
-  const overlay = page.locator("#trackDetailOverlay");
-  const outside = { position: { x: 5, y: 5 } };
+  const view = page.locator("#trackDetailView");
 
   // View-only changes (zoom, beat-grid slider) aren't edits.
   await page.locator("#trackDetailZoomFit").click();
   await page.locator("#trackDetailGridLevel").fill("80");
-  await overlay.click(outside);
-  await expect(overlay).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(view).toBeHidden();
 
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(overlay).toBeVisible();
+  await expect(view).toBeVisible();
   await page.locator("#trackDetailAddCue").click();
-  await overlay.click(outside);
-  await expect(overlay).toBeVisible();
-  await expect(page.locator("#trackDetailSaveBtn")).toHaveClass(/is-attention/);
   await page.keyboard.press("Escape");
-  await expect(overlay).toBeVisible();
+  await expect(view).toBeVisible();
+  await expect(page.locator("#trackDetailSaveBtn")).toHaveClass(/is-attention/);
 
-  // Undoing the edit makes it clean again: Escape closes…
+  // Undoing the edit makes it clean again: Escape closes.
   await page
     .locator("#trackDetailCueList .cue-row")
     .filter({ hasNot: page.locator(".cue-row-pos", { hasText: "0:30.00" }) })
     .locator(".cue-row-delete")
     .click();
   await page.keyboard.press("Escape");
-  await expect(overlay).toBeHidden();
-  // …and so does an outside click.
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(overlay).toBeVisible();
-  await overlay.click(outside);
-  await expect(overlay).toBeHidden();
+  await expect(view).toBeHidden();
   const saves = await page.evaluate(() =>
     window.__calls.filter((c) => c.command === "save_track_analysis_edits")
   );
@@ -766,7 +789,7 @@ test("keyboard: Space plays/pauses (never presses the focused Save), C adds a cu
   await page.keyboard.press("Space");
   await expect.poll(async () => (await calls("pause_playback_native")).length).toBe(1);
   expect(await calls("save_track_analysis_edits")).toHaveLength(0);
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   // C: a cue at the paused spot (on the nearest beat, Q is on), selected.
   await page.keyboard.press("c");
@@ -847,11 +870,11 @@ test("undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name ty
   await page.locator("#trackDetailBpmHalf").click();
   await expect(redo).toBeDisabled();
 
-  // Undoing everything leaves nothing unsaved: an outside click closes.
+  // Undoing everything leaves nothing unsaved: Escape closes.
   for (let i = 0; i < 3; i += 1) await page.keyboard.press("Control+z");
   await expect(undo).toBeDisabled();
-  await page.locator("#trackDetailOverlay").click({ position: { x: 5, y: 5 } });
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 });
 
 test("the metronome has the native engine click on the grid, following grid edits and the mix, off on close", async ({ page }) => {
@@ -921,13 +944,13 @@ test("track-detail modal edits BPM, saves it, and the library row/tooltip update
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
 
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
 
   await page.locator("#trackDetailBpm").fill("140.25");
   await page.locator("#trackDetailBpm").dispatchEvent("change");
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const saveCall = await page.evaluate(() =>
     window.__calls.find((c) => c.command === "save_track_analysis_edits")
@@ -944,12 +967,12 @@ test("track-detail modal edits the musical key, saves it, and the library row up
   await page.goto("/");
 
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
 
   await page.locator("#trackDetailKey").selectOption("F#m");
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const saveCall = await page.evaluate(() =>
     window.__calls.find((c) => c.command === "save_track_analysis_edits")
@@ -969,13 +992,13 @@ test("Camelot notation shows the backend's labels but saves the classic key", as
   await expect(keyPill).toHaveClass(/key-pill--h7/);
 
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
   await expect(page.locator("#trackDetailKey option:checked")).toHaveText("8A");
 
   await page.locator("#trackDetailKey").selectOption({ label: "11A" });
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const saveCall = await page.evaluate(() =>
     window.__calls.find((c) => c.command === "save_track_analysis_edits")
@@ -1014,7 +1037,7 @@ test("key stepper steps through the backend's key options and wraps at the ends"
   await installTrackDetailMock(page);
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   // Fixture key is "Am" (index 21 of 24: majors C..B, then minors Cm..Bm).
   await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
@@ -1037,7 +1060,7 @@ test("BPM stepper nudges by 0.01 and clamps to a positive value", async ({ page 
   await installTrackDetailMock(page);
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
   await page.locator("#trackDetailBpmPlus").click();
@@ -1082,7 +1105,7 @@ test("genre, star rating and release date: a change to only them saves only them
   await expect(date).toHaveValue("1994-3-7");
 
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
   const calls = await page.evaluate(() => window.__calls);
   expect(calls.some((c) => c.command === "save_track_analysis_edits")).toBe(false);
   const save = calls.find((c) => c.command === "save_track_metadata_edits");
@@ -1099,7 +1122,7 @@ test("the folder button shows the track's file in its folder", async ({ page }) 
   await expect.poll(() => page.evaluate(() => window.__revealed)).toBe("/music/one.mp3");
   // Not an edit: Escape still closes the dialog without pointing at Save.
   await page.keyboard.press("Escape");
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 });
 
 test("a rating edit alongside a BPM edit saves both, each with only its own fields", async ({ page }) => {
@@ -1107,7 +1130,7 @@ test("a rating edit alongside a BPM edit saves both, each with only its own fiel
   await setBpmInput(page, "130");
   await page.locator("#trackDetailRating [data-rating='1']").click();
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const calls = await page.evaluate(() => window.__calls);
   expect(calls.find((c) => c.command === "save_track_analysis_edits").request.bpm).toBe(130);
@@ -1122,7 +1145,7 @@ async function setBpmInput(page, value) {
 
 async function savedCuePositions(page) {
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
   const saveCall = await page.evaluate(() =>
     window.__calls.find((c) => c.command === "save_track_analysis_edits")
   );
@@ -1375,7 +1398,7 @@ test("double-click the waveform adds a cue at that position without starting pla
   await installTrackDetailMock(page);
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   // Default view is 60 bars (0–112.5 s) of the 180 s track; x≈300/1227 ≈ 24 % ⇒ ~28 s.
   await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
@@ -1401,7 +1424,7 @@ test("cue names default to 'Cue N' and stay editable without losing focus", asyn
   await installTrackDetailMock(page);
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   await page.locator("#trackDetailAddCue").click();
   await page.locator("#trackDetailAddCue").click();
@@ -1430,7 +1453,7 @@ test("a cue row's play button and its waveform marker both play from that cue's 
   await installTrackDetailMock(page, { seedCues: [90000] });
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
 
   const playCalls = () =>
@@ -1449,7 +1472,7 @@ test("dragging a cue marker moves it without playing; Quantize (Q, on by default
   await installTrackDetailMock(page, { seedCues: [30000] });
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   const quantize = page.locator("#trackDetailQuantize");
   await expect(quantize).toHaveAttribute("aria-pressed", "true");
 
@@ -1513,7 +1536,7 @@ test("a marker tooltip never jumps to the corner when the markers re-render unde
   await installTrackDetailMock(page, { seedCues: [30000] });
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   // Hover a marker, then re-render the markers (a BPM edit) inside the
   // tooltip's show delay, so the hovered element is replaced mid-delay. The
@@ -1564,7 +1587,7 @@ test("play/pause pauses in the backend, freezes the playhead, and + Hot cue land
   await installTrackDetailMock(page, { quantize: false });
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   const btn = page.locator("#trackDetailPlayPause");
   const calls = (command) =>
@@ -1631,7 +1654,7 @@ test("a waveform click parks the playhead without playing; dragging the playhead
   await installTrackDetailMock(page, { quantize: false });
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   const wf = page.locator("#trackDetailWaveform");
   const btn = page.locator("#trackDetailPlayPause");
   const playhead = page.locator("#trackDetailPlayhead");
@@ -1707,7 +1730,7 @@ test("opening the editor on the track already playing from its row shows it play
   await page.waitForTimeout(400);
 
   await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   const btn = page.locator("#trackDetailPlayPause");
   // Still the same playback -- shown here, not restarted or stopped.
   await expect(btn).toHaveAttribute("aria-label", "Pause");
@@ -1725,7 +1748,7 @@ test("opening the editor on the track already playing from its row shows it play
 
   // Closing leaves it playing, back on the row.
   await page.locator("#trackDetailCloseBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
   await expect(row.locator(".waveform")).toHaveClass(/is-playing/);
   expect(await calls("stop_playback_native")).toHaveLength(0);
 });
@@ -1743,7 +1766,7 @@ test("opening the editor while another track plays stops that track", async ({ p
   await expect(other.locator(".waveform")).toHaveClass(/is-playing/);
 
   await rows.filter({ hasText: "Cue Track" }).locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect.poll(async () => (await calls("stop_playback_native")).length).toBe(1);
   await expect(page.locator("#trackDetailPlayPause")).toHaveAttribute("aria-label", "Play");
   await expect(other.locator(".waveform")).not.toHaveClass(/is-playing/);
@@ -1754,7 +1777,7 @@ test("the modal opens zoomed to 60 bars; Fit shows the whole track; zoom windows
   await installTrackDetailMock(page, { seedCues: [30000, 170000] });
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(2);
 
   const visibleMarkers = page.locator("#trackDetailCueMarkers .cue-marker:not(.off-view)");
@@ -1880,7 +1903,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
   await expect(row).toHaveCount(1);
 
   await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("90");
 
   await page.locator("#trackDetailAddCue").click();
@@ -1890,7 +1913,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
   await page.locator("#trackDetailKey").selectOption("Em");
 
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_track_analysis_edits"));
   expect(saveCall).toBeTruthy();
@@ -2089,14 +2112,14 @@ test("cue editor opens + saves from a USB playlist row through the USB commands"
   await expect(row.locator('[data-action="analyze-track"]')).toHaveCount(0);
   await row.locator('[data-action="edit-track-detail"]').click();
 
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
   const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
   expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
 
   await page.locator("#trackDetailAddCue").click();
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
   expect(saveCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
@@ -2136,13 +2159,13 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailBpm")).toHaveValue("126.00");
 
   await page.locator("#trackDetailBpm").fill("128.5");
   await page.locator("#trackDetailBpm").dispatchEvent("change");
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
   expect(saveCall.request.bpm).toBe(128.5);
@@ -2162,7 +2185,7 @@ test("a rating-only edit from a USB row saves only the rating through the USB me
   await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
   await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
   expect(detailCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
@@ -2171,7 +2194,7 @@ test("a rating-only edit from a USB row saves only the rating through the USB me
 
   await page.locator("#trackDetailRating [data-rating='4']").click();
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const calls = await page.evaluate(() => window.__calls);
   expect(calls.some((c) => c.command === "save_usb_track_analysis_edits")).toBe(false);
@@ -2204,7 +2227,7 @@ test("clearing the release date from a USB row sends an empty date and blanks th
   await page.locator("#trackDetailReleaseDate").fill("");
   await page.locator("#trackDetailReleaseDate").dispatchEvent("change");
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const calls = await page.evaluate(() => window.__calls);
   expect(calls.some((c) => c.command === "save_usb_track_analysis_edits")).toBe(false);
@@ -2224,12 +2247,12 @@ test("cue editor edits the musical key from a USB playlist row and saves it thro
 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
 
   await page.locator("#trackDetailKey").selectOption("Dm");
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
   expect(saveCall.request.key).toBe("Dm");
@@ -2248,7 +2271,7 @@ test("a USB save runs as a background job: the progress bar shows each write and
   await page.locator("#trackDetailBpm").fill("128.5");
   await page.locator("#trackDetailBpm").dispatchEvent("change");
   await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailOverlay")).toBeHidden();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
 
   // While the stick is being written, the footer shows the backend's step.
   await expect(page.locator("#progressFooter")).toHaveClass(/active/);
@@ -2300,7 +2323,7 @@ test("cue editor also opens from a USB history row", async ({ page }) => {
   await expect(row).toHaveCount(1);
   await expect(row.locator('[data-action="analyze-track"]')).toHaveCount(0);
   await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
   const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
   expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
 });
@@ -2313,7 +2336,7 @@ test("a USB-side save that fails on the device is surfaced, not silently dropped
   await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
   await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   // USB yanked between open and save: the command errors.
   await page.evaluate(() => { window.__usbSaveFails = true; });

@@ -256,7 +256,7 @@ async function openApp(browser, fixture, opts) {
 async function openEditor(page) {
   const row = page.locator("#libraryTableBody .track-grid-row", { hasText: EDITOR_TITLE });
   await row.locator('.waveform-cell [data-action="edit-track-detail"]').click();
-  await page.locator("#trackDetailOverlay").waitFor({ state: "visible" });
+  await page.locator("#trackDetailView").waitFor({ state: "visible" });
   await page.waitForTimeout(400);
   return page.locator("#trackDetailWaveform").boundingBox();
 }
@@ -354,7 +354,7 @@ const FULL_WINDOW = { x: 0, y: 0, width: VIEWPORT.width, height: VIEWPORT.height
 async function capture(page, framesDir, scene, { fullWindow = false } = {}) {
   rmSync(framesDir, { recursive: true, force: true });
   mkdirSync(framesDir, { recursive: true });
-  const dialog = page.locator("#trackDetailOverlay > *").first();
+  const dialog = page.locator("#trackDetailView > *").first();
   const cropBox = async () => (fullWindow ? FULL_WINDOW : dialog.boundingBox());
   const boxes = [await cropBox()];
   const cdp = await page.context().newCDPSession(page);

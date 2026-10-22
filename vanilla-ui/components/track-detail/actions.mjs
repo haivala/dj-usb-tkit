@@ -1,4 +1,4 @@
-// Track-detail modal: cue points + beat-grid ("first beat") editing.
+// Track-detail editor: cue points + beat-grid ("first beat") editing.
 //
 // This app targets CDJ playback directly, so a cue is just a position + name +
 // colour. The list is capped at 8; on save each becomes a memory point + a
@@ -15,7 +15,7 @@ import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_d
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { patchUsbTrackRows, RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } from "../shared/track_metadata_edits.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
-import { coverElement } from "../../track_table.mjs";
+import { coverElement, markLastEditedRow } from "../../track_table.mjs";
 import { buildCoverSrcCandidates, attachCoverFallbackHandlers } from "../library/actions.mjs";
 import { formatBpm } from "../../track_utils.mjs";
 import {
@@ -121,9 +121,17 @@ export function createTrackDetailController(el, prefs = {}) {
     setPlaybackMetronome = () => Promise.resolve(),
     getMetronomeMixPref = () => 50,
     setMetronomeMixPref = () => {},
+    // (rowKey) -> void  -- the editor closed; rowKey is the list row it was
+    // opened from (null when not known)
+    onClosed = () => {},
   } = prefs;
   let resolveFn = null;
   let open = false;
+  // The list row the editor was opened from (see `onClosed`).
+  let openedRowKey = null;
+  // While the editor is open it is the only usable part of the window: the
+  // page it covers, the sidebar and the top bar are inert (they still update).
+  let inertNodes = [];
   let resizeObserver = null;
   let playheadRafHandle = 0;
   // While the playhead is dragged it sits under the pointer (whole-track ms),
@@ -174,6 +182,21 @@ export function createTrackDetailController(el, prefs = {}) {
   let openedGenre = null;
   let openedRating = 0;
   let openedReleaseDate = null;
+
+  function setPageInert(on) {
+    for (const node of inertNodes) node.inert = false;
+    inertNodes = [];
+    if (!on) return;
+    const doc = el.trackDetailView.ownerDocument;
+    inertNodes = [
+      doc.querySelector("main > .panel.active"),
+      el.navSidebar,
+      el.sidebarExpandBtn,
+      doc.querySelector(".topbar"),
+    ].filter(Boolean);
+    for (const node of inertNodes) node.inert = true;
+  }
+
   // Undo/redo: snapshots of the editable state (see `mutate`).
   let undoStack = [];
   let redoStack = [];
@@ -431,7 +454,7 @@ export function createTrackDetailController(el, prefs = {}) {
   }
 
   /// The live playhead fraction (0..1, whole-track) the shared playback module
-  /// writes on the modal waveform, or 0 when nothing has played.
+  /// writes on the editor waveform, or 0 when nothing has played.
   function playheadFullRatio() {
     const wf = el.trackDetailWaveform;
     const win = wf?.ownerDocument?.defaultView;
@@ -628,7 +651,7 @@ export function createTrackDetailController(el, prefs = {}) {
   }
 
   // Both flags are the shared playback module's projection of backend state
-  // onto this waveform (`setWaveformPlayhead`); the modal keeps no copy.
+  // onto this waveform (`setWaveformPlayhead`); the editor keeps no copy.
   function isPlaying() {
     return !!el.trackDetailWaveform?.classList.contains("is-playing");
   }
@@ -765,7 +788,7 @@ export function createTrackDetailController(el, prefs = {}) {
     return slot;
   }
 
-  /// Always all eight A–H slots, so the modal keeps its height as cues come
+  /// Always all eight A–H slots, so the editor keeps its height as cues come
   /// and go. The playback-start cue sits in the "Playback starts at" row.
   function renderCueList() {
     const host = el.trackDetailCueList;
@@ -808,7 +831,7 @@ export function createTrackDetailController(el, prefs = {}) {
     if (el.trackDetailStartNote) el.trackDetailStartNote.hidden = hasCues;
   }
 
-  // The modal opens zoomed to the first 60 bars, so make it unmistakable that
+  // The editor opens zoomed to the first 60 bars, so make it unmistakable that
   // the waveform is a window, not the whole track: show the visible span vs the
   // track length ("0:00–2:00 of 5:34"), accented while zoomed, and point at Fit.
   function renderZoomHint() {
@@ -976,7 +999,7 @@ export function createTrackDetailController(el, prefs = {}) {
       api.setView(0, working.durationMs || DEFAULT_SPAN_MS);
     },
 
-    /// Called after every open, once the modal is shown.
+    /// Called after every open, once the editor is shown.
     onOpened(listener) {
       openListeners.push(listener);
     },
@@ -1395,7 +1418,8 @@ export function createTrackDetailController(el, prefs = {}) {
       playheadDragMs = null;
       metronome.on = false;
       syncMetronome();
-      el.trackDetailOverlay.hidden = true;
+      el.trackDetailView.hidden = true;
+      setPageInert(false);
       if (el.trackDetailColorPopover) el.trackDetailColorPopover.hidden = true;
       if (el.trackDetailPlayhead) el.trackDetailPlayhead.hidden = true;
       if (resizeObserver) {
@@ -1406,6 +1430,8 @@ export function createTrackDetailController(el, prefs = {}) {
         if (h) caf(h);
       }
       playheadRafHandle = renderViewRafHandle = waveformRetryHandle = 0;
+      onClosed(openedRowKey);
+      openedRowKey = null;
       const resolver = resolveFn;
       resolveFn = null;
       if (resolver) resolver(result || null);
@@ -1424,9 +1450,11 @@ export function createTrackDetailController(el, prefs = {}) {
       releaseDate = null,
       genreOptions = [],
       coverCandidates = [],
+      rowKey = null,
     }) {
       if (open) api.close(null);
       open = true;
+      openedRowKey = rowKey;
       working.track = track || {};
       working.bytes = null;
       working.waveNorm = null;
@@ -1478,7 +1506,8 @@ export function createTrackDetailController(el, prefs = {}) {
         el.trackDetailCover.replaceChildren(coverElement(el.trackDetailCover.ownerDocument, coverCandidates));
         attachCoverFallbackHandlers(el.trackDetailCover);
       }
-      el.trackDetailOverlay.hidden = false;
+      el.trackDetailView.hidden = false;
+      setPageInert(true);
       render();
       // Re-measure once layout has settled (canvas is otherwise sized from a
       // pre-layout rect on the first synchronous paint).
@@ -1582,6 +1611,9 @@ export function createAppTrackDetailController(ctx) {
       ctx.persistSetting(STORAGE_KEY_CUE_START_ON_FIRST_BEAT, FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT, on ? "1" : "0");
     },
     setPlaybackMetronome: (request) => ctx.command("set_playback_metronome", request),
+    onClosed: (rowKey) => {
+      if (rowKey) markLastEditedRow(ctx, rowKey);
+    },
     getQuantizePref: () => ctx.state.cueQuantize !== false,
     setQuantizePref: (on) => {
       ctx.state.cueQuantize = !!on;
@@ -1609,11 +1641,11 @@ export function createAppTrackDetailController(ctx) {
   });
 }
 
-/// Open the modal for a track from a USB view (playlists or history): fetch the
+/// Open the editor for a track from a USB view (playlists or history): fetch the
 /// detail straight off the on-device ANLZ bundle and, on Save, write the edit
 /// onto that USB *and* into the local master. The USB must be connected — a
 /// not-connected row is blocked here, never silently downgraded to local-only.
-async function openUsbTrackDetail(ctx, track) {
+async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
   const { command, trackDetailDialog, emitStatus, state } = ctx;
 
   if (!state?.usbRootValid || !state?.usbRoot) {
@@ -1655,6 +1687,7 @@ async function openUsbTrackDetail(ctx, track) {
     releaseDate: detail.releaseDate,
     genreOptions: detail.genreOptions,
     coverCandidates: buildCoverSrcCandidates(ctx, track),
+    rowKey,
   });
   if (!payload) return;
 
@@ -1719,13 +1752,13 @@ async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
   }
 }
 
-/// Open the modal for a track: resolve to a local id, fetch detail, and on Save
+/// Open the editor for a track: resolve to a local id, fetch detail, and on Save
 /// persist the edits.
-export async function openTrackDetail(ctx, track) {
+export async function openTrackDetail(ctx, track, opts = {}) {
   const { command, resolveLocalTrackIdAsync, trackDetailDialog, emitStatus } = ctx;
 
   if (track?.origin === "usb") {
-    return openUsbTrackDetail(ctx, track);
+    return openUsbTrackDetail(ctx, track, opts);
   }
 
   let localId = null;
@@ -1764,6 +1797,7 @@ export async function openTrackDetail(ctx, track) {
     releaseDate: detail.releaseDate,
     genreOptions: detail.genreOptions,
     coverCandidates: buildCoverSrcCandidates(ctx, track),
+    rowKey: opts.rowKey || null,
   });
   if (!payload) return;
 

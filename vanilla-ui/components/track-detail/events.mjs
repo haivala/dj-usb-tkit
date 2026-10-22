@@ -1,4 +1,4 @@
-// DOM event wiring for the track-detail (cues + beat grid) modal.
+// DOM event wiring for the track-detail (cues + beat grid) editor.
 
 import { scrubRatioFromPointer } from "../playback/actions.mjs";
 import { HOTCUE_PALETTE, MAX_CUES } from "./actions.mjs";
@@ -6,8 +6,8 @@ import { cloneTemplate } from "../../ui_utils.mjs";
 
 export function bindTrackDetailEvents(ctx) {
   const { el, trackDetailDialog } = ctx;
-  const overlay = el.trackDetailOverlay;
-  if (!overlay || !trackDetailDialog) return;
+  const view = el.trackDetailView;
+  if (!view || !trackDetailDialog) return;
 
   let playbackStartedHere = false;
   // Playback of this track was already running when the editor opened: the
@@ -39,7 +39,7 @@ export function bindTrackDetailEvents(ctx) {
         .then((from) => {
           if (from === undefined) return;
           adopted = { from };
-          if (overlay.hidden) {
+          if (!trackDetailDialog.isOpen()) {
             stopIfOwned(); // closed before the status came back: hand it straight back
             return;
           }
@@ -70,16 +70,13 @@ export function bindTrackDetailEvents(ctx) {
     void save.offsetWidth; // restart the animation on repeated attempts
     save.classList.add("is-attention");
   };
-  overlay.addEventListener("mousedown", (event) => {
-    if (event.target === overlay) closeIfClean();
-  });
   el.trackDetailSaveBtn?.addEventListener("animationend", (event) =>
     event.currentTarget.classList.remove("is-attention")
   );
   // On the document, like the shell's dialogs: deleting a cue removes the
-  // focused button, leaving focus on <body>, outside the overlay.
-  overlay.ownerDocument.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || overlay.hidden) return;
+  // focused button, leaving focus on <body>, outside the editor.
+  view.ownerDocument.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !trackDetailDialog.isOpen()) return;
     if (el.confirmOverlay && !el.confirmOverlay.hidden) return; // its own Escape
     event.preventDefault();
     closeIfClean();
@@ -99,7 +96,7 @@ export function bindTrackDetailEvents(ctx) {
   // engine renders the app (WebKitGTK in the Tauri build): drop any selection
   // on press, mark the page unselectable, and cancel `selectstart` until the
   // button is released anywhere.
-  const doc = overlay.ownerDocument;
+  const doc = view.ownerDocument;
   let dragNoSelect = false;
   const endDragNoSelect = () => {
     if (!dragNoSelect) return;
@@ -430,7 +427,7 @@ export function bindTrackDetailEvents(ctx) {
     playFromCue(cue);
   };
   doc.addEventListener("keydown", (event) => {
-    if (overlay.hidden) return;
+    if (!trackDetailDialog.isOpen()) return;
     if (el.confirmOverlay && !el.confirmOverlay.hidden) return;
     if (isTypingTarget(event.target)) return;
     const mod = event.ctrlKey || event.metaKey;
@@ -638,10 +635,10 @@ function openColorPopover(ctx, anchor, tempId) {
     });
     pop.appendChild(none);
   }
-  const overlayRect = el.trackDetailOverlay.getBoundingClientRect();
+  const viewRect = el.trackDetailView.getBoundingClientRect();
   const rect = anchor.getBoundingClientRect();
-  pop.style.left = `${rect.left - overlayRect.left}px`;
-  pop.style.top = `${rect.bottom - overlayRect.top + 4}px`;
+  pop.style.left = `${rect.left - viewRect.left}px`;
+  pop.style.top = `${rect.bottom - viewRect.top + 4}px`;
   pop.hidden = false;
 
   const dismiss = (event) => {

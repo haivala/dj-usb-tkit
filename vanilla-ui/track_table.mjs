@@ -257,6 +257,15 @@ export function renderEmptyTrackTable(ctx, tbody) {
   tbody.replaceChildren(cloneTemplate(tbody.ownerDocument, "tplTrackRowEmpty"));
 }
 
+// Mark the row the cue editor was just closed on (`is-last-edited`) in every
+// list, and unmark the previous one.
+export function markLastEditedRow(ctx, rowKey) {
+  ctx.state.lastEditedRowKey = rowKey;
+  for (const row of ctx.document.querySelectorAll(".track-grid-row")) {
+    row.classList.toggle("is-last-edited", row.dataset.playbackRow === rowKey);
+  }
+}
+
 // Wire up rows just put in the table: cover fallbacks, transport state,
 // waveforms. A rebuilt row of the playing track takes the playhead back --
 // the row it had was dropped when it left the rendered window.
@@ -266,6 +275,7 @@ export async function finishTrackRows(ctx, rows) {
   for (const row of rows) {
     attachCoverFallbackHandlers(row);
     updateTransportButtonsInDom(ctx, row);
+    row.classList.toggle("is-last-edited", !!state.lastEditedRowKey && row.dataset.playbackRow === state.lastEditedRowKey);
     waveforms.push(...row.querySelectorAll(".waveform.waveform-canvas"));
     const playingHere = state.playbackActive
       && state.playbackRowKey

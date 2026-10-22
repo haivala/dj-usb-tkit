@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+- **Improvement:** The cue editor opens over the page and sidebar instead of opening as a window
+  on top, and the track you edited stays marked in the list after closing.
 - **Chore:** Updated dependencies (`tauri`, `reqwest`, `serde`, `chrono`, `uuid`, `@tauri-apps/api`,
   `@tauri-apps/cli`, `@playwright/test`, `jsdom`).
 - **Chore:** Building the app needs Node.js 24.15 or newer, or Node.js 26. The macOS and Windows

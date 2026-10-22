@@ -142,7 +142,7 @@ test("the cue editor draws the track's detail waveform", async ({ page }) => {
   const row = page.locator("#libraryTableBody .track-grid-row").first();
   await row.hover();
   await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailOverlay")).toBeVisible();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
 
   await expect
     .poll(() => canvasesDrawn(page, "#trackDetailWaveform > .waveform-canvas-el"))

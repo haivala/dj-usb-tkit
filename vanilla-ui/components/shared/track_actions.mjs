@@ -64,9 +64,10 @@ export function handleTrackAction({ action, track, origin, target, event, state,
   }
 
   if (action === "edit-track-detail") {
-    // Tag the row's origin so the modal knows whether to edit the local
-    // master (Library / app playlist) or the on-USB bundle directly.
-    ctx.openTrackDetail({ ...track, origin }).catch(catchErr(emitStatus));
+    // Tag the row's origin so the editor knows whether to edit the local
+    // master (Library / app playlist) or the on-USB bundle directly. The row
+    // is marked as last edited when the editor closes.
+    ctx.openTrackDetail({ ...track, origin }, { rowKey }).catch(catchErr(emitStatus));
     return true;
   }
 
