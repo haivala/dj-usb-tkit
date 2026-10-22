@@ -58,7 +58,7 @@ export function renderPlaylistList(ctx) {
     const li = cloneTemplate(document, "tplNavPlaylistItem");
     const btn = li.firstElementChild;
     btn.dataset.playlistId = playlist.id;
-    fillPlaylistSidebarItem(btn, playlist);
+    fillPlaylistSidebarItem(btn, playlist, state.playlistUsbExportStatusById?.get(playlist.id));
     if (state.activeTab === playlist.id) btn.classList.add("active");
     if (state.currentPlaylistId === playlist.id) {
       btn.classList.add("playlist-active-mode");
@@ -155,6 +155,7 @@ export function startPlaylistRename(ctx, playlistId) {
         current.lastExportedAt = null;
         current.lastExportedUsbRoot = null;
         current.lastExportedTrackCount = null;
+        refreshUsbExportStatusInBackground(ctx);
       } catch (err) {
         console.error("rename failed:", err);
         emitStatus(`Rename failed: ${err.message || err}`);
@@ -165,7 +166,7 @@ export function startPlaylistRename(ctx, playlistId) {
     const current = state.playlists.find((item) => item.id === playlistId) || playlist;
     if (state.activeTab === playlistId) {
       el.playlistPanelTitle.textContent = current.name;
-      renderPlaylistExportStatus(el, current);
+      renderPlaylistExportStatus(ctx, current);
     }
     // The badge and the selection bars' "+ Add to ‹name›".
     if (getCurrentPlaylist(ctx)?.id === playlistId) ctx.updateModeText();
@@ -183,9 +184,21 @@ export function startPlaylistRename(ctx, playlistId) {
   });
 }
 
-export function formatPlaylistExportStatus(playlist) {
+// `usbStatus` is the playlist's backend PlaylistUsbExportStatus for the
+// connected USB (see fillPlaylistSidebarItem): with one, the line leads with
+// whether the playlist is on that stick, then the last export, if any.
+export function formatPlaylistExportStatus(playlist, usbStatus) {
+  const lastExport = formatLastExport(playlist);
+  if (usbStatus) {
+    const onUsb = usbStatus.sameNameExistsOnUsb ? "On this USB." : "Not on this USB.";
+    return lastExport ? `${onUsb} ${lastExport}` : onUsb;
+  }
+  return lastExport || "Not exported yet.";
+}
+
+function formatLastExport(playlist) {
   const when = String(playlist?.lastExportedAt || "").trim();
-  if (!when) return "Not exported yet.";
+  if (!when) return null;
   const formattedWhen = formatTimestampLocal(when);
   const root = String(playlist?.lastExportedUsbRoot || "").trim();
   // The drive's name (backend-resolved) reads better than its mount path.
@@ -198,15 +211,24 @@ export function formatPlaylistExportStatus(playlist) {
 
 // The export status line, with the drive's mount path as its tooltip when
 // the line names the drive instead.
-function renderPlaylistExportStatus(el, playlist) {
-  const status = el.playlistExportStatus;
-  status.textContent = formatPlaylistExportStatus(playlist);
+function renderPlaylistExportStatus(ctx, playlist) {
+  const status = ctx.el.playlistExportStatus;
+  const usbStatus = ctx.state.playlistUsbExportStatusById?.get(playlist?.id);
+  status.textContent = formatPlaylistExportStatus(playlist, usbStatus);
   const root = String(playlist?.lastExportedUsbRoot || "").trim();
   if (playlist?.lastExportedAt && playlist?.lastExportedUsbName && root) {
     status.dataset.tooltip = root;
   } else {
     delete status.dataset.tooltip;
   }
+}
+
+// Re-render the open playlist's export status line, e.g. after a USB scan
+// changed whether it is on the connected stick.
+export function renderOpenPlaylistExportStatus(ctx) {
+  const { state } = ctx;
+  const playlist = state.playlists.find((item) => item.id === state.activeTab);
+  if (playlist) renderPlaylistExportStatus(ctx, playlist);
 }
 
 // Sidebar drag-reorder: moves the playlist locally, then saves the whole
@@ -230,6 +252,18 @@ export async function loadPlaylists(ctx) {
   ctx.state.playlists = (data.items || []).map((playlist) => ({ ...playlist, tracks: [] }));
   renderPlaylistList(ctx);
   updatePlaylistExportButtons(ctx);
+  refreshUsbExportStatusInBackground(ctx);
+}
+
+// The USB export status matches playlists by name, so a create, rename,
+// delete or export leaves it stale; the backend recompute is cheap (staged
+// PDB/eDB only). Fire-and-forget: a failed refresh only leaves the marks stale.
+function refreshUsbExportStatusInBackground(ctx) {
+  const { state } = ctx;
+  if (!state.usbRoot || !state.usbRootValid || !ctx.refreshPlaylistExportStatus) return;
+  Promise.resolve()
+    .then(() => ctx.refreshPlaylistExportStatus())
+    .catch((err) => console.warn("refresh_playlist_export_status failed:", err));
 }
 
 // Column-sort on the app playlist tracklist is a free, reversible view-only
@@ -610,17 +644,19 @@ export function createSingleSubmit(handler) {
 }
 
 // Name, "exported to USB" mark and delete button of a sidebar playlist item.
-export function fillPlaylistSidebarItem(item, playlist) {
+// `usbStatus` is the playlist's backend PlaylistUsbExportStatus for the
+// connected USB: with one, the mark says whether the playlist is on that
+// stick; without (no USB scanned), it falls back to "ever exported".
+export function fillPlaylistSidebarItem(item, playlist, usbStatus) {
   item.querySelector(".nav-playlist-name").textContent = playlist.name;
   const status = item.querySelector(".nav-playlist-status");
-  const exported = !!playlist.lastExportedAt;
+  const exported = usbStatus ? !!usbStatus.sameNameExistsOnUsb : !!playlist.lastExportedAt;
   status.classList.toggle("exported", exported);
   status.textContent = exported ? "✓" : "";
+  // No tooltip: hovering the row swaps the mark for the rename/delete buttons.
   if (exported) {
-    status.dataset.tooltip = "Exported to USB";
-    status.setAttribute("aria-label", "Exported to USB");
+    status.setAttribute("aria-label", usbStatus ? "On this USB" : "Exported to USB");
   } else {
-    delete status.dataset.tooltip;
     status.removeAttribute("aria-label");
   }
   item.querySelector(".nav-playlist-rename").dataset.renamePlaylist = playlist.id;
@@ -652,7 +688,7 @@ export function populatePlaylistPanel(ctx, playlist) {
   const { state, el } = ctx;
   if (!playlist) return;
   updatePlaylistPanelTitle(ctx, playlist);
-  renderPlaylistExportStatus(el, playlist);
+  renderPlaylistExportStatus(ctx, playlist);
   updatePlaylistExportButtons(ctx);
   el.playlistSearchInput.value = state.playlistTrackSearch || "";
 }

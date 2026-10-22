@@ -45,8 +45,26 @@ test("fillPlaylistSidebarItem shows the name as text and the export marker", () 
   assert.equal(item.querySelector(".nav-playlist-name").textContent, "<Mix & Match>");
   const status = item.querySelector(".nav-playlist-status");
   assert.equal(status.classList.contains("exported"), true);
-  assert.equal(status.dataset.tooltip, "Exported to USB");
+  assert.equal(status.getAttribute("aria-label"), "Exported to USB");
   assert.equal(item.querySelector(".nav-playlist-delete").dataset.deletePlaylist, "p1");
+});
+
+test("fillPlaylistSidebarItem marks by the connected USB's status when there is one", () => {
+  const { document } = makeDom().window;
+  const freshItem = () => document.getElementById("tplNavPlaylistItem").content.firstElementChild.cloneNode(true).firstElementChild;
+
+  const onUsb = freshItem();
+  fillPlaylistSidebarItem(onUsb, { id: "p1", name: "Warmup", lastExportedAt: null }, { sameNameExistsOnUsb: true });
+  const onUsbStatus = onUsb.querySelector(".nav-playlist-status");
+  assert.equal(onUsbStatus.classList.contains("exported"), true);
+  assert.equal(onUsbStatus.getAttribute("aria-label"), "On this USB");
+
+  const notOnUsb = freshItem();
+  fillPlaylistSidebarItem(notOnUsb, { id: "p2", name: "Peak", lastExportedAt: "2026-04-07T10:00:00Z" }, { sameNameExistsOnUsb: false });
+  const notOnUsbStatus = notOnUsb.querySelector(".nav-playlist-status");
+  assert.equal(notOnUsbStatus.classList.contains("exported"), false);
+  assert.equal(notOnUsbStatus.textContent, "");
+  assert.equal(notOnUsbStatus.getAttribute("aria-label"), null);
 });
 
 test("renderUsbRecentRoots toggles row visibility and renders buttons", () => {

@@ -91,7 +91,7 @@ export function createAppContext(env) {
     commitActivePlaylistSort updatePlaylistExportButtons createPlaylist deletePlaylist
     addTracksToCurrentPlaylist addLibrarySelectionToCurrentPlaylist populatePlaylistPanel
     getCurrentPlaylist isPlaylistSortActive renderCurrentPlaylistTracksFromState
-    refreshCurrentPlaylistTracks importExternalPlaylist`);
+    refreshCurrentPlaylistTracks importExternalPlaylist renderOpenPlaylistExportStatus`);
   bindActions(library, `normalizeTrack normalizeUsbPlaylist refreshSourceRootAnalysisStatus
     refreshMissingSourceRoots applyRealtimeAnalyzedTrackUpdate hydrateLoadedTracksPreviewsInBackground
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows

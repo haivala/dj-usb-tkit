@@ -91,6 +91,20 @@ test("formatPlaylistExportStatus describes the last export", () => {
   }), /^Last exported .+ to \/usb \(5 track\(s\)\)\.$/);
 });
 
+test("formatPlaylistExportStatus leads with whether the playlist is on the connected USB", () => {
+  const exported = {
+    lastExportedAt: "2026-01-01T00:00:00Z",
+    lastExportedUsbRoot: "/other",
+    lastExportedTrackCount: 5
+  };
+  assert.equal(formatPlaylistExportStatus({}, { sameNameExistsOnUsb: true }), "On this USB.");
+  assert.equal(formatPlaylistExportStatus({}, { sameNameExistsOnUsb: false }), "Not on this USB.");
+  assert.match(
+    formatPlaylistExportStatus(exported, { sameNameExistsOnUsb: false }),
+    /^Not on this USB\. Last exported .+ to \/other \(5 track\(s\)\)\.$/
+  );
+});
+
 // The active playlist sort lives in tableSortState; committing always clears
 // it (recorded as "clear") before deciding whether to persist it.
 function commitCtx(state, sort = { key: "artist", dir: "desc" }) {

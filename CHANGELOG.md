@@ -41,6 +41,9 @@
 
 - **Improvement:** The cue editor opens over the page and sidebar instead of opening as a window
   on top, and the track you edited stays marked in the list after closing.
+- **Improvement:** With a USB connected, the checkmark next to a playlist in the sidebar and the
+  export line under the playlist's title show whether that playlist is on this USB. With no USB
+  connected they still show whether the playlist was ever exported.
 - **Chore:** Updated dependencies (`tauri`, `reqwest`, `serde`, `chrono`, `uuid`, `@tauri-apps/api`,
   `@tauri-apps/cli`, `@playwright/test`, `jsdom`).
 - **Chore:** Building the app needs Node.js 24.15 or newer, or Node.js 26. The macOS and Windows

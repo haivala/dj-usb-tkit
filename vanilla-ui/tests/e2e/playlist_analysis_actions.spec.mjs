@@ -702,8 +702,8 @@ test("selecting a playlist with tracks right after an empty one still paints its
   })).toBe(true);
 });
 
-function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneStale } = {}) {
-  return page.addInitScript(({ usbSameNamePlaylistName, exportPruneStale }) => {
+function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneStale, extraPlaylists = [] } = {}) {
+  return page.addInitScript(({ usbSameNamePlaylistName, exportPruneStale, extraPlaylists }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     if (exportPruneStale !== undefined) {
       window.localStorage.setItem("djusbtkit.exportPruneStale", exportPruneStale ? "1" : "0");
@@ -718,7 +718,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
       lastExportedTrackCount: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    }];
+    }, ...extraPlaylists];
 
     const playlistTracks = {
       "pl-1": [
@@ -849,7 +849,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
         }
       }
     };
-  }, { usbSameNamePlaylistName, exportPruneStale });
+  }, { usbSameNamePlaylistName, exportPruneStale, extraPlaylists });
 }
 
 async function dragPlaylistTrackRow(page, fromTrackId, toTrackId, dropNearTop) {
@@ -980,6 +980,44 @@ async function connectUsbAndFetchPlaylists(page) {
   await page.locator("#refreshUsbBtn").click();
   await expect(page.locator("#usbPlaylists li[data-usb-playlist-li]")).toHaveCount(1);
 }
+
+test("sidebar checkmarks show which playlists are on the connected USB", async ({ page }) => {
+  await installReorderTauriMock(page, {
+    usbSameNamePlaylistName: "Reorder Playlist",
+    extraPlaylists: [{
+      id: "pl-2",
+      name: "Elsewhere Set",
+      source: "local",
+      lastExportedAt: "2026-04-07T10:00:00Z",
+      lastExportedUsbRoot: "/OTHER_USB",
+      lastExportedTrackCount: 2,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }]
+  });
+  await page.goto("/");
+
+  const statusOf = (id) => page.locator(`#navPlaylistList .nav-playlist-item[data-playlist-id="${id}"] .nav-playlist-status`);
+
+  // No USB yet: the mark means "exported at some point".
+  await expect(statusOf("pl-1")).not.toHaveClass(/exported/);
+  await expect(statusOf("pl-2")).toHaveClass(/exported/);
+  await expect(statusOf("pl-2")).toHaveAttribute("aria-label", "Exported to USB");
+
+  // With this USB scanned, the mark means "on this USB".
+  await connectUsbAndFetchPlaylists(page);
+  await expect(statusOf("pl-1")).toHaveClass(/exported/);
+  await expect(statusOf("pl-1")).toHaveText("✓");
+  await expect(statusOf("pl-1")).toHaveAttribute("aria-label", "On this USB");
+  await expect(statusOf("pl-2")).not.toHaveClass(/exported/);
+  await expect(statusOf("pl-2")).toHaveText("");
+
+  // The line under the open playlist's title says the same.
+  await page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"]').click();
+  await expect(page.locator("#playlistExportStatus")).toHaveText("On this USB.");
+  await page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-2"]').click();
+  await expect(page.locator("#playlistExportStatus")).toHaveText(/^Not on this USB\. Last exported .+ to \/OTHER_USB \(2 track\(s\)\)\.$/);
+});
 
 test("playlist track drag handle is disabled with a tooltip when additive export won't reorder it on the USB", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });

@@ -67,10 +67,18 @@ export async function refreshPlaylistExportStatus(ctx) {
   const data = await ctx.command("refresh_playlist_export_status", {
     usbRoot: state.usbRoot || null,
   });
-  state.playlistUsbExportStatusById = playlistUsbExportStatusById(
-    data?.playlistUsbExportStatus,
-  );
-  return state.playlistUsbExportStatusById;
+  return applyPlaylistUsbExportStatus(ctx, data?.playlistUsbExportStatus);
+}
+
+// Store a fresh backend status list and re-render what shows it: the export
+// button label, the sidebar's "on this USB" marks and the open playlist's
+// export status line.
+function applyPlaylistUsbExportStatus(ctx, statusList) {
+  ctx.state.playlistUsbExportStatusById = playlistUsbExportStatusById(statusList);
+  ctx.updatePlaylistExportButtons();
+  ctx.renderPlaylistList();
+  ctx.renderOpenPlaylistExportStatus();
+  return ctx.state.playlistUsbExportStatusById;
 }
 
 export function computeExportButtonState({
@@ -447,7 +455,7 @@ export function loadUsbRootFromStorage(ctx) {
 export function resetUsbStateViews(ctx, { hideDiagnostics = true } = {}) {
   const { state, el } = ctx;
   state.usbPlaylists = [];
-  state.playlistUsbExportStatusById = new Map();
+  applyPlaylistUsbExportStatus(ctx, []);
   state.histories = [];
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
@@ -860,13 +868,12 @@ export async function refreshUsb(ctx) {
   stopProgressHeartbeat();
 
   state.usbPlaylists = (data.items || []).map((item) => ctx.normalizeUsbPlaylist(item));
-  state.playlistUsbExportStatusById = playlistUsbExportStatusById(data.playlistUsbExportStatus);
+  applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
 
   const usbTrackTotal = Number(data.playlistTrackTotal) || 0;
   el.usbCountsText.textContent = `${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`;
   renderUsbPlaylists(ctx);
   ctx.usbPlaylistTracksCtl.clear();
-  ctx.updatePlaylistExportButtons();
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await ctx.renderCurrentPlaylistTracksFromState();
 
@@ -897,8 +904,7 @@ export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
     const data = await ctx.command("run_usb_diagnostics", {
       usbRoot: state.usbRoot
     });
-    state.playlistUsbExportStatusById = playlistUsbExportStatusById(data?.playlistUsbExportStatus);
-    ctx.updatePlaylistExportButtons();
+    applyPlaylistUsbExportStatus(ctx, data?.playlistUsbExportStatus);
     await ctx.renderCurrentPlaylistTracksFromState();
     renderDiagnosticsReport(ctx, data);
     ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
@@ -978,10 +984,7 @@ export async function applyUsbRepairs(ctx) {
   syncEngineLibrarySetting(ctx, data.engineLibraryEnabled === true);
   ctx.logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
   if (data.diagnostics) {
-    state.playlistUsbExportStatusById = playlistUsbExportStatusById(
-      data.diagnostics.playlistUsbExportStatus
-    );
-    ctx.updatePlaylistExportButtons();
+    applyPlaylistUsbExportStatus(ctx, data.diagnostics.playlistUsbExportStatus);
     await ctx.renderCurrentPlaylistTracksFromState();
     renderDiagnosticsReport(ctx, data.diagnostics);
     ctx.logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");

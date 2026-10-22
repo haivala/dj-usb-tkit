@@ -42,9 +42,17 @@ test("refreshPlaylistExportStatus re-indexes state from the backend command's re
     };
   };
 
-  const byId = await refreshPlaylistExportStatus({ state, command });
+  const rendered = [];
+  const byId = await refreshPlaylistExportStatus({
+    state,
+    command,
+    updatePlaylistExportButtons: () => rendered.push("buttons"),
+    renderPlaylistList: () => rendered.push("sidebar"),
+    renderOpenPlaylistExportStatus: () => rendered.push("status line")
+  });
 
   assert.deepEqual(calls, [{ name: "refresh_playlist_export_status", payload: { usbRoot: "/media/usb" } }]);
+  assert.deepEqual(rendered, ["buttons", "sidebar", "status line"]);
   assert.equal(byId, state.playlistUsbExportStatusById);
   assert.equal(state.playlistUsbExportStatusById.get("p1").locksReorder, true);
   assert.equal(state.playlistUsbExportStatusById.get("p2").locksReorder, false);
@@ -54,7 +62,7 @@ test("refreshPlaylistExportStatus passes null usbRoot when none is connected", a
   const state = { usbRoot: null, playlistUsbExportStatusById: new Map([["p1", {}]]) };
   const command = async () => ({ playlistUsbExportStatus: [] });
 
-  await refreshPlaylistExportStatus({ state, command });
+  await refreshPlaylistExportStatus({ state, command, updatePlaylistExportButtons() {}, renderPlaylistList() {}, renderOpenPlaylistExportStatus() {} });
   assert.equal(state.playlistUsbExportStatusById.size, 0);
 });
 
