@@ -352,24 +352,37 @@ pub fn read_pdb_import_counter(m_db: &Path) -> Option<i64> {
 /// library intact.
 pub fn write_engine_m_db(dir: &Path, library: &EngineLibrary) -> BackendResult<()> {
     std::fs::create_dir_all(dir)?;
+    // Built on the local disk and copied over whole: SQLite's many small
+    // writes and journal syncs take minutes on a USB stick.
+    let local = std::env::temp_dir().join(format!("engine-m-{}.db", uuid::Uuid::new_v4()));
+    let built = build_m_db(&local, library);
+    let copied = built.and_then(|()| copy_m_db(&local, dir));
+    remove_db_files(&local)?;
+    copied
+}
+
+fn build_m_db(path: &Path, library: &EngineLibrary) -> BackendResult<()> {
+    let mut conn = create_db(path, M_DB_SCHEMA)?;
+    let tx = conn.transaction()?;
+    insert_information(
+        &tx,
+        &library.db_uuid,
+        library.current_played_indicator,
+        Some(i64::from(library.pdb_sequence)),
+    )?;
+    insert_album_art(&tx, &library.album_art)?;
+    insert_tracks(&tx, library)?;
+    insert_playlists(&tx, library)?;
+    tx.commit()?;
+    conn.close().map_err(|(_, err)| BackendError::from(err))
+}
+
+fn copy_m_db(local: &Path, dir: &Path) -> BackendResult<()> {
     let target = dir.join("m.db");
     let tmp = dir.join("m.db.tmp");
     remove_db_files(&tmp)?;
-    {
-        let mut conn = create_db(&tmp, M_DB_SCHEMA)?;
-        let tx = conn.transaction()?;
-        insert_information(
-            &tx,
-            &library.db_uuid,
-            library.current_played_indicator,
-            Some(i64::from(library.pdb_sequence)),
-        )?;
-        insert_album_art(&tx, &library.album_art)?;
-        insert_tracks(&tx, library)?;
-        insert_playlists(&tx, library)?;
-        tx.commit()?;
-        conn.close().map_err(|(_, err)| BackendError::from(err))?;
-    }
+    std::fs::copy(local, &tmp)?;
+    std::fs::File::open(&tmp)?.sync_all()?;
     // A leftover journal would be replayed onto the new file.
     remove_db_files(&target)?;
     std::fs::rename(&tmp, &target)?;

@@ -1208,6 +1208,13 @@ impl BackendService {
             });
         }
 
+        if closer.has_pending() {
+            on_progress(
+                playlist.tracks.len(),
+                total_steps,
+                "USB: Waiting for files to finish writing",
+            );
+        }
         closer.finish();
         on_progress(total_steps, total_steps, "USB: Finalizing export metadata");
         let manifest = ExportManifest {
@@ -1452,6 +1459,9 @@ impl BackendService {
                 validate_export_manifest_after_prune(&usb_root, &manifest)?;
             }
             // After the prune, which can still drop PDB rows.
+            if self.engine_library_enabled() {
+                on_progress(total_steps, total_steps, "USB: Writing Engine DJ library");
+            }
             warnings.extend(self.refresh_engine_library(&usb_root));
             self.save_export_owned_files(&owned_setting_key, &current_owned)?;
             {

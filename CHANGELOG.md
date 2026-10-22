@@ -44,6 +44,11 @@
 - **Improvement:** With a USB connected, the checkmark next to a playlist in the sidebar and the
   export line under the playlist's title show whether that playlist is on this USB. With no USB
   connected they still show whether the playlist was ever exported.
+- **Improvement:** Writing the Engine DJ library at the end of an export is much faster: the
+  database is built on the computer and copied to the USB in one go. The export progress shows
+  this as its own step.
+- **Improvement:** After the last track is copied, the export progress says when it is waiting for
+  the copied files to finish writing to the USB, instead of looking stuck on that track.
 - **Chore:** Updated dependencies (`tauri`, `reqwest`, `serde`, `chrono`, `uuid`, `@tauri-apps/api`,
   `@tauri-apps/cli`, `@playwright/test`, `jsdom`).
 - **Chore:** Building the app needs Node.js 24.15 or newer, or Node.js 26. The macOS and Windows

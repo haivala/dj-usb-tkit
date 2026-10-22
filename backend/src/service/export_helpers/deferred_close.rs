@@ -12,6 +12,7 @@
 
 use std::fs::File;
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -23,31 +24,44 @@ const CLOSER_QUEUE: usize = 64;
 pub struct FileCloser {
     tx: Option<SyncSender<File>>,
     workers: Vec<JoinHandle<()>>,
+    /// Handed-over files not yet closed.
+    pending: Arc<AtomicUsize>,
 }
 
 impl FileCloser {
     pub fn new() -> Self {
         let (tx, rx) = sync_channel::<File>(CLOSER_QUEUE);
         let rx = Arc::new(Mutex::new(rx));
+        let pending = Arc::new(AtomicUsize::new(0));
         let workers = (0..CLOSER_THREADS)
             .map(|_| {
                 let rx = Arc::clone(&rx);
-                std::thread::spawn(move || close_until_disconnected(&rx))
+                let pending = Arc::clone(&pending);
+                std::thread::spawn(move || close_until_disconnected(&rx, &pending))
             })
             .collect();
         Self {
             tx: Some(tx),
             workers,
+            pending,
         }
     }
 
     /// Closes `file` on a pool thread (inline if the pool is gone).
     pub fn close(&self, file: File) {
-        if let Some(tx) = &self.tx
-            && let Err(err) = tx.send(file)
-        {
+        let Some(tx) = &self.tx else {
+            return;
+        };
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        if let Err(err) = tx.send(file) {
             drop(err.0);
+            self.pending.fetch_sub(1, Ordering::SeqCst);
         }
+    }
+
+    /// Whether any handed-over file is still waiting to be closed.
+    pub fn has_pending(&self) -> bool {
+        self.pending.load(Ordering::SeqCst) > 0
     }
 
     /// Waits until every handed-over file has been closed.
@@ -75,14 +89,17 @@ impl Drop for FileCloser {
     }
 }
 
-fn close_until_disconnected(rx: &Mutex<Receiver<File>>) {
+fn close_until_disconnected(rx: &Mutex<Receiver<File>>, pending: &AtomicUsize) {
     loop {
         let next = match rx.lock() {
             Ok(rx) => rx.recv(),
             Err(_) => return,
         };
         match next {
-            Ok(file) => drop(file),
+            Ok(file) => {
+                drop(file);
+                pending.fetch_sub(1, Ordering::SeqCst);
+            }
             Err(_) => return,
         }
     }
