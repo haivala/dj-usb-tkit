@@ -1113,7 +1113,7 @@ test("the playlist heading shows what an export would copy against the USB's fre
   await connectUsbAndFetchPlaylists(page);
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
   const space = page.locator("#playlistExportSpace");
-  await expect(space).toHaveText("1.2 GB to copy · 27.0 GB free on USB");
+  await expect(space).toHaveText("1.2 GB to copy incl. analysis & artwork · 27.0 GB free on USB");
   await expect(space).not.toHaveClass(/is-warning/);
 
   // The backend decides it won't fit; the next load (here a search) shows it.
@@ -1121,7 +1121,7 @@ test("the playlist heading shows what an export would copy against the USB's fre
     window.__exportSpace = { bytesToCopy: 31 * 1024 ** 3, availableBytes: 27 * 1024 ** 3, fits: false };
   });
   await page.locator("#playlistSearchInput").fill("Song");
-  await expect(space).toHaveText("Doesn't fit: 31.0 GB to copy, 27.0 GB free on USB");
+  await expect(space).toHaveText("Doesn't fit: 31.0 GB to copy incl. analysis & artwork, 27.0 GB free on USB");
   await expect(space).toHaveClass(/is-warning/);
 });
 

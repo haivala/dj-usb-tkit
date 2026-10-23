@@ -409,8 +409,10 @@
 
       <!-- Shared playlist panel (reused for whichever playlist is selected) -->
       <section class="panel" id="panel-playlist" role="tabpanel" aria-hidden="true">
-        <h2 id="playlistPanelTitle">Playlist</h2>
-        <p class="muted playlist-export-space hidden" id="playlistExportSpace"></p>
+        <div class="panel-header">
+          <h2 id="playlistPanelTitle">Playlist</h2>
+          <span class="muted panel-header-meta playlist-export-space hidden" id="playlistExportSpace"></span>
+        </div>
         <div class="track-toolbar">
           <div class="search-row">
             <input id="playlistSearchInput" value="" placeholder="Search playlist tracks" />

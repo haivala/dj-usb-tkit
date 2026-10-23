@@ -702,10 +702,13 @@ function renderPlaylistExportSpace(ctx, playlist) {
   const toCopy = Number(space.bytesToCopy) || 0;
   const free = space.availableBytes == null ? null : `${formatByteSize(space.availableBytes)} free on USB`;
   let text;
+  // The copy counts analysis files and artwork too, so it can exceed the
+  // audio size in the title.
+  const copied = `${formatByteSize(toCopy)} to copy incl. analysis & artwork`;
   if (!space.fits) {
-    text = `Doesn't fit: ${formatByteSize(toCopy)} to copy, ${free}`;
+    text = `Doesn't fit: ${copied}, ${free}`;
   } else {
-    const copyText = toCopy > 0 ? `${formatByteSize(toCopy)} to copy` : "Nothing new to copy";
+    const copyText = toCopy > 0 ? copied : "Nothing new to copy";
     text = free ? `${copyText} · ${free}` : copyText;
   }
   el.playlistExportSpace.textContent = text;
