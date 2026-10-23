@@ -1094,6 +1094,12 @@ pub struct GetUsbDeviceNameData {
     /// prompt, never applied automatically.
     #[serde(default)]
     pub suggested_name: Option<String>,
+    /// Set when the drive carries a name that belongs to another drive (it's
+    /// a copy, or got that drive's name): the name it carries. The drive
+    /// counts as unnamed until it's given its own name, or this one again
+    /// if it is that drive.
+    #[serde(default)]
+    pub name_taken_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

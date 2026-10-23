@@ -5,9 +5,9 @@ import { test, expect } from "./coverage-fixture.mjs";
 // part of the assertion surface.
 function installTauriMock(
   page,
-  { deviceName = null, suggestedName = null, getNameMode = "normal", takenName = null } = {}
+  { deviceName = null, suggestedName = null, getNameMode = "normal", takenName = null, nameTakenBy = null } = {}
 ) {
-  return page.addInitScript(({ deviceName, suggestedName, getNameMode, takenName }) => {
+  return page.addInitScript(({ deviceName, suggestedName, getNameMode, takenName, nameTakenBy }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.__setNameCalls = [];
     let storedName = deviceName;
@@ -83,7 +83,11 @@ function installTauriMock(
             }
             return {
               ok: true,
-              data: { name: storedName, suggestedName: storedName ? null : suggestedName }
+              data: {
+                name: storedName,
+                suggestedName: storedName ? null : suggestedName,
+                nameTakenBy: storedName ? null : nameTakenBy
+              }
             };
           }
           if (command === "set_usb_device_name") {
@@ -117,7 +121,7 @@ function installTauriMock(
         }
       }
     };
-  }, { deviceName, suggestedName, getNameMode, takenName });
+  }, { deviceName, suggestedName, getNameMode, takenName, nameTakenBy });
 }
 
 async function openRecentUsbNamingPrompt(page, opts = {}) {
@@ -280,4 +284,22 @@ test("a drive left unnamed can be named later from the header", async ({ page })
   await page.locator("#driveNameOkBtn").click();
 
   await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");
+});
+
+test("a drive carrying another drive's name is asked for its own and says which name it carries", async ({ page }) => {
+  await openRecentUsbNamingPrompt(page, { nameTakenBy: "Club Stick" });
+
+  await expect(page.locator("#driveNameOverlay")).toBeVisible();
+  await expect(page.locator("#driveNameTitle")).toHaveText("Name This Drive", { useInnerText: true });
+  await expect(page.locator("#driveNameTakenBy")).toHaveText("Club Stick");
+  await expect(page.locator("#driveNameTakenBy")).toBeVisible();
+  await page.locator("#driveNameSkipBtn").click();
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Unnamed");
+
+  // Naming it later from the header still explains why.
+  await page.locator("#usbNameBadgeLabel").click();
+  await expect(page.locator("#driveNameTakenBy")).toBeVisible();
+  await page.locator("#driveNameInput").fill("Booth Stick");
+  await page.locator("#driveNameOkBtn").click();
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Booth Stick");
 });

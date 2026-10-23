@@ -84,15 +84,38 @@ fn migrate_file(src: &Path, dest: &Path) -> std::io::Result<()> {
     std::fs::remove_file(src)
 }
 
+/// Appends this export's record to the drive's log and returns it.
 pub(crate) fn append_export_log_record(
     usb_root: &Path,
     playlist: &ExportPlaylistData,
     manifest: &ExportManifest,
-) -> BackendResult<()> {
+) -> BackendResult<UsbExportLogRecord> {
     let mut log = load_export_log(usb_root)?.unwrap_or_default();
-    log.records
-        .push(build_export_log_record(playlist, manifest));
-    save_export_log(usb_root, &log)
+    let record = build_export_log_record(playlist, manifest);
+    log.records.push(record.clone());
+    save_export_log(usb_root, &log)?;
+    Ok(record)
+}
+
+/// Whether the drive's log has the record with `exported_at`: false when it
+/// has no log at all, None when the log can't be read.
+pub(crate) fn has_export_log_record(usb_root: &Path, exported_at: &str) -> Option<bool> {
+    match load_export_log(usb_root) {
+        Ok(log) => Some(log.is_some_and(|log| {
+            log.records
+                .iter()
+                .any(|record| record.exported_at == exported_at)
+        })),
+        Err(_) => None,
+    }
+}
+
+/// `exportedAt` of the drive's newest log record.
+pub(crate) fn latest_export_log_record_at(usb_root: &Path) -> Option<String> {
+    load_export_log(usb_root)
+        .ok()
+        .flatten()
+        .and_then(|log| log.records.last().map(|record| record.exported_at.clone()))
 }
 
 pub(crate) fn load_export_log(usb_root: &Path) -> BackendResult<Option<UsbExportLog>> {

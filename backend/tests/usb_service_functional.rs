@@ -13,10 +13,10 @@ use backend::error::ErrorCode;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
     ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
-    FetchUsbTracksRequest, GetTracksMetadataSummaryRequest, GetUsbTracksMetadataSummaryRequest,
-    InitializeUsbRequest, InspectUsbTrackRequest, SaveTrackMetadataEditsRequest,
-    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SharedValue, UsbMetadataEditTrack,
-    ValidateUsbRootRequest,
+    FetchUsbTracksRequest, GetTracksMetadataSummaryRequest, GetUsbDeviceNameRequest,
+    GetUsbTracksMetadataSummaryRequest, InitializeUsbRequest, InspectUsbTrackRequest,
+    SaveTrackMetadataEditsRequest, SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest,
+    SetUsbDeviceNameRequest, SharedValue, UsbMetadataEditTrack, ValidateUsbRootRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
@@ -337,6 +337,96 @@ fn validate_usb_root_reports_initialized_root_as_valid_with_pdb_and_edb() {
         data.warnings.is_empty(),
         "no warnings expected for a fully initialized root: {:?}",
         data.warnings
+    );
+}
+
+// --- drive names ----------------------------------------------------------
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).expect("create copy dir");
+    for entry in fs::read_dir(from).expect("read dir") {
+        let entry = entry.expect("dir entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).expect("copy file");
+        }
+    }
+}
+
+fn connect_and_get_name(
+    backend: &BackendCommands,
+    usb: &Path,
+) -> backend::models::GetUsbDeviceNameData {
+    let validated = backend.validate_usb_root(ValidateUsbRootRequest {
+        path: usb.to_string_lossy().to_string(),
+    });
+    assert!(validated.ok, "validate failed: {validated:?}");
+    let name = backend.get_usb_device_name(GetUsbDeviceNameRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    name.data.expect("name data")
+}
+
+#[test]
+fn a_copy_of_a_named_drive_needs_its_own_name_once_the_drive_gets_an_export() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let copy = root.path().join("usb_copy");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    assert!(
+        backend
+            .initialize_usb(InitializeUsbRequest {
+                usb_root: usb.to_string_lossy().to_string(),
+            })
+            .ok
+    );
+    connect_and_get_name(&backend, &usb);
+    let named = backend.set_usb_device_name(SetUsbDeviceNameRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+        name: "Club Stick".to_string(),
+    });
+    assert!(named.ok, "name failed: {named:?}");
+    copy_tree(&usb, &copy);
+
+    // An identical copy can't be told apart yet, and sharing is harmless.
+    assert_eq!(
+        connect_and_get_name(&backend, &copy).name.as_deref(),
+        Some("Club Stick")
+    );
+
+    scan_and_export_single_track(
+        &backend,
+        &data_dir,
+        &root.path().join("media"),
+        &usb,
+        "formats/track_format_flac.flac",
+        "Drive Artist - Drive Title.flac",
+        "Drive Playlist",
+    );
+
+    let copy_name = connect_and_get_name(&backend, &copy);
+    assert_eq!(
+        copy_name.name, None,
+        "the copy lacks the export's log record"
+    );
+    assert_eq!(copy_name.name_taken_by.as_deref(), Some("Club Stick"));
+    let renamed = backend.set_usb_device_name(SetUsbDeviceNameRequest {
+        usb_root: copy.to_string_lossy().to_string(),
+        name: "Booth Stick".to_string(),
+    });
+    assert!(renamed.ok, "naming the copy failed: {renamed:?}");
+
+    assert_eq!(
+        connect_and_get_name(&backend, &usb).name.as_deref(),
+        Some("Club Stick")
+    );
+    assert_eq!(
+        connect_and_get_name(&backend, &copy).name.as_deref(),
+        Some("Booth Stick")
     );
 }
 

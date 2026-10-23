@@ -185,7 +185,7 @@ fn cache_root() -> Option<PathBuf> {
 /// or a test's arbitrary temp dir) fall back to the old mount-path hash,
 /// prefixed so the two key spaces can never collide.
 fn cache_key_for_root(usb_root: &Path) -> String {
-    if let Some(name) = super::usb_identity::read_drive_name(usb_root) {
+    if let Some(name) = super::usb_identity::drive_name(usb_root) {
         return super::usb_identity::slug(&name);
     }
 
@@ -242,7 +242,7 @@ pub(crate) fn backups_dir_for(usb_root: &Path) -> Option<PathBuf> {
     // cache key is the unstable mount-path hash (see `cache_key_for_root`),
     // so archiving into it now would just orphan the archive once the drive
     // is later named and its cache key changes.
-    super::usb_identity::read_drive_name(usb_root)?;
+    super::usb_identity::drive_name(usb_root)?;
     device_dir_for(cache_root().as_deref(), usb_root)
         .map(|device_dir| local_vendor_db_dir(&device_dir).join("backups"))
 }

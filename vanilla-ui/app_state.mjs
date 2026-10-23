@@ -16,6 +16,8 @@ export function createInitialState() {
     usbRecentRoots: [],
     usbRootValid: false,
     usbDeviceName: null,
+    // The name a connected drive carries that belongs to another drive.
+    usbNameTakenBy: null,
     usbWritable: true,
     exportPruneStale: true,
     exportBackup: true,

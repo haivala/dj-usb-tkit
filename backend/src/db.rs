@@ -304,6 +304,8 @@ const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[
 
 const ALLOWED_TRACK_CUES_COLUMNS: &[&str] = &["is_playback_start", "is_memory"];
 
+const ALLOWED_USB_DRIVE_NAMES_COLUMNS: &[&str] = &["last_export_at", "total_bytes"];
+
 fn ensure_tracks_column(
     conn: &Connection,
     column_name: &str,
@@ -346,6 +348,20 @@ fn ensure_track_cues_column(
     )
 }
 
+fn ensure_usb_drive_names_column(
+    conn: &Connection,
+    column_name: &str,
+    definition: &str,
+) -> BackendResult<()> {
+    ensure_column(
+        conn,
+        "usb_drive_names",
+        ALLOWED_USB_DRIVE_NAMES_COLUMNS,
+        column_name,
+        definition,
+    )
+}
+
 /// Idempotent `ALTER TABLE {table} ADD COLUMN`, gated on `allowed`.
 fn ensure_column(
     conn: &Connection,
@@ -360,12 +376,8 @@ fn ensure_column(
         )));
     }
 
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for col in columns {
-        if col?.eq_ignore_ascii_case(column_name) {
-            return Ok(());
-        }
+    if has_column(conn, table, column_name)? {
+        return Ok(());
     }
 
     let sql = format!("ALTER TABLE {table} ADD COLUMN {column_name} {definition}");
@@ -488,41 +500,89 @@ fn rebuilt_tracks_sql(table_sql: &str) -> Option<String> {
 /// `usb_devices.label` it isn't tied to a mount path, so two drives that the
 /// OS mounts at the same path still can't end up with the same name. Seeded
 /// once, from the names `usb_devices` held before the registry existed.
+///
+/// `last_export_at` / `total_bytes` tell a drive apart from a copy carrying
+/// the same name marker (see `BackendService::check_drive_identity`).
+/// `last_export_at` starts from this computer's export history.
 fn create_usb_drive_names(conn: &Connection) -> BackendResult<()> {
     let exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'usb_drive_names')",
         [],
         |row| row.get(0),
     )?;
-    if exists {
-        return Ok(());
-    }
-
     let tx = conn.unchecked_transaction()?;
-    tx.execute_batch(
-        "CREATE TABLE usb_drive_names (
-           slug TEXT PRIMARY KEY,
-           name TEXT NOT NULL,
-           last_seen_at TEXT NOT NULL
-         );",
-    )?;
-    let labels: Vec<(String, String)> = tx
-        .prepare(
-            "SELECT label, last_seen_at FROM usb_devices
-             WHERE deleted_at IS NULL AND label IS NOT NULL AND TRIM(label) != ''
-             ORDER BY last_seen_at",
-        )?
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<Result<_, _>>()?;
-    for (label, last_seen_at) in labels {
-        let name = label.trim();
-        tx.execute(
-            "INSERT OR REPLACE INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)",
-            rusqlite::params![crate::service::usb_identity::slug(name), name, last_seen_at],
+    let backfill_exports = if exists {
+        let had_last_export = has_column(&tx, "usb_drive_names", "last_export_at")?;
+        ensure_usb_drive_names_column(&tx, "last_export_at", "TEXT")?;
+        ensure_usb_drive_names_column(&tx, "total_bytes", "INTEGER")?;
+        !had_last_export
+    } else {
+        tx.execute_batch(
+            "CREATE TABLE usb_drive_names (
+               slug TEXT PRIMARY KEY,
+               name TEXT NOT NULL,
+               last_seen_at TEXT NOT NULL,
+               last_export_at TEXT,
+               total_bytes INTEGER
+             );",
         )?;
+        let labels: Vec<(String, String)> = tx
+            .prepare(
+                "SELECT label, last_seen_at FROM usb_devices
+                 WHERE deleted_at IS NULL AND label IS NOT NULL AND TRIM(label) != ''
+                 ORDER BY last_seen_at",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (label, last_seen_at) in labels {
+            let name = label.trim();
+            tx.execute(
+                "INSERT OR REPLACE INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![crate::service::usb_identity::slug(name), name, last_seen_at],
+            )?;
+        }
+        true
+    };
+
+    if backfill_exports {
+        // `usb_device_exports.exported_at` is the same string the export
+        // wrote into the drive's export log.
+        let exports: Vec<(String, String)> = tx
+            .prepare(
+                "SELECT d.label, e.exported_at FROM usb_device_exports e
+                 JOIN usb_devices d ON d.id = e.usb_device_id
+                 WHERE d.label IS NOT NULL AND TRIM(d.label) != ''
+                 ORDER BY e.created_at",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        let mut latest = std::collections::HashMap::new();
+        for (label, exported_at) in exports {
+            latest.insert(
+                crate::service::usb_identity::slug(label.trim()),
+                exported_at,
+            );
+        }
+        for (slug, exported_at) in latest {
+            tx.execute(
+                "UPDATE usb_drive_names SET last_export_at = ?1 WHERE slug = ?2",
+                rusqlite::params![exported_at, slug],
+            )?;
+        }
     }
     tx.commit()?;
     Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column_name: &str) -> BackendResult<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for col in columns {
+        if col?.eq_ignore_ascii_case(column_name) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn set_schema_version(conn: &Connection, version: i64) -> BackendResult<()> {
@@ -764,6 +824,10 @@ mod tests {
                   VALUES ('u1', '/media/a', '/media/a', 'Club Stick', 'now', 'now', NULL, 'now', 'now'),
                          ('u2', '/media/b', '/media/b', NULL, 'now', 'now', NULL, 'now', 'now'),
                          ('u3', '/media/c', '/media/c', 'Gone', 'now', 'now', 'then', 'now', 'now');
+                INSERT INTO usb_device_exports (id, usb_device_id, playlist_name, exported_at,
+                                                track_count, track_fingerprints, created_at)
+                  VALUES ('e1', 'u1', 'Set', '2026-01-01T10:00:00+02:00', 1, '[]', '2026-01-01T08:00:00Z'),
+                         ('e2', 'u1', 'Set', '2026-01-02T10:00:00+02:00', 1, '[]', '2026-01-02T08:00:00Z');
                 "#,
             )
             .expect("downgrade");
@@ -784,6 +848,20 @@ mod tests {
             names(&db),
             vec![("club-stick".to_string(), "Club Stick".to_string())]
         );
+        let last_export: Option<String> = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT last_export_at FROM usb_drive_names WHERE slug = 'club-stick'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            last_export.as_deref(),
+            Some("2026-01-02T10:00:00+02:00"),
+            "starts from the latest export this computer made to the drive"
+        );
 
         // Later opens leave the registry alone (a renamed-away name stays free).
         db.connect()
@@ -793,6 +871,50 @@ mod tests {
         drop(db);
         let db = Db::new(dir.path()).expect("db reopen again");
         assert!(names(&db).is_empty());
+    }
+
+    #[test]
+    fn migrate_adds_drive_check_columns_to_an_existing_registry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        {
+            let db = Db::new(dir.path()).expect("db init");
+            let conn = db.connect().expect("db connect");
+            // The registry before it remembered a drive's last export and size.
+            conn.execute_batch(
+                r#"
+                DROP TABLE usb_drive_names;
+                CREATE TABLE usb_drive_names (
+                  slug TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen_at TEXT NOT NULL);
+                INSERT INTO usb_drive_names VALUES ('club-stick', 'Club Stick', 'now');
+                INSERT INTO usb_devices (id, root_path, root_path_key, label, first_seen_at,
+                                         last_seen_at, created_at, updated_at)
+                  VALUES ('u1', '/media/a', '/media/a', 'Club Stick', 'now', 'now', 'now', 'now');
+                INSERT INTO usb_device_exports (id, usb_device_id, playlist_name, exported_at,
+                                                track_count, track_fingerprints, created_at)
+                  VALUES ('e1', 'u1', 'Set', '2026-01-01T10:00:00+02:00', 1, '[]', 'now');
+                "#,
+            )
+            .expect("downgrade");
+        }
+
+        let db = Db::new(dir.path()).expect("db reopen");
+        let row: (String, Option<String>, Option<i64>) = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT name, last_export_at, total_bytes FROM usb_drive_names",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "Club Stick".to_string(),
+                Some("2026-01-01T10:00:00+02:00".to_string()),
+                None
+            )
+        );
     }
 
     #[test]

@@ -209,8 +209,12 @@ impl ExternalLibraries {
 }
 
 /// The name of the drive at `usb_root`: the on-drive marker when it's plugged
-/// in, else the name cached for it in `usb_devices`.
+/// in, else the name cached for it in `usb_devices`. None for a drive whose
+/// marker names another drive -- the cached name may well be that drive's.
 pub(crate) fn usb_drive_name(conn: &rusqlite::Connection, usb_root: &Path) -> Option<String> {
+    if usb_identity::has_name_conflict(usb_root) {
+        return None;
+    }
     if let Some(name) = usb_identity::read_drive_name(usb_root) {
         return Some(name);
     }

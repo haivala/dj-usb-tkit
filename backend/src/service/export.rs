@@ -704,7 +704,7 @@ pub(crate) fn usb_root_last_segment(usb_root: &str) -> Option<String> {
 /// marker the app writes when a drive is named), else the root's trailing
 /// directory name.
 pub(crate) fn usb_drive_label(usb_root: &str) -> Option<String> {
-    super::usb_identity::read_drive_name(std::path::Path::new(usb_root.trim()))
+    super::usb_identity::drive_name(std::path::Path::new(usb_root.trim()))
         .or_else(|| usb_root_last_segment(usb_root))
 }
 
@@ -1531,13 +1531,22 @@ impl BackendService {
                     playlist.id
                 ],
             )?;
-            if let Err(err) = append_export_log_record(&usb_root, &playlist, &manifest) {
-                warnings.push(logging::log(
-                    Level::Warn,
-                    "export",
-                    "export.log-append-skipped",
-                    format!("USB export log append skipped: {err}"),
-                ));
+            match append_export_log_record(&usb_root, &playlist, &manifest) {
+                // The next connect checks the drive holding this name has
+                // this record, which a copy made before now doesn't.
+                Ok(record) => {
+                    if let Some(name) = super::usb_identity::drive_name(&usb_root) {
+                        usb_utils::record_drive_export(&local_conn, &name, &record.exported_at)?;
+                    }
+                }
+                Err(err) => {
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "export",
+                        "export.log-append-skipped",
+                        format!("USB export log append skipped: {err}"),
+                    ));
+                }
             }
             // Additive, always-queryable counterpart to the on-drive JSON
             // log above -- that log stays the source of truth for

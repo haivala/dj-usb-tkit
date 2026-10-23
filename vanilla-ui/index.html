@@ -752,13 +752,14 @@
 
   <div class="confirm-overlay" id="driveNameOverlay" hidden>
     <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="driveNameTitle">
-      <h3 id="driveNameTitle"><span data-drive-name-mode="name">Name This Drive</span><span data-drive-name-mode="rename" hidden>Rename This Drive</span></h3>
+      <h3 id="driveNameTitle"><span data-drive-name-mode="name conflict">Name This Drive</span><span data-drive-name-mode="rename" hidden>Rename This Drive</span></h3>
       <p class="muted" data-drive-name-mode="name">Give this USB a name so backups and local caching can reliably follow it, even on a different computer. If this is a real USB drive with a volume label, it's pre-filled below — edit it or replace it with your own. Each drive needs its own name, even when several have the same volume label.</p>
       <p class="muted" data-drive-name-mode="rename" hidden>The drive's backups and local cache stay with it under the new name.</p>
+      <p class="muted" data-drive-name-mode="conflict" hidden>This drive carries the name “<span id="driveNameTakenBy"></span>”, but it isn't the drive this computer knows by that name — most likely it's a copy of it. Give this one a name of its own so the two don't share backups.</p>
       <input type="text" id="driveNameInput" maxlength="80" placeholder="e.g. Club Stick" />
       <p class="muted" id="driveNameError" hidden></p>
       <div class="row confirm-actions">
-        <button id="driveNameSkipBtn"><span data-drive-name-mode="name">Not now</span><span data-drive-name-mode="rename" hidden>Cancel</span></button>
+        <button id="driveNameSkipBtn"><span data-drive-name-mode="name conflict">Not now</span><span data-drive-name-mode="rename" hidden>Cancel</span></button>
         <button id="driveNameOkBtn" data-primary>Save</button>
       </div>
     </div>

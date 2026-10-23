@@ -53,7 +53,9 @@
   same way.
 - **Fix:** A USB with the same volume label as one you already named is asked for its own name,
   instead of quietly taking the other drive's name and sharing its backups. Names that differ only
-  in case or punctuation count as the same name.
+  in case or punctuation count as the same name. A copy of a named drive or folder is asked for its
+  own name too, once it's a different size from the original or the original has had an export
+  the copy doesn't have. Until it's named, it keeps its own cache and its backups stay on the USB.
 - **Fix:** A failed export or other background job adds one entry to the Event Log instead of
   repeating the same error up to four times.
 - **Improvement:** The cue editor opens over the page and sidebar instead of opening as a window

@@ -14,6 +14,7 @@
 //! root's directory listing, only known paths).
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,40 @@ pub(crate) fn app_marker_dir(root: &Path) -> PathBuf {
 
 fn marker_path(root: &Path) -> PathBuf {
     app_marker_dir(root).join(MARKER_FILE)
+}
+
+/// Mount paths (normalized, as `root_path_key`) whose marker names a
+/// different drive -- a copy of a named drive, or a drive that got another
+/// one's name (see `BackendService::check_drive_identity`). Re-decided on
+/// every connect, so it only lives for this process.
+static NAME_CONFLICTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn root_key(root: &Path) -> String {
+    super::normalize_source_root_for_matching(&root.to_string_lossy())
+}
+
+pub(crate) fn set_name_conflict(root: &Path, conflicted: bool) {
+    let key = root_key(root);
+    let mut conflicts = NAME_CONFLICTS.lock().unwrap();
+    conflicts.retain(|k| *k != key);
+    if conflicted {
+        conflicts.push(key);
+    }
+}
+
+pub(crate) fn has_name_conflict(root: &Path) -> bool {
+    let key = root_key(root);
+    NAME_CONFLICTS.lock().unwrap().contains(&key)
+}
+
+/// The drive's name as the rest of the app should use it (cache and backup
+/// keys, labels): the marker's name, unless that name belongs to another
+/// drive, in which case the drive counts as unnamed until it gets its own.
+pub(crate) fn drive_name(root: &Path) -> Option<String> {
+    if has_name_conflict(root) {
+        return None;
+    }
+    read_drive_name(root)
 }
 
 /// Read the user-assigned name from the marker file at `root`, if any.
@@ -68,7 +103,7 @@ pub(crate) fn validate_name(name: &str) -> Result<String, String> {
 
 /// Write `name` to the marker file at `root`, creating the marker directory
 /// if needed. Caller is responsible for uniqueness checks against other
-/// known drives (see `usb_utils::find_registered_drive_name`).
+/// known drives (see `usb_utils::find_registered_drive`).
 pub(crate) fn write_drive_name(root: &Path, name: &str) -> std::io::Result<()> {
     let validated = validate_name(name).map_err(std::io::Error::other)?;
     let dir = root.join(MARKER_DIR);

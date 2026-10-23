@@ -144,24 +144,42 @@ pub(crate) fn upsert_usb_device(
     Ok(id)
 }
 
-/// The registered drive name sharing `name`'s slug, if any. Names double as
-/// cache/backup-archive keys (`usb_identity::slug`), so "My USB" and
+/// A `usb_drive_names` row: the name in use, plus what tells the drive that
+/// holds it apart from a copy (see `BackendService::check_drive_identity`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RegisteredDrive {
+    pub name: String,
+    /// `exportedAt` of the last export this computer logged on the drive.
+    pub last_export_at: Option<String>,
+    /// The drive's (or, for a folder, its disk's) size.
+    pub total_bytes: Option<u64>,
+}
+
+/// The registered drive whose name shares `name`'s slug, if any. Names double
+/// as cache/backup-archive keys (`usb_identity::slug`), so "My USB" and
 /// "my-usb" are the same name here.
-pub(crate) fn find_registered_drive_name(
+pub(crate) fn find_registered_drive(
     conn: &rusqlite::Connection,
     name: &str,
-) -> BackendResult<Option<String>> {
-    let row: Option<String> = conn
+) -> BackendResult<Option<RegisteredDrive>> {
+    let row = conn
         .query_row(
-            "SELECT name FROM usb_drive_names WHERE slug = ?1",
+            "SELECT name, last_export_at, total_bytes FROM usb_drive_names WHERE slug = ?1",
             rusqlite::params![super::usb_identity::slug(name)],
-            |row| row.get(0),
+            |row| {
+                Ok(RegisteredDrive {
+                    name: row.get(0)?,
+                    last_export_at: row.get(1)?,
+                    total_bytes: row.get::<_, Option<i64>>(2)?.map(|n| n.max(0) as u64),
+                })
+            },
         )
         .optional()?;
     Ok(row)
 }
 
-/// Record `name` as in use by a drive (see `db::create_usb_drive_names`).
+/// Record `name` as in use by a drive (see `db::create_usb_drive_names`),
+/// keeping what is already known about the drive holding it.
 pub(crate) fn register_drive_name(
     conn: &rusqlite::Connection,
     name: &str,
@@ -171,6 +189,51 @@ pub(crate) fn register_drive_name(
         "INSERT INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(slug) DO UPDATE SET name = excluded.name, last_seen_at = excluded.last_seen_at",
         rusqlite::params![super::usb_identity::slug(name), name, now_ts],
+    )?;
+    Ok(())
+}
+
+/// Make the drive at hand the one holding `name`: from now on it's the
+/// drive whose last export and size the name is checked against.
+pub(crate) fn set_registered_drive(
+    conn: &rusqlite::Connection,
+    name: &str,
+    last_export_at: Option<&str>,
+    total_bytes: Option<u64>,
+) -> BackendResult<()> {
+    conn.execute(
+        "UPDATE usb_drive_names SET last_export_at = ?1, total_bytes = ?2 WHERE slug = ?3",
+        rusqlite::params![
+            last_export_at,
+            total_bytes.map(|n| n as i64),
+            super::usb_identity::slug(name)
+        ],
+    )?;
+    Ok(())
+}
+
+/// Remember the size of the drive holding `name`, if it isn't known yet.
+pub(crate) fn fill_registered_drive_size(
+    conn: &rusqlite::Connection,
+    name: &str,
+    total_bytes: u64,
+) -> BackendResult<()> {
+    conn.execute(
+        "UPDATE usb_drive_names SET total_bytes = ?1 WHERE slug = ?2 AND total_bytes IS NULL",
+        rusqlite::params![total_bytes as i64, super::usb_identity::slug(name)],
+    )?;
+    Ok(())
+}
+
+/// Remember the export just logged on the drive holding `name`.
+pub(crate) fn record_drive_export(
+    conn: &rusqlite::Connection,
+    name: &str,
+    exported_at: &str,
+) -> BackendResult<()> {
+    conn.execute(
+        "UPDATE usb_drive_names SET last_export_at = ?1 WHERE slug = ?2",
+        rusqlite::params![exported_at, super::usb_identity::slug(name)],
     )?;
     Ok(())
 }
