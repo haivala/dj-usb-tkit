@@ -45,6 +45,14 @@
   });
   const ok = (data) => ({ ok: true, data });
   const sumMs = (items) => items.reduce((ms, t) => ms + (Number(t.durationMs) || 0), 0);
+  // A list's heading totals, as the backend's `track_list::list_totals`
+  // counts them: every track, and the sizes that are known.
+  const listTotals = (items) => ({
+    listTrackCount: items.length,
+    listSizeBytes: items.reduce((n, t) => n + Math.max(0, Number(t.fileSizeBytes) || 0), 0),
+  });
+  // Free space on the made-up 32 GB stick.
+  const USB_FREE_BYTES = Math.round(27.4 * 1024 ** 3);
   const exportedAt = "2026-09-26T18:00:00Z";
   const external = opts.externalLibraries || null;
   const byTitles = (titles) => titles.map((title) => tracks.find((t) => t.title === title)).filter(Boolean);
@@ -68,6 +76,7 @@
     nextCursor: null,
     totalDurationMs: sumMs(items),
     durationKnownCount: items.length,
+    ...listTotals(items),
   });
   const historySessions = (usbHistory || []).map(({ id, name, createdAt, titles }) => {
     const items = titles.map((title) => usbTracksByTitle.get(title)).filter(Boolean);
@@ -111,6 +120,21 @@
     exportedNow.add(playlistId);
     emit("job.completed", 1, 1, "USB: Export complete");
     return run.response;
+  };
+
+  // What exporting `items` would copy: the tracks no exported playlist has
+  // put on the USB yet.
+  const exportSpace = (items) => {
+    const onUsb = new Set(
+      playlists.filter((p) => isExported(p.id, p.tracks, p.imported)).flatMap((p) => p.tracks.map((t) => t.id))
+    );
+    const toCopy = items.filter((t) => !onUsb.has(t.id));
+    return {
+      bytesToCopy: listTotals(toCopy).listSizeBytes,
+      tracksToCopy: toCopy.length,
+      availableBytes: USB_FREE_BYTES,
+      fits: true,
+    };
   };
 
   const listExternal = (source) =>
@@ -159,6 +183,8 @@
             return [];
           case "set_frontend_setting":
             return ok(null);
+          case "run_data_migrations":
+            return ok({ ran: [], retryLater: [] });
           case "detect_external_rekordbox_db":
             return ok(external?.rekordbox
               ? { found: true, path: "C:/Users/dj/AppData/Roaming/Pioneer/rekordbox/master.db", imported: true }
@@ -212,6 +238,8 @@
               hasMore: false,
               totalDurationMs: sumMs(items),
               durationKnownCount: items.length,
+              ...listTotals(items),
+              ...(r.usbRoot ? { exportSpace: exportSpace(items) } : {}),
             });
           }
           case "check_for_update":
@@ -251,6 +279,8 @@
             });
           case "get_usb_device_name":
             return ok({ name: "Chiphead" });
+          case "refresh_playlist_export_status":
+            return ok({ playlistUsbExportStatus: usb?.diagnostics?.data?.playlistUsbExportStatus || [] });
           case "run_usb_diagnostics":
             if (!usb) return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
             return opts.brokenUsb ? usb.brokenDiagnostics : usb.diagnostics;
@@ -291,6 +321,7 @@
               sourceRootAnalysis: roots.map((sourceRoot) => ({ sourceRoot, fullyAnalyzed: true })),
               totalDurationMs: sumMs(items),
               durationKnownCount: items.length,
+              ...listTotals(items),
             });
           }
           case "get_tracks_by_ids_with_previews":

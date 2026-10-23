@@ -37,7 +37,9 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.5
+
+**Severity:** feature
 
 - **New feature:** Playlist, Media Library, USB playlist and USB history headings show the total
   size of the list's audio files next to its track count, so you can see before exporting whether

@@ -76,10 +76,12 @@ replaces the old frontend-only recent-roots list for device bookkeeping.
 USB-device media path, and `usb_device_exports` records per-device playlist
 export history even when that drive is not currently mounted.
 
-A `UsbDevice`'s `label` column mirrors the user-assigned drive name, if any
-(see `docs/USB_EXPORT.md`'s "USB drive naming" section) — the name of record
-is a marker file on the drive itself; `label` is a fast local cache/uniqueness
-index over it, kept in sync whenever the drive is (re)named.
+A `UsbDevice`'s `label` column is the user-assigned drive name last seen at
+that mount path, shown while the drive isn't plugged in (see
+`docs/USB_EXPORT.md`'s "USB drive naming" section). The name of record is a
+marker file on the drive itself. Names in use are indexed by slug in
+`usb_drive_names`, which also remembers each named drive's size and last
+logged export, to tell it apart from a copy.
 
 ### WarningEntry
 

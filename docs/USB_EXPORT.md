@@ -128,14 +128,48 @@ for PDB reads).
 
 Drives have no app-visible hardware serial/UUID — `resolve_usb_root` accepts any directory, not
 just a real removable device — so identity is instead a name the user assigns. The app prompts
-for a name once, the first time a valid, unnamed drive is connected. The name is stored two ways:
+for a name the first time a valid, unnamed drive is connected; "Not now" leaves it unnamed, and
+the drive name in the header names or renames the connected drive at any time. The name is stored
 in a small marker file (`.dj-usb-tkit/drive.json`) written next to `PIONEER/` on the drive itself
-(untouched by Rekordbox and by this app's own validation/repair scans), and mirrored into the
-local `usb_devices.label` column as a fast local cache/uniqueness index. Because the marker file
+(untouched by Rekordbox and by this app's own validation/repair scans). Because the marker file
 travels with the drive, the same physical stick keeps its identity across replugs, different USB
-ports, and even different computers — something the previous mount-path-based identity couldn't
-do, and what the local HDD staging cache key (above) and backup archiving (above) both depend on
-for stability.
+ports, and even different computers — what the local HDD staging cache key (above) and backup
+archiving (above) both depend on for stability.
+
+Locally, two tables mirror it:
+
+- `usb_drive_names` is the uniqueness index: one row per name in use, keyed by the name's slug
+  (the cache/backup key), so "My USB" and "my-usb" are the same name. It is not keyed by mount
+  path: sticks with the same volume label usually mount at the same path, and each needs its own
+  name. A name read from a drive's marker joins it on connect, so drives named on another computer
+  count as taken too. Removing a drive from the recent list frees its name.
+- `usb_devices.label` is the name last seen at a mount path, shown for a drive that isn't plugged
+  in. It is never read back as a drive's name: a drive without a marker is unnamed.
+
+Renaming moves the drive's HDD cache directory (staged databases and archived backups) to the new
+name's key and frees the old name.
+
+### Copies of a named drive
+
+A copied stick or folder carries the original's marker. On every connect, before the databases
+are staged, `check_drive_identity` compares the drive with what `usb_drive_names` remembers about
+the drive holding that name:
+
+- `total_bytes`: the drive's size (for a folder, its disk's). A different size means a different
+  drive.
+- `last_export_at`: the `exportedAt` of the last export this computer logged on that drive (set
+  only once the export log record is written; seeded from `usb_device_exports` when the column is
+  added). If the connected drive's export log lacks that record, it's a different drive. Exports
+  from other computers only add records, so they never trip this; an unreadable log is ignored.
+
+A drive that fails either check counts as unnamed for the rest of the session
+(`usb_identity::drive_name`): it stages into its own cache, its backups stay on the USB, and it
+isn't labelled with the other drive's name. The naming prompt says which name it carries, and the
+OS label isn't suggested when it is that name. Giving it a new name makes it a drive of its own.
+Giving it the carried name again makes it the drive that name is checked against (for a drive
+that is the original after all, e.g. after a partition resize). An identical copy on a
+same-size stick can't be told apart until one of the two gets an export; until then the two hold
+the same content, so sharing the cache is harmless.
 
 If the folder the user selected is on an actual removable USB device, the drive's own filesystem
 volume label is read and pre-filled into the naming prompt as a suggestion (`GetVolumeInformationW`
@@ -145,7 +179,8 @@ device has a `usb-*` entry under `/dev/disk/by-id/`). The user can still edit or
 suggestion before saving; an arbitrary local directory that isn't backed by a removable device
 gets no suggestion.
 
-Implementation: `backend/src/service/usb_identity.rs`.
+Implementation: `backend/src/service/usb_identity.rs`, `check_drive_identity` and
+`set_usb_device_name` in `backend/src/service/usb.rs`.
 
 ## Deep technical details
 
