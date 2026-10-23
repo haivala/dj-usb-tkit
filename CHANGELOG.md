@@ -42,6 +42,9 @@
 - **Fix:** When no USB is connected, the "Last exported to …" line under a playlist could show the
   wrong drive name, for example for a drive that was named on another computer. It now shows the
   name the drive had the last time it was connected.
+- **Fix:** Clicking Export twice, or quickly on another playlist, could start a second export to
+  the same USB while the first was still running. Export is now disabled from the click until the
+  export has finished, and a second export is refused.
 
 ## 0.4.5
 

@@ -83,7 +83,9 @@ analysis runs.
 - USB initialization for drives that are writable but missing the expected
   export database structure.
 - USB drives can be given a persistent name, so the same physical drive keeps
-  its identity across replugs, ports, and computers.
+  its identity across replugs, ports, and computers. What selecting a USB does,
+  and what changes while one is connected, is in
+  [docs/USB_CONNECT.md](docs/USB_CONNECT.md).
 - A dedicated Backups panel to list, restore, and delete USB database
   snapshots, with configurable retention.
 - Automated backend and frontend coverage for core workflows, export behavior,

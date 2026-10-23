@@ -1147,6 +1147,35 @@ test("a failed export is reported in the status bar and left to the backend's on
   await expect(page.locator("#eventLogList")).not.toContainText("export_to_usb");
 });
 
+test("export is disabled from the click until the export finishes, so a double click starts one export", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.goto("/");
+  await connectUsbAndFetchPlaylists(page);
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+  // Hold export_to_usb open until the test releases it, counting the calls.
+  await page.evaluate(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__exportCalls = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command !== "export_to_usb") return invoke(command, payload);
+      window.__exportCalls += 1;
+      await new Promise((resolve) => { window.__finishExport = resolve; });
+      return { ok: false, error: { code: "INTERNAL", message: "stopped by test" } };
+    };
+  });
+
+  const exportBtn = page.locator("#exportPlaylistBtn");
+  await exportBtn.dblclick();
+  await expect(exportBtn).toBeDisabled();
+  expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
+
+  await page.evaluate(() => window.__finishExport());
+  await expect(page.locator("#statusText")).toContainText("stopped by test");
+  await expect(exportBtn).toBeEnabled();
+  expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
+});
+
 test("changing the export sync mode releases and re-engages the open playlist's reorder lock without a USB rescan", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });
   await page.goto("/");

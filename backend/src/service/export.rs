@@ -864,6 +864,19 @@ impl BackendService {
                 "playlistId must not be empty".to_string(),
             ));
         }
+        // One export at a time, and none while a USB track save is running:
+        // each read-modify-writes the same staged PDB/eDB. Refused rather
+        // than queued, so a second click never starts a surprise export later.
+        let _usb_write_guard = match self.usb_write_lock.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(BackendError::Validation(
+                    "Another export or change to the USB is still running. Export again once it has finished."
+                        .to_string(),
+                ));
+            }
+        };
 
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         if !usb_root.exists() || !usb_root.is_dir() {
@@ -2423,6 +2436,25 @@ mod tests {
     }
 
     // --- ensure_local_u32_setting / ensure_track_master_content_id / resolve_manifest_identity ---
+
+    #[test]
+    fn export_is_refused_while_another_usb_write_runs() {
+        let (_dir, service) = test_service();
+        let _running = service.usb_write_lock.lock().unwrap();
+
+        let err = service
+            .export_to_usb(ExportToUsbRequest {
+                usb_root: None,
+                playlist_id: "p1".to_string(),
+                options: None,
+            })
+            .expect_err("a second write must not start");
+
+        assert!(
+            matches!(&err, BackendError::Validation(message) if message.contains("still running")),
+            "{err:?}"
+        );
+    }
 
     fn test_service() -> (tempfile::TempDir, BackendService) {
         let dir = tempdir().expect("service data dir");

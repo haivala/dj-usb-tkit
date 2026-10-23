@@ -302,7 +302,7 @@ export function updatePlaylistExportButtons(ctx) {
     playlistUsbExportStatusById: state.playlistUsbExportStatusById
   });
 
-  el.exportPlaylistBtn.disabled = isUsbRootChangeBlocked(state);
+  el.exportPlaylistBtn.disabled = isUsbRootChangeBlocked(state) || !!state.exportStarting;
   el.exportPlaylistBtn.textContent = buttonState.text;
   el.exportPlaylistBtn.dataset.tooltip = buttonState.title;
 

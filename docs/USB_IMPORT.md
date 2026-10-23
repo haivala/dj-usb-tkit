@@ -2,6 +2,9 @@
 
 ## How it works
 
+Import works on the selected USB; see [USB_CONNECT.md](USB_CONNECT.md) for selecting one and
+what that does.
+
 USB import reads USB database data from the selected USB root and builds one in-app view of playlists, histories, and tracks. When possible, the import path tolerates incomplete or corrupted USB metadata and returns warnings instead of failing the entire operation.
 
 ![USB Playlists: the playlists on the USB, and the open playlist's tracks](assets/usb-playlists.png)

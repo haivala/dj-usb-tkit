@@ -2,6 +2,9 @@
 
 ## How it works
 
+Export goes to the selected USB; see [USB_CONNECT.md](USB_CONNECT.md) for selecting one, what the
+playlist page shows while it's connected, and why Export is disabled while an export runs.
+
 USB export writes selected local playlist content into DJ-player-compatible USB structures. The export path includes media copies, playlist membership, and analysis/artwork references required for player compatibility.
 
 Export supports two playlist sync modes:

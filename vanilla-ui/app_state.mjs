@@ -19,6 +19,8 @@ export function createInitialState() {
     // The name a connected drive carries that belongs to another drive.
     usbNameTakenBy: null,
     usbWritable: true,
+    // An export was clicked and hasn't finished (see exportPlaylistToUsb).
+    exportStarting: false,
     exportPruneStale: true,
     exportBackup: true,
     // Rebuild the Engine DJ library whenever the app changes a USB. Off until

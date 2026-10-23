@@ -1378,7 +1378,23 @@ export async function moveUsbPlayerMenuItems(ctx, direction) {
   });
 }
 
+// One export at a time: the button is disabled from the click on, not only
+// once the backend's job.started event arrives (the backend refuses a second
+// export too).
 export async function exportPlaylistToUsb(ctx, playlistId) {
+  const { state } = ctx;
+  if (state.exportStarting || isUsbRootChangeBlocked(state)) return;
+  state.exportStarting = true;
+  ctx.updatePlaylistExportButtons();
+  try {
+    await runPlaylistExport(ctx, playlistId);
+  } finally {
+    state.exportStarting = false;
+    ctx.updatePlaylistExportButtons();
+  }
+}
+
+async function runPlaylistExport(ctx, playlistId) {
   const { state, el, setProgress, stopProgressHeartbeat } = ctx;
   const { emitStatus } = ctx;
   const playlist = state.playlists.find((item) => item.id === playlistId);
