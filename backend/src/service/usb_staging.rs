@@ -196,6 +196,32 @@ fn cache_key_for_root(usb_root: &Path) -> String {
     format!("unnamed-{:016x}", hasher.finish())
 }
 
+/// Moves a named drive's cache dir to its new name's key when the drive is
+/// renamed, so its staged DBs and archived backups stay with it. Does
+/// nothing when staging is off, the drive has no cache dir yet, or the new
+/// key's dir already exists (left behind by a removed drive that had that
+/// name -- merging two drives' archives would be worse than starting fresh).
+pub(crate) fn rename_cache_dir(old_name: &str, new_name: &str) -> std::io::Result<()> {
+    rename_cache_dir_with_root(cache_root().as_deref(), old_name, new_name)
+}
+
+fn rename_cache_dir_with_root(
+    cache_root: Option<&Path>,
+    old_name: &str,
+    new_name: &str,
+) -> std::io::Result<()> {
+    let Some(cache_root) = cache_root else {
+        return Ok(());
+    };
+    let old_dir = cache_root.join(super::usb_identity::slug(old_name));
+    let new_dir = cache_root.join(super::usb_identity::slug(new_name));
+    if old_dir == new_dir || !old_dir.is_dir() || new_dir.exists() {
+        return Ok(());
+    }
+    let _guard = STATE_LOCK.lock().unwrap();
+    std::fs::rename(old_dir, new_dir)
+}
+
 fn device_dir_for(cache_root: Option<&Path>, usb_root: &Path) -> Option<PathBuf> {
     cache_root.map(|root| root.join(cache_key_for_root(usb_root)))
 }
@@ -652,6 +678,26 @@ mod tests {
             cache_key_for_root(usb_a.path()),
             cache_key_for_root(usb_b.path())
         );
+    }
+
+    #[test]
+    fn rename_cache_dir_moves_the_dir_but_never_onto_an_existing_one() {
+        let cache = tempdir().unwrap();
+        std::fs::create_dir_all(cache.path().join("club-stick/backups")).unwrap();
+        rename_cache_dir_with_root(Some(cache.path()), "Club Stick", "Booth Stick").unwrap();
+        assert!(!cache.path().join("club-stick").exists());
+        assert!(cache.path().join("booth-stick/backups").is_dir());
+
+        std::fs::create_dir_all(cache.path().join("old-stick")).unwrap();
+        rename_cache_dir_with_root(Some(cache.path()), "Booth Stick", "Old Stick").unwrap();
+        assert!(
+            cache.path().join("booth-stick/backups").is_dir(),
+            "an existing dir for the new name is left alone"
+        );
+
+        rename_cache_dir_with_root(None, "Booth Stick", "New Stick").unwrap();
+        rename_cache_dir_with_root(Some(cache.path()), "Missing", "New Stick").unwrap();
+        assert!(!cache.path().join("new-stick").exists());
     }
 
     #[test]

@@ -780,53 +780,45 @@ impl BackendService {
     ) -> BackendResult<crate::models::PruneUsbDeviceData> {
         let conn = self.db.connect()?;
         let now_ts = now();
+        let label: Option<String> = conn
+            .query_row(
+                "SELECT label FROM usb_devices WHERE id = ?1 AND deleted_at IS NULL",
+                params![req.id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
         let changed = conn.execute(
             "UPDATE usb_devices SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
             params![now_ts, req.id],
         )?;
+        // A removed drive's name is free again.
+        if let Some(label) = label.filter(|label| !label.trim().is_empty()) {
+            usb_utils::forget_drive_name(&conn, label.trim())?;
+        }
         Ok(crate::models::PruneUsbDeviceData {
             pruned: changed > 0,
         })
     }
 
-    /// Reads the user-assigned name for `req.usb_root`. Prefers the on-drive
-    /// marker file (survives a different computer); falls back to the local
-    /// `usb_devices.label` and self-heals the marker when only the local
-    /// value is present. See `usb_identity` for why a name, not a hardware
-    /// serial, is this app's notion of drive identity.
+    /// Reads the user-assigned name for `req.usb_root` from the on-drive
+    /// marker (survives a different computer). A drive without one is
+    /// unnamed, even when `usb_devices` has a name cached for its mount path:
+    /// drives with the same volume label mount at the same path, so that
+    /// name may belong to a different drive. See `usb_identity` for why a
+    /// name, not a hardware serial, is this app's notion of drive identity.
     pub fn get_usb_device_name(
         &self,
         req: crate::models::GetUsbDeviceNameRequest,
     ) -> BackendResult<crate::models::GetUsbDeviceNameData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         if let Some(name) = super::usb_identity::read_drive_name(&usb_root) {
+            // Drives named on another computer join the registry here, so
+            // their names count as taken.
+            let conn = self.db.connect()?;
+            usb_utils::register_drive_name(&conn, &name, &now())?;
             return Ok(crate::models::GetUsbDeviceNameData {
                 name: Some(name),
-                suggested_name: None,
-            });
-        }
-
-        let conn = self.db.connect()?;
-        let root_path_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
-        // `.optional()` on a `Result<Option<String>>` needs the closure to
-        // actually return `Option<String>` (row.get::<_, String>(0) would
-        // otherwise be inferred and error on a NULL label -- which every
-        // not-yet-named device has) -- then flatten the resulting
-        // `Option<Option<String>>` (no row vs. a row with a NULL label) back
-        // down to a single `Option<String>`, since both mean "unnamed".
-        let label: Option<String> = conn
-            .query_row(
-                "SELECT label FROM usb_devices WHERE root_path_key = ?1",
-                params![root_path_key],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten();
-        if let Some(name) = label.as_ref().filter(|n| !n.trim().is_empty()) {
-            let _ = super::usb_identity::write_drive_name(&usb_root, name);
-            super::usb_staging::forget_cache_key_for_root(&usb_root);
-            return Ok(crate::models::GetUsbDeviceNameData {
-                name: label,
                 suggested_name: None,
             });
         }
@@ -839,9 +831,10 @@ impl BackendService {
     }
 
     /// Assigns `req.name` to `req.usb_root`, rejecting names already taken by
-    /// a different known drive (names double as cache/backup-archive keys).
-    /// Writes both the on-drive marker (source of truth) and the local
-    /// `usb_devices.label` cache.
+    /// a different drive (names double as cache/backup-archive keys). Also
+    /// renames: the drive's cache dir moves to the new name and its old name
+    /// is freed. Writes the on-drive marker (source of truth), the local
+    /// `usb_devices.label` cache and the `usb_drive_names` registry.
     pub fn set_usb_device_name(
         &self,
         req: crate::models::SetUsbDeviceNameRequest,
@@ -849,21 +842,41 @@ impl BackendService {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         let name =
             super::usb_identity::validate_name(&req.name).map_err(BackendError::Validation)?;
+        let current = super::usb_identity::read_drive_name(&usb_root);
+        let renaming_away = current.as_deref().filter(|current| {
+            super::usb_identity::slug(current) != super::usb_identity::slug(&name)
+        });
 
         let conn = self.db.connect()?;
-        let root_path_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
-        if let Some(taken_by) = usb_utils::find_device_root_by_label(&conn, &name, &root_path_key)?
+        // Keeping its own name (or changing only its case) is not a collision.
+        let keeps_own_name = current.is_some() && renaming_away.is_none();
+        if !keeps_own_name && let Some(taken) = usb_utils::find_registered_drive_name(&conn, &name)?
         {
             return Err(BackendError::Validation(format!(
-                "Drive name '{name}' is already used by another known drive ({taken_by})"
+                "Drive name '{name}' is already used by another drive ('{taken}')"
             )));
         }
 
-        super::usb_identity::write_drive_name(&usb_root, &name).map_err(|e| {
-            BackendError::Internal(format!("failed to write drive name marker: {e}"))
-        })?;
+        if let Some(old_name) = renaming_away {
+            super::usb_staging::rename_cache_dir(old_name, &name).map_err(|e| {
+                BackendError::Internal(format!("failed to move the drive's cache: {e}"))
+            })?;
+        }
+        if let Err(e) = super::usb_identity::write_drive_name(&usb_root, &name) {
+            if let Some(old_name) = renaming_away {
+                let _ = super::usb_staging::rename_cache_dir(&name, old_name);
+            }
+            return Err(BackendError::Internal(format!(
+                "failed to write drive name marker: {e}"
+            )));
+        }
         super::usb_staging::forget_cache_key_for_root(&usb_root);
-        usb_utils::set_device_label(&conn, &usb_root, &name, &now())?;
+        let now_ts = now();
+        if let Some(old_name) = renaming_away {
+            usb_utils::forget_drive_name(&conn, old_name)?;
+        }
+        usb_utils::register_drive_name(&conn, &name, &now_ts)?;
+        usb_utils::set_device_label(&conn, &usb_root, &name, &now_ts)?;
         self.invalidate_usb_parse_cache();
 
         Ok(crate::models::SetUsbDeviceNameData { saved: true })
@@ -3926,6 +3939,138 @@ mod tests {
                 name: "Club Stick".to_string(),
             })
             .expect("re-setting own name must succeed");
+    }
+
+    fn get_name(
+        service: &crate::service::BackendService,
+        usb_root: &Path,
+    ) -> crate::models::GetUsbDeviceNameData {
+        service
+            .get_usb_device_name(crate::models::GetUsbDeviceNameRequest {
+                usb_root: usb_root.to_string_lossy().to_string(),
+            })
+            .expect("get name")
+    }
+
+    fn set_name(
+        service: &crate::service::BackendService,
+        usb_root: &Path,
+        name: &str,
+    ) -> crate::error::BackendResult<()> {
+        service
+            .set_usb_device_name(crate::models::SetUsbDeviceNameRequest {
+                usb_root: usb_root.to_string_lossy().to_string(),
+                name: name.to_string(),
+            })
+            .map(|_| ())
+    }
+
+    /// Another stick with the same volume label: same mount path, no marker.
+    fn swap_in_unnamed_drive_at(usb_root: &Path) {
+        std::fs::remove_dir_all(crate::service::usb_identity::app_marker_dir(usb_root))
+            .expect("remove marker");
+    }
+
+    #[test]
+    fn second_drive_at_the_same_mount_path_is_unnamed_and_cannot_take_the_first_ones_name() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        set_name(&service, &usb_root, "Club Stick").expect("name first drive");
+
+        swap_in_unnamed_drive_at(&usb_root);
+        let second = get_name(&service, &usb_root);
+        assert_eq!(second.name, None, "must not inherit the first drive's name");
+        assert!(
+            crate::service::usb_identity::read_drive_name(&usb_root).is_none(),
+            "reading the name must not write one onto the drive"
+        );
+
+        let err = set_name(&service, &usb_root, "Club Stick")
+            .expect_err("the first drive's name is taken");
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+        set_name(&service, &usb_root, "Booth Stick").expect("a new name is fine");
+        assert_eq!(
+            get_name(&service, &usb_root).name.as_deref(),
+            Some("Booth Stick")
+        );
+    }
+
+    #[test]
+    fn set_usb_device_name_rejects_a_name_that_only_differs_in_case_or_punctuation() {
+        let (_dir, service) = test_service();
+        let (_usb_dir_a, usb_root_a) = test_usb_root();
+        let (_usb_dir_b, usb_root_b) = test_usb_root();
+        set_name(&service, &usb_root_a, "Club Stick").expect("name first drive");
+
+        let err = set_name(&service, &usb_root_b, "club-stick")
+            .expect_err("same cache key as Club Stick");
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+
+        set_name(&service, &usb_root_a, "CLUB STICK").expect("own name in another case");
+        assert_eq!(
+            get_name(&service, &usb_root_a).name.as_deref(),
+            Some("CLUB STICK")
+        );
+    }
+
+    #[test]
+    fn renaming_a_drive_moves_its_cache_and_frees_the_old_name() {
+        let (_dir, service) = test_service();
+        let cache = tempfile::tempdir().expect("cache dir");
+        let _cache_guard =
+            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let (_usb_dir_a, usb_root_a) = test_usb_root();
+        let (_usb_dir_b, usb_root_b) = test_usb_root();
+        set_name(&service, &usb_root_a, "Club Stick").expect("name drive");
+        let archived = cache.path().join("club-stick/backups/export_old.pdb");
+        std::fs::create_dir_all(archived.parent().unwrap()).unwrap();
+        std::fs::write(&archived, b"pdb").unwrap();
+
+        set_name(&service, &usb_root_a, "Booth Stick").expect("rename");
+
+        assert!(!cache.path().join("club-stick").exists());
+        assert_eq!(
+            std::fs::read(cache.path().join("booth-stick/backups/export_old.pdb")).unwrap(),
+            b"pdb"
+        );
+        set_name(&service, &usb_root_b, "Club Stick").expect("the old name is free again");
+        let err =
+            set_name(&service, &usb_root_b, "Booth Stick").expect_err("the new name is taken");
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn a_name_read_from_the_drive_counts_as_taken() {
+        // Named on another computer: only the marker knows the name.
+        let (_dir, service) = test_service();
+        let (_usb_dir_a, usb_root_a) = test_usb_root();
+        let (_usb_dir_b, usb_root_b) = test_usb_root();
+        crate::service::usb_identity::write_drive_name(&usb_root_a, "Club Stick").unwrap();
+
+        assert_eq!(
+            get_name(&service, &usb_root_a).name.as_deref(),
+            Some("Club Stick")
+        );
+        let err =
+            set_name(&service, &usb_root_b, "Club Stick").expect_err("name registered when read");
+        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+    }
+
+    #[test]
+    fn pruning_a_drive_frees_its_name() {
+        let (_dir, service) = test_service();
+        let (_usb_dir_a, usb_root_a) = test_usb_root();
+        let (_usb_dir_b, usb_root_b) = test_usb_root();
+        set_name(&service, &usb_root_a, "Club Stick").expect("name drive");
+        let id = service.list_usb_devices().expect("list").items[0]
+            .id
+            .clone();
+
+        service
+            .prune_usb_device(crate::models::PruneUsbDeviceRequest { id })
+            .expect("prune");
+
+        set_name(&service, &usb_root_b, "Club Stick").expect("name is free after pruning");
     }
 
     #[test]

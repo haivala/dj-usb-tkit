@@ -450,6 +450,22 @@ body.library-onboarding {
   color: var(--accent-hot);
 }
 
+/* Connected drive: the name is a button that renames it. */
+.usb-name-badge.is-renamable {
+  cursor: pointer;
+}
+
+.usb-name-badge.is-renamable:hover .header-stat-value,
+.usb-name-badge.is-renamable:focus-visible .header-stat-value {
+  color: var(--accent-hot);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.usb-name-badge:focus-visible {
+  outline: none;
+}
+
 /* While exporting, the Donate button gets a steady highlight that stays inside
    the button, and only its heart beats now and then: two beats, then a rest. */
 @keyframes donate-heartbeat {

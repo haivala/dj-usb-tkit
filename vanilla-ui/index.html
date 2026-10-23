@@ -48,7 +48,7 @@
           <span class="header-stat-label">Playlist</span>
           <span class="header-stat-value" id="badgeLabel">No active playlist</span>
         </div>
-        <div class="usb-name-badge" id="usbNameBadge">
+        <div class="usb-name-badge" id="usbNameBadge" role="button" tabindex="-1" aria-disabled="true">
           <span class="usb-health-dot" id="usbHeaderHealthDot" data-tooltip="USB health unknown" aria-label="USB health unknown"></span>
           <span class="header-stat-label">USB</span>
           <span class="header-stat-value" id="usbNameBadgeLabel">Not connected</span>
@@ -752,12 +752,13 @@
 
   <div class="confirm-overlay" id="driveNameOverlay" hidden>
     <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="driveNameTitle">
-      <h3 id="driveNameTitle">Name This Drive</h3>
-      <p class="muted">Give this USB a name so backups and local caching can reliably follow it, even on a different computer. If this is a real USB drive with a volume label, it's pre-filled below — edit it or replace it with your own.</p>
+      <h3 id="driveNameTitle"><span data-drive-name-mode="name">Name This Drive</span><span data-drive-name-mode="rename" hidden>Rename This Drive</span></h3>
+      <p class="muted" data-drive-name-mode="name">Give this USB a name so backups and local caching can reliably follow it, even on a different computer. If this is a real USB drive with a volume label, it's pre-filled below — edit it or replace it with your own. Each drive needs its own name, even when several have the same volume label.</p>
+      <p class="muted" data-drive-name-mode="rename" hidden>The drive's backups and local cache stay with it under the new name.</p>
       <input type="text" id="driveNameInput" maxlength="80" placeholder="e.g. Club Stick" />
       <p class="muted" id="driveNameError" hidden></p>
       <div class="row confirm-actions">
-        <button id="driveNameSkipBtn">Not now</button>
+        <button id="driveNameSkipBtn"><span data-drive-name-mode="name">Not now</span><span data-drive-name-mode="rename" hidden>Cancel</span></button>
         <button id="driveNameOkBtn" data-primary>Save</button>
       </div>
     </div>

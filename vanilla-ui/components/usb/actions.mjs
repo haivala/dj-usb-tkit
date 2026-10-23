@@ -575,7 +575,7 @@ export async function detectExternalMixxxDb(ctx) {
 // Best-effort: any failure to even check/show the prompt just lets the user
 // continue unnamed rather than blocking USB use entirely.
 async function promptDriveNameIfUnset(ctx) {
-  const { state, el, command, document: doc } = ctx;
+  const { state, command } = ctx;
   const { emitStatus } = ctx;
   // Reset first: a stale name from whatever drive was connected before must
   // never linger on screen while this one's actual name is still unknown.
@@ -609,6 +609,35 @@ async function promptDriveNameIfUnset(ctx) {
     return;
   }
 
+  await openDriveNameDialog(ctx, { mode: "name", initial: suggestedName });
+}
+
+// Renames the selected drive (or names it, if the first-time prompt was
+// skipped). The backend moves the drive's backups and cache to the new name;
+// everything showing the name is refreshed from there.
+export async function renameDrive(ctx) {
+  const { state } = ctx;
+  if (!state.usbRoot || !state.usbRootValid || isUsbRootChangeBlocked(state)) return;
+  const current = String(state.usbDeviceName || "").trim();
+  const saved = await openDriveNameDialog(ctx, { mode: current ? "rename" : "name", initial: current });
+  if (!saved || saved === current) return;
+  ctx.emitStatus(`Drive renamed to ${saved}.`);
+  try {
+    // Playlists carry the backend-resolved name of the drive they were
+    // exported to, and loadPlaylists refreshes the export status too.
+    await ctx.loadPlaylists();
+    if (state.currentPlaylistId) await ctx.refreshCurrentPlaylistTracks();
+    await loadUsbDevices(ctx);
+  } catch (err) {
+    ctx.warn("[usb] refresh after rename failed:", err);
+  }
+}
+
+// The name dialog: `mode` "name" (first time) or "rename" picks which of the
+// template's texts show. Resolves to the saved name, or null if closed
+// without saving.
+async function openDriveNameDialog(ctx, { mode, initial }) {
+  const { state, el, command, document: doc } = ctx;
   const overlay = el.driveNameOverlay;
   if (!doc || !overlay || !el.driveNameInput || !el.driveNameOkBtn) {
     console.warn("[usb] drive-naming prompt DOM elements missing, skipping prompt", {
@@ -617,16 +646,19 @@ async function promptDriveNameIfUnset(ctx) {
       hasInput: !!el.driveNameInput,
       hasOkBtn: !!el.driveNameOkBtn
     });
-    return;
+    return null;
+  }
+  for (const node of overlay.querySelectorAll("[data-drive-name-mode]")) {
+    node.hidden = node.dataset.driveNameMode !== mode;
   }
 
   // This overlay is full-viewport and intercepts every click while open, so
   // it must never be able to get stuck there -- Escape, a backdrop click,
-  // and an explicit "Not now" button all close it without a name, in
-  // addition to Save. A prompt with no way out would silently freeze the
+  // and an explicit "Not now"/"Cancel" button all close it without a name,
+  // in addition to Save. A prompt with no way out would silently freeze the
   // entire app if anything about it ever misbehaves.
-  await new Promise((resolve) => {
-    el.driveNameInput.value = suggestedName;
+  return new Promise((resolve) => {
+    el.driveNameInput.value = initial || "";
     if (el.driveNameError) el.driveNameError.hidden = true;
     overlay.hidden = false;
     el.driveNameInput.focus();
@@ -654,7 +686,7 @@ async function promptDriveNameIfUnset(ctx) {
         state.usbDeviceName = name;
         ctx.updateUsbNameBadge();
         cleanup();
-        resolve();
+        resolve(name);
       } catch (err) {
         if (el.driveNameError) {
           el.driveNameError.textContent = err?.message || String(err);
@@ -664,7 +696,7 @@ async function promptDriveNameIfUnset(ctx) {
     };
     const onSkip = () => {
       cleanup();
-      resolve();
+      resolve(null);
     };
     const onEnter = (event) => {
       if (event.key === "Enter") onSave();

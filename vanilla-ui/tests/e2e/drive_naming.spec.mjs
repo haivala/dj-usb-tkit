@@ -1,10 +1,13 @@
 import { test, expect } from "./coverage-fixture.mjs";
 
-// Exercises the "Name this drive" prompt end-to-end in a real browser DOM,
+// Exercises the "Name this drive" prompt and renaming end-to-end in a real browser DOM,
 // where element ids, overlay visibility, and recent-USB-pill wiring are all
 // part of the assertion surface.
-function installTauriMock(page, { deviceName = null, suggestedName = null, getNameMode = "normal" } = {}) {
-  return page.addInitScript(({ deviceName, suggestedName, getNameMode }) => {
+function installTauriMock(
+  page,
+  { deviceName = null, suggestedName = null, getNameMode = "normal", takenName = null } = {}
+) {
+  return page.addInitScript(({ deviceName, suggestedName, getNameMode, takenName }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.__setNameCalls = [];
     let storedName = deviceName;
@@ -85,6 +88,15 @@ function installTauriMock(page, { deviceName = null, suggestedName = null, getNa
           }
           if (command === "set_usb_device_name") {
             const name = payload?.request?.name || "";
+            if (name === takenName) {
+              return {
+                ok: false,
+                error: {
+                  code: "VALIDATION",
+                  message: `Drive name '${name}' is already used by another drive ('${takenName}')`
+                }
+              };
+            }
             storedName = name;
             window.__setNameCalls.push({ usbRoot: payload?.request?.usbRoot, name });
             return { ok: true, data: { saved: true } };
@@ -105,7 +117,7 @@ function installTauriMock(page, { deviceName = null, suggestedName = null, getNa
         }
       }
     };
-  }, { deviceName, suggestedName, getNameMode });
+  }, { deviceName, suggestedName, getNameMode, takenName });
 }
 
 async function openRecentUsbNamingPrompt(page, opts = {}) {
@@ -123,7 +135,7 @@ test("clicking a recent USB pill for an unnamed drive opens the naming prompt, s
 
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
   await expect(page.locator("#usbNameBadge")).toBeVisible();
-  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Not connected");
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Unnamed");
   await page.locator("#driveNameInput").fill("Club Stick");
   await page.locator("#driveNameOkBtn").click();
 
@@ -203,4 +215,69 @@ test("recent USB naming check fails closed on an unexpected response shape", asy
 
   await expect(page.locator("#usbRootPathText")).toContainText("/Volumes/USB-TEST");
   await expect(page.locator("#driveNameOverlay")).toBeHidden();
+});
+
+async function openNamedDrive(page, opts = {}) {
+  await installTauriMock(page, { deviceName: "Club Stick", ...opts });
+  await page.goto("/");
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Not connected");
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]').click();
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");
+}
+
+test("clicking the header drive name renames the connected drive", async ({ page }) => {
+  await openNamedDrive(page);
+  await expect(page.locator("#usbNameBadge")).toHaveAttribute("data-tooltip", "Rename this drive");
+
+  await page.locator("#usbNameBadgeLabel").click();
+  const overlay = page.locator("#driveNameOverlay");
+  await expect(overlay).toBeVisible();
+  await expect(page.locator("#driveNameTitle")).toHaveText("Rename This Drive", { useInnerText: true });
+  await expect(page.locator("#driveNameSkipBtn")).toHaveText("Cancel", { useInnerText: true });
+  await expect(page.locator("#driveNameInput")).toHaveValue("Club Stick");
+
+  await page.locator("#driveNameInput").fill("Booth Stick");
+  await page.locator("#driveNameInput").press("Enter");
+
+  await expect(overlay).toBeHidden();
+  expect(await page.evaluate(() => window.__setNameCalls)).toEqual([
+    { usbRoot: "/Volumes/USB-TEST", name: "Booth Stick" }
+  ]);
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Booth Stick");
+  await expect(page.locator("#usbRootPathText")).toHaveText("Booth Stick");
+});
+
+test("renaming to a name another drive has shows the error and cancel keeps the old name", async ({ page }) => {
+  await openNamedDrive(page, { takenName: "Booth Stick" });
+
+  await page.locator("#usbNameBadge").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#driveNameOverlay")).toBeVisible();
+  await page.locator("#driveNameInput").fill("Booth Stick");
+  await page.locator("#driveNameOkBtn").click();
+
+  await expect(page.locator("#driveNameError")).toBeVisible();
+  await expect(page.locator("#driveNameError")).toContainText("already used by another drive");
+  await expect(page.locator("#driveNameOverlay")).toBeVisible();
+
+  await page.locator("#driveNameSkipBtn").click();
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
+  expect(await page.evaluate(() => window.__setNameCalls)).toEqual([]);
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");
+});
+
+test("a drive left unnamed can be named later from the header", async ({ page }) => {
+  await openRecentUsbNamingPrompt(page);
+  await page.locator("#driveNameSkipBtn").click();
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Unnamed");
+  await expect(page.locator("#usbNameBadge")).toHaveAttribute("data-tooltip", "Name this drive");
+
+  await page.locator("#usbNameBadgeLabel").click();
+  await expect(page.locator("#driveNameTitle")).toHaveText("Name This Drive", { useInnerText: true });
+  await page.locator("#driveNameInput").fill("Club Stick");
+  await page.locator("#driveNameOkBtn").click();
+
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");
 });

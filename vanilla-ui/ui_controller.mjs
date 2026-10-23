@@ -44,7 +44,15 @@ export function updateUsbNameBadge(ctx) {
   const { state, el } = ctx;
   if (!el?.usbNameBadge || !el?.usbNameBadgeLabel) return;
   const name = String(state.usbDeviceName || "").trim();
-  el.usbNameBadgeLabel.textContent = name || "Not connected";
+  const connected = !!state.usbRoot && !!state.usbRootValid;
+  el.usbNameBadgeLabel.textContent = name || (connected ? "Unnamed" : "Not connected");
+  // Clicking the badge names or renames the connected drive.
+  const badge = el.usbNameBadge;
+  badge.classList.toggle("is-renamable", connected);
+  badge.tabIndex = connected ? 0 : -1;
+  badge.setAttribute("aria-disabled", connected ? "false" : "true");
+  if (connected) badge.dataset.tooltip = name ? "Rename this drive" : "Name this drive";
+  else delete badge.dataset.tooltip;
   // The USB Browser heading shows the same name.
   if (state.usbRoot && state.usbRootValid) ctx.updateUsbRootText?.(state.usbRoot, true);
 }

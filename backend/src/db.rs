@@ -253,6 +253,7 @@ impl Db {
             "#,
         )?;
         store_file_modified_at_as_integer(&conn)?;
+        create_usb_drive_names(&conn)?;
         set_schema_version(&conn, CURRENT_SCHEMA_VERSION)?;
 
         Ok(())
@@ -482,6 +483,48 @@ fn rebuilt_tracks_sql(table_sql: &str) -> Option<String> {
     ))
 }
 
+/// The drive-name registry (`usb_identity`): one row per name in use, keyed
+/// by its slug since that is the drive's cache/backup key. Unlike
+/// `usb_devices.label` it isn't tied to a mount path, so two drives that the
+/// OS mounts at the same path still can't end up with the same name. Seeded
+/// once, from the names `usb_devices` held before the registry existed.
+fn create_usb_drive_names(conn: &Connection) -> BackendResult<()> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'usb_drive_names')",
+        [],
+        |row| row.get(0),
+    )?;
+    if exists {
+        return Ok(());
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE usb_drive_names (
+           slug TEXT PRIMARY KEY,
+           name TEXT NOT NULL,
+           last_seen_at TEXT NOT NULL
+         );",
+    )?;
+    let labels: Vec<(String, String)> = tx
+        .prepare(
+            "SELECT label, last_seen_at FROM usb_devices
+             WHERE deleted_at IS NULL AND label IS NOT NULL AND TRIM(label) != ''
+             ORDER BY last_seen_at",
+        )?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (label, last_seen_at) in labels {
+        let name = label.trim();
+        tx.execute(
+            "INSERT OR REPLACE INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![crate::service::usb_identity::slug(name), name, last_seen_at],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 fn set_schema_version(conn: &Connection, version: i64) -> BackendResult<()> {
     conn.execute(
         r#"
@@ -704,6 +747,52 @@ mod tests {
         assert_eq!(count("SELECT COUNT(*) FROM track_cues"), 0);
         assert_eq!(count("SELECT COUNT(*) FROM playlist_tracks"), 0);
         assert_eq!(count("SELECT COUNT(*) FROM track_usb_links"), 0);
+    }
+
+    #[test]
+    fn migrate_seeds_drive_name_registry_once_from_known_drive_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        {
+            let db = Db::new(dir.path()).expect("db init");
+            let conn = db.connect().expect("db connect");
+            // Put the database back in its shape from before the registry.
+            conn.execute_batch(
+                r#"
+                DROP TABLE usb_drive_names;
+                INSERT INTO usb_devices (id, root_path, root_path_key, label, first_seen_at,
+                                         last_seen_at, deleted_at, created_at, updated_at)
+                  VALUES ('u1', '/media/a', '/media/a', 'Club Stick', 'now', 'now', NULL, 'now', 'now'),
+                         ('u2', '/media/b', '/media/b', NULL, 'now', 'now', NULL, 'now', 'now'),
+                         ('u3', '/media/c', '/media/c', 'Gone', 'now', 'now', 'then', 'now', 'now');
+                "#,
+            )
+            .expect("downgrade");
+        }
+
+        let names = |db: &Db| -> Vec<(String, String)> {
+            db.connect()
+                .unwrap()
+                .prepare("SELECT slug, name FROM usb_drive_names ORDER BY slug")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let db = Db::new(dir.path()).expect("db reopen");
+        assert_eq!(
+            names(&db),
+            vec![("club-stick".to_string(), "Club Stick".to_string())]
+        );
+
+        // Later opens leave the registry alone (a renamed-away name stays free).
+        db.connect()
+            .unwrap()
+            .execute("DELETE FROM usb_drive_names", [])
+            .unwrap();
+        drop(db);
+        let db = Db::new(dir.path()).expect("db reopen again");
+        assert!(names(&db).is_empty());
     }
 
     #[test]

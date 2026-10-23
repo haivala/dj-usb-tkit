@@ -144,31 +144,53 @@ pub(crate) fn upsert_usb_device(
     Ok(id)
 }
 
-/// Root path of an existing, non-deleted device whose `label` already equals
-/// `label`, other than the device identified by `exclude_root_path_key`.
-/// Used to reject a drive name that's already taken -- names double as
-/// cache/backup-archive keys, so collisions must be prevented before they
-/// happen (see `usb_identity`).
-pub(crate) fn find_device_root_by_label(
+/// The registered drive name sharing `name`'s slug, if any. Names double as
+/// cache/backup-archive keys (`usb_identity::slug`), so "My USB" and
+/// "my-usb" are the same name here.
+pub(crate) fn find_registered_drive_name(
     conn: &rusqlite::Connection,
-    label: &str,
-    exclude_root_path_key: &str,
+    name: &str,
 ) -> BackendResult<Option<String>> {
     let row: Option<String> = conn
         .query_row(
-            "SELECT root_path FROM usb_devices WHERE label = ?1 AND root_path_key != ?2 AND deleted_at IS NULL",
-            rusqlite::params![label, exclude_root_path_key],
+            "SELECT name FROM usb_drive_names WHERE slug = ?1",
+            rusqlite::params![super::usb_identity::slug(name)],
             |row| row.get(0),
         )
         .optional()?;
     Ok(row)
 }
 
+/// Record `name` as in use by a drive (see `db::create_usb_drive_names`).
+pub(crate) fn register_drive_name(
+    conn: &rusqlite::Connection,
+    name: &str,
+    now_ts: &str,
+) -> BackendResult<()> {
+    conn.execute(
+        "INSERT INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(slug) DO UPDATE SET name = excluded.name, last_seen_at = excluded.last_seen_at",
+        rusqlite::params![super::usb_identity::slug(name), name, now_ts],
+    )?;
+    Ok(())
+}
+
+/// Free `name` for another drive to take (renamed away, or the drive was
+/// removed from the known list).
+pub(crate) fn forget_drive_name(conn: &rusqlite::Connection, name: &str) -> BackendResult<()> {
+    conn.execute(
+        "DELETE FROM usb_drive_names WHERE slug = ?1",
+        rusqlite::params![super::usb_identity::slug(name)],
+    )?;
+    Ok(())
+}
+
 /// Persist `label` onto the `usb_devices` row for `root`, upserting a row
 /// first if none exists yet (e.g. naming a drive before it's ever been
 /// through `validate_usb_root`). The on-drive marker file
-/// (`usb_identity::write_drive_name`) is the source of truth; this is a fast
-/// local cache/uniqueness index, kept in sync by the caller.
+/// (`usb_identity::write_drive_name`) is the source of truth; this is the
+/// name shown for the path while the drive isn't plugged in, kept in sync by
+/// the caller.
 pub(crate) fn set_device_label(
     conn: &rusqlite::Connection,
     root: &Path,

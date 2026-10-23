@@ -1,7 +1,9 @@
 //! User-assigned identity for a USB root: a name, stored in a marker file on
 //! the root itself (so it survives being plugged into a different computer)
-//! and mirrored into the local `usb_devices.label` column (a fast local
-//! cache/uniqueness index -- see `usb_utils::upsert_usb_device`).
+//! and mirrored into the local `usb_devices.label` column (display cache for
+//! a drive that isn't plugged in) and the `usb_drive_names` registry (the
+//! uniqueness index -- not keyed by mount path, since drives with the same
+//! volume label usually mount at the same path).
 //!
 //! The app has no real USB device enumeration -- `resolve_usb_root` accepts
 //! any directory, not just a real removable device -- so a hardware
@@ -66,7 +68,7 @@ pub(crate) fn validate_name(name: &str) -> Result<String, String> {
 
 /// Write `name` to the marker file at `root`, creating the marker directory
 /// if needed. Caller is responsible for uniqueness checks against other
-/// known devices (see `usb_utils::find_device_by_label`).
+/// known drives (see `usb_utils::find_registered_drive_name`).
 pub(crate) fn write_drive_name(root: &Path, name: &str) -> std::io::Result<()> {
     let validated = validate_name(name).map_err(std::io::Error::other)?;
     let dir = root.join(MARKER_DIR);

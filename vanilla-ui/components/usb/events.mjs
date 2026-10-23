@@ -82,6 +82,18 @@ export function bindUsbEvents(ctx) {
     pickUsbFolder().catch(catchErr(emitStatus));
   });
 
+  // The header's drive name renames the connected drive.
+  el.usbNameBadge?.addEventListener("click", (event) => {
+    // The health dot inside it has its own tooltip, not a rename.
+    if (event.target.closest(".usb-health-dot")) return;
+    ctx.renameDrive().catch(catchErr(emitStatus));
+  });
+  el.usbNameBadge?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    ctx.renameDrive().catch(catchErr(emitStatus));
+  });
+
   // Recent USBs accordion, like the library's Sources.
   el.usbRecentHeader?.addEventListener("click", () => {
     el.usbRecentRow?.classList.toggle("collapsed");
