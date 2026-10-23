@@ -137,10 +137,10 @@ export function toggleAnalysisPause(ctx) {
     // handleJobEvent freezes it once analyzingTrackIds empties out. If
     // nothing is in flight right now, it's already effectively stopped, so
     // reflect that immediately.
-    if (state.analyzingTrackIds.size === 0) {
+    if (state.analyzingTrackIds.size === 0 && analysisOwnsProgressBar(state)) {
       pauseProgressHeartbeat(ctx);
     }
-  } else {
+  } else if (analysisOwnsProgressBar(state)) {
     resumeProgressHeartbeat(ctx);
   }
   ctx.command("set_analysis_paused", { paused }).catch((err) => {
@@ -154,7 +154,7 @@ export function cancelAnalysis(ctx) {
   el.progressCancelAnalysisBtn.hidden = true;
   if (state.analysisPaused) {
     state.analysisPaused = false;
-    resumeProgressHeartbeat(ctx);
+    if (analysisOwnsProgressBar(state)) resumeProgressHeartbeat(ctx);
   }
   ctx.command("cancel_analysis").catch((err) => {
     console.error("[analysis-ui] cancel_analysis failed:", err);
@@ -162,9 +162,18 @@ export function cancelAnalysis(ctx) {
 }
 
 export function updateAnalysisPauseButtonAppearance(el, paused) {
+  const label = paused ? "Resume analysis" : "Pause analysis";
   el.progressPauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
-  el.progressPauseBtn.setAttribute("aria-label", paused ? "Resume analysis" : "Pause analysis");
+  el.progressPauseBtn.setAttribute("aria-label", label);
+  el.progressPauseBtn.setAttribute("title", label);
   el.progressPauseBtn.textContent = paused ? "\u25B6" : "\u275A\u275A";
+}
+
+// The pause/cancel buttons follow the analysis job, not the bar: they show
+// while an analysis runs even when an export started first owns the bar. The
+// bar's clock only pauses with the analysis while the analysis owns it.
+function analysisOwnsProgressBar(state) {
+  return state.activeJobType === "analysis";
 }
 
 function setAnalysisControlsVisible(state, el, visible) {
@@ -255,7 +264,7 @@ export function handleJobEvent(ctx, payload) {
     // finished (no rows left in the "analyzing" state) has the batch really
     // stopped. Conversely, a track still turning up while frozen means the
     // freeze was premature (see unfreezeProgressHeartbeat).
-    if (state.analysisPaused && state.analyzingTrackIds) {
+    if (state.analysisPaused && state.analyzingTrackIds && analysisOwnsProgressBar(state)) {
       if (state.analyzingTrackIds.size === 0) {
         pauseProgressHeartbeat(ctx);
       } else {
@@ -268,6 +277,9 @@ export function handleJobEvent(ctx, payload) {
     state.runningJobs.set(jobId, { jobType, startedAtMs: Date.now(), percent, message });
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
       setUsbRootControlsLocked(true);
+    }
+    if (jobType === "analysis") {
+      setAnalysisControlsVisible(state, el, true);
     }
     // A job started while another runs (an analysis or an update during an
     // export) only reports in the status line; the bar stays with the
@@ -349,18 +361,21 @@ export function handleJobEvent(ctx, payload) {
   }
 }
 
-// Hand the footer bar to a running job: its own text, percent, controls and
-// elapsed time, counted from when it started rather than when it got the bar.
+// Hand the footer bar to a running job: its own text, percent and elapsed
+// time, counted from when it started rather than when it got the bar.
 function showJobOnProgressBar(ctx, jobId) {
-  const { state, el } = ctx;
+  const { state } = ctx;
   const job = state.runningJobs.get(jobId);
   state.activeJobId = jobId;
   state.activeJobType = job.jobType;
-  setAnalysisControlsVisible(state, el, job.jobType === "analysis");
   setProgress(ctx, true, job.percent, job.message || "Working...");
   stopProgressHeartbeat(ctx);
   startProgressHeartbeat(ctx);
   state.progressStartedAtMs = job.startedAtMs;
+  // An analysis paused while the export held the bar arrives paused.
+  if (analysisOwnsProgressBar(state) && state.analysisPaused && state.analyzingTrackIds?.size === 0) {
+    pauseProgressHeartbeat(ctx);
+  }
   renderProgressTime(ctx);
 }
 
@@ -372,10 +387,12 @@ function finishJob(ctx, jobId, jobType, ownsProgressBar, idleDelayMs) {
     const waiters = state.usbJobIdleWaiters.splice(0);
     waiters.forEach((resolve) => resolve());
   }
+  if (jobType === "analysis") {
+    setAnalysisControlsVisible(state, el, false);
+  }
   if (!ownsProgressBar) return;
   state.activeJobId = null;
   state.activeJobType = null;
-  setAnalysisControlsVisible(state, el, false);
   const [nextJobId] = state.runningJobs.keys();
   if (nextJobId) {
     showJobOnProgressBar(ctx, nextJobId);

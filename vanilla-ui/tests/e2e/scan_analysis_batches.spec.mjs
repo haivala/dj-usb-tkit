@@ -937,7 +937,7 @@ function finishMockExport(page) {
   }));
 }
 
-test("an analysis run during an export leaves the export's progress bar and timer alone", async ({ page }) => {
+test("an analysis run during an export keeps its pause/cancel but leaves the export's progress bar and timer alone", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 50, pauseBeforeBpmKey: true });
   await page.goto("/");
   await startMockExport(page);
@@ -945,13 +945,20 @@ test("an analysis run during an export leaves the export's progress bar and time
   await page.locator("#scanLibraryBtn").click();
   await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
   await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
-  await expect(page.locator("#progressPauseBtn")).toBeHidden();
+  // The analysis keeps its own controls while the export holds the bar, and
+  // pausing it leaves the export's clock running.
+  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+  await expect(page.locator("#progressPauseBtn")).toHaveAttribute("title", "Pause analysis");
+  await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
+  await page.locator("#progressPauseBtn").click();
+  await expect(page.locator("#progressPauseBtn")).toHaveAttribute("title", "Resume analysis");
 
   await page.evaluate(() => window.__releaseBeforeBpmKey());
   await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
   await expect(page.locator("#progressFooter")).toHaveClass(/active/);
   await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
   await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+  await expect(page.locator("#progressPauseBtn")).toBeHidden();
   await expect(page.locator("#selectUsbFolderBtn")).toBeDisabled();
 
   await finishMockExport(page);

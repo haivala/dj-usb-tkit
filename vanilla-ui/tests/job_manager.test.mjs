@@ -233,6 +233,7 @@ test("handleJobEvent applies analysis progress, duration totals, and delayed pau
   withTimerStubs(() => {
     const state = makeState();
     state.activeJobId = "analysis-1";
+    state.activeJobType = "analysis";
     state.analysisPaused = true;
     state.analyzingTrackIds = new Set(["track-1", "track-2"]);
     const el = makeEl();

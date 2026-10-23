@@ -49,7 +49,9 @@
   analysis finished, the bar lost its elapsed time, the USB controls unlocked while the export was
   still writing, and the app could start installing an update mid-export. The progress bar now
   stays with the job that started first, and jobs started after it show their progress in the
-  status line. When the first job ends, the bar moves to the next job still running.
+  status line. When the first job ends, the bar moves to the next job still running. An analysis
+  keeps its pause and cancel buttons even while an export has the bar, and pausing it doesn't stop
+  the export's elapsed time.
 - **Improvement:** The progress bar's elapsed time now sits next to the "Progress" heading instead
   of after the status text.
 - **Chore:** New docs page on connecting a USB: how to select one, what selecting it does
