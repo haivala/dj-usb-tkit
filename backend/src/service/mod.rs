@@ -107,7 +107,7 @@ use crate::models::{
     Track, TrackMatch, WarningEntry,
 };
 use crate::player::PlaybackController;
-use crate::scanner::{ScanCache, scan_audio_files, scan_audio_files_cached, unique_paths};
+use crate::scanner::{ScanCache, scan_audio_files, unique_paths};
 use crate::wav_format::WavFormatIssue;
 
 const TRACK_QUERY_LIMIT_MAX: usize = 5000;
@@ -269,9 +269,9 @@ pub struct BackendService {
     /// Set while background data migrations run (see `migrations.rs`), so
     /// commands that write the analysis cache wait for them.
     pub(crate) data_migration_running: Arc<AtomicBool>,
-    /// Tag reads of the source folders' audio files, reused by
-    /// `browse_source_files` (which lists the folders on every page) while a
-    /// file is unchanged. Shared across `.clone()`s of the service.
+    /// The source folders' file listings and tag reads, reused by
+    /// `browse_source_files` (which lists the folders on every page),
+    /// select-all and analysis. Shared across `.clone()`s of the service.
     pub(crate) library_scan_cache: Arc<ScanCache>,
 }
 

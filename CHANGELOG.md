@@ -45,6 +45,11 @@
   version show the drive's mount path instead.
 - **Improvement:** A playlist's tracks no longer wait for the "tracks to copy" line. With a USB
   connected, the list shows right away and the line fills in a moment later.
+- **Improvement:** Select all, scrolling and searching the library are much faster, most of all
+  with a large library and only some source folders enabled. They no longer go through every
+  file in the source folders, or re-read copies of library files, each time. The folders are read
+  again when the app window comes back into focus or the library is scanned, so files added from
+  outside the app still show up.
 
 ## 0.4.6
 

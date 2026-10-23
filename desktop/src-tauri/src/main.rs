@@ -696,6 +696,15 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Files dropped into a source folder while the app was in the
+        // background show up on the next library load.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(true) = event
+                && let Some(commands) = window.try_state::<BackendCommands>()
+            {
+                commands.forget_source_folder_listings();
+            }
+        })
         .setup(|app| {
             let app_handle = app.handle().clone();
 

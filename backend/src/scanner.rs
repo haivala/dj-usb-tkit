@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lofty::config::ParseOptions;
@@ -71,12 +71,34 @@ pub fn scan_audio_files(source_roots: &[String]) -> BackendResult<Vec<ScannedTra
     walk_audio_files(source_roots, scan_audio_file)
 }
 
-/// Per-file results of `scan_audio_files_cached`, reused while a file's size
-/// and modification time are unchanged. Holds an entry per audio file ever
-/// seen in the source folders.
+/// One audio file in a source folder: what a listing knows without opening it.
+#[derive(Debug, Clone)]
+pub struct ListedAudioFile {
+    pub path: PathBuf,
+    pub len: u64,
+    pub modified: Option<SystemTime>,
+}
+
+/// What the library view knows about the source folders, shared across
+/// `browse_source_files` pages, select-all and the analysis baseline:
+/// - each folder's file listing, kept until `forget_listings` (a library scan,
+///   or the app window regaining focus -- the folders only change from
+///   outside the app), so paging and select-all don't walk the disk;
+/// - per-file tag reads, and whether two files hold the same bytes, reused
+///   while the files' size and modification time are unchanged.
 #[derive(Debug, Default)]
 pub struct ScanCache {
+    listings: Mutex<HashMap<String, Arc<Vec<ListedAudioFile>>>>,
     entries: Mutex<HashMap<PathBuf, CachedScan>>,
+    same_bytes: Mutex<HashMap<(PathBuf, PathBuf), CachedComparison>>,
+}
+
+type FileStamp = (u64, Option<SystemTime>);
+
+#[derive(Debug)]
+struct CachedComparison {
+    stamps: (FileStamp, FileStamp),
+    same: bool,
 }
 
 #[derive(Debug)]
@@ -86,40 +108,99 @@ struct CachedScan {
     track: ScannedTrack,
 }
 
-/// `scan_audio_files`, but a file whose size and modification time match the
-/// last scan isn't opened again: walking the folders is cheap, reading every
-/// file's tags is not. New and changed files are read as usual.
-pub fn scan_audio_files_cached(
-    source_roots: &[String],
-    cache: &ScanCache,
-) -> BackendResult<Vec<ScannedTrack>> {
-    walk_audio_files(source_roots, |path| {
-        let metadata = read_file_metadata(path)?;
-        let (len, modified) = (metadata.len(), metadata.modified().ok());
-        let lock = || cache.entries.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(hit) = lock().get(path)
-            && hit.len == len
-            && hit.modified == modified
+impl ScanCache {
+    /// The next listing walks the folders again. Tag reads are kept: they're
+    /// checked against each file's size and modification time.
+    pub fn forget_listings(&self) {
+        self.listings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
+    /// The audio files under `source_roots`, walking only folders not
+    /// listed since the last `forget_listings`.
+    pub fn list_audio_files(&self, source_roots: &[String]) -> BackendResult<Vec<ListedAudioFile>> {
+        let mut files = Vec::new();
+        for root in source_roots {
+            let cached = self
+                .listings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(root)
+                .cloned();
+            let listing = match cached {
+                Some(listing) => listing,
+                None => {
+                    let listing = Arc::new(walk_audio_files(std::slice::from_ref(root), |path| {
+                        let metadata = read_file_metadata(path)?;
+                        Ok(ListedAudioFile {
+                            path: path.to_path_buf(),
+                            len: metadata.len(),
+                            modified: metadata.modified().ok(),
+                        })
+                    })?);
+                    self.listings
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(root.clone(), Arc::clone(&listing));
+                    listing
+                }
+            };
+            files.extend(listing.iter().cloned());
+        }
+        Ok(files)
+    }
+
+    /// `scan_audio_file`, but a file whose size and modification time match
+    /// its last read isn't opened again.
+    pub fn scan(&self, file: &ListedAudioFile) -> BackendResult<ScannedTrack> {
+        let lock = || self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(hit) = lock().get(&file.path)
+            && hit.len == file.len
+            && hit.modified == file.modified
         {
             return Ok(hit.track.clone());
         }
-        let track = scan_audio_file(path)?;
+        let track = scan_audio_file(&file.path)?;
         lock().insert(
-            path.to_path_buf(),
+            file.path.clone(),
             CachedScan {
-                len,
-                modified,
+                len: file.len,
+                modified: file.modified,
                 track: track.clone(),
             },
         );
         Ok(track)
-    })
+    }
+
+    /// `compare(a, b)`, remembered while neither file's size or modification
+    /// time changes: a copy of a library file is hidden on every listing,
+    /// and reading both files each time is what made it slow.
+    pub fn same_bytes(
+        &self,
+        a: &ListedAudioFile,
+        b: &ListedAudioFile,
+        compare: impl FnOnce(&Path, &Path) -> bool,
+    ) -> bool {
+        let stamps = ((a.len, a.modified), (b.len, b.modified));
+        let key = (a.path.clone(), b.path.clone());
+        let lock = || self.same_bytes.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(hit) = lock().get(&key)
+            && hit.stamps == stamps
+        {
+            return hit.same;
+        }
+        let same = compare(&a.path, &b.path);
+        lock().insert(key, CachedComparison { stamps, same });
+        same
+    }
 }
 
-fn walk_audio_files(
+fn walk_audio_files<T>(
     source_roots: &[String],
-    mut scan: impl FnMut(&Path) -> BackendResult<ScannedTrack>,
-) -> BackendResult<Vec<ScannedTrack>> {
+    mut scan: impl FnMut(&Path) -> BackendResult<T>,
+) -> BackendResult<Vec<T>> {
     let mut tracks = Vec::new();
 
     for root in source_roots {
@@ -989,6 +1070,14 @@ mod tests {
                 .find(|t| t.path.ends_with("a.wav"))
                 .and_then(|t| t.wav_extensible_kind)
         };
+        let scan_audio_files_cached = |roots: &[String], cache: &ScanCache| {
+            cache.forget_listings();
+            cache
+                .list_audio_files(roots)?
+                .iter()
+                .map(|file| cache.scan(file))
+                .collect::<BackendResult<Vec<_>>>()
+        };
         let first = scan_audio_files_cached(&roots, &cache).unwrap();
         assert_eq!(kind(&first), Some(WavFormatIssue::ExtensiblePcm));
 
@@ -1015,6 +1104,21 @@ mod tests {
         let changed = scan_audio_files_cached(&roots, &cache).unwrap();
         assert_eq!(kind(&changed), Some(WavFormatIssue::ExtensibleOther));
         assert_eq!(changed.len(), 2);
+    }
+
+    #[test]
+    fn folder_listing_is_kept_until_forgotten() {
+        let dir = tempdir().unwrap();
+        let roots = [dir.path().to_string_lossy().to_string()];
+        fs::write(dir.path().join("a.wav"), make_minimal_wav()).unwrap();
+        let cache = ScanCache::default();
+        assert_eq!(cache.list_audio_files(&roots).unwrap().len(), 1);
+
+        fs::write(dir.path().join("b.wav"), make_minimal_wav()).unwrap();
+        assert_eq!(cache.list_audio_files(&roots).unwrap().len(), 1);
+
+        cache.forget_listings();
+        assert_eq!(cache.list_audio_files(&roots).unwrap().len(), 2);
     }
 
     #[test]

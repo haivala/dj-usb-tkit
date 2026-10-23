@@ -299,6 +299,10 @@ impl BackendCommands {
         wrap(self.service.add_track_candidates_to_playlist(req))
     }
 
+    pub fn forget_source_folder_listings(&self) {
+        self.service.forget_source_folder_listings();
+    }
+
     pub fn list_matching_track_ids(
         &self,
         req: ListMatchingTrackIdsRequest,

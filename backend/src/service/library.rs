@@ -1,12 +1,17 @@
 //! Track library: scanning, search, listing, browsing, track identity and paging.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::*;
-use crate::scanner::ScannedTrack;
+use crate::scanner::{ListedAudioFile, ScannedTrack};
 
 pub(super) fn browse_path_key(path: &str) -> String {
-    path.trim().replace('\\', "/").to_ascii_lowercase()
+    let key = path.trim().to_ascii_lowercase();
+    if key.contains('\\') {
+        key.replace('\\', "/")
+    } else {
+        key
+    }
 }
 
 /// The file a stored `tracks.file_path` names on this machine. Used by
@@ -171,6 +176,12 @@ pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
 }
 
 impl BackendService {
+    /// The source folders may have changed outside the app: the next library
+    /// listing walks them again.
+    pub fn forget_source_folder_listings(&self) {
+        self.library_scan_cache.forget_listings();
+    }
+
     pub fn scan_library(&self, req: ScanLibraryRequest) -> BackendResult<ScanLibraryData> {
         let source_roots = sanitize_source_roots(req.source_roots);
         if source_roots.is_empty() {
@@ -216,6 +227,7 @@ impl BackendService {
             });
         }
 
+        self.library_scan_cache.forget_listings();
         let mut scanned = scan_audio_files(&existing_roots)?;
         // Sorted so the copy kept of two identical new files is always the same one.
         scanned.sort_by(|a, b| a.path.cmp(&b.path));
@@ -638,95 +650,153 @@ impl BackendService {
             return Ok(Vec::new());
         }
 
-        let scanned = if source_roots.is_empty() {
+        let listed = if source_roots.is_empty() {
             Vec::new()
         } else {
-            scan_audio_files_cached(&source_roots, &self.library_scan_cache)?
+            self.library_scan_cache.list_audio_files(&source_roots)?
         };
-        let mut stmt = conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks"))?;
-        let indexed_rows = stmt.query_map([], |row| row_to_track(row, false))?;
-        let indexed_tracks = indexed_rows.collect::<Result<Vec<_>, _>>()?;
+        let listed = listed
+            .into_iter()
+            .map(|file| (browse_path_key(&file.path.to_string_lossy()), file))
+            .collect::<Vec<_>>();
+
+        // Rows are built only for what the view shows -- the listed files
+        // and the enabled libraries' tracks -- not for the whole library.
+        // Matching paths reads only the `file_path` index.
+        let listed_keys = listed
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect::<HashSet<_>>();
+        let mut shown_rowids = Vec::new();
+        {
+            let mut stmt = conn.prepare("SELECT rowid, file_path FROM tracks")?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                if row
+                    .get_ref(1)?
+                    .as_str()
+                    .is_ok_and(|path| listed_keys.contains(browse_path_key(path).as_str()))
+                {
+                    shown_rowids.push(row.get::<_, i64>(0)?);
+                }
+            }
+        }
+        if libraries.any() {
+            let mut stmt = conn.prepare(
+                "SELECT rowid FROM tracks \
+                 WHERE (?1 AND COALESCE(rekordbox_db_source, 0) != 0) \
+                    OR (?2 AND COALESCE(mixxx_db_source, 0) != 0)",
+            )?;
+            let rows = stmt
+                .query_map(params![libraries.rekordbox_db, libraries.mixxx_db], |row| {
+                    row.get::<_, i64>(0)
+                })?;
+            for rowid in rows {
+                shown_rowids.push(rowid?);
+            }
+        }
+        shown_rowids.sort_unstable();
+        shown_rowids.dedup();
+        let mut indexed_tracks = Vec::with_capacity(shown_rowids.len());
+        for chunk in shown_rowids.chunks(10_000) {
+            let placeholders = vec!["?"; chunk.len()].join(", ");
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {TRACK_COLS} FROM tracks WHERE rowid IN ({placeholders})"
+            ))?;
+            let rows = stmt.query_map(params_from_iter(chunk), |row| row_to_track(row, false))?;
+            for track in rows {
+                indexed_tracks.push(track?);
+            }
+        }
         let indexed_by_path = indexed_tracks
             .iter()
-            .cloned()
             .map(|track| (browse_path_key(&track.file_path), track))
-            .collect::<std::collections::HashMap<_, _>>();
+            .collect::<HashMap<_, _>>();
 
         // A file not in the library that is a copy of one that is stays
         // hidden, as the scan never adds it.
-        let mut indexed_paths_by_size = HashMap::<i64, Vec<String>>::new();
-        for item in &scanned {
-            if let Some(size) = item.file_size_bytes.filter(|&size| size > 0)
-                && indexed_by_path.contains_key(&browse_path_key(&item.path))
-            {
-                indexed_paths_by_size
-                    .entry(size)
+        let mut indexed_files_by_size = HashMap::<u64, Vec<&ListedAudioFile>>::new();
+        for (key, file) in &listed {
+            if file.len > 0 && indexed_by_path.contains_key(key) {
+                indexed_files_by_size
+                    .entry(file.len)
                     .or_default()
-                    .push(item.path.clone());
+                    .push(file);
             }
         }
 
-        let mut seen_paths = std::collections::HashSet::<String>::new();
-        let mut items = scanned
-            .into_iter()
-            .filter_map(|scanned| {
-                let scanned_key = browse_path_key(&scanned.path);
-                seen_paths.insert(scanned_key.clone());
-                if let Some(existing) = indexed_by_path.get(&scanned_key) {
-                    Some(existing.clone())
-                } else if identical_library_file(&indexed_paths_by_size, &scanned).is_some() {
-                    None
-                } else {
-                    let now = now();
-                    let wav_extensible_kind = scanned
-                        .wav_extensible_kind
-                        .map(|kind| kind.as_db_str().to_string());
-                    let format_compat = format_compat::compute_format_compat(
-                        scanned.format_ext.as_deref(),
-                        scanned.sample_rate_hz,
-                        scanned.bit_depth,
-                        scanned.bitrate_kbps,
-                        wav_extensible_kind.as_deref(),
-                    );
-                    Some(Track {
-                        id: scanned.path.clone(),
-                        title: scanned.title,
-                        artist: scanned.artist,
-                        album: scanned.album,
-                        year: scanned.release_year,
-                        genre: scanned.genre,
-                        track_number: scanned.track_number,
-                        bpm: None,
-                        bpm_analyzer: None,
-                        key: scanned.tonality,
-                        key_display: None,
-                        key_color: None,
-                        key_source: None,
-                        file_path: scanned.path,
-                        file_size_bytes: scanned.file_size_bytes,
-                        format_ext: scanned.format_ext,
-                        sample_rate_hz: scanned.sample_rate_hz,
-                        bit_depth: scanned.bit_depth,
-                        bitrate_kbps: scanned.bitrate_kbps,
-                        wav_extensible_kind,
-                        duration_ms: None,
-                        artwork_path: None,
-                        artwork_data_url: None,
-                        waveform_peaks_path: None,
-                        waveform_preview: None,
-                        waveform_color_data: None,
-                        created_at: now.clone(),
-                        updated_at: now,
-                        rekordbox_db_source: false,
-                        mixxx_db_source: false,
-                        is_usb_path: false,
-                        // Freshly scanned, not yet indexed -- no analysis.
-                        analysis_ready: false,
-                        format_compat,
-                    })
-                }
-            })
-            .collect::<Vec<_>>();
+        // Only files not in the library have their tags read: an indexed
+        // file's row already holds them.
+        let mut seen_paths = HashSet::<String>::new();
+        let mut items = Vec::with_capacity(listed.len());
+        for (scanned_key, file) in &listed {
+            seen_paths.insert(scanned_key.clone());
+            if let Some(existing) = indexed_by_path.get(scanned_key) {
+                items.push((*existing).clone());
+                continue;
+            }
+            let is_copy = indexed_files_by_size.get(&file.len).is_some_and(|kept| {
+                kept.iter().any(|kept| {
+                    kept.path != file.path
+                        && self.library_scan_cache.same_bytes(
+                            file,
+                            kept,
+                            track_matching::same_file_bytes,
+                        )
+                })
+            });
+            if is_copy {
+                continue;
+            }
+            let scanned = self.library_scan_cache.scan(file)?;
+            let now = now();
+            let wav_extensible_kind = scanned
+                .wav_extensible_kind
+                .map(|kind| kind.as_db_str().to_string());
+            let format_compat = format_compat::compute_format_compat(
+                scanned.format_ext.as_deref(),
+                scanned.sample_rate_hz,
+                scanned.bit_depth,
+                scanned.bitrate_kbps,
+                wav_extensible_kind.as_deref(),
+            );
+            items.push(Track {
+                id: scanned.path.clone(),
+                title: scanned.title,
+                artist: scanned.artist,
+                album: scanned.album,
+                year: scanned.release_year,
+                genre: scanned.genre,
+                track_number: scanned.track_number,
+                bpm: None,
+                bpm_analyzer: None,
+                key: scanned.tonality,
+                key_display: None,
+                key_color: None,
+                key_source: None,
+                file_path: scanned.path,
+                file_size_bytes: scanned.file_size_bytes,
+                format_ext: scanned.format_ext,
+                sample_rate_hz: scanned.sample_rate_hz,
+                bit_depth: scanned.bit_depth,
+                bitrate_kbps: scanned.bitrate_kbps,
+                wav_extensible_kind,
+                duration_ms: None,
+                artwork_path: None,
+                artwork_data_url: None,
+                waveform_peaks_path: None,
+                waveform_preview: None,
+                waveform_color_data: None,
+                created_at: now.clone(),
+                updated_at: now,
+                rekordbox_db_source: false,
+                mixxx_db_source: false,
+                is_usb_path: false,
+                // Freshly scanned, not yet indexed -- no analysis.
+                analysis_ready: false,
+                format_compat,
+            });
+        }
 
         if libraries.any() {
             for track in indexed_tracks
@@ -740,11 +810,7 @@ impl BackendService {
             }
         }
 
-        items.sort_by(|a, b| {
-            browse_path_key(&a.file_path)
-                .cmp(&browse_path_key(&b.file_path))
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        items.sort_by_cached_key(|track| (browse_path_key(&track.file_path), track.id.clone()));
 
         Ok(items)
     }
