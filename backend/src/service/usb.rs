@@ -854,7 +854,7 @@ impl BackendService {
     /// own cache and backups; returns the name it carries.
     ///
     /// Otherwise registers the name, so drives named on another computer
-    /// count as taken here too.
+    /// count as taken here too, and labels the mount path with it.
     pub(crate) fn check_drive_identity(
         &self,
         conn: &rusqlite::Connection,
@@ -885,10 +885,14 @@ impl BackendService {
             return Ok(registered.map(|drive| drive.name));
         }
         if let Some(name) = &marker {
-            usb_utils::register_drive_name(conn, name, &now())?;
+            let now_ts = now();
+            usb_utils::register_drive_name(conn, name, &now_ts)?;
             if let Some(total_bytes) = total_bytes {
                 usb_utils::fill_registered_drive_size(conn, name, total_bytes)?;
             }
+            // The path's label follows the drive last seen there, also one
+            // named elsewhere (another computer, or a hand-edited marker).
+            usb_utils::set_device_label(conn, usb_root, name, &now_ts)?;
         }
         Ok(None)
     }
@@ -4170,6 +4174,12 @@ mod tests {
             crate::service::usb_drive_name(&devices_conn, &usb_root),
             None
         );
+        let devices = service.list_usb_devices().expect("list devices");
+        assert_eq!(
+            devices.items[0].label.as_deref(),
+            Some("Club Stick"),
+            "a carried name is not written to the path's label"
+        );
     }
 
     #[test]
@@ -4215,6 +4225,22 @@ mod tests {
         let data = get_name(&service, &usb_root);
         assert_eq!(data.name.as_deref(), Some("Club Stick"));
         assert_eq!(data.name_taken_by, None);
+    }
+
+    #[test]
+    fn the_mount_path_label_follows_a_name_changed_outside_the_app() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        set_name(&service, &usb_root, "Club Stick").expect("name drive");
+        crate::service::usb_identity::write_drive_name(&usb_root, "Booth Stick").unwrap();
+
+        assert_eq!(
+            get_name(&service, &usb_root).name.as_deref(),
+            Some("Booth Stick")
+        );
+
+        let devices = service.list_usb_devices().expect("list devices");
+        assert_eq!(devices.items[0].label.as_deref(), Some("Booth Stick"));
     }
 
     #[test]

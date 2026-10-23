@@ -37,6 +37,12 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Fix:** When no USB is connected, the "Last exported to …" line under a playlist could show the
+  wrong drive name, for example for a drive that was named on another computer. It now shows the
+  name the drive had the last time it was connected.
+
 ## 0.4.5
 
 **Severity:** feature

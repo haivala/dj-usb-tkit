@@ -263,7 +263,7 @@ pub(crate) fn set_device_label(
     upsert_usb_device(conn, root, false, now_ts)?;
     let root_path_key = super::normalize_source_root_for_matching(&root.to_string_lossy());
     conn.execute(
-        "UPDATE usb_devices SET label = ?1, updated_at = ?2 WHERE root_path_key = ?3",
+        "UPDATE usb_devices SET label = ?1, updated_at = ?2 WHERE root_path_key = ?3 AND label IS NOT ?1",
         rusqlite::params![label, now_ts, root_path_key],
     )?;
     Ok(())
