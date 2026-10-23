@@ -75,7 +75,7 @@ test("renderUsbRecentRoots toggles row visibility and renders buttons", () => {
     usbRecentList: document.getElementById("usbRecentList")
   };
 
-  renderUsbRecentRoots({ el, document, state: { usbRecentRoots: ["/USB/A", "", " /USB/B "] } });
+  renderUsbRecentRoots({ el, document, state: { usbRecentRoots: ["/USB/A", "", " /USB/B "], runningJobs: new Map() } });
 
   assert.equal(el.usbRecentRow.classList.contains("hidden"), false);
   assert.equal(el.usbRecentList.querySelectorAll("button").length, 2);

@@ -34,7 +34,7 @@ function jobCtx(lockCalls) {
     progressCancelAnalysisBtn: {}
   };
   return {
-    state: { activeJobId: null, activeJobType: null, usbJobIdleWaiters: [] },
+    state: { activeJobId: null, activeJobType: null, runningJobs: new Map(), usbJobIdleWaiters: [] },
     el,
     debugFrontendLog: () => {},
     emitMessage: () => {},
@@ -47,7 +47,8 @@ function jobCtx(lockCalls) {
 }
 
 function withJob(ctx, activeJobId, activeJobType) {
-  Object.assign(ctx.state, { activeJobId, activeJobType });
+  const runningJobs = activeJobId ? new Map([[activeJobId, { jobType: activeJobType }]]) : new Map();
+  Object.assign(ctx.state, { activeJobId, activeJobType, runningJobs });
   return ctx;
 }
 
@@ -88,7 +89,7 @@ test("validateAndSetUsbRoot blocks every USB-locking job type before backend val
       let commandCalled = false;
       let lastStatus = "";
       const ctx = {
-        state: { activeJobId: "job-1", activeJobType: jobType, usbRoot: null },
+        state: { activeJobId: "job-1", activeJobType: jobType, runningJobs: new Map([["job-1", { jobType }]]), usbRoot: null },
         el: {},
         command: async () => { commandCalled = true; return {}; },
         emitStatus: (text) => { lastStatus = text; }

@@ -455,6 +455,10 @@ function installScanAnalysisMock(page, opts = {}) {
       convertFileSrc: (filePath) => filePath
     };
 
+    // Lets a test run a job of its own (an export) alongside the analysis.
+    window.__emitJobEvent = emitJobEvent;
+    window.__hasJobListener = () => (listeners.get("job:event") || []).length > 0;
+
     window.__scanTestStats = {
       get analyzeNewTracksCalls() {
         return analyzeNewTracksCalls;
@@ -906,6 +910,71 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.bpmRangeSeen)).toEqual({ min: 70, max: 180 });
   await expect(page.locator("#libraryTotalDuration")).toHaveText("Total time: 3:00");
   await expect(page.locator("#libraryTableBody .track-grid-row").first()).not.toHaveClass(/is-analyzing/);
+});
+
+async function startMockExport(page) {
+  await page.waitForFunction(() => window.__hasJobListener?.());
+  await page.evaluate(() => window.__emitJobEvent({
+    event: "job.started",
+    jobId: "export-1",
+    jobType: "export",
+    stage: "export",
+    percent: 10,
+    message: "USB: Exporting playlist"
+  }));
+  await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
+  await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+}
+
+function finishMockExport(page) {
+  return page.evaluate(() => window.__emitJobEvent({
+    event: "job.completed",
+    jobId: "export-1",
+    jobType: "export",
+    stage: "export",
+    percent: 100,
+    message: "USB: Export complete"
+  }));
+}
+
+test("an analysis run during an export leaves the export's progress bar and timer alone", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 50, pauseBeforeBpmKey: true });
+  await page.goto("/");
+  await startMockExport(page);
+
+  await page.locator("#scanLibraryBtn").click();
+  await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
+  await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
+  await expect(page.locator("#progressPauseBtn")).toBeHidden();
+
+  await page.evaluate(() => window.__releaseBeforeBpmKey());
+  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
+  await expect(page.locator("#progressFooter")).toHaveClass(/active/);
+  await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
+  await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+  await expect(page.locator("#selectUsbFolderBtn")).toBeDisabled();
+
+  await finishMockExport(page);
+  await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
+  await expect(page.locator("#selectUsbFolderBtn")).toBeEnabled();
+});
+
+test("the progress bar passes to an analysis still running when the export ends", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 50, pauseBeforeBpmKey: true });
+  await page.goto("/");
+  await startMockExport(page);
+
+  await page.locator("#scanLibraryBtn").click();
+  await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
+
+  await finishMockExport(page);
+  await expect(page.locator("#progressText")).toHaveText("Analyzing selected tracks");
+  await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+
+  await page.evaluate(() => window.__releaseBeforeBpmKey());
+  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
+  await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
 });
 
 test("every track in a large batch pulses as analyzing while a worker is on it", async ({ page }, testInfo) => {

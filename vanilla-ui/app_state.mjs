@@ -102,8 +102,12 @@ export function createInitialState() {
     mixxxDbEnabled: false,
     mixxxDbImported: false,
     sourcesEverConfigured: false,
+    // The job whose progress the footer bar shows: the oldest running one.
     activeJobId: null,
     activeJobType: null,
+    // Every running backend job, in start order: jobId -> { jobType,
+    // startedAtMs, percent, message }.
+    runningJobs: new Map(),
     analysisPaused: false,
     unlistenJobEvent: null,
     unlistenPlaybackEvent: null,

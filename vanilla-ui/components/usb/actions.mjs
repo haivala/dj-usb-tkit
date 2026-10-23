@@ -19,7 +19,10 @@ import {
 export const USB_ROOT_LOCKING_JOB_TYPES = new Set(["usb_read", "usb_write", "diagnostics", "export"]);
 
 export function isUsbRootChangeBlocked(state) {
-  return !!state.activeJobId && USB_ROOT_LOCKING_JOB_TYPES.has(state.activeJobType);
+  for (const job of state.runningJobs.values()) {
+    if (USB_ROOT_LOCKING_JOB_TYPES.has(job.jobType)) return true;
+  }
+  return false;
 }
 
 export function setUsbRootControlsLocked(ctx, locked) {

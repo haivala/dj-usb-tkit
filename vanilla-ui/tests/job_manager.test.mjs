@@ -55,6 +55,7 @@ function makeState() {
     progressPausedAtMs: null,
     activeJobId: null,
     activeJobType: null,
+    runningJobs: new Map(),
     usbJobIdleWaiters: []
   };
 }

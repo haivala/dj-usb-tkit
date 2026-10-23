@@ -211,6 +211,7 @@ test("empty playlist links to the Media Library and to USB, or to USB Playlists 
       selectedTrackIds: new Set(),
       usbRoot: null,
       usbRootValid: false,
+      runningJobs: new Map(),
     },
     el: elements(document, [
       "navPlaylistList", "playlistPanelTitle", "playlistExportStatus", "playlistSearchInput",

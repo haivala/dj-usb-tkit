@@ -184,6 +184,7 @@ function makeExportState(overrides = {}) {
     exportPruneStale: true,
     exportBackup: false,
     activeJobId: null,
+    runningJobs: new Map(),
     currentPlaylistId: null,
     usbPlaylists: [],
     ...overrides

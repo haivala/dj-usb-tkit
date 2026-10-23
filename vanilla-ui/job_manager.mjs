@@ -265,14 +265,16 @@ export function handleJobEvent(ctx, payload) {
   }
 
   if (eventName === "job.started" && jobId) {
-    state.activeJobId = jobId;
-    state.activeJobType = jobType;
+    state.runningJobs.set(jobId, { jobType, startedAtMs: Date.now(), percent, message });
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
       setUsbRootControlsLocked(true);
     }
-    setAnalysisControlsVisible(state, el, jobType === "analysis");
-      setProgress(ctx, true, percent, message || "Working...");
-    startProgressHeartbeat(ctx);
+    // A job started while another runs (an analysis or an update during an
+    // export) only reports in the status line; the bar stays with the
+    // running job until it ends.
+    if (!state.activeJobId) {
+      showJobOnProgressBar(ctx, jobId);
+    }
     if (status) {
       emitMessage({
         level: "info",
@@ -284,9 +286,7 @@ export function handleJobEvent(ctx, payload) {
     return;
   }
 
-  if (jobId && state.activeJobId && jobId !== state.activeJobId) {
-    return;
-  }
+  const ownsProgressBar = !jobId || jobId === state.activeJobId;
 
   if (eventName === "job.progress") {
     const isPartialAnalysisPiece = stage === "analyze_new_tracks"
@@ -295,7 +295,14 @@ export function handleJobEvent(ctx, payload) {
     if (isPartialAnalysisPiece) {
       return;
     }
+    const job = jobId ? state.runningJobs.get(jobId) : null;
+    if (job) {
+      job.percent = percent;
+      job.message = message;
+    }
+    if (ownsProgressBar) {
       setProgress(ctx, true, percent, message || "Working...");
+    }
     if (status) {
       emitMessage({
         level: "info",
@@ -308,7 +315,9 @@ export function handleJobEvent(ctx, payload) {
   }
 
   if (eventName === "job.completed") {
+    if (ownsProgressBar) {
       setProgress(ctx, true, 100, message || "Done");
+    }
     if (status) {
       emitMessage({
         level: "info",
@@ -318,16 +327,14 @@ export function handleJobEvent(ctx, payload) {
       });
     }
     Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
-    if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
-      setUsbRootControlsLocked(false);
-    }
-    finishActiveJob(ctx, jobType);
-    scheduleProgressIdle(ctx, 350);
+    finishJob(ctx, jobId, jobType, ownsProgressBar, 350);
     return;
   }
 
   if (eventName === "job.failed") {
+    if (ownsProgressBar) {
       setProgress(ctx, true, 100, message || "Failed");
+    }
     // No Event Log entry: every job fails through a failed command, and the
     // backend logs each failed command's reason once (ApiResponse::failure).
     if (status) {
@@ -338,22 +345,42 @@ export function handleJobEvent(ctx, payload) {
         status
       });
     }
-    if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
-      setUsbRootControlsLocked(false);
-    }
-    finishActiveJob(ctx, jobType);
-    scheduleProgressIdle(ctx, 500);
+    finishJob(ctx, jobId, jobType, ownsProgressBar, 500);
   }
 }
 
-function finishActiveJob(ctx, jobType) {
+// Hand the footer bar to a running job: its own text, percent, controls and
+// elapsed time, counted from when it started rather than when it got the bar.
+function showJobOnProgressBar(ctx, jobId) {
   const { state, el } = ctx;
+  const job = state.runningJobs.get(jobId);
+  state.activeJobId = jobId;
+  state.activeJobType = job.jobType;
+  setAnalysisControlsVisible(state, el, job.jobType === "analysis");
+  setProgress(ctx, true, job.percent, job.message || "Working...");
+  stopProgressHeartbeat(ctx);
+  startProgressHeartbeat(ctx);
+  state.progressStartedAtMs = job.startedAtMs;
+  renderProgressTime(ctx);
+}
+
+function finishJob(ctx, jobId, jobType, ownsProgressBar, idleDelayMs) {
+  const { state, el, setUsbRootControlsLocked } = ctx;
+  if (jobId) state.runningJobs.delete(jobId);
+  if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType) && !isUsbRootChangeBlocked(state)) {
+    setUsbRootControlsLocked(false);
+    const waiters = state.usbJobIdleWaiters.splice(0);
+    waiters.forEach((resolve) => resolve());
+  }
+  if (!ownsProgressBar) return;
   state.activeJobId = null;
   state.activeJobType = null;
   setAnalysisControlsVisible(state, el, false);
-  if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
-    const waiters = state.usbJobIdleWaiters.splice(0);
-    waiters.forEach((resolve) => resolve());
+  const [nextJobId] = state.runningJobs.keys();
+  if (nextJobId) {
+    showJobOnProgressBar(ctx, nextJobId);
+  } else {
+    scheduleProgressIdle(ctx, idleDelayMs);
   }
 }
 
