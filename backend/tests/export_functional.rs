@@ -795,14 +795,14 @@ fn playlist_export_space_counts_only_tracks_the_usb_pdb_lacks() {
     assert!(space.available_bytes.is_some());
     assert!(space.fits);
 
-    // Only the new track counts: its audio plus its analysis bundle
-    // (DAT + EXT + 2EX written by seed_test_analysis_bundle).
+    // Only the new track counts, by the audio size the DB recorded: the DB
+    // records no analysis-bundle sizes, so the heading doesn't stat them.
     add(&two);
     let two_len = fs::metadata(media.join("Space Artist - Space Two.wav"))
         .expect("stat track two")
         .len();
     let space = export_space();
-    assert_eq!(space.bytes_to_copy, two_len + 3 * 8);
+    assert_eq!(space.bytes_to_copy, two_len);
     assert_eq!(space.tracks_to_copy, 1);
 }
 

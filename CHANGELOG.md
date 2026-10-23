@@ -37,8 +37,15 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.6
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** With a USB connected, opening a playlist (also at startup and when
+  selecting the USB) read the size of every track's file from your music disk to work out the
+  "tracks to copy" line, waking a sleeping hard drive and repeating the work as the list scrolled.
+  The line now uses the sizes the library recorded when the files were scanned and no longer
+  touches your music files.
 - **Fix:** When no USB is connected, the "Last exported to …" line under a playlist could show the
   wrong drive name, for example for a drive that was named on another computer. It now shows the
   name the drive had the last time it was connected.

@@ -82,7 +82,9 @@ The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPOR
     the playlist was last exported and to which drive.
   - The title row shows how many tracks and how much data an export would still copy, and how
     much space is free on the USB. It says "Doesn't fit" when the export won't fit. Tracks
-    already on the USB aren't counted, and working this out doesn't read the USB.
+    already on the USB aren't counted. Working this out reads neither the USB nor your music
+    files: it uses the sizes the library recorded when the files were scanned, so it doesn't
+    wake a sleeping disk.
   - The export button names the drive: **Export to USB: \<name\>**. In additive sync mode, when
     the USB already has a playlist with the same name, it reads **Append to (\<playlist\>) on USB**
     instead, and the playlist's tracks can't be reordered by dragging, since an append keeps the
