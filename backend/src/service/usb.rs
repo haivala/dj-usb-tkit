@@ -111,6 +111,24 @@ pub(crate) type UsbPlaylistsCache =
 pub(crate) type UsbHistoriesCache =
     std::sync::Mutex<Option<(UsbParseCacheKey, Arc<crate::models::FetchUsbHistoriesData>)>>;
 
+/// Every track file the staged PDB lists, by `usb_track_size_key`, with its
+/// recorded size.
+pub(crate) type UsbTrackSizes = HashMap<String, u64>;
+/// One-entry cache of `UsbTrackSizes`, keyed by the staged PDB's path and
+/// signature, so the playlist heading's export estimate doesn't re-parse the
+/// PDB on every page load.
+pub(crate) type UsbTrackSizesCache =
+    std::sync::Mutex<Option<(std::path::PathBuf, StagedFileSig, Arc<UsbTrackSizes>)>>;
+
+/// Lookup key for a file under the USB root: its root-relative path with `/`
+/// separators, lowercased (FAT32 and exFAT names are case-insensitive).
+pub(crate) fn usb_track_size_key(relative_path: &str) -> String {
+    relative_path
+        .replace('\\', "/")
+        .trim_start_matches('/')
+        .to_lowercase()
+}
+
 fn build_usb_track_index(
     parsed: &crate::pdb_reader::ParsedPdb,
     usb_root: &Path,
@@ -880,6 +898,40 @@ impl BackendService {
         if let Ok(mut guard) = self.usb_histories_cache.lock() {
             *guard = None;
         }
+        if let Ok(mut guard) = self.usb_track_sizes_cache.lock() {
+            *guard = None;
+        }
+    }
+
+    /// The staged PDB's track files and sizes (see `UsbTrackSizes`). Reads
+    /// only the local staged copy; `stage_pdb` touches the drive only when
+    /// this stick's PDB hasn't been staged and verified yet.
+    pub(crate) fn usb_track_sizes(&self, usb_root: &Path) -> BackendResult<Arc<UsbTrackSizes>> {
+        let pdb_path = super::usb_staging::stage_pdb(usb_root)?;
+        let sig = StagedFileSig::of(&pdb_path)
+            .ok_or_else(|| BackendError::NotFound("staged PDB is missing".to_string()))?;
+        if let Ok(guard) = self.usb_track_sizes_cache.lock()
+            && let Some((path, cached_sig, sizes)) = guard.as_ref()
+            && *path == pdb_path
+            && *cached_sig == sig
+        {
+            return Ok(Arc::clone(sizes));
+        }
+        let parsed = parse_pdb(&pdb_path)?;
+        let sizes: Arc<UsbTrackSizes> = Arc::new(
+            parsed
+                .tracks
+                .iter()
+                .filter_map(|track| {
+                    let size = track.file_size_bytes?;
+                    Some((usb_track_size_key(&track.track_file_path), u64::from(size)))
+                })
+                .collect(),
+        );
+        if let Ok(mut guard) = self.usb_track_sizes_cache.lock() {
+            *guard = Some((pdb_path, sig, Arc::clone(&sizes)));
+        }
+        Ok(sizes)
     }
 
     fn usb_playlists_cache_hit(&self, key: &UsbParseCacheKey) -> Option<Arc<CachedUsbPlaylists>> {

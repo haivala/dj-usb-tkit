@@ -43,6 +43,12 @@
   size of the list's audio files next to its track count, so you can see before exporting whether
   a playlist fits on the USB. Both numbers cover the whole list, even while a search is narrowing
   it.
+- **New feature:** With a USB connected, a line under the playlist title shows how much an export
+  would still copy and how much space is free on the USB, and warns when it won't fit. Tracks
+  already on the USB aren't counted, and working this out doesn't read the USB, so it stays quick
+  on slow sticks.
+- **Fix:** A failed export or other background job adds one entry to the Event Log instead of
+  repeating the same error up to four times.
 - **Improvement:** The cue editor opens over the page and sidebar instead of opening as a window
   on top, and the track you edited stays marked in the list after closing.
 - **Improvement:** With a USB connected, the checkmark next to a playlist in the sidebar and the

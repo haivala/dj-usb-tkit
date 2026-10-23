@@ -328,16 +328,16 @@ export function handleJobEvent(ctx, payload) {
 
   if (eventName === "job.failed") {
       setProgress(ctx, true, 100, message || "Failed");
-    emitMessage({
-      level: "error",
-      source: "job",
-      code: `${jobType}.failed`,
-      ...(status ? { status } : {}),
-      eventLog: {
-        text: statusText || message || "Job failed",
-        coalesceKey: `${jobType}.failed.${stage || "unknown"}`
-      }
-    });
+    // No Event Log entry: every job fails through a failed command, and the
+    // backend logs each failed command's reason once (ApiResponse::failure).
+    if (status) {
+      emitMessage({
+        level: "error",
+        source: "job",
+        code: `${jobType}.failed`,
+        status
+      });
+    }
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
       setUsbRootControlsLocked(false);
     }

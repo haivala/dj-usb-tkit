@@ -2188,7 +2188,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
     .await;
 
     let Err(message) = result;
-    crate::backend_log!(Warn, "update-install", "update install failed: {message}");
+    // ApiResponse::failure below puts the reason in the Event Log.
     let message = format!("Update failed: {message}");
     emit_job_failed(&app, identity, Some(message.clone()));
     ApiResponse::failure(ErrorPayload {

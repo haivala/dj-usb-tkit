@@ -1851,6 +1851,16 @@ button[data-export-playlist]:hover {
   flex-shrink: 0;
 }
 
+/* "1.2 GB to copy · 27.0 GB free on USB" under the playlist title. */
+.playlist-export-space {
+  margin: -8px 0 12px;
+  font-size: 13px;
+}
+
+.playlist-export-space.is-warning {
+  color: var(--danger);
+}
+
 .playlist-footer .playlist-export-status {
   margin: 8px 2px 0;
   padding-bottom: 10px;

@@ -647,6 +647,24 @@ pub struct GetPlaylistTracksRequest {
     /// `0` ⇒ unpaginated (the whole playlist), for backward compatibility.
     #[serde(default)]
     pub limit: usize,
+    /// The connected USB, if any: the response then carries `export_space`.
+    #[serde(default)]
+    pub usb_root: Option<String>,
+}
+
+/// What exporting a playlist to the connected USB would newly copy, against
+/// the drive's free space. Worked out without reading the drive: the copy
+/// estimate checks the locally staged PDB's track list, and the free space is
+/// one filesystem query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistExportSpace {
+    pub bytes_to_copy: u64,
+    /// `None` when the free space can't be read.
+    pub available_bytes: Option<u64>,
+    /// False when the copy plus the export's headroom exceeds the free space,
+    /// the same rule the export's own preflight blocks on.
+    pub fits: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -676,6 +694,9 @@ pub struct GetPlaylistTracksData {
     pub list_track_count: usize,
     #[serde(default)]
     pub list_size_bytes: u64,
+    /// Set when the request named a USB and the estimate could be made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_space: Option<PlaylistExportSpace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

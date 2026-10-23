@@ -217,33 +217,31 @@ test("exportPlaylistToUsb reports local blockers and generic command failures", 
   let status = "";
   const logged = [];
 
-  await assert.rejects(
-    exportPlaylistToUsb(exportCtx(makeExportState(), {
-      emitStatus: (text) => { status = text; },
-      command: async () => { throw new Error("boom"); },
-      emitMessage: (message) => logged.push(message)
-    }), "p1")
-  );
+  // Reported in the status bar only, and not rethrown: the backend already
+  // put the reason in the Event Log (one entry per failure).
+  await exportPlaylistToUsb(exportCtx(makeExportState(), {
+    emitStatus: (text) => { status = text; },
+    command: async () => { throw new Error("boom"); },
+    emitMessage: (message) => logged.push(message)
+  }), "p1");
   assert.match(status, /Export failed: boom/);
-  assert.equal(logged[0].code, "export.failure");
+  assert.equal(logged.filter((message) => message.eventLog).length, 0);
 
   // A missing source folder is now a backend export-gate rejection
   // (validationType "source_root_missing") -- the frontend renders it, no
   // client-side path matching.
-  await assert.rejects(
-    exportPlaylistToUsb(
-      exportCtx(makeExportState({
-        playlists: [{ id: "p1", name: "Set", tracks: [{ id: "t1", filePath: "/music/missing/Artist - Track.mp3" }] }]
-      }), {
-        emitStatus: (text) => { status = text; },
-        command: async () => {
-          const err = new Error("export blocked: source folder is missing: /music/missing. Relocate or remove it first.");
-          err.details = { validationType: "source_root_missing", missingRoots: ["/music/missing"] };
-          throw err;
-        }
-      }),
-      "p1"
-    )
+  await exportPlaylistToUsb(
+    exportCtx(makeExportState({
+      playlists: [{ id: "p1", name: "Set", tracks: [{ id: "t1", filePath: "/music/missing/Artist - Track.mp3" }] }]
+    }), {
+      emitStatus: (text) => { status = text; },
+      command: async () => {
+        const err = new Error("export blocked: source folder is missing: /music/missing. Relocate or remove it first.");
+        err.details = { validationType: "source_root_missing", missingRoots: ["/music/missing"] };
+        throw err;
+      }
+    }),
+    "p1"
   );
   assert.match(status, /Export blocked: source folder is missing: \/music\/missing/);
 });

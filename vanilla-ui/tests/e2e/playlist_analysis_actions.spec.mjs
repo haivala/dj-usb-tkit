@@ -36,6 +36,8 @@ test.beforeEach(async ({ page }) => {
         // The heading's totals cover the whole playlist, ignoring the search.
         listTrackCount: (all || []).length,
         listSizeBytes: (all || []).reduce((s, t) => s + (t.fileSizeBytes > 0 ? t.fileSizeBytes : 0), 0),
+        // The backend only estimates the export when asked about a USB.
+        ...(request.usbRoot && window.__exportSpace ? { exportSpace: window.__exportSpace } : {}),
       };
     };
     window.__applyReorder = (cur, request) => {
@@ -1094,6 +1096,48 @@ test("playlist header sort is disabled with a tooltip when additive export won't
   await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
   await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t2");
   await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t3");
+});
+
+test("the playlist heading shows what an export would copy against the USB's free space", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.addInitScript(() => {
+    window.__exportSpace = { bytesToCopy: 1.2 * 1024 ** 3, availableBytes: 27 * 1024 ** 3, fits: true };
+  });
+  await page.goto("/");
+
+  // No USB yet: no estimate.
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+  await expect(page.locator("#playlistExportSpace")).toBeHidden();
+
+  await connectUsbAndFetchPlaylists(page);
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const space = page.locator("#playlistExportSpace");
+  await expect(space).toHaveText("1.2 GB to copy · 27.0 GB free on USB");
+  await expect(space).not.toHaveClass(/is-warning/);
+
+  // The backend decides it won't fit; the next load (here a search) shows it.
+  await page.evaluate(() => {
+    window.__exportSpace = { bytesToCopy: 31 * 1024 ** 3, availableBytes: 27 * 1024 ** 3, fits: false };
+  });
+  await page.locator("#playlistSearchInput").fill("Song");
+  await expect(space).toHaveText("Doesn't fit: 31.0 GB to copy, 27.0 GB free on USB");
+  await expect(space).toHaveClass(/is-warning/);
+});
+
+test("a failed export is reported in the status bar and left to the backend's one Event Log entry", async ({ page }) => {
+  // The mock answers export_to_usb with a failure ("Unhandled: export_to_usb").
+  // The real backend logs every failed command once; the frontend adds nothing.
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.goto("/");
+  await connectUsbAndFetchPlaylists(page);
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+
+  await page.locator("#exportPlaylistBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Export failed: Unhandled: export_to_usb. See Event Log for details.");
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#eventLogList")).not.toContainText("export_to_usb");
 });
 
 test("changing the export sync mode releases and re-engages the open playlist's reorder lock without a USB rescan", async ({ page }) => {

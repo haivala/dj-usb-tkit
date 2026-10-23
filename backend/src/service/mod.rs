@@ -250,6 +250,9 @@ pub struct BackendService {
     /// re-parse on every page. Shared across `.clone()`s of the service.
     pub(crate) usb_playlists_cache: Arc<usb::UsbPlaylistsCache>,
     pub(crate) usb_histories_cache: Arc<usb::UsbHistoriesCache>,
+    /// The staged PDB's track files and sizes, for the playlist heading's
+    /// export estimate. Shared across `.clone()`s of the service.
+    pub(crate) usb_track_sizes_cache: Arc<usb::UsbTrackSizesCache>,
     /// Serializes cue-editor saves to a USB: they run as background jobs, and
     /// each one read-modify-writes the same staged `export.pdb` / eDB.
     /// Shared across `.clone()`s (the Tauri state and the job threads).
@@ -276,6 +279,7 @@ impl BackendService {
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),
+            usb_track_sizes_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_write_lock: Arc::new(std::sync::Mutex::new(())),
             usb_playlist_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             usb_history_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),

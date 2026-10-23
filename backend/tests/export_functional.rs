@@ -702,6 +702,108 @@ fn export_to_usb_preserves_flac_wav_and_aif_media_paths_in_edb_and_pdb() {
 }
 
 #[test]
+fn playlist_export_space_counts_only_tracks_the_usb_pdb_lacks() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_flac.flac",
+        "Space Artist - Space One.flac",
+    );
+    copy_audio_fixture(
+        &media,
+        "formats/track_format_wav.wav",
+        "Space Artist - Space Two.wav",
+    );
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    let tracks = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            query: "space".to_string(),
+            limit: 10,
+            ..Default::default()
+        })
+        .data
+        .expect("search data")
+        .items;
+    let id_of = |title: &str| {
+        tracks
+            .iter()
+            .find(|track| track.title == title)
+            .unwrap_or_else(|| panic!("missing track {title}"))
+            .id
+            .clone()
+    };
+    let (one, two) = (id_of("Space One"), id_of("Space Two"));
+    seed_tracks_as_analyzed(&data_dir, &[one.clone(), two.clone()]);
+
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: "Space Check".to_string(),
+        })
+        .data
+        .expect("playlist data")
+        .playlist_id;
+    let add = |track_id: &str| {
+        let added =
+            backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+                source_roots: vec![media.to_string_lossy().to_string()],
+                playlist_id: playlist_id.clone(),
+                track_ids: vec![track_id.to_string()],
+                ..Default::default()
+            });
+        assert!(added.ok, "add track failed: {added:?}");
+    };
+    let export_space = || {
+        backend
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist_id.clone(),
+                usb_root: Some(usb.to_string_lossy().to_string()),
+                ..Default::default()
+            })
+            .data
+            .expect("playlist tracks")
+            .export_space
+            .expect("export space")
+    };
+
+    add(&one);
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: None,
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+
+    let space = export_space();
+    assert_eq!(space.bytes_to_copy, 0, "the exported track is on the USB");
+    assert!(space.available_bytes.is_some());
+    assert!(space.fits);
+
+    // Only the new track counts: its audio plus its analysis bundle
+    // (DAT + EXT + 2EX written by seed_test_analysis_bundle).
+    add(&two);
+    let two_len = fs::metadata(media.join("Space Artist - Space Two.wav"))
+        .expect("stat track two")
+        .len();
+    assert_eq!(export_space().bytes_to_copy, two_len + 3 * 8);
+}
+
+#[test]
 fn export_to_usb_does_not_change_player_menu_in_edb_or_pdb() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");

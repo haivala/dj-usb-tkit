@@ -10,6 +10,7 @@ import {
   formatTimestampLocal,
   renderTrackListDurationSummary,
   formatTrackListSummary,
+  formatByteSize,
   ANALYZE_PLAYLIST_MISSING_TOOLTIP,
 } from "../../track_utils.mjs";
 
@@ -684,6 +685,31 @@ export function updatePlaylistPanelTitle(ctx, playlist) {
   // Backend-derived from where the playlist was imported (see list_playlists).
   if (playlist.importedFrom) parts.push(`· Imported from ${playlist.importedFrom}`);
   el.playlistPanelTitle.textContent = parts.join(" ");
+  renderPlaylistExportSpace(ctx, playlist);
+}
+
+// What exporting the playlist to the connected USB would copy, against its
+// free space -- `exportSpace` from get_playlist_tracks (the backend decides
+// whether it fits). Hidden without a USB or an estimate.
+function renderPlaylistExportSpace(ctx, playlist) {
+  const { state, el } = ctx;
+  if (!el?.playlistExportSpace) return;
+  const space = state.usbRoot && state.usbRootValid && Number(playlist.listTrackCount) > 0
+    ? playlist.exportSpace
+    : null;
+  el.playlistExportSpace.classList.toggle("hidden", !space);
+  if (!space) return;
+  const toCopy = Number(space.bytesToCopy) || 0;
+  const free = space.availableBytes == null ? null : `${formatByteSize(space.availableBytes)} free on USB`;
+  let text;
+  if (!space.fits) {
+    text = `Doesn't fit: ${formatByteSize(toCopy)} to copy, ${free}`;
+  } else {
+    const copyText = toCopy > 0 ? `${formatByteSize(toCopy)} to copy` : "Nothing new to copy";
+    text = free ? `${copyText} · ${free}` : copyText;
+  }
+  el.playlistExportSpace.textContent = text;
+  el.playlistExportSpace.classList.toggle("is-warning", !space.fits);
 }
 
 export function populatePlaylistPanel(ctx, playlist) {
@@ -745,6 +771,8 @@ export function createPlaylistTracksController(ctx) {
         sortDir: sortDir || null,
         offset,
         limit,
+        // Asks for the export estimate (exportSpace) against this USB.
+        usbRoot: ctx.state.usbRoot && ctx.state.usbRootValid ? ctx.state.usbRoot : null,
       }),
     normalize: (track) => ctx.normalizeTrack(track),
     getItems: () => getCurrentPlaylist(ctx)?.tracks || [],
@@ -793,6 +821,7 @@ export function createPlaylistTracksController(ctx) {
         p.trackCount = Number(data.total) || 0;
         p.listTrackCount = Number(data.listTrackCount) || 0;
         p.listSizeBytes = Number(data.listSizeBytes) || 0;
+        p.exportSpace = data.exportSpace || null;
       }
       // Reveal the table wrap *before* the rows are built: a
       // waveform canvas measured while an ancestor is `display:none` (the

@@ -406,6 +406,17 @@ impl BackendService {
         let mut page: Vec<Track> = items.into_iter().skip(start_idx).take(limit + 1).collect();
         let (has_more, next_cursor) = paginate_tracks(&mut page, limit, &signature);
 
+        // Best effort: a USB that can't be estimated just leaves it out.
+        let export_space = req
+            .usb_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|root| !root.is_empty())
+            .and_then(|root| {
+                self.playlist_export_space(&req.playlist_id, std::path::Path::new(root))
+                    .ok()
+            });
+
         Ok(GetPlaylistTracksData {
             playlist_id: req.playlist_id,
             items: page,
@@ -417,6 +428,7 @@ impl BackendService {
             unanalyzed_count,
             list_track_count,
             list_size_bytes,
+            export_space,
         })
     }
 

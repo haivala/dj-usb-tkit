@@ -1394,14 +1394,10 @@ export async function exportPlaylistToUsb(ctx, playlistId) {
     } else {
       const msg = String(error?.message || "USB export failed").trim() || "USB export failed";
       emitStatus(`Export failed: ${msg}. See Event Log for details.`);
-      ctx.emitMessage({
-        level: "error",
-        source: "export",
-        code: "export.failure",
-        eventLog: { text: msg, details: "context: export_to_usb", coalesceKey: "export.failure.export_to_usb" }
-      });
     }
-    throw error;
+    // Reported: the backend already put the reason in the Event Log, so the
+    // caller must not log it again.
+    return;
   } finally {
     if (!state.activeJobId) {
       setProgress(false, 0, "Idle");

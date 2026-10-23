@@ -316,7 +316,8 @@ test("handleJobEvent routes analysis and job failures to the event log", () => {
       message: "Export failed"
     });
     assert.equal(state.activeJobId, null);
+    // Status bar only: the backend logs the failed command's reason itself.
     assert.equal(messages.at(-1).level, "error");
-    assert.equal(messages.at(-1).eventLog.text, "Export failed");
+    assert.equal(messages.at(-1).eventLog, undefined);
   });
 });

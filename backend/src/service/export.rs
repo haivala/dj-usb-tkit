@@ -6,12 +6,13 @@ use std::path::{Path, PathBuf};
 use rusqlite::{OptionalExtension, params};
 use serde_json::json;
 
+use super::usb::usb_track_size_key;
 use crate::edb::{open_edb_from_usb_root, open_edb_rw};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest, Playlist, PlaylistUsbExportStatus,
-    WarningEntry,
+    ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest, Playlist, PlaylistExportSpace,
+    PlaylistUsbExportStatus, WarningEntry,
 };
 
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
@@ -418,10 +419,15 @@ const EXPORT_FREE_SPACE_HEADROOM_BYTES: u64 = 64 * 1024 * 1024;
 /// their assets are reused, not rewritten. Deliberately an estimate: the
 /// collision-suffixing in the real copy loop can pick a different file name,
 /// which only matters for the "already present" check, not the byte total.
+///
+/// `already_present(target, source_len)` says whether a track's audio is
+/// already on the drive: the preflight checks the drive itself, the playlist
+/// heading checks the staged PDB's track list instead.
 fn estimate_export_new_bytes(
     media_root: &Path,
     playlist: &ExportPlaylistData,
     options: &ExportToUsbOptions,
+    already_present: impl Fn(&Path, u64) -> bool,
 ) -> u64 {
     let mut total: u64 = 0;
     for track in &playlist.tracks {
@@ -442,10 +448,7 @@ fn estimate_export_new_bytes(
             &track.title,
             &extension,
         );
-        let already_present = std::fs::metadata(&target)
-            .map(|dst| dst.is_file() && dst.len() == source_len)
-            .unwrap_or(false);
-        if already_present {
+        if already_present(&target, source_len) {
             continue;
         }
         total = total.saturating_add(source_len);
@@ -475,6 +478,14 @@ fn estimate_export_new_bytes(
     total
 }
 
+/// The preflight's "already on the drive": the target exists with the
+/// source's size.
+fn present_on_drive(target: &Path, source_len: u64) -> bool {
+    std::fs::metadata(target)
+        .map(|dst| dst.is_file() && dst.len() == source_len)
+        .unwrap_or(false)
+}
+
 /// `Some((required, available))` when the export cannot fit, `None` when it
 /// fits. Split out from `ensure_usb_has_space_for_export` so the arithmetic is
 /// unit-testable without a real filesystem of a known size.
@@ -483,19 +494,12 @@ fn export_space_shortfall(estimate: u64, available: u64) -> Option<(u64, u64)> {
     (required > available).then_some((required, available))
 }
 
-/// Free bytes on the filesystem backing `usb_root`, using the same
-/// "longest matching mount point wins" rule as `usb_identity`. `None` when no
-/// enumerated disk covers the path — callers treat that as "can't tell, don't
-/// block".
+/// Free bytes on the filesystem backing `usb_root`: one free-space query on
+/// that path (`statvfs` / `GetDiskFreeSpaceExW`), which the OS answers from
+/// its in-memory filesystem state without reading the drive. `None` when the
+/// query fails — callers treat that as "can't tell, don't block".
 fn usb_mount_available_bytes(usb_root: &Path) -> Option<u64> {
-    let canon = std::fs::canonicalize(usb_root).unwrap_or_else(|_| usb_root.to_path_buf());
-    let disks = sysinfo::Disks::new_with_refreshed_list();
-    disks
-        .list()
-        .iter()
-        .filter(|disk| canon.starts_with(disk.mount_point()))
-        .max_by_key(|disk| disk.mount_point().as_os_str().len())
-        .map(|disk| disk.available_space())
+    fs4::available_space(usb_root).ok()
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -528,7 +532,7 @@ fn ensure_usb_has_space_for_export(
     let Some(available) = usb_mount_available_bytes(usb_root) else {
         return Ok(());
     };
-    let estimate = estimate_export_new_bytes(media_root, playlist, options);
+    let estimate = estimate_export_new_bytes(media_root, playlist, options, present_on_drive);
     let Some((required, available)) = export_space_shortfall(estimate, available) else {
         return Ok(());
     };
@@ -750,6 +754,39 @@ pub(crate) fn compute_playlist_usb_export_status(
 }
 
 impl BackendService {
+    /// The playlist heading's export estimate: the same byte count as the
+    /// export preflight, but with "already on the drive" answered from the
+    /// staged PDB's track list, so nothing on the drive is read. Tracks on the
+    /// drive that the PDB doesn't list count as still to copy.
+    pub(crate) fn playlist_export_space(
+        &self,
+        playlist_id: &str,
+        usb_root: &Path,
+    ) -> BackendResult<PlaylistExportSpace> {
+        let playlist = self.load_playlist_for_export(playlist_id)?;
+        let on_usb = self.usb_track_sizes(usb_root)?;
+        let bytes_to_copy = estimate_export_new_bytes(
+            &usb_root.join("Contents"),
+            &playlist,
+            &ExportToUsbOptions::default(),
+            |target, len| {
+                target
+                    .strip_prefix(usb_root)
+                    .ok()
+                    .and_then(|rel| on_usb.get(&usb_track_size_key(&rel.to_string_lossy())))
+                    == Some(&len)
+            },
+        );
+        let available_bytes = usb_mount_available_bytes(usb_root);
+        let fits = available_bytes
+            .is_none_or(|available| export_space_shortfall(bytes_to_copy, available).is_none());
+        Ok(PlaylistExportSpace {
+            bytes_to_copy,
+            available_bytes,
+            fits,
+        })
+    }
+
     pub fn export_to_usb(&self, req: ExportToUsbRequest) -> BackendResult<ExportToUsbData> {
         self.export_to_usb_with_progress(req, |_, _, _| {})
     }
@@ -1909,7 +1946,7 @@ mod tests {
         content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes,
         existing_usb_relative_if_file, existing_usb_relative_if_present, export_space_shortfall,
         format_bytes, has_required_analysis, has_required_analysis_fields,
-        normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
+        normalize_playlist_name_for_compare, playlist_locks_reorder_on_export, present_on_drive,
         record_existing_usb_path_by_fingerprint, resolve_collision_free_media_target,
         usb_drive_label, usb_playlist_names_for_export_compare, usb_root_last_segment,
         validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
@@ -2943,7 +2980,7 @@ mod tests {
         };
 
         assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &options),
+            estimate_export_new_bytes(&media_root, &playlist, &options, present_on_drive),
             10_000
         );
     }
@@ -2980,7 +3017,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &without),
+            estimate_export_new_bytes(&media_root, &playlist, &without, present_on_drive),
             1000
         );
 
@@ -2990,7 +3027,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &with),
+            estimate_export_new_bytes(&media_root, &playlist, &with, present_on_drive),
             1000 + 200 + 50 + 25
         );
     }
