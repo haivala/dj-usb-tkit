@@ -849,7 +849,8 @@ export function createPlaylistTracksController(ctx) {
       // playlist) sizes to 1x1 and is never repainted when the wrap is later
       // shown, leaving every waveform blank. renderPlaylistPanelChrome() in
       // onPage still owns the authoritative empty/non-empty state afterwards.
-      const hasTracks = Number(data.total) > 0 || (data.items || []).length > 0;
+      const hasTracks = Number(data.listTrackCount) > 0 || Number(data.total) > 0
+        || (data.items || []).length > 0;
       ctx.el.playlistTableWrap?.classList.toggle("hidden", !hasTracks);
       ctx.el.playlistTotalDuration?.classList.toggle("hidden", !hasTracks);
     },
@@ -862,14 +863,14 @@ export function createPlaylistTracksController(ctx) {
   return ctl;
 }
 
-// Panel glue around the playlist track table that the controller does not own:
-// empty state, section visibility, search-input restore, is-analyzing pulse,
-// title, export buttons, sidebar. Run after every (re)render of the list.
-export function renderPlaylistPanelChrome(ctx) {
+// The "add tracks" screen of an empty playlist, or the table and the
+// controls that go with it. Empty only once this playlist's tracks have
+// loaded and it has none at all: while they load the table shows "Loading
+// tracks…", and a search that matches nothing still leaves tracks to search.
+function renderPlaylistEmptyState(ctx, playlist) {
   const { state, el, playlistTracksCtl } = ctx;
-  const playlist = getCurrentPlaylist(ctx);
-  if (!playlist) return;
-  const empty = playlistTracksCtl.total === 0 && !playlistTracksCtl.loading;
+  const loaded = playlistTracksCtl.scopeId === playlist.id && !playlistTracksCtl.loading;
+  const empty = loaded && playlistTracksCtl.total === 0 && !(Number(playlist.listTrackCount) > 0);
   if (el.playlistEmptyState) {
     el.playlistEmptyState.replaceChildren();
     if (empty) {
@@ -894,6 +895,16 @@ export function renderPlaylistPanelChrome(ctx) {
   el.playlistExportStatus?.classList.toggle("hidden", empty && !playlist.lastExportedAt);
   el.playlistSearchInput?.closest(".track-toolbar")?.classList.toggle("hidden", empty);
   el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", empty);
+}
+
+// Panel glue around the playlist track table that the controller does not own:
+// empty state, section visibility, search-input restore, is-analyzing pulse,
+// title, export buttons, sidebar. Run after every (re)render of the list.
+export function renderPlaylistPanelChrome(ctx) {
+  const { state, el } = ctx;
+  const playlist = getCurrentPlaylist(ctx);
+  if (!playlist) return;
+  renderPlaylistEmptyState(ctx, playlist);
   if (el.playlistSearchInput && el.playlistSearchInput.value !== (state.playlistTrackSearch || "")) {
     el.playlistSearchInput.value = state.playlistTrackSearch || "";
   }
@@ -929,6 +940,12 @@ export async function refreshCurrentPlaylistTracks(ctx) {
   const st = ctx.tableSortState.playlistTracksBody || null;
   playlistTracksCtl.sortBy = st?.key || null;
   playlistTracksCtl.sortDir = st?.dir || null;
-  await playlistTracksCtl.load({ scopeId: playlist.id });
+  // `load` marks the list loading before its first await, so a previous
+  // empty playlist's screen gives way to the loading table at once. Only
+  // that part: the full chrome re-renders the sidebar, which would swallow
+  // a double-click's second click.
+  const loading = playlistTracksCtl.load({ scopeId: playlist.id });
+  renderPlaylistEmptyState(ctx, playlist);
+  await loading;
   renderPlaylistPanelChrome(ctx);
 }

@@ -219,7 +219,7 @@ test("empty playlist links to the Media Library and to USB, or to USB Playlists 
       "exportPlaylistBtn", "analyzePlaylistMissingBtn",
     ]),
     document,
-    playlistTracksCtl: { total: 0, loading: false },
+    playlistTracksCtl: { scopeId: "p1", total: 0, loading: false },
     switchView: async (view) => { views.push(view); },
   };
   const buttons = () => [...document.querySelectorAll("#playlistEmptyState .empty-state-action")];

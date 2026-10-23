@@ -37,12 +37,15 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.7
 
 - **Fix:** A playlist's "Last exported … to" line could name the wrong drive when another stick
   had since been mounted at the same place, for example a new stick with the same volume label as
   an old one. The line now keeps the name the drive had at the export. Exports made before this
   version show the drive's mount path instead.
+- **Fix:** Opening a playlist right after an empty one kept showing the "add tracks" screen until
+  its tracks had loaded, and a search with no matches showed it too. A playlist with tracks now
+  shows "Loading tracks…" while they load, and a search with no matches shows an empty table.
 - **Improvement:** A playlist's tracks no longer wait for the "tracks to copy" line. With a USB
   connected, the list shows right away and the line fills in a moment later.
 - **Improvement:** Select all, scrolling and searching the library are much faster, most of all
