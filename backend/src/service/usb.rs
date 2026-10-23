@@ -952,6 +952,13 @@ impl BackendService {
         let now_ts = now();
         if let Some(old_name) = renaming_away {
             usb_utils::forget_drive_name(&conn, old_name)?;
+            // Earlier exports to this drive name it as it is now called. By
+            // its old name, not its mount path: another stick may have used
+            // the same path, and names are unique to one drive.
+            conn.execute(
+                "UPDATE playlists SET last_exported_usb_name = ?1 WHERE last_exported_usb_name = ?2",
+                params![name, old_name],
+            )?;
         }
         usb_utils::register_drive_name(&conn, &name, &now_ts)?;
         if !keeps_own_name {
@@ -4225,6 +4232,38 @@ mod tests {
         let data = get_name(&service, &usb_root);
         assert_eq!(data.name.as_deref(), Some("Club Stick"));
         assert_eq!(data.name_taken_by, None);
+    }
+
+    #[test]
+    fn renaming_a_drive_renames_it_on_its_playlists_last_export_lines() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        set_name(&service, &usb_root, "Club Stick").expect("name drive");
+        let conn = service.db.connect().expect("db");
+        conn.execute_batch(
+            "INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, last_exported_usb_name, created_at, updated_at)
+               VALUES ('p1', 'Set', 'local', 'x', '/run/media/dj/STICK', 'Club Stick', '1', '1'),
+                      ('p2', 'Other', 'local', 'x', '/run/media/dj/STICK', 'Booth Stick', '2', '2');",
+        )
+        .expect("seed");
+
+        set_name(&service, &usb_root, "Main Stick").expect("rename drive");
+
+        let names: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT id, last_exported_usb_name FROM playlists ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            names,
+            vec![
+                ("p1".to_string(), Some("Main Stick".to_string())),
+                ("p2".to_string(), Some("Booth Stick".to_string())),
+            ],
+            "only exports to the renamed drive follow its name"
+        );
     }
 
     #[test]

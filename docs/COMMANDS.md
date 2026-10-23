@@ -180,6 +180,11 @@ drive selection from being rendered against a newer selected drive.
 - `delete_playlist`
 - `list_playlists`
 - `get_playlist_tracks`
+- `get_playlist_export_space` — `{ playlistId, usbRoot }` → `exportSpace`: how many tracks and
+  bytes an export of the playlist would still copy to the USB, its free space, and whether it
+  fits. Worked out from recorded data only (audio sizes from the app DB, what is already on the
+  USB from the staged PDB), so no file is read. `null` when it can't be made. The frontend asks
+  for it after the track list is shown, so it never holds the list up
 - `add_library_selection_to_playlist`
 - `add_track_candidates_to_playlist`
 - `add_library_selection_to_playlists` / `add_track_candidates_to_playlists` — the same

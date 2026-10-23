@@ -955,17 +955,18 @@ fn insert_full_track(
 }
 
 #[test]
-fn list_playlists_names_the_drive_last_exported_to() {
+fn list_playlists_names_the_drive_as_it_was_called_at_export() {
     let (_dir, service) = test_service();
     let conn = service.db.connect().expect("service db");
-    // An unplugged drive whose name is cached, and an unnamed one.
+    // Another stick, "Booth Stick", now uses the mount path both playlists
+    // were exported to.
     conn.execute_batch(&format!(
         "INSERT INTO usb_devices (id, root_path, root_path_key, label, first_seen_at, last_seen_at, created_at, updated_at)
-           VALUES ('d1', '/run/media/dj/STICK', '{}', 'CLUB_STICK', 'x', 'x', 'x', 'x');
-         INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, created_at, updated_at)
-           VALUES ('p1', 'Named', 'local', 'x', '/run/media/dj/STICK', '1', '1'),
-                  ('p2', 'Unnamed', 'local', 'x', '/run/media/dj/OTHER', '2', '2'),
-                  ('p3', 'Never', 'local', NULL, NULL, '3', '3');",
+           VALUES ('d1', '/run/media/dj/STICK', '{}', 'Booth Stick', 'x', 'x', 'x', 'x');
+         INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, last_exported_usb_name, created_at, updated_at)
+           VALUES ('p1', 'Named', 'local', 'x', '/run/media/dj/STICK', 'Club Stick', '1', '1'),
+                  ('p2', 'Before names were kept', 'local', 'x', '/run/media/dj/STICK', NULL, '2', '2'),
+                  ('p3', 'Never', 'local', NULL, NULL, NULL, '3', '3');",
         normalize_source_root_for_matching("/run/media/dj/STICK")
     ))
     .expect("seed");
@@ -977,8 +978,9 @@ fn list_playlists_names_the_drive_last_exported_to() {
         .into_iter()
         .map(|p| p.last_exported_usb_name)
         .collect();
-    // Never reordered, so newest first: p3, p2, p1.
-    assert_eq!(names, vec![None, None, Some("CLUB_STICK".to_string())]);
+    // Never reordered, so newest first: p3, p2, p1. The path's current
+    // drive names neither export.
+    assert_eq!(names, vec![None, None, Some("Club Stick".to_string())]);
 }
 
 #[test]

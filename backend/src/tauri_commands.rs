@@ -22,9 +22,10 @@ use crate::models::{
     DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
     ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
     FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
-    GetFrontendSettingsData, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
-    GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
+    GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetSourceRootAnalysisData, GetSourceRootAnalysisRequest,
+    GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
     GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
@@ -962,6 +963,18 @@ pub async fn get_playlist_tracks(
     let commands = state.inner().clone();
     Ok(run_blocking_command("get_playlist_tracks", move || {
         commands.get_playlist_tracks(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn get_playlist_export_space(
+    state: State<'_, BackendCommands>,
+    request: GetPlaylistExportSpaceRequest,
+) -> Result<ApiResponse<GetPlaylistExportSpaceData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_playlist_export_space", move || {
+        commands.get_playlist_export_space(request)
     })
     .await)
 }

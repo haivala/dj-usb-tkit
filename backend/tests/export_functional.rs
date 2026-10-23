@@ -9,11 +9,11 @@ use backend::error::ErrorCode;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     BrowseSourceFilesRequest, CreatePlaylistRequest, DiagStatus, ExportToUsbOptions,
-    ExportToUsbRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest, GetPlaylistTracksRequest,
-    InitializeUsbRequest, MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest,
-    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsRequest,
-    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest,
-    SetFrontendSettingRequest,
+    ExportToUsbRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
+    GetPlaylistExportSpaceRequest, GetPlaylistTracksRequest, InitializeUsbRequest,
+    MaterializeSourceTrackRequest, RemoveTracksFromPlaylistRequest, ReorderPlaylistTracksRequest,
+    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -770,13 +770,12 @@ fn playlist_export_space_counts_only_tracks_the_usb_pdb_lacks() {
     };
     let export_space = || {
         backend
-            .get_playlist_tracks(GetPlaylistTracksRequest {
+            .get_playlist_export_space(GetPlaylistExportSpaceRequest {
                 playlist_id: playlist_id.clone(),
-                usb_root: Some(usb.to_string_lossy().to_string()),
-                ..Default::default()
+                usb_root: usb.to_string_lossy().to_string(),
             })
             .data
-            .expect("playlist tracks")
+            .expect("export space data")
             .export_space
             .expect("export space")
     };

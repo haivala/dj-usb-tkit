@@ -688,13 +688,38 @@ export function updatePlaylistPanelTitle(ctx, playlist) {
   renderPlaylistExportSpace(ctx, playlist);
 }
 
+// Ask for the export estimate once the track list is shown, without awaiting
+// it, so it never holds the list up. Only the newest answer lands (a per-
+// playlist request count), and it is kept with the USB it was made for, so a
+// switched stick never shows another stick's numbers. A failed or missing
+// estimate just leaves the line hidden.
+function refreshPlaylistExportSpaceInBackground(ctx) {
+  const { state } = ctx;
+  const playlist = getCurrentPlaylist(ctx);
+  if (!playlist || !state.usbRoot || !state.usbRootValid) return;
+  const seq = (playlist.exportSpaceSeq = (playlist.exportSpaceSeq || 0) + 1);
+  const usbRoot = state.usbRoot;
+  Promise.resolve()
+    .then(() => ctx.command("get_playlist_export_space", { playlistId: playlist.id, usbRoot }))
+    .then((data) => {
+      if (seq !== playlist.exportSpaceSeq) return;
+      // A playlist list reload may have swapped the object; land on the open one.
+      const current = getCurrentPlaylist(ctx);
+      if (current?.id !== playlist.id) return;
+      current.exportSpace = data?.exportSpace ? { ...data.exportSpace, usbRoot } : null;
+      renderPlaylistExportSpace(ctx, current);
+    })
+    .catch((err) => console.warn("get_playlist_export_space failed:", err));
+}
+
 // What exporting the playlist to the connected USB would copy, against its
-// free space -- `exportSpace` from get_playlist_tracks (the backend decides
-// whether it fits). Hidden without a USB or an estimate.
+// free space -- `exportSpace` from get_playlist_export_space (the backend
+// decides whether it fits). Hidden without a USB or an estimate.
 function renderPlaylistExportSpace(ctx, playlist) {
   const { state, el } = ctx;
   if (!el?.playlistExportSpace) return;
   const space = state.usbRoot && state.usbRootValid && Number(playlist.listTrackCount) > 0
+    && playlist.exportSpace?.usbRoot === state.usbRoot
     ? playlist.exportSpace
     : null;
   el.playlistExportSpace.classList.toggle("hidden", !space);
@@ -769,8 +794,6 @@ export function createPlaylistTracksController(ctx) {
         sortDir: sortDir || null,
         offset,
         limit,
-        // Asks for the export estimate (exportSpace) against this USB.
-        usbRoot: ctx.state.usbRoot && ctx.state.usbRootValid ? ctx.state.usbRoot : null,
       }),
     normalize: (track) => ctx.normalizeTrack(track),
     getItems: () => getCurrentPlaylist(ctx)?.tracks || [],
@@ -819,7 +842,6 @@ export function createPlaylistTracksController(ctx) {
         p.trackCount = Number(data.total) || 0;
         p.listTrackCount = Number(data.listTrackCount) || 0;
         p.listSizeBytes = Number(data.listSizeBytes) || 0;
-        p.exportSpace = data.exportSpace || null;
       }
       // Reveal the table wrap *before* the rows are built: a
       // waveform canvas measured while an ancestor is `display:none` (the
@@ -834,6 +856,7 @@ export function createPlaylistTracksController(ctx) {
     onPage: (_page, { first }) => {
       if (first) narrowTrackSelectionToLoaded(ctx, "playlist", getCurrentPlaylist(ctx)?.tracks || []);
       renderPlaylistPanelChrome(ctx);
+      if (first) refreshPlaylistExportSpaceInBackground(ctx);
     },
   });
   return ctl;

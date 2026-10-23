@@ -16,6 +16,8 @@ function addCtx({ playlist = { id: "pl-1", name: "Main" }, onAdd, usbRoot = null
         out.refreshes += 1;
         return { items: [], total: 0 };
       }
+      // Asked for in the background once a USB is connected and the list is shown.
+      if (name === "get_playlist_export_space") return { exportSpace: null };
       return onAdd(name, payload);
     }
   });

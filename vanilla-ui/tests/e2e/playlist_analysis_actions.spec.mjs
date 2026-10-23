@@ -36,8 +36,6 @@ test.beforeEach(async ({ page }) => {
         // The heading's totals cover the whole playlist, ignoring the search.
         listTrackCount: (all || []).length,
         listSizeBytes: (all || []).reduce((s, t) => s + (t.fileSizeBytes > 0 ? t.fileSizeBytes : 0), 0),
-        // The backend only estimates the export when asked about a USB.
-        ...(request.usbRoot && window.__exportSpace ? { exportSpace: window.__exportSpace } : {}),
       };
     };
     window.__applyReorder = (cur, request) => {
@@ -785,6 +783,14 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
           }
+          if (command === "get_playlist_export_space") {
+            // `__exportSpaceGate` (a promise) holds the answer back, to show
+            // the track list doesn't wait for it.
+            return Promise.resolve(window.__exportSpaceGate).then(() => ({
+              ok: true,
+              data: { exportSpace: window.__exportSpace || null },
+            }));
+          }
           if (command === "reorder_playlist_tracks") {
             window.__reorderPlaylistTrackCalls.push(request);
             playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId] || [], request);
@@ -1110,9 +1116,17 @@ test("the playlist heading shows what an export would copy against the USB's fre
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
   await expect(page.locator("#playlistExportSpace")).toBeHidden();
 
+  // The estimate is asked for after the rows are shown: a slow one leaves the
+  // list usable and fills the line in when it arrives.
   await connectUsbAndFetchPlaylists(page);
+  await page.evaluate(() => {
+    window.__exportSpaceGate = new Promise((resolve) => { window.__releaseExportSpace = resolve; });
+  });
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
   const space = page.locator("#playlistExportSpace");
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+  await expect(space).toBeHidden();
+  await page.evaluate(() => window.__releaseExportSpace());
   await expect(space).toHaveText("2 of 3 tracks to copy · 1.2 GB · 27.0 GB free on USB");
   await expect(space).not.toHaveClass(/is-warning/);
 

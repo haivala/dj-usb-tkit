@@ -202,7 +202,9 @@ pub struct Playlist {
     /// "rekordbox"); derived from `playlists.import_source`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported_from: Option<String>,
-    /// The name of the drive at `last_exported_usb_root`, when it has one.
+    /// The name the drive had when the playlist was exported to it, when it
+    /// had one. Exports from before this was recorded have none (the mount
+    /// path may since belong to another stick, so it isn't guessed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_exported_usb_name: Option<String>,
 }
@@ -647,20 +649,32 @@ pub struct GetPlaylistTracksRequest {
     /// `0` ⇒ unpaginated (the whole playlist), for backward compatibility.
     #[serde(default)]
     pub limit: usize,
-    /// The connected USB, if any: the response then carries `export_space`.
-    #[serde(default)]
-    pub usb_root: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPlaylistExportSpaceRequest {
+    pub playlist_id: String,
+    /// The connected USB.
+    pub usb_root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPlaylistExportSpaceData {
+    /// `None` when the estimate can't be made (no staged PDB, unknown
+    /// playlist): the heading just leaves it out.
+    pub export_space: Option<PlaylistExportSpace>,
 }
 
 /// What exporting a playlist to the connected USB would newly copy, against
-/// the drive's free space. Worked out without reading the drive: the copy
-/// estimate checks the locally staged PDB's track list, and the free space is
-/// one filesystem query.
+/// the drive's free space. Worked out from recorded data only: audio sizes
+/// from the app DB, what is already on the USB from the locally staged PDB's
+/// track list, and the free space from one filesystem query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistExportSpace {
-    /// Audio of the tracks not on the USB yet, plus their analysis files and
-    /// artwork.
+    /// Audio of the tracks not on the USB yet, by their recorded sizes.
     pub bytes_to_copy: u64,
     /// How many of the playlist's tracks aren't on the USB yet.
     pub tracks_to_copy: usize,
@@ -698,9 +712,6 @@ pub struct GetPlaylistTracksData {
     pub list_track_count: usize,
     #[serde(default)]
     pub list_size_bytes: u64,
-    /// Set when the request named a USB and the estimate could be made.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub export_space: Option<PlaylistExportSpace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

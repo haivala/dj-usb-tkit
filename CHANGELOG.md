@@ -37,6 +37,15 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Fix:** A playlist's "Last exported … to" line could name the wrong drive when another stick
+  had since been mounted at the same place, for example a new stick with the same volume label as
+  an old one. The line now keeps the name the drive had at the export. Exports made before this
+  version show the drive's mount path instead.
+- **Improvement:** A playlist's tracks no longer wait for the "tracks to copy" line. With a USB
+  connected, the list shows right away and the line fills in a moment later.
+
 ## 0.4.6
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

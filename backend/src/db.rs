@@ -119,6 +119,7 @@ impl Db {
               last_exported_at TEXT,
               last_exported_usb_root TEXT,
               last_exported_track_count INTEGER,
+              last_exported_usb_name TEXT,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
@@ -242,6 +243,7 @@ impl Db {
         ensure_playlists_column(&conn, "last_exported_at", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_usb_root", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_track_count", "INTEGER")?;
+        ensure_playlists_column(&conn, "last_exported_usb_name", "TEXT")?;
         ensure_playlists_column(&conn, "import_source", "TEXT")?;
         ensure_playlists_column(&conn, "sort_order", "INTEGER")?;
         ensure_track_cues_column(&conn, "is_playback_start", "INTEGER NOT NULL DEFAULT 0")?;
@@ -298,6 +300,7 @@ const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[
     "last_exported_at",
     "last_exported_usb_root",
     "last_exported_track_count",
+    "last_exported_usb_name",
     "import_source",
     "sort_order",
 ];

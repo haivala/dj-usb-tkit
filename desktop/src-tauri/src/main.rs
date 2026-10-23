@@ -870,6 +870,7 @@ fn main() {
             backend::tauri_commands::delete_playlist,
             backend::tauri_commands::list_playlists,
             backend::tauri_commands::get_playlist_tracks,
+            backend::tauri_commands::get_playlist_export_space,
             backend::tauri_commands::add_track_candidates_to_playlist,
             backend::tauri_commands::list_matching_track_ids,
             backend::tauri_commands::add_library_selection_to_playlist,

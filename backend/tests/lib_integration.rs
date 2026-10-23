@@ -20,7 +20,7 @@ use backend::models::{
     MaterializeSourceTrackRequest, RemoveTracksBySourceRootsRequest,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest,
     ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    ScanLibraryRequest, SetFrontendSettingRequest, WarningEntry,
+    ScanLibraryRequest, SetFrontendSettingRequest, SetUsbDeviceNameRequest, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::BackendService;
@@ -918,6 +918,11 @@ fn export_to_usb_writes_canonical_outputs() {
         usb_root: usb.to_string_lossy().to_string(),
     });
     assert!(init.ok, "initialize usb failed: {init:?}");
+    let named = backend.set_usb_device_name(SetUsbDeviceNameRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+        name: "Club Stick".to_string(),
+    });
+    assert!(named.ok, "name usb failed: {named:?}");
 
     let scan = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
@@ -1001,6 +1006,12 @@ fn export_to_usb_writes_canonical_outputs() {
         Some(1),
         "expected exported track count to persist"
     );
+    // Kept as the drive was called then, so another stick later mounted at
+    // the same path doesn't take it over.
+    assert_eq!(
+        exported_playlist.last_exported_usb_name.as_deref(),
+        Some("Club Stick")
+    );
 
     let removed = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
         playlist_id: playlist_id.clone(),
@@ -1025,6 +1036,10 @@ fn export_to_usb_writes_canonical_outputs() {
     assert!(
         edited_playlist.last_exported_track_count.is_none(),
         "expected exported track count to clear after playlist edit"
+    );
+    assert!(
+        edited_playlist.last_exported_usb_name.is_none(),
+        "expected exported drive name to clear after playlist edit"
     );
 }
 

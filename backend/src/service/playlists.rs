@@ -131,7 +131,7 @@ pub(crate) fn save_imported_playlist(
             )?;
         }
         conn.execute(
-            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL WHERE id = ?2",
+            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL, last_exported_usb_name = NULL WHERE id = ?2",
             params![now, existing.id],
         )?;
         return Ok((existing, true));
@@ -189,7 +189,7 @@ impl BackendService {
         let now = now();
         let conn = self.db.connect()?;
         conn.execute(
-            "UPDATE playlists SET name = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL, updated_at = ?2 WHERE id = ?3",
+            "UPDATE playlists SET name = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL, last_exported_usb_name = NULL, updated_at = ?2 WHERE id = ?3",
             params![name, now, req.playlist_id],
         )?;
 
@@ -260,7 +260,7 @@ impl BackendService {
         let conn = self.db.connect()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at, import_source
+            SELECT id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at, import_source, last_exported_usb_name
             FROM playlists
             ORDER BY sort_order IS NULL, sort_order ASC, created_at DESC, id DESC
             "#,
@@ -281,18 +281,11 @@ impl BackendService {
                     .as_deref()
                     .and_then(imported_from_label)
                     .map(str::to_string),
-                // Filled in below (needs a lookup per exported playlist).
-                last_exported_usb_name: None,
+                last_exported_usb_name: row.get(9)?,
             })
         })?;
 
-        let mut items = rows.collect::<Result<Vec<_>, _>>()?;
-        for playlist in &mut items {
-            playlist.last_exported_usb_name = playlist
-                .last_exported_usb_root
-                .as_deref()
-                .and_then(|root| usb_drive_name(&conn, Path::new(root.trim())));
-        }
+        let items = rows.collect::<Result<Vec<_>, _>>()?;
         Ok(ListPlaylistsData { items })
     }
 
@@ -406,17 +399,6 @@ impl BackendService {
         let mut page: Vec<Track> = items.into_iter().skip(start_idx).take(limit + 1).collect();
         let (has_more, next_cursor) = paginate_tracks(&mut page, limit, &signature);
 
-        // Best effort: a USB that can't be estimated just leaves it out.
-        let export_space = req
-            .usb_root
-            .as_deref()
-            .map(str::trim)
-            .filter(|root| !root.is_empty())
-            .and_then(|root| {
-                self.playlist_export_space(&req.playlist_id, std::path::Path::new(root))
-                    .ok()
-            });
-
         Ok(GetPlaylistTracksData {
             playlist_id: req.playlist_id,
             items: page,
@@ -428,7 +410,6 @@ impl BackendService {
             unanalyzed_count,
             list_track_count,
             list_size_bytes,
-            export_space,
         })
     }
 
@@ -510,7 +491,7 @@ impl BackendService {
         }
 
         tx.execute(
-            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL WHERE id = ?2",
+            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL, last_exported_usb_name = NULL WHERE id = ?2",
             params![now, req.playlist_id],
         )?;
 
@@ -951,7 +932,7 @@ impl BackendService {
         }
 
         tx.execute(
-            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL WHERE id = ?2",
+            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL, last_exported_usb_name = NULL WHERE id = ?2",
             params![now(), req.playlist_id],
         )?;
 
@@ -1084,7 +1065,7 @@ impl BackendService {
         }
 
         tx.execute(
-            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL WHERE id = ?2",
+            "UPDATE playlists SET updated_at = ?1, last_exported_at = NULL, last_exported_usb_root = NULL, last_exported_track_count = NULL, last_exported_usb_name = NULL WHERE id = ?2",
             params![now(), req.playlist_id],
         )?;
 

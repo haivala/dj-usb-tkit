@@ -13,9 +13,10 @@ use crate::models::{
     DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
     ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
     FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
-    GetFrontendSettingsData, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
-    GetSourceRootAnalysisRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
+    GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetSourceRootAnalysisData, GetSourceRootAnalysisRequest,
+    GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
     GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
     GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
@@ -282,6 +283,13 @@ impl BackendCommands {
         req: GetPlaylistTracksRequest,
     ) -> ApiResponse<GetPlaylistTracksData> {
         wrap(self.service.get_playlist_tracks(req))
+    }
+
+    pub fn get_playlist_export_space(
+        &self,
+        req: GetPlaylistExportSpaceRequest,
+    ) -> ApiResponse<GetPlaylistExportSpaceData> {
+        wrap(self.service.get_playlist_export_space(req))
     }
 
     pub fn add_track_candidates_to_playlist(

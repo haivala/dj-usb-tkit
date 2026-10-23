@@ -84,7 +84,8 @@ The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPOR
     much space is free on the USB. It says "Doesn't fit" when the export won't fit. Tracks
     already on the USB aren't counted. Working this out reads neither the USB nor your music
     files: it uses the sizes the library recorded when the files were scanned, so it doesn't
-    wake a sleeping disk.
+    wake a sleeping disk. The line is worked out after the track list is shown, so it can
+    appear a moment after the tracks.
   - The export button names the drive: **Export to USB: \<name\>**. In additive sync mode, when
     the USB already has a playlist with the same name, it reads **Append to (\<playlist\>) on USB**
     instead, and the playlist's tracks can't be reordered by dragging, since an append keeps the
@@ -111,6 +112,8 @@ to finish writing the copied files, which can take a while on slow sticks.
 
 - The sidebar checkmark means the playlist has been exported at some point.
 - The line under a playlist's title says when it was last exported and to which drive, named as
-  the drive was the last time it was connected.
+  the drive was called at that export (or as it was renamed since in the app). Another stick
+  later mounted at the same place doesn't take that name over. Exports from older versions,
+  which didn't keep the name, show the drive's mount path instead.
 - The export button reads **Select USB first** and takes you to the USB Browser.
 - The USB views under **USB Browser** are hidden.

@@ -816,7 +816,8 @@ pub(super) fn mark_track_edited_tx(
             SET updated_at = ?1,
                 last_exported_at = NULL,
                 last_exported_usb_root = NULL,
-                last_exported_track_count = NULL
+                last_exported_track_count = NULL,
+                last_exported_usb_name = NULL
           WHERE id IN (SELECT playlist_id FROM playlist_tracks WHERE track_id = ?2)",
         params![now, track_id],
     )?;
@@ -1498,7 +1499,8 @@ mod tests {
               updated_at TEXT NOT NULL,
               last_exported_at TEXT,
               last_exported_usb_root TEXT,
-              last_exported_track_count INTEGER
+              last_exported_track_count INTEGER,
+              last_exported_usb_name TEXT
             );
             CREATE TABLE playlist_tracks (
               playlist_id TEXT NOT NULL,
@@ -2106,8 +2108,9 @@ mod tests {
         .unwrap();
         conn.execute(
             "INSERT INTO playlists
-               (id, updated_at, last_exported_at, last_exported_usb_root, last_exported_track_count)
-             VALUES ('playlist-1', 'old', 'exported', '/usb', 3)",
+               (id, updated_at, last_exported_at, last_exported_usb_root, last_exported_track_count,
+                last_exported_usb_name)
+             VALUES ('playlist-1', 'old', 'exported', '/usb', 3, 'Club Stick')",
             [],
         )
         .unwrap();
@@ -2179,15 +2182,22 @@ mod tests {
                 .collect::<Vec<_>>(),
             [Some("Two"), Some("One")]
         );
-        let playlist: (String, Option<String>, Option<String>, Option<i64>) = conn
+        let playlist: (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+        ) = conn
             .query_row(
-                "SELECT updated_at, last_exported_at, last_exported_usb_root, last_exported_track_count
+                "SELECT updated_at, last_exported_at, last_exported_usb_root, last_exported_track_count,
+                        last_exported_usb_name
                    FROM playlists WHERE id = 'playlist-1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .unwrap();
-        assert_eq!(playlist, ("new".to_string(), None, None, None));
+        assert_eq!(playlist, ("new".to_string(), None, None, None, None));
     }
 
     #[test]

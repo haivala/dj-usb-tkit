@@ -11,8 +11,9 @@ use crate::edb::{open_edb_from_usb_root, open_edb_rw};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
-    ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest, Playlist, PlaylistExportSpace,
-    PlaylistUsbExportStatus, WarningEntry,
+    ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest, GetPlaylistExportSpaceData,
+    GetPlaylistExportSpaceRequest, Playlist, PlaylistExportSpace, PlaylistUsbExportStatus,
+    WarningEntry,
 };
 
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
@@ -799,6 +800,21 @@ pub(crate) fn compute_playlist_usb_export_status(
 }
 
 impl BackendService {
+    /// The playlist heading's export estimate, asked for on its own after the
+    /// track list is shown so it never holds the list up. Best effort: an
+    /// estimate that can't be made (no staged PDB yet, unknown playlist) is
+    /// `None`, not an error.
+    pub fn get_playlist_export_space(
+        &self,
+        req: GetPlaylistExportSpaceRequest,
+    ) -> BackendResult<GetPlaylistExportSpaceData> {
+        let usb_root = req.usb_root.trim();
+        let export_space = (!usb_root.is_empty())
+            .then(|| self.playlist_export_space(&req.playlist_id, Path::new(usb_root)))
+            .and_then(Result::ok);
+        Ok(GetPlaylistExportSpaceData { export_space })
+    }
+
     /// The playlist heading's export estimate (see `estimate_playlist_copy`)
     /// against the USB's free space.
     pub(crate) fn playlist_export_space(
@@ -1555,12 +1571,16 @@ impl BackendService {
                     params![profile_key, profile.as_str(), now()],
                 )?;
             }
+            // The drive's name is kept as it is now: the mount path can later
+            // belong to another stick, so looking the name up by path when
+            // the line is shown could name a drive that never got this export.
             local_conn.execute(
-                "UPDATE playlists SET last_exported_at = ?1, last_exported_usb_root = ?2, last_exported_track_count = ?3 WHERE id = ?4",
+                "UPDATE playlists SET last_exported_at = ?1, last_exported_usb_root = ?2, last_exported_track_count = ?3, last_exported_usb_name = ?4 WHERE id = ?5",
                 params![
                     now(),
                     usb_root.to_string_lossy().to_string(),
                     manifest.tracks.len() as i64,
+                    super::usb_drive_name(&local_conn, &usb_root),
                     playlist.id
                 ],
             )?;

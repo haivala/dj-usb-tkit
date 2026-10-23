@@ -239,8 +239,11 @@
               totalDurationMs: sumMs(items),
               durationKnownCount: items.length,
               ...listTotals(items),
-              ...(r.usbRoot ? { exportSpace: exportSpace(items) } : {}),
             });
+          }
+          case "get_playlist_export_space": {
+            const items = playlists.find((p) => p.id === r.playlistId)?.tracks || [];
+            return ok({ exportSpace: exportSpace(items) });
           }
           case "check_for_update":
             return ok({
