@@ -87,9 +87,11 @@ Strict parity validation is handled as a separate diagnostics surface so users c
 
 `export.pdb` and `exportLibrary.db` are staged to a local working copy under the desktop app's
 data directory (`usb_cache/<device-key>/PIONEER/rekordbox/...`) instead of being read directly off
-the USB mount on every call. The first read of either file after a device is plugged in (or after
-either file changes size/mtime on the drive) copies it locally; subsequent reads within the same
-session reuse that local copy without touching the USB mount again. Writes go to the local copy
+the USB mount on every call. Selecting a USB (`validate_usb_root`) checks each file against the
+drive once: it's copied locally when its size/mtime differ from the last copy, and the last copy is
+reused otherwise. For the rest of that connect, reads trust the local copy without touching the
+USB mount again, so a change made to the drive by something else meanwhile is only picked up by
+selecting the USB again (and blocks the next write-back, below). Writes go to the local copy
 first and are committed back to the drive only if the local copy actually changed, via an atomic
 temp-file-plus-rename so a crash or drive removal mid-write can't leave a half-written database on
 the USB.

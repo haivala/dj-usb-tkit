@@ -45,6 +45,10 @@
 - **Fix:** Clicking Export twice, or quickly on another playlist, could start a second export to
   the same USB while the first was still running. Export is now disabled from the click until the
   export has finished, and a second export is refused.
+- **Chore:** New docs page on connecting a USB: how to select one, what selecting it does
+  (naming, spotting copies, the local working copy of its databases, diagnostics), what changes
+  in the app while it's connected, and why to select it again after using the stick in a player
+  or rekordbox.
 
 ## 0.4.5
 

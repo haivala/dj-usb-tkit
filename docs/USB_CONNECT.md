@@ -32,13 +32,41 @@ select it again, from **Recent USBs**, once it's plugged in.
    name. Once the copy is a different size from the original, or the original has had an export
    the copy doesn't have, the app asks for a name of its own. Until it gets one, it's treated as
    unnamed, so nothing is shared with the original.
-4. **The databases are copied to your computer.** The app reads and changes a local working
-   copy of the stick's databases, and writes them back to the stick only when something changed.
-   This is why browsing a slow stick stays quick. See "Local HDD staging" in
-   [USB_EXPORT.md](USB_EXPORT.md).
+4. **The databases are staged.** The stick's player databases are copied to your computer, or
+   the copy from last time is reused if the stick hasn't changed since. See
+   [Staging](#staging-the-local-working-copy) below.
 5. **Diagnostics run.** The result shows as the dot next to the drive's name in the header:
    good, warnings, or issues found (hover it to see which). **Health & Diagnostics** in the USB
    Browser has the details ([DIAGNOSTICS_REPAIRS.md](DIAGNOSTICS_REPAIRS.md)).
+
+## Staging: the local working copy
+
+The app never works on the stick's player databases directly. Selecting a USB copies them to your
+computer, and everything the app reads from or changes in those databases uses the copy:
+browsing playlists and history, diagnostics, the export estimate, exports, repairs and edits.
+Reading a stick is slow, so this keeps the app quick: the databases are read from the stick once
+per connect. Music, analysis and artwork files are still read and written on the stick itself.
+
+- **Changes are written back in one go.** An export, a repair or an edit changes the copy first.
+  At the end, the copy is written back to the stick, and only if something actually changed. The
+  stick's file is replaced in one step, so pulling the stick or a crash in the middle never leaves
+  a half-written database on it. Still wait for the footer to say the export has finished before
+  pulling the stick: the music files are copied straight to the stick.
+- **Changes made elsewhere need a reconnect.** While a USB is selected, the app doesn't look at
+  the stick's databases again, and it doesn't notice the stick being pulled out. So when you take
+  the stick to a player (which records history on it), or change it with rekordbox or the app on
+  another computer, select it again in **Recent USBs** once it's back. If you don't, the app's
+  next write is refused instead of overwriting those changes, with an error asking you to re-open
+  the USB and try again.
+- **Each drive has its own copy**, kept under its name, so it's reused whichever port or computer
+  path the stick gets. A drive that isn't named yet, or a copy of a named drive that hasn't got
+  its own name, gets one of its own too. Renaming a drive moves its copy along with it.
+- **Where it is:** the `usb_cache` folder in the app's data folder (on Linux,
+  `~/.local/share/art.chiph.djusbtkit/usb_cache`). The Event Log shows the exact folder the first
+  time it's created for a drive. A named drive's older backups are moved there too: only the
+  newest one stays on the stick ([USB_EXPORT.md](USB_EXPORT.md), "Backup").
+
+The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPORT.md).
 
 ## While a USB is connected
 
