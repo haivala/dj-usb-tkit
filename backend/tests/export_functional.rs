@@ -791,6 +791,7 @@ fn playlist_export_space_counts_only_tracks_the_usb_pdb_lacks() {
 
     let space = export_space();
     assert_eq!(space.bytes_to_copy, 0, "the exported track is on the USB");
+    assert_eq!(space.tracks_to_copy, 0);
     assert!(space.available_bytes.is_some());
     assert!(space.fits);
 
@@ -800,7 +801,9 @@ fn playlist_export_space_counts_only_tracks_the_usb_pdb_lacks() {
     let two_len = fs::metadata(media.join("Space Artist - Space Two.wav"))
         .expect("stat track two")
         .len();
-    assert_eq!(export_space().bytes_to_copy, two_len + 3 * 8);
+    let space = export_space();
+    assert_eq!(space.bytes_to_copy, two_len + 3 * 8);
+    assert_eq!(space.tracks_to_copy, 1);
 }
 
 #[test]

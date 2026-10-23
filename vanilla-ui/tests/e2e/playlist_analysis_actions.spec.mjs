@@ -1101,7 +1101,7 @@ test("playlist header sort is disabled with a tooltip when additive export won't
 test("the playlist heading shows what an export would copy against the USB's free space", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
   await page.addInitScript(() => {
-    window.__exportSpace = { bytesToCopy: 1.2 * 1024 ** 3, availableBytes: 27 * 1024 ** 3, fits: true };
+    window.__exportSpace = { bytesToCopy: 1.2 * 1024 ** 3, tracksToCopy: 2, availableBytes: 27 * 1024 ** 3, fits: true };
   });
   await page.goto("/");
 
@@ -1113,16 +1113,23 @@ test("the playlist heading shows what an export would copy against the USB's fre
   await connectUsbAndFetchPlaylists(page);
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
   const space = page.locator("#playlistExportSpace");
-  await expect(space).toHaveText("1.2 GB to copy incl. analysis & artwork · 27.0 GB free on USB");
+  await expect(space).toHaveText("2 of 3 tracks to copy · 1.2 GB · 27.0 GB free on USB");
   await expect(space).not.toHaveClass(/is-warning/);
 
   // The backend decides it won't fit; the next load (here a search) shows it.
   await page.evaluate(() => {
-    window.__exportSpace = { bytesToCopy: 31 * 1024 ** 3, availableBytes: 27 * 1024 ** 3, fits: false };
+    window.__exportSpace = { bytesToCopy: 31 * 1024 ** 3, tracksToCopy: 3, availableBytes: 27 * 1024 ** 3, fits: false };
   });
   await page.locator("#playlistSearchInput").fill("Song");
-  await expect(space).toHaveText("Doesn't fit: 31.0 GB to copy incl. analysis & artwork, 27.0 GB free on USB");
+  await expect(space).toHaveText("Doesn't fit: 3 of 3 tracks to copy · 31.0 GB · 27.0 GB free on USB");
   await expect(space).toHaveClass(/is-warning/);
+
+  await page.evaluate(() => {
+    window.__exportSpace = { bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true };
+  });
+  await page.locator("#playlistSearchInput").fill("");
+  await expect(space).toHaveText("All tracks on USB · 27.0 GB free on USB");
+  await expect(space).not.toHaveClass(/is-warning/);
 });
 
 test("a failed export is reported in the status bar and left to the backend's one Event Log entry", async ({ page }) => {

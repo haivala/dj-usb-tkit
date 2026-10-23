@@ -659,7 +659,11 @@ pub struct GetPlaylistTracksRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistExportSpace {
+    /// Audio of the tracks not on the USB yet, plus their analysis files and
+    /// artwork.
     pub bytes_to_copy: u64,
+    /// How many of the playlist's tracks aren't on the USB yet.
+    pub tracks_to_copy: usize,
     /// `None` when the free space can't be read.
     pub available_bytes: Option<u64>,
     /// False when the copy plus the export's headroom exceeds the free space,

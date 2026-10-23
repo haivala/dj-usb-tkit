@@ -43,8 +43,9 @@
   size of the list's audio files next to its track count, so you can see before exporting whether
   a playlist fits on the USB. Both numbers cover the whole list, even while a search is narrowing
   it.
-- **New feature:** With a USB connected, a line under the playlist title shows how much an export
-  would still copy and how much space is free on the USB, and warns when it won't fit. Tracks
+- **New feature:** With a USB connected, the playlist title row shows how many tracks and how much
+  data an export would still copy and how much space is free on the USB, and warns when it won't
+  fit. Tracks
   already on the USB aren't counted, and working this out doesn't read the USB, so it stays quick
   on slow sticks.
 - **Fix:** A failed export or other background job adds one entry to the Event Log instead of

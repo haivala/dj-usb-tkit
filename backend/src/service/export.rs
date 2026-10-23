@@ -413,6 +413,13 @@ fn run_manifest_invariant_check(
 /// the estimate skips them entirely).
 const EXPORT_FREE_SPACE_HEADROOM_BYTES: u64 = 64 * 1024 * 1024;
 
+/// What `estimate_export_copy` found: the bytes to write and how many of the
+/// playlist's tracks they belong to.
+struct ExportCopyEstimate {
+    bytes: u64,
+    tracks: usize,
+}
+
 /// Estimate the bytes an export will newly write into `Contents` (plus the
 /// optional artwork/analysis assets), skipping tracks already present at their
 /// primary target with a matching size — `copy_if_different` skips those and
@@ -423,13 +430,14 @@ const EXPORT_FREE_SPACE_HEADROOM_BYTES: u64 = 64 * 1024 * 1024;
 /// `already_present(target, source_len)` says whether a track's audio is
 /// already on the drive: the preflight checks the drive itself, the playlist
 /// heading checks the staged PDB's track list instead.
-fn estimate_export_new_bytes(
+fn estimate_export_copy(
     media_root: &Path,
     playlist: &ExportPlaylistData,
     options: &ExportToUsbOptions,
     already_present: impl Fn(&Path, u64) -> bool,
-) -> u64 {
+) -> ExportCopyEstimate {
     let mut total: u64 = 0;
+    let mut tracks = 0usize;
     for track in &playlist.tracks {
         let source = PathBuf::from(&track.file_path);
         let Ok(meta) = std::fs::metadata(&source) else {
@@ -451,6 +459,7 @@ fn estimate_export_new_bytes(
         if already_present(&target, source_len) {
             continue;
         }
+        tracks += 1;
         total = total.saturating_add(source_len);
 
         if options.include_analysis
@@ -475,7 +484,10 @@ fn estimate_export_new_bytes(
             total = total.saturating_add(m.len());
         }
     }
-    total
+    ExportCopyEstimate {
+        bytes: total,
+        tracks,
+    }
 }
 
 /// The preflight's "already on the drive": the target exists with the
@@ -532,7 +544,7 @@ fn ensure_usb_has_space_for_export(
     let Some(available) = usb_mount_available_bytes(usb_root) else {
         return Ok(());
     };
-    let estimate = estimate_export_new_bytes(media_root, playlist, options, present_on_drive);
+    let estimate = estimate_export_copy(media_root, playlist, options, present_on_drive).bytes;
     let Some((required, available)) = export_space_shortfall(estimate, available) else {
         return Ok(());
     };
@@ -765,7 +777,7 @@ impl BackendService {
     ) -> BackendResult<PlaylistExportSpace> {
         let playlist = self.load_playlist_for_export(playlist_id)?;
         let on_usb = self.usb_track_sizes(usb_root)?;
-        let bytes_to_copy = estimate_export_new_bytes(
+        let estimate = estimate_export_copy(
             &usb_root.join("Contents"),
             &playlist,
             &ExportToUsbOptions::default(),
@@ -779,9 +791,10 @@ impl BackendService {
         );
         let available_bytes = usb_mount_available_bytes(usb_root);
         let fits = available_bytes
-            .is_none_or(|available| export_space_shortfall(bytes_to_copy, available).is_none());
+            .is_none_or(|available| export_space_shortfall(estimate.bytes, available).is_none());
         Ok(PlaylistExportSpace {
-            bytes_to_copy,
+            bytes_to_copy: estimate.bytes,
+            tracks_to_copy: estimate.tracks,
             available_bytes,
             fits,
         })
@@ -1943,7 +1956,7 @@ impl BackendService {
 mod tests {
     use super::{
         BackendService, ContentFingerprint, compute_playlist_usb_export_status,
-        content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes,
+        content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_copy,
         existing_usb_relative_if_file, existing_usb_relative_if_present, export_space_shortfall,
         format_bytes, has_required_analysis, has_required_analysis_fields,
         normalize_playlist_name_for_compare, playlist_locks_reorder_on_export, present_on_drive,
@@ -2928,7 +2941,7 @@ mod tests {
     }
 
     #[test]
-    fn estimate_export_new_bytes_counts_new_audio_and_skips_files_already_on_usb() {
+    fn estimate_export_copy_counts_new_audio_and_skips_files_already_on_usb() {
         let root = tempdir().expect("root");
         let media_src = root.path().join("src");
         let media_root = root.path().join("usb/Contents");
@@ -2979,14 +2992,13 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &options, present_on_drive),
-            10_000
-        );
+        let estimate = estimate_export_copy(&media_root, &playlist, &options, present_on_drive);
+        assert_eq!(estimate.bytes, 10_000);
+        assert_eq!(estimate.tracks, 1, "only the new track is copied");
     }
 
     #[test]
-    fn estimate_export_new_bytes_adds_analysis_bundle_bytes_only_when_requested() {
+    fn estimate_export_copy_adds_analysis_bundle_bytes_only_when_requested() {
         let root = tempdir().expect("root");
         let media_src = root.path().join("src");
         let media_root = root.path().join("usb/Contents");
@@ -3017,7 +3029,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &without, present_on_drive),
+            estimate_export_copy(&media_root, &playlist, &without, present_on_drive).bytes,
             1000
         );
 
@@ -3027,7 +3039,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &with, present_on_drive),
+            estimate_export_copy(&media_root, &playlist, &with, present_on_drive).bytes,
             1000 + 200 + 50 + 25
         );
     }

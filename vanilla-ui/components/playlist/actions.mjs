@@ -699,18 +699,13 @@ function renderPlaylistExportSpace(ctx, playlist) {
     : null;
   el.playlistExportSpace.classList.toggle("hidden", !space);
   if (!space) return;
-  const toCopy = Number(space.bytesToCopy) || 0;
   const free = space.availableBytes == null ? null : `${formatByteSize(space.availableBytes)} free on USB`;
-  let text;
-  // The copy counts analysis files and artwork too, so it can exceed the
-  // audio size in the title.
-  const copied = `${formatByteSize(toCopy)} to copy incl. analysis & artwork`;
-  if (!space.fits) {
-    text = `Doesn't fit: ${copied}, ${free}`;
-  } else {
-    const copyText = toCopy > 0 ? copied : "Nothing new to copy";
-    text = free ? `${copyText} · ${free}` : copyText;
-  }
+  const tracks = Number(space.tracksToCopy) || 0;
+  const parts = tracks > 0
+    ? [`${tracks} of ${Number(playlist.listTrackCount)} tracks to copy`, formatByteSize(space.bytesToCopy)]
+    : ["All tracks on USB"];
+  if (free) parts.push(free);
+  const text = `${space.fits ? "" : "Doesn't fit: "}${parts.join(" · ")}`;
   el.playlistExportSpace.textContent = text;
   el.playlistExportSpace.classList.toggle("is-warning", !space.fits);
 }
