@@ -6,6 +6,7 @@ import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../s
 import {
   formatDurationMs,
   renderTrackListDurationSummary,
+  formatTrackListSummary,
   getHistoryDateValue,
   buildTracklistText,
 } from "../../track_utils.mjs";
@@ -1468,14 +1469,15 @@ export function renderUsbPlaylists(ctx) {
   renderUsbPlaylistHeading(ctx);
 }
 
-// Name + track count of the list shown in a USB track table, above it.
-// `item` is the open playlist/history (null hides the heading).
+// Name, track count and size of the list shown in a USB track table, above
+// it. `item` is the open playlist/history (null hides the heading). The size
+// comes from the first page response (`listSizeBytes`, stored on the item).
 function renderTrackListHeading(heading, item, count) {
   if (!heading) return;
   heading.classList.toggle("hidden", !item);
   if (!item) return;
   heading.querySelector(".track-list-heading-name").textContent = item.name;
-  heading.querySelector(".track-list-heading-count").textContent = `${count} ${count === 1 ? "track" : "tracks"}`;
+  heading.querySelector(".track-list-heading-count").textContent = formatTrackListSummary(count, item.listSizeBytes);
 }
 
 function findByScopeId(items, scopeId) {
@@ -1513,10 +1515,16 @@ export function renderHistoryList(ctx) {
 // The USB-playlist and USB-history track tables' data layer: paginated +
 // searched + sorted + per-page-hydrated by the backend, rendered via the shared
 // controller. Selection/search/sort/scroll all go through it.
-function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, secondaryActionType, actionType, onScopeChange }) {
+function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, secondaryActionType, actionType, getItems, onScopeChange }) {
   const ctl = createTrackListController({
     bodyId,
     onScopeChange,
+    onResponse: (data) => {
+      const item = findByScopeId(getItems(), ctl.scopeId);
+      if (!item) return;
+      item.listSizeBytes = Number(data.listSizeBytes) || 0;
+      onScopeChange();
+    },
     getElements: () => ({
       body: ctx.el[bodyId],
       wrap: ctx.el[bodyId]?.closest?.(".table-wrap"),
@@ -1564,6 +1572,7 @@ export function createUsbPlaylistTracksController(ctx) {
     fetchCommand: "fetch_usb_playlist_tracks",
     actionType: "add-usb",
     secondaryActionType: "play-usb",
+    getItems: () => ctx.state.usbPlaylists,
     onScopeChange: () => renderUsbPlaylistHeading(ctx),
   });
 }
@@ -1575,6 +1584,7 @@ export function createUsbHistoryTracksController(ctx) {
     fetchCommand: "fetch_usb_history_tracks",
     actionType: "add-history",
     secondaryActionType: "play-history",
+    getItems: () => ctx.state.histories,
     onScopeChange: () => renderHistoryHeading(ctx),
   });
 }

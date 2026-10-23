@@ -9,6 +9,7 @@ import {
   formatDurationMs,
   formatTimestampLocal,
   renderTrackListDurationSummary,
+  formatTrackListSummary,
   ANALYZE_PLAYLIST_MISSING_TOOLTIP,
 } from "../../track_utils.mjs";
 
@@ -663,21 +664,22 @@ export function fillPlaylistSidebarItem(item, playlist, usbStatus) {
   item.querySelector(".nav-playlist-delete").dataset.deletePlaylist = playlist.id;
 }
 
-// The playlist's track count is computed by the backend over the whole
-// playlist (not just whatever page(s) happen to be loaded client-side) and
-// pushed here via playlist.trackCount -- see GetPlaylistTracksData::total.
-// This is a pure setter, no track iteration.
+// The playlist's track count and size are computed by the backend over the
+// whole playlist, ignoring the search (what an export copies), and pushed here
+// via playlist.listTrackCount / listSizeBytes -- see
+// GetPlaylistTracksData::list_track_count. This is a pure setter, no track
+// iteration.
 export function updatePlaylistPanelTitle(ctx, playlist) {
   const { el } = ctx;
   if (!el?.playlistPanelTitle || !playlist) return;
   const loaded = Array.isArray(playlist.tracks) ? playlist.tracks.length : 0;
-  // Prefer the backend's whole-playlist total; fall back to the loaded count
-  // only before the first page response has set it.
-  const count = Number(playlist.trackCount) > 0 ? Number(playlist.trackCount) : loaded;
+  // Prefer the backend's whole-playlist count; before the first page response
+  // has set it, fall back to the sidebar listing's count, then the loaded one.
+  const count = Number(playlist.listTrackCount) || Number(playlist.trackCount) || loaded;
   const parts = [playlist.name];
   // The total time is under the table (playlistTotalDuration), not repeated here.
   if (count > 0) {
-    parts.push(`(${count} track${count !== 1 ? "s" : ""})`);
+    parts.push(`(${formatTrackListSummary(count, playlist.listSizeBytes)})`);
   }
   // Backend-derived from where the playlist was imported (see list_playlists).
   if (playlist.importedFrom) parts.push(`· Imported from ${playlist.importedFrom}`);
@@ -789,6 +791,8 @@ export function createPlaylistTracksController(ctx) {
         p.unanalyzedCount = Number(data.unanalyzedCount) || 0;
         // Whole-playlist count from the backend, not just the loaded page(s).
         p.trackCount = Number(data.total) || 0;
+        p.listTrackCount = Number(data.listTrackCount) || 0;
+        p.listSizeBytes = Number(data.listSizeBytes) || 0;
       }
       // Reveal the table wrap *before* the rows are built: a
       // waveform canvas measured while an ancestor is `display:none` (the

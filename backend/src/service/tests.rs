@@ -1289,6 +1289,68 @@ fn add_tracks_to_playlist_dedupe_skip_counts_skipped_and_get_playlist_tracks_ord
 }
 
 #[test]
+fn get_playlist_tracks_list_totals_ignore_search() {
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "t1",
+        "Song A",
+        "Artist",
+        "/music/a.mp3",
+        Some(200_000),
+        Some(8_000_000),
+        false,
+    );
+    insert_full_track(
+        &conn,
+        "t2",
+        "Song B",
+        "Artist",
+        "/music/b.mp3",
+        Some(100_000),
+        Some(2_000_000),
+        false,
+    );
+    // Unknown size: counted as a track, adds nothing to the size.
+    insert_full_track(
+        &conn,
+        "t3",
+        "Song C",
+        "Artist",
+        "/music/c.mp3",
+        Some(100_000),
+        None,
+        false,
+    );
+    drop(conn);
+
+    let playlist = service
+        .create_playlist(CreatePlaylistRequest {
+            name: "PL".to_string(),
+        })
+        .expect("create playlist");
+    service
+        .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: playlist.playlist_id.clone(),
+            track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
+        })
+        .expect("add tracks");
+
+    let tracks = service
+        .get_playlist_tracks(GetPlaylistTracksRequest {
+            playlist_id: playlist.playlist_id,
+            query: "song b".to_string(),
+            ..Default::default()
+        })
+        .expect("get playlist tracks");
+    assert_eq!(tracks.total, 1);
+    assert_eq!(tracks.total_duration_ms, 100_000);
+    assert_eq!(tracks.list_track_count, 3);
+    assert_eq!(tracks.list_size_bytes, 10_000_000);
+}
+
+#[test]
 fn get_playlist_tracks_computes_total_duration_server_side() {
     let (_dir, service) = test_service();
     let conn = service.db.connect().expect("connect");
@@ -2913,7 +2975,9 @@ fn unregistered_export_stick_counts_as_usb() {
     std::fs::write(&on_stick, b"x").expect("write stick file");
     let on_stick = on_stick.to_string_lossy().to_string();
     let conn = service.db.connect().expect("connect");
-    insert_full_track(&conn, "stick", "Song", "Artist", &on_stick, None, None, false);
+    insert_full_track(
+        &conn, "stick", "Song", "Artist", &on_stick, None, None, false,
+    );
     drop(conn);
 
     let result = service

@@ -793,6 +793,8 @@ impl BackendService {
                 source_root_analysis: Vec::new(),
                 total_duration_ms: 0,
                 duration_known_count: 0,
+                list_track_count: 0,
+                list_size_bytes: 0,
             });
         }
 
@@ -831,6 +833,7 @@ impl BackendService {
         // `total` to 0, and `fully_analyzed` requires `total > 0`). Computed
         // from the full, unfiltered set -- before the query filter below.
         let source_root_analysis = source_root_analysis(&source_roots, &all_items);
+        let (list_track_count, list_size_bytes) = list_totals(&all_items);
 
         let mut items = all_items;
         query.retain(&mut items);
@@ -881,6 +884,8 @@ impl BackendService {
             source_root_analysis,
             total_duration_ms,
             duration_known_count,
+            list_track_count,
+            list_size_bytes,
         })
     }
 

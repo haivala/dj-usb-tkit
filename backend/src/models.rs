@@ -397,6 +397,11 @@ pub struct BrowseSourceFilesData {
     pub total_duration_ms: u64,
     #[serde(default)]
     pub duration_known_count: usize,
+    /// Whole list before the search filter -- see `track_list::list_totals`.
+    #[serde(default)]
+    pub list_track_count: usize,
+    #[serde(default)]
+    pub list_size_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -666,6 +671,11 @@ pub struct GetPlaylistTracksData {
     /// can't count them from a single loaded page).
     #[serde(default)]
     pub unanalyzed_count: usize,
+    /// Whole list before the search filter -- see `track_list::list_totals`.
+    #[serde(default)]
+    pub list_track_count: usize,
+    #[serde(default)]
+    pub list_size_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1548,6 +1558,10 @@ pub struct FetchUsbTracksData {
     /// Sum over the whole filtered list, not just the page.
     pub total_duration_ms: u64,
     pub duration_known_count: usize,
+    /// Whole playlist/history before the search filter -- see
+    /// `track_list::list_totals`.
+    pub list_track_count: usize,
+    pub list_size_bytes: u64,
     pub warnings: Vec<WarningEntry>,
 }
 

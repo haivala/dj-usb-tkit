@@ -51,7 +51,7 @@ pub(crate) use playlists::*;
 use rekordbox_resources::*;
 pub use settings::*;
 pub(crate) use source_roots::*;
-use track_list::{TrackQuery, TrackSort};
+use track_list::{TrackQuery, TrackSort, list_totals};
 pub use track_matching::build_track_match_fingerprint;
 use track_matching::{
     library_metadata_candidate_compatible, matching_file_name, matching_file_stem,

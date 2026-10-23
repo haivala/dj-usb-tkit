@@ -7,6 +7,7 @@ import { REANALYZE_TOOLTIP } from "../../track_utils.mjs";
 import {
   formatDurationMs,
   renderTrackListDurationSummary,
+  formatTrackListSummary,
 } from "../../track_utils.mjs";
 import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
 
@@ -573,6 +574,10 @@ export function createLibraryTracksController(ctx) {
       }
       applySourceRootAnalysis(ctx.state, data.sourceRootAnalysis);
       renderSourceChips(ctx);
+      // The enabled sources' tracks, ignoring the search.
+      if (ctx.el.libraryCountsText) {
+        ctx.el.libraryCountsText.textContent = formatTrackListSummary(data.listTrackCount, data.listSizeBytes);
+      }
     },
     onPage: (_page, { first }) => {
       if (first) narrowTrackSelectionToLoaded(ctx, "library", ctx.state.tracks || []);

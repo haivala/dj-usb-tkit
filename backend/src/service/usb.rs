@@ -396,6 +396,7 @@ fn paginate_usb_tracks(
     req: &crate::models::FetchUsbTracksRequest,
     warnings: Vec<WarningEntry>,
 ) -> BackendResult<crate::models::FetchUsbTracksData> {
+    let (list_track_count, list_size_bytes) = super::list_totals(&tracks);
     let query = super::TrackQuery::new(&req.query);
     query.retain(&mut tracks);
     let (total_duration_ms, duration_known_count) = sum_usb_track_durations(&tracks);
@@ -435,6 +436,8 @@ fn paginate_usb_tracks(
         has_more,
         total_duration_ms,
         duration_known_count,
+        list_track_count,
+        list_size_bytes,
         warnings,
     })
 }

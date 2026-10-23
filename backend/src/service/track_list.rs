@@ -22,6 +22,7 @@ pub(crate) trait ListTrack {
     fn bpm(&self) -> Option<f64>;
     fn duration_ms(&self) -> Option<u64>;
     fn key(&self) -> Option<&str>;
+    fn file_size_bytes(&self) -> Option<i64>;
 }
 
 macro_rules! impl_list_track {
@@ -54,12 +55,28 @@ macro_rules! impl_list_track {
             fn key(&self) -> Option<&str> {
                 self.key.as_deref()
             }
+            fn file_size_bytes(&self) -> Option<i64> {
+                self.file_size_bytes
+            }
         }
     };
 }
 
 impl_list_track!(Track);
 impl_list_track!(UsbTrack);
+
+/// Track count and summed file size of a whole list, taken before the search
+/// filter: what an export of it copies, shown in the list's heading. Tracks
+/// without a known size add nothing.
+pub(crate) fn list_totals<T: ListTrack>(tracks: &[T]) -> (usize, u64) {
+    let size_bytes = tracks
+        .iter()
+        .filter_map(|track| track.file_size_bytes())
+        .filter(|&size| size > 0)
+        .map(|size| size as u64)
+        .sum();
+    (tracks.len(), size_bytes)
+}
 
 /// A search over title, artist, album, genre and year. Each word of the text
 /// must appear, case-insensitively, in one of those fields, so a query may mix

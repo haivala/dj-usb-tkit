@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+- **New feature:** Playlist, Media Library, USB playlist and USB history headings show the total
+  size of the list's audio files next to its track count, so you can see before exporting whether
+  a playlist fits on the USB. Both numbers cover the whole list, even while a search is narrowing
+  it.
 - **Improvement:** The cue editor opens over the page and sidebar instead of opening as a window
   on top, and the track you edited stays marked in the list after closing.
 - **Improvement:** With a USB connected, the checkmark next to a playlist in the sidebar and the

@@ -54,6 +54,25 @@ export function renderTrackListDurationSummary(
   target.textContent = `Total time: ${formatDurationMsFn(total)}${suffix}`;
 }
 
+// Binary units, like file managers and `df` show a USB stick's size.
+export function formatByteSize(bytes) {
+  const n = Math.max(0, Number(bytes) || 0);
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${Math.round(n / 1024 ** 2)} MB`;
+  return `${Math.round(n / 1024)} KB`;
+}
+
+// The "42 tracks · 3.4 GB" summary in every track-list heading (app playlist,
+// library, USB playlist/history): the whole list, ignoring the search, as the
+// backend reports it in `listTrackCount` / `listSizeBytes`. The size is left
+// out when no track in the list has a known size.
+export function formatTrackListSummary(trackCount, sizeBytes) {
+  const count = Math.max(0, Number(trackCount) || 0);
+  const parts = [`${count} ${count === 1 ? "track" : "tracks"}`];
+  if (Number(sizeBytes) > 0) parts.push(formatByteSize(sizeBytes));
+  return parts.join(" · ");
+}
+
 export function buildTracklistText(tracks, timeMode) {
   const items = Array.isArray(tracks) ? tracks : [];
   let cumulativeMs = 0;

@@ -95,6 +95,9 @@ test("populatePlaylistPanel fills export status and search input", () => {
   populatePlaylistPanel(ctx, { name: "Set A", tracks: [], trackCount: 2, totalDurationMs: 61000 });
 
   assert.equal(ctx.el.playlistPanelTitle.textContent, "Set A (2 tracks)");
+
+  populatePlaylistPanel(ctx, { name: "Set A", tracks: [], listTrackCount: 3, listSizeBytes: 3.4 * 1024 ** 3 });
+  assert.equal(ctx.el.playlistPanelTitle.textContent, "Set A (3 tracks · 3.4 GB)");
   assert.equal(ctx.el.playlistExportStatus.textContent, "Not exported yet.");
   assert.equal(ctx.el.playlistSearchInput.value, "acid");
   assert.equal(ctx.el.exportPlaylistBtn.textContent, "Select USB first");

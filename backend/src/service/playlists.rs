@@ -354,6 +354,7 @@ impl BackendService {
 
         let conn = self.db.connect()?;
         let mut items = self.load_playlist_tracks_ordered(&conn, &req.playlist_id)?;
+        let (list_track_count, list_size_bytes) = list_totals(&items);
 
         let query = TrackQuery::new(&req.query);
         query.retain(&mut items);
@@ -414,6 +415,8 @@ impl BackendService {
             total_duration_ms,
             duration_known_count,
             unanalyzed_count,
+            list_track_count,
+            list_size_bytes,
         })
     }
 

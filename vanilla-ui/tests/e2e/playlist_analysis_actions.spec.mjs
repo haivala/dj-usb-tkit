@@ -33,6 +33,9 @@ test.beforeEach(async ({ page }) => {
         totalDurationMs: rows.reduce((s, t) => s + (t.durationMs > 0 ? t.durationMs : 0), 0),
         durationKnownCount: rows.filter((t) => t.durationMs > 0).length,
         unanalyzedCount: rows.filter((t) => !t.analysisReady).length,
+        // The heading's totals cover the whole playlist, ignoring the search.
+        listTrackCount: (all || []).length,
+        listSizeBytes: (all || []).reduce((s, t) => s + (t.fileSizeBytes > 0 ? t.fileSizeBytes : 0), 0),
       };
     };
     window.__applyReorder = (cur, request) => {
@@ -100,6 +103,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           artist: "Artist A",
           album: "Album A",
           filePath: "/music/local-missing.mp3",
+          fileSizeBytes: 1.5 * 1024 ** 3,
           waveformPeaksPath: "",
           waveformPreview: [],
           durationMs: null,
@@ -117,6 +121,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           usbAnalysisPath: "/USB/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT",
           waveformPeaksPath: "/USB/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT",
           waveformPreview: [10, 20, 30],
+          fileSizeBytes: 2 * 1024 ** 3,
           durationMs: 180000,
           bpm: 128,
           key: null,
@@ -345,9 +350,16 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   await page.goto("/");
 
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks · 3.5 GB)");
   // Footer total comes straight from the backend (get_playlist_tracks), not a
   // client-side sum -- 1 of the 2 tracks has no known length.
+  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00 (1 without length)");
+  // A search narrows the footer total, but the heading keeps the whole
+  // playlist: that's what an export copies.
+  await page.locator("#playlistSearchInput").fill("USB Ready");
+  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks · 3.5 GB)");
+  await page.locator("#playlistSearchInput").fill("");
   await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00 (1 without length)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toHaveText("Analyze Missing Tracks (1)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeVisible();
