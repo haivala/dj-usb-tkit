@@ -1169,7 +1169,6 @@ pub(super) fn write_pdb_fresh_with_overrides(
     }
 
     // ── Build PdbData and write ─────────────────────────────────────────
-    let exported_track_count_for_t19 = all_tracks.len();
     let pdb_data = PdbData {
         tracks: all_tracks,
         artists: all_artists,
@@ -1230,43 +1229,12 @@ pub(super) fn write_pdb_fresh_with_overrides(
         } else {
             Vec::new()
         },
-        history_raw_rows: if let Some(ref parsed) = existing {
-            let mut rows = parsed.history_raw_rows_bytes.clone();
-            if rows.len() <= 1 {
-                let track_count = exported_track_count_for_t19;
-                if track_count > 0 {
-                    let base = rows.first().cloned().unwrap_or_else(|| {
-                        let mut seed = vec![0u8; 40];
-                        seed[0] = 0x80;
-                        seed[1] = 0x02;
-                        seed[2] = 0x00;
-                        seed[3] = 0x00;
-                        seed[26..30].copy_from_slice(b"1000");
-                        seed
-                    });
-                    rows = (0..=track_count)
-                        .map(|idx| {
-                            let mut row = if base.len() == 40 {
-                                base.clone()
-                            } else {
-                                vec![0u8; 40]
-                            };
-                            // Runtime sequence follows observed profile:
-                            // 0x280, 0x200280, 0x400280, ...
-                            let val = 0x0000_0280u32
-                                .saturating_add((idx as u32).saturating_mul(0x0020_0000));
-                            row[0..4].copy_from_slice(&val.to_le_bytes());
-                            row[4..8].copy_from_slice(&(idx as u32).to_le_bytes());
-                            // keep date/num region from seed/base (if present)
-                            row
-                        })
-                        .collect();
-                }
-            }
-            rows
-        } else {
-            Vec::new()
-        },
+        // The PDB writers derive t19's runtime rows from these; see
+        // `t19_rows_after_first_export`.
+        history_raw_rows: existing
+            .as_ref()
+            .map(|parsed| parsed.history_raw_rows_bytes.clone())
+            .unwrap_or_default(),
         profile,
     };
 

@@ -110,8 +110,20 @@ fn encode_all_tables(data: &PdbData) -> BackendResult<[Vec<Vec<u8>>; 20]> {
         &data.history_entries,
         encode_history_entry_row,
     );
-    // t19: history (raw pass-through)
-    tables[19] = data.history_raw_rows.clone();
+    // t19: history. A library with tracks never keeps the empty-device
+    // template's single row: it gets the two rows rekordbox's first export
+    // leaves, the same as the additive writer's activation. Real history
+    // (more than one row) passes through.
+    tables[19] = match data.history_raw_rows.as_slice() {
+        [] if !data.tracks.is_empty() => t19_rows_after_first_export(&T19_TEMPLATE_ROW).to_vec(),
+        [row0] if !data.tracks.is_empty() => {
+            match <&[u8; T19_ROW_LEN]>::try_from(row0.as_slice()) {
+                Ok(row0) => t19_rows_after_first_export(row0).to_vec(),
+                Err(_) => data.history_raw_rows.clone(),
+            }
+        }
+        _ => data.history_raw_rows.clone(),
+    };
 
     Ok(tables)
 }

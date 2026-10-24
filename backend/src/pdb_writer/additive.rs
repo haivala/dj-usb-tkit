@@ -1296,7 +1296,30 @@ pub(crate) fn remove_t08_entries_in_place(
 }
 
 /// Fixed width of a tt=19 (history_runtime) row.
-const T19_ROW_LEN: usize = 40;
+pub(crate) const T19_ROW_LEN: usize = 40;
+
+/// The single tt=19 row of an empty-device template (`initialize_usb`
+/// seeds it; rekordbox's own template carries the same row with its own
+/// date).
+pub(crate) const T19_TEMPLATE_ROW: [u8; T19_ROW_LEN] = [
+    0x80, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x17, 0x32, 0x30, 0x32,
+    0x36, 0x2d, 0x30, 0x33, 0x2d, 0x30, 0x36, 0x19, 0x1e, 0x0b, 0x31, 0x30, 0x30, 0x30, 0x03, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+
+/// The tt=19 rows rekordbox leaves after its first export onto a template
+/// whose single row is `row0`: that row kept, plus a copy of it with bytes
+/// `0..4` = `0x0280 + idx * 0x0020_0000` and bytes `4..8` = `idx`. The
+/// activation, its repair and the fresh writer all use this, so every path
+/// produces the same page.
+pub(crate) fn t19_rows_after_first_export(row0: &[u8; T19_ROW_LEN]) -> [Vec<u8>; 2] {
+    let mut row1 = row0.to_vec();
+    let idx = 1u32;
+    let val = 0x0000_0280u32.saturating_add(idx.saturating_mul(0x0020_0000));
+    row1[0..4].copy_from_slice(&val.to_le_bytes());
+    row1[4..8].copy_from_slice(&idx.to_le_bytes());
+    [row0.to_vec(), row1]
+}
 
 /// First data page of tt=19 (`chain[1]`, after the sentinel), if the table
 /// has one.
@@ -1370,18 +1393,15 @@ pub(crate) fn activate_t19_template_page(bytes: &mut [u8], page_size: usize) -> 
             .next()
             .map(|group| HEAP_START + group.row_offset(page, 0))
             .unwrap_or(HEAP_START);
-        page.get(row_off..row_off + T19_ROW_LEN)
+        let row: &[u8; T19_ROW_LEN] = page
+            .get(row_off..row_off + T19_ROW_LEN)
+            .and_then(|row| row.try_into().ok())
             .ok_or_else(|| {
                 BackendError::Validation("t19 activation: template row out of bounds".into())
-            })?
-            .to_vec()
+            })?;
+        *row
     };
-    let mut row1 = row0.clone();
-    let idx = 1u32;
-    let val = 0x0000_0280u32.saturating_add(idx.saturating_mul(0x0020_0000));
-    row1[0..4].copy_from_slice(&val.to_le_bytes());
-    row1[4..8].copy_from_slice(&idx.to_le_bytes());
-    let rows = [row0, row1];
+    let rows = t19_rows_after_first_export(&row0);
 
     if !rewrite_variable_page_rows_in_place(bytes, page_idx, &rows, page_size) {
         return Err(BackendError::Validation(format!(

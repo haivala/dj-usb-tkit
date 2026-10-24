@@ -2624,19 +2624,36 @@ const RB_T19_ROW1: [u8; 40] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
-fn t19_page_offset(bytes: &[u8]) -> usize {
+fn t19_page_index(bytes: &[u8]) -> u32 {
     let (_ec, first, last) = table_ptr_fields(bytes, 19).expect("t19 ptr");
     let chain = collect_chain_pages(bytes, PAGE_SIZE, first, last).expect("t19 chain");
-    page_offset(chain[1], PAGE_SIZE).expect("t19 page offset")
+    chain[1]
 }
 
-/// Write `data` with one t19 row and seal that page into the init-template
-/// shape `seed_rb_initialized_history_shape` writes (flags 0x24, u5=1,
-/// rowpf=tranrf=0x0001).
+fn t19_page_offset(bytes: &[u8]) -> usize {
+    page_offset(t19_page_index(bytes), PAGE_SIZE).expect("t19 page offset")
+}
+
+/// Write `data` and put its t19 back into the init-template state an older
+/// build left behind: one row, sealed the way
+/// `seed_rb_initialized_history_shape` writes it (flags 0x24, u5=1,
+/// rowpf=tranrf=0x0001), with an empty sentinel B-tree.
 fn write_with_template_state_t19(data: &PdbData) -> Vec<u8> {
     let mut data = data.clone();
     data.history_raw_rows = vec![RB_T19_ROW0.to_vec()];
     let mut bytes = write_pdb(&data).expect("write seed");
+    let page_idx = t19_page_index(&bytes);
+    assert!(rewrite_variable_page_rows_in_place(
+        &mut bytes,
+        page_idx,
+        &[RB_T19_ROW0.to_vec()],
+        PAGE_SIZE
+    ));
+    let (_ec, sentinel, _last) = table_ptr_fields(&bytes, 19).expect("t19 ptr");
+    let s = page_offset(sentinel, PAGE_SIZE).unwrap();
+    bytes[s + 0x26..s + 0x28].copy_from_slice(&0u16.to_le_bytes());
+    bytes[s + 0x38..s + 0x3a].copy_from_slice(&0u16.to_le_bytes());
+    bytes[s + 0x3c..s + 0x40].copy_from_slice(&0x1fff_fff8u32.to_le_bytes());
     let off = t19_page_offset(&bytes);
     bytes[off + 0x1b] = 0x24;
     bytes[off + 0x20..off + 0x22].copy_from_slice(&1u16.to_le_bytes());
@@ -2775,4 +2792,57 @@ fn trackless_export_leaves_template_t19_alone() {
     let (empty, before) = template_state_seed();
     let diff = compute_additive_diff(&before, &empty, vec![]).expect("additive");
     assert!(!diff.activate_t19_template);
+}
+
+#[test]
+fn fresh_writer_builds_the_same_t19_page_as_activation() {
+    let (empty, before) = template_state_seed();
+    let mut next = empty.clone();
+    next.tracks.push(t19_test_track(1));
+    let (activated, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("additive export")
+        .expect("additive export accepted");
+    let fresh = write_pdb(&next).expect("fresh write");
+
+    let (a, f) = (t19_page_offset(&activated), t19_page_offset(&fresh));
+    let (a_page, f_page) = (&activated[a..a + PAGE_SIZE], &fresh[f..f + PAGE_SIZE]);
+    // Same rows, header counts, flags and footer; only seq and the chain's
+    // next pointer are the writers' own.
+    assert_eq!(&f_page[0x18..], &a_page[0x18..]);
+    assert_eq!(&f_page[HEAP_START + 40..HEAP_START + 80], &RB_T19_ROW1);
+
+    let sentinel = |bytes: &[u8]| {
+        let (_ec, first, _last) = table_ptr_fields(bytes, 19).unwrap();
+        let off = page_offset(first, PAGE_SIZE).unwrap();
+        (
+            read_u16_le_at(bytes, off + 0x26),
+            read_u16_le_at(bytes, off + 0x38),
+            read_u32_le_at(bytes, off + 0x3c),
+        )
+    };
+    assert_eq!(sentinel(&fresh), sentinel(&activated));
+    assert_eq!(
+        sentinel(&fresh),
+        (Some(1), Some(1), Some(t19_page_index(&fresh) * 8))
+    );
+}
+
+#[test]
+fn fresh_writer_keeps_real_t19_history_rows() {
+    let mut data = PdbData::empty();
+    data.colors = standard_colors();
+    data.columns_raw_rows = standard_columns_raw();
+    data.tracks.push(t19_test_track(1));
+    let rows: Vec<Vec<u8>> = t19_rows_after_first_export(&RB_T19_ROW0)
+        .into_iter()
+        .chain(std::iter::once(RB_T19_ROW1.to_vec()))
+        .collect();
+    data.history_raw_rows = rows.clone();
+    let bytes = write_pdb(&data).expect("fresh write");
+    let off = t19_page_offset(&bytes);
+    assert_eq!(bytes[off + 0x18], 3);
+    for (i, row) in rows.iter().enumerate() {
+        let at = off + HEAP_START + i * 40;
+        assert_eq!(&bytes[at..at + 40], row.as_slice());
+    }
 }

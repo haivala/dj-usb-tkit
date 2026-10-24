@@ -433,6 +433,13 @@ size. A page rekordbox or a player has already advanced has a different shape
 and is left untouched. `repair_pdb_t19_template_state` applies the same change
 to an existing USB (`docs/DIAGNOSTICS_REPAIRS.md`).
 
+The fresh writer (`write_pdb`) builds the same page: for a library with tracks
+it turns a single `tt=19` row (or none, using the `initialize_usb` template row)
+into the same two rows, and indexes the active page in the sentinel B-tree.
+More than one row is real history and passes through. All three paths share
+`t19_rows_after_first_export`, so a full rewrite, an additive export and the
+repair leave the same `tt=19` page.
+
 ## Page Footer Conventions
 
 `trc` means the total row-slot count on the page.
