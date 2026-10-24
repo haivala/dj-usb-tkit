@@ -294,7 +294,11 @@ impl BackendService {
         // explicitly: the setting may not have been rewritten yet.
         let remaining_roots = configured_source_roots(&tx)?
             .into_iter()
-            .filter(|root| !roots.iter().any(|removed| source_root_keys_equal(root, removed)))
+            .filter(|root| {
+                !roots
+                    .iter()
+                    .any(|removed| source_root_keys_equal(root, removed))
+            })
             .collect::<Vec<_>>();
         let mut removed = 0usize;
         for root in roots {

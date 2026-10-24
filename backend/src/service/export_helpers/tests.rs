@@ -3383,6 +3383,49 @@ fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
 }
 
 #[test]
+fn write_edb_playlist_sets_device_name_from_drive_name() {
+    let dir = tempdir().unwrap();
+    let usb_root = dir.path();
+    std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+    crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    let playlist = ExportPlaylistData {
+        id: "pl-name".to_string(),
+        name: "Name".to_string(),
+        tracks: Vec::new(),
+    };
+    let manifest = make_test_manifest("pl-name", "Name", usb_root, &[("t1", "Song 1", "a1.mp3")]);
+    let device_name = || {
+        let mut warnings = Vec::<WarningEntry>::new();
+        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        conn.query_row("SELECT deviceName FROM property", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .expect("read deviceName")
+    };
+    let set_device_name = |name: &str| {
+        let mut warnings = Vec::<WarningEntry>::new();
+        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        conn.execute("UPDATE property SET deviceName = ?1", [name])
+            .expect("set deviceName");
+    };
+
+    // No drive name: a name set elsewhere (e.g. in rekordbox) stays.
+    set_device_name("Named Elsewhere");
+    write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
+    assert_eq!(device_name(), "Named Elsewhere");
+
+    crate::service::usb_identity::write_drive_name(usb_root, "Test Stick").unwrap();
+    write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
+    assert_eq!(device_name(), "Test Stick");
+
+    // A name carried over from another drive is not this drive's.
+    set_device_name("Named Elsewhere");
+    crate::service::usb_identity::set_name_conflict(usb_root, true);
+    write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
+    assert_eq!(device_name(), "Named Elsewhere");
+}
+
+#[test]
 fn strict_parity_report_has_no_dictionary_id_issues_for_thin_manifest_fallback() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();

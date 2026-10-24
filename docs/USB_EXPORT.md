@@ -141,6 +141,12 @@ travels with the drive, the same physical stick keeps its identity across replug
 ports, and even different computers — what the local HDD staging cache key (above) and backup
 archiving (above) both depend on for stability.
 
+Every eDB write (export and the repairs that write playlists) also sets the eDB's
+`property.deviceName` to the drive name, the field rekordbox shows the drive under. A drive with
+no name of its own (unnamed, or carrying another drive's name) keeps whatever is there, such as
+a name set in rekordbox. The PDB's `t19` rows can carry the name too; the app leaves them as
+they are.
+
 Locally, two tables mirror it:
 
 - `usb_drive_names` is the uniqueness index: one row per name in use, keyed by the name's slug

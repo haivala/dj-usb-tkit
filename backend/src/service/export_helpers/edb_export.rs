@@ -209,6 +209,16 @@ pub fn write_edb_playlist_with_conn(
                 [],
             )?;
         }
+        // rekordbox shows the drive under this name. Without a name of
+        // this drive's own (none set, or one carried over from another
+        // drive) whatever is there stays, e.g. a name set in rekordbox.
+        let usb_root = Path::new(&manifest.usb_root);
+        if property_columns.contains("deviceName")
+            && !crate::service::usb_identity::has_name_conflict(usb_root)
+            && let Some(name) = crate::service::usb_identity::read_drive_name(usb_root)
+        {
+            tx.execute("UPDATE property SET deviceName = ?1", params![name])?;
+        }
     }
 
     tx.commit()?;

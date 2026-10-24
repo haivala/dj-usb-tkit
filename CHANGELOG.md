@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+- **Improvement:** rekordbox now shows a USB under the drive name given in the app. Each export
+  writes the name into the eDB.
 - **Fix:** Older players could show 0 tracks on a USB the app had initialized, even after
   playlists were exported to it. Exports now set up the PDB's history page the way rekordbox does, and Repair
   fixes USBs that are already affected.

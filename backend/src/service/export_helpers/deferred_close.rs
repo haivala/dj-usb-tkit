@@ -11,8 +11,8 @@
 //! waits for every close before the databases are written.
 
 use std::fs::File;
-use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
