@@ -131,8 +131,11 @@ When `apply=true`:
   additive track appends hard-fail while a table's chain is unreachable, and
   `repair_pdb_torn_growth_pages` because its dirty-tail truncation boundary is
   computed once, up front, and would otherwise go stale and cut off
-  tracks/playlists that strict parity had just written; all other structural
-  PDB page repairs run *after* strict parity upgrade;
+  tracks/playlists that strict parity had just written;
+- `repair_pdb_t19_template_state` runs right after those two and before strict
+  parity upgrade, so strict parity's additive write finds `t19` already active
+  and leaves it alone; all other structural PDB page repairs run *after* strict
+  parity upgrade;
 - the desktop UI's repair preview locks these two fixes' checkboxes checked
   whenever they're proposed — they cannot be deselected while leaving strict
   parity selected, since there is no safe outcome from skipping either one;
@@ -170,6 +173,7 @@ The current code can propose these repair IDs:
 | `repair_pdb_t00_multipage_active_pages` | predecessor `t00` pages marked active in a multi-page chain | Sets those pages to sealed flag `0x24` and `(1, nrs-1)` |
 | `repair_pdb_ec_data_page_conflict` | table `empty_candidate` pointer aliasing another table's data page | Assigns each conflicting table a new empty candidate beyond the current file tail and updates `next_unused_page` |
 | `repair_pdb_torn_growth_pages` | torn additive-growth write left by an interrupted export (e.g. USB disconnected mid-write) | Zeroes `empty_candidate` page(s) that hold garbage instead of a blank reusable page, truncates any never-populated file tail beyond `next_unused_page`, and recomputes `seqdb` |
+| `repair_pdb_t19_template_state` | the PDB has tracks but its `t19` page is still the empty-device template (one sealed row, flags `0x24`, `u5=1`, `rowpf=0x0001`); older players show 0 tracks. Only app-initialized USBs end up like this. Shown as a WARN "PDB history page" check in the PDB section, and in the overview as older players showing 0 tracks | Keeps the template row, appends one copied from it, and marks the page active (`nrs=2`, flags `0x34`, `u5=2`, `rowpf=0x0002`, `tranrf=0x0003`), as rekordbox's first export does (`docs/PDB.md`, "`tt=19` activation"). Also points the `t19` sentinel's B-tree at that page, as an export does; touches no other page. Re-checked at apply time, so a second run is a no-op |
 | `repair_pdb_truncated_table_chain` | a table's declared last page is beyond the physical end of the file (interrupted export left growth pointers ahead of the actual written data) | Points the table's `last`/`empty_candidate` fields back at the real last written page (found by walking the chain); does not touch page content. Applied before strict parity, since additive track appends hard-fail while the chain is unreachable |
 | `relink_moved_audio` | a referenced file is missing while the same track sits unindexed under another path (renamed file, moved or re-cased folder) | Pairs missing references with unindexed files of the same audio format by content fingerprint (size + title + artist), else by file name; only one-to-one pairs. Rewrites the PDB track row's path/file name/size in place (same id), updates the eDB `content` row's path, and the bundle's `PPTH`. Applied before the two fixes below, which only see unmatched items |
 | `add_unindexed_audio_playlist` | audio files under `Contents/` not indexed by PDB/eDB (e.g. databases restored from an older backup), matched by exact path like the parity report's indexed-file presence check | Additive export of a USB-only playlist `Unindexed`: tags read from each file, BPM/first beat/cues from the file's canonical ANLZ bundle (bundle reused, not rewritten). A file without a bundle is analysed and gets one, as with `fix_empty_analysis_files`; only a file that can't be analysed is added without. Nothing is copied or deleted |

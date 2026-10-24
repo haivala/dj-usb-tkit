@@ -34,6 +34,7 @@ pub(super) const DISPLAY_LAYOUT: [DisplaySection; 7] = [
             "PDB page headers",
             "PDB structural integrity",
             "Track/album string alignment",
+            T19_TEMPLATE_STATE_LABEL,
             "Parse warnings",
         ],
     },
@@ -221,6 +222,14 @@ pub(super) fn diagnostics_overview(
                 counted(facts.playlists, "playlist", "playlists"),
                 counted(facts.pdb_tracks, "track", "tracks")
             ),
+            DiagStatus::Warn
+                if check_status(pdb, T19_TEMPLATE_STATE_LABEL).is_some_and(|s| !is_pass(&s)) =>
+            {
+                with_hint(vec![
+                    "These players will show 0 tracks: part of the player database was never set up."
+                        .to_string(),
+                ])
+            }
             DiagStatus::Warn => with_hint(vec![
                 "Readable, but parts of the player database are irregular and desktop DJ software may complain."
                     .to_string(),

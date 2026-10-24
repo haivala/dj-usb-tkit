@@ -34,6 +34,7 @@ struct DetectedRepairs {
     pdb_ec_conflicts: Vec<EcDataPageConflict>,
     pdb_truncated_chains: Vec<TruncatedTableChain>,
     pdb_torn_growth: PdbTornGrowthReport,
+    pdb_t19_template_state: bool,
     pdb_misaligned_track_ids: Vec<u32>,
     pdb_misaligned_album_ids: Vec<u32>,
     pdb_misaligned_artist_ids: Vec<u32>,
@@ -573,6 +574,10 @@ impl BackendService {
         let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&staged_pdb_path);
         let pdb_truncated_chains = detect_pdb_truncated_table_chains(&staged_pdb_path);
         let pdb_torn_growth = detect_pdb_torn_growth_pages(&staged_pdb_path);
+        let pdb_t19_template_state = detect_pdb_t19_template_state(
+            &staged_pdb_path,
+            parsed_pdb.as_ref().map_or(0, |p| p.tracks.len()),
+        );
         let pdb_misaligned_slots = detect_pdb_string_misalignment(&staged_pdb_path);
         let pdb_misaligned_track_ids: Vec<u32> = {
             let mut ids: Vec<u32> = pdb_misaligned_slots
@@ -793,6 +798,22 @@ impl BackendService {
                      including the strict-parity upgrade: parity's additive writes can grow the \
                      file, and this repair's tail-truncation boundary would otherwise go stale \
                      and cut off tracks/playlists parity had just written.",
+            ));
+        }
+        if pdb_t19_template_state {
+            detected_issues.push(
+                "PDB history page (tt=19) still in its empty-device template state \
+                 (older players show 0 tracks)"
+                    .to_string(),
+            );
+            estimated_file_writes += 1;
+            proposed_fixes.push(fix_proposal(
+                PDB_T19_TEMPLATE_STATE_FIX_ID,
+                "Activate PDB History Page",
+                "The tt=19 page still has the single sealed row of a never-exported USB, so \
+                 older players count 0 tracks. Keep that row, append one more and mark the page \
+                 active, as rekordbox's own first export does. No other page is changed."
+                    .to_string(),
             ));
         }
         if !pdb_misaligned_track_ids.is_empty() {
@@ -1293,6 +1314,7 @@ impl BackendService {
             pdb_ec_conflicts,
             pdb_truncated_chains,
             pdb_torn_growth,
+            pdb_t19_template_state,
             pdb_misaligned_track_ids,
             pdb_misaligned_album_ids,
             pdb_misaligned_artist_ids,
@@ -1441,6 +1463,7 @@ impl BackendService {
             pdb_ec_conflicts,
             pdb_truncated_chains,
             pdb_torn_growth,
+            pdb_t19_template_state,
             pdb_misaligned_track_ids,
             pdb_misaligned_album_ids,
             pdb_misaligned_artist_ids,
@@ -1559,6 +1582,25 @@ impl BackendService {
                             ""
                         }
                     )
+                })
+            },
+        );
+
+        // Before strict parity, so its additive write already finds t19
+        // active and leaves it alone. Grows nothing, so the torn-growth
+        // boundary above stays valid.
+        outcomes.record_with_progress(
+            progress,
+            "Activate PDB History Page",
+            selected.contains(PDB_T19_TEMPLATE_STATE_FIX_ID),
+            pdb_t19_template_state,
+            || {
+                apply_pdb_t19_template_state_repair(usb_root).map(|activated| {
+                    if activated {
+                        "activated tt=19 page".to_string()
+                    } else {
+                        "already active".to_string()
+                    }
                 })
             },
         );

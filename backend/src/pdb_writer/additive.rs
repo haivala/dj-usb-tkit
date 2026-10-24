@@ -753,10 +753,9 @@ pub(crate) struct PdbAdditiveDiff {
     /// accumulate duplicate rows across repeated exports.
     /// `(playlist_id, track_id, new_entry_index)`.
     pub repositioned_t08_entries: Vec<(u32, u32, u32)>,
-    /// Number of t19 runtime-history rows to synthesize in place for a
-    /// template first export. Includes the seed row, so this is usually
-    /// `track_count + 1`.
-    pub synthesize_t19_runtime_rows: Option<usize>,
+    /// The export has tracks but tt=19 is still in template state, so its
+    /// page gets activated (see [`activate_t19_template_page`]).
+    pub activate_t19_template: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -830,36 +829,22 @@ pub(crate) fn compute_additive_diff(
     let parsed = crate::pdb_reader::parse_pdb_bytes(existing_bytes)
         .map_err(|e| NonAdditiveReason::Unparseable(e.to_string()))?;
 
-    // A fresh USB has no real play history yet, so this seeds a single
-    // placeholder tt=19 (history_runtime) row rather than one per track.
-    // Previously this scaled with track count (`new_data.tracks.len() + 1`),
-    // which both had no real basis (there's no real history to represent on
-    // a never-played device) and hard-failed any first export past ~95
-    // tracks, since a tt=19 page holds at most 96 fixed-40-byte rows and
-    // this function has never needed to grow tt=19 across multiple pages.
-    // Confirmed against an independent, real, working DJ export tool
-    // that a single static row is the correct baseline: its own PDB writer
-    // seeds table 19 with exactly one fixed row on every export, never
-    // scaled to library size. See docs/PDB.md's Row Footer section.
-    //
-    // Only synthesize when the existing tt=19 page doesn't already have
-    // exactly one row. A genuine rekordbox-initialized template (confirmed
-    // via a reference template confirmed to carry rekordbox-only files like
-    // `djprofile.nxs`/`DEVSETTING.DAT` this app never writes) already ships
-    // tt=19 with exactly one row, but SEALED (flags=0x24, u5=1) -- a
-    // different footer shape than `write_t19_runtime_footer_groups`
-    // produces (ACTIVE, u5=2). Previously this unconditionally rewrote that
-    // page on every first export regardless, silently replacing a valid
-    // rekordbox-native page with a different, self-invented one even when
-    // nothing needed to change. Skipping the no-op case avoids that.
-    let synthesize_t19_runtime_rows = if parsed.tracks.is_empty()
-        && !new_data.tracks.is_empty()
-        && parsed.history_raw_rows_bytes.len() != 1
-    {
-        Some(1usize)
-    } else {
-        None
-    };
+    // Older players count 0 songs while tt=19's page is still the init template
+    // (one sealed row, flags=0x24, u5=1), however many tracks t00 holds.
+    // rekordbox's own exports show that sealed single row is the
+    // empty-device state, not a finished page: on its first export
+    // rekordbox keeps the template row, appends one, and turns the page
+    // active (a 1-track reference export: nrs=2, flags=0x34, u5=2,
+    // rowpf=0x0002, tranrf=0x0003). So any export with tracks activates a
+    // template-state page -- including one onto a PDB that already has
+    // tracks, so a USB an older build left at 0 songs recovers on its next
+    // export. A page rekordbox or a player has already advanced is not
+    // template state and is left alone.
+    let activate_t19_template = !new_data.tracks.is_empty()
+        && t19_is_template_state(
+            existing_bytes,
+            read_u32_le_at(existing_bytes, 4).unwrap_or(0) as usize,
+        );
 
     // ── Tracks ──────────────────────────────────────────────────────
     let new_track_ids: std::collections::HashSet<u32> =
@@ -1202,7 +1187,7 @@ pub(crate) fn compute_additive_diff(
         desired_t08_entries,
         removed_t08_entries,
         repositioned_t08_entries,
-        synthesize_t19_runtime_rows,
+        activate_t19_template,
     })
 }
 
@@ -1310,74 +1295,117 @@ pub(crate) fn remove_t08_entries_in_place(
     Ok(())
 }
 
-fn synthesize_t19_runtime_rows_in_place(
-    bytes: &mut [u8],
-    row_count: usize,
-    page_size: usize,
-) -> BackendResult<()> {
-    if row_count == 0 {
-        return Ok(());
+/// Fixed width of a tt=19 (history_runtime) row.
+const T19_ROW_LEN: usize = 40;
+
+/// First data page of tt=19 (`chain[1]`, after the sentinel), if the table
+/// has one.
+fn t19_first_data_page(bytes: &[u8], page_size: usize) -> Option<u32> {
+    let (_ec, first, last) = table_ptr_fields(bytes, 19)?;
+    let chain = collect_chain_pages(bytes, page_size, first, last)?;
+    chain.get(1).copied()
+}
+
+/// True when tt=19's first data page is still the untouched init template:
+/// one sealed row (`nrs=1`, flags `0x24`, `u5=1`, group-0 `rowpf=0x0001`).
+/// Both rekordbox's own empty-device template and the one
+/// `initialize_usb` writes have this shape. Older players count 0 songs
+/// while the page stays like this, whatever t00 holds. Any other shape (a page
+/// rekordbox or a player has already advanced) is not template state.
+pub(crate) fn t19_is_template_state(bytes: &[u8], page_size: usize) -> bool {
+    if page_size < HEAP_START {
+        return false;
     }
+    let Some(page_idx) = t19_first_data_page(bytes, page_size) else {
+        return false;
+    };
+    let Some(off) = page_offset(page_idx, page_size) else {
+        return false;
+    };
+    let Some(page) = bytes.get(off..off + page_size) else {
+        return false;
+    };
+    if pdb_page::read_slot_counts(page).map(|(nro, _)| nro) != Some(1)
+        || page[0x1b] != 0x24
+        || read_u16_le_at(page, 0x20) != Some(1)
+    {
+        return false;
+    }
+    pdb_page::footer_groups(page_size, 1)
+        .next()
+        .is_some_and(|group| group.rowpf(page) == 0x0001)
+}
+
+/// Turn a template-state tt=19 page (see [`t19_is_template_state`]) into
+/// the active shape rekordbox writes on its first export: the template row
+/// is kept and one row is appended, a copy of it with bytes `0..4` =
+/// `0x0280 + idx * 0x0020_0000` and bytes `4..8` = `idx`. The page then
+/// turns active (flags `0x34`, `u5=2`, `rowpf=0x0002`, `tranrf=0x0003`),
+/// byte-for-byte what rekordbox wrote on a 1-track reference export apart
+/// from seq and the row date. The tt=19 sentinel's B-tree then indexes the
+/// active page, as rekordbox's does. Touches no other page.
+pub(crate) fn activate_t19_template_page(bytes: &mut [u8], page_size: usize) -> BackendResult<()> {
     if page_size != PAGE_SIZE {
         return Err(BackendError::Validation(format!(
-            "t19 runtime synthesis requires page_size {PAGE_SIZE}, got {page_size}"
+            "t19 activation requires page_size {PAGE_SIZE}, got {page_size}"
         )));
     }
-
-    let (_ec, first, last) = table_ptr_fields(bytes, 19).ok_or_else(|| {
-        BackendError::Validation("t19 runtime synthesis: table 19 pointer missing".into())
+    // KNOWN GAP: a tt=19 with no data page yet (chain is just the sentinel)
+    // would need a page allocated, which this in-place `&mut [u8]` writer
+    // cannot do. Not reachable in production: the `initialize_usb` template
+    // always pre-seeds one tt=19 data page (`seed_rb_initialized_history_shape`
+    // in usb_utils.rs). Tests must mirror that pre-seeded page.
+    let page_idx = t19_first_data_page(bytes, page_size).ok_or_else(|| {
+        BackendError::Validation("t19 activation: table 19 has no data page".into())
     })?;
-    let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation("t19 runtime synthesis: t19 chain unreachable".into())
+    let off = page_offset(page_idx, page_size).ok_or_else(|| {
+        BackendError::Validation(format!("t19 activation: page {page_idx} out of bounds"))
     })?;
-    // KNOWN GAP: if tt=19 genuinely has no data page yet (chain.len()==1, i.e.
-    // first==last==sentinel), this falls back to `last`, which is the sentinel
-    // page itself, and would overwrite it in place rather than allocating a
-    // real data page (this function takes &mut [u8], not &mut Vec<u8>, so it
-    // cannot grow the file to allocate one). Not reachable in production: the
-    // real `initialize_usb` template always pre-seeds exactly one tt=19 data
-    // page (`seed_rb_initialized_history_shape` in usb_utils.rs), so `chain`
-    // always has at least 2 entries by the time this runs. Tests must mirror
-    // that pre-seeded page rather than a bare empty PdbData with no tt=19 row.
-    let page_idx = chain.get(1).copied().unwrap_or(last);
 
-    let rows: Vec<Vec<u8>> = (0..row_count)
-        .map(|idx| {
-            let mut row = vec![0u8; 40];
-            let val = 0x0000_0280u32.saturating_add((idx as u32).saturating_mul(0x0020_0000));
-            row[0..4].copy_from_slice(&val.to_le_bytes());
-            row[4..8].copy_from_slice(&(idx as u32).to_le_bytes());
-            row[26..30].copy_from_slice(b"1000");
-            row
-        })
-        .collect();
+    let row0 = {
+        let page = bytes.get(off..off + page_size).ok_or_else(|| {
+            BackendError::Validation(format!("t19 activation: page {page_idx} out of bounds"))
+        })?;
+        let row_off = pdb_page::footer_groups(page_size, 1)
+            .next()
+            .map(|group| HEAP_START + group.row_offset(page, 0))
+            .unwrap_or(HEAP_START);
+        page.get(row_off..row_off + T19_ROW_LEN)
+            .ok_or_else(|| {
+                BackendError::Validation("t19 activation: template row out of bounds".into())
+            })?
+            .to_vec()
+    };
+    let mut row1 = row0.clone();
+    let idx = 1u32;
+    let val = 0x0000_0280u32.saturating_add(idx.saturating_mul(0x0020_0000));
+    row1[0..4].copy_from_slice(&val.to_le_bytes());
+    row1[4..8].copy_from_slice(&idx.to_le_bytes());
+    let rows = [row0, row1];
 
     if !rewrite_variable_page_rows_in_place(bytes, page_idx, &rows, page_size) {
         return Err(BackendError::Validation(format!(
-            "t19 runtime synthesis: {row_count} rows do not fit on page {page_idx}"
+            "t19 activation: rows do not fit on page {page_idx}"
         )));
     }
 
-    let off = page_offset(page_idx, page_size).ok_or_else(|| {
-        BackendError::Validation(format!(
-            "t19 runtime synthesis: page {page_idx} out of bounds"
-        ))
-    })?;
     let seq = max_seqpage_in_file(bytes, page_size)
         .saturating_add(1)
         .max(2);
     bytes[off + 0x10..off + 0x14].copy_from_slice(&seq.to_le_bytes());
-    bytes[off + 0x18] = (row_count & 0xff) as u8;
+    bytes[off + 0x18] = rows.len() as u8;
     bytes[off + 0x19] = 0x20;
     bytes[off + 0x1a] = 0;
     bytes[off + 0x1b] = page_flags_for_table(19);
     if let Some(page) = bytes.get_mut(off..off + page_size) {
-        apply_page_footer_convention(page, 19, row_count);
+        apply_page_footer_convention(page, 19, rows.len());
     }
+    rebuild_sentinel_btrees_for_tables(bytes, &[19]);
 
+    // seqdb must stay above every seqpage, the rebuilt sentinel's included.
     let seqdb = read_u32_le_at(bytes, 0x14)
         .unwrap_or(0)
-        .max(seq.saturating_add(1));
+        .max(max_seqpage_in_file(bytes, page_size).saturating_add(1));
     let _ = write_u32_le_at(bytes, 0x14, seqdb);
 
     Ok(())
@@ -2149,8 +2177,8 @@ pub(crate) fn apply_additive_diff(
             patch_t08_entry_indices_in_place(&mut out, &diff.repositioned_t08_entries, page_size);
     }
 
-    if let Some(row_count) = diff.synthesize_t19_runtime_rows {
-        synthesize_t19_runtime_rows_in_place(&mut out, row_count, page_size)?;
+    if diff.activate_t19_template {
+        activate_t19_template_page(&mut out, page_size)?;
     }
 
     Ok(out)

@@ -69,6 +69,40 @@ pub(super) fn apply_pdb_header_compatibility_repair(
     Ok(true)
 }
 
+/// True when the PDB holds tracks but its tt=19 page is still the untouched
+/// init template, so older players count 0 songs (see
+/// [`crate::pdb_writer::t19_is_template_state`]).
+pub(in crate::service) fn detect_pdb_t19_template_state(
+    pdb_path: &Path,
+    track_count: usize,
+) -> bool {
+    if track_count == 0 {
+        return false;
+    }
+    let Ok(bytes) = std::fs::read(pdb_path) else {
+        return false;
+    };
+    let page_size = crate::utils::read_u32_le_at(&bytes, 4).unwrap_or(0) as usize;
+    crate::pdb_writer::t19_is_template_state(&bytes, page_size)
+}
+
+/// Activate a template-state tt=19 page the way rekordbox's first export
+/// does. Re-checks the current file, so it is a no-op (`Ok(false)`) once
+/// the page is active. Touches only that page and the header's seqdb.
+pub(in crate::service) fn apply_pdb_t19_template_state_repair(
+    usb_root: &Path,
+) -> BackendResult<bool> {
+    let pdb_path = usb_staging::stage_pdb(usb_root)?;
+    let mut bytes = std::fs::read(&pdb_path)?;
+    let page_size = crate::utils::read_u32_le_at(&bytes, 4).unwrap_or(0) as usize;
+    if !crate::pdb_writer::t19_is_template_state(&bytes, page_size) {
+        return Ok(false);
+    }
+    crate::pdb_writer::activate_t19_template_page(&mut bytes, page_size)?;
+    std::fs::write(&pdb_path, &bytes)?;
+    Ok(true)
+}
+
 /// A data page whose `u5` field at offset 0x20 carries the sentinel value
 /// 0x1FFF.  This makes player firmware treat the page as an empty fence
 /// page and report the database as corrupted.

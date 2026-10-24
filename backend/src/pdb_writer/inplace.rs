@@ -407,6 +407,12 @@ pub(crate) fn fix_tt8_num_rl_conventions_inplace(bytes: &mut [u8]) {
 /// chains have no 0x34 pages (all pages are 0x24), so the sentinel is left
 /// as-is (preserving the SENTINEL_EMPTY_ENTRY entry written by the original exporter).
 pub(crate) fn rebuild_sentinel_btrees_inplace(bytes: &mut [u8]) {
+    rebuild_sentinel_btrees_for_tables(bytes, &[0, 19]);
+}
+
+/// [`rebuild_sentinel_btrees_inplace`] for only the listed tables, which
+/// must use 0x34 for active pages (tt=0, tt=19).
+pub(crate) fn rebuild_sentinel_btrees_for_tables(bytes: &mut [u8], tables: &[u32]) {
     let Some(page_size) = bytes
         .get(4..8)
         .and_then(|b| b.try_into().ok())
@@ -433,8 +439,7 @@ pub(crate) fn rebuild_sentinel_btrees_inplace(bytes: &mut [u8]) {
             .and_then(|b| b.try_into().ok())
             .map(u32::from_le_bytes)
             .unwrap_or(9999);
-        // Only update tables that use 0x34 for active pages
-        if !matches!(tt, 0 | 19) {
+        if !tables.contains(&tt) {
             continue;
         }
 

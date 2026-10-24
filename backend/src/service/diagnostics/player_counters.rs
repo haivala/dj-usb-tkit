@@ -76,6 +76,9 @@ pub(super) fn compute_player_counter_snapshot(
         0
     };
 
+    let t19_template_state =
+        t00_tracks > 0 && crate::pdb_writer::t19_is_template_state(&bytes, page_size);
+
     let baseline_init_like = t11.ec == 24
         && t11.first == 23
         && t11.last == 23
@@ -114,6 +117,7 @@ pub(super) fn compute_player_counter_snapshot(
         confidence,
         shape_mode,
         baseline_init_like,
+        t19_template_state,
         t00_tracks,
         t08_entries,
         t11,
@@ -124,10 +128,15 @@ pub(super) fn compute_player_counter_snapshot(
     })
 }
 
+/// Label of the template-state t19 check. Listed under the PDB display
+/// section, so it drives the "Older Pioneer players" overview line.
+pub(super) const T19_TEMPLATE_STATE_LABEL: &str = "PDB history page";
+
 /// Renders a `PlayerCounterSnapshot` as the "Player Counter Snapshot"
 /// `DiagSection` (previously assembled in `vanilla-ui/components/usb/actions.mjs`
-/// `renderDiagnosticsReport`). Every check is informational (`PASS`); the
-/// section status is `PASS` only at high confidence.
+/// `renderDiagnosticsReport`). Every check is informational (`PASS`) except a
+/// template-state t19, which is a `WARN`; the section status is `PASS` only
+/// at high confidence.
 pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> DiagSection {
     let t19_line = match cdj.t19.data_page.as_ref() {
         Some(page) => format!(
@@ -163,6 +172,43 @@ pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> Di
         detail,
         link: None,
     };
+    let mut checks = Vec::new();
+    if cdj.t19_template_state {
+        checks.push(DiagCheck {
+            label: T19_TEMPLATE_STATE_LABEL.to_string(),
+            status: DiagStatus::Warn,
+            detail: "t19 still in template state — older players will show 0 tracks. \
+                     Repair fixes it."
+                .to_string(),
+            link: None,
+        });
+    }
+    checks.extend([
+        info(
+            "Predicted player counter",
+            format!(
+                "playlists {}, songs {} (confidence: {})",
+                cdj.playlist_count_candidate, cdj.song_count_candidate, cdj.confidence
+            ),
+        ),
+        info(
+            "Shape mode",
+            format!(
+                "{} (baseline-init-like: {})",
+                cdj.shape_mode,
+                if cdj.baseline_init_like { "yes" } else { "no" }
+            ),
+        ),
+        info(
+            "Cross-check",
+            format!(
+                "t00 tracks {}, t08 entries {}",
+                cdj.t00_tracks, cdj.t08_entries
+            ),
+        ),
+        info("History pointers", history_pointers),
+        info("Primitive signal", t19_line),
+    ]);
     DiagSection {
         title: "Player Counter Snapshot".to_string(),
         status: if cdj.confidence.eq_ignore_ascii_case("high") {
@@ -170,32 +216,7 @@ pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> Di
         } else {
             DiagStatus::Warn
         },
-        checks: vec![
-            info(
-                "Predicted player counter",
-                format!(
-                    "playlists {}, songs {} (confidence: {})",
-                    cdj.playlist_count_candidate, cdj.song_count_candidate, cdj.confidence
-                ),
-            ),
-            info(
-                "Shape mode",
-                format!(
-                    "{} (baseline-init-like: {})",
-                    cdj.shape_mode,
-                    if cdj.baseline_init_like { "yes" } else { "no" }
-                ),
-            ),
-            info(
-                "Cross-check",
-                format!(
-                    "t00 tracks {}, t08 entries {}",
-                    cdj.t00_tracks, cdj.t08_entries
-                ),
-            ),
-            info("History pointers", history_pointers),
-            info("Primitive signal", t19_line),
-        ],
+        checks,
         counts: None,
     }
 }

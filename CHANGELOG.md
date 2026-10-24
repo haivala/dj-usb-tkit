@@ -37,6 +37,12 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Fix:** Older players could show 0 tracks on a USB the app had initialized, even after
+  playlists were exported to it. Exports now set up the PDB's history page the way rekordbox does, and Repair
+  fixes USBs that are already affected.
+
 ## 0.4.7
 
 - **Fix:** A playlist's "Last exported … to" line could name the wrong drive when another stick

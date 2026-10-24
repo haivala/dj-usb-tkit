@@ -4,10 +4,10 @@ use std::fs;
 use super::{
     DISPLAY_ANALYSIS, DISPLAY_EDB, DISPLAY_ENGINE, DISPLAY_LAYOUT, DISPLAY_LOW_LEVEL, DISPLAY_PDB,
     DISPLAY_PLAYLISTS, ExportDbPlaylist, OverviewFacts, ParityTotals, RatingColourParity,
-    build_usb_parity_comparison, compare_rating_colour, count_named_history_rows,
-    diagnose_analysis_integrity, diagnose_contents_integrity, diagnose_playlist_resolution_with_db,
-    diagnose_playlist_resolution_with_edb_internal, diagnostics_overview,
-    evaluate_strict_raw_coverage_parity, normalize_pdb_path_for_edb_lookup,
+    T19_TEMPLATE_STATE_LABEL, build_usb_parity_comparison, compare_rating_colour,
+    count_named_history_rows, diagnose_analysis_integrity, diagnose_contents_integrity,
+    diagnose_playlist_resolution_with_db, diagnose_playlist_resolution_with_edb_internal,
+    diagnostics_overview, evaluate_strict_raw_coverage_parity, normalize_pdb_path_for_edb_lookup,
     normalize_track_path_for_identity, parity_issue_labels, parity_overview, parity_section_groups,
     regroup_sections, track_identity_key,
 };
@@ -224,6 +224,55 @@ fn overview_explains_each_area_in_plain_words() {
                  on Settings → Export → \"Write Engine DJ library\"."
             ),
         ]
+    );
+}
+
+#[test]
+fn template_state_t19_warns_older_players_show_zero_tracks() {
+    let pdb = diag_section(
+        "PDB Integrity",
+        "PASS",
+        &[("PDB exists", "PASS"), ("PDB parseable", "PASS")],
+    );
+    let cdj = diag_section(
+        "Player Counter Snapshot",
+        "WARN",
+        &[(T19_TEMPLATE_STATE_LABEL, "WARN"), ("Shape mode", "PASS")],
+    );
+    let groups = regroup_sections(
+        &DISPLAY_LAYOUT,
+        &[(&pdb, DISPLAY_PDB), (&cdj, DISPLAY_LOW_LEVEL)],
+    );
+    let pdb_section = &groups[0].sections[0];
+    assert_eq!(pdb_section.title, "PDB");
+    assert!(
+        pdb_section
+            .checks
+            .iter()
+            .any(|c| c.label == T19_TEMPLATE_STATE_LABEL)
+    );
+    let overview = diagnostics_overview(
+        &groups,
+        &OverviewFacts {
+            edb_file_present: true,
+            pdb_tracks: 12,
+            edb_tracks: 12,
+            pdb_only_tracks: 0,
+            edb_only_tracks: 0,
+            playlists: 1,
+            playlist_entries: 12,
+            resolved_playlist_entries: 12,
+        },
+    );
+    assert_eq!(overview[0].title, "Older Pioneer players");
+    assert!(matches!(
+        overview[0].status,
+        Some(crate::models::DiagStatus::Warn)
+    ));
+    assert_eq!(
+        overview[0].detail,
+        "These players will show 0 tracks: part of the player database was never set up. \
+         Preview Fixes shows what can be repaired."
     );
 }
 

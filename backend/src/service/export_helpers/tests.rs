@@ -2536,6 +2536,77 @@ fn initialize_usb_seeds_baseline_history_shape_pages() {
 }
 
 #[test]
+fn t19_template_state_repair_activates_page_once() {
+    // An older build exported tracks but left page 40 as the init
+    // template (the "0 tracks on CDJ" USB). Recreate that by exporting,
+    // then putting the template page back.
+    let dir = tempdir().unwrap();
+    let usb_root = dir.path();
+    std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+    crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    let pdb_path = usb_root
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let template = std::fs::read(&pdb_path).expect("read initialized export.pdb");
+    let playlist = ExportPlaylistData {
+        id: "pl-test".to_string(),
+        name: "Test".to_string(),
+        tracks: vec![make_test_track("t1", "Song 1", "a1.mp3")],
+    };
+    let manifest = make_test_manifest("pl-test", "Test", usb_root, &[("t1", "Song 1", "a1.mp3")]);
+    write_pdb(usb_root, &playlist, &manifest, true, None, None).expect("export playlist");
+    let exported = std::fs::read(&pdb_path).expect("read export.pdb");
+
+    let ps = 4096usize;
+    let p40 = 40 * ps;
+    let mut broken = exported.clone();
+    broken[p40..p40 + ps].copy_from_slice(&template[p40..p40 + ps]);
+    std::fs::write(&pdb_path, &broken).unwrap();
+    assert!(crate::service::repair::detect_pdb_t19_template_state(
+        &pdb_path, 1
+    ));
+    assert!(!crate::service::repair::detect_pdb_t19_template_state(
+        &pdb_path, 0
+    ));
+
+    assert!(crate::service::repair::apply_pdb_t19_template_state_repair(usb_root).unwrap());
+    let repaired = std::fs::read(&pdb_path).unwrap();
+    assert!(!crate::service::repair::detect_pdb_t19_template_state(
+        &pdb_path, 1
+    ));
+    // Same page 40 and t19 sentinel (page 39) the export writes, apart from
+    // seq; no other page touched.
+    let p39 = 39 * ps;
+    for p in [p39, p40] {
+        assert_eq!(&repaired[p..p + 0x10], &exported[p..p + 0x10]);
+        assert_eq!(&repaired[p + 0x14..p + ps], &exported[p + 0x14..p + ps]);
+    }
+    let u16le = |b: &[u8], off: usize| u16::from_le_bytes(b[off..off + 2].try_into().unwrap());
+    assert_eq!(u16le(&repaired, p39 + 0x38), 1, "sentinel ne");
+    assert_eq!(u16le(&repaired, p39 + 0x26), 1, "sentinel u7");
+    assert_eq!(
+        &repaired[p39 + 0x3c..p39 + 0x40],
+        &(40u32 * 8).to_le_bytes()
+    );
+    assert_eq!(&repaired[0x18..p39], &broken[0x18..p39]);
+    assert_eq!(&repaired[p40 + ps..], &broken[p40 + ps..]);
+    let seqdb = u32::from_le_bytes(repaired[0x14..0x18].try_into().unwrap());
+    let max_seq = (1..repaired.len() / ps)
+        .map(|i| u32::from_le_bytes(repaired[i * ps + 0x10..i * ps + 0x14].try_into().unwrap()))
+        .max()
+        .unwrap();
+    assert!(
+        seqdb > max_seq,
+        "seqdb {seqdb} must exceed every seqpage ({max_seq})"
+    );
+
+    // One shot: a second run finds nothing and writes nothing.
+    assert!(!crate::service::repair::apply_pdb_t19_template_state_repair(usb_root).unwrap());
+    assert_eq!(std::fs::read(&pdb_path).unwrap(), repaired);
+}
+
+#[test]
 fn export_preserves_t17_t18_seed_shape_and_allows_t19_runtime_rows() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
@@ -2609,31 +2680,27 @@ fn export_preserves_t17_t18_seed_shape_and_allows_t19_runtime_rows() {
     assert!(u32le(o19 + 4) >= 41);
     assert_eq!(u32le(o19 + 8), 39);
     assert!(u32le(o19 + 12) >= 40);
-    // t19 always ends up with exactly one placeholder row on a first
-    // export, regardless of track count (no real play history exists
-    // yet on a freshly initialized USB, and no reference export -- real
-    // rekordbox or an independent working DJ export tool -- has
-    // ever shown tt=19 needing more than one row here). The
-    // `initialize_usb` template already seeds exactly one row, SEALED
-    // (flags=0x24), matching a genuine rekordbox-initialized template
-    // (confirmed via a reference template carrying
-    // rekordbox-only files this app never writes) -- since that's
-    // already the desired end state, the export leaves it untouched
-    // rather than needlessly rewriting it to a different, self-invented
-    // footer shape.
-    assert_eq!(bytes[40 * ps + 24], 1);
-    assert_eq!(bytes[40 * ps + 25], 0x20);
-    assert_eq!(bytes[40 * ps + 27], 0x24);
-    assert_eq!(u16le(40 * ps + ps - 4), 0x0001);
-    assert_eq!(u16le(40 * ps + ps - 2), 0x0001);
-    // t19 row payload pattern should follow runtime sequence profile:
-    // 0x00000280 + i*0x00200000, and second dword = i.
+    // The `initialize_usb` template seeds t19 with one sealed row
+    // (flags=0x24, u5=1) -- the empty-device state, on which a CDJ counts
+    // 0 songs. Like rekordbox's own first export, the export keeps that
+    // row, appends one, and turns the page active: nrs=2, flags=0x34,
+    // u5=2, num_rl=0, rowpf=0x0002, tranrf=0x0003.
     let p40 = 40 * ps;
-    let row_base = p40 + 40;
-    let u0 = u32le(row_base);
-    let u1 = u32le(row_base + 4);
-    assert_eq!(u0, 0x0000_0280u32);
-    assert_eq!(u1, 0u32);
+    assert_eq!(bytes[p40 + 24], 2);
+    assert_eq!(bytes[p40 + 25], 0x20);
+    assert_eq!(bytes[p40 + 27], 0x34);
+    assert_eq!(u16le(p40 + 0x20), 2);
+    assert_eq!(u16le(p40 + 0x22), 0);
+    assert_eq!(u16le(p40 + ps - 4), 0x0002);
+    assert_eq!(u16le(p40 + ps - 2), 0x0003);
+    // Row 0 is the template row, untouched. Row 1 copies it with the
+    // runtime sequence patched in: 0x00000280 + i*0x00200000, then i.
+    let row0 = p40 + 40;
+    let row1 = row0 + 40;
+    assert_eq!(&bytes[row0..row0 + 40], &before_bytes[row0..row0 + 40]);
+    assert_eq!(u32le(row1), 0x0020_0280u32);
+    assert_eq!(u32le(row1 + 4), 1u32);
+    assert_eq!(&bytes[row1 + 8..row1 + 40], &bytes[row0 + 8..row0 + 40]);
 
     // t08 runtime row-index behavior should mirror growth writer contract.
     let o8 = tptr(8);

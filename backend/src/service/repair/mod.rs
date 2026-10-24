@@ -108,6 +108,7 @@ const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_p
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
 const PDB_TORN_GROWTH_PAGES_FIX_ID: &str = "repair_pdb_torn_growth_pages";
 const PDB_TRUNCATED_TABLE_CHAIN_FIX_ID: &str = "repair_pdb_truncated_table_chain";
+const PDB_T19_TEMPLATE_STATE_FIX_ID: &str = "repair_pdb_t19_template_state";
 
 /// Structural-prerequisite fixes the strict-parity upgrade needs to have run
 /// first -- surfaced to the editor as `RepairFixProposal.always_applied` so it
@@ -164,6 +165,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     EMPTY_ANALYSIS_FILES_FIX_ID,
     PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,
     PDB_TORN_GROWTH_PAGES_FIX_ID,
+    PDB_T19_TEMPLATE_STATE_FIX_ID,
     STRICT_PARITY_UPGRADE_FIX_ID,
     PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID,
     PDB_ZERO_TRANRF_FIX_ID,

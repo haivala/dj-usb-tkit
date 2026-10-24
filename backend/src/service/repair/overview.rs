@@ -28,6 +28,10 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, &'static str)> {
             AREA_OLDER_PLAYERS,
             "Repairs damage left in the player database by an interrupted export.",
         ),
+        PDB_T19_TEMPLATE_STATE_FIX_ID => (
+            AREA_OLDER_PLAYERS,
+            "Fixes older players showing 0 tracks on this USB.",
+        ),
         PDB_WRONG_HISTORY_SHAPE_FIX_ID | PDB_EC_CONFLICT_FIX_ID => (
             AREA_OLDER_PLAYERS,
             "Fixes errors that make rekordbox report the USB as corrupted.",

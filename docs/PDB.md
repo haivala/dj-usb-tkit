@@ -234,7 +234,7 @@ Known table families used by this repository:
 | `t16` | columns | player browse-category catalog; Deep Symmetry marks details as unconfirmed |
 | `t17` | history_playlists | Deep Symmetry: History menu playlist list; normal export preserves it; menu repair may rewrite it as an eDB category snapshot |
 | `t18` | history_entries | Deep Symmetry: links tracks to history playlist entries; normal export preserves it |
-| `t19` | history | Deep Symmetry: history synchronization data; runtime rows synthesized for initialized templates |
+| `t19` | history | Deep Symmetry: history synchronization data; a template-state page is activated on export |
 
 Deep Symmetry documents table type numbers in hexadecimal. In this document the
 `tNN` labels are decimal table numbers, so Deep Symmetry `0x11`, `0x12`, and
@@ -352,7 +352,8 @@ These differences are expected and legitimate (they are *not* shape violations):
 | accumulated `tranrf` bits on **reused** `u5=1` heap pages | additive preserves existing footer groups and ORs in only the bits for appended rows (see "Row Footer" below) |
 | `empty_candidate` under torn growth | can legitimately point past the physical file end |
 | header `0x10` compatibility byte | additive copies the pre-export value verbatim |
-| `t16`–`t18` menu pages, seeded `t19` history shape | preserved verbatim from the template |
+| `t16`–`t18` menu pages | preserved verbatim from the template |
+| seeded `t19` history page | preserved once active; a template-state page is activated (see "`tt=19` activation" below) |
 
 ## Row Footer
 
@@ -386,7 +387,7 @@ For freshly written pages:
 
 For reused pages, the additive writer preserves existing footer groups and ORs
 in only the bits for appended rows — **except `tt=19`**, whose additive and
-in-place-synthesis paths rewrite every footer group from scratch to preserve the
+in-place activation paths rewrite every footer group from scratch to preserve the
 single-active-row invariant above; the generic OR-in-bits append path declines to
 handle `tt=19` at all (`append_rows_to_existing_page_preserving_footer_state`
 asserts against it). `apply_page_footer_convention` in `pdb_writer/fresh.rs` is the
@@ -394,18 +395,43 @@ single writer-side source of truth for `u5`/`num_rl` and the per-group `tranrf`
 shape; every in-place page rewrite that changes a page's row count funnels
 through it.
 
-### `tt=19` synthesis is a single fixed row
+### `tt=19` activation
 
-On the first export against a track-less template, the writer seeds exactly
-**one** placeholder `tt=19` row — not one per track. There is no real play
-history to represent on a never-played device, and no reference export (real
-rekordbox or an independent working DJ export tool) has ever shown `tt=19`
-needing more than one row for a fresh export. If the existing template already
-has exactly one row (e.g. a genuine rekordbox-initialized template, which ships
-one already), the page is left completely untouched rather than rewritten —
-`compute_additive_diff` only triggers synthesis when the count isn't already
-right, so a real rekordbox template's own footer shape is never needlessly
-clobbered by a first export.
+An empty device's `tt=19` page (rekordbox's own template and the one
+`initialize_usb` writes) holds **one** sealed row: `nrs=1`, flags `0x24`,
+`u5=1`, `rowpf=tranrf=0x0001`. Older players count **0 songs** while the page has this
+shape, however many tracks `t00` holds.
+rekordbox-initialized sticks never stay in this state, since rekordbox's own
+export activates the page, so it only occurs on app-initialized USBs.
+
+On its first export rekordbox keeps that template row, appends one more, and
+turns the page active. A 1-track rekordbox reference export:
+
+| field | template | after rekordbox's first export |
+| --- | --- | --- |
+| `nrs` / `0x19` | `1` / `0x20` | `2` / `0x20` |
+| flags (`0x1b`) | `0x24` | `0x34` |
+| `u5` / `num_rl` | `1` / `0` | `2` / `0` |
+| `rowpf` / `tranrf` | `0x0001` / `0x0001` | `0x0002` / `0x0003` |
+
+```text
+row 0: 80 02 00 00 00 00 00 00 00 00 00 00 17 "2026-03-13" 19 1e 0b "1000" 03 00…
+row 1: 80 02 20 00 01 00 00 00 00 00 00 00 17 "2026-03-13" 19 1e 0b "1000" 03 00…
+```
+
+Row 1 is a copy of row 0 with bytes `0..4` = `0x0280 + idx * 0x0020_0000` and
+bytes `4..8` = `idx`; every other byte (date string, `"1000"`, trailing `03`)
+is copied from row 0. rekordbox also points the `tt=19` sentinel's B-tree at
+the now-active page (`ne=1`, `u7=1`).
+
+The writer does the same (`activate_t19_template_page` in
+`pdb_writer/additive.rs`) on any export with tracks whose `tt=19` page is still
+in template state (`t19_is_template_state`), including an export onto a PDB
+that already has tracks, so a USB an older build left at 0 songs recovers on its
+next export. The page never grows past two rows this way, whatever the library
+size. A page rekordbox or a player has already advanced has a different shape
+and is left untouched. `repair_pdb_t19_template_state` applies the same change
+to an existing USB (`docs/DIAGNOSTICS_REPAIRS.md`).
 
 ## Page Footer Conventions
 
@@ -735,7 +761,7 @@ It accepts changes that can be represented without unsafe topology changes:
 - when a mapped `t00` string changes length, mark the old active row inactive
   and append a replacement row with the same track id;
 - patch `t07.sort_order` in place;
-- synthesize `t19` runtime rows for initialized templates.
+- activate a template-state `t19` page (see "`tt=19` activation").
 
 It rejects changes that require unsafe rewrite behavior, including:
 
