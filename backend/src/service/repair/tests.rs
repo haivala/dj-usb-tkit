@@ -1435,6 +1435,67 @@ fn truncated_table_chain_repair_restores_last_and_ec_to_physical_reality() {
 }
 
 #[test]
+fn truncated_table_chain_detected_past_trailing_blank_reserve_page() {
+    // An interrupted additive-growth write linked an all-zero reserve page
+    // (3) into the chain tail *and* advanced the header's
+    // last/empty_candidate pointers even further ahead (past EOF). The real
+    // last live page (2) already points its `next` at page 3.
+    let mut header = header_page();
+    header[8..12].copy_from_slice(&1u32.to_le_bytes()); // num_tables = 1
+    let toff = 0x1c;
+    header[toff..toff + 4].copy_from_slice(&9u32.to_le_bytes()); // tt = 9
+    header[toff + 4..toff + 8].copy_from_slice(&5u32.to_le_bytes()); // ec = 5 (nonexistent)
+    header[toff + 8..toff + 12].copy_from_slice(&1u32.to_le_bytes()); // fp = 1
+    header[toff + 12..toff + 16].copy_from_slice(&4u32.to_le_bytes()); // lp = 4 (nonexistent)
+
+    let mut p1 = data_page(1, 9);
+    set_flags(&mut p1, 0x34);
+    set_next_page(&mut p1, 2);
+    let mut p2 = data_page(2, 9); // real last live page
+    set_flags(&mut p2, 0x34);
+    set_next_page(&mut p2, 3);
+    // page 3: blank in-file reserve page linked into the chain tail
+    let mut p3 = empty_page();
+    p3[4..8].copy_from_slice(&3u32.to_le_bytes());
+    p3[8..12].copy_from_slice(&9u32.to_le_bytes());
+    // used_s stays 0; next stays 0
+
+    // 4 physical pages (0..3): page 3 is in-bounds, page 4 (declared last) is not.
+    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header, p1, p2, p3]);
+    let pdb_path = vendor_pdb_path(&usb_root);
+
+    let fixes = detect_pdb_truncated_table_chains(&pdb_path);
+    assert_eq!(
+        fixes.len(),
+        1,
+        "trailing blank page must not defeat detection"
+    );
+    assert_eq!(fixes[0].table_type, 9);
+    assert_eq!(
+        fixes[0].corrected_last, 2,
+        "anchor on the last live page, not the trailing blank reserve page"
+    );
+    assert_eq!(
+        fixes[0].corrected_ec, 3,
+        "empty_candidate == real last page's own next (the blank reserve page)"
+    );
+
+    let patched = apply_pdb_truncated_table_chain_repair(&usb_root, &fixes).unwrap();
+    assert_eq!(patched, 1);
+
+    let bytes = std::fs::read(&pdb_path).unwrap();
+    let new_ec = u32::from_le_bytes(bytes[toff + 4..toff + 8].try_into().unwrap());
+    let new_last = u32::from_le_bytes(bytes[toff + 12..toff + 16].try_into().unwrap());
+    assert_eq!(new_ec, 3);
+    assert_eq!(new_last, 2);
+    assert!(
+        crate::utils::collect_chain(&bytes, TEST_PAGE_SIZE, 1, 2).is_some(),
+        "chain must now walk cleanly to the corrected last page"
+    );
+    assert!(detect_pdb_truncated_table_chains(&pdb_path).is_empty());
+}
+
+#[test]
 fn torn_growth_repair_zeroes_garbage_ec_page_and_truncates_tail() {
     // Mirrors a USB disconnected mid-additive-growth-write: table tt=9's
     // empty_candidate (page 2) was earmarked as the next blank slot but

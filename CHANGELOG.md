@@ -54,6 +54,13 @@
   its own again.
 - **Fix:** An export could be refused for lack of free space on the USB when some of its tracks were
   already on it under a shortened file name.
+- **Fix:** repair now recognises a wider form of interrupted-export corruption. A
+  drive whose PDB tracks table claimed a last page past the end of the file *and*
+  had an unfilled blank page linked onto the end of the chain would report every
+  playlist as un-repairable ("PDB additive track mutation blocked: t00 chain
+  invalid") and could not be fixed. The truncated-table-chain repair now walks
+  the chain to the last page that actually holds data, skipping the trailing
+  blank page, so these drives repair cleanly in one pass.
 
 ## 0.4.7
 

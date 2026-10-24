@@ -933,9 +933,8 @@ pub(super) fn apply_pdb_ec_data_page_conflict_repair(
 ///
 /// Unlike `empty_candidate`, which healthy rekordbox exports routinely set
 /// beyond the file's current physical length (reserved headroom for future
-/// growth — confirmed against `USB_REKORDBOX6` and `USB_LOTS_OF_TRACKS_RB`),
-/// a table's `last` page must always physically exist: it is not a future
-/// candidate, it is the table's real current tail.
+/// growth), a table's `last` page must always physically exist: it is not a
+/// future candidate, it is the table's real current tail.
 #[derive(Debug, Clone)]
 pub(in crate::service) struct TruncatedTableChain {
     pub(in crate::service) table_type: u32,
@@ -983,9 +982,15 @@ pub(in crate::service) fn detect_pdb_truncated_table_chains(
         if collect_chain(&bytes, page_size, first, last).is_some() {
             continue; // shouldn't happen (last >= total_pages), but stay safe
         }
-        // Walk from `first` following `next` pointers, stopping at the last
-        // page that is still within the physical file. Bounded by
-        // total_pages so a cycle can't spin forever.
+        // Walk from `first` following `next` pointers, anchoring `real_last`
+        // on the last page that both physically exists AND holds live rows
+        // (`used_size > 0`). An interrupted additive-growth write can link an
+        // all-zero reserve page into the chain tail before advancing the
+        // header's `last`/`empty_candidate` pointers even further ahead;
+        // anchoring only on in-bounds pages would land on that blank page and
+        // defeat the repair. Bounded by total_pages so a cycle can't spin
+        // forever; the traversal itself never skips a page, so a blank page
+        // followed by more data still resolves to the last data page.
         let mut seen = HashSet::<u32>::new();
         let mut real_last = None;
         let mut cur = first;
@@ -993,13 +998,19 @@ pub(in crate::service) fn detect_pdb_truncated_table_chains(
             if cur >= total_pages || !seen.insert(cur) {
                 break;
             }
-            real_last = Some(cur);
-            if cur == last {
-                break;
-            }
             let Some(off) = page_offset(cur, page_size) else {
                 break;
             };
+            let has_live_rows = bytes
+                .get(off..off + page_size)
+                .and_then(|page| read_u16_le_at(page, 0x1e))
+                .is_some_and(|used_s| used_s > 0);
+            if has_live_rows {
+                real_last = Some(cur);
+            }
+            if cur == last {
+                break;
+            }
             let Some(next) = read_u32_le_at(&bytes, off + 0x0c) else {
                 break;
             };
@@ -1020,7 +1031,9 @@ pub(in crate::service) fn detect_pdb_truncated_table_chains(
         };
         let used_s = read_u16_le_at(page, 0x1e).unwrap_or(0);
         if used_s == 0 {
-            continue; // don't anchor a repair on a blank/garbage page
+            // Unreachable now that the walk only anchors on live pages; kept
+            // as a defensive guard against ever anchoring on a blank page.
+            continue;
         }
         let real_next = read_u32_le_at(&bytes, off + 0x0c).unwrap_or(total_pages);
         let corrected_ec = if real_next > real_last {
