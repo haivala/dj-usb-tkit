@@ -44,6 +44,8 @@
 - **Fix:** Older players could show 0 tracks on a USB the app had initialized, even after
   playlists were exported to it. Exports now set up the PDB's history page the way rekordbox does, and Repair
   fixes USBs that are already affected.
+- **Fix:** USB playlists could leave out a track whose file name differed from another track's
+  only by punctuation (`Vol. 1.mp3` and `Vol-1.mp3`).
 
 ## 0.4.7
 

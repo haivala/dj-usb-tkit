@@ -112,18 +112,13 @@ pub(crate) fn dedupe_usb_playlists_by_name(items: Vec<UsbPlaylist>) -> (Vec<UsbP
     (out, collapsed)
 }
 
-/// A path or USB record ID identifies a playlist entry. Metadata alone does
-/// not: tracks with the same title and artist can be distinct encodings.
+/// The USB record ID identifies a playlist entry: a track is in a playlist at
+/// most once. The file path does not: distinct tracks can have file names
+/// that differ only by punctuation. Metadata alone does not either: tracks
+/// with the same title and artist can be distinct encodings.
 pub(crate) fn track_merge_key(track: &UsbTrack) -> Option<String> {
-    let path = canonicalize_playlist_name(&track.file_path);
-    if !path.is_empty() {
-        return Some(format!("path:{path}"));
-    }
     let id = track.id.trim();
-    if !id.is_empty() {
-        return Some(format!("id:{id}"));
-    }
-    None
+    (!id.is_empty()).then(|| id.to_string())
 }
 
 pub(crate) fn sanitize_history_name(value: &str) -> String {
@@ -349,6 +344,31 @@ mod tests {
         assert_eq!(source, "eDB");
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].id, "2002");
+    }
+
+    #[test]
+    fn merge_keeps_distinct_tracks_whose_paths_differ_only_by_punctuation() {
+        let export = vec![
+            make_track("1", "Live Vol. 1", "X", "/Contents/X/Live - Vol. 1.mp3"),
+            make_track("2", "Live Vol-1", "X", "/Contents/X/Live - Vol-1.mp3"),
+        ];
+
+        let (merged, _) = merge_playlist_tracks(&[], &export);
+        assert_eq!(
+            merged.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["1", "2"]
+        );
+    }
+
+    #[test]
+    fn merge_collapses_repeated_record_id() {
+        let export = vec![
+            make_track("1", "Track A", "X", "/a.mp3"),
+            make_track("1", "Track A", "X", "/a.mp3"),
+        ];
+
+        let (merged, _) = merge_playlist_tracks(&[], &export);
+        assert_eq!(merged.len(), 1);
     }
 
     #[test]
