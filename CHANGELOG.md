@@ -46,6 +46,14 @@
   fixes USBs that are already affected.
 - **Fix:** USB playlists could leave out a track whose file name differed from another track's
   only by punctuation (`Vol. 1.mp3` and `Vol-1.mp3`).
+- **Fix:** A playlist's heading could count tracks already on the USB as still to copy, even right
+  after exporting the playlist. This happened to tracks whose shortened file names collide with another
+  track's.
+- **Fix:** Re-exporting a playlist could give two tracks whose file names differ only by punctuation
+  the same track identity and artwork on the USB. The next export of such a playlist gives each track
+  its own again.
+- **Fix:** An export could be refused for lack of free space on the USB when some of its tracks were
+  already on it under a shortened file name.
 
 ## 0.4.7
 

@@ -805,6 +805,163 @@ fn playlist_export_space_counts_only_tracks_the_usb_pdb_lacks() {
     assert_eq!(space.tracks_to_copy, 1);
 }
 
+/// Scans `names` from `media`, puts them in one analyzed playlist and returns
+/// the backend and the playlist id.
+fn playlist_of_fixture_wavs(
+    root: &Path,
+    media: &Path,
+    usb: &Path,
+    names: &[&str],
+) -> (BackendCommands, String) {
+    for name in names {
+        copy_audio_fixture(media, "formats/track_format_wav.wav", name);
+    }
+    let data_dir = root.join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    let track_ids = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            query: String::new(),
+            limit: 50,
+            ..Default::default()
+        })
+        .data
+        .expect("browse data")
+        .items
+        .into_iter()
+        .map(|track| track.id)
+        .collect::<Vec<_>>();
+    assert_eq!(track_ids.len(), names.len(), "every fixture scanned");
+    seed_tracks_as_analyzed(&data_dir, &track_ids);
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: "Similar Names".to_string(),
+        })
+        .data
+        .expect("playlist data")
+        .playlist_id;
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        playlist_id: playlist_id.clone(),
+        track_ids,
+        ..Default::default()
+    });
+    assert!(added.ok, "add tracks failed: {added:?}");
+    (backend, playlist_id)
+}
+
+#[test]
+fn playlist_export_space_finds_tracks_exported_under_a_suffixed_name() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    // Both file names shorten to the same 48-character name on the USB, so
+    // the export gives the second one a `-1` suffix. The names differ in
+    // length, so the files differ in size too.
+    let (backend, playlist_id) = playlist_of_fixture_wavs(
+        root.path(),
+        &media,
+        &usb,
+        &[
+            "Collide Artist - A Very Long Release Title For Shortening - 01 One.wav",
+            "Collide Artist - A Very Long Release Title For Shortening - 02 Second.wav",
+        ],
+    );
+
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: None,
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+    let parsed = parse_pdb(
+        &usb.join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb"),
+    )
+    .expect("parse PDB");
+    assert!(
+        parsed
+            .tracks
+            .iter()
+            .any(|row| row.track_file_path.ends_with("-1.wav")),
+        "one track exported under a suffixed name: {:?}",
+        parsed
+            .tracks
+            .iter()
+            .map(|row| &row.track_file_path)
+            .collect::<Vec<_>>()
+    );
+
+    let space = backend
+        .get_playlist_export_space(GetPlaylistExportSpaceRequest {
+            playlist_id,
+            usb_root: usb.to_string_lossy().to_string(),
+        })
+        .data
+        .expect("export space data")
+        .export_space
+        .expect("export space");
+    assert_eq!(space.tracks_to_copy, 0, "both tracks are on the USB");
+    assert_eq!(space.bytes_to_copy, 0);
+}
+
+#[test]
+fn re_export_keeps_tracks_with_similar_file_names_apart() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let (backend, playlist_id) = playlist_of_fixture_wavs(
+        root.path(),
+        &media,
+        &usb,
+        &["Similar Artist - Live Vol. 1.wav", "Similar Artist - Live Vol-1.wav"],
+    );
+
+    let content_ids = || {
+        let parsed = parse_pdb(
+            &usb.join(USB_VENDOR_ROOT_DIR)
+                .join(USB_VENDOR_DB_DIR)
+                .join("export.pdb"),
+        )
+        .expect("parse PDB");
+        let mut ids = parsed
+            .tracks
+            .iter()
+            .map(|row| (row.track_file_path.clone(), row.master_content_id))
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    };
+    for pass in ["first", "second"] {
+        let exported = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: playlist_id.clone(),
+            options: None,
+        });
+        assert!(exported.ok, "{pass} export failed: {exported:?}");
+        let ids = content_ids();
+        assert_eq!(ids.len(), 2, "{pass} export: two track rows: {ids:?}");
+        assert!(
+            ids[0].1.is_some() && ids[0].1 != ids[1].1,
+            "{pass} export: each track keeps its own masterContentId: {ids:?}"
+        );
+    }
+}
+
 #[test]
 fn export_to_usb_does_not_change_player_menu_in_edb_or_pdb() {
     let root = tempdir().expect("temp root");

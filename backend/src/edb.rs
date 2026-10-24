@@ -335,7 +335,7 @@ pub fn try_read_track_index_from_edb(
 
 /// `c.<column>` when the eDB's `content` table has `column`, else `NULL`, so
 /// a read works across eDB schema versions.
-fn content_column_or_null(conn: &rusqlite::Connection, column: &str) -> String {
+pub(crate) fn content_column_or_null(conn: &rusqlite::Connection, column: &str) -> String {
     let found = conn
         .query_row(
             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = ?1",

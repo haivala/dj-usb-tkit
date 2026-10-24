@@ -7,7 +7,7 @@ use rusqlite::{OptionalExtension, params};
 
 use super::{
     ExclusiveTrackInfo, ExportManifest, ExportPlaylistData, PlaylistRemovalPdbResult,
-    normalize_owned_export_path,
+    canonicalize_track_path_identity, normalize_owned_export_path,
 };
 use crate::edb::{
     open_edb_from_usb_root, open_edb_rw, preferred_export_playlist_row_id, table_exists,
@@ -16,6 +16,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
+use crate::service::track_matching::{ContentFingerprint, content_fingerprint_key};
 use crate::service::usb_utils::canonicalize_playlist_name;
 
 fn parse_usb_playlist_numeric_id(raw: Option<&str>) -> Option<u32> {
@@ -392,7 +393,7 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
         .iter()
         .filter_map(|p| normalize_owned_export_path(usb_root, p))
         .filter(|p| p.starts_with("/Contents/"))
-        .map(|p| canonicalize_playlist_name(&p))
+        .map(|p| canonicalize_track_path_identity(&p))
         .collect();
     if target_keys.is_empty() {
         return Ok(result);
@@ -415,19 +416,38 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
         .chain(parsed.history_entries.iter().filter_map(|h| h.track_id))
         .collect();
 
-    let orphan_track_ids: HashSet<u32> = parsed
+    let orphan_tracks: Vec<_> = parsed
         .tracks
         .iter()
         .filter(|t| !referenced_track_ids.contains(&t.id))
         .filter(|t| {
             normalize_owned_export_path(usb_root, &t.track_file_path)
-                .map(|norm| target_keys.contains(&canonicalize_playlist_name(&norm)))
+                .map(|norm| target_keys.contains(&canonicalize_track_path_identity(&norm)))
                 .unwrap_or(false)
         })
-        .map(|t| t.id)
         .collect();
-    if orphan_track_ids.is_empty() {
+    if orphan_tracks.is_empty() {
         return Ok(result);
+    }
+    let orphan_track_ids: HashSet<u32> = orphan_tracks.iter().map(|t| t.id).collect();
+    // The eDB rows of those tracks: the ones with their content fingerprint
+    // (size, title, artist), or, for a track without one, at its exact path.
+    let mut orphan_fingerprints = HashSet::<ContentFingerprint>::new();
+    let mut orphan_path_keys = HashSet::<String>::new();
+    for track in &orphan_tracks {
+        let artist = parsed
+            .artists
+            .get(&track.artist_id)
+            .map(String::as_str)
+            .unwrap_or("");
+        match content_fingerprint_key(track.file_size_bytes.map(i64::from), &track.title, artist) {
+            Some(fingerprint) => {
+                orphan_fingerprints.insert(fingerprint);
+            }
+            None => {
+                orphan_path_keys.insert(canonicalize_track_path_identity(&track.track_file_path));
+            }
+        }
     }
 
     // --- eDB: delete content rows for those paths, then orphaned image rows ---
@@ -436,19 +456,34 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
         if table_exists(&conn, "content") {
             let mut to_delete = Vec::<i64>::new();
             {
-                let mut stmt = conn.prepare("SELECT content_id, path FROM content")?;
+                let file_size = crate::edb::content_column_or_null(&conn, "fileSize");
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT c.content_id, c.path, {file_size}, c.title, ar.name
+                     FROM content c
+                     LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist"
+                ))?;
                 let rows = stmt.query_map([], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
                 })?;
                 for row in rows {
-                    let (content_id, path) = row?;
-                    let Some(norm) = path
-                        .as_deref()
-                        .and_then(|p| normalize_owned_export_path(usb_root, p))
-                    else {
-                        continue;
+                    let (content_id, path, size, title, artist) = row?;
+                    let is_orphan = match content_fingerprint_key(
+                        size,
+                        title.as_deref().unwrap_or(""),
+                        artist.as_deref().unwrap_or(""),
+                    ) {
+                        Some(fingerprint) => orphan_fingerprints.contains(&fingerprint),
+                        None => path.as_deref().is_some_and(|p| {
+                            orphan_path_keys.contains(&canonicalize_track_path_identity(p))
+                        }),
                     };
-                    if target_keys.contains(&canonicalize_playlist_name(&norm)) {
+                    if is_orphan {
                         to_delete.push(content_id);
                     }
                 }
@@ -658,17 +693,12 @@ pub fn verify_pdb_content(
     let track_path_by_id = parsed
         .tracks
         .iter()
-        .map(|t| {
-            (
-                t.id,
-                canonicalize_playlist_name(&t.track_file_path.replace('\\', "/")),
-            )
-        })
+        .map(|t| (t.id, canonicalize_track_path_identity(&t.track_file_path)))
         .collect::<HashMap<_, _>>();
     let expected_paths = manifest
         .tracks
         .iter()
-        .map(|t| canonicalize_playlist_name(&t.exported_path))
+        .map(|t| canonicalize_track_path_identity(&t.exported_path))
         .collect::<HashSet<_>>();
 
     let mut matched = HashSet::<String>::new();

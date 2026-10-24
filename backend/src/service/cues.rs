@@ -41,6 +41,7 @@ use super::export_helpers::{
     PdbLayoutProfile, key_names_match, load_table_columns_tx, write_edb_cues_for_content,
 };
 use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_setting};
+use super::track_matching::content_fingerprint_key;
 use super::usb_utils::{
     read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path, resolve_usb_side_path_text,
 };
@@ -227,6 +228,48 @@ pub(super) fn pdb_page_size(bytes: &[u8]) -> BackendResult<usize> {
         .and_then(|b| b.try_into().ok())
         .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
         .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))
+}
+
+/// The local track whose content fingerprint (`content_fingerprint_key`:
+/// recorded size, title, artist) matches the PDB row at the hint's media
+/// path, when exactly one does.
+fn local_track_id_by_usb_fingerprint(
+    conn: &Connection,
+    usb_root: &Path,
+    req: &UsbLocalTrackHint<'_>,
+) -> Option<String> {
+    let parsed = super::usb_utils::parse_staged_pdb(usb_root).ok()?;
+    let row = pdb_track_by_media_path(&parsed, req.usb_media_path_raw).ok()?;
+    let artist = parsed
+        .artists
+        .get(&row.artist_id)
+        .map(String::as_str)
+        .unwrap_or("");
+    let size = row.file_size_bytes.map(i64::from);
+    let fingerprint = content_fingerprint_key(size, &row.title, artist)?;
+    let mut stmt = conn
+        .prepare("SELECT id, title, artist FROM tracks WHERE file_size_bytes = ?1")
+        .ok()?;
+    let rows = stmt
+        .query_map(params![size], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .ok()?;
+    let mut matches = rows.filter_map(Result::ok).filter(|(_, title, artist)| {
+        content_fingerprint_key(
+            size,
+            title.as_deref().unwrap_or(""),
+            artist.as_deref().unwrap_or(""),
+        )
+        .as_ref()
+            == Some(&fingerprint)
+    });
+    let (track_id, _, _) = matches.next()?;
+    matches.next().is_none().then_some(track_id)
 }
 
 /// The PDB track row at a USB media path (exact, else ignoring ASCII case).
@@ -1307,8 +1350,9 @@ impl BackendService {
     }
 
     /// Resolve the local `tracks` id a USB row maps to, in priority order:
-    /// frontend hint → `track_usb_links` → `resolve_playback_source`
-    /// (fingerprint/title). Only the USB→local direction is ever needed.
+    /// frontend hint → content fingerprint → `track_usb_links` →
+    /// `resolve_playback_source` (fingerprint/title). Only the USB→local
+    /// direction is ever needed.
     pub(super) fn resolve_local_track_id_for_usb(
         &self,
         usb_root: &Path,
@@ -1329,7 +1373,13 @@ impl BackendService {
             }
         }
 
-        // 2. Authoritative link row for this device + media path.
+        // 2. The local track with the USB row's content fingerprint (size,
+        // title, artist), when exactly one has it.
+        if let Some(track_id) = local_track_id_by_usb_fingerprint(&conn, usb_root, req) {
+            return Some(track_id);
+        }
+
+        // 3. Authoritative link row for this device + media path.
         let media_raw = req.usb_media_path_raw.trim();
         if !media_raw.is_empty() {
             let root_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
@@ -1358,7 +1408,7 @@ impl BackendService {
             }
         }
 
-        // 3. Fingerprint / title fallback.
+        // 4. Fingerprint / title fallback.
         let title = req.title.unwrap_or_default().trim().to_string();
         let artist = req.artist.unwrap_or_default().trim().to_string();
         if title.is_empty() && artist.is_empty() {

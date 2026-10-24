@@ -34,6 +34,7 @@ use super::export_helpers::{
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
 };
 use super::key_notation::KeyNotation;
+use super::track_matching::{ContentFingerprint, content_fingerprint_key};
 use super::usb_display_files::{
     DisplayReadCounts, LibraryDisplayFiles, UsbDisplaySource, library_files_off_usb,
 };
@@ -111,9 +112,34 @@ pub(crate) type UsbPlaylistsCache =
 pub(crate) type UsbHistoriesCache =
     std::sync::Mutex<Option<(UsbParseCacheKey, Arc<crate::models::FetchUsbHistoriesData>)>>;
 
-/// Every track file the staged PDB lists, by `usb_track_size_key`, with its
-/// recorded size.
-pub(crate) type UsbTrackSizes = HashMap<String, u64>;
+/// Every track the staged PDB lists.
+#[derive(Debug, Default)]
+pub(crate) struct UsbTrackSizes {
+    /// By `content_fingerprint_key` (recorded size, title, artist), so a local
+    /// track is found by its data wherever its file landed.
+    pub by_fingerprint: HashSet<ContentFingerprint>,
+    /// Recorded size by `usb_track_size_key` of the track file.
+    pub by_path: HashMap<String, u64>,
+}
+
+impl UsbTrackSizes {
+    /// Whether a local track of `size` bytes is already on the USB: by its
+    /// fingerprint, or, for a track without one (no size or a blank title),
+    /// by the USB-relative path it would be exported to.
+    pub(crate) fn holds(
+        &self,
+        fingerprint: Option<&ContentFingerprint>,
+        size: u64,
+        target_relative: impl FnOnce() -> Option<String>,
+    ) -> bool {
+        match fingerprint {
+            Some(fingerprint) => self.by_fingerprint.contains(fingerprint),
+            None => target_relative()
+                .and_then(|rel| self.by_path.get(&usb_track_size_key(&rel)).copied())
+                == Some(size),
+        }
+    }
+}
 /// One-entry cache of `UsbTrackSizes`, keyed by the staged PDB's path and
 /// signature, so the playlist heading's export estimate doesn't re-parse the
 /// PDB on every page load.
@@ -1025,16 +1051,26 @@ impl BackendService {
             return Ok(Arc::clone(sizes));
         }
         let parsed = parse_pdb(&pdb_path)?;
-        let sizes: Arc<UsbTrackSizes> = Arc::new(
-            parsed
-                .tracks
-                .iter()
-                .filter_map(|track| {
-                    let size = track.file_size_bytes?;
-                    Some((usb_track_size_key(&track.track_file_path), u64::from(size)))
-                })
-                .collect(),
-        );
+        let mut sizes = UsbTrackSizes::default();
+        for track in &parsed.tracks {
+            let Some(size) = track.file_size_bytes else {
+                continue;
+            };
+            let artist = parsed
+                .artists
+                .get(&track.artist_id)
+                .map(String::as_str)
+                .unwrap_or("");
+            if let Some(fingerprint) =
+                content_fingerprint_key(Some(i64::from(size)), &track.title, artist)
+            {
+                sizes.by_fingerprint.insert(fingerprint);
+            }
+            sizes
+                .by_path
+                .insert(usb_track_size_key(&track.track_file_path), u64::from(size));
+        }
+        let sizes = Arc::new(sizes);
         if let Ok(mut guard) = self.usb_track_sizes_cache.lock() {
             *guard = Some((pdb_path, sig, Arc::clone(&sizes)));
         }

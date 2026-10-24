@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{OptionalExtension, params};
 use serde_json::json;
 
-use super::usb::{UsbTrackSizes, usb_track_size_key};
+use super::usb::UsbTrackSizes;
 use crate::edb::{open_edb_from_usb_root, open_edb_rw};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
@@ -37,7 +37,7 @@ use super::export_helpers::{
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
 use super::usb_utils::{
-    self, analysis_bundle_exists, canonicalize_playlist_name,
+    self, analysis_bundle_exists,
     load_existing_analysis_paths_by_content_path,
     load_existing_analysis_paths_by_content_path_with_conn,
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
@@ -415,15 +415,15 @@ fn run_manifest_invariant_check(
 const EXPORT_FREE_SPACE_HEADROOM_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Estimate the bytes an export will newly write into `Contents` (plus the
-/// optional artwork/analysis assets), skipping tracks already present at their
-/// primary target with a matching size — `copy_if_different` skips those and
-/// their assets are reused, not rewritten. Deliberately an estimate: the
-/// collision-suffixing in the real copy loop can pick a different file name,
-/// which only matters for the "already present" check, not the byte total.
+/// optional artwork/analysis assets), skipping tracks already on the USB
+/// (`track_on_usb`, against the staged PDB's track list `on_usb`) — their
+/// audio isn't copied again and their assets are reused, not rewritten.
 fn estimate_export_new_bytes(
+    usb_root: &Path,
     media_root: &Path,
     playlist: &ExportPlaylistData,
     options: &ExportToUsbOptions,
+    on_usb: &UsbTrackSizes,
 ) -> u64 {
     let mut total: u64 = 0;
     for track in &playlist.tracks {
@@ -435,19 +435,7 @@ fn estimate_export_new_bytes(
             continue;
         }
         let source_len = meta.len();
-        let extension = crate::audio_format::export_extension(&source);
-        let target = exported_media_target_path(
-            media_root,
-            &source,
-            &track.artist,
-            track.album.as_deref(),
-            &track.title,
-            &extension,
-        );
-        let already_present = std::fs::metadata(&target)
-            .map(|dst| dst.is_file() && dst.len() == source_len)
-            .unwrap_or(false);
-        if already_present {
+        if track_on_usb(usb_root, media_root, track, source_len, on_usb) {
             continue;
         }
         total = total.saturating_add(source_len);
@@ -484,12 +472,41 @@ struct PlaylistCopyEstimate {
     tracks: usize,
 }
 
+/// Whether `track` (`size` bytes as recorded) is already on the USB, from the
+/// staged PDB's track list: by its content fingerprint wherever its file
+/// landed, or, without one, by the plain target path an export would pick.
+fn track_on_usb(
+    usb_root: &Path,
+    media_root: &Path,
+    track: &ExportTrackData,
+    size: u64,
+    on_usb: &UsbTrackSizes,
+) -> bool {
+    let fingerprint = content_fingerprint_key(Some(size as i64), &track.title, &track.artist);
+    on_usb.holds(fingerprint.as_ref(), size, || {
+        let source = Path::new(&track.file_path);
+        let extension = crate::audio_format::export_extension(source);
+        let target = exported_media_target_path(
+            media_root,
+            source,
+            &track.artist,
+            track.album.as_deref(),
+            &track.title,
+            &extension,
+        );
+        target
+            .strip_prefix(usb_root)
+            .ok()
+            .map(|rel| rel.to_string_lossy().into_owned())
+    })
+}
+
 /// The playlist heading's export estimate, from recorded data only: each
 /// track's audio size as the DB recorded it at scan time, and whether it is
-/// already on the drive from the staged PDB's track list (`on_usb`, keyed by
-/// `usb_track_size_key`). Touches no file, so neither the music disk nor the
-/// USB is woken. Tracks without a recorded size add nothing; analysis and
-/// artwork sizes aren't recorded, so they are left to the free-space headroom.
+/// already on the drive (`track_on_usb`). Touches no file, so neither the
+/// music disk nor the USB is woken. Tracks without a recorded size add
+/// nothing; analysis and artwork sizes aren't recorded, so they are left to
+/// the free-space headroom.
 fn estimate_playlist_copy(
     usb_root: &Path,
     playlist: &ExportPlaylistData,
@@ -508,22 +525,7 @@ fn estimate_playlist_copy(
         else {
             continue;
         };
-        let source = Path::new(&track.file_path);
-        let extension = crate::audio_format::export_extension(source);
-        let target = exported_media_target_path(
-            &media_root,
-            source,
-            &track.artist,
-            track.album.as_deref(),
-            &track.title,
-            &extension,
-        );
-        let already_present = target
-            .strip_prefix(usb_root)
-            .ok()
-            .and_then(|rel| on_usb.get(&usb_track_size_key(&rel.to_string_lossy())))
-            == Some(&source_len);
-        if already_present {
+        if track_on_usb(usb_root, &media_root, track, source_len, on_usb) {
             continue;
         }
         estimate.tracks += 1;
@@ -574,11 +576,12 @@ fn ensure_usb_has_space_for_export(
     media_root: &Path,
     playlist: &ExportPlaylistData,
     options: &ExportToUsbOptions,
+    on_usb: &UsbTrackSizes,
 ) -> BackendResult<()> {
     let Some(available) = usb_mount_available_bytes(usb_root) else {
         return Ok(());
     };
-    let estimate = estimate_export_new_bytes(media_root, playlist, options);
+    let estimate = estimate_export_new_bytes(usb_root, media_root, playlist, options, on_usb);
     let Some((required, available)) = export_space_shortfall(estimate, available) else {
         return Ok(());
     };
@@ -964,7 +967,9 @@ impl BackendService {
         let mut warnings = Vec::<WarningEntry>::new();
         ensure_playlist_tracks_analysis_ready(&usb_root, &playlist)?;
         if !export_dry_run {
-            ensure_usb_has_space_for_export(&usb_root, &media_root, &playlist, &options)?;
+            // A USB without a PDB yet holds no tracks.
+            let on_usb = self.usb_track_sizes(&usb_root).unwrap_or_default();
+            ensure_usb_has_space_for_export(&usb_root, &media_root, &playlist, &options, &on_usb)?;
         }
         let local_conn = self.db.connect()?;
         Self::ensure_track_export_identity_schema(&local_conn)?;
@@ -998,9 +1003,18 @@ impl BackendService {
         let mut existing_usb_identity_by_path = HashMap::<String, UsbTrackIdentity>::new();
         let mut existing_usb_path_by_fingerprint =
             HashMap::<ContentFingerprint, Option<String>>::new();
+        // masterContentIds more than one USB row carries: copied from another
+        // track by an older export, so not this track's to keep.
+        let mut shared_master_content_ids = HashSet::<u32>::new();
         if let Ok(parsed) = usb_utils::parse_staged_pdb(&usb_root) {
+            let mut seen_master_content_ids = HashSet::<u32>::new();
             for track in &parsed.tracks {
-                let path_key = canonicalize_playlist_name(&track.track_file_path);
+                if let Some(mci) = track.master_content_id
+                    && !seen_master_content_ids.insert(mci)
+                {
+                    shared_master_content_ids.insert(mci);
+                }
+                let path_key = canonicalize_track_path_identity(&track.track_file_path);
                 let art = parsed.artworks.get(&track.artwork_id).cloned();
                 existing_usb_identity_by_path.insert(
                     path_key,
@@ -1087,7 +1101,7 @@ impl BackendService {
                 track.album.as_deref(),
                 &track.title,
                 &extension,
-                this_fingerprint,
+                this_fingerprint.clone(),
             );
             let computed_target_relative = usb_relative_path(&usb_root, &target);
             let existing_exported_path = existing_usb_relative_file(&usb_root, &source)
@@ -1115,8 +1129,8 @@ impl BackendService {
                     }
                     if computed_target_relative
                         .as_deref()
-                        .map(canonicalize_playlist_name)
-                        == Some(canonicalize_playlist_name(candidate))
+                        .map(canonicalize_track_path_identity)
+                        == Some(canonicalize_track_path_identity(candidate))
                     {
                         return None;
                     }
@@ -1136,6 +1150,32 @@ impl BackendService {
                 usb_relative_path(&usb_root, &target)
                     .unwrap_or_else(|| target.to_string_lossy().to_string())
             });
+            // The USB row this track was exported as before: the one with its
+            // content fingerprint, else the one at its exported path.
+            let existing_identity = this_fingerprint
+                .as_ref()
+                .and_then(|fingerprint| existing_usb_path_by_fingerprint.get(fingerprint))
+                .and_then(|path| path.as_deref())
+                .and_then(|path| {
+                    existing_usb_identity_by_path.get(&canonicalize_track_path_identity(path))
+                })
+                .or_else(|| {
+                    existing_usb_identity_by_path
+                        .get(&canonicalize_track_path_identity(&exported_path))
+                })
+                .cloned();
+            // A masterContentId of this app's that another row carries too is
+            // another track's: this one gets its own, and no artwork from that row.
+            let existing_identity = match existing_identity {
+                Some((Some(mdb), Some(mci), cl, _))
+                    if i64::from(mdb) == app_master_db_id
+                    && shared_master_content_ids.contains(&mci) =>
+                {
+                    let own = Self::ensure_track_master_content_id(&local_conn, &track.id)?;
+                    Some((Some(mdb), u32::try_from(own).ok(), cl, None))
+                }
+                other => other,
+            };
             let mut artwork_relative = None;
             // "This playlist keeps this asset alive on the USB" -- true for a
             // freshly generated asset AND for one this app placed on a prior
@@ -1153,11 +1193,9 @@ impl BackendService {
                 {
                     artwork_relative = Some(existing_artwork);
                     retain_artwork = true;
-                } else if let Some((_, _, _, Some(art_path))) =
-                    existing_usb_identity_by_path.get(&canonicalize_playlist_name(&exported_path))
-                {
+                } else if let Some((_, _, _, Some(art_path))) = &existing_identity {
                     // Fallback: pick up artwork already indexed on the USB PDB for this
-                    // exported_path (e.g. a fingerprint-matched track already on this
+                    // track's row (e.g. a fingerprint-matched track already on this
                     // USB under a foreign naming scheme) before minting a new asset.
                     artwork_relative = Some(art_path.clone());
                     retain_artwork = true;
@@ -1210,7 +1248,7 @@ impl BackendService {
                     analysis_relative = Some(existing_analysis);
                     retain_waveform = true;
                 } else {
-                    let exported_key = canonicalize_playlist_name(&exported_path);
+                    let exported_key = canonicalize_track_path_identity(&exported_path);
                     if let Some(existing_analysis) = existing_analysis_by_path
                         .get(&exported_key)
                         .cloned()
@@ -1245,14 +1283,12 @@ impl BackendService {
                 }
             }
 
-            let exported_key = canonicalize_playlist_name(&exported_path);
-            let existing_identity = existing_usb_identity_by_path.get(&exported_key);
-            // Preserve prior USB identity for existing paths to keep eDB/PDB
-            // track identity stable across additive exports.
+            // Preserve the track's prior USB identity to keep eDB/PDB track
+            // identity stable across additive exports.
             let (mdb, mci, cl) = Self::resolve_manifest_identity(
                 &local_conn,
                 &track.id,
-                existing_identity,
+                existing_identity.as_ref(),
                 owns_waveform,
                 app_master_db_id,
                 app_content_link_id,
@@ -2024,9 +2060,9 @@ mod tests {
         normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
         record_existing_usb_path_by_fingerprint, resolve_collision_free_media_target,
         usb_drive_label, usb_playlist_names_for_export_compare, usb_root_last_segment,
-        usb_track_size_key, validate_export_manifest_after_prune,
-        validate_export_manifest_before_db_write,
+        validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
     };
+    use crate::service::usb::usb_track_size_key;
     use crate::error::BackendError;
     use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, Playlist};
     use crate::pdb_reader::{ParsedPdb, PdbPlaylistTreeRow};
@@ -3030,20 +3066,16 @@ mod tests {
         std::fs::create_dir_all(&media_src).expect("src dir");
         std::fs::create_dir_all(&media_root).expect("contents dir");
 
-        // Already on the USB at its primary target with a matching size.
+        // Already on the USB by the staged PDB's track list, under whatever
+        // file name the earlier export gave it.
         let present_src = media_src.join("present.mp3");
         std::fs::write(&present_src, vec![0u8; 4096]).expect("present src");
-        let present_target = exported_media_target_path(
-            &media_root,
-            &present_src,
-            "Artist",
-            Some("Album"),
-            "Present",
-            "mp3",
-        );
-        std::fs::create_dir_all(present_target.parent().expect("target parent"))
-            .expect("mk target parent");
-        std::fs::write(&present_target, vec![0u8; 4096]).expect("present target");
+        let on_usb = UsbTrackSizes {
+            by_fingerprint: content_fingerprint_key(Some(4096), "Present", "Artist")
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
 
         let new_src = media_src.join("new.mp3");
         std::fs::write(&new_src, vec![0u8; 10_000]).expect("new src");
@@ -3075,7 +3107,13 @@ mod tests {
         };
 
         assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &options),
+            estimate_export_new_bytes(
+                &root.path().join("usb"),
+                &media_root,
+                &playlist,
+                &options,
+                &on_usb
+            ),
             10_000
         );
     }
@@ -3112,7 +3150,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &without),
+            estimate_export_new_bytes(
+                &root.path().join("usb"),
+                &media_root,
+                &playlist,
+                &without,
+                &UsbTrackSizes::default()
+            ),
             1000
         );
 
@@ -3122,7 +3166,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            estimate_export_new_bytes(&media_root, &playlist, &with),
+            estimate_export_new_bytes(
+                &root.path().join("usb"),
+                &media_root,
+                &playlist,
+                &with,
+                &UsbTrackSizes::default()
+            ),
             1000 + 200 + 50 + 25
         );
     }
@@ -3135,41 +3185,23 @@ mod tests {
         // No file exists anywhere: the estimate runs on recorded data alone.
         let mut on_drive = make_track();
         on_drive.title = "On Drive".to_string();
-        on_drive.file_path = root
-            .path()
-            .join("src/on_drive.mp3")
-            .to_string_lossy()
-            .to_string();
+        on_drive.file_path = "/music/on_drive.mp3".to_string();
         on_drive.file_size_bytes = Some(3_000);
         let mut new_track = make_track();
         new_track.title = "New".to_string();
-        new_track.file_path = root
-            .path()
-            .join("src/new.mp3")
-            .to_string_lossy()
-            .to_string();
+        new_track.file_path = "/music/new.mp3".to_string();
         new_track.file_size_bytes = Some(4_000);
         let mut unknown = make_track();
         unknown.title = "Unknown".to_string();
-        unknown.file_path = root
-            .path()
-            .join("src/unknown.mp3")
-            .to_string_lossy()
-            .to_string();
+        unknown.file_path = "/music/unknown.mp3".to_string();
         unknown.file_size_bytes = None;
 
-        let target = exported_media_target_path(
-            &usb_root.join("Contents"),
-            Path::new(&on_drive.file_path),
-            &on_drive.artist,
-            on_drive.album.as_deref(),
-            &on_drive.title,
-            "mp3",
-        );
-        let rel = target.strip_prefix(&usb_root).expect("under usb root");
-        let on_usb: UsbTrackSizes = [(usb_track_size_key(&rel.to_string_lossy()), 3_000)]
-            .into_iter()
-            .collect();
+        let on_usb = UsbTrackSizes {
+            by_fingerprint: content_fingerprint_key(Some(3_000), "On Drive", "Artist")
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
 
         let playlist = ExportPlaylistData {
             id: "pl1".to_string(),
@@ -3182,6 +3214,83 @@ mod tests {
             estimate.tracks, 1,
             "listed and size-less tracks add nothing"
         );
+    }
+
+    #[test]
+    fn estimate_playlist_copy_matches_by_track_data_not_file_name() {
+        let root = tempdir().expect("root");
+        let usb_root = root.path().join("usb");
+
+        // Exported earlier under a `-1` name the plain target doesn't predict.
+        let mut suffixed = make_track();
+        suffixed.title = "Live Vol. 1".to_string();
+        suffixed.file_path = "/music/Artist - Album - Live Vol. 1.mp3".to_string();
+        suffixed.file_size_bytes = Some(5_000);
+        // A different track whose file name differs only by punctuation.
+        let mut similar = make_track();
+        similar.title = "Live Vol-1".to_string();
+        similar.file_path = "/music/Artist - Album - Live Vol-1.mp3".to_string();
+        similar.file_size_bytes = Some(6_000);
+        // Exported earlier, but the source file has changed since.
+        let mut changed = make_track();
+        changed.title = "Changed".to_string();
+        changed.file_path = "/music/Artist - Album - Changed.mp3".to_string();
+        changed.file_size_bytes = Some(7_000);
+
+        let on_usb = UsbTrackSizes {
+            by_fingerprint: [
+                content_fingerprint_key(Some(5_000), "Live Vol. 1", "Artist"),
+                content_fingerprint_key(Some(6_000), "Live Vol-1", "Artist"),
+                content_fingerprint_key(Some(6_500), "Changed", "Artist"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+            ..Default::default()
+        };
+
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: vec![suffixed, similar, changed],
+        };
+        let estimate = estimate_playlist_copy(&usb_root, &playlist, &on_usb);
+        assert_eq!(estimate.tracks, 1, "only the changed track is copied");
+        assert_eq!(estimate.bytes, 7_000);
+    }
+
+    #[test]
+    fn estimate_playlist_copy_falls_back_to_the_target_path_without_a_fingerprint() {
+        let root = tempdir().expect("root");
+        let usb_root = root.path().join("usb");
+
+        // A blank title gives no fingerprint.
+        let mut untitled = make_track();
+        untitled.title = "  ".to_string();
+        untitled.file_path = "/music/untitled.mp3".to_string();
+        untitled.file_size_bytes = Some(2_000);
+        let target = exported_media_target_path(
+            &usb_root.join("Contents"),
+            Path::new(&untitled.file_path),
+            &untitled.artist,
+            untitled.album.as_deref(),
+            &untitled.title,
+            "mp3",
+        );
+        let rel = target.strip_prefix(&usb_root).expect("under usb root");
+        let on_usb = UsbTrackSizes {
+            by_path: [(usb_track_size_key(&rel.to_string_lossy()), 2_000)]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: vec![untitled],
+        };
+        assert_eq!(estimate_playlist_copy(&usb_root, &playlist, &on_usb).tracks, 0);
     }
 
     // --- export_to_usb validation paths ---
