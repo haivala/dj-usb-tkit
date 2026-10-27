@@ -37,16 +37,18 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.8
+
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Improvement:** rekordbox now shows a USB under the drive name given in the app. Each export
   writes the name into the eDB.
-- **Fix:** Older players could show 0 tracks on a USB the app had initialized, even after
+- **Fix (CRITICAL):** Older players could show 0 tracks on a USB the app had initialized, even after
   playlists were exported to it, and after the first fix for that, only 1 track and sometimes hang with a
   communication error. Exports now keep the PDB's history page counting the USB's tracks and matching the
   eDB's device details (name, creation date, background color) the way rekordbox does, and Repair fixes
   USBs that are already affected.
-- **Fix:** Older CDJs (CDJ-2000nexus, CDJ-2000NXS2) could give a communication error as soon as the
+- **Fix (CRITICAL):** Older CDJs (CDJ-2000nexus, CDJ-2000NXS2) could give a communication error as soon as the
   track list opened when a track had a comment or title longer than 126 characters. Exports now place
   such text where the players can read it, and any write to an affected USB (an export, a repair, a cue
   or metadata edit) fixes the tracks already on it.
