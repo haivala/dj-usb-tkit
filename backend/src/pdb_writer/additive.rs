@@ -753,9 +753,10 @@ pub(crate) struct PdbAdditiveDiff {
     /// accumulate duplicate rows across repeated exports.
     /// `(playlist_id, track_id, new_entry_index)`.
     pub repositioned_t08_entries: Vec<(u32, u32, u32)>,
-    /// The export has tracks but tt=19 is still in template state, so its
-    /// page gets activated (see [`activate_t19_template_page`]).
-    pub activate_t19_template: bool,
+    /// tt=19 does not match the export's track count or the eDB's
+    /// `property` row yet, so its page is rewritten for them (see
+    /// [`t19_sync_target`]).
+    pub sync_t19_ring: Option<(usize, T19Property)>,
 }
 
 #[derive(Debug, Clone)]
@@ -829,22 +830,21 @@ pub(crate) fn compute_additive_diff(
     let parsed = crate::pdb_reader::parse_pdb_bytes(existing_bytes)
         .map_err(|e| NonAdditiveReason::Unparseable(e.to_string()))?;
 
-    // Older players count 0 songs while tt=19's page is still the init template
-    // (one sealed row, flags=0x24, u5=1), however many tracks t00 holds.
-    // rekordbox's own exports show that sealed single row is the
-    // empty-device state, not a finished page: on its first export
-    // rekordbox keeps the template row, appends one, and turns the page
-    // active (a 1-track reference export: nrs=2, flags=0x34, u5=2,
-    // rowpf=0x0002, tranrf=0x0003). So any export with tracks activates a
-    // template-state page -- including one onto a PDB that already has
-    // tracks, so a USB an older build left at 0 songs recovers on its next
-    // export. A page rekordbox or a player has already advanced is not
-    // template state and is left alone.
-    let activate_t19_template = !new_data.tracks.is_empty()
-        && t19_is_template_state(
-            existing_bytes,
-            read_u32_le_at(existing_bytes, 4).unwrap_or(0) as usize,
-        );
+    // Older players take the song count from tt=19, not t00: 0 songs while
+    // its page is still the init template (one sealed row, flags=0x24,
+    // u5=1), otherwise the newest row id of its ring (see `t19_ring_rows`).
+    // rekordbox's own exports keep that id at the track count. So any
+    // export with tracks rewrites a template-state page or an app-written
+    // ring whose newest id or eDB property (date, version, name, color) is
+    // off -- including one onto a PDB that already has tracks, so a USB an
+    // older build left at 0 songs (or "1 track") recovers on its next
+    // export. A page a player has added rows to is left alone.
+    let sync_t19_ring = t19_sync_target(
+        existing_bytes,
+        read_u32_le_at(existing_bytes, 4).unwrap_or(0) as usize,
+        new_data.tracks.len(),
+        new_data.t19_property.as_ref(),
+    );
 
     // ── Tracks ──────────────────────────────────────────────────────
     let new_track_ids: std::collections::HashSet<u32> =
@@ -1187,7 +1187,7 @@ pub(crate) fn compute_additive_diff(
         desired_t08_entries,
         removed_t08_entries,
         repositioned_t08_entries,
-        activate_t19_template,
+        sync_t19_ring,
     })
 }
 
@@ -1307,18 +1307,148 @@ pub(crate) const T19_TEMPLATE_ROW: [u8; T19_ROW_LEN] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
-/// The tt=19 rows rekordbox leaves after its first export onto a template
-/// whose single row is `row0`: that row kept, plus a copy of it with bytes
-/// `0..4` = `0x0280 + idx * 0x0020_0000` and bytes `4..8` = `idx`. The
-/// activation, its repair and the fresh writer all use this, so every path
-/// produces the same page.
-pub(crate) fn t19_rows_after_first_export(row0: &[u8; T19_ROW_LEN]) -> [Vec<u8>; 2] {
-    let mut row1 = row0.to_vec();
-    let idx = 1u32;
-    let val = 0x0000_0280u32.saturating_add(idx.saturating_mul(0x0020_0000));
-    row1[0..4].copy_from_slice(&val.to_le_bytes());
-    row1[4..8].copy_from_slice(&idx.to_le_bytes());
-    [row0.to_vec(), row1]
+/// Row slots of an unnamed tt=19 ring: 96 rows of 40 bytes plus their 6
+/// footer groups fill a 4096-byte page exactly (rekordbox's full ring has
+/// `free_size=0`). A named ring has longer rows and fewer slots (see
+/// [`t19_ring_rows`]).
+#[cfg(test)]
+pub(crate) const T19_RING_SLOTS: usize = 96;
+
+/// Offset of the date string in a tt=19 row, after the slot/id words and
+/// a flags word whose byte 9 is the background color.
+const T19_DATE_OFFSET: usize = 12;
+
+/// The two bytes between the date and `dbVersion` strings in every tt=19
+/// row seen so far (rekordbox's, players' and the template's).
+const T19_MID_BYTES: [u8; 2] = [0x19, 0x1e];
+
+/// What a tt=19 row mirrors of the eDB's `property` row: rekordbox keeps
+/// every row's date, version string, name and byte 9 equal to `createdDate`,
+/// `dbVersion`, `deviceName` and `backGroundColorType`, and the newest row id
+/// equal to `numberOfContents`. Players compare the two databases and give
+/// communication errors when they disagree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct T19Property {
+    pub created_date: String,
+    pub db_version: String,
+    /// `None` for an unnamed USB (`deviceName` empty).
+    pub device_name: Option<String>,
+    /// Player background color; `0` is the default (blue highlight). A
+    /// rekordbox USB with `1` turned a CDJ-2000NXS2's highlight purple.
+    pub background_color: u8,
+}
+
+impl T19Property {
+    /// The property a tt=19 row carries (`None` if it isn't one).
+    pub(crate) fn from_row(row: &[u8]) -> Option<Self> {
+        // Bytes a PDB string takes: short ones carry it in their kind byte,
+        // long ones in the u16 after it.
+        let string_len = |at: usize| match *row.get(at)? {
+            kind if kind & 1 == 1 => Some(usize::from(kind >> 1)),
+            _ => read_u16_le_at(row, at + 1).map(usize::from),
+        };
+        let created_date = crate::pdb_reader::get_string_from_pdb(row, T19_DATE_OFFSET)?;
+        let mid = T19_DATE_OFFSET + string_len(T19_DATE_OFFSET)?;
+        if row.get(mid..mid + 2)? != T19_MID_BYTES {
+            return None;
+        }
+        let version_at = mid + 2;
+        let db_version = crate::pdb_reader::get_string_from_pdb(row, version_at)?;
+        let name_at = version_at + string_len(version_at)?;
+        // `get_string_from_pdb` has no value for the empty string (`03`).
+        let device_name = match *row.get(name_at)? {
+            0x03 => String::new(),
+            _ => crate::pdb_reader::get_string_from_pdb(row, name_at)?,
+        };
+        Some(Self {
+            created_date,
+            db_version,
+            device_name: (!device_name.is_empty()).then_some(device_name),
+            background_color: *row.get(9)?,
+        })
+    }
+
+    /// The property in a tt=19 template row, unnamed and with color 0.
+    pub(crate) fn from_template_row(row0: &[u8]) -> Option<Self> {
+        Self::from_row(row0).map(|prop| Self {
+            device_name: None,
+            background_color: 0,
+            ..prop
+        })
+    }
+}
+
+/// One tt=19 row for `slot`/`id`: bytes `0..4` = `0x0280 + slot *
+/// 0x0020_0000`, `4..8` = the id, byte 9 the background color, then the
+/// date, [`T19_MID_BYTES`], `dbVersion` and the name as PDB strings, then
+/// at least 7 zero bytes up to a 4-byte boundary. Slot 0 is the template
+/// row: no name, color 0 (both as rekordbox writes it). That gives 40-byte
+/// rows unnamed, 48 for `"APECAR_red"` and 52 for `"Chiphead 256GB"`, as
+/// rekordbox and players write them.
+fn t19_slot_row(prop: &T19Property, slot: usize, id: u32) -> Vec<u8> {
+    let mut row = vec![0u8; T19_DATE_OFFSET];
+    let val = 0x0000_0280u32 + (slot as u32) * 0x0020_0000;
+    row[0..4].copy_from_slice(&val.to_le_bytes());
+    row[4..8].copy_from_slice(&id.to_le_bytes());
+    let name = if slot == 0 {
+        ""
+    } else {
+        row[9] = prop.background_color;
+        prop.device_name.as_deref().unwrap_or("")
+    };
+    row.extend_from_slice(&encode_pdb_string(&prop.created_date));
+    row.extend_from_slice(&T19_MID_BYTES);
+    row.extend_from_slice(&encode_pdb_string(&prop.db_version));
+    row.extend_from_slice(&encode_pdb_string(name));
+    row.resize(align4(row.len() + 7), 0);
+    row
+}
+
+/// Most rows a tt=19 page holds when slot 0 is `row0_len` bytes and every
+/// other row `row_len`.
+fn t19_ring_capacity(row0_len: usize, row_len: usize) -> usize {
+    (1..=0x1fff)
+        .take_while(|&n| HEAP_START + row0_len + (n - 1) * row_len + footer_size(n) <= PAGE_SIZE)
+        .last()
+        .unwrap_or(1)
+}
+
+/// The tt=19 rows rekordbox leaves for `prop` (the eDB's `property` row)
+/// once its newest row id is `newest`. Older players read the newest id as
+/// the USB's song count, so the writers pass the track count (the eDB's
+/// `numberOfContents`).
+///
+/// The page is a ring: slot `s` holds the row [`t19_slot_row`] builds for
+/// it. Ids `0..=newest` fill slots `0..` in order until the page is full;
+/// after that each new id overwrites one of two slots by parity: slot
+/// `id % 2` when every row is alike, slot `1 + id % 2` when slot 0 differs
+/// (named or colored; the template row in slot 0 is kept). Matches
+/// rekordbox's own 1-track (`0..=1`) and 2-track (`0..=2`) exports, its
+/// wrapped unnamed 96-slot ring (slots 0/1 = ids 228/229, slots 2..95 = ids
+/// 2..95) and its wrapped named 80-slot ring of 48-byte rows (slot 0 = id 0,
+/// slots 1/2 = ids 332/331).
+pub(crate) fn t19_ring_rows(prop: &T19Property, newest: u32) -> Vec<Vec<u8>> {
+    let row0 = t19_slot_row(prop, 0, 0);
+    let row1 = t19_slot_row(prop, 1, 0);
+    let capacity = t19_ring_capacity(row0.len(), row1.len());
+    let wrap_base = usize::from(row0[8..] != row1[8..]);
+    let slot_count = (newest as usize).saturating_add(1).min(capacity);
+    (0..slot_count)
+        .map(|slot| {
+            let mut id = slot as u32;
+            if let Some(parity) = slot.checked_sub(wrap_base).filter(|&p| p < 2) {
+                let wrapped = if newest % 2 == parity as u32 {
+                    newest
+                } else {
+                    newest - 1
+                };
+                if wrapped as usize >= capacity {
+                    id = wrapped;
+                }
+            }
+            t19_slot_row(prop, slot, id)
+        })
+        .collect()
 }
 
 /// First data page of tt=19 (`chain[1]`, after the sentinel), if the table
@@ -1359,18 +1489,100 @@ pub(crate) fn t19_is_template_state(bytes: &[u8], page_size: usize) -> bool {
         .is_some_and(|group| group.rowpf(page) == 0x0001)
 }
 
-/// Turn a template-state tt=19 page (see [`t19_is_template_state`]) into
-/// the active shape rekordbox writes on its first export: the template row
-/// is kept and one row is appended, a copy of it with bytes `0..4` =
-/// `0x0280 + idx * 0x0020_0000` and bytes `4..8` = `idx`. The page then
-/// turns active (flags `0x34`, `u5=2`, `rowpf=0x0002`, `tranrf=0x0003`),
+/// Rows of tt=19's first data page in slot order, each running to the next
+/// row's offset (the last one to the heap's used size).
+fn t19_page_rows(bytes: &[u8], page_size: usize) -> Option<(u32, Vec<Vec<u8>>)> {
+    let page_idx = t19_first_data_page(bytes, page_size)?;
+    let off = page_offset(page_idx, page_size)?;
+    let page = bytes.get(off..off + page_size)?;
+    let (nrs, _) = pdb_page::read_slot_counts(page)?;
+    if !pdb_page::footer_fits(page_size, nrs) {
+        return None;
+    }
+    let offsets: Vec<usize> = pdb_page::footer_groups(page_size, nrs)
+        .flat_map(|group| (0..group.len).map(move |j| group.row_offset(page, j)))
+        .collect();
+    let used = read_u16_le_at(page, 0x1e)? as usize;
+    let rows = offsets
+        .iter()
+        .map(|&start| {
+            let end = offsets
+                .iter()
+                .copied()
+                .filter(|&other| other > start)
+                .min()
+                .unwrap_or(used);
+            page.get(HEAP_START + start..HEAP_START + end)
+                .map(<[u8]>::to_vec)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some((page_idx, rows))
+}
+
+/// The newest row id and property of a tt=19 page that holds exactly the
+/// ring [`t19_ring_rows`] builds for the property its rows carry: a page
+/// this app or rekordbox has written. `None` for a page a player has added
+/// rows to: a CDJ copies the newest id into the rows it adds, which breaks
+/// the ring.
+fn t19_ring_state(bytes: &[u8], page_size: usize) -> Option<(u32, T19Property)> {
+    let (_, rows) = t19_page_rows(bytes, page_size)?;
+    let newest = rows.iter().map(|row| read_u32_le_at(row, 4)).max()??;
+    let prop = T19Property::from_row(rows.get(1).or(rows.first())?)?;
+    (rows == t19_ring_rows(&prop, newest)).then_some((newest, prop))
+}
+
+/// What tt=19 needs rewriting to for a PDB holding `track_count` tracks
+/// whose eDB has `property`, as the `(track_count, property)` to pass to
+/// [`sync_t19_ring_page`]; `None` when it needs nothing. Players compare
+/// t19 with the eDB's `property` row and the track count and give
+/// communication errors when they disagree; older ones also show the newest
+/// id as the song count (0 songs on the template, "1 track" on the 2-row
+/// page an older build wrote). The page is rewritten while still in template
+/// state (see [`t19_is_template_state`]), or while it is a ring (see
+/// [`t19_ring_state`]) whose newest id is not the track count or whose
+/// property is not the eDB's. Without an eDB (`property` `None`) the page
+/// keeps the property it has. A page a player has added rows to is never
+/// rewritten.
+pub(crate) fn t19_sync_target(
+    bytes: &[u8],
+    page_size: usize,
+    track_count: usize,
+    property: Option<&T19Property>,
+) -> Option<(usize, T19Property)> {
+    if track_count == 0 || page_size != PAGE_SIZE {
+        return None;
+    }
+    if t19_is_template_state(bytes, page_size) {
+        let prop = match property {
+            Some(prop) => prop.clone(),
+            None => {
+                let (_, rows) = t19_page_rows(bytes, page_size)?;
+                T19Property::from_template_row(rows.first()?)?
+            }
+        };
+        return Some((track_count, prop));
+    }
+    let (newest, current) = t19_ring_state(bytes, page_size)?;
+    let prop = property.cloned().unwrap_or_else(|| current.clone());
+    (newest as usize != track_count || prop != current).then_some((track_count, prop))
+}
+
+/// Rewrite tt=19's first data page as the ring rekordbox keeps for
+/// `track_count` tracks and `property` (see [`t19_ring_rows`]), turning the
+/// page active (flags `0x34`, `u5=2`). Unnamed with one track this is
 /// byte-for-byte what rekordbox wrote on a 1-track reference export apart
-/// from seq and the row date. The tt=19 sentinel's B-tree then indexes the
-/// active page, as rekordbox's does. Touches no other page.
-pub(crate) fn activate_t19_template_page(bytes: &mut [u8], page_size: usize) -> BackendResult<()> {
+/// from seq. Only for a page [`t19_sync_target`] accepts. The tt=19
+/// sentinel's B-tree then indexes the active page, as rekordbox's does.
+/// Touches no other page.
+pub(crate) fn sync_t19_ring_page(
+    bytes: &mut [u8],
+    page_size: usize,
+    track_count: usize,
+    property: &T19Property,
+) -> BackendResult<()> {
     if page_size != PAGE_SIZE {
         return Err(BackendError::Validation(format!(
-            "t19 activation requires page_size {PAGE_SIZE}, got {page_size}"
+            "t19 sync requires page_size {PAGE_SIZE}, got {page_size}"
         )));
     }
     // KNOWN GAP: a tt=19 with no data page yet (chain is just the sentinel)
@@ -1378,34 +1590,18 @@ pub(crate) fn activate_t19_template_page(bytes: &mut [u8], page_size: usize) -> 
     // cannot do. Not reachable in production: the `initialize_usb` template
     // always pre-seeds one tt=19 data page (`seed_rb_initialized_history_shape`
     // in usb_utils.rs). Tests must mirror that pre-seeded page.
-    let page_idx = t19_first_data_page(bytes, page_size).ok_or_else(|| {
-        BackendError::Validation("t19 activation: table 19 has no data page".into())
-    })?;
+    let page_idx = t19_first_data_page(bytes, page_size)
+        .ok_or_else(|| BackendError::Validation("t19 sync: table 19 has no data page".into()))?;
+    let newest = u32::try_from(track_count)
+        .map_err(|_| BackendError::Validation("t19 sync: track count overflows u32".into()))?;
+    let rows = t19_ring_rows(property, newest);
     let off = page_offset(page_idx, page_size).ok_or_else(|| {
-        BackendError::Validation(format!("t19 activation: page {page_idx} out of bounds"))
+        BackendError::Validation(format!("t19 sync: page {page_idx} out of bounds"))
     })?;
-
-    let row0 = {
-        let page = bytes.get(off..off + page_size).ok_or_else(|| {
-            BackendError::Validation(format!("t19 activation: page {page_idx} out of bounds"))
-        })?;
-        let row_off = pdb_page::footer_groups(page_size, 1)
-            .next()
-            .map(|group| HEAP_START + group.row_offset(page, 0))
-            .unwrap_or(HEAP_START);
-        let row: &[u8; T19_ROW_LEN] = page
-            .get(row_off..row_off + T19_ROW_LEN)
-            .and_then(|row| row.try_into().ok())
-            .ok_or_else(|| {
-                BackendError::Validation("t19 activation: template row out of bounds".into())
-            })?;
-        *row
-    };
-    let rows = t19_rows_after_first_export(&row0);
 
     if !rewrite_variable_page_rows_in_place(bytes, page_idx, &rows, page_size) {
         return Err(BackendError::Validation(format!(
-            "t19 activation: rows do not fit on page {page_idx}"
+            "t19 sync: rows do not fit on page {page_idx}"
         )));
     }
 
@@ -1451,8 +1647,9 @@ fn patch_changed_string_slot(
     patch_track_row_slot_bytes_if_len_matches(row, slot_index, &desired)
 }
 
-/// True if any of the row's 21 string slots is UTF-16 encoded (`0x90` marker) but starts at a
-/// row-relative offset that isn't 4-byte aligned. MIPS-based player hardware requires 4-byte
+/// True if any of the row's 21 string slots is long-form (UTF-16 `0x90` or long ASCII `0x40`
+/// marker, both with a 4-byte header) but starts at a row-relative offset that isn't 4-byte
+/// aligned. MIPS-based player hardware requires 4-byte
 /// aligned reads for that header; a misaligned slot froze/comm-errored CDJ hardware while
 /// browsing (see `encode_track_row_with_profile`'s alignment padding, added to fix this at
 /// write time). A same-size in-place patch never touches the offset table, so it can't fix an
@@ -1462,7 +1659,7 @@ pub(super) fn track_row_has_misaligned_utf16_slot(row: &[u8]) -> bool {
         let Some(offset) = read_u16_le_at(row, 94 + 2 * index).map(|v| v as usize) else {
             continue;
         };
-        if row.get(offset) == Some(&0x90) && offset % 4 != 0 {
+        if matches!(row.get(offset), Some(0x40 | 0x90)) && offset % 4 != 0 {
             return true;
         }
     }
@@ -2197,8 +2394,8 @@ pub(crate) fn apply_additive_diff(
             patch_t08_entry_indices_in_place(&mut out, &diff.repositioned_t08_entries, page_size);
     }
 
-    if diff.activate_t19_template {
-        activate_t19_template_page(&mut out, page_size)?;
+    if let Some((track_count, property)) = &diff.sync_t19_ring {
+        sync_t19_ring_page(&mut out, page_size, *track_count, property)?;
     }
 
     Ok(out)

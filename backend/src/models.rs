@@ -1879,8 +1879,9 @@ pub struct PlayerCounterSnapshot {
     pub confidence: String,
     pub shape_mode: String,
     pub baseline_init_like: bool,
-    /// The PDB has tracks but t19 is still the init template, so players
-    /// count 0 songs on older players (repaired by `repair_pdb_t19_template_state`).
+    /// The PDB has tracks but t19 does not count them (still the init
+    /// template, or an app-written ring at another count), so older players
+    /// show 0 or 1 songs (repaired by `repair_pdb_t19_template_state`).
     #[serde(default)]
     pub t19_template_state: bool,
     pub t00_tracks: usize,

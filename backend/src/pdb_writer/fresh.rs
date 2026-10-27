@@ -111,17 +111,25 @@ fn encode_all_tables(data: &PdbData) -> BackendResult<[Vec<Vec<u8>>; 20]> {
         encode_history_entry_row,
     );
     // t19: history. A library with tracks never keeps the empty-device
-    // template's single row: it gets the two rows rekordbox's first export
-    // leaves, the same as the additive writer's activation. Real history
-    // (more than one row) passes through.
+    // template's single row: it gets the ring rekordbox keeps for that many
+    // tracks and the eDB's `property` row (or, without one, what the
+    // template row carries), the same as the additive writer's sync. Real
+    // history (more than one row) passes through.
+    let track_count = u32::try_from(data.tracks.len()).unwrap_or(u32::MAX);
+    let template_property = |row0: &[u8]| {
+        data.t19_property
+            .clone()
+            .or_else(|| T19Property::from_template_row(row0))
+    };
     tables[19] = match data.history_raw_rows.as_slice() {
-        [] if !data.tracks.is_empty() => t19_rows_after_first_export(&T19_TEMPLATE_ROW).to_vec(),
-        [row0] if !data.tracks.is_empty() => {
-            match <&[u8; T19_ROW_LEN]>::try_from(row0.as_slice()) {
-                Ok(row0) => t19_rows_after_first_export(row0).to_vec(),
-                Err(_) => data.history_raw_rows.clone(),
-            }
-        }
+        [] if track_count > 0 => match template_property(&T19_TEMPLATE_ROW) {
+            Some(prop) => t19_ring_rows(&prop, track_count),
+            None => Vec::new(),
+        },
+        [row0] if track_count > 0 => match template_property(row0) {
+            Some(prop) => t19_ring_rows(&prop, track_count),
+            None => data.history_raw_rows.clone(),
+        },
         _ => data.history_raw_rows.clone(),
     };
 
@@ -467,18 +475,21 @@ pub(super) fn apply_page_footer_convention(page: &mut [u8], table_type: u32, row
 }
 
 /// Write the tt=19 (history_runtime) "runtime profile" rowpf/tranrf footer
-/// for a page holding `row_count` rows, into a full page buffer.
+/// and `num_rl` for a page holding `row_count` rows, into a full page buffer.
 ///
-/// Only the most recently added row (and, when it shares a footer group
-/// with it, the row immediately before it) is "active"/current — every
-/// earlier row is committed history. This must hold across ALL footer
-/// groups, not just the first: verified against real rekordbox's own
-/// multi-group tt=19 output (a reference export of 88 rows across 6 groups
-/// of 16), which has exactly one rowpf bit and two tranrf bits set globally,
-/// both in the group holding the final row. `write_footer_all_present`
-/// defaults every group's rowpf/tranrf to "all rows active", which is
-/// correct for ordinary tables but wrong here for any group — this
-/// overwrites every group's rowpf/tranrf accordingly.
+/// tt=19 is a ring of row slots (see [`t19_ring_rows`]): every row carries a
+/// sequence id at bytes `4..8`, and only the newest row (and the one before
+/// it) is "active"/current -- every other row is committed history. rowpf
+/// marks the newest row's slot, tranrf that slot plus the previous id's slot,
+/// and `num_rl` is the lower of the two slots. Until the ring wraps the newest
+/// row is the last slot; once it wraps it can sit anywhere. This holds across
+/// ALL footer groups: verified against real rekordbox's own tt=19 output
+/// (growing 2- and 3-row pages, a reference export of 88 rows across 6
+/// groups, and full wrapped 80- and 96-slot rings), which always has exactly
+/// one rowpf bit and at most two tranrf bits set globally.
+/// `write_footer_all_present` defaults every group's rowpf/tranrf to "all
+/// rows active", which is correct for ordinary tables but wrong here for any
+/// group -- this overwrites every group's rowpf/tranrf accordingly.
 ///
 /// Both call sites of this used to only handle the single-group case,
 /// `row_count <= 16`; a page with more than 16 history rows silently kept
@@ -490,23 +501,47 @@ fn write_t19_runtime_footer_groups(page: &mut [u8], row_count: usize) {
     if row_count == 0 {
         return;
     }
-    let last_slot = row_count - 1;
+    let (active, previous) = t19_active_slots(page, row_count);
+    let num_rl = previous.map_or(0, |prev| prev.min(active)) as u16;
+    page[0x22..0x24].copy_from_slice(&num_rl.to_le_bytes());
     for group in pdb_page::footer_groups(page.len(), row_count) {
-        let (rowpf, tranrf) = if group.contains_slot(last_slot) {
-            let last_bit = last_slot - group.first_slot;
-            let rowpf = 1u16 << last_bit;
-            let tranrf = if last_bit >= 1 {
-                rowpf | (1u16 << (last_bit - 1))
+        let bit = |slot: usize| {
+            if group.contains_slot(slot) {
+                1u16 << (slot - group.first_slot)
             } else {
-                rowpf
-            };
-            (rowpf, tranrf)
-        } else {
-            (0u16, 0u16)
+                0
+            }
         };
+        let rowpf = bit(active);
         group.set_rowpf(page, rowpf);
-        group.set_tranrf(page, tranrf);
+        group.set_tranrf(page, rowpf | previous.map_or(0, bit));
     }
+}
+
+/// Slots of the newest tt=19 row and of the row whose id precedes it, read
+/// from the row ids at bytes `4..8`. Falls back to the last two slots when
+/// a row cannot be read.
+fn t19_active_slots(page: &[u8], row_count: usize) -> (usize, Option<usize>) {
+    let last = row_count - 1;
+    let fallback = (last, last.checked_sub(1));
+    let ids: Option<Vec<u32>> = pdb_page::footer_groups(page.len(), row_count)
+        .flat_map(|group| (0..group.len).map(move |j| (group, j)))
+        .map(|(group, j)| read_u32_le_at(page, HEAP_START + group.row_offset(page, j) + 4))
+        .collect();
+    let Some(ids) = ids.filter(|ids| ids.len() == row_count) else {
+        return fallback;
+    };
+    // Ties keep the later slot, so equal ids behave like a growing ring.
+    let Some((active, &newest)) = ids.iter().enumerate().max_by_key(|&(slot, id)| (id, slot))
+    else {
+        return fallback;
+    };
+    // Without a row one id older (e.g. equal ids), the slot before stands in.
+    let previous = newest
+        .checked_sub(1)
+        .and_then(|id| ids.iter().rposition(|&other| other == id))
+        .or_else(|| active.checked_sub(1));
+    (active, previous)
 }
 
 // ── File Assembly ────────────────────────────────────────────────────────────

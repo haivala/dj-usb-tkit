@@ -928,7 +928,10 @@ fn re_export_keeps_tracks_with_similar_file_names_apart() {
         root.path(),
         &media,
         &usb,
-        &["Similar Artist - Live Vol. 1.wav", "Similar Artist - Live Vol-1.wav"],
+        &[
+            "Similar Artist - Live Vol. 1.wav",
+            "Similar Artist - Live Vol-1.wav",
+        ],
     );
 
     let content_ids = || {

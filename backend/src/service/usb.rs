@@ -134,9 +134,11 @@ impl UsbTrackSizes {
     ) -> bool {
         match fingerprint {
             Some(fingerprint) => self.by_fingerprint.contains(fingerprint),
-            None => target_relative()
-                .and_then(|rel| self.by_path.get(&usb_track_size_key(&rel)).copied())
-                == Some(size),
+            None => {
+                target_relative()
+                    .and_then(|rel| self.by_path.get(&usb_track_size_key(&rel)).copied())
+                    == Some(size)
+            }
         }
     }
 }

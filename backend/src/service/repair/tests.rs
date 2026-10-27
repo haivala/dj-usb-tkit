@@ -1006,6 +1006,131 @@ fn repair_usb_diagnostics_proposes_and_applies_string_alignment_fixes() {
     );
 }
 
+/// Replace track 1's comment (string slot 16) with `comment` stored as long ASCII (`0x40`) at a
+/// misaligned row offset, as older builds wrote it, shifting the later slot offsets.
+fn store_long_ascii_comment_in_place(bytes: &mut [u8], comment: &str) {
+    use crate::pdb_writer::{read_present_page_rows, rewrite_variable_page_rows_in_place};
+    use crate::utils::{
+        collect_chain, page_offset, read_u16_le_at, read_u32_le_at, table_ptr_fields,
+    };
+    const PAGE_SIZE: usize = 4096;
+    let (_ec, first, last) = table_ptr_fields(bytes, 0).expect("t00 pointer");
+    let chain = collect_chain(bytes, PAGE_SIZE, first, last).expect("t00 chain");
+    for page_idx in chain.into_iter().skip(1) {
+        let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
+        let mut rows = read_present_page_rows(&bytes[off..off + PAGE_SIZE], PAGE_SIZE);
+        let Some(row) = rows
+            .iter_mut()
+            .find(|row| read_u32_le_at(row, 72) == Some(1))
+        else {
+            continue;
+        };
+        let start = read_u16_le_at(row, 94 + 2 * 16).unwrap() as usize;
+        let end = read_u16_le_at(row, 94 + 2 * 17).unwrap() as usize;
+        // Misalign the comment (one byte past a 4-byte boundary), as older builds left it.
+        let mut encoded = vec![0u8; (5 - start % 4) % 4];
+        let comment_at = start + encoded.len();
+        assert_eq!(comment_at % 4, 1);
+        encoded.push(0x40);
+        encoded.extend_from_slice(&((4 + comment.len()) as u16).to_le_bytes());
+        encoded.push(0);
+        encoded.extend_from_slice(comment.as_bytes());
+        // Keep the later (UTF-16) slots 4-byte aligned.
+        while (encoded.len() as isize - (end - start) as isize) % 4 != 0 {
+            encoded.push(0);
+        }
+        let delta = encoded.len() as isize - (end - start) as isize;
+        row.splice(start..end, encoded);
+        row[94 + 2 * 16..94 + 2 * 16 + 2].copy_from_slice(&(comment_at as u16).to_le_bytes());
+        for index in 17..21usize {
+            let pos = 94 + 2 * index;
+            let cur = read_u16_le_at(row, pos).unwrap() as isize;
+            row[pos..pos + 2].copy_from_slice(&((cur + delta) as u16).to_le_bytes());
+        }
+        assert!(rewrite_variable_page_rows_in_place(
+            bytes, page_idx, &rows, PAGE_SIZE
+        ));
+        return;
+    }
+    panic!("track 1 not found");
+}
+
+#[test]
+fn repair_realigns_misaligned_long_ascii_track_strings() {
+    // A misaligned long ASCII string makes older CDJs give a communication error as soon as the
+    // track list opens; the track string repair re-encodes the row with it 4-byte aligned.
+    let comment = "x".repeat(200);
+    let mut bytes = build_seed_pdb_bytes_for_alignment_test();
+    store_long_ascii_comment_in_place(&mut bytes, &comment);
+
+    let td = tempdir().expect("tempdir");
+    let usb_root = td.path().to_path_buf();
+    let pdb_path = vendor_pdb_path(&usb_root);
+    std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
+    std::fs::write(&pdb_path, &bytes).expect("write pdb");
+
+    let found = detect_pdb_string_misalignment(&pdb_path);
+    assert!(
+        found
+            .iter()
+            .any(|m| m.table_type == 0 && m.id == 1 && m.slot_label == "comment"),
+        "{found:?}"
+    );
+    assert_eq!(
+        apply_pdb_track_string_alignment_repair(&usb_root, &[1]).expect("apply track repair"),
+        1
+    );
+    assert!(detect_pdb_string_misalignment(&pdb_path).is_empty());
+
+    let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse repaired pdb");
+    let track = parsed.tracks.iter().find(|t| t.id == 1).expect("track 1");
+    assert_eq!(track.dj_comment.as_deref(), Some(comment.as_str()));
+    assert_eq!(track.title, "Café Track");
+}
+
+#[test]
+fn every_pdb_write_back_heals_misaligned_string_rows() {
+    // Any write to the USB (staged or not) also moves rows an older build wrote into the current
+    // layout: here a misaligned long ASCII comment, which made older CDJs give a communication
+    // error opening the track list.
+    use crate::service::usb_staging::{DbKind, commit_and_write_back_for_test};
+    let comment = "x".repeat(200);
+    let mut bytes = build_seed_pdb_bytes_for_alignment_test();
+    store_long_ascii_comment_in_place(&mut bytes, &comment);
+    assert!(!detect_string_misalignment_in_bytes(&bytes).is_empty());
+
+    let cache = tempdir().expect("cache dir");
+    for cache_root in [None, Some(cache.path())] {
+        let td = tempdir().expect("tempdir");
+        let usb_root = td.path().to_path_buf();
+        let pdb_path = vendor_pdb_path(&usb_root);
+        std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
+        commit_and_write_back_for_test(cache_root, &usb_root, DbKind::Pdb, &bytes)
+            .expect("write back");
+
+        assert!(
+            detect_pdb_string_misalignment(&pdb_path).is_empty(),
+            "staged: {}",
+            cache_root.is_some()
+        );
+        let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse written pdb");
+        let track = parsed.tracks.iter().find(|t| t.id == 1).expect("track 1");
+        assert_eq!(track.dj_comment.as_deref(), Some(comment.as_str()));
+    }
+}
+
+#[test]
+fn pdb_write_back_leaves_current_layout_byte_identical() {
+    use crate::service::usb_staging::{DbKind, commit_and_write_back_for_test};
+    let bytes = build_seed_pdb_bytes_for_alignment_test();
+    let td = tempdir().expect("tempdir");
+    let usb_root = td.path().to_path_buf();
+    let pdb_path = vendor_pdb_path(&usb_root);
+    std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
+    commit_and_write_back_for_test(None, &usb_root, DbKind::Pdb, &bytes).expect("write back");
+    assert_eq!(std::fs::read(&pdb_path).unwrap(), bytes);
+}
+
 /// Reproduces a real-world report: a track exported by an old (pre-alignment-fix) build was
 /// played on a CDJ, which recorded it into a PDB history playlist; the user then removed the
 /// track's regular playlist. A later library rewrite orphaned the album's original data page

@@ -259,7 +259,7 @@ impl BackendService {
                 DiagStatus::Fail
             };
             let detail = if misaligned.is_empty() {
-                "All UTF-16 string slots are 4-byte aligned".to_string()
+                "All UTF-16 and long ASCII string slots are 4-byte aligned".to_string()
             } else {
                 let examples = misaligned
                     .iter()
@@ -275,8 +275,8 @@ impl BackendService {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
-                    "{} row(s) with a misaligned UTF-16 string slot — freezes/comm-errors CDJ \
-                     hardware while browsing; e.g. {examples}; run repair_pdb_track_string_alignment \
+                    "{} row(s) with a misaligned UTF-16 or long ASCII string slot — \
+                     freezes/comm-errors CDJ hardware while browsing; e.g. {examples}; run repair_pdb_track_string_alignment \
                      / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout to fix",
                     misaligned.len()
                 )
@@ -506,9 +506,13 @@ impl BackendService {
                 .map_or(&DiagStatus::Pass, |section| &section.status),
         ]);
 
-        let cdj_counter_snapshot = parsed_opt
-            .as_ref()
-            .and_then(|(parsed, _)| compute_player_counter_snapshot(&pdb_path, parsed));
+        let cdj_counter_snapshot = parsed_opt.as_ref().and_then(|(parsed, _)| {
+            compute_player_counter_snapshot(
+                &pdb_path,
+                parsed,
+                crate::service::export_helpers::edb_t19_property(&usb_root).as_ref(),
+            )
+        });
         let cdj_counter_section = cdj_counter_snapshot
             .as_ref()
             .map(player_counter_snapshot_section);

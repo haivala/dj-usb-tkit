@@ -43,6 +43,7 @@ pub(super) fn table_signal(
 pub(super) fn compute_player_counter_snapshot(
     pdb_path: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
+    property: Option<&crate::pdb_writer::T19Property>,
 ) -> Option<PlayerCounterSnapshot> {
     let bytes = std::fs::read(pdb_path).ok()?;
     let page_size = read_u32_le_at(&bytes, 4)? as usize;
@@ -77,7 +78,7 @@ pub(super) fn compute_player_counter_snapshot(
     };
 
     let t19_template_state =
-        t00_tracks > 0 && crate::pdb_writer::t19_is_template_state(&bytes, page_size);
+        crate::pdb_writer::t19_sync_target(&bytes, page_size, t00_tracks, property).is_some();
 
     let baseline_init_like = t11.ec == 24
         && t11.first == 23
@@ -177,8 +178,8 @@ pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> Di
         checks.push(DiagCheck {
             label: T19_TEMPLATE_STATE_LABEL.to_string(),
             status: DiagStatus::Warn,
-            detail: "t19 still in template state — older players will show 0 tracks. \
-                     Repair fixes it."
+            detail: "t19 does not match the track count or the eDB's property row — players \
+                     may show 0 or 1 tracks or give communication errors. Repair fixes it."
                 .to_string(),
             link: None,
         });

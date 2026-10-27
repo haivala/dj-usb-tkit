@@ -137,8 +137,8 @@ pub fn encode_artist_row(id: u32, name: &str) -> Vec<u8> {
     // the next 4-byte aligned offset, 12 (2 zero bytes at 10-11) — the same rule as album rows.
     // MIPS-based player hardware freezes on a UTF-16 name at 10 (unaligned 4-byte header load).
     // Engine DJ's own `export.pdb` import reads a short ASCII name only at 10: at 12 the artist
-    // comes out empty. A long ASCII name (4-byte header, never seen in reference exports) keeps
-    // the aligned 12.
+    // comes out empty. A long ASCII name has the same 4-byte header as UTF-16 and takes the
+    // aligned 12 too.
     let name_start = if name_bytes.first().is_some_and(|b| b & 1 == 1) {
         ARTIST_SHORT_ASCII_NAME_OFFSET
     } else {
@@ -189,9 +189,13 @@ pub fn encode_album_row(id: u32, name: &str, artist_id: u32) -> Vec<u8> {
     // player's Album browse menu — the same class of bug already fixed for
     // the near-variant artist row (see `encode_artist_row`). Non-ASCII
     // (UTF-16) names are padded 2 bytes to start at the next aligned
-    // offset, 24, instead.
-    let is_utf16 = name_bytes.first() == Some(&0x90);
-    let name_start = if is_utf16 { 24usize } else { 22usize };
+    // offset, 24, instead, and so are long ASCII names (over 126 bytes),
+    // whose header is the same 4 bytes.
+    let name_start = if is_long_form_pdb_string(&name_bytes) {
+        24usize
+    } else {
+        22usize
+    };
     let mut row = vec![0u8; name_start + name_bytes.len()];
     row[0..2].copy_from_slice(&0x0080u16.to_le_bytes()); // subtype = near
     // bytes 2-3: page-local index_shift; assigned by the page writer.
@@ -279,12 +283,15 @@ pub fn encode_track_row_with_profile(
         // Any slot encoded as UTF-16 (0x90 header + u16 total_len = 4-byte read) must start
         // at a 4-byte aligned row-relative offset. MIPS-based player hardware requires 4-byte
         // aligned reads; misalignment causes an Address Error exception → freeze/comm error.
+        // Long ASCII (0x40, over 126 bytes) has the same 4-byte header: a misaligned one made
+        // CDJ-2000nexus/NXS2 give a communication error as soon as the track list opened (a
+        // 255-character comment at row offset % 4 == 3).
         // This isn't unique to slot 20 (media path) — any string slot goes UTF-16 whenever its
         // content is non-ASCII (title, filename, comment, etc.), so the padding must also apply
         // to whichever other slot actually carries the 0x90 marker. Slot 20 keeps its existing
         // unconditional padding (reference exports always keep it 4-byte aligned regardless of
         // ASCII/UTF-16 content, and the additive same-size patch path relies on that invariant).
-        if index == 20 || slot_bytes[index].first() == Some(&0x90) {
+        if index == 20 || is_long_form_pdb_string(&slot_bytes[index]) {
             let pad = (4 - cursor % 4) % 4;
             row.resize(row.len() + pad, 0u8);
             cursor += pad;
@@ -376,6 +383,13 @@ fn encode_long_ascii(bytes: &[u8]) -> Vec<u8> {
     out.push(0);
     out.extend_from_slice(bytes);
     out
+}
+
+/// True for a long-form PDB string (long ASCII `0x40` or UTF-16 `0x90`): its
+/// 4-byte header holds a u16 length, so MIPS-based players need it at a
+/// 4-byte aligned offset. Short ASCII has an odd one-byte header and doesn't.
+pub(crate) fn is_long_form_pdb_string(encoded: &[u8]) -> bool {
+    matches!(encoded.first(), Some(0x40 | 0x90))
 }
 
 #[cfg(test)]
@@ -478,6 +492,27 @@ mod tests {
     fn slot_20_offset(row: &[u8]) -> usize {
         // Offset table starts at byte 94; each entry is 2 bytes LE; slot 20 is at index 20.
         u16::from_le_bytes([row[134], row[135]]) as usize
+    }
+
+    #[test]
+    fn track_row_long_ascii_slots_are_4byte_aligned() {
+        // A long ASCII (0x40) string has the same 4-byte header as UTF-16. A 255-character
+        // comment at row offset % 4 == 3 made CDJ-2000nexus/NXS2 give a communication error as
+        // soon as the track list opened. Vary the bytes before it so every residue comes up.
+        use super::PdbLayoutProfile;
+        for prefix in 0..4usize {
+            let mut track = test_track(&"t".repeat(130 + prefix), None, "/Contents/track.mp3");
+            track.dj_comment = Some(format!("{}{}", "c".repeat(200), "d".repeat(prefix)));
+            track.release_date = Some("2".repeat(prefix + 1));
+            let row = encode_track_row_with_profile(&track, PdbLayoutProfile::Current)
+                .expect("encode should succeed");
+            for slot in [16usize, 17] {
+                let pos = 94 + 2 * slot;
+                let off = u16::from_le_bytes([row[pos], row[pos + 1]]) as usize;
+                assert_eq!(row[off], 0x40, "slot {slot} stays long ASCII");
+                assert_eq!(off % 4, 0, "slot {slot} at {off} (prefix {prefix})");
+            }
+        }
     }
 
     #[test]

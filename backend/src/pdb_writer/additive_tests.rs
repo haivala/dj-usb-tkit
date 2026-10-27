@@ -1962,7 +1962,7 @@ fn additive_diff_accepts_empty_existing_pdb_for_first_export() {
 
     let diff = compute_additive_diff(&bytes, &next, vec![]).expect("additive first export");
     assert_eq!(diff.new_tracks.len(), 1);
-    assert!(diff.activate_t19_template);
+    assert_eq!(diff.sync_t19_ring.map(|(count, _)| count), Some(1));
 }
 
 #[test]
@@ -2099,9 +2099,8 @@ fn additive_first_export_large_library_synthesizes_single_t19_row() {
     // initialized USB used to hard-fail with "t19 runtime synthesis: 560
     // rows do not fit on page 40" -- the synthesis fabricated one
     // placeholder tt=19 row per track with no cap, and a tt=19 page can
-    // only ever hold ~96 40-byte rows. rekordbox's first export appends
-    // exactly one row to the template row whatever the library size, so
-    // the page must end up with two rows, not scale with track count.
+    // only ever hold 96 40-byte rows. The page is a ring: past 96 rows the
+    // newest ids overwrite slots 0/1, so it stays on one full page.
     let (empty, bytes) = template_state_seed();
 
     let mut next = empty.clone();
@@ -2154,11 +2153,8 @@ fn additive_first_export_large_library_synthesizes_single_t19_row() {
     // chain[0] = sentinel, chain[1] = the single data page.
     assert_eq!(chain.len(), 2, "t19 activation must stay on a single page");
     let off = page_offset(chain[1], PAGE_SIZE).expect("page offset");
-    assert_eq!(
-        out[off + 0x18],
-        2,
-        "t19 must hold the template row plus one, not scale with track count"
-    );
+    assert_eq!(out[off + 0x18] as usize, T19_RING_SLOTS);
+    assert_eq!(t19_newest_and_active_slot(&out), (559, 1));
     assert_eq!(read_u16_le_at(&out, off + PAGE_SIZE - 4), Some(0x0002));
     assert_eq!(read_u16_le_at(&out, off + PAGE_SIZE - 2), Some(0x0003));
 }
@@ -2624,6 +2620,14 @@ const RB_T19_ROW1: [u8; 40] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
+/// The property `row0` (a template row) carries, named `name`.
+fn test_prop(row0: &[u8; 40], name: Option<&str>) -> T19Property {
+    T19Property {
+        device_name: name.map(str::to_string),
+        ..T19Property::from_template_row(row0).expect("template row")
+    }
+}
+
 fn t19_page_index(bytes: &[u8]) -> u32 {
     let (_ec, first, last) = table_ptr_fields(bytes, 19).expect("t19 ptr");
     let chain = collect_chain_pages(bytes, PAGE_SIZE, first, last).expect("t19 chain");
@@ -2639,14 +2643,19 @@ fn t19_page_offset(bytes: &[u8]) -> usize {
 /// `seed_rb_initialized_history_shape` writes it (flags 0x24, u5=1,
 /// rowpf=tranrf=0x0001), with an empty sentinel B-tree.
 fn write_with_template_state_t19(data: &PdbData) -> Vec<u8> {
+    write_with_template_state_t19_row(data, &RB_T19_ROW0)
+}
+
+/// [`write_with_template_state_t19`] with `row0` as the template row.
+fn write_with_template_state_t19_row(data: &PdbData, row0: &[u8; 40]) -> Vec<u8> {
     let mut data = data.clone();
-    data.history_raw_rows = vec![RB_T19_ROW0.to_vec()];
+    data.history_raw_rows = vec![row0.to_vec()];
     let mut bytes = write_pdb(&data).expect("write seed");
     let page_idx = t19_page_index(&bytes);
     assert!(rewrite_variable_page_rows_in_place(
         &mut bytes,
         page_idx,
-        &[RB_T19_ROW0.to_vec()],
+        &[row0.to_vec()],
         PAGE_SIZE
     ));
     let (_ec, sentinel, _last) = table_ptr_fields(&bytes, 19).expect("t19 ptr");
@@ -2664,14 +2673,41 @@ fn write_with_template_state_t19(data: &PdbData) -> Vec<u8> {
     bytes
 }
 
-/// An empty library on a template-state t19, as `initialize_usb` leaves it.
+/// An empty library on a template-state t19 carrying rekordbox's template
+/// row.
 fn template_state_seed() -> (PdbData, Vec<u8>) {
+    template_state_seed_with_row(&RB_T19_ROW0)
+}
+
+/// An empty library on a template-state t19 whose template row is `row0`;
+/// with [`T19_TEMPLATE_ROW`] this is what `initialize_usb` leaves.
+fn template_state_seed_with_row(row0: &[u8; 40]) -> (PdbData, Vec<u8>) {
     let mut empty = PdbData::empty();
     empty.colors = standard_colors();
     empty.columns_raw_rows = standard_columns_raw();
-    let bytes = write_with_template_state_t19(&empty);
-    empty.history_raw_rows = vec![RB_T19_ROW0.to_vec()];
+    let bytes = write_with_template_state_t19_row(&empty, row0);
+    empty.history_raw_rows = vec![row0.to_vec()];
     (empty, bytes)
+}
+
+/// Newest row id on the t19 page and the slot rowpf marks.
+fn t19_newest_and_active_slot(bytes: &[u8]) -> (u32, usize) {
+    let off = t19_page_offset(bytes);
+    let page = &bytes[off..off + PAGE_SIZE];
+    let nrs = page[0x18] as usize;
+    let mut newest = 0;
+    let mut active = Vec::new();
+    for group in crate::pdb_page::footer_groups(PAGE_SIZE, nrs) {
+        for j in 0..group.len {
+            let row = HEAP_START + group.row_offset(page, j);
+            newest = newest.max(read_u32_le_at(page, row + 4).unwrap());
+            if group.rowpf(page) & (1 << j) != 0 {
+                active.push(group.first_slot + j);
+            }
+        }
+    }
+    assert_eq!(active.len(), 1, "exactly one rowpf bit");
+    (newest, active[0])
 }
 
 fn t19_test_track(id: u32) -> crate::service::export_helpers::PdbTrackRowData {
@@ -2746,7 +2782,7 @@ fn first_export_activates_template_t19_into_rekordbox_shape() {
 fn export_onto_pdb_with_tracks_activates_template_state_t19() {
     // The "0 tracks on CDJ" case: an older build exported tracks but left
     // t19 in template state. The next export must still activate it, even
-    // when it adds nothing.
+    // when it adds nothing, with the newest row id at the track count.
     let mut data = PdbData::empty();
     data.colors = standard_colors();
     data.columns_raw_rows = standard_columns_raw();
@@ -2756,42 +2792,328 @@ fn export_onto_pdb_with_tracks_activates_template_state_t19() {
 
     let diff = compute_additive_diff(&before, &data, vec![]).expect("additive");
     assert!(diff.new_tracks.is_empty());
-    assert!(diff.activate_t19_template);
+    assert_eq!(diff.sync_t19_ring.map(|(count, _)| count), Some(3));
 
     let (out, _) = try_write_pdb_additive_in_place(&before, &data, vec![], PAGE_SIZE)
         .expect("re-export")
         .expect("re-export accepted");
     let off = t19_page_offset(&out);
-    assert_eq!(out[off + 0x18], 2);
+    assert_eq!(out[off + 0x18], 4);
     assert_eq!(out[off + 0x1b], 0x34);
+    assert_eq!(read_u16_le_at(&out, off + 0x22), Some(2), "num_rl");
+    assert_eq!(t19_newest_and_active_slot(&out), (3, 3));
     assert!(!t19_is_template_state(&out, PAGE_SIZE));
 }
 
 #[test]
-fn export_leaves_active_t19_byte_identical() {
+fn export_keeps_rekordbox_t19_ring_at_track_count() {
+    // A ring rekordbox wrote follows the track count too, keeping the
+    // property its rows carry while the export has no eDB property.
     let (empty, before) = template_state_seed();
     let mut next = empty.clone();
     next.tracks.push(t19_test_track(1));
     let (active, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
         .expect("first export")
         .expect("first export accepted");
-    let off = t19_page_offset(&active);
 
     next.tracks.push(t19_test_track(2));
     let diff = compute_additive_diff(&active, &next, vec![]).expect("additive");
-    assert!(!diff.activate_t19_template);
+    assert_eq!(diff.sync_t19_ring, Some((2, test_prop(&RB_T19_ROW0, None))));
     let (out, _) = try_write_pdb_additive_in_place(&active, &next, vec![], PAGE_SIZE)
         .expect("second export")
         .expect("second export accepted");
-    assert_eq!(t19_page_offset(&out), off);
-    assert_eq!(&out[off..off + PAGE_SIZE], &active[off..off + PAGE_SIZE]);
+    assert_eq!(t19_newest_and_active_slot(&out), (2, 2));
+    let off = t19_page_offset(&out);
+    assert_eq!(&out[off + HEAP_START..off + HEAP_START + 40], &RB_T19_ROW0);
+}
+
+#[test]
+fn export_writes_edb_property_into_t19() {
+    // t19 mirrors the eDB's `property` row: a new date, color or name
+    // there rewrites the page; the same property leaves it alone.
+    let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let mut next = empty.clone();
+    next.tracks = (1..=3).map(t19_test_track).collect();
+    let prop = T19Property {
+        created_date: "2026-10-22".into(),
+        db_version: "1000".into(),
+        device_name: Some("Stick".into()),
+        background_color: 0,
+    };
+    next.t19_property = Some(prop.clone());
+    let (out, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("export")
+        .expect("export accepted");
+    let off = t19_page_offset(&out);
+    let row0 = &out[off + HEAP_START..off + HEAP_START + 40];
+    assert_eq!(&row0[12..23], b"\x172026-10-22");
+    assert_eq!(row0[30], 0x03, "slot 0 carries no name");
+    let row1 = &out[off + HEAP_START + 40..off + HEAP_START + 80];
+    assert_eq!(&row1[30..36], b"\x0dStick");
+    assert_eq!(
+        compute_additive_diff(&out, &next, vec![])
+            .unwrap()
+            .sync_t19_ring,
+        None
+    );
+
+    let colored = T19Property {
+        background_color: 1,
+        ..prop
+    };
+    next.t19_property = Some(colored.clone());
+    let diff = compute_additive_diff(&out, &next, vec![]).expect("additive");
+    assert_eq!(diff.sync_t19_ring, Some((3, colored)));
+}
+
+#[test]
+fn export_keeps_app_t19_ring_at_track_count() {
+    // An app-initialized USB: every export moves the ring's newest id to
+    // the track count, and an unchanged count leaves the page alone.
+    let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let mut next = empty.clone();
+    next.tracks.push(t19_test_track(1));
+    let (first, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("first export")
+        .expect("first export accepted");
+    assert_eq!(t19_newest_and_active_slot(&first), (1, 1));
+
+    next.tracks.extend((2..=5).map(t19_test_track));
+    let (second, _) = try_write_pdb_additive_in_place(&first, &next, vec![], PAGE_SIZE)
+        .expect("second export")
+        .expect("second export accepted");
+    assert_eq!(t19_newest_and_active_slot(&second), (5, 5));
+
+    let diff = compute_additive_diff(&second, &next, vec![]).expect("additive");
+    assert_eq!(diff.sync_t19_ring, None);
+    assert!(
+        crate::pdb_reader::validate_pdb_page_conventions(&second).is_empty(),
+        "{:?}",
+        crate::pdb_reader::validate_pdb_page_conventions(&second)
+    );
+}
+
+#[test]
+fn app_t19_left_at_one_track_is_synced_to_track_count() {
+    // The "1 track on CDJ" case: an older build activated an
+    // app-initialized t19 into the fixed 2-row page whatever the track
+    // count was.
+    let mut data = PdbData::empty();
+    data.colors = standard_colors();
+    data.columns_raw_rows = standard_columns_raw();
+    data.tracks = (1..=40).map(t19_test_track).collect();
+    // More than one history row passes through the fresh writer as is.
+    data.history_raw_rows = t19_ring_rows(&test_prop(&T19_TEMPLATE_ROW, None), 1);
+    let before = write_pdb(&data).expect("write");
+    assert_eq!(t19_newest_and_active_slot(&before).0, 1);
+    assert!(t19_sync_target(&before, PAGE_SIZE, 40, None).is_some());
+
+    let mut out = before.clone();
+    sync_t19_ring_page(&mut out, PAGE_SIZE, 40, &test_prop(&T19_TEMPLATE_ROW, None)).expect("sync");
+    assert_eq!(t19_newest_and_active_slot(&out), (40, 40));
+    assert!(!t19_sync_target(&out, PAGE_SIZE, 40, None).is_some());
+}
+
+#[test]
+fn export_leaves_t19_alone_once_a_player_wrote_to_it() {
+    // A CDJ appends its own rows to an app-written ring (seen on a real
+    // USB: the newest id copied, plus the drive name). The page is the
+    // player's from then on: export and repair must not rewrite it, even
+    // when the track count moved.
+    let mut cdj_row = t19_ring_rows(&test_prop(&T19_TEMPLATE_ROW, None), 2)[2].clone();
+    cdj_row[4..8].copy_from_slice(&1u32.to_le_bytes());
+    cdj_row.truncate(30);
+    cdj_row.push(0x1f);
+    cdj_row.extend_from_slice(b"Chiphead 256GB");
+    cdj_row.resize(52, 0);
+
+    let mut data = PdbData::empty();
+    data.colors = standard_colors();
+    data.columns_raw_rows = standard_columns_raw();
+    data.tracks = (1..=3).map(t19_test_track).collect();
+    data.history_raw_rows = t19_ring_rows(&test_prop(&T19_TEMPLATE_ROW, None), 1);
+    data.history_raw_rows.push(cdj_row);
+    let before = write_pdb(&data).expect("write");
+    assert!(!t19_sync_target(&before, PAGE_SIZE, 3, None).is_some());
+
+    data.tracks.push(t19_test_track(4));
+    let diff = compute_additive_diff(&before, &data, vec![]).expect("additive");
+    assert_eq!(diff.sync_t19_ring, None);
+    let (out, _) = try_write_pdb_additive_in_place(&before, &data, vec![], PAGE_SIZE)
+        .expect("export")
+        .expect("export accepted");
+    let off = t19_page_offset(&out);
+    assert_eq!(&out[off..off + PAGE_SIZE], &before[off..off + PAGE_SIZE]);
+}
+
+#[test]
+fn t19_ring_wraps_like_rekordbox() {
+    // rekordbox's own wrapped ring: 96 slots, slots 0/1 hold ids 228/229,
+    // slots 2..95 keep ids 2..95; rowpf marks slot 1, tranrf slots 0 and 1,
+    // num_rl=0, and the page is exactly full.
+    let rows = t19_ring_rows(&test_prop(&T19_TEMPLATE_ROW, None), 229);
+    assert_eq!(rows.len(), T19_RING_SLOTS);
+    let id = |slot: usize| read_u32_le_at(&rows[slot], 4).unwrap();
+    assert_eq!((id(0), id(1), id(2), id(95)), (228, 229, 2, 95));
+    assert_eq!(&rows[8][0..4], &[0x80, 0x02, 0x00, 0x01]);
+    assert_eq!(&rows[95][0..4], &[0x80, 0x02, 0xe0, 0x0b]);
+    assert_eq!(
+        t19_ring_rows(&test_prop(&T19_TEMPLATE_ROW, None), 95).len(),
+        96
+    );
+    let at_96 = t19_ring_rows(&test_prop(&T19_TEMPLATE_ROW, None), 96);
+    assert_eq!(
+        (id_of(&at_96[0]), id_of(&at_96[1]), id_of(&at_96[95])),
+        (96, 1, 95)
+    );
+
+    let (_, mut out) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    sync_t19_ring_page(
+        &mut out,
+        PAGE_SIZE,
+        229,
+        &test_prop(&T19_TEMPLATE_ROW, None),
+    )
+    .expect("sync");
+    let off = t19_page_offset(&out);
+    let page = &out[off..off + PAGE_SIZE];
+    assert_eq!(page[0x18], 96);
+    assert_eq!(read_u16_le_at(page, 0x1c), Some(0), "free_size");
+    assert_eq!(read_u16_le_at(page, 0x20), Some(2), "u5");
+    assert_eq!(read_u16_le_at(page, 0x22), Some(0), "num_rl");
+    assert_eq!(read_u16_le_at(page, PAGE_SIZE - 4), Some(0x0002), "rowpf");
+    assert_eq!(read_u16_le_at(page, PAGE_SIZE - 2), Some(0x0003), "tranrf");
+    for group in 1..6 {
+        let end = PAGE_SIZE - group * 36;
+        assert_eq!(read_u32_le_at(page, end - 4), Some(0), "group {group}");
+    }
+    assert!(!t19_sync_target(&out, PAGE_SIZE, 229, None).is_some());
+    assert!(t19_sync_target(&out, PAGE_SIZE, 230, None).is_some());
+}
+
+#[test]
+fn named_t19_ring_matches_rekordbox() {
+    // rekordbox's named ring (a real USB named "APECAR_red"): slot 0 is the
+    // unnamed 40-byte template row, every other slot a 48-byte row with
+    // the name after "1000"; 80 slots fill the page; once
+    // wrapped, ids alternate in slots 1/2 (332 in slot 1, 331 in slot 2).
+    let rows = t19_ring_rows(&test_prop(&T19_TEMPLATE_ROW, Some("APECAR_red")), 332);
+    assert_eq!(rows.len(), 80);
+    assert_eq!(rows[0], T19_TEMPLATE_ROW.to_vec());
+    let mut expected = T19_TEMPLATE_ROW[..30].to_vec();
+    expected[0..8].copy_from_slice(&[0x80, 0x02, 0x20, 0x00, 0x4c, 0x01, 0x00, 0x00]);
+    expected.push(0x17);
+    expected.extend_from_slice(b"APECAR_red");
+    expected.resize(48, 0);
+    assert_eq!(rows[1], expected);
+    assert_eq!(
+        (id_of(&rows[1]), id_of(&rows[2]), id_of(&rows[3])),
+        (332, 331, 3)
+    );
+    assert_eq!(id_of(&rows[0]), 0);
+
+    // The CDJ's own row for the same name is 52 bytes; 74 such slots fit.
+    let rows = t19_ring_rows(&test_prop(&T19_TEMPLATE_ROW, Some("Chiphead 256GB")), 3768);
+    assert_eq!(rows[1].len(), 52);
+    assert_eq!(rows.len(), 74);
+
+    let (_, mut out) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    sync_t19_ring_page(
+        &mut out,
+        PAGE_SIZE,
+        3768,
+        &test_prop(&T19_TEMPLATE_ROW, Some("Chiphead 256GB")),
+    )
+    .expect("sync");
+    assert_eq!(t19_newest_and_active_slot(&out), (3768, 1));
+    let off = t19_page_offset(&out);
+    assert_eq!(read_u16_le_at(&out, off + 0x22), Some(1), "num_rl");
+    assert_eq!(
+        read_u16_le_at(&out, off + PAGE_SIZE - 2),
+        Some(0x0006),
+        "tranrf"
+    );
+    assert_eq!(
+        t19_sync_target(
+            &out,
+            PAGE_SIZE,
+            3768,
+            Some(&test_prop(&T19_TEMPLATE_ROW, Some("Chiphead 256GB")))
+        ),
+        None
+    );
+    assert!(
+        crate::pdb_reader::validate_pdb_page_conventions(&out).is_empty(),
+        "{:?}",
+        crate::pdb_reader::validate_pdb_page_conventions(&out)
+    );
+}
+
+#[test]
+fn export_writes_usb_name_into_app_t19_ring() {
+    // The eDB carries the USB name (`property.deviceName`); t19 must carry
+    // the same, or CDJs hit communication errors listing tracks.
+    let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let mut next = empty.clone();
+    next.tracks = (1..=3).map(t19_test_track).collect();
+    next.t19_property = Some(test_prop(&T19_TEMPLATE_ROW, Some("Stick")));
+    let (named, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("export")
+        .expect("export accepted");
+    let off = t19_page_offset(&named);
+    let row1 = &named[off + HEAP_START + 40..off + HEAP_START + 80];
+    assert_eq!(row1[9], 0x00, "byte 9 is a player setting, not a name flag");
+    assert_eq!(&row1[30..36], b"\x0dStick");
+
+    // Renaming the USB renames the rows; the same name leaves them alone.
+    next.t19_property = Some(test_prop(&T19_TEMPLATE_ROW, Some("Other")));
+    let diff = compute_additive_diff(&named, &next, vec![]).expect("additive");
+    assert_eq!(
+        diff.sync_t19_ring,
+        Some((3, test_prop(&T19_TEMPLATE_ROW, Some("Other"))))
+    );
+    next.t19_property = Some(test_prop(&T19_TEMPLATE_ROW, Some("Stick")));
+    let diff = compute_additive_diff(&named, &next, vec![]).expect("additive");
+    assert_eq!(diff.sync_t19_ring, None);
+
+    // No name of its own: the page keeps the one it has, as the eDB does.
+    next.t19_property = None;
+    next.tracks.push(t19_test_track(4));
+    let diff = compute_additive_diff(&named, &next, vec![]).expect("additive");
+    assert_eq!(
+        diff.sync_t19_ring,
+        Some((4, test_prop(&T19_TEMPLATE_ROW, Some("Stick"))))
+    );
+}
+
+#[test]
+fn fresh_writer_builds_the_same_named_t19_page_as_sync() {
+    let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let mut next = empty.clone();
+    next.tracks = (1..=150).map(t19_test_track).collect();
+    next.t19_property = Some(test_prop(&T19_TEMPLATE_ROW, Some("Chiphead 256GB")));
+    let (synced, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("additive export")
+        .expect("additive export accepted");
+    let fresh = write_pdb(&next).expect("fresh write");
+
+    let (a, f) = (t19_page_offset(&synced), t19_page_offset(&fresh));
+    assert_eq!(
+        &fresh[f + 0x18..f + PAGE_SIZE],
+        &synced[a + 0x18..a + PAGE_SIZE]
+    );
+    assert_eq!(t19_newest_and_active_slot(&fresh), (150, 1));
+}
+
+fn id_of(row: &[u8]) -> u32 {
+    read_u32_le_at(row, 4).unwrap()
 }
 
 #[test]
 fn trackless_export_leaves_template_t19_alone() {
     let (empty, before) = template_state_seed();
     let diff = compute_additive_diff(&before, &empty, vec![]).expect("additive");
-    assert!(!diff.activate_t19_template);
+    assert_eq!(diff.sync_t19_ring, None);
 }
 
 #[test]
@@ -2828,12 +3150,30 @@ fn fresh_writer_builds_the_same_t19_page_as_activation() {
 }
 
 #[test]
+fn fresh_writer_builds_the_same_wrapped_t19_page_as_sync() {
+    let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let mut next = empty.clone();
+    next.tracks = (1..=150).map(t19_test_track).collect();
+    let (synced, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("additive export")
+        .expect("additive export accepted");
+    let fresh = write_pdb(&next).expect("fresh write");
+
+    let (a, f) = (t19_page_offset(&synced), t19_page_offset(&fresh));
+    assert_eq!(
+        &fresh[f + 0x18..f + PAGE_SIZE],
+        &synced[a + 0x18..a + PAGE_SIZE]
+    );
+    assert_eq!(t19_newest_and_active_slot(&fresh), (150, 0));
+}
+
+#[test]
 fn fresh_writer_keeps_real_t19_history_rows() {
     let mut data = PdbData::empty();
     data.colors = standard_colors();
     data.columns_raw_rows = standard_columns_raw();
     data.tracks.push(t19_test_track(1));
-    let rows: Vec<Vec<u8>> = t19_rows_after_first_export(&RB_T19_ROW0)
+    let rows: Vec<Vec<u8>> = t19_ring_rows(&test_prop(&RB_T19_ROW0, None), 1)
         .into_iter()
         .chain(std::iter::once(RB_T19_ROW1.to_vec()))
         .collect();

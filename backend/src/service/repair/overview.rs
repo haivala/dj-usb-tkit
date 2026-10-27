@@ -30,7 +30,7 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, &'static str)> {
         ),
         PDB_T19_TEMPLATE_STATE_FIX_ID => (
             AREA_OLDER_PLAYERS,
-            "Fixes older players showing 0 tracks on this USB.",
+            "Fixes older players showing 0 or 1 tracks on this USB.",
         ),
         PDB_WRONG_HISTORY_SHAPE_FIX_ID | PDB_EC_CONFLICT_FIX_ID => (
             AREA_OLDER_PLAYERS,

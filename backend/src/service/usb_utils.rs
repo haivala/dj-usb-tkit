@@ -892,7 +892,10 @@ pub(crate) fn load_existing_analysis_paths_by_content_path_with_conn(
         if p.is_empty() || a.is_empty() {
             continue;
         }
-        out.insert(super::export_helpers::canonicalize_track_path_identity(p), a.to_string());
+        out.insert(
+            super::export_helpers::canonicalize_track_path_identity(p),
+            a.to_string(),
+        );
     }
     out
 }
@@ -913,7 +916,10 @@ pub(crate) fn load_existing_analysis_paths_by_pdb_track_path(
         if path.is_empty() || anlz.is_empty() {
             continue;
         }
-        out.insert(super::export_helpers::canonicalize_track_path_identity(path), anlz.to_string());
+        out.insert(
+            super::export_helpers::canonicalize_track_path_identity(path),
+            anlz.to_string(),
+        );
     }
     out
 }
@@ -2793,9 +2799,11 @@ mod diag_tests {
         let mut warnings = Vec::<WarningEntry>::new();
         let map = load_existing_analysis_paths_by_content_path(&tmp, &mut warnings);
         let anlz = map
-            .get(&crate::service::export_helpers::canonicalize_track_path_identity(
-                "/Contents/Artist/Album/Track.mp3",
-            ))
+            .get(
+                &crate::service::export_helpers::canonicalize_track_path_identity(
+                    "/Contents/Artist/Album/Track.mp3",
+                ),
+            )
             .cloned()
             .expect("analysis path should be mapped");
         assert!(

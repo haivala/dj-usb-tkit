@@ -198,6 +198,29 @@ pub(super) fn validate_topology_locked_export_bytes(
 /// Existing PDBs are written through the topology-locked additive path only.
 /// A full rebuild is allowed only when there is no PDB on disk yet; falling
 /// back to a rebuilt blob for a populated USB is a known player database corruption class.
+/// The eDB's `property` row as the PDB's t19 rows mirror it (see
+/// [`crate::pdb_writer::T19Property`]), or `None` when the USB has no
+/// readable eDB.
+pub(crate) fn edb_t19_property(usb_root: &Path) -> Option<crate::pdb_writer::T19Property> {
+    let mut warnings = Vec::<WarningEntry>::new();
+    let conn = open_edb_rw(usb_root, &mut warnings)?;
+    conn.query_row(
+        "SELECT COALESCE(deviceName, ''), CAST(dbVersion AS TEXT), createdDate, \
+         COALESCE(backGroundColorType, 0) FROM property LIMIT 1",
+        [],
+        |row| {
+            let name: String = row.get(0)?;
+            Ok(crate::pdb_writer::T19Property {
+                created_date: row.get(2)?,
+                db_version: row.get(1)?,
+                device_name: (!name.is_empty()).then_some(name),
+                background_color: u8::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+            })
+        },
+    )
+    .ok()
+}
+
 pub fn write_pdb(
     usb_root: &Path,
     playlist: &ExportPlaylistData,
@@ -1230,11 +1253,13 @@ pub(super) fn write_pdb_fresh_with_overrides(
             Vec::new()
         },
         // The PDB writers derive t19's runtime rows from these; see
-        // `t19_rows_after_first_export`.
+        // `t19_ring_rows`.
         history_raw_rows: existing
             .as_ref()
             .map(|parsed| parsed.history_raw_rows_bytes.clone())
             .unwrap_or_default(),
+        // The eDB export runs first, so this is the property it just wrote.
+        t19_property: edb_t19_property(usb_root),
         profile,
     };
 

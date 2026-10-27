@@ -37,8 +37,7 @@ use super::export_helpers::{
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
 use super::usb_utils::{
-    self, analysis_bundle_exists,
-    load_existing_analysis_paths_by_content_path,
+    self, analysis_bundle_exists, load_existing_analysis_paths_by_content_path,
     load_existing_analysis_paths_by_content_path_with_conn,
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
@@ -1169,7 +1168,7 @@ impl BackendService {
             let existing_identity = match existing_identity {
                 Some((Some(mdb), Some(mci), cl, _))
                     if i64::from(mdb) == app_master_db_id
-                    && shared_master_content_ids.contains(&mci) =>
+                        && shared_master_content_ids.contains(&mci) =>
                 {
                     let own = Self::ensure_track_master_content_id(&local_conn, &track.id)?;
                     Some((Some(mdb), u32::try_from(own).ok(), cl, None))
@@ -2062,7 +2061,6 @@ mod tests {
         usb_drive_label, usb_playlist_names_for_export_compare, usb_root_last_segment,
         validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
     };
-    use crate::service::usb::usb_track_size_key;
     use crate::error::BackendError;
     use crate::models::{CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, Playlist};
     use crate::pdb_reader::{ParsedPdb, PdbPlaylistTreeRow};
@@ -2070,6 +2068,7 @@ mod tests {
         ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
         exported_media_target_path,
     };
+    use crate::service::usb::usb_track_size_key;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
@@ -3290,7 +3289,10 @@ mod tests {
             name: "Playlist".to_string(),
             tracks: vec![untitled],
         };
-        assert_eq!(estimate_playlist_copy(&usb_root, &playlist, &on_usb).tracks, 0);
+        assert_eq!(
+            estimate_playlist_copy(&usb_root, &playlist, &on_usb).tracks,
+            0
+        );
     }
 
     // --- export_to_usb validation paths ---

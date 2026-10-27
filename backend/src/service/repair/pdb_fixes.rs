@@ -69,36 +69,41 @@ pub(super) fn apply_pdb_header_compatibility_repair(
     Ok(true)
 }
 
-/// True when the PDB holds tracks but its tt=19 page is still the untouched
-/// init template, so older players count 0 songs (see
-/// [`crate::pdb_writer::t19_is_template_state`]).
+/// True when the PDB holds tracks but its tt=19 page does not match them
+/// and the eDB's `property` row: still the untouched init template (older
+/// players count 0 songs), or a ring whose newest id is not the track count
+/// or whose date, version, name or color is not the eDB's (see
+/// [`crate::pdb_writer::t19_sync_target`]).
 pub(in crate::service) fn detect_pdb_t19_template_state(
     pdb_path: &Path,
     track_count: usize,
+    property: Option<&crate::pdb_writer::T19Property>,
 ) -> bool {
-    if track_count == 0 {
-        return false;
-    }
     let Ok(bytes) = std::fs::read(pdb_path) else {
         return false;
     };
     let page_size = crate::utils::read_u32_le_at(&bytes, 4).unwrap_or(0) as usize;
-    crate::pdb_writer::t19_is_template_state(&bytes, page_size)
+    crate::pdb_writer::t19_sync_target(&bytes, page_size, track_count, property).is_some()
 }
 
-/// Activate a template-state tt=19 page the way rekordbox's first export
-/// does. Re-checks the current file, so it is a no-op (`Ok(false)`) once
-/// the page is active. Touches only that page and the header's seqdb.
+/// Rewrite tt=19 as the ring rekordbox keeps for the PDB's track count and
+/// the eDB's `property` row. Re-checks the current file, so it is a no-op
+/// (`Ok(false)`) once the page matches. Touches only that page, its
+/// sentinel and the header's seqdb.
 pub(in crate::service) fn apply_pdb_t19_template_state_repair(
     usb_root: &Path,
 ) -> BackendResult<bool> {
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
+    let track_count = crate::pdb_reader::parse_pdb_bytes(&bytes)?.tracks.len();
     let page_size = crate::utils::read_u32_le_at(&bytes, 4).unwrap_or(0) as usize;
-    if !crate::pdb_writer::t19_is_template_state(&bytes, page_size) {
+    let property = crate::service::export_helpers::edb_t19_property(usb_root);
+    let Some((track_count, property)) =
+        crate::pdb_writer::t19_sync_target(&bytes, page_size, track_count, property.as_ref())
+    else {
         return Ok(false);
-    }
-    crate::pdb_writer::activate_t19_template_page(&mut bytes, page_size)?;
+    };
+    crate::pdb_writer::sync_t19_ring_page(&mut bytes, page_size, track_count, &property)?;
     std::fs::write(&pdb_path, &bytes)?;
     Ok(true)
 }
@@ -485,8 +490,8 @@ pub(in crate::service) fn detect_pdb_wrong_track_u5(pdb_path: &Path) -> Vec<Wron
     out
 }
 
-/// A track/album/artist row whose UTF-16 (`0x90`-marker) string slot starts at a row-relative
-/// offset that isn't 4-byte aligned.
+/// A track/album/artist row whose long-form (UTF-16 `0x90` or long ASCII `0x40`) string slot
+/// starts at a row-relative offset that isn't 4-byte aligned.
 #[derive(Debug, Clone)]
 pub(in crate::service) struct MisalignedStringSlot {
     /// 0 = tracks (t00), 2 = artists (t02), 3 = albums (t03).
@@ -533,12 +538,18 @@ pub(super) const TRACK_STRING_SLOT_LABELS: [&str; 21] = [
 pub(in crate::service) fn detect_pdb_string_misalignment(
     pdb_path: &Path,
 ) -> Vec<MisalignedStringSlot> {
+    std::fs::read(pdb_path)
+        .map(|bytes| detect_string_misalignment_in_bytes(&bytes))
+        .unwrap_or_default()
+}
+
+/// [`detect_pdb_string_misalignment`] on PDB bytes in memory.
+pub(in crate::service) fn detect_string_misalignment_in_bytes(
+    bytes: &[u8],
+) -> Vec<MisalignedStringSlot> {
     use crate::pdb_writer::parse_page_row_slots;
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -548,17 +559,17 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
     let mut out = Vec::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let table_type = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         if !matches!(table_type, 0 | 2 | 3) {
             continue;
         }
-        let used_s = read_u16_le_at(&bytes, off + 30).unwrap_or(0) as usize;
+        let used_s = read_u16_le_at(bytes, off + 30).unwrap_or(0) as usize;
         if used_s == 0 {
             continue;
         }
@@ -589,7 +600,8 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
                         else {
                             continue;
                         };
-                        if row.get(slot_offset) == Some(&0x90) && slot_offset % 4 != 0 {
+                        if matches!(row.get(slot_offset), Some(0x40 | 0x90)) && slot_offset % 4 != 0
+                        {
                             out.push(MisalignedStringSlot {
                                 table_type,
                                 id,
@@ -606,7 +618,9 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
                         continue;
                     };
                     let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
-                    if row.get(name_offset) == Some(&0x90) && !name_offset.is_multiple_of(4) {
+                    if matches!(row.get(name_offset), Some(0x40 | 0x90))
+                        && !name_offset.is_multiple_of(4)
+                    {
                         out.push(MisalignedStringSlot {
                             table_type,
                             id,
@@ -629,7 +643,7 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
                     }) else {
                         continue;
                     };
-                    if row.get(name_offset) == Some(&0x90) && name_offset % 4 != 0 {
+                    if matches!(row.get(name_offset), Some(0x40 | 0x90)) && name_offset % 4 != 0 {
                         out.push(MisalignedStringSlot {
                             table_type,
                             id,
@@ -1326,6 +1340,16 @@ pub(super) fn apply_pdb_track_string_alignment_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
+    let patched = realign_track_rows_in_bytes(&mut bytes, ids)?;
+    std::fs::write(&pdb_path, &bytes)?;
+    Ok(patched)
+}
+
+/// [`apply_pdb_track_string_alignment_repair`] on PDB bytes in memory.
+fn realign_track_rows_in_bytes(bytes: &mut Vec<u8>, ids: &[u32]) -> BackendResult<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
     let Some(page_size) = bytes
         .get(4..8)
         .and_then(|b| b.try_into().ok())
@@ -1335,7 +1359,7 @@ pub(super) fn apply_pdb_track_string_alignment_repair(
             "PDB too small to read page size".into(),
         ));
     };
-    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
+    let parsed = crate::pdb_reader::parse_pdb_bytes(bytes)?;
     let by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
         parsed.tracks.iter().map(|t| (t.id, t)).collect();
     let mutations: Vec<crate::pdb_writer::PdbTrackRowMutation> = ids
@@ -1350,12 +1374,12 @@ pub(super) fn apply_pdb_track_string_alignment_repair(
         return Ok(0);
     }
     let patched = crate::pdb_writer::mutate_tracks_in_place(
-        &mut bytes,
+        bytes,
         &mutations,
         PdbLayoutProfile::DEFAULT,
         page_size,
     )?;
-    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
+    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(bytes);
     if !mismatches.is_empty() {
         let detail = mismatches
             .iter()
@@ -1367,7 +1391,6 @@ pub(super) fn apply_pdb_track_string_alignment_repair(
             "Track string alignment repair blocked: page-header convention mismatches ({detail})"
         )));
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -1379,16 +1402,26 @@ pub(super) fn apply_pdb_album_string_alignment_repair(
     usb_root: &Path,
     ids: &[u32],
 ) -> BackendResult<usize> {
+    reencode_pdb_dictionary_rows(
+        usb_root,
+        ids,
+        3,
+        12,
+        "Album string alignment",
+        reencode_album_row,
+    )
+}
+
+/// Album row `id` re-encoded by the current writer, artist and name unchanged.
+fn reencode_album_row(row: &[u8], id: u32) -> Option<Vec<u8>> {
     use crate::utils::{read_u8_at, read_u32_le_at};
-    reencode_pdb_dictionary_rows(usb_root, ids, 3, 12, "Album string alignment", |row, id| {
-        if row.len() < 16 {
-            return None;
-        }
-        let artist_id = read_u32_le_at(row, 8)?;
-        let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
-        let name = crate::pdb_reader::get_string_from_pdb(row, name_offset).unwrap_or_default();
-        Some(encode_album_row(id, &name, artist_id))
-    })
+    if row.len() < 16 {
+        return None;
+    }
+    let artist_id = read_u32_le_at(row, 8)?;
+    let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
+    let name = crate::pdb_reader::get_string_from_pdb(row, name_offset).unwrap_or_default();
+    Some(encode_album_row(id, &name, artist_id))
 }
 
 /// Fix artist rows whose name isn't where rekordbox puts it (see
@@ -1397,19 +1430,29 @@ pub(super) fn apply_pdb_artist_name_layout_repair(
     usb_root: &Path,
     ids: &[u32],
 ) -> BackendResult<usize> {
+    reencode_pdb_dictionary_rows(
+        usb_root,
+        ids,
+        2,
+        4,
+        "Artist name layout",
+        reencode_artist_row,
+    )
+}
+
+/// Artist row `id` re-encoded by the current writer, name unchanged.
+fn reencode_artist_row(row: &[u8], id: u32) -> Option<Vec<u8>> {
     use crate::utils::{read_u8_at, read_u16_le_at};
-    reencode_pdb_dictionary_rows(usb_root, ids, 2, 4, "Artist name layout", |row, id| {
-        if row.len() < 10 {
-            return None;
-        }
-        let name_offset = if read_u16_le_at(row, 0)? == 0x64 {
-            read_u16_le_at(row, 10)? as usize
-        } else {
-            read_u8_at(row, 9)? as usize
-        };
-        let name = crate::pdb_reader::get_string_from_pdb(row, name_offset)?;
-        Some(encode_artist_row(id, &name))
-    })
+    if row.len() < 10 {
+        return None;
+    }
+    let name_offset = if read_u16_le_at(row, 0)? == 0x64 {
+        read_u16_le_at(row, 10)? as usize
+    } else {
+        read_u8_at(row, 9)? as usize
+    };
+    let name = crate::pdb_reader::get_string_from_pdb(row, name_offset)?;
+    Some(encode_artist_row(id, &name))
 }
 
 /// Re-encode the dictionary rows (`table_type` 2 or 3, id at `id_offset`) named by `ids` and
@@ -1423,12 +1466,30 @@ pub(super) fn reencode_pdb_dictionary_rows(
     label: &str,
     encode: impl Fn(&[u8], u32) -> Option<Vec<u8>>,
 ) -> BackendResult<usize> {
-    use crate::utils::{page_offset, read_u32_le_at};
     if ids.is_empty() {
         return Ok(0);
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
+    let patched =
+        reencode_dictionary_rows_in_bytes(&mut bytes, ids, table_type, id_offset, label, encode)?;
+    std::fs::write(&pdb_path, &bytes)?;
+    Ok(patched)
+}
+
+/// [`reencode_pdb_dictionary_rows`] on PDB bytes in memory.
+fn reencode_dictionary_rows_in_bytes(
+    bytes: &mut Vec<u8>,
+    ids: &[u32],
+    table_type: u32,
+    id_offset: usize,
+    label: &str,
+    encode: impl Fn(&[u8], u32) -> Option<Vec<u8>>,
+) -> BackendResult<usize> {
+    use crate::utils::{page_offset, read_u32_le_at};
+    if ids.is_empty() {
+        return Ok(0);
+    }
     let Some(page_size) = bytes
         .get(4..8)
         .and_then(|b| b.try_into().ok())
@@ -1440,12 +1501,12 @@ pub(super) fn reencode_pdb_dictionary_rows(
     };
     let target_ids: HashSet<u32> = ids.iter().copied().collect();
     let (_ec, first, last) =
-        crate::utils::table_ptr_fields(&bytes, table_type).ok_or_else(|| {
+        crate::utils::table_ptr_fields(bytes, table_type).ok_or_else(|| {
             BackendError::Validation(format!(
                 "{label} repair blocked: t{table_type:02} pointer missing"
             ))
         })?;
-    crate::utils::collect_chain(&bytes, page_size, first, last).ok_or_else(|| {
+    crate::utils::collect_chain(bytes, page_size, first, last).ok_or_else(|| {
         BackendError::Validation(format!(
             "{label} repair blocked: t{table_type:02} chain invalid"
         ))
@@ -1495,9 +1556,9 @@ pub(super) fn reencode_pdb_dictionary_rows(
         return Ok(0);
     }
     let patched = crate::pdb_writer::realign_dictionary_rows_in_place(
-        &mut bytes, table_type, id_offset, &rows, page_size,
+        bytes, table_type, id_offset, &rows, page_size,
     )?;
-    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
+    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(bytes);
     if !mismatches.is_empty() {
         let detail = mismatches
             .iter()
@@ -1509,8 +1570,49 @@ pub(super) fn reencode_pdb_dictionary_rows(
             "{label} repair blocked: page-header convention mismatches ({detail})"
         )));
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
+}
+
+/// Re-encode every track, album and artist row whose string layout the current writer no
+/// longer produces (see [`detect_string_misalignment_in_bytes`]): long-form (UTF-16 or long
+/// ASCII) strings at an offset that isn't 4-byte aligned, and short ASCII artist names away from
+/// rekordbox's offset. Content stays the same; rows are relocated by the same writers the repairs
+/// use. Runs on every PDB write-back (see `usb_staging`), so any write to a USB leaves its rows in
+/// the current format. Returns the number of rows re-encoded; on error `bytes` may be part-way
+/// through, so callers keep their own copy.
+pub(crate) fn heal_pdb_string_layout(bytes: &mut Vec<u8>) -> BackendResult<usize> {
+    let found = detect_string_misalignment_in_bytes(bytes);
+    if found.is_empty() {
+        return Ok(0);
+    }
+    let ids = |table_type: u32| -> Vec<u32> {
+        let mut ids: Vec<u32> = found
+            .iter()
+            .filter(|m| m.table_type == table_type)
+            .map(|m| m.id)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    };
+    let mut healed = realign_track_rows_in_bytes(bytes, &ids(0))?;
+    healed += reencode_dictionary_rows_in_bytes(
+        bytes,
+        &ids(3),
+        3,
+        12,
+        "Album string alignment",
+        reencode_album_row,
+    )?;
+    healed += reencode_dictionary_rows_in_bytes(
+        bytes,
+        &ids(2),
+        2,
+        4,
+        "Artist name layout",
+        reencode_artist_row,
+    )?;
+    Ok(healed)
 }
 
 /// Normalizes flagged pages to the current writer's own convention

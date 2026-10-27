@@ -2564,16 +2564,16 @@ fn t19_template_state_repair_activates_page_once() {
     broken[p40..p40 + ps].copy_from_slice(&template[p40..p40 + ps]);
     std::fs::write(&pdb_path, &broken).unwrap();
     assert!(crate::service::repair::detect_pdb_t19_template_state(
-        &pdb_path, 1
+        &pdb_path, 1, None
     ));
     assert!(!crate::service::repair::detect_pdb_t19_template_state(
-        &pdb_path, 0
+        &pdb_path, 0, None
     ));
 
     assert!(crate::service::repair::apply_pdb_t19_template_state_repair(usb_root).unwrap());
     let repaired = std::fs::read(&pdb_path).unwrap();
     assert!(!crate::service::repair::detect_pdb_t19_template_state(
-        &pdb_path, 1
+        &pdb_path, 1, None
     ));
     // Same page 40 and t19 sentinel (page 39) the export writes, apart from
     // seq; no other page touched.
@@ -2682,25 +2682,38 @@ fn export_preserves_t17_t18_seed_shape_and_allows_t19_runtime_rows() {
     assert!(u32le(o19 + 12) >= 40);
     // The `initialize_usb` template seeds t19 with one sealed row
     // (flags=0x24, u5=1) -- the empty-device state, on which a CDJ counts
-    // 0 songs. Like rekordbox's own first export, the export keeps that
-    // row, appends one, and turns the page active: nrs=2, flags=0x34,
-    // u5=2, num_rl=0, rowpf=0x0002, tranrf=0x0003.
+    // 0 songs. Like rekordbox's own exports, the export keeps that row
+    // and appends one per track (newest id = track count, 4 here), turning
+    // the page active: nrs=5, flags=0x34, u5=2, num_rl=3, rowpf=0x0010,
+    // tranrf=0x0018.
     let p40 = 40 * ps;
-    assert_eq!(bytes[p40 + 24], 2);
+    assert_eq!(bytes[p40 + 24], 5);
     assert_eq!(bytes[p40 + 25], 0x20);
     assert_eq!(bytes[p40 + 27], 0x34);
     assert_eq!(u16le(p40 + 0x20), 2);
-    assert_eq!(u16le(p40 + 0x22), 0);
-    assert_eq!(u16le(p40 + ps - 4), 0x0002);
-    assert_eq!(u16le(p40 + ps - 2), 0x0003);
-    // Row 0 is the template row, untouched. Row 1 copies it with the
-    // runtime sequence patched in: 0x00000280 + i*0x00200000, then i.
+    assert_eq!(u16le(p40 + 0x22), 3);
+    assert_eq!(u16le(p40 + ps - 4), 0x0010);
+    assert_eq!(u16le(p40 + ps - 2), 0x0018);
+    // Row 0 is the template row with the eDB's `createdDate` (the template
+    // carries a fixed one). Row 1 copies it with the runtime sequence
+    // patched in: 0x00000280 + i*0x00200000, then i.
     let row0 = p40 + 40;
     let row1 = row0 + 40;
-    assert_eq!(&bytes[row0..row0 + 40], &before_bytes[row0..row0 + 40]);
+    assert_eq!(&bytes[row0..row0 + 13], &before_bytes[row0..row0 + 13]);
+    assert_eq!(
+        &bytes[row0 + 23..row0 + 40],
+        &before_bytes[row0 + 23..row0 + 40]
+    );
+    let edb_date = crate::service::export_helpers::edb_t19_property(usb_root)
+        .expect("eDB property")
+        .created_date;
+    assert_eq!(&bytes[row0 + 13..row0 + 23], edb_date.as_bytes());
     assert_eq!(u32le(row1), 0x0020_0280u32);
     assert_eq!(u32le(row1 + 4), 1u32);
     assert_eq!(&bytes[row1 + 8..row1 + 40], &bytes[row0 + 8..row0 + 40]);
+    let row4 = row0 + 4 * 40;
+    assert_eq!(u32le(row4), 0x0080_0280u32);
+    assert_eq!(u32le(row4 + 4), 4u32);
 
     // t08 runtime row-index behavior should mirror growth writer contract.
     let o8 = tptr(8);
@@ -2708,7 +2721,7 @@ fn export_preserves_t17_t18_seed_shape_and_allows_t19_runtime_rows() {
     assert_eq!(u32le(o8 + 12), 18);
     assert_eq!(bytes[18 * ps + 24], 4);
     assert_eq!(u16le(18 * ps + 34), 3);
-    assert_eq!(u16le(40 * ps + 34), 0);
+    assert_eq!(u16le(40 * ps + 34), 3);
 }
 
 /// t09/t10/t11/t12/t14/t15 are tables this codebase never writes rows
@@ -4633,4 +4646,43 @@ fn validate_no_empty_data_pages_catches_empty_page() {
     bytes[off2 + 0x1e..off2 + 0x20].copy_from_slice(&12u16.to_le_bytes()); // used_size = 12
     let result2 = validate_no_empty_data_pages(&bytes, page_size, 8, 1, 2);
     assert!(result2.is_ok(), "should pass with non-empty data page");
+}
+
+#[test]
+fn export_writes_edb_property_into_t19() {
+    // t19 carries the eDB's `property` row: name, color, date, version.
+    let dir = tempdir().unwrap();
+    let usb_root = dir.path();
+    std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+    crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    {
+        let mut warnings = Vec::<WarningEntry>::new();
+        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        conn.execute(
+            "UPDATE property SET deviceName = 'Test Stick', createdDate = '2026-10-22'",
+            [],
+        )
+        .expect("set property");
+    }
+    let playlist = ExportPlaylistData {
+        id: "pl-test".to_string(),
+        name: "Test".to_string(),
+        tracks: vec![make_test_track("t1", "Song 1", "a1.mp3")],
+    };
+    let manifest = make_test_manifest("pl-test", "Test", usb_root, &[("t1", "Song 1", "a1.mp3")]);
+    write_pdb(usb_root, &playlist, &manifest, true, None, None).expect("export playlist");
+
+    let bytes = std::fs::read(
+        usb_root
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb"),
+    )
+    .unwrap();
+    let row0 = 40 * 4096 + 40;
+    assert_eq!(&bytes[row0 + 12..row0 + 23], b"\x172026-10-22");
+    let row1 = row0 + 40;
+    assert_eq!(bytes[row1 + 9], 0x00);
+    assert_eq!(&bytes[row1 + 12..row1 + 23], b"\x172026-10-22");
+    assert_eq!(&bytes[row1 + 30..row1 + 41], b"\x17Test Stick");
 }

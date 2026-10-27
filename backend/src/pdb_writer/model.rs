@@ -25,6 +25,9 @@ pub struct PdbData {
     pub history_playlists: Vec<PdbDictRow>,
     pub history_entries: Vec<PdbHistoryEntryRow>,
     pub history_raw_rows: Vec<Vec<u8>>,
+    /// The eDB's `property` row, which the t19 rows mirror (see
+    /// `t19_ring_rows`). `None` without an eDB: t19 keeps what it has.
+    pub t19_property: Option<T19Property>,
     /// Layout profile for track row encoding
     pub profile: PdbLayoutProfile,
 }
@@ -107,6 +110,7 @@ impl PdbData {
             history_playlists: Vec::new(),
             history_entries: Vec::new(),
             history_raw_rows: Vec::new(),
+            t19_property: None,
             profile: PdbLayoutProfile::DEFAULT,
         }
     }

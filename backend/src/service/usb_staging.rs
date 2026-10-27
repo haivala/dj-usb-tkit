@@ -493,6 +493,35 @@ fn vendor_path(usb_root: &Path, kind: DbKind) -> PathBuf {
 /// transaction commit through a connection opened earlier) by the time this
 /// runs, so "back up right before committing" would capture the already-new
 /// content, not the pre-write state a backup is supposed to preserve.
+/// `bytes` with every track/album/artist row the current writer would lay out differently
+/// re-encoded (`repair::heal_pdb_string_layout`), or `None` when nothing needs it. Every PDB
+/// write-back goes through this, so any write to a USB -- export, repair, cue or metadata edit,
+/// menu change -- also moves rows an older build wrote into the current format (e.g. misaligned
+/// long ASCII comments that gave CDJ-2000nexus/NXS2 a communication error opening the track
+/// list). A failed heal never blocks the write: it is logged and the bytes go out unchanged.
+fn heal_pdb_for_write_back(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut healed = bytes.to_vec();
+    match crate::service::repair::heal_pdb_string_layout(&mut healed) {
+        Ok(0) => None,
+        Ok(rows) => {
+            crate::logging::emit(
+                crate::logging::Level::Info,
+                "usb-staging",
+                &format!("Re-encoded {rows} PDB row(s) in the current string layout"),
+            );
+            Some(healed)
+        }
+        Err(err) => {
+            crate::logging::emit(
+                crate::logging::Level::Warn,
+                "usb-staging",
+                &format!("PDB string layout heal skipped: {err}"),
+            );
+            None
+        }
+    }
+}
+
 fn commit_local_to_usb(
     usb_root: &Path,
     device_dir: &Path,
@@ -513,6 +542,12 @@ fn commit_local_to_usb(
             "USB database changed since it was last read ({}) -- re-open and retry to avoid discarding the external change",
             dest.display()
         )));
+    }
+
+    if kind == DbKind::Pdb
+        && let Some(healed) = heal_pdb_for_write_back(&std::fs::read(local_path)?)
+    {
+        std::fs::write(local_path, healed)?;
     }
 
     if let Some(parent) = dest.parent() {
@@ -567,7 +602,13 @@ fn commit_and_write_back_with_root(
     local_bytes: &[u8],
 ) -> BackendResult<bool> {
     let Some(device_dir) = cache_root.map(|root| root.join(resolve_cache_key(usb_root))) else {
-        std::fs::write(vendor_path(usb_root, kind), local_bytes)?;
+        let healed = (kind == DbKind::Pdb)
+            .then(|| heal_pdb_for_write_back(local_bytes))
+            .flatten();
+        std::fs::write(
+            vendor_path(usb_root, kind),
+            healed.as_deref().unwrap_or(local_bytes),
+        )?;
         return Ok(true);
     };
     let local_dir = local_vendor_db_dir(&device_dir);

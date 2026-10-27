@@ -353,7 +353,7 @@ These differences are expected and legitimate (they are *not* shape violations):
 | `empty_candidate` under torn growth | can legitimately point past the physical file end |
 | header `0x10` compatibility byte | additive copies the pre-export value verbatim |
 | `t16`–`t18` menu pages | preserved verbatim from the template |
-| seeded `t19` history page | preserved once active; a template-state page is activated (see "`tt=19` activation" below) |
+| seeded `t19` history page | a template-state or app-written page is rewritten for the track count; any other is preserved (see "`tt=19` activation" below) |
 
 ## Row Footer
 
@@ -371,8 +371,9 @@ For freshly written pages:
 
 - tables using `u5=1` write `tranrf` with only the bit for `num_rl` set;
 - tables using `u5=trc` write `tranrf=rowpf`;
-- `tt=19` writes a runtime profile where `rowpf` marks the last row bit and
-  `tranrf` carries the last row bit plus the previous row bit when present.
+- `tt=19` writes a runtime profile where `rowpf` marks the newest row (the
+  last row until the ring wraps) and `tranrf` carries that bit plus the
+  previous row's bit when present.
   This holds across every footer group once a `tt=19` page needs more than
   one (more than 16 rows): only the group holding the true last row gets
   the active bit(s); every earlier group is fully zeroed. Confirmed against
@@ -419,26 +420,74 @@ row 0: 80 02 00 00 00 00 00 00 00 00 00 00 17 "2026-03-13" 19 1e 0b "1000" 03 00
 row 1: 80 02 20 00 01 00 00 00 00 00 00 00 17 "2026-03-13" 19 1e 0b "1000" 03 00…
 ```
 
-Row 1 is a copy of row 0 with bytes `0..4` = `0x0280 + idx * 0x0020_0000` and
-bytes `4..8` = `idx`; every other byte (date string, `"1000"`, trailing `03`)
+Row 1 is a copy of row 0 with bytes `0..4` = `0x0280 + slot * 0x0020_0000` and
+bytes `4..8` = its id; every other byte (date string, `"1000"`, trailing `03`)
 is copied from row 0. rekordbox also points the `tt=19` sentinel's B-tree at
 the now-active page (`ne=1`, `u7=1`).
 
-The writer does the same (`activate_t19_template_page` in
-`pdb_writer/additive.rs`) on any export with tracks whose `tt=19` page is still
-in template state (`t19_is_template_state`), including an export onto a PDB
-that already has tracks, so a USB an older build left at 0 songs recovers on its
-next export. The page never grows past two rows this way, whatever the library
-size. A page rekordbox or a player has already advanced has a different shape
-and is left untouched. `repair_pdb_t19_template_state` applies the same change
-to an existing USB (`docs/DIAGNOSTICS_REPAIRS.md`).
+**The page is a ring whose newest id is the song count.** Older players read
+the newest row id as the USB's song count, not `t00`: rekordbox's 1-track
+export ends at id 1, its 2-track export at id 2 (`nrs=3`, `num_rl=1`,
+`rowpf=0x0004`, `tranrf=0x0006`). Ids fill slots in order until the page
+holds 96 rows (96 × 40 bytes plus 6 footer groups fill the page exactly,
+`free_size=0`); after that each new id overwrites slot `id % 2`, so slots
+`2..95` keep ids `2..95`. Wrapped rekordbox rings seen on real USBs:
+
+| rows | slots 0 / 1 / 2.. | `rowpf` / `tranrf` | `num_rl` |
+| --- | --- | --- | --- |
+| 96 × 40 bytes | ids 228 / 229 / 2.. | `0x0002` / `0x0003` | 0 |
+| 80 × 48 bytes (rows carry a string) | ids 0 / 332 / 331, then 1.. | `0x0002` / `0x0006` | 1 |
+
+**The rows mirror the eDB's `property` row.** Each row holds, after the
+slot/id words: a flags word whose byte 9 is `backGroundColorType`, then PDB
+strings for `createdDate`, two constant bytes (`19 1e`), `dbVersion`
+(`"1000"`) and `deviceName`, then at least 7 zero bytes up to a 4-byte
+boundary. The newest id is `numberOfContents`. Seen on rekordbox's own USBs:
+
+| USB | eDB `property` | t19 rows |
+| --- | --- | --- |
+| 2 tracks, unnamed | count 2, `2026-09-11`, color 0 | newest id 2, `2026-09-11`, byte 9 = 0, empty name |
+| named `"APECAR_red"` | color 1, `2026-08-20` | `"APECAR_red"`, byte 9 = 1, `2026-08-20` |
+
+Slot 0 (the template row) carries no name and color 0. Unnamed rows are 40
+bytes; rekordbox's `"APECAR_red"` rows are 48, so its ring holds 80 slots,
+and once wrapped its ids alternate in slots 1/2 (slot 0 keeps the template
+row). A CDJ writes the same shape into rows it adds (`"Chiphead 256GB"`, 52
+bytes). Players compare t19 with the eDB and give communication errors when
+they disagree; byte 9 sets the player's menu highlight (color 1 turned a
+CDJ-2000NXS2's highlight from blue to purple).
+
+The writer builds the rows from the eDB's `property` row (`T19Property`,
+read by `edb_t19_property` after the eDB export has updated it). Without a
+readable eDB, a page keeps the property its rows carry. `initialize_usb`
+seeds the template row with a fixed date (`T19_TEMPLATE_ROW`) while the eDB
+gets the day's `createdDate`; the first export with tracks replaces it.
+
+In every one, `rowpf` marks the newest id's slot, `tranrf` that slot plus the
+slot of the id before it, and `num_rl` is the lower of those two slots. The
+writer derives the footer from the row ids the same way
+(`write_t19_runtime_footer_groups` in `pdb_writer/fresh.rs`).
+
+The writer builds this ring (`t19_ring_rows`) with the newest id at the
+track count. `sync_t19_ring_page` in `pdb_writer/additive.rs` rewrites the
+page on any export with tracks when `t19_sync_target` asks for it: the page
+is still in template state (`t19_is_template_state`), or it is a ring
+(`t19_ring_state`: exactly the rows `t19_ring_rows` builds for the property
+they carry) whose newest id is not the track count or whose property is not
+the eDB's. This includes an export onto a PDB that already has tracks, so a
+USB an older build left at 0 songs, or at the fixed 2-row page (players then
+show 1 track and can hang on a communication error), recovers on its next
+export. A page a player has added rows to is not a ring (a CDJ copies the
+newest id into its rows) and is left untouched: the writer never rewrites or
+drops a player's rows. `repair_pdb_t19_template_state` applies the same
+change to an existing USB (`docs/DIAGNOSTICS_REPAIRS.md`).
 
 The fresh writer (`write_pdb`) builds the same page: for a library with tracks
 it turns a single `tt=19` row (or none, using the `initialize_usb` template row)
-into the same two rows, and indexes the active page in the sentinel B-tree.
+into the same ring, and indexes the active page in the sentinel B-tree.
 More than one row is real history and passes through. All three paths share
-`t19_rows_after_first_export`, so a full rewrite, an additive export and the
-repair leave the same `tt=19` page.
+`t19_ring_rows`, so a full rewrite, an additive export and the repair leave
+the same `tt=19` page.
 
 ## Page Footer Conventions
 
@@ -602,8 +651,9 @@ collapsed.
 
 String encoding used by the writer:
 
-- short ASCII strings use a one-byte length marker;
-- long ASCII strings use marker `0x40` plus length;
+- short ASCII strings (up to 126 bytes) use a one-byte length marker;
+- long ASCII strings use marker `0x40` plus length (Deep Symmetry has seen
+  rekordbox write this form);
 - non-ASCII strings use marker `0x90` plus UTF-16LE payload;
 - path strings (slot 20) do **not** include a trailing NUL — `total_len` encodes exact char count.
 
@@ -622,7 +672,7 @@ sanitizer is not applied to track media paths, analysis paths, or
 key/tonality strings. Slot 20 (media path) is also exempt from this
 sanitizer, but the path it holds is already built from sanitized components.
 
-### Every UTF-16-encoded string slot must start at a 4-byte aligned row offset
+### Every long-form string slot (UTF-16 or long ASCII) must start at a 4-byte aligned row offset
 
 Tested legacy hardware uses MIPS processors. MIPS requires natural alignment for
 memory loads — a 4-byte read must be at a 4-byte aligned address. The DeviceSQL
@@ -642,15 +692,27 @@ enough) produced a title slot at a misaligned offset and a COMM ERROR when the
 CDJ tried to list the containing playlist, even though slot 20 for that same
 row was correctly aligned.
 
-**The writer pads before any slot whose encoded bytes start with the `0x90`
-UTF-16 marker**, uniformly across all 21 slots, plus slot 20 unconditionally
+Long ASCII strings (`0x40 [total_len: u16 LE] 0x00`, ASCII over 126 bytes)
+have the same 4-byte header and need the same alignment. Confirmed on a
+CDJ-2000nexus and a CDJ-2000NXS2: an app USB whose long ASCII comments (up to
+255 characters) and one long title sat at row offset % 4 == 3 gave a
+communication error as soon as the track list opened. Blanking those strings
+made the list open; its long ASCII media paths (slot 20, always aligned) were
+fine.
+
+Rows an older build wrote misaligned are re-encoded on every PDB write-back
+(`docs/USB_EXPORT.md`, "Local HDD staging"), not only by the string repairs.
+
+**The writer pads before any slot whose encoded bytes start with a long-form
+marker (`0x90` UTF-16 or `0x40` long ASCII)**, uniformly across all 21 slots, plus slot 20 unconditionally
 (kept unconditional for parity with reference exports, which always keep slot
 20 aligned regardless of whether its content is ASCII or UTF-16). ASCII/empty
 slots are untouched — their headers are a single byte, not read as an atomic
 4-byte word, so alignment doesn't matter for them.
 
-The same alignment rule applies to any other row type where a UTF-16 string
-header is read by the hardware decoder with a 4-byte load:
+The same alignment rule applies to any other row type where a long-form string
+header is read by the hardware decoder with a 4-byte load (artist and album
+names over 126 ASCII bytes are padded like UTF-16 ones):
 - `tt=2` artist row near-variant (0x0060): name at offset 12 (% 4 = 0 ✓).
   Offset 10 (% 4 = 2) caused a hardware freeze on UTF-16 artist names.
 - `tt=3` album row near-variant (0x0080): reference exports place the name at
@@ -768,7 +830,8 @@ It accepts changes that can be represented without unsafe topology changes:
 - when a mapped `t00` string changes length, mark the old active row inactive
   and append a replacement row with the same track id;
 - patch `t07.sort_order` in place;
-- activate a template-state `t19` page (see "`tt=19` activation").
+- rewrite a template-state or app-written `t19` page for the track count (see
+  "`tt=19` activation").
 
 It rejects changes that require unsafe rewrite behavior, including:
 

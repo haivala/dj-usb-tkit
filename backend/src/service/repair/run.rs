@@ -577,6 +577,7 @@ impl BackendService {
         let pdb_t19_template_state = detect_pdb_t19_template_state(
             &staged_pdb_path,
             parsed_pdb.as_ref().map_or(0, |p| p.tracks.len()),
+            crate::service::export_helpers::edb_t19_property(&usb_root).as_ref(),
         );
         let pdb_misaligned_slots = detect_pdb_string_misalignment(&staged_pdb_path);
         let pdb_misaligned_track_ids: Vec<u32> = {
@@ -802,23 +803,25 @@ impl BackendService {
         }
         if pdb_t19_template_state {
             detected_issues.push(
-                "PDB history page (tt=19) still in its empty-device template state \
-                 (older players show 0 tracks)"
+                "PDB history page (tt=19) does not match the USB's tracks or name \
+                 (older players show 0 or 1 tracks)"
                     .to_string(),
             );
             estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
                 PDB_T19_TEMPLATE_STATE_FIX_ID,
                 "Activate PDB History Page",
-                "The tt=19 page still has the single sealed row of a never-exported USB, so \
-                 older players count 0 tracks. Keep that row, append one more and mark the page \
-                 active, as rekordbox's own first export does. No other page is changed."
+                "The tt=19 page still has the single sealed row of a never-exported USB, the \
+                 fixed two rows an older version wrote, or no USB name although the USB has \
+                 one, so older players count 0 or 1 tracks. Rewrite it \
+                 as the ring of one row per track rekordbox keeps, with the USB's name, keeping \
+                 the template row, and mark the page active. No other page is changed."
                     .to_string(),
             ));
         }
         if !pdb_misaligned_track_ids.is_empty() {
             detected_issues.push(format!(
-                "{} track row(s) with a misaligned UTF-16 string slot (freezes/comm-errors CDJ hardware while browsing)",
+                "{} track row(s) with a misaligned UTF-16 or long ASCII string slot (freezes/comm-errors CDJ hardware while browsing or opening the track list)",
                 pdb_misaligned_track_ids.len()
             ));
             estimated_file_writes += 1;
@@ -826,10 +829,11 @@ impl BackendService {
                 PDB_TRACK_STRING_ALIGNMENT_FIX_ID,
                 "Repair Track String Alignment",
                 format!(
-                    "Re-encode {} track row(s) whose title/filename/other UTF-16 string slot \
-                     doesn't start at a 4-byte aligned offset. MIPS-based CDJ hardware requires \
-                     4-byte aligned reads for the UTF-16 string header; a misaligned slot \
-                     freezes/comm-errors the player while browsing.",
+                    "Re-encode {} track row(s) whose title/filename/comment/other UTF-16 or long \
+                     ASCII string slot doesn't start at a 4-byte aligned offset. MIPS-based CDJ \
+                     hardware requires 4-byte aligned reads for that 4-byte string header; a \
+                     misaligned slot freezes/comm-errors the player while browsing, or as soon \
+                     as the track list opens.",
                     pdb_misaligned_track_ids.len()
                 ),
             ));
@@ -1587,7 +1591,8 @@ impl BackendService {
         );
 
         // Before strict parity, so its additive write already finds t19
-        // active and leaves it alone. Grows nothing, so the torn-growth
+        // counting the tracks and leaves it alone (parity's own additive
+        // writes keep it in sync if they add tracks). Grows nothing, so the torn-growth
         // boundary above stays valid.
         outcomes.record_with_progress(
             progress,
@@ -1597,9 +1602,9 @@ impl BackendService {
             || {
                 apply_pdb_t19_template_state_repair(usb_root).map(|activated| {
                     if activated {
-                        "activated tt=19 page".to_string()
+                        "rewrote tt=19 page for the track count".to_string()
                     } else {
-                        "already active".to_string()
+                        "already matches the track count".to_string()
                     }
                 })
             },
