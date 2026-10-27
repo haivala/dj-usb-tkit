@@ -700,8 +700,9 @@ communication error as soon as the track list opened. Blanking those strings
 made the list open; its long ASCII media paths (slot 20, always aligned) were
 fine.
 
-Rows an older build wrote misaligned are re-encoded on every PDB write-back
-(`docs/USB_EXPORT.md`, "Local HDD staging"), not only by the string repairs.
+Rows an older build wrote misaligned stay as they are until the string repairs
+are applied; diagnostics reports them as a FAIL ("Track/album string
+alignment"), so the user sees they need Preview Fixes.
 
 **The writer pads before any slot whose encoded bytes start with a long-form
 marker (`0x90` UTF-16 or `0x40` long ASCII)**, uniformly across all 21 slots, plus slot 20 unconditionally

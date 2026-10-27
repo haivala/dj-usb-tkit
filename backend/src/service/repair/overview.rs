@@ -42,7 +42,8 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, &'static str)> {
         ),
         PDB_TRACK_STRING_ALIGNMENT_FIX_ID | PDB_ALBUM_STRING_ALIGNMENT_FIX_ID => (
             AREA_OLDER_PLAYERS,
-            "Rewrites track and album names that can freeze players while browsing.",
+            "Rewrites track and album text that can freeze players while browsing or stop the \
+             track list from opening.",
         ),
         PDB_ARTIST_NAME_LAYOUT_FIX_ID => (
             AREA_OLDER_PLAYERS,

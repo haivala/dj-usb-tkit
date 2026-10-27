@@ -136,7 +136,8 @@ pub(super) const T19_TEMPLATE_STATE_LABEL: &str = "PDB history page";
 /// Renders a `PlayerCounterSnapshot` as the "Player Counter Snapshot"
 /// `DiagSection` (previously assembled in `vanilla-ui/components/usb/actions.mjs`
 /// `renderDiagnosticsReport`). Every check is informational (`PASS`) except a
-/// template-state t19, which is a `WARN`; the section status is `PASS` only
+/// a t19 that doesn't match the USB, which is a `WARN` (players show a wrong track count but
+/// still work); the section status is `PASS` only
 /// at high confidence.
 pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> DiagSection {
     let t19_line = match cdj.t19.data_page.as_ref() {
@@ -178,8 +179,8 @@ pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> Di
         checks.push(DiagCheck {
             label: T19_TEMPLATE_STATE_LABEL.to_string(),
             status: DiagStatus::Warn,
-            detail: "t19 does not match the track count or the eDB's property row — players \
-                     may show 0 or 1 tracks or give communication errors. Repair fixes it."
+            detail: "t19 does not match the track count or the eDB's property row — older \
+                     players may show 0 or 1 tracks. Repair fixes it."
                 .to_string(),
             link: None,
         });

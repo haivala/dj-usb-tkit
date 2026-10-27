@@ -37,6 +37,12 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Improvement:** Track and album text an older version stored where older CDJs can't read it is no
+  longer rewritten behind your back on every write to the USB. Health & Diagnostics shows it as failing,
+  and Preview Fixes repairs it when you choose to.
+
 ## 0.4.8
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

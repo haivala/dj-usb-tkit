@@ -1573,48 +1573,6 @@ fn reencode_dictionary_rows_in_bytes(
     Ok(patched)
 }
 
-/// Re-encode every track, album and artist row whose string layout the current writer no
-/// longer produces (see [`detect_string_misalignment_in_bytes`]): long-form (UTF-16 or long
-/// ASCII) strings at an offset that isn't 4-byte aligned, and short ASCII artist names away from
-/// rekordbox's offset. Content stays the same; rows are relocated by the same writers the repairs
-/// use. Runs on every PDB write-back (see `usb_staging`), so any write to a USB leaves its rows in
-/// the current format. Returns the number of rows re-encoded; on error `bytes` may be part-way
-/// through, so callers keep their own copy.
-pub(crate) fn heal_pdb_string_layout(bytes: &mut Vec<u8>) -> BackendResult<usize> {
-    let found = detect_string_misalignment_in_bytes(bytes);
-    if found.is_empty() {
-        return Ok(0);
-    }
-    let ids = |table_type: u32| -> Vec<u32> {
-        let mut ids: Vec<u32> = found
-            .iter()
-            .filter(|m| m.table_type == table_type)
-            .map(|m| m.id)
-            .collect();
-        ids.sort_unstable();
-        ids.dedup();
-        ids
-    };
-    let mut healed = realign_track_rows_in_bytes(bytes, &ids(0))?;
-    healed += reencode_dictionary_rows_in_bytes(
-        bytes,
-        &ids(3),
-        3,
-        12,
-        "Album string alignment",
-        reencode_album_row,
-    )?;
-    healed += reencode_dictionary_rows_in_bytes(
-        bytes,
-        &ids(2),
-        2,
-        4,
-        "Artist name layout",
-        reencode_artist_row,
-    )?;
-    Ok(healed)
-}
-
 /// Normalizes flagged pages to the current writer's own convention
 /// (`data_page_footer_fields(0, trc)`, i.e. `(1, nrs-1)`), not the older
 /// `(2, 0)` shape `detect_pdb_wrong_track_u5` still tolerates as valid on

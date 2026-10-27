@@ -228,7 +228,7 @@ fn overview_explains_each_area_in_plain_words() {
 }
 
 #[test]
-fn template_state_t19_warns_older_players_show_zero_tracks() {
+fn t19_mismatch_warns_older_players_show_zero_or_one_tracks() {
     let pdb = diag_section(
         "PDB Integrity",
         "PASS",
@@ -271,8 +271,8 @@ fn template_state_t19_warns_older_players_show_zero_tracks() {
     ));
     assert_eq!(
         overview[0].detail,
-        "These players will show 0 tracks: part of the player database was never set up. \
-         Preview Fixes shows what can be repaired."
+        "These players will show 0 or 1 tracks: part of the player database doesn't match the \
+         music on this USB. Preview Fixes shows what can be repaired."
     );
 }
 

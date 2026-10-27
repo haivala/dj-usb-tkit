@@ -115,16 +115,6 @@ back to the USB drive once, at the end of the apply, rather than once per fix. T
 editor (`update_usb_player_menu_config`/`sync_usb_player_menu_edb_to_pdb`) is staged the same way,
 each as its own standalone backup-then-write-then-flush.
 
-Every PDB write-back also brings rows an older build wrote up to the current string layout
-(`heal_pdb_for_write_back` in `usb_staging.rs`, `repair::heal_pdb_string_layout`): track, album
-and artist rows with a long-form string (UTF-16 or long ASCII) at an offset that isn't 4-byte
-aligned, or a short ASCII artist name away from rekordbox's offset, are re-encoded with the same
-content and relocated, the way the string repairs do it. So any write to a USB (an export, a
-repair, a cue or metadata edit, a menu change) leaves those rows in the current format; a USB
-whose rows are already current is written byte for byte as given. A heal that fails is logged
-and skipped, never blocking the write. CLI dev tools that write the given path directly, without
-staging, only get this through `commit_and_write_back`.
-
 The Event Log records the local staging folder path the first time it's created for a device,
 plus each individual stage-copy and write-back, so it's easy to find the working folder if you
 want to inspect it directly.

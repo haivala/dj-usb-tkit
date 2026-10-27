@@ -226,7 +226,8 @@ pub(super) fn diagnostics_overview(
                 if check_status(pdb, T19_TEMPLATE_STATE_LABEL).is_some_and(|s| !is_pass(&s)) =>
             {
                 with_hint(vec![
-                    "These players will show 0 tracks: part of the player database was never set up."
+                    "These players will show 0 or 1 tracks: part of the player database doesn't \
+                     match the music on this USB."
                         .to_string(),
                 ])
             }

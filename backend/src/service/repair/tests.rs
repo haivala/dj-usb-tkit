@@ -1089,46 +1089,44 @@ fn repair_realigns_misaligned_long_ascii_track_strings() {
 }
 
 #[test]
-fn every_pdb_write_back_heals_misaligned_string_rows() {
-    // Any write to the USB (staged or not) also moves rows an older build wrote into the current
-    // layout: here a misaligned long ASCII comment, which made older CDJs give a communication
-    // error opening the track list.
-    use crate::service::usb_staging::{DbKind, commit_and_write_back_for_test};
-    let comment = "x".repeat(200);
+fn diagnostics_fail_misaligned_long_ascii_until_the_user_repairs() {
+    // Nothing rewrites misaligned rows on its own: diagnostics shows them as failing, under
+    // "Older Pioneer players", so the user knows to run Preview Fixes.
+    let (_td, usb_root) = test_usb_root();
     let mut bytes = build_seed_pdb_bytes_for_alignment_test();
-    store_long_ascii_comment_in_place(&mut bytes, &comment);
-    assert!(!detect_string_misalignment_in_bytes(&bytes).is_empty());
+    store_long_ascii_comment_in_place(&mut bytes, &"x".repeat(200));
+    std::fs::write(vendor_pdb_path(&usb_root), &bytes).expect("write pdb");
 
-    let cache = tempdir().expect("cache dir");
-    for cache_root in [None, Some(cache.path())] {
-        let td = tempdir().expect("tempdir");
-        let usb_root = td.path().to_path_buf();
-        let pdb_path = vendor_pdb_path(&usb_root);
-        std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
-        commit_and_write_back_for_test(cache_root, &usb_root, DbKind::Pdb, &bytes)
-            .expect("write back");
-
-        assert!(
-            detect_pdb_string_misalignment(&pdb_path).is_empty(),
-            "staged: {}",
-            cache_root.is_some()
-        );
-        let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse written pdb");
-        let track = parsed.tracks.iter().find(|t| t.id == 1).expect("track 1");
-        assert_eq!(track.dj_comment.as_deref(), Some(comment.as_str()));
-    }
-}
-
-#[test]
-fn pdb_write_back_leaves_current_layout_byte_identical() {
-    use crate::service::usb_staging::{DbKind, commit_and_write_back_for_test};
-    let bytes = build_seed_pdb_bytes_for_alignment_test();
-    let td = tempdir().expect("tempdir");
-    let usb_root = td.path().to_path_buf();
-    let pdb_path = vendor_pdb_path(&usb_root);
-    std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
-    commit_and_write_back_for_test(None, &usb_root, DbKind::Pdb, &bytes).expect("write back");
-    assert_eq!(std::fs::read(&pdb_path).unwrap(), bytes);
+    let service_data_dir = tempdir().expect("service data dir");
+    let service = BackendService::new(service_data_dir.path()).expect("backend service");
+    let report = service
+        .run_usb_diagnostics(crate::models::RunUsbDiagnosticsRequest {
+            usb_root: Some(usb_root.to_string_lossy().to_string()),
+        })
+        .expect("diagnostics");
+    let check = report
+        .section_groups
+        .iter()
+        .flat_map(|group| &group.sections)
+        .flat_map(|section| &section.checks)
+        .find(|check| check.label == "Track/album string alignment")
+        .expect("string alignment check");
+    assert!(
+        matches!(check.status, crate::models::DiagStatus::Fail),
+        "{check:?}"
+    );
+    assert!(check.detail.contains("long ASCII"), "{}", check.detail);
+    let older = report
+        .overview
+        .iter()
+        .find(|item| item.title == "Older Pioneer players")
+        .expect("older players line");
+    assert!(
+        matches!(older.status, Some(crate::models::DiagStatus::Fail)),
+        "{older:?}"
+    );
+    assert!(older.detail.contains("Preview Fixes"), "{}", older.detail);
+    assert_eq!(std::fs::read(vendor_pdb_path(&usb_root)).unwrap(), bytes);
 }
 
 /// Reproduces a real-world report: a track exported by an old (pre-alignment-fix) build was
