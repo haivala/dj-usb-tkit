@@ -521,13 +521,19 @@ mod tests {
         };
         let record = build_export_log_record(&playlist, &manifest("2026-04-03T10:00:00Z", vec![]));
 
-        let expected_offset = chrono::Local::now().offset().to_string();
+        // The offset in effect at the export's instant, not today's: they differ across a
+        // daylight-saving change.
+        let exported = chrono::DateTime::parse_from_rfc3339("2026-04-03T10:00:00Z")
+            .expect("valid rfc3339")
+            .with_timezone(&chrono::Local);
+        let expected_offset = exported.offset().to_string();
         assert!(
             record.exported_at.ends_with(&expected_offset),
             "exported_at {:?} should carry the local UTC offset {expected_offset:?}, not the \
              source UTC (Z) offset",
             record.exported_at
         );
+        assert_eq!(record.exported_at, exported.to_rfc3339());
         assert_eq!(
             record.export_date,
             expected_local_date("2026-04-03T10:00:00Z")
